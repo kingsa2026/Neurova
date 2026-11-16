@@ -146,6 +146,10 @@ def test_private_execute_route(env, tmp_path, monkeypatch):
     client, _tmp = env
     from neurova.skills import library_service as _lib
 
+    # api-P2-1 属主门：tmp 里自建的 agent "ax" 不在属主单源内，本测试测执行路由
+    # 本身，按 admin 身份过门。
+    _as(client, {"user_id": "7", "username": "alice", "role": "admin", "neuser_id": "7"})
+
     # _pool_service 重定向到 tmp 下的 agent 库（防污染真 data/）
     monkeypatch.setattr(
         skill_pool_api, "_pool_service",

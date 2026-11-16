@@ -33,7 +33,8 @@ from neurova.core.agent_run_ledger import (
     requestTurnAdmission,
     resumeTurnIdentity,
 )
-from neurova.api.endpoints import get_agent_instance
+from neurova.api.endpoints import defaultAgentId, get_agent_instance
+from neurova.api.agent_access import agentOwnerById, can_access_agent, requireAgentOwner
 from neurova.api.endpoints.artifacts_api import extract_tool_artifacts
 from neurova.api.endpoints.sse_items import ItemEventMapper
 from neurova.session_repository import get_session_repository
@@ -148,6 +149,28 @@ def _establishRequestOwner(user_id: str) -> None:
     from neurova.core.identity_context import set_request_user_id
 
     set_request_user_id(user_id)
+
+
+def _agentAccessible(agent_id: str, user_id: str, role: str) -> bool:
+    """agent 访问判定（P1-1）：判据统一走 agent_access 单源。
+
+    `agent_id` 为空按"当前默认 agent"解析（与 `get_agent_instance()` 同一口径），
+    WS 腿的默认 agent 门与 HTTP 聊天面共用这一份判定，不再各写各的。
+    """
+    return can_access_agent(user_id, role, agentOwnerById(agent_id or defaultAgentId()))
+
+
+def _gate_agent_instance(agent_id: str, current_user: Dict[str, Any], *, action: str) -> None:
+    """console 会话面取用 agent 实例前的属主门（P1-1，2026-11-16 审计）。
+
+    与 /v1/chat 执行门同源：admin 全量；非 admin 仅属主；**无主仅 admin**。
+    实例未装配（`get_agent_instance` 为 None）时没有可被驱动的他人资源，
+    放行交给既有 503/回退语义——门只拦"真在跑的他人 agent"。
+    """
+    resolved = agent_id or defaultAgentId()
+    if get_agent_instance(resolved) is None:
+        return
+    requireAgentOwner(resolved, current_user, action=action)
 
 
 # ── Models ─────────────────────────────────────────────
@@ -716,6 +739,10 @@ async def post_console_chat(
         # 续跑执行身份＝原回合属主（推导单源在 `core/agent_run_ledger`，四入口共用）
         user_id, agent_id = resumeTurnIdentity(runRow, user_id, agent_id)
 
+    # P1-1：console 聊天面此前绕过 agent 属主执行门——同一 agent 走 /v1/chat 403、
+    # 走 console 200。判据与 /v1/chat 同源（agent_access 单源），且必须落在会话
+    # 创建等一切副作用之前：拒绝不留下半拉会话。
+    _gate_agent_instance(agent_id, current_user, action="对话")
     _establishRequestOwner(user_id)
     from neurova.core.build_context import setCurrentBuildSessionId
 
@@ -1289,6 +1316,8 @@ async def post_console_chat_review(
     content = (body.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="content 不能为空（提供待评审的 diff 或文本）")
+    # P1-1：评审驱动的是该 agent 的 LLM，实例在而身份不可访问先 403（503 语义保持）
+    _gate_agent_instance(body.agent_id or "", current_user, action="评审")
     agent = get_agent_instance(body.agent_id or "")
     if agent is None or getattr(agent, "llm_client", None) is None:
         raise HTTPException(status_code=503, detail="Agent 未就绪")
@@ -1706,6 +1735,8 @@ async def auto_title_chat_session(session_id: str, request: Request,
         raise HTTPException(status_code=404, detail="Session not found")
     _check_session_ownership(target, user_id)
     agent_id = target.get("agent_id", "")
+    # P1-1：会话属主 ≠ agent 属主（历史会话可指向任意 agent），用其 LLM 起标题前过门
+    _gate_agent_instance(agent_id, current_user, action="生成会话标题")
 
     messages = repo.get_history(agent_id=agent_id, session_id=session_id)
     first_user = next((m for m in messages if m.get("role") == "user"), None)
@@ -1902,6 +1933,8 @@ async def delete_chat_round(session_id: str, timestamp: str, request: Request,
     repo = get_session_repository()
     target = _find_session_target(repo, session_id, user_id)
     agent_id = target.get("agent_id", "")
+    # P1-1：轮次删除会清该 agent 的记忆并同步其内存历史，实例在而身份不可访问先 403
+    _gate_agent_instance(agent_id, current_user, action="删除会话轮次")
 
     deleted = repo.delete_round(agent_id=agent_id, session_id=session_id, timestamp=timestamp)
     if not deleted:
@@ -2208,6 +2241,10 @@ async def post_chat_feedback(
     repo = get_session_repository()
     target = _find_session_target(repo, body.session_id, user_id)
     agent_id = target.get("agent_id", "")
+    # P1-1：反馈扇出（记忆温度/通道权重/结晶/反思/动机）全部按该 agent 实例落笔，
+    # 会话属主不等于 agent 属主——在此过一次属主门，覆盖端点体与各 _apply_feedback_*
+    # 助手里全部 get_agent_instance 命中点（教义第 5 条同路径一次收口）。
+    _gate_agent_instance(agent_id, current_user, action="提交反馈")
 
     ok = repo.update_message_metadata(
         agent_id=agent_id,
@@ -2496,7 +2533,9 @@ async def websocket_console(websocket: WebSocket, client_id: str, token: str = Q
     # 那份单点，不在这里另推一遍 `sub` 的口径。
     from neurova.api.auth import _user_identity
 
-    user_id = str(_user_identity(payload).get("user_id") or "")
+    wsIdentity = _user_identity(payload)
+    user_id = str(wsIdentity.get("user_id") or "")
+    wsRole = str(wsIdentity.get("role") or "user")
     _establishRequestOwner(user_id)
     conn_id = f"{payload.get('sub', 'unknown')}:{uuid.uuid4().hex[:8]}"
     await _manager.connect(websocket, conn_id)
@@ -2512,6 +2551,14 @@ async def websocket_console(websocket: WebSocket, client_id: str, token: str = Q
                 ws_session_id = data.get("session_id") or str(uuid.uuid4())
                 try:
                     agent = get_agent_instance()
+                    # P1-1：WS 腿固定吃"当前默认 agent"，而默认位可被 /agent/{id}/switch
+                    # 改到他人私有 agent（P1-2 越权链）。无主/他人 agent 对非 admin 一律
+                    # 拒——判据与 HTTP 聊天面同源，不再把无主默认 agent 供任意用户对话。
+                    if agent is not None and not _agentAccessible(defaultAgentId(), user_id, wsRole):
+                        await websocket.send_json(
+                            {"type": "error", "message": "无权使用该智能体（仅属主或管理员）"}
+                        )
+                        continue
                     # Bug V2-4 修复:不强制传 metadata={"history": []}。
                     # 原代码强制空历史,LLM 缺对话上下文,工具参数指代不清。
                     # 现在不传 metadata,让 agent.chat() 自行从 session 恢复历史。

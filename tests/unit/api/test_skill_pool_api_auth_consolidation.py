@@ -31,7 +31,10 @@ from neurova.api.endpoints import skill_pool_api
 from neurova.skills.skill_service import SkillService
 
 BASE = "/api/v1/skill-pool"
-USER = {"user_id": "u1", "username": "alice", "role": "user", "neuser_id": "u1"}
+# api-P2-1（2026-11-16 拍板：技能资产归属主单源，复用 agent_access 属主门）后，
+# /private 面按 agent 属主判；本文件测 CRUD 落盘机制，桩 agent 不在属主单源内，
+# 统一按 admin 身份过门（登录 401 语义仍由上面 UNAUTH 用例钉住）。
+USER = {"user_id": "u1", "username": "alice", "role": "admin", "neuser_id": "u1"}
 
 
 @pytest.fixture

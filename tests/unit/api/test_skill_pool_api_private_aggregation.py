@@ -17,6 +17,9 @@ import asyncio
 import inspect
 from unittest.mock import MagicMock, patch
 
+# api-P2-1 属主门：直调端点须带身份；本文件测聚合契约，按 admin 过门
+_ADMIN = {"user_id": "u1", "role": "admin", "neuser_id": "u1"}
+
 
 def _fake_service(entries):
     """iter_skills 形态的单源替身（entries: [(sid, info)]）。"""
@@ -60,7 +63,7 @@ def test_list_private_skills_returns_manifest_entries():
         ),
     ])
     with _patch_service(svc):
-        result = asyncio.run(mod.list_private_skills(agent_id="a1"))
+        result = asyncio.run(mod.list_private_skills(agent_id="a1", current_user=_ADMIN))
     assert len(result) == 1
     row = result[0]
     assert row.name == "alpha" and row.category == "research"
@@ -78,7 +81,7 @@ def test_list_private_skills_degrades_when_service_raises():
 
     with patch.object(mod, "_pool_service", side_effect=_boom):
         with patch.object(mod.logger, "exception") as mock_log_exc:
-            result = asyncio.run(mod.list_private_skills(agent_id="a2"))
+            result = asyncio.run(mod.list_private_skills(agent_id="a2", current_user=_ADMIN))
     assert result == []
     assert mock_log_exc.called, "读失败必须 logger.exception"
 
@@ -90,7 +93,7 @@ def test_list_private_skills_passes_agent_id_to_service():
     svc = _fake_service([])
     with patch("neurova.skills.skill_service.SkillService") as mock_cls:
         mock_cls.return_value = svc
-        asyncio.run(mod.list_private_skills(agent_id="agent-xyz"))
+        asyncio.run(mod.list_private_skills(agent_id="agent-xyz", current_user=_ADMIN))
         assert mock_cls.called
         assert mock_cls.call_args.kwargs.get("agent_id") == "agent-xyz"
 
@@ -105,7 +108,7 @@ def test_create_persists_via_service_not_memory():
     svc.register_auto_skill.return_value = True
     with patch.object(mod, "_pool_service", return_value=svc):
         info = asyncio.run(
-            mod.create_private_skill(SkillCreate(name="n1", description="d1"), agent_id="a3")
+            mod.create_private_skill(SkillCreate(name="n1", description="d1"), agent_id="a3", current_user=_ADMIN)
         )
     assert info.owner_id == "a3"
     kwargs = svc.register_auto_skill.call_args.kwargs

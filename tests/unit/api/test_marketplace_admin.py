@@ -138,5 +138,8 @@ class TestMarketplaceAuth:
         _auth(c, "user")
         assert c.get("/api/v1/marketplace/skills").status_code == 200
         assert c.get("/api/v1/marketplace/installed").status_code == 200
+        # api-P2-1 属主门：默认 agent 无主，普通用户安装被 403 拦在技能查找之前
+        assert c.post("/api/v1/marketplace/skills/no-such-skill/install").status_code == 403
+        _auth(c, "admin")
         # 安装走真实 importer(单例 data/skills) — 使用不存在的技能预期 404, 证明路由+鉴权通过
         assert c.post("/api/v1/marketplace/skills/no-such-skill/install").status_code == 404

@@ -17,12 +17,16 @@ import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
-from neurova.api.auth import get_current_user, Depends
+from neurova.api.auth import Depends
+from neurova.api.deps import require_admin
 from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
 
-router = APIRouter(dependencies=[Depends(get_current_user)],)
+# P1-3（2026-11-16 审计）：防火墙/限流规则是全站安全面——普通用户可封禁他人
+# IP/路径、把全站限流改成 1/min（DoS）、给自身加白。整 router 从"仅登录"
+# 收紧为仅管理员，与写侧既有 remote-source 管理面同规。
+router = APIRouter(dependencies=[Depends(require_admin())],)
 
 # 导入防火墙服务
 from neurova.core.firewall import AgentFirewall, get_firewall

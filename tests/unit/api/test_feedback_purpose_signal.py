@@ -59,7 +59,11 @@ def _wire(monkeypatch, ledger):
 
 def _post(feedback):
     body = console_module.FeedbackRequest(session_id="s1", timestamp="2026-09-15T10:00:00", feedback=feedback)
-    return asyncio.run(console_module.post_chat_feedback(body, _make_request()))
+    # P1-1 属主门：桩 agent 对属主单源不可见（owner 解析走真实 state 面），
+    # 本测试只关心动机回流，按 admin 身份过门。
+    return asyncio.run(console_module.post_chat_feedback(
+        body, _make_request(), {"user_id": "u1", "username": "u1", "role": "admin", "neuser_id": "u1"}
+    ))
 
 
 def test_like_flows_to_purpose_drive(monkeypatch):

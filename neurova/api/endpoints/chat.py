@@ -887,27 +887,14 @@ async def add_attachment(
     body: AttachmentRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """添加附件到对话（审计 A8：补齐鉴权——stub 期与兄弟端点同源）"""
-    request_id = _get_request_id(request)
-
-    try:
-        # TODO: 实现附件处理
-        return {
-            "code": 0,
-            "message": "Attachment added",
-            "data": {
-                "file_path": body.file_path,
-                "file_type": body.file_type,
-            },
-            "request_id": request_id,
-        }
-    except Exception as e:
-        logger.error(f"Add attachment error: {e}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={
-                "code": 5000,
-                "message": f"Failed to add attachment: {str(e)}",
-                "request_id": request_id,
-            },
-        )
+    """添加附件到对话（P1-9：附件处理未实装——显式 501 点名，不谎报"已添加"）"""
+    # 与 DELETE /history 同纪律（教义第 2 条）：未实现的能力以诚实形态暴露。
+    # 原 TODO 桩不校验、不落库、不处理却回 "Attachment added"，调用方据此把
+    # 附件当已生效——假成功比 501 更危险。
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "附件处理在本仓没有落点（不校验、不落库、不进模型上下文）；"
+            "文件请先走 POST /api/v1/files/upload，再以 ChatRequest.file_ids 随对话携带"
+        ),
+    )

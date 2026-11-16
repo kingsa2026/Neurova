@@ -25,7 +25,8 @@ from neurova.api.error_handlers import register_error_handlers
 from neurova.interfaces.api_standard import ErrorCodes
 from tests.auth_headers import bearerHeaders
 
-USER = {"user_id": "1", "username": "tester", "role": "user"}
+# P1-3 后 firewall 整 router 收 admin；本文件测故障诚实化，身份门统一按 admin 过。
+USER = {"user_id": "1", "username": "tester", "role": "admin"}
 
 
 def _mount(router, prefix: str):

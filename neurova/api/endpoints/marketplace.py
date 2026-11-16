@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from pydantic import BaseModel, Field
 
+from neurova.api.agent_access import requireAgentOwner
 from neurova.api.deps import get_current_user, require_admin
 
 logger = get_logger(__name__)
@@ -335,8 +336,12 @@ async def install_skill(
     body: SkillInstallRequest = SkillInstallRequest(),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """安装技能 — 登录用户可操作"""
+    """安装技能 — 登录用户可操作；目标 agent 限属主/admin（api-P2-1）"""
     request_id = _get_request_id(request)
+
+    # api-P2-1（2026-11-16 审计拍板：技能资产归属主单源，复用 agent_access 门）：
+    # 目标 agent 过属主门，不再接受任意 agent_id 把市场技能装进他人 agent。
+    requireAgentOwner(body.agent_id or "default", current_user, action="安装技能到")
 
     try:
         if get_market_importer is None:
@@ -499,8 +504,11 @@ async def uninstall_skill(
     agent_id: str = Query(default="default", description="目标 Agent ID（联邦注销落盘目标）"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """卸载技能 — 登录用户可操作"""
+    """卸载技能 — 登录用户可操作；目标 agent 限属主/admin（api-P2-1）"""
     request_id = _get_request_id(request)
+
+    # api-P2-1：联邦注销落在目标 agent 的技能页上，属他人资产，先过属主门
+    requireAgentOwner(agent_id, current_user, action="卸载技能自")
 
     try:
         if get_market_importer is None:

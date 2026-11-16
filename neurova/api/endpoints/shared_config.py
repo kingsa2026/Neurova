@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
+from neurova.api.deps import require_admin
 
 logger = get_logger(__name__)
 # P0 安全修复: 共享配置包含 LLM API Key 与 MCP 命令，读写均必须认证
@@ -132,7 +133,9 @@ async def get_shared_config():
     return {"code": 0, "message": "success", "data": data}
 
 
-@router.put("/")
+# §3.1-P2（2026-11-16 审计）：写侧管理面收 admin——内存平行配置面可被普通用户
+# 整体改写（PUT / 即 `_shared_config = body` 整体替换），读侧维持登录即可（掩码返回）。
+@router.put("/", dependencies=[Depends(require_admin())])
 async def update_shared_config(body: dict):
     """更新共享配置（完整替换）"""
     global _shared_config
@@ -151,7 +154,7 @@ async def list_llm_providers():
     return {"code": 0, "message": "success", "data": {"providers": providers, "total": len(providers)}}
 
 
-@router.post("/llm-providers")
+@router.post("/llm-providers", dependencies=[Depends(require_admin())])
 async def add_llm_provider(body: LLMProviderRequest):
     """添加新的 LLM 提供商配置"""
     name = body.name
@@ -177,7 +180,7 @@ async def get_llm_provider(name: str):
     return {"code": 0, "message": "success", "data": _masked_provider(provider)}
 
 
-@router.put("/llm-providers/{name}")
+@router.put("/llm-providers/{name}", dependencies=[Depends(require_admin())])
 async def update_llm_provider(name: str, body: LLMProviderRequest):
     """更新 LLM 提供商配置"""
     if name not in _shared_config["llm_providers"]:
@@ -196,7 +199,7 @@ async def update_llm_provider(name: str, body: LLMProviderRequest):
     return {"code": 0, "message": "Provider updated", "data": _masked_provider(provider)}
 
 
-@router.delete("/llm-providers/{name}")
+@router.delete("/llm-providers/{name}", dependencies=[Depends(require_admin())])
 async def delete_llm_provider(name: str):
     """删除 LLM 提供商配置"""
     if name not in _shared_config["llm_providers"]:
@@ -365,7 +368,7 @@ async def update_mcp_server(
     }
 
 
-@router.delete("/mcp-servers/{name}")
+@router.delete("/mcp-servers/{name}", dependencies=[Depends(require_admin())])
 async def delete_mcp_server(name: str):
     """删除 MCP 服务器配置"""
     from neurova.shared_config import get_shared_config_manager
@@ -418,7 +421,7 @@ def _import_mcp_servers_into_manager(config: dict) -> None:
             logger.warning("导入 MCP server 失败（跳过）: %s", e)
 
 
-@router.post("/import")
+@router.post("/import", dependencies=[Depends(require_admin())])
 async def import_config(body: ImportConfigRequest):
     """导入完整的共享配置
 

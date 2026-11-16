@@ -248,6 +248,23 @@ def _owned_workflow_or_404(storage, workflow_id: str, current_user: Dict[str, An
     return workflow
 
 
+def _ensure_execution_owned(execution, current_user: Dict[str, Any]) -> None:
+    """执行记录属主门（§3.1-P2，2026-11-16 审计）：inputs/outputs/variables 是
+    跨用户可读的敏感面，读/恢复都要先过这道门。
+
+    口径：owner/admin 通过；无主（空 user_id）或历史 default 行视为共享——与
+    SSE 腿既有口径一致；deny≡404（与工作流面同构，防枚举）。
+    """
+    owner = str(getattr(execution, "user_id", "") or "")
+    if not owner or owner == "default":
+        return
+    if current_user.get("role") == "admin":
+        return
+    if owner == str(current_user.get("user_id") or ""):
+        return
+    raise HTTPException(status_code=404, detail="执行记录不存在")
+
+
 @router.get("/workflows/{workflow_id}")
 async def get_workflow(
     workflow_id: str,
@@ -553,11 +570,20 @@ async def list_executions(
     status: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """列出执行记录"""
+    """列出执行记录（§3.1-P2：非 admin 仅见本人执行记录）"""
     storage = _get_storage()
     ws_status = WorkflowStatus(status) if status else None
-    executions = storage.list_executions(workflow_id=workflow_id, status=ws_status, limit=limit, offset=offset)
+    # 执行记录带 inputs/outputs，跨用户可读即泄露；admin 全量，其余按请求者过滤
+    user_filter = (
+        None
+        if current_user.get("role") == "admin"
+        else str(current_user.get("user_id") or "")
+    )
+    executions = storage.list_executions(
+        workflow_id=workflow_id, status=ws_status, user_id=user_filter, limit=limit, offset=offset
+    )
     return {
         "executions": [
             {
@@ -575,12 +601,13 @@ async def list_executions(
 
 
 @router.get("/executions/{execution_id}")
-async def get_execution(execution_id: str):
-    """获取执行详情"""
+async def get_execution(execution_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取执行详情（§3.1-P2：属主门）"""
     storage = _get_storage()
     execution = storage.get_execution(execution_id)
     if not execution:
         raise HTTPException(status_code=404, detail="执行记录不存在")
+    _ensure_execution_owned(execution, current_user)
     return {
         "execution": {
             "id": execution.id,
@@ -622,7 +649,10 @@ async def stream_execution_events(
         raise HTTPException(status_code=404, detail=f"执行不存在: {execution_id}")
 
     owner = str(getattr(instance, "user_id", "") or "") if instance is not None else ""
-    if owner and user_id and owner != user_id:
+    # §3.1-P2（复核新增命中点 6）：原判断 `owner and user_id and owner != user_id`
+    # 对空身份短路放行、且无 admin 通道。现：owner 在而身份不匹配即 403，
+    # admin 放行——匿名/默认身份不再借短路读到他人执行事件流。
+    if owner and owner != user_id and current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="无权访问该执行")
 
     async def event_generator():
@@ -1173,6 +1203,8 @@ async def resume_execution(
     execution = storage.get_execution(execution_id)
     if not execution:
         raise HTTPException(status_code=404, detail="执行记录不存在")
+    # §3.1-P2：resume 是对他人执行记录的写操作，先过属主门（deny≡404）
+    _ensure_execution_owned(execution, current_user)
 
     if execution.status != WorkflowStatus.PAUSED:
         raise HTTPException(status_code=400, detail="只能恢复暂停的执行")
@@ -1566,6 +1598,8 @@ async def get_execution_variables(
     execution = storage.get_execution(execution_id)
     if not execution:
         raise HTTPException(status_code=404, detail="执行实例不存在")
+    # §3.1-P2：variables 含 inputs/outputs 全文，先过执行记录属主门
+    _ensure_execution_owned(execution, current_user)
     return {
         "execution_id": execution_id,
         "inputs": execution.inputs,

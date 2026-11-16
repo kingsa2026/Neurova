@@ -29,7 +29,8 @@ from neurova.api.endpoints import marketplace, notifications as notif_module
 from neurova.skills.market_store import reset_market_store
 from tests.auth_headers import overrideIdentity
 
-USER = {"user_id": "u1", "username": "alice", "role": "user", "neuser_id": "u1"}
+# api-P2-1 属主门：安装/卸载目标 agent=default 无主仅 admin；本文件测删除语义。
+USER = {"user_id": "u1", "username": "alice", "role": "admin", "neuser_id": "u1"}
 ADMIN = {"user_id": "a9", "username": "admin", "role": "admin", "neuser_id": "a9"}
 
 BASE = "/api/v1/marketplace"

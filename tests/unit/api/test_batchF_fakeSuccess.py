@@ -15,7 +15,8 @@ from fastapi.testclient import TestClient
 from neurova.api import deps as deps_mod
 from neurova.api.endpoints import console as console_mod
 
-USER = {"user_id": "u1", "username": "u1", "role": "user", "neuser_id": "u1"}
+# P1-1 属主门：桩 agent 不在属主单源内，本文件测假成功治理，按 admin 过门。
+USER = {"user_id": "u1", "username": "u1", "role": "admin", "neuser_id": "u1"}
 
 
 class _OkAgent:
@@ -63,7 +64,9 @@ def test_f2_ws_chat_error_sends_error_frame(monkeypatch):
     # WS 握手要求 ?token=<JWT>（2026-09-07 根因修复）——按 auth_headers 教义签真令牌
     from tests.auth_headers import bearerHeaders
 
-    token = bearerHeaders("u1")["Authorization"].removeprefix("Bearer ")
+    # P1-1 WS 属主门：默认 agent 无主仅 admin——本格测 error 帧诚实化，
+    # 按 admin 令牌过门，让故障帧真正来自 agent.chat 的 "llm down"。
+    token = bearerHeaders("u1", role="admin")["Authorization"].removeprefix("Bearer ")
     client = TestClient(app)
     from starlette.websockets import WebSocketDisconnect
 

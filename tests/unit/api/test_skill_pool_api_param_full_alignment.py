@@ -28,6 +28,9 @@ def _get_func(mod, name):
 # ─── 静态契约: 参数名 ───
 
 
+_ADMIN = {"user_id": "u1", "role": "admin", "neuser_id": "u1"}
+
+
 def test_create_private_skill_param_is_agent_id():
     """s6.1 静态契约: create_private_skill 参数名为 agent_id"""
     from neurova.api.endpoints import skill_pool_api as mod
@@ -141,7 +144,9 @@ def _create(name, desc, agent_id):
     from neurova.api.endpoints import skill_pool_api as mod
     from neurova.api.endpoints.skill_pool_api import SkillCreate
 
-    return asyncio.run(mod.create_private_skill(SkillCreate(name=name, description=desc), agent_id=agent_id))
+    # api-P2-1 属主门：直调须带身份；本文件测参数契约，按 admin 过门
+    return asyncio.run(mod.create_private_skill(
+        SkillCreate(name=name, description=desc), agent_id=agent_id, current_user=_ADMIN))
 
 
 def test_create_private_skill_accepts_agent_id_kwarg(mini):
@@ -158,7 +163,7 @@ def test_update_private_skill_accepts_agent_id_kwarg(mini):
 
     created = _create("old_name", "旧", "alice")
     result = asyncio.run(
-        mod.update_private_skill(created.skill_id, SkillUpdate(name="new_name"), agent_id="alice")
+        mod.update_private_skill(created.skill_id, SkillUpdate(name="new_name"), agent_id="alice", current_user=_ADMIN)
     )
     assert result.name == "new_name"
 
@@ -168,7 +173,7 @@ def test_delete_private_skill_accepts_agent_id_kwarg(mini):
     from neurova.api.endpoints import skill_pool_api as mod
 
     created = _create("to_delete", "待删", "alice")
-    result = asyncio.run(mod.delete_private_skill(created.skill_id, agent_id="alice"))
+    result = asyncio.run(mod.delete_private_skill(created.skill_id, agent_id="alice", current_user=_ADMIN))
     assert result["code"] == 0
     assert created.skill_id not in mini._stores["alice"]
 
@@ -180,9 +185,9 @@ def test_create_then_list_roundtrip_uses_agent_id(mini):
 
     _create("roundtrip_skill", "链路测试", "bob")
 
-    names = {r.name for r in asyncio.run(mod.list_private_skills(agent_id="bob"))}
+    names = {r.name for r in asyncio.run(mod.list_private_skills(agent_id="bob", current_user=_ADMIN))}
     assert "roundtrip_skill" in names, (
         f"create/list 同 agent_id 链路必须闭环, 实际 names={names}"
     )
-    other = {r.name for r in asyncio.run(mod.list_private_skills(agent_id="someone_else"))}
+    other = {r.name for r in asyncio.run(mod.list_private_skills(agent_id="someone_else", current_user=_ADMIN))}
     assert "roundtrip_skill" not in other, "视图不得串"

@@ -26,7 +26,8 @@ from neurova.api.endpoints import marketplace, notifications as notif_module  # 
 from neurova.skills import market_importer  # noqa: E402
 from neurova.skills.market_store import reset_market_store  # noqa: E402
 
-USER = {"user_id": "u1", "username": "alice", "role": "user", "neuser_id": "u1"}
+# api-P2-1 属主门：安装目标 agent=default 无主仅 admin；本文件测拒因诚实化。
+USER = {"user_id": "u1", "username": "alice", "role": "admin", "neuser_id": "u1"}
 BASE = "/api/v1/marketplace"
 
 SKILL_MD = "---\nname: evil\ndescription: d\n---\n\n# Evil\n\nrun it\n"

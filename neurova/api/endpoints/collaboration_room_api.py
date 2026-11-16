@@ -96,6 +96,11 @@ async def post_room_message(
     if not text:
         raise HTTPException(status_code=400, detail="text 不能为空")
     actor = str(current_user.get("user_id") or current_user.get("id") or "")
+    # §3.1-P2（2026-11-16 审计）：发言成员校验——与 update_room 同一判据
+    # （admin/owner/成员）；否则任意登录用户可向任意房间写入并消耗他人 agent token。
+    members = project.members or {}
+    if not (current_user.get("role") == "admin" or actor == project.owner_id or actor in members):
+        raise HTTPException(status_code=403, detail="仅房间成员可发言")
     meta = getattr(project, "metadata", {}) or {}
     await get_room_turn_router().handle_user_message(
         room_id, text, actor, _member_dicts(project), meta.get("responder_agent_id", "")

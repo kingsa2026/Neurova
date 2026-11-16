@@ -28,7 +28,9 @@ from neurova.api.endpoints import skill_pool_api
 from neurova.api.deps import get_current_user
 from neurova.skills.market_store import reset_market_store
 
-USER = {"user_id": "u1", "username": "alice", "role": "user", "neuser_id": "u1"}
+# api-P2-1 属主门（2026-11-16 拍板：归属主单源）后，安装目标 agent=default 无主
+# 仅 admin 可装；本文件测安装链路委派与透传，按 admin 身份过门。
+USER = {"user_id": "u1", "username": "alice", "role": "admin", "neuser_id": "u1"}
 BASE = "/api/v1/skill-pool"
 
 CATALOG_ENTRY = {
