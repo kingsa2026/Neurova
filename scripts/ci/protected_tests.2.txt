@@ -1062,14 +1062,6 @@ tests/unit/channels/test_feishuMediaUploadIsRealMultipart.py
 # 内容认语音那一跳而不是按位置取最后一条——文本走 lark SDK 路、语音走纯 HTTP 路，两跳先后随
 # 装配耗时变化，用 sends[-1] 会在慢的那次读成没按 file 发）。
 tests/unit/channels/test_channelVoiceInboundBytes.py
-# §6-171 取回密码的最高权重口令按用户裁定回到源码常量。六格分三面：AST 形态格钉住「常量是源码字面量
-# 而非环境查询」（本批裁定本身，防下个会话静默改回），死分支退役格钉住「未配置即 403」那道不可达门
-# 不许留在路上，行为四格走真端点——admin+源码口令⇒200 且新口令在登录端点上真能用、旧口令即失效
-# （写→读闭环）；非 admin+正确口令⇒400 且该账号原口令未被改动（用户那条硬要求）；错口令⇒400；
-# 空口令⇒400——反证实测过：只把常量退回环境查询而不补那道门时 hmac.compare_digest("", "") 为真，
-# 留空最高权重密码即可接管任意 admin，这一格就是被删掉的那道门的替身。全程落临时数据根，不碰仓内
-# data/users.db；入册前逐文件单跑三次同读数 6 passed。
-tests/unit/api/test_recoverPasswordFromSourceConstant.py
 # §6-175 语音上下文写侧接进现役渠道回合（预检写 → 路由交 → 读侧同名键）：
 # 读侧 `chat_pipeline` 一直在取 `metadata["voice_context"]`，而此前全仓唯一的写者只活在评测面
 # （`agent_core.process_multimodal`，其生产调用点只有 `evolution/eval/ab_library.py`）——对真用户
