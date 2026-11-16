@@ -131,6 +131,11 @@ class SecurityConfig:
     max_access_logs: int = 10000
     encryption_key: Optional[str] = None
     salt: Optional[str] = None
+    # 审计 3.3-5 拍板：remember 咽喉的敏感内容处置。
+    # log_only（默认）＝零内容漂移只记证据（与认知安全门 observe 同姿态）；
+    # mask＝敏感段掩码后落库；encrypt＝整条 Fernet 加密（检索面按密文建
+    # 索引，运维显式开启）。非法值一律回落 log_only（宁观察勿改写）。
+    sensitive_write_action: str = "log_only"
 
 
 @dataclass
@@ -451,6 +456,37 @@ class MemorySecurity:
             return sanitizeSensitive(content, rules=self._patterns)
         # 两个分支都在锁内 return，这里是不可达的旧尾巴（曾带一句读 `result` 的死返回）
 
+    def screenForStorage(self, content: str) -> Tuple[str, Dict[str, Any]]:
+        """remember 写入咽喉的安检面（审计 3.3-5 接线）。
+
+        返回 ``(落库内容, security 元数据)``：
+        - 无敏感命中：原样返回，元数据只含处置名（不塞空证据块）；
+        - 有命中：元数据落 sensitivity/patterns 证据；处置按
+          `SecurityConfig.sensitive_write_action`——log_only 原样、mask 掩码
+          敏感段、encrypt 整条加密（方法名进元数据，读侧可解）。
+        """
+        meta: Dict[str, Any] = {"action": self._storageAction()}
+        findings = self.detect_sensitive_info(content)
+        if not findings:
+            return content, meta
+        meta["sensitivity"] = self.get_sensitivity_level(content).value
+        meta["patterns"] = [{"name": f["pattern_name"], "count": f["count"]} for f in findings]
+
+        action = self._storageAction()
+        if action == "mask":
+            masked, method = self.encrypt_sensitive_content(content, EncryptionMethod.MASK)
+            meta["encrypted"] = method
+            return masked, meta
+        if action == "encrypt":
+            encrypted, method = self.encrypt_sensitive_content(content)
+            meta["encrypted"] = method
+            return encrypted, meta
+        return content, meta
+
+    def _storageAction(self) -> str:
+        action = str(getattr(self._config, "sensitive_write_action", "") or "").strip().lower()
+        return action if action in ("log_only", "mask", "encrypt") else "log_only"
+
     def forget_memory(self, memory_id: str, permanent: bool = False) -> Dict[str, Any]:
         """
         被遗忘权处理
@@ -711,13 +747,22 @@ _instance_lock = threading.RLock()
 
 
 def get_memory_security(config: Optional[SecurityConfig] = None) -> MemorySecurity:
-    """获取记忆安全实例（单例）"""
+    """获取记忆安全实例（单例）
+
+    env ``NEUROVA_MEMORY_SECURITY_WRITE_ACTION``（log_only/mask/encrypt）是
+    remember 咽喉处置的运维逃生门（显式值最优先，非法值回落 log_only），
+    形态与认知安全门的 NEUROVA_COGNITIVE_SECURITY 一致。
+    """
     global _security_instance
 
     if _security_instance is None:
         with _instance_lock:
             if _security_instance is None:
-                _security_instance = MemorySecurity(config)
+                effective = config
+                if effective is None:
+                    env = (os.environ.get("NEUROVA_MEMORY_SECURITY_WRITE_ACTION") or "").strip().lower()
+                    effective = SecurityConfig(sensitive_write_action=env)
+                _security_instance = MemorySecurity(effective)
 
     return _security_instance
 

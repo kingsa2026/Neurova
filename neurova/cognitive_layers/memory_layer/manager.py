@@ -1775,6 +1775,25 @@ class MemoryManager:
             content, _sec_reading = runMemoryWriteGuard(content)
         except Exception:  # noqa: BLE001 - 安全面故障不阻断记忆写入
             logger.debug("记忆安全门检查失败（放行原文）", exc_info=True)
+        # 记忆安全面接线（审计 3.3-5 拍板）：MemorySecurity 的敏感检测/加密进
+        # 写入咽喉。证据必记（metadata._security），处置按
+        # SecurityConfig.sensitive_write_action（默认 log_only 零内容漂移；
+        # mask/encrypt 为显式开启态）。fail-open 与认知安全门同姿态。
+        try:
+            from neurova.cognitive_layers.memory_layer.security import get_memory_security
+
+            content, _security_meta = get_memory_security().screenForStorage(content)
+            if _security_meta.get("patterns"):
+                metadata = dict(metadata or {})
+                metadata["_security"] = _security_meta
+                logger.info(
+                    "记忆安全面读数: action=%s level=%s patterns=%s",
+                    _security_meta.get("action"),
+                    _security_meta.get("sensitivity"),
+                    [p["name"] for p in _security_meta.get("patterns", [])],
+                )
+        except Exception:  # noqa: BLE001 - 安全面故障不阻断记忆写入
+            logger.debug("记忆安全面检查失败（放行原文）", exc_info=True)
         # 配置化默认值（memory-settings 配置页）: manager.new_memory_temperature /
         # new_memory_importance。默认 65（温度死锁修复：原 100 ≥ 高温不衰减
         # 阈值 80，新记忆从未真正参与衰减）；

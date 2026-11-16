@@ -180,9 +180,16 @@ async def forget_memory(
     if not existing:
         raise _notFound(memory_id)
 
-    if not manager.forget(memory_id, soft=True):
-        # 存在却在归属校验处被拒 = 越权，对外与不存在同口径，不泄漏归属信息
-        logger.warning("forget 被拒绝（归属校验）: id=%s", memory_id)
+    # 遗忘链统一入口（审计 3.3-5 拍板）：经 MemorySecurity.forget_memory
+    # 执行删除——统一入口带访问审计留痕，直调 manager.forget 的旧路退役。
+    from neurova.cognitive_layers.memory_layer.security import get_memory_security
+
+    security = get_memory_security()
+    security.set_memory_manager(manager)
+    forget_result = security.forget_memory(memory_id, permanent=False)
+    if not forget_result.get("success"):
+        # 统一入口失败（含归属校验被拒=越权）与不存在同口径，不泄漏归属信息
+        logger.warning("forget 被拒绝（统一入口）: id=%s", memory_id)
         raise _notFound(memory_id)
 
     after = manager.get_memory(memory_id, agent_wide=True) or {}
