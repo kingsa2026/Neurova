@@ -15,9 +15,13 @@ Agent 外部通信 API 端点（简化版）
 - API密钥绑定到特定用户和Agent；撤销或过期即刻被那道门拒认
 """
 
+from neurova.core.data_root import dataPath
 from neurova.core.logger import get_logger
+import json
+import os
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -103,6 +107,46 @@ class SendMessageRequest(BaseModel):
 _handshakes: Dict[str, Dict[str, Any]] = {}
 _messages: List[Dict[str, Any]] = []
 _external_agents: Dict[str, Dict[str, Any]] = {}
+
+
+# ---------------------------------------------------------------------------
+# P2-2（评测报告 G-9）：握手与外部 Agent 注册持久化
+# ---------------------------------------------------------------------------
+# 此前这两张表纯进程内存，重启即失——外部 Agent 重新握手前整个互通面不可用。
+# 密钥本就走 APIKeyManager（持久化）；这里把其余两份身份态补上持久化：
+# JSON 原子落盘（temp+os.replace），消息日志仍属进程内会话态不落盘。
+# 写失败只记日志不阻断请求：内存态仍是本次请求的真相，下次变更会再试。
+
+_EXTERNAL_STATE_FILE = Path(dataPath("external_agents_state.json"))
+
+
+def _loadExternalState() -> None:
+    """重启恢复握手与注册（损坏/缺失按空态起步，不阻断启动）。"""
+    try:
+        raw = json.loads(_EXTERNAL_STATE_FILE.read_text(encoding="utf-8"))
+        _handshakes.update(raw.get("handshakes", {}))
+        _external_agents.update(raw.get("external_agents", {}))
+    except FileNotFoundError:
+        pass
+    except Exception as e:  # noqa: BLE001 - 恢复失败不阻断启动
+        logger.warning("外部 Agent 状态恢复失败（按空态起步）: %s", e)
+
+
+def _saveExternalState() -> None:
+    """原子落盘。"""
+    try:
+        payload = json.dumps(
+            {"handshakes": _handshakes, "external_agents": _external_agents},
+            ensure_ascii=False, indent=2,
+        )
+        tmp = _EXTERNAL_STATE_FILE.with_suffix(".tmp")
+        tmp.write_text(payload, encoding="utf-8")
+        os.replace(tmp, _EXTERNAL_STATE_FILE)
+    except Exception as e:  # noqa: BLE001 - 落盘失败不阻断请求
+        logger.warning("外部 Agent 状态落盘失败: %s", e)
+
+
+_loadExternalState()
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +327,7 @@ async def handshake(
         "user_id": auth.get("user_id", "default"),
         "last_seen": now,
     }
+    _saveExternalState()
 
     return {
         "code": 0,
@@ -411,6 +456,7 @@ async def register_external_agent(
         "user_id": auth.get("user_id", "default"),
         "last_seen": now,
     }
+    _saveExternalState()
     return {"code": 0, "message": f"External agent '{body.agent_id}' registered"}
 
 
