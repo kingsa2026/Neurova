@@ -13,6 +13,7 @@ import { ConfigManager } from '../libs/config/ConfigManager';
 import { Router, RouteNames } from '../routing/Router';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
+import { StyleManager } from '../libs/style/StyleManager';
 
 const TAG = 'ConnectionPage';
 
@@ -28,6 +29,7 @@ export struct ConnectionPage {
   private store = ServerProfiles.getInstance();
   private cm = ConfigManager.getInstance();
   private router = Router.getInstance();
+  private sm = StyleManager.getInstance();
   private logger = Logger.getInstance();
   private msg = MessageManager.getInstance();
 
@@ -112,15 +114,15 @@ export struct ConnectionPage {
 
                 Button(p.id === this.activeId ? '当前' : '使用')
                   .fontSize(12)
-                  .backgroundColor(p.id === this.activeId ? '#34d399' : '#5b8cff')
+                  .backgroundColor(p.id === this.activeId ? this.sm.getColor('success') : this.sm.getColor('primary'))
                   .onClick(() => this.useProfile(p))
                 Button('删')
                   .fontSize(12)
-                  .backgroundColor('#f87171')
+                  .backgroundColor(this.sm.getColor('error'))
                   .margin({ left: 6 })
                   .onClick(() => this.removeProfile(p.id))
               }.width('100%')
-            }.padding(12).borderRadius(12).margin({ bottom: 10 }).backgroundColor('#161c29')
+            }.padding(12).borderRadius(12).margin({ bottom: 10 }).backgroundColor(this.sm.getColor('surface'))
           }, (p: ServerProfile) => p.id)
 
           Column() {
@@ -131,12 +133,12 @@ export struct ConnectionPage {
               .onChange((v: string) => { this.newUrl = v; })
               .margin({ bottom: 8 })
             Button('添加服务器档案').width('100%').onClick(() => this.addProfile())
-          }.padding(12).borderRadius(12).backgroundColor('#161c29')
+          }.padding(12).borderRadius(12).backgroundColor(this.sm.getColor('surface'))
 
           Text('切换档案后需用该服务器的账号重新登录（账号与令牌不跨服务器共享）。')
             .fontSize(11).opacity(0.6).padding(8)
         }.width('100%').padding(12)
       }.layoutWeight(1).scrollBar(BarState.Off)
-    }.width('100%').height('100%').backgroundColor('#0b0e14')
+    }.width('100%').height('100%').backgroundColor(this.sm.getColor('background'))
   }
 }

@@ -220,7 +220,7 @@ export struct AgentListPage {
             .fontColor(this.sm.getColor('text_on_primary'))
         }
         .height(34)
-        .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+        .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
         .onClick(() => {
           this.handleCreate();
         })
@@ -305,7 +305,7 @@ export struct AgentListPage {
             .width(40)
             .height(40)
             .borderRadius(14)
-            .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+            .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
             .textAlign(TextAlign.Center)
 
           // 信息列：名称、描述、状态行

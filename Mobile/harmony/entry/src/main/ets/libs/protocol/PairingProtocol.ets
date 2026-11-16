@@ -42,27 +42,8 @@ export const CONNECTION_FAILURE_REASONS: string[] = [
 ];
 
 /**
- * 解析二维码载荷。
- *
- * 载荷形状在 `protocol.pairingQrPayload()` 定义：`neurova://pair?ref=<高熵一次性引用>`，
- * **刻意不含任何 host**——「谁」与「在哪」分开，地址漂移不得让已发的码作废。
- * 旧形（裸 `ws://…?code=XXXXXX`）靠子串巧合对得上，那是一条 nobody owns 的约定，
- * 本页不再自己抦正则，解析面只在这一处。
+ * 二维码载荷解析不在这里：真单源是 `libs/protocol/PairingPayload.ets` 的
+ * `PairingPayload.parse()`（PairingPage 在用）。本文件曾并存一份重复的
+ * 解析函数 + 同名 interface（全仓零调用），属同功能第二实现，
+ * 按先比后合退役（审计 3.8-8；存活判据见 R2 台账）。
  */
-export interface PairingPayload {
-  ref: string;
-  shortCode: string;
-}
-
-/** 从扫描结果取出 ref / 短码；两者都取不到时返回 null（调用方负责分型报错） */
-export function parsePairingPayload(scanned: string): PairingPayload | null {
-  const refMatch = scanned.match(/[?&]ref=([0-9a-zA-Z]{22})/);
-  if (refMatch) {
-    return { ref: refMatch[1], shortCode: '' };
-  }
-  const codeMatch = scanned.match(/[?&]code=([0-9]{6})/);
-  if (codeMatch) {
-    return { ref: '', shortCode: codeMatch[1] };
-  }
-  return null;
-}

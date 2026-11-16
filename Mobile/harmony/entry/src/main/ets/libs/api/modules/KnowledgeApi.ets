@@ -11,6 +11,10 @@
  *   POST   /knowledge/{id}/unshare {usernames[]}
  *   POST   /knowledge       创建（KnowledgeCreate）
  *   PUT/DELETE /knowledge/{id}
+ *
+ * 时间戳口径：后端 item_response 的 created_at/updated_at 是**秒级** Unix 时间戳
+ * （knowledge_core.py `datetime.timestamp()` 产出）；JS Date 构造只吃毫秒，
+ * 直接透传会渲染成 1970 年——映射处统一 ×1000。
  */
 
 import { HttpClient } from '../HttpClient';
@@ -66,8 +70,8 @@ export class KnowledgeApi {
       category: dto.category,
       tags: dto.tags,
       status: 'ready',
-      createdAt: dto.created_at > 0 ? new Date(dto.created_at).toISOString() : '',
-      updatedAt: dto.updated_at > 0 ? new Date(dto.updated_at).toISOString() : '',
+      createdAt: dto.created_at > 0 ? new Date(dto.created_at * 1000).toISOString() : '',
+      updatedAt: dto.updated_at > 0 ? new Date(dto.updated_at * 1000).toISOString() : '',
       visibility: dto.visibility,
       ownerUserId: dto.owner_user_id,
       sharedWith: dto.shared_with,

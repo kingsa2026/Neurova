@@ -43,6 +43,7 @@
  */
 
 import { TopNavMenu, GlassCard, GlassButton, GlassInput } from '../components/glass';
+import { mediaquery } from '@kit.ArkUI';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { AppStore } from '../libs/state/stores/AppStore';
 import { AuthStore } from '../libs/state/stores/AuthStore';
@@ -50,6 +51,7 @@ import { Router, RouteNames } from '../routing/Router';
 import { StyleManager, ThemeMode } from '../libs/style/StyleManager';
 import { ConfigManager } from '../libs/config/ConfigManager';
 import { ServerProfiles } from '../libs/config/ServerProfiles';
+import { PlatformAdapter } from '../libs/adapters/PlatformAdapter';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
 import { SettingGroup, SettingItem } from '../libs/types';
@@ -273,6 +275,7 @@ export struct SettingPage {
   private router = Router.getInstance();
   private sm = StyleManager.getInstance();
   private cm = ConfigManager.getInstance();
+  private platform = PlatformAdapter.getInstance();
   private logger = Logger.getInstance();
   private msg = MessageManager.getInstance();
 
@@ -371,15 +374,26 @@ export struct SettingPage {
   /** 应用主题：light/dark/auto → StyleManager + AppStore */
   private applyTheme(theme: string): void {
     if (theme === 'auto') {
-      // 跟随系统：当前简化为 light，后续可读取系统主题
-      this.sm.setThemeMode(ThemeMode.LIGHT);
-      this.appStore.setTheme('light');
+      // 跟随系统：实时探测系统深色模式（此前恒落 light，auto 名不副实——审计 3.8-4）
+      const dark = this.systemPrefersDark();
+      this.sm.setThemeMode(dark ? ThemeMode.DARK : ThemeMode.LIGHT);
+      this.appStore.setTheme(dark ? 'dark' : 'light');
     } else if (theme === 'dark') {
       this.sm.setThemeMode(ThemeMode.DARK);
       this.appStore.setTheme('dark');
     } else {
       this.sm.setThemeMode(ThemeMode.LIGHT);
       this.appStore.setTheme('light');
+    }
+  }
+
+  /** 系统当前是否深色模式（dark-mode 媒体查询；探测失败按浅色兜底，只影响 auto 档初值） */
+  private systemPrefersDark(): boolean {
+    try {
+      return mediaquery.matchMediaSync('(dark-mode: true)').matches;
+    } catch (e) {
+      this.logger.warn(TAG, '系统深色模式探测失败，auto 档按浅色处理', e as Error);
+      return false;
     }
   }
 
@@ -473,10 +487,15 @@ export struct SettingPage {
   /** 执行退出登录：清除认证状态 → 重置路由到登录页 */
   private logout(): void {
     try {
-      // 推送令牌注销（fire-and-forget；失败不影响登出）
-      this.api.push.remove('harmony-main').catch((e: Object) => {
-        this.logger.warn(TAG, '推送令牌注销失败（不影响登出）', e as Error);
-      });
+      // 推送令牌注销（fire-and-forget；失败不影响登出）。
+      // deviceId 与登录上报同走 PlatformAdapter.getDeviceId() 单源（后端按 device_id
+      // 索引注册表，两端口径不一致时注销永远打不中登记项——审计 3.8-5）；
+      // 仅在真实推送令牌存在时发起，从未上报过的设备不发无主请求
+      if (this.cm.get<string>('push_token', '').length > 0) {
+        this.api.push.remove(this.platform.getDeviceId()).catch((e: Object) => {
+          this.logger.warn(TAG, '推送令牌注销失败（不影响登出）', e as Error);
+        });
+      }
       this.authStore.logout();
       this.msg.success('已退出登录');
       this.router.resetTo(RouteNames.LOGIN);
@@ -509,25 +528,32 @@ export struct SettingPage {
   }
 
   /**
-   * 点击 select 类型设置项：弹出 AlertDialog 选项列表
+   * 点击 select 类型设置项：弹出选项选择对话框，每个选项一个按钮，点选即回写
+   * （此前是空壳对话框：只有无动作的取消/确定按钮，选不了任何值——审计 3.8-4）
    */
   private showSelectPicker(item: SettingItem): void {
     if (!item.options || item.options.length === 0) return;
+    // 每个选项生成一个按钮；当前选中项以主题色高亮，点选后经 updateValue 回写并持久化
+    const optionButtons: AlertDialogButtonOptions[] = [];
+    for (const opt of item.options) {
+      const selected = String(opt.value) === String(item.value);
+      optionButtons.push({
+        value: opt.label,
+        fontColor: selected ? this.sm.getColor('primary') : this.sm.getColor('text_secondary'),
+        action: () => {
+          this.updateValue(item.key, opt.value);
+        },
+      });
+    }
     // 字面量先赋给 SDK 显式类型，避免 AlertDialog.show 联合参数类型的重载解析失败
-    const dialogParam: AlertDialogParamWithButtons = {
+    const dialogParam: AlertDialogParamWithOptions = {
       title: item.label,
-      message: '',
+      message: '请选择',
       autoCancel: true,
       alignment: DialogAlignment.Center,
-      primaryButton: { value: '取消', action: () => {} },
-      secondaryButton: {
-        value: '确定',
-        action: () => {},
-      },
+      buttons: optionButtons,
     };
     AlertDialog.show(dialogParam);
-    // 简化实现：选项通过菜单展示。ArkUI 的 AlertDialog 不直接支持多选项列表，
-    // 这里采用首个选项作为示例，实际项目可换用 Menu 或 CustomDialog。
   }
 
   build() {
@@ -545,7 +571,7 @@ export struct SettingPage {
             .fontColor(this.sm.getColor('text_on_primary'))
         }
         .height(34)
-        .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+        .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
         .onClick(() => {
           this.saveAll();
         })
@@ -563,7 +589,7 @@ export struct SettingPage {
           .height(52)
           .borderRadius(18)
           .textAlign(TextAlign.Center)
-          .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+          .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
         Column() {
           Text(this.authStore.user?.username ?? '未登录')
             .fontSize(16)

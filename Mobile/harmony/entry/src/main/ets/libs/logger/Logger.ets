@@ -34,7 +34,9 @@ const MAX_HISTORY = 500;
 
 export class Logger {
   private static instance: Logger;
-  private level: LogLevel = LogLevel.DEBUG;
+  // 默认 INFO：DEBUG 全量输出只在显式 setLevel(DEBUG)（如调试配置）后开启——
+  // release 形态无人调用 setLevel，默认 DEBUG 等于全量日志直进 hilog（审计 3.8-7）
+  private level: LogLevel = LogLevel.INFO;
   private history: LogEntry[] = [];
 
   private constructor() {}

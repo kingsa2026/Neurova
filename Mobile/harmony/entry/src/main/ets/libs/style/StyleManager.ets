@@ -22,7 +22,8 @@ export type ColorToken =
   | 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'info'
   | 'background' | 'surface' | 'text_primary' | 'text_secondary' | 'text_disabled'
   | 'text_on_primary' | 'overlay_mask' | 'border' | 'divider'
-  | 'accent' | 'surface_strong' | 'text_tertiary' | 'primary_soft';
+  | 'accent' | 'surface_strong' | 'text_tertiary' | 'primary_soft'
+  | 'status_success' | 'status_error' | 'status_warning';
 
 /** 间距 token 名 */
 export type SpacingToken = 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'xxl';
@@ -54,6 +55,11 @@ LIGHT_COLORS['primary_soft'] = 'rgba(77,107,254,0.12)';
 LIGHT_COLORS['overlay_mask'] = 'rgba(16,21,44,0.42)';
 LIGHT_COLORS['border'] = 'rgba(21,28,58,0.11)';
 LIGHT_COLORS['divider'] = 'rgba(21,28,58,0.07)';
+// 状态三 token（ChannelIntegration/SessionSync/Monitor/Stats 四页的状态色名）：
+// 值一律由上方基 token 派生，此处只挂名，不另设第二份色值（单一事实源）
+LIGHT_COLORS['status_success'] = LIGHT_COLORS['success'];
+LIGHT_COLORS['status_error'] = LIGHT_COLORS['error'];
+LIGHT_COLORS['status_warning'] = LIGHT_COLORS['warning'];
 
 /** 暗色主题颜色表（同上，空表逐键赋值） */
 const DARK_COLORS: Record<string, string> = {};
@@ -76,6 +82,10 @@ DARK_COLORS['primary_soft'] = 'rgba(99,102,241,0.16)';
 DARK_COLORS['overlay_mask'] = 'rgba(4,6,14,0.62)';
 DARK_COLORS['border'] = 'rgba(255,255,255,0.11)';
 DARK_COLORS['divider'] = 'rgba(255,255,255,0.07)';
+// 状态三 token：同亮色表，值由基 token 派生（单一事实源）
+DARK_COLORS['status_success'] = DARK_COLORS['success'];
+DARK_COLORS['status_error'] = DARK_COLORS['error'];
+DARK_COLORS['status_warning'] = DARK_COLORS['warning'];
 
 /** 间距表（fp，空表逐键赋值） */
 const SPACING: Record<string, number> = {};

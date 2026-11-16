@@ -38,7 +38,21 @@ export class NotificationsStore {
   }
 
   markAsRead(id: string): void {
-    const list = this.notifications.map(n => n.id === id ? { ...n, read: true } : n);
+    // ArkTS 禁对象展开，逐键拷贝（审计 3.8-11）
+    const list = this.notifications.map((n: AppNotification): AppNotification => {
+      if (n.id !== id) {
+        return n;
+      }
+      const marked: AppNotification = {
+        id: n.id,
+        title: n.title,
+        body: n.body,
+        type: n.type,
+        read: true,
+        createdAt: n.createdAt,
+      };
+      return marked;
+    });
     this.state.set(KEY_NOTIFICATIONS, list);
     this.state.set(KEY_UNREAD_COUNT, Math.max(0, this.unreadCount - 1));
   }

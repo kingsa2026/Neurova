@@ -381,7 +381,7 @@ export struct ChatPage {
           .height(32)
           .borderRadius(11)
           .textAlign(TextAlign.Center)
-          .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+          .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
         Column() {
           Text(this.sessionTitle.length > 0 ? this.sessionTitle : '新对话')
             .fontSize(15)

@@ -134,6 +134,17 @@ export class PlatformAdapter {
   }
 
   /**
+   * 获取设备标识（单源）：`brand-model` 口径。
+   * 登录上报推送令牌（PUT /mobile/push/push-tokens 的 device_id）与登出注销
+   * （DELETE /mobile/push/push-tokens/{device_id}）共用本方法——后端注册表按
+   * device_id 索引，两端各拼各的字符串时注销永远打不中登记项。
+   */
+  getDeviceId(): string {
+    const info = this.getDeviceInfo();
+    return `${info.brand}-${info.model}`;
+  }
+
+  /**
    * 获取当前网络状态（同步）
    * 连通性使用 connection.hasDefaultNetSync() 同步判断；
    * 类型字段取缓存值（由网络变化监听器异步刷新），未刷新时为 'none'

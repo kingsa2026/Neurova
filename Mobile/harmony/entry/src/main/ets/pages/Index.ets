@@ -38,7 +38,10 @@ struct Index {
       this.router.replace(RouteNames.CONNECTION);
       return;
     }
-    ConfigManager.getInstance().applyServerProfile(apiBase, getContext(this) as Context);
+    // await：applyServerProfile 是 async（baseUrl 同步落 + preferences 异步落盘），
+    // 不等它完成就分发路由，持久化可能被冷启动竞态截断，且拒绝会变成无人接的
+    // unhandled rejection（审计 3.8-11）
+    await ConfigManager.getInstance().applyServerProfile(apiBase, getContext(this) as Context);
     // 凭证持久化装配（P1-36）：先初始化存储桥，再恢复持久化凭证并按需续签——
     // 恢复失败（无凭证/续签被拒）时 isAuthenticated 仍为 false，自然回落登录页
     try {

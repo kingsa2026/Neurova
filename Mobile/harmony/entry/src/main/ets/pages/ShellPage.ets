@@ -6,9 +6,6 @@
  *       <600vp 悬浮液态玻璃胶囊（LiquidTabBar）。
  * 栈页（聊天详情/智能体详情等）经 Router.push 叠在 Navigation 之上，壳随之下沉——
  * 与原型一致：Tab 栏只出现在五个根页。
- *
- * 已知断点：对话 Tab 当前内嵌 ChatPage（流式直聊），会话列表（F4，同源 PC
- * /console/chat/sessions）在 M3 落地后替换。
  */
 
 import { mediaquery } from '@kit.ArkUI';
@@ -17,7 +14,6 @@ import { StyleManager } from '../libs/style/StyleManager';
 import { LiquidTabBar } from '../components/shell/LiquidTabBar';
 import { RailBar } from '../components/shell/RailBar';
 import { SessionListPage } from './SessionListPage';
-import { ChatPage } from './ChatPage';
 import { DashboardPage } from './DashboardPage';
 import { AgentListPage } from './AgentListPage';
 import { KnowledgePage } from './KnowledgePage';
