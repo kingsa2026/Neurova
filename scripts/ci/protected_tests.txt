@@ -1609,6 +1609,9 @@ tests/unit/test_auditLedgerReachabilitySingleProbe.py
 # 但"只钉 stderr"与"只在文字里提一句"必须照样点名。
 # 逐文件单跑 7 passed（4.67s／4.96s 两次同读数）
 tests/unit/ci/test_scriptsCiStdoutIsPinnedBeforePrint.py
+# 修复教义提交判据扫未推送窗口（防 --no-verify 绕过本地钩子）；生效口径=树含判据文件，
+# 基线带判据后全面执法（法不溯及既往，生效后删判据文件的笔也受检）。逐文件单跑 5 passed
+tests/unit/ci/test_commitMsgDoctrineOnUnpushedRange.py
 # tests/manual/ 的活体脚本不得被 pytest 收集：它们在导入期改写进程 env，会掩盖一切依赖数据根的判据
 # （实测掩盖过会话落点守卫：同一选择集带 manual 时 0 ERROR，摘掉才露出 16 条真 ERROR）。
 # 拦截在 pytest_configure（收集之前）——pytest_ignore_collect 对显式路径在 pytest 9 无效，实测过。
