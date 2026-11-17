@@ -156,3 +156,48 @@ describe('computeMentionQuery / applyMention / filterMembers', () => {
     expect(filterMembers(members, 'zzz')).toEqual([])
   })
 })
+
+describe('S9 蜂群系统消息（审批/升级/候选）投影', () => {
+  it('agent_reply + sender_type=system → 蜂群审批卡（kind/swarm 载荷）', () => {
+    const out = applyRoomEvent([], ev('agent_reply', {
+      sender_id: 'swarm', sender_type: 'system', content: '【审批请求】删除生产数据库表',
+      kind: 'swarm_approval', request_id: 'req_1', level: 'L2', subagent_id: 'swarm_x',
+    }, 's1'))
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({
+      sender_type: 'system', sender_id: 'swarm', kind: 'swarm_approval',
+      swarm: { request_id: 'req_1', level: 'L2', subagent_id: 'swarm_x' },
+    })
+  })
+
+  it('候选事件带 candidate_id/status 载荷（submitted 徽标）', () => {
+    const out = applyRoomEvent([], ev('agent_reply', {
+      sender_id: 'swarm', sender_type: 'system', content: '【结果候选】cand_1 · submitted',
+      kind: 'swarm_candidate', candidate_id: 'cand_1', status: 'submitted',
+    }, 's2'))
+    expect(out[0].swarm).toMatchObject({ candidate_id: 'cand_1', status: 'submitted' })
+  })
+
+  it('升级消息带 severity/agent_name 载荷', () => {
+    const out = applyRoomEvent([], ev('agent_reply', {
+      sender_id: 'swarm', sender_type: 'system', content: '【升级】子代理：需要确认',
+      kind: 'swarm_escalate', severity: 'high', agent_name: '子代理',
+    }, 's3'))
+    expect(out[0].kind).toBe('swarm_escalate')
+    expect(out[0].swarm).toMatchObject({ severity: 'high', agent_name: '子代理' })
+  })
+
+  it('非蜂群 system 通知回落普通 system 消息（无 swarm 载荷）', () => {
+    const out = applyRoomEvent([], ev('agent_reply', {
+      sender_id: 'sys', sender_type: 'system', content: 'hello',
+    }, 's4'))
+    expect(out[0]).toMatchObject({ sender_type: 'system', kind: 'message' })
+    expect(out[0].swarm).toBeUndefined()
+  })
+
+  it('普通 agent 回复不受 system 分支影响（回归）', () => {
+    const out = applyRoomEvent([], ev('agent_reply', { sender_id: 'a1', content: 'ans' }, 's5'))
+    expect(out[0]).toMatchObject({ sender_type: 'agent', content: 'ans' })
+    expect(out[0].swarm).toBeUndefined()
+  })
+})
