@@ -4,7 +4,7 @@ LLM 提供商统一接口定义 - 适配器模式基础
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List, Generator
+from typing import Optional, Dict, Any, List, AsyncGenerator
 from dataclasses import dataclass, field
 from enum import Enum
 import time
@@ -98,8 +98,13 @@ class LLMAbstractProvider(ABC):
         self,
         messages: List[Message],
         temperature: Optional[float] = None,
-    ) -> Generator[str, None, None]:
-        """Stream responses token by token"""
+    ) -> AsyncGenerator[str, None]:
+        """Stream responses token by token.
+
+        async 生成器：调用即返回可 ``async for`` 迭代的对象，逐 token
+        产出增量文本；失败以异常诚实暴露（N1 对齐：此前注解误写为同步
+        Generator，与 async def 生成器实现形态冲突，以可运行为准）。
+        """
         pass
     
     @abstractmethod
