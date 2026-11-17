@@ -90,6 +90,54 @@
       </a-table>
     </GlassPanel>
 
+    <!-- S8 审批审计轨迹：按 runId 成对拉取请求+决定（后端 admin 门，级别/时间窗为前端过滤） -->
+    <GlassPanel class="panel" data-testid="approval-audit-panel">
+      <div class="panel-head">
+        <span class="panel-title" data-testid="approval-audit-title">{{ t('audit.approvalTrajectoryTitle') }}</span>
+        <GlassButton size="sm" :loading="approvalAuditLoading" data-testid="approval-audit-search" @click="runApprovalAudit">
+          {{ t('common.search') }}
+        </GlassButton>
+      </div>
+      <div class="acc-filters">
+        <a-input v-model:value="approvalAuditRunId" size="small" :placeholder="t('audit.approvalRunId')" style="width: 220px" data-testid="approval-audit-runid" allow-clear />
+        <a-select v-model:value="approvalAuditLevel" size="small" :placeholder="t('audit.approvalAuditLevel')" style="width: 110px" allow-clear data-testid="approval-audit-level">
+          <a-select-option value="L0">L0</a-select-option>
+          <a-select-option value="L1">L1</a-select-option>
+          <a-select-option value="L2">L2</a-select-option>
+        </a-select>
+        <a-range-picker v-model:value="approvalAuditRange" size="small" show-time style="width: 320px" data-testid="approval-audit-range" />
+      </div>
+      <a-empty v-if="!approvalAuditItems.length" :description="t('audit.approvalAuditEmpty')" />
+      <a-table v-else :columns="approvalAuditColumns" :data-source="approvalAuditItems" row-key="request_id" :pagination="false" size="small" data-testid="approval-audit-table">
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'status'">
+            <a-tag :color="record.status === 'decided' ? 'green' : 'orange'">
+              {{ record.status === 'decided' ? t('audit.approvalAuditDecided') : t('audit.approvalAuditPending') }}
+            </a-tag>
+          </template>
+          <template v-if="column.key === 'requested_at'">
+            <span class="acc-when">{{ record.requested_at ? formatTimestampText(record.requested_at) : '—' }}</span>
+          </template>
+          <template v-if="column.key === 'decided_at'">
+            <span class="acc-when">{{ record.decided_at ? formatTimestampText(record.decided_at) : '—' }}</span>
+          </template>
+          <template v-if="column.key === 'latency_ms'">
+            <span class="mono">{{ record.latency_ms == null ? '—' : `${record.latency_ms} ms` }}</span>
+          </template>
+        </template>
+        <template #expandedRowRender="{ record }">
+          <div class="approval-expand" data-testid="approval-audit-expand">
+            <p class="mono">request_id: <code>{{ record.request_id }}</code></p>
+            <p v-if="record.reason" class="mono">{{ t('audit.approvalAuditReason') }}: {{ record.reason }}</p>
+            <p v-if="record.effective_level" class="mono">{{ t('audit.approvalAuditEffectiveLevel') }}: {{ record.effective_level }}</p>
+            <p v-if="record.request_event" class="mono">{{ t('audit.approvalAuditRequestEvent') }}: <code>{{ JSON.stringify(record.request_event) }}</code></p>
+            <p v-else class="approval-no-action">{{ t('audit.approvalAuditNoRequestEvent') }}</p>
+            <p v-if="record.decision_event" class="mono">{{ t('audit.approvalAuditDecisionEvent') }}: <code>{{ JSON.stringify(record.decision_event) }}</code></p>
+          </div>
+        </template>
+      </a-table>
+    </GlassPanel>
+
     <!-- Filters -->
     <GlassCard>
       <div class="filters-row">
@@ -160,7 +208,8 @@ import { ref, computed, onMounted } from 'vue'
 import { queryOntologyAccountability, verifyDigestChain, listOntologyActions } from '@/api/modules/ontology'
 import type { OntologyActionRow } from '@/types/ontology'
 import { useI18n } from 'vue-i18n'
-import { listAuditRecords, exportAudit as exportAuditApi } from '@/api/modules/audit'
+import { listAuditRecords, exportAudit as exportAuditApi, getApprovalTrajectory } from '@/api/modules/audit'
+import type { ApprovalTrajectoryItem } from '@/api/modules/audit'
 import { getDesktopAuditWaiting, getIngressBypassStats, getPendingApprovals } from '@/api/modules/governance'
 import { mergeWaitingHuman } from '@/utils/waitingHuman'
 import GlassCard from '@/components/GlassCard.vue'
@@ -243,6 +292,55 @@ function actionOfRequest(req: Record<string, any>): OntologyActionRow | undefine
   const actionId = String(req?.metadata?.action_id ?? '')
   return ontologyActions.value.find((a) => a.action_id === actionId)
 }
+
+// ── S8 审批审计轨迹：runId 必填（审计按 run 成对拉取，无 run 即无轨迹），
+// 级别/时间窗是前端过滤——后端只按 run_id 索引查询，不伪造服务端筛选。
+const approvalAuditRunId = ref('')
+const approvalAuditLevel = ref<string | undefined>(undefined)
+const approvalAuditRange = ref<any>(null)
+const approvalAuditLoading = ref(false)
+const approvalAuditRaw = ref<ApprovalTrajectoryItem[]>([])
+
+async function runApprovalAudit() {
+  const runId = approvalAuditRunId.value.trim()
+  if (!runId) {
+    message.warning(t('audit.approvalRunIdRequired'))
+    return
+  }
+  approvalAuditLoading.value = true
+  try {
+    const res: any = await getApprovalTrajectory(runId)
+    approvalAuditRaw.value = res?.data?.requests ?? []
+  } catch {
+    // 403（非 admin）等故障如实置空并报错，不拿空列表冒充"无审批"
+    approvalAuditRaw.value = []
+    message.error(t('common.error'))
+  } finally {
+    approvalAuditLoading.value = false
+  }
+}
+
+const approvalAuditItems = computed(() => approvalAuditRaw.value.filter((row) => {
+  if (approvalAuditLevel.value && String(row.level ?? '') !== approvalAuditLevel.value) return false
+  if (approvalAuditRange.value?.length === 2) {
+    const start = approvalAuditRange.value[0].valueOf()
+    const end = approvalAuditRange.value[1].valueOf()
+    const ts = row.requested_at ? new Date(row.requested_at).valueOf() : Number.NaN
+    if (Number.isNaN(ts) || ts < start || ts > end) return false
+  }
+  return true
+}))
+
+const approvalAuditColumns = computed(() => [
+  { title: t('audit.approvalAuditLevel'), dataIndex: 'level', key: 'level', width: 70 },
+  { title: t('audit.approvalAuditStatus'), key: 'status', width: 90 },
+  { title: t('common.actions'), dataIndex: 'operation', key: 'operation' },
+  { title: t('audit.approvalAuditRequested'), key: 'requested_at', width: 150 },
+  { title: t('audit.approvalAuditDecidedAt'), key: 'decided_at', width: 150 },
+  { title: t('audit.approvalAuditDecision'), dataIndex: 'decision', key: 'decision', width: 90 },
+  { title: t('audit.approvalAuditDecidedBy'), dataIndex: 'decided_by', key: 'decided_by', width: 120 },
+  { title: t('audit.approvalAuditLatency'), key: 'latency_ms', width: 100 },
+])
 
 async function runAccountability() {
   accError.value = ''
