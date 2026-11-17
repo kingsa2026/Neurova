@@ -23,6 +23,25 @@
           </p>
         </div>
       </div>
+      <!-- S11 入口二：用户经房间直发多 agent 协作 -->
+      <GlassButton variant="primary" size="sm" @click="openCollabModal">
+        {{ t('collab.initiate') }}
+      </GlassButton>
+    </div>
+
+    <!-- S11 协作进度区：蜂群 run 的实时状态（subagent_* 事件驱动） -->
+    <div v-if="collabRunList.length" class="collab-progress">
+      <span class="collab-progress-title">{{ t('collab.collabProgress') }}</span>
+      <span
+        v-for="run in collabRunList"
+        :key="run.subagentId"
+        class="collab-run"
+        :class="{ 'run-active': run.status === 'running' || run.status === 'in_review' || run.status === 'pending' }"
+      >
+        <span class="run-dot"></span>
+        <span class="run-name">{{ run.agentName || senderName(run.agentId) }}</span>
+        <span class="run-status">{{ run.status }}</span>
+      </span>
     </div>
 
     <!-- 消息流 -->
@@ -45,6 +64,7 @@
                   <a-tag v-if="msg.kind === 'swarm_approval'" color="orange">{{ t('collab.swarmApproval') }}</a-tag>
                   <a-tag v-else-if="msg.kind === 'swarm_escalate'" color="red">{{ t('collab.swarmEscalate') }}</a-tag>
                   <a-tag v-else-if="msg.kind === 'swarm_candidate'" color="blue">{{ t('collab.swarmCandidate') }}</a-tag>
+                  <a-tag v-else-if="msg.kind === 'swarm_collab'" color="geekblue">{{ t('collab.swarmCollab') }}</a-tag>
                   <a-tag v-if="msg.swarm.level" color="gold">{{ msg.swarm.level }}</a-tag>
                   <a-tag v-if="msg.swarm.status" :color="swarmStatusColor(msg.swarm.status)">{{ msg.swarm.status }}</a-tag>
                 </div>
@@ -107,11 +127,36 @@
         <GlassButton variant="primary" size="md" :loading="sending" @click="send">{{ t('collab.roomSend') }}</GlassButton>
       </div>
     </GlassPanel>
+
+    <!-- S11：发起协作表单（任务书 + 可选预算/支援上限） -->
+    <a-modal
+      v-model:open="showCollabModal"
+      :title="t('collab.collabStartTitle')"
+      @ok="startCollab"
+      :confirm-loading="starting"
+    >
+      <a-form layout="vertical">
+        <a-form-item :label="t('collab.collabTaskLabel')">
+          <a-input
+            v-model:value="collabForm.task"
+            type="textarea"
+            :rows="4"
+            :placeholder="t('collab.collabTaskPlaceholder')"
+          />
+        </a-form-item>
+        <a-form-item :label="t('collab.collabBudget')">
+          <a-input-number v-model:value="collabForm.budgetSeconds" :min="1" style="width: 100%" />
+        </a-form-item>
+        <a-form-item :label="t('collab.collabMaxMembers')">
+          <a-input-number v-model:value="collabForm.maxMembers" :min="1" style="width: 100%" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { message as antMessage } from 'ant-design-vue'
@@ -125,7 +170,7 @@ import { useAuthStore } from '@/stores/auth'
 import {
   getRoom, getRoomMessages, postRoomMessage, applyRoomEvent,
   computeMentionQuery, applyMention, filterMembers,
-  decideRoomApproval, roomCandidateAction,
+  decideRoomApproval, roomCandidateAction, startRoomCollaboration,
   type RoomInfo, type RoomMessage, type RoomEvent, type MentionContext, type RoomMember,
 } from '@/api/modules/collaborationRoom'
 
@@ -208,8 +253,77 @@ function scrollToBottom() {
 }
 
 function onEvent(event: RoomEvent) {
+  // S11：蜂群 run 的 subagent_* 事件进协作进度区（不进消息流；复用 H-4/S9 通道）
+  if (event.event_type === 'subagent_started' || event.event_type === 'subagent_completed') {
+    applyCollabRunEvent(event)
+    return
+  }
   messages.value = applyRoomEvent(messages.value, event)
   scrollToBottom()
+}
+
+// ── S11 入口二：发起协作（表单 + 编排进度）───────────────────────────
+interface CollabRunView {
+  subagentId: string
+  agentId: string
+  agentName: string
+  status: string
+}
+const showCollabModal = ref(false)
+const starting = ref(false)
+const collabForm = reactive<{ task: string; budgetSeconds: number | null; maxMembers: number | null }>({
+  task: '',
+  budgetSeconds: null,
+  maxMembers: null,
+})
+const collabRuns = ref<Record<string, CollabRunView>>({})
+const collabRunList = computed<CollabRunView[]>(() => Object.values(collabRuns.value))
+
+function openCollabModal() {
+  collabForm.task = ''
+  collabForm.budgetSeconds = null
+  collabForm.maxMembers = null
+  showCollabModal.value = true
+}
+
+async function startCollab() {
+  const task = collabForm.task.trim()
+  if (!task || starting.value) return
+  starting.value = true
+  try {
+    await startRoomCollaboration(roomId, {
+      task,
+      budget_seconds: collabForm.budgetSeconds ?? undefined,
+      max_members: collabForm.maxMembers ?? undefined,
+    })
+    showCollabModal.value = false
+    antMessage.success(t('collab.collabStartDone'))
+  } catch {
+    antMessage.error(t('collab.swarmActionFailed'))
+  } finally {
+    starting.value = false
+  }
+}
+
+function applyCollabRunEvent(event: RoomEvent) {
+  const p = event.payload || {}
+  const sid = String(p.subagent_id || '')
+  if (!sid) return
+  if (event.event_type === 'subagent_started') {
+    collabRuns.value = {
+      ...collabRuns.value,
+      [sid]: {
+        subagentId: sid,
+        agentId: String(p.agent_id || ''),
+        agentName: String(p.agent_name || p.agent_id || sid),
+        status: String(p.status || 'running'),
+      },
+    }
+    return
+  }
+  const prev = collabRuns.value[sid]
+  if (!prev) return
+  collabRuns.value = { ...collabRuns.value, [sid]: { ...prev, status: String(p.status || prev.status) } }
 }
 
 async function send() {
@@ -301,6 +415,18 @@ onMounted(async () => {
 .room-sub { color: var(--nr-text-secondary); font-size: 13px; margin: 4px 0 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .room-responder { color: var(--nr-text-tertiary); }
 .room-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+/* S11 协作进度区：蜂群 run 实时状态条（全部走主题令牌） */
+.collab-progress {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 8px 14px; border-radius: 10px;
+  border: 1px solid var(--nr-glass-border); background: var(--nr-glass-bg);
+}
+.collab-progress-title { font-size: 12px; font-weight: 600; color: var(--nr-text-secondary); }
+.collab-run { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--nr-text-primary); }
+.collab-run .run-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--nr-success, rgba(74, 222, 128, 0.9)); }
+.collab-run.run-active .run-dot { background: var(--nr-warning, rgba(245, 158, 11, 0.9)); animation: blink 1s steps(2) infinite; }
+.collab-run .run-name { font-weight: 600; }
+.collab-run .run-status { color: var(--nr-text-tertiary); }
 /* GlassPanel 的 slot 包在 .nr-glass-content（block、无界高）里，需让它填满面板高并成为 flex 列，
    否则 .room-messages 的 flex:1 无参照、内容撑高被外层 overflow:hidden 裁掉而无法滚动。 */
 .room-body :deep(.nr-glass-content) { height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }

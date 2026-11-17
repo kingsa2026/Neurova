@@ -48,6 +48,8 @@ function handleSubAgentSyncEvent(event: { event_type: string; payload: Record<st
       chunkCount: 0,
       // P1（蜂群对照）：子代理类型随事件携带（explore=只读白名单收窄面）
       subagentType: p.subagent_type || 'general',
+      // S10：团队溯源标（dispatch_team 派生的 run 带团队徽标）
+      teamId: p.team_id || undefined,
       // 状态取自事件本身（改前这里硬编码 'running'：那一刻后端确实是 running，
       // 但事件不带事实，竞态或重放时前端只能一直猜）。词值到 UI 态的翻译只有
       // LEDGER_TO_WINDOW_STATUS 一处——事件先于后端扩态也不会渲染成未定义态。
@@ -156,6 +158,8 @@ export async function restoreSubAgentWindows(
       task: row?.task || '',
       bodyText: '',
       chunkCount: 0,
+      // S10：台账行未落 team_id（跨会话移交项）——刷新回填时徽标缺席属预期降级
+      teamId: row?.team_id || undefined,
       status,
       report: '',
       error: row?.error_type || null,

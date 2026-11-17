@@ -9,6 +9,10 @@ export interface Team {
   name: string
   description?: string
   members?: string[]
+  /** S10 团队来源：manual（人工创建）/ agent_proposed（蜂群沉淀提议经人批准） */
+  origin?: 'manual' | 'agent_proposed'
+  approved_by?: string
+  promoted_from_run?: string
 }
 
 // ---------------------------------------------------------------------------

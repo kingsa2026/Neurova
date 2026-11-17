@@ -25,6 +25,8 @@ export interface SubAgentWindowState {
   error?: string | null
   /** P1（蜂群对照）：子代理类型（general/explore）；explore = 工具面收窄为只读白名单 */
   subagentType?: string
+  /** S10：团队溯源标（dispatch_team 派生的 run 带团队徽标） */
+  teamId?: string
   /** P2（蜂群对照）：卡死渐进提醒——后端看门狗判 member 连续无产出后携带 */
   stallNotice?: { stalledSeconds: number; reminderCount: number }
 }
@@ -36,6 +38,13 @@ const { t } = useI18n()
 const minimized = ref(false)
 
 const title = computed(() => `${props.state.agentName || t('ui.subagent')} · ${props.state.status}`)
+
+/** S10：团队徽标展示名（uuid 截短显示，完整 id 进 tooltip） */
+const teamBadge = computed(() => {
+  const tid = props.state.teamId || ''
+  if (!tid) return ''
+  return tid.length > 10 ? `${tid.slice(0, 10)}…` : tid
+})
 
 const bodyText = computed(() => {
   const busy = props.state.status === 'running' || props.state.status === 'in_review'
@@ -161,6 +170,12 @@ function shortTime(iso: string): string {
         class="panel-type-chip"
         :title="state.subagentType"
       >{{ state.subagentType }}</span>
+      <!-- S10：团队徽标（dispatch_team 派生的 run 带团队溯源标） -->
+      <span
+        v-if="teamBadge"
+        class="panel-type-chip team-chip"
+        :title="`${t('collab.teams')}: ${state.teamId}`"
+      >◈ {{ teamBadge }}</span>
       <button class="panel-btn" :title="t('ui.subagentTimeline')" @click.stop="toggleTimeline">≡</button>
       <button class="panel-btn" :title="minimized ? t('ui.expand') : t('ui.minimize')" @click.stop="toggleMinimize">
         {{ minimized ? '▢' : '—' }}
@@ -244,6 +259,7 @@ function shortTime(iso: string): string {
   text-transform: uppercase;
   letter-spacing: 0.4px;
 }
+.panel-type-chip.team-chip { color: var(--nr-primary-light, #818cf8); text-transform: none; }
 .panel-btn {
   border: none;
   background: transparent;

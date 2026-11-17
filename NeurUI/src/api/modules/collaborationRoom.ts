@@ -30,7 +30,7 @@ export interface RoomMessage {
   sender_id: string
   content: string
   streaming?: boolean
-  kind?: 'message' | 'error' | 'swarm_approval' | 'swarm_escalate' | 'swarm_candidate'
+  kind?: 'message' | 'error' | 'swarm_approval' | 'swarm_escalate' | 'swarm_candidate' | 'swarm_collab'
   /** 助手回应附带的工具/推理步骤（与 ChatPage 同源契约，供 MessageSteps 渲染）。 */
   steps?: ChatStep[]
   /** S9 蜂群系统消息的结构化载荷（审批卡/升级卡/候选徽标渲染用）。 */
@@ -48,9 +48,13 @@ export interface RoomSwarmMeta {
   severity?: string
   subagent_id?: string
   agent_name?: string
+  /** S11 蜂群协作卡：started 阶段标 + 本次编排的 run 清单 */
+  phase?: string
+  lead?: string
+  subagent_ids?: string[]
 }
 
-const SWARM_KINDS = ['swarm_approval', 'swarm_escalate', 'swarm_candidate'] as const
+const SWARM_KINDS = ['swarm_approval', 'swarm_escalate', 'swarm_candidate', 'swarm_collab'] as const
 
 function swarmMetaFrom(record: Record<string, unknown> | undefined): RoomSwarmMeta | undefined {
   const src = record || {}
@@ -70,6 +74,9 @@ function swarmMetaFrom(record: Record<string, unknown> | undefined): RoomSwarmMe
     severity: pick('severity'),
     subagent_id: pick('subagent_id'),
     agent_name: pick('agent_name'),
+    phase: pick('phase'),
+    lead: pick('lead'),
+    subagent_ids: Array.isArray(src.subagent_ids) ? src.subagent_ids.map((v) => String(v)) : undefined,
   }
 }
 
@@ -219,6 +226,24 @@ export async function getRoomSwarmPending(roomId: string): Promise<RoomSwarmPend
   const res = await api.get(`${BASE}/rooms/${encodeURIComponent(roomId)}/swarm/pending`)
   const data = unwrap<RoomSwarmPending>(res)
   return { approvals: data?.approvals ?? [], candidates: data?.candidates ?? [] }
+}
+
+// ── S11 入口二：房间"发起协作"动作（用户直发多 agent 协作）──────────────
+
+export interface StartCollaborationPayload {
+  task: string
+  /** 每路 run 的运行窗口（秒，可选；不传沿用蜂群治理默认） */
+  budget_seconds?: number
+  /** 支援成员上限（可选；不传全部支援成员参与） */
+  max_members?: number
+}
+
+/** 发起蜂群协作：房间成员交 SwarmManager 编排（主从/依赖按成员职责）。 */
+export async function startRoomCollaboration(
+  roomId: string,
+  payload: StartCollaborationPayload,
+): Promise<void> {
+  await api.post(`${BASE}/rooms/${encodeURIComponent(roomId)}/collaboration`, payload)
 }
 
 /**
