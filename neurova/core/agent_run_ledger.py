@@ -359,6 +359,7 @@ def subagentTerminalRow(runStatus: str, cause: str) -> typing.Tuple[str, str]:
 def openSubagentRun(
     *, memberSessionId: str, subagentId: str, parentSessionId: str,
     userId: str, agentId: str, task: str, traceId: str = "",
+    projectId: str = "", teamId: str = "",
 ) -> Optional[str]:
     """子任务进台账：`intake` → 晋升 `running`。返回 run_id，失败返回 None。
 
@@ -367,6 +368,9 @@ def openSubagentRun(
     起止各一次，不在高频流式循环里。
 
     `traceId`（P3-2）：该子任务轨迹的 trace_id，台账行与 span 树由此关联。
+    `projectId`/`teamId`（S12/S10）：协作归属标——房间发起的 run 按
+    ``room_id=project_id`` 等式带 projectId，团队派活带 teamId；档案读面按这两列
+    聚合。普通派生留空，台账行语义与改前一致。
 
     **为什么不走 `AgentRunLedger.acquire()`**：那条是回合准入闸（排队、让位、park
     等人工续跑），而 park 对子任务没有对应 UI——把它塞进让位闸会造出"挂着等人点的
@@ -381,7 +385,8 @@ def openSubagentRun(
             return None
         store = _ars.get_agent_run_store()
         run_id = store.intake(memberSessionId, userId, agentId, task,
-                              subagentId, parentSessionId, traceId)
+                              subagentId, parentSessionId, traceId,
+                              project_id=projectId, team_id=teamId)
         claimed = store.claim_next(memberSessionId)
         if claimed != run_id:
             # 没晋升（同 member 会话已有 running 行）→ 弃 queued 行，绝不留幽灵 running
