@@ -356,3 +356,25 @@ S14 同框重评分与超越判定
 ## 附录 B：交付定义（每批相同）
 
 每批完成 = ①红灯测试先行的实现转绿；②目标套件全绿 + trio/api A/B 零新增失败（按涉及面选）；③live-verify 真链路证据（命令+输出原文）写入提交说明；④`git commit --only` 逐文件点名入库；⑤本方案文档的执行记录段补一行（commit 号 + 一句话结果 + 偏差说明）。执行中发现方案与现场冲突：以现场为准修方案（改文档），不硬凑。
+
+## 附录 C：多会话并行推进方案（非子代理，独立 ZCode 会话）
+
+> 先例：2026-11-16 审计修复批以 8 个独立会话并行推进 147 条修复。本方案 14 批**不能全并行**——所有会话共享同一工作树，文件域重叠的批次硬性串行。按文件域不相交切分，最多 **4 路并行**，共约 6 个波次：
+
+| 波次 | 会话分工 | 独占文件域 | 依赖 |
+|---|---|---|---|
+| 波1（4 路并行） | A:S1 · B:S2 · C:S5 · D:S7 | benchmark/multi_agent · mailbox+loops/base · session_manager · mem_core | 无，随时开工 |
+| 波2（3 路并行） | E:S3+S4 连做 · F:S6 · G:S8 | swarm.py+goal_verifier/review · chat_pipeline+context_pool+tool_executor · approval_chain（tool_executor 小触点） | 波1 不阻塞本波，但 G 的 tool_executor 触点**等 F 收口后再落**（同文件禁双改） |
+| 波3（1 路） | H:S9 | swarm 房间桥接+room_bus/teams_api 读 | E（S4 候选）、G（S8 审计）落地后 |
+| 波4（1 路） | H 续:S10+S11 连做 | builtin_tools+tool_executor+room_turn_router+collaboration_room_api | S9 落地后；S10/S11 同碰 swarm.py 与工具面，**同会话连做** |
+| 波5（2 路并行） | I:S12 · J:S13 | projects_api+swarm 打标 · builtin_tools+tool_executor | 波4 落地后；I/J 文件域不相交可并行 |
+| 波6（1 路） | K:S14 重评分 | docs/08-research | S1–S13 全部落地后 |
+
+**并行协调规则（附录 A 之上追加）**
+1. **同文件禁双改**：共享同一工作树，开工前 `git status` + `git log --oneline -5 -- <file>` 撞车复核；发现他人在途改动（未提交的 M）→ 换批或等待，绝不覆盖。
+2. **提交一律 `git commit --only` 逐文件点名**，新文件先 `git add` 再 --only，**严禁 `git add -A`**（会暂存他人在途文件，审计批实证）。
+3. **全量 A/B 错峰跑**：trio/api 全量套件不得两会话同时跑（CPU 争用→超时假红，P3 实证）；文件级测试随时可跑；并行期间全量跑排队或错峰。
+4. **基线随 main 漂移**：每会话 A/B 的基线以"当时 stash 后的 main"现场重跑为准，不用陈旧失败清单；比对比的是失败**集合**而非数量（各批会新增通过测试）。
+5. **契约钉子同批同步**（A7）：改枚举/路由/schema 的会话在提交说明里显式列出"动了哪些钉子"，供其他会话感知。
+6. **共享文档并发编辑**：0-index/本方案/记忆文件改前必须重读（已有两次并发修改冲突实证）。
+7. **执行记录台账**：仿审计批 SUMMARY.md，各会话完成一批即登记（批次/commit 号/一句话结果/移交项），波6 收尾会话据此汇总并更新本方案执行记录。
