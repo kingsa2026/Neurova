@@ -334,7 +334,8 @@ class TestHiddenFromMembers:
         """成员上下文（白名单已绑定）调用主 agent 专属工具 → 结构化拒绝。
 
         用真实成员工具面（computeSubagentToolAllowlist("general")）作白名单——
-        即便声明式剔除暂未并入 swarm.MEMBER_EXCLUDED_TOOLS，执行咽喉也必须拦住。
+        声明集收口后白名单派生期已剔除主 agent 专属工具（见
+        TestMemberExclusionSingleSource），执行咽喉成员门保留为纵深防御。
         """
         from neurova.agent.swarm import computeSubagentToolAllowlist
         from neurova.core.turn_context import set_subagent_tool_allowlist
