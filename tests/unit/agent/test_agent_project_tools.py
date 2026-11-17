@@ -12,6 +12,8 @@
    MAIN_AGENT_ONLY_TOOLS 声明 + 执行咽喉成员上下文结构化拒绝。
 ⑤（波M 移交项①）成员工具面剔除集并集收口：单源于 builtin_tools.MAIN_AGENT_ONLY_TOOLS，
    swarm 自有第二份声明退役；白名单派生期即不含全部成员专属工具。
+⑥（波M 移交项②）项目治理 ASK 的房间裁决回灌：房间裁决端点批准后经
+   applyProjectGovernanceDecision 生效（成员加入/可见性变更落地），审计带 decided_by_channel。
 """
 from __future__ import annotations
 
@@ -94,6 +96,17 @@ def roomStore(monkeypatch):
     fake = _FakeRepo()
     monkeypatch.setattr("neurova.collaboration.room_store._store", RoomStore(repo=fake))
     yield fake
+
+
+@pytest.fixture
+def roomBus(monkeypatch):
+    """房间广播桩：避免单测触达真实 WS 管理器；落库面由 roomStore 覆盖。"""
+
+    class _StubBus:
+        async def publish(self, *args, **kwargs):
+            return 0
+
+    monkeypatch.setattr("neurova.collaboration.room_bus.get_room_bus", lambda: _StubBus())
 
 
 @pytest.fixture
@@ -386,3 +399,78 @@ class TestMemberExclusionSingleSource:
             assert not leaked, (
                 f"{subagentType} 成员工具面仍含主 agent 专属工具: {sorted(leaked)}"
             )
+
+
+# ── ⑥ 移交项②（波M）：项目治理 ASK 的房间裁决回灌 ───────────────────
+
+
+class TestRoomAdjudicationOfGovernanceAsk:
+    """S13 治理 ASK（人类成员写入/可见性放宽）此前只有 decide_subagent_approval
+    工具路径能回灌生效；房间裁决端点（S9）批准后不生效——等待预算耗尽仅记录。
+    按 S10 团队沉淀同构补齐：房间裁决批准 → applyProjectGovernanceDecision 回灌。"""
+
+    @pytest.mark.asyncio
+    async def test_room_owner_decision_applies_governance(
+        self, collab, approvals, auditDb, roomStore, roomBus, executor,
+    ):
+        from neurova.api.endpoints import collaboration_room_api as roomApi
+
+        exe, _ = executor
+        created = await exe._execute_project_create({
+            "name": "房间裁决项目",
+            "description": "治理 ASK 走房间裁决",
+            "visibility": "team",
+            "memberUserIds": ["2002"],
+        })
+        assert created.get("governance_pending") is True, created
+        projectId = created["project_id"]
+        project = collab.get_project(projectId)
+        assert "2002" not in project.members, "未裁决：人类成员不得写入"
+        assert project.visibility.value == "private", "未裁决：可见性保持 private"
+
+        # 房间裁决端点：群主（项目 owner=属主用户 1001）显式批准
+        res = await roomApi.decide_room_approval(
+            projectId, created["request_id"],
+            roomApi.ApprovalDecisionBody(decision="approve", note="同意加入并放宽"),
+            current_user={"user_id": "1001", "role": "member"},
+        )
+        data = res["data"]
+        assert data.get("success") is True, data
+        assert data.get("project_governance_applied", {}).get("applied") is True, (
+            "房间裁决批准后必须回灌项目治理申请（applyProjectGovernanceDecision）"
+        )
+
+        project = collab.get_project(projectId)
+        assert "2002" in project.members, "房间裁决批准后人类成员应写入"
+        assert project.visibility.value == "team", "房间裁决批准后可见性应放宽"
+
+        # 审计照 S8 口径：回灌生效行带 decided_by_channel=room
+        appliedRows = [
+            e for e in auditLoggerQuery(auditDb, resource_id=projectId)
+            if e.action == "project_governance_applied"
+        ]
+        assert appliedRows, "房间裁决回灌必须落审计台账"
+        assert appliedRows[-1].details.get("decided_by_channel") == "room", (
+            "回灌生效审计须照 S8 口径落 decided_by_channel"
+        )
+
+    @pytest.mark.asyncio
+    async def test_room_member_rejected_governance_stays_out(
+        self, collab, approvals, auditDb, roomStore, roomBus, executor,
+    ):
+        """房间驳回：快照不生效（成员不写入），登记已清（不复活）。"""
+        from neurova.api.endpoints import collaboration_room_api as roomApi
+
+        exe, _ = executor
+        created = await exe._execute_project_create({
+            "name": "房间驳回项目", "memberUserIds": ["2003"],
+        })
+        assert created.get("governance_pending") is True
+        res = await roomApi.decide_room_approval(
+            created["project_id"], created["request_id"],
+            roomApi.ApprovalDecisionBody(decision="reject", note="暂不拉人"),
+            current_user={"user_id": "1001", "role": "member"},
+        )
+        assert res["data"].get("success") is True, res
+        project = collab.get_project(created["project_id"])
+        assert "2003" not in project.members, "房间驳回后人类成员不得写入"
