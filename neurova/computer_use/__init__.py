@@ -542,26 +542,59 @@ class ComputerUseManager:
 
     @staticmethod
     def _setClipboardText(text: str) -> bool:
-        """win32 剪贴板写入（CF_UNICODETEXT；无第三方依赖）。"""
-        try:
-            import ctypes
-            from ctypes import wintypes
+        """win32 剪贴板写入（CF_UNICODETEXT；无第三方依赖）。
 
+        64 位进程必须显式声明 argtypes/restype：否则 GlobalAlloc/GlobalLock/
+        SetClipboardData 的 HANDLE 返回值被按 32 位 int 截断（活体实测写入恒败），
+        后续 GlobalLock/EmptyClipboard 全链失真。OpenClipboard 可能被剪贴板
+        观察者短暂占用，做 3 次 50ms 退避重试。
+        """
+        import ctypes
+        import time
+        from ctypes import wintypes
+
+        try:
             user32 = ctypes.windll.user32
             kernel32 = ctypes.windll.kernel32
             CF_UNICODETEXT = 13
             GMEM_MOVEABLE = 0x0002
-            if not user32.OpenClipboard(None):
-                logger.warning("剪贴板打开失败（可能被其它进程占用）")
+
+            user32.OpenClipboard.argtypes = [wintypes.HWND]
+            user32.OpenClipboard.restype = wintypes.BOOL
+            user32.EmptyClipboard.argtypes = []
+            user32.EmptyClipboard.restype = wintypes.BOOL
+            user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+            user32.SetClipboardData.restype = wintypes.HANDLE
+            user32.CloseClipboard.argtypes = []
+            user32.CloseClipboard.restype = wintypes.BOOL
+            kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+            kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+            kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+            kernel32.GlobalLock.restype = wintypes.LPVOID
+            kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+            kernel32.GlobalUnlock.restype = wintypes.BOOL
+            kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
+            kernel32.GlobalFree.restype = wintypes.HGLOBAL
+
+            opened = False
+            for attempt in range(3):
+                if user32.OpenClipboard(None):
+                    opened = True
+                    break
+                time.sleep(0.05 * (attempt + 1))
+            if not opened:
+                logger.warning("剪贴板打开失败（3 次退避后仍被占用）")
                 return False
             try:
                 user32.EmptyClipboard()
                 size = (len(text) + 1) * ctypes.sizeof(wintypes.WCHAR)
                 handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, size)
                 if not handle:
+                    logger.warning("GlobalAlloc 失败")
                     return False
                 pointer = kernel32.GlobalLock(handle)
                 if not pointer:
+                    logger.warning("GlobalLock 失败")
                     kernel32.GlobalFree(handle)
                     return False
                 try:
@@ -569,6 +602,7 @@ class ComputerUseManager:
                 finally:
                     kernel32.GlobalUnlock(handle)
                 if not user32.SetClipboardData(CF_UNICODETEXT, handle):
+                    logger.warning("SetClipboardData 失败（GetLastError=%s）", ctypes.GetLastError())
                     kernel32.GlobalFree(handle)
                     return False
                 return True
