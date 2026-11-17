@@ -2616,6 +2616,9 @@ class ToolExecutor:
         if tool_name.startswith("computer_"):
             _rt = self._desktop_runtime_gate(tool_name, params)
             if _rt is not None:
+                # 增强②：门控拒绝也广播 computer_action——面板看得见"为什么没动"
+                # （与帧权威 stale_frame 拒绝同一面；模型侧仍以返回值为准）。
+                await self._emit_computer_event(tool_name, params, _rt)
                 return _rt
         # R3-4 桌面动作审计：分发咽喉点单写（本地/远程会话平面/MCP 导出三
         # 入口都收口到这里， §3）。
@@ -2630,11 +2633,14 @@ class ToolExecutor:
                 if tool_name in foregroundDesktopTools():
                     lease_token = self._acquireForegroundLease()
                     if lease_token is None:
-                        return self._gate_refusal(
+                        # 增强②：互斥拒绝同样广播面板（CONTROLLER_BUSY 可见）
+                        busy_refusal = self._gate_refusal(
                             tool_name,
                             "controller_busy",
                             "另一会话正在操控前台输入（鼠标/键盘全局单例）——请等待其完成，或改走隔离会话（沙箱/远程平面）",
                         )
+                        await self._emit_computer_event(tool_name, params, busy_refusal)
+                        return busy_refusal
             _t0 = _t.time()
             try:
                 result = await getattr(self, method_name)(params)
@@ -7017,6 +7023,11 @@ class ToolExecutor:
             action_result = result.get("action_result") if isinstance(result, dict) else None
             if isinstance(action_result, dict):
                 payload["action_result"] = action_result
+            # 增强③：窗口清单进载荷（computer_list_windows 的前端表格数据源）；
+            # 按需出现——其它工具的广播不带 windows 键。
+            windows = result.get("windows") if isinstance(result, dict) else None
+            if isinstance(windows, list) and windows:
+                payload["windows"] = windows
 
             mgr = get_session_sync_manager()
             mgr.register_or_create_session(session_id=session_id, user_id="agent")
