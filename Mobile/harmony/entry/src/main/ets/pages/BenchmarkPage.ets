@@ -265,6 +265,12 @@ export struct BenchmarkPage {
       if (res.code === 0) {
         this.msg.info(res.message && res.message.length > 0 ? res.message : `已触发: ${suite.name}`);
         await this.loadRuns();
+        // N3 真执行器：run 返回 status=running（后台执行+GET /runs/{run_id} 状态
+        // 查询）——延迟刷新两次历史以透出终态与真实分数（3s/8s 覆盖轻量 suite）。
+        if (res.data !== null && res.data !== undefined && res.data.status === 'running') {
+          setTimeout(() => { this.loadRuns(); }, 3000);
+          setTimeout(() => { this.loadRuns(); }, 8000);
+        }
       } else {
         this.msg.error(res.message && res.message.length > 0 ? res.message : '运行评测失败');
       }
