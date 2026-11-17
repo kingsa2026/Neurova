@@ -1557,9 +1557,9 @@ class ToolExecutor:
                     "（蜂群派生时已按子代理类型收窄工具面）"
                 ),
             }
-        # S13：主 agent 专属工具的成员面剔除——声明集 builtin_tools.MAIN_AGENT_ONLY_TOOLS
-        # （S10 MEMBER_EXCLUDED_TOOLS 的项目/群聊扩容项）。成员上下文（白名单已绑定）
-        # 一律结构化拒绝；声明式并集收口前由本门兜住（先于治理/审批，不可 bypass）。
+        # 成员工具面剔除的执行期纵深防御——声明集 builtin_tools.MAIN_AGENT_ONLY_TOOLS
+        # （单一事实源，白名单派生期已同源剔除；S13 移交项①收口）。成员上下文
+        # （含白名单快照早于收口的存量运行）一律结构化拒绝（先于治理/审批，不可 bypass）。
         from neurova.builtin_tools import MAIN_AGENT_ONLY_TOOLS
 
         if _toolAllowlist is not None and tool_name in MAIN_AGENT_ONLY_TOOLS:
