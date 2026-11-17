@@ -787,6 +787,100 @@ async def ontology_readiness(ctx: Context) -> dict:
     return knowledgeReadiness(_store(), _tenantOf(_currentUserFromContext(ctx)))
 
 
+# ── S18：团队能力外部暴露（team_list/team_dispatch/project_list/project_detail）──
+# 形态沿用裁定：工具壳两层、机制单源——本壳只做参数适配与协议封装，执行转交
+# 既有 ToolExecutor.execute 单管道（治理三明治/审批链/审计/run 溯源与主 agent
+# 原生调用同一条路，不新建第二套执行逻辑）；工具描述与原生 builtin schema 同源。
+
+def _nativeToolDescription(nativeName: str) -> Optional[str]:
+    """原生工具描述单源取法（同一份字符串，不复制两份防漂移）；取不到退回 docstring。"""
+    try:
+        from neurova.builtin_tools import get_builtin_tool_params
+
+        schema = get_builtin_tool_params(nativeName) or {}
+        text = str(schema.get("description") or "").strip()
+        return text or None
+    except Exception:  # noqa: BLE001 - 描述单源取法失败退回 docstring，不阻断注册
+        return None
+
+
+def _activeSwarmMemberAgentIds() -> set:
+    """当前以蜂群成员身份活动中的 agent id 集（读 SwarmManager.list_active 单源）。
+
+    成员工具面剔除（builtin_tools.MAIN_AGENT_ONLY_TOOLS）在 native 面靠成员
+    回合上下文绑定的白名单 ContextVar 拦截；MCP 调用不在任何成员回合内，
+    改按「调用方 agent 是否正在以成员身份活动」判——防经 MCP 绕过成员限制。
+    """
+    from neurova.agent.swarm import get_swarm_manager
+
+    try:
+        rows = get_swarm_manager().list_active()
+    except Exception:  # noqa: BLE001 - 蜂群面不可用按无成员处理（不放大故障）
+        return set()
+    return {str(row.get("agent_id") or "") for row in rows
+            if str(row.get("agent_id") or "")}
+
+
+def _rejectTeamToolForSwarmMember(agentId: str, mcpName: str) -> Optional[dict]:
+    if agentId in _activeSwarmMemberAgentIds():
+        return {
+            "rejected": True,
+            "code": "member_tool_not_allowed",
+            "detail": (f"成员工具面不含该工具: {mcpName}"
+                       "（主 agent 专属能力，蜂群成员身份不可经 MCP 调用）"),
+        }
+    return None
+
+
+async def _executeViaNativeTool(ctx: Context, mcpName: str, nativeName: str,
+                                params: dict, agent_id: str = "") -> dict:
+    """团队/项目工具壳统一转交点：身份 → 成员剔除 → 载体解析 →
+    ToolExecutor.execute 单管道（与原生调用同治理/审批/审计/run 溯源）。"""
+    user = _currentUserFromContext(ctx)
+    agentId = _agentIdOf(user, agent_id)
+    rejected = _rejectTeamToolForSwarmMember(agentId, mcpName)
+    if rejected is not None:
+        return rejected
+    resolved = _resolveAgentForActions(agentId)
+    if resolved is None:
+        return {"rejected": True,
+                "detail": "Agent 未就绪（执行载体不可用，稍后重试）"}
+    return await resolved["executor"].execute(nativeName, params)
+
+
+@_SERVER.tool(description=_nativeToolDescription("list_teams"))
+async def team_list(ctx: Context, agent_id: str = "") -> dict:
+    """列出可派活的固定团队（映射原生 list_teams 同一执行体）。"""
+    return await _executeViaNativeTool(ctx, "team_list", "list_teams", {}, agent_id)
+
+
+@_SERVER.tool(description=_nativeToolDescription("dispatch_team"))
+async def team_dispatch(ctx: Context, team_id: str, task: str,
+                        task_unit: Optional[dict] = None,
+                        background: bool = True, agent_id: str = "") -> dict:
+    """把固定团队整体派活（映射原生 dispatch_team 同一执行体：按名册多路
+    spawn、治理三明治与审批链照走、run 带 team_id 溯源标）。"""
+    params = {"team_id": team_id, "task": task, "background": background}
+    if task_unit is not None:
+        params["task_unit"] = task_unit
+    return await _executeViaNativeTool(ctx, "team_dispatch", "dispatch_team",
+                                       params, agent_id)
+
+
+@_SERVER.tool(description=_nativeToolDescription("project_list"))
+async def project_list(ctx: Context, agent_id: str = "") -> dict:
+    """列出当前 agent 可见项目（映射原生 project_list 同一执行体）。"""
+    return await _executeViaNativeTool(ctx, "project_list", "project_list",
+                                       {}, agent_id)
+
+
+@_SERVER.tool(description=_nativeToolDescription("project_detail"))
+async def project_detail(ctx: Context, project_id: str, agent_id: str = "") -> dict:
+    """查看单个项目详情（映射原生 project_detail 同一执行体；非成员且非公开不可见）。"""
+    return await _executeViaNativeTool(ctx, "project_detail", "project_detail",
+                                       {"project_id": project_id}, agent_id)
+
+
 def build_ontology_mcp_asgi():
     """构造本体 MCP 面（一次构建一对，transport 实例 run() 一次不可复用）。
 
