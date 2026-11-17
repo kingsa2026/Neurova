@@ -150,7 +150,7 @@ ACTION_REFRESH_NOTE = "操作后的画面已实时回传到操作面板（如需
 
 _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "computer_screenshot": frozenset(),
-    "computer_click": frozenset({"x", "y", "button"}),
+    "computer_click": frozenset({"x", "y", "button", "frame_id"}),
     "computer_type": frozenset({"text", "interval"}),
     "computer_scroll": frozenset({"scroll_x", "scroll_y", "x", "y"}),
     "computer_shell": frozenset({"command"}),
@@ -158,7 +158,7 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "computer_click_element": frozenset({"index", "runtime_id", "window_title", "button", "generation"}),
     "computer_set_value": frozenset({"value", "index", "runtime_id", "window_title", "generation"}),
     "computer_som_snapshot": frozenset(),
-    "computer_click_mark": frozenset({"index", "button"}),
+    "computer_click_mark": frozenset({"index", "button", "frame_id"}),
     "computer_ssh_exec": frozenset({"host", "command", "user", "port", "timeout"}),
     "browser_navigate": frozenset({"url", "generation"}),
     "browser_click": frozenset({"selector", "text"}),
@@ -6111,6 +6111,37 @@ class ToolExecutor:
             return None, "path 必须以 .pdf 结尾"
         return candidate, None
 
+    # ── P1-1 桌面帧权威（观测发帧 / 变更失效 / 陈旧帧拒点）──────────
+
+    def _checkDesktopFrame(self, tool_name: str, frame_id: Any) -> Optional[Dict]:
+        """携带 frame_id 的坐标动作先过帧新鲜度；过期/未知帧 fail-closed。
+
+        返回 None=放行（未携带=既有行为）；dict=stale_frame 拒绝（retry=reobserve，
+        强制先重新观察）。帧事实源在 computer_use.frame_registry（会话分键）。
+        """
+        if not frame_id:
+            return None
+        from neurova.computer_use import frame_registry
+
+        ok, why = frame_registry.checkFresh(self._somSessionKey(), str(frame_id))
+        if ok:
+            return None
+        return self._gate_refusal(
+            tool_name,
+            why,
+            "观测帧已过期或未知（画面可能已变化）——请先重新 "
+            "computer_screenshot / computer_som_snapshot 获取新 frame_id，再携带它行动作",
+        )
+
+    def _invalidateDesktopFrame(self) -> None:
+        """变更动作成功后失效本会话当前帧（画面已变，旧坐标不可信）。"""
+        try:
+            from neurova.computer_use import frame_registry
+
+            frame_registry.invalidateFrame(self._somSessionKey())
+        except Exception:  # noqa: BLE001 — 帧失效失败不影响动作结果
+            logger.debug("桌面帧失效失败（不影响动作结果）", exc_info=True)
+
     async def _execute_computer_screenshot(self, params: Dict) -> Dict:
         """执行屏幕截图
 
@@ -6148,6 +6179,16 @@ class ToolExecutor:
                         )
                 except Exception:
                     logger.debug("截图元数据附带回带失败（不影响截图结果）", exc_info=True)
+                # P1-1 帧权威：观测成功即签发新帧（旧帧自动失效），模型可携带
+                # frame_id 让后续坐标动作受"陈旧帧拒点"保护。
+                try:
+                    from neurova.computer_use import frame_registry
+
+                    result["frame_id"] = frame_registry.issueFrame(
+                        self._somSessionKey(), {"screen": result.get("screen")}
+                    )
+                except Exception:
+                    logger.debug("观测帧签发失败（不影响截图结果）", exc_info=True)
                 await self._emit_computer_event("computer_screenshot", params, result, screenshot_base64=b64_str)
                 return result
             else:
@@ -6162,6 +6203,12 @@ class ToolExecutor:
         """执行鼠标点击（实现体在 computer_use.actions，宿主/来宾共用）"""
         try:
             from neurova.computer_use import actions, get_computer_use_manager
+
+            # P1-1 帧权威：携带 frame_id 时先校验新鲜度（陈旧帧 fail-closed）
+            frame_refusal = self._checkDesktopFrame("computer_click", params.get("frame_id"))
+            if frame_refusal is not None:
+                await self._emit_computer_event("computer_click", params, frame_refusal)
+                return frame_refusal
 
             # 坐标链（R0-2）：LLM 给的是截图像素坐标，经 DPI/多屏元数据换算成
             # 屏幕坐标点再落 pyautogui（单屏 100% 时恒等，行为不变）
@@ -6180,6 +6227,7 @@ class ToolExecutor:
                 from neurova.computer_use import action_result as _ar
 
                 _ar.attach(result, self._pixel_action_result())
+                self._invalidateDesktopFrame()
             await self._emit_computer_event("computer_click", params, result)
             if success:
                 await self._emit_action_refreshed_screenshot("computer_click", params, result)
@@ -6228,6 +6276,7 @@ class ToolExecutor:
             if success:
                 result["refreshed_screenshot"] = True
                 result["note"] = ACTION_REFRESH_NOTE
+                self._invalidateDesktopFrame()
             await self._emit_computer_event("computer_type", params, result)
             if success:
                 await self._emit_action_refreshed_screenshot("computer_type", params, result)
@@ -6257,6 +6306,7 @@ class ToolExecutor:
                 from neurova.computer_use import action_result as _ar
 
                 _ar.attach(result, self._pixel_action_result())
+                self._invalidateDesktopFrame()
             await self._emit_computer_event("computer_scroll", params, result)
             if success:
                 await self._emit_action_refreshed_screenshot("computer_scroll", params, result)
@@ -6509,6 +6559,7 @@ class ToolExecutor:
             if success:
                 result["refreshed_screenshot"] = True
                 result["note"] = ACTION_REFRESH_NOTE
+                self._invalidateDesktopFrame()
             await self._emit_computer_event("computer_click_element", params, result)
             if success:
                 await self._emit_action_refreshed_screenshot("computer_click_element", params, result)
@@ -6533,6 +6584,7 @@ class ToolExecutor:
             if success:
                 result["refreshed_screenshot"] = True
                 result["note"] = ACTION_REFRESH_NOTE
+                self._invalidateDesktopFrame()
             await self._emit_computer_event("computer_set_value", params, result)
             if success:
                 await self._emit_action_refreshed_screenshot("computer_set_value", params, result)
@@ -6619,6 +6671,13 @@ class ToolExecutor:
                     "点击目标；有 UIA 树时优先 computer_dom_snapshot。"
                 ),
             }
+            # P1-1 帧权威：SOM 快照同样是观测，签发新帧供 click_mark 新鲜度校验
+            try:
+                from neurova.computer_use import frame_registry
+
+                result["frame_id"] = frame_registry.issueFrame(self._somSessionKey())
+            except Exception:
+                logger.debug("SOM 观测帧签发失败（不影响快照结果）", exc_info=True)
             await self._emit_computer_event(
                 "computer_som_snapshot", params, result,
                 screenshot_base64=marked.get("annotated_png_b64"),
@@ -6633,6 +6692,12 @@ class ToolExecutor:
         try:
             from neurova.computer_use import actions, get_computer_use_manager
             from neurova.computer_use import action_result as _ar
+
+            # P1-1 帧权威：携带 frame_id 时先校验新鲜度（陈旧帧 fail-closed）
+            frame_refusal = self._checkDesktopFrame("computer_click_mark", params.get("frame_id"))
+            if frame_refusal is not None:
+                await self._emit_computer_event("computer_click_mark", params, frame_refusal)
+                return frame_refusal
 
             id2xy = self._recallSomMarks()
             mid = str(params.get("index"))
@@ -6654,6 +6719,7 @@ class ToolExecutor:
                 result["refreshed_screenshot"] = True
                 result["note"] = ACTION_REFRESH_NOTE
                 _ar.attach(result, self._pixel_action_result())
+                self._invalidateDesktopFrame()
             await self._emit_computer_event("computer_click_mark", params, result)
             if result.get("success"):
                 await self._emit_action_refreshed_screenshot("computer_click_mark", params, result)
