@@ -597,7 +597,11 @@ class OpenAILoop(BaseAgentLoop):
         等于把别人的门控窗口接过来（实测：续跑轮的调用签名落到另一会话窗口，
         被死循环门误判终止）。
         """
-        from neurova.agent.loops.base import LOOP_CONTINUE, evaluateLoopExit
+        from neurova.agent.loops.base import (
+            LOOP_CONTINUE,
+            appendExitNotice,
+            evaluateLoopExit,
+        )
 
         decision = await evaluateLoopExit(
             self,
@@ -623,6 +627,9 @@ class OpenAILoop(BaseAgentLoop):
         if decision.action != "done":
             logger.warning("主出口门控 %s 终止: %s", decision.gate_name, decision.reason)
             appendTerminationNotice(response, decision.gate_name, decision.reason)
+        elif decision.reason:
+            # H-2 机械完成闸门：后台待办的等待事实随出口并入正文（幂等）。
+            appendExitNotice(response, decision.reason)
         phaseAdvance(state, TurnPhase.COMPLETING)
         return _TurnOutcome.finished(response)
 
@@ -1173,7 +1180,12 @@ class OpenAILoop(BaseAgentLoop):
             yield _STREAM_END
             return
 
-        from neurova.agent.loops.base import LOOP_CONTINUE, LOOP_DONE, evaluateLoopExit
+        from neurova.agent.loops.base import (
+            LOOP_CONTINUE,
+            LOOP_DONE,
+            appendExitNotice,
+            evaluateLoopExit,
+        )
 
         _exitDecision = await evaluateLoopExit(
             self,
@@ -1209,6 +1221,10 @@ class OpenAILoop(BaseAgentLoop):
                 "reason": _exitDecision.reason,
                 "gate": _exitDecision.gate_name,
             }
+        elif _exitDecision.reason:
+            # H-2 机械完成闸门：后台待办的等待事实并入 done.reply（幂等由
+            # appendExitNotice 在非流式侧保证；流式侧这里只走一次）。
+            reply_parts.append("\n\n" + _exitDecision.reason)
 
         # 单轮收口（整条流到此结束，`_predict_stream` 不再开下一轮）。
         # COMPLETING 不在这里推进：这个 done 可能被恢复路径截下（length 空回复

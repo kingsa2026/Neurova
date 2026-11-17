@@ -689,6 +689,36 @@ class SwarmManager:
             runs = sorted(self._runs.values(), key=lambda r: r.started_at, reverse=True)
         return [r.to_dict() for r in runs[:limit]]
 
+    def pendingBackgroundForSession(self, session_id: Optional[str]) -> Dict[str, Any]:
+        """H-2 机械完成闸门的判定输入：本会话还有哪些蜂群后台工作未清。
+
+        活跃 run（pending/running/in_review，按发起会话过滤）+ 尚未回灌送达的
+        邮箱件。供 loop 主出口在宣告完成前核账——发现而不裁决。
+        """
+        sid = str(session_id or "")
+        active: List[Dict[str, Any]] = []
+        with self._lock:
+            for r in self._runs.values():
+                if r.status in SUBAGENT_ACTIVE_STATUSES and r.session_id == sid:
+                    active.append({
+                        "subagent_id": r.subagent_id,
+                        "status": r.status,
+                        "task": (r.task or "")[:80],
+                    })
+        mailboxPending = 0
+        if sid:
+            try:
+                from neurova.agent.mailbox import get_agent_mailbox
+
+                mailboxPending = get_agent_mailbox().pending(sid)
+            except Exception:  # noqa: BLE001 - 邮箱不可用不阻断核账
+                pass
+        return {
+            "active": active,
+            "mailbox_pending": mailboxPending,
+            "pending": bool(active or mailboxPending),
+        }
+
     def integrationReport(self) -> Dict[str, Any]:
         """P2-4（评测报告 G-6）：集成前核对面——各子任务验收/评审/依赖状态一览。
 
