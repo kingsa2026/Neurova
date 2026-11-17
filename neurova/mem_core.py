@@ -36,6 +36,7 @@ import threading
 from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
 from neurova.core.data_root import get_data_root
+from neurova.memory_admission import installMemoryAdmission
 
 logger = get_logger(__name__)
 
@@ -473,7 +474,11 @@ class MemCore:
 
     @memory_manager.setter
     def memory_manager(self, value):
-        self._agent.memory_manager = value
+        # S7 记忆准入：写入入口单点包一层。凡经 MemCore 装配的 memory_manager，
+        # 其 remember 写入口统一过准入闸（敏感信息拦截 + 审计 + 准入清单）。
+        # chat 主路（post_chat_pipeline）、save_conversation_memory、memory 技能
+        # store、API 写入、缓冲落库全部汇到同一实例的 remember，一处包层全链路生效。
+        self._agent.memory_manager = installMemoryAdmission(value)
 
     @property
     def storage(self):
