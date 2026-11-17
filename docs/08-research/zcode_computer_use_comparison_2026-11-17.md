@@ -344,3 +344,29 @@ reward==1.0（harness.py＋test_cua_sim_tasks.py）。
   纳入，其工具面需单独盘点。
 - 评分是静态代码评测，不含实机成功率/延迟等运行时指标；Neurova 侧的 cua_sim
   reward 与 ZCode 侧的真机 e2e 不在同一尺度，未做跨仓换算。
+
+## 7. 实施记录（2026-11-17，§5 候选全部落地）
+
+用户拍板「全部修复」后，十项候选当日全部实施（先红后绿，单任务单提交）：
+
+| 候选 | 提交 | 要点 |
+|---|---|---|
+| P1-3 route 词表 | `0c721b642` | `playwright_ref` 入 ROUTES＋设计稿 §0.3 同步登记，ref 动作恢复 ActionResult 契约 |
+| P1-2 actionSent/retry | `03be1ccc3`（断言对齐 `1f98b3990`） | 契约新增两字段＋每拒绝码重试建议单源＋NEVER_RETRY 集；三类门控拒绝统一携带契约 |
+| P1-1 帧权威 | `2698573ac` | `frame_registry.py` 单源：观测发帧/变更失效/陈旧帧拒点（stale_frame，retry=reobserve）；frame_id 省略=既有行为零回归 |
+| P2-6 窗口枚举 | `0ed45f07c` | `computer_list_windows`（UIA 同源枚举）＋包 docstring「窗口管理-模拟实现」失实声明清除；远程/guest 同契约 |
+| P2-7 三动词 | `00005945c`（剪贴板根修 `25b89b6fa`） | `computer_key/paste/drag`：KEY_ALIASES 单源+键表校验；win32 剪贴板（活体抓出 64 位句柄截断真缺陷并根修）；坐标链换算拖拽 |
+| P2-4 子代理策略 | `b42f32919` | `FOREGROUND_DESKTOP_TOOLS` 单源，swarm general 面整族剔除（对齐 ZCode「CUA 仅主代理」）；观察/命令面保留 |
+| P2-5 前台互斥 | `d14c851e3` | 进程级前台输入租约：跨会话 controller_busy（retry=never），同会话重入放行，finally 必释放 |
+| P3-8 等待语义 | `b3e85a805` | 「动作后必补拍」钉成契约：前台输入族必须声明补拍、观察/命令面不得补拍 |
+| P3-9 远程元数据 | `bdbb13c1f` | guest agent `screen_metadata` 动作＋宿主侧代理缓存，消除远程坐标链恒等退化 |
+| P3-10 SOM 接口化 | `2f0f3c9a3` | `SomDetector` 协议＋`get_som_detector()` 选型单点（env）＋capability_state 第 7 轴 som（如实标注启发式档） |
+
+**验证证据**：computer_use 全量 778 passed（唯一失败 `test_reprobeRebuildsBackend`
+经基线 worktree A/B 实证为预存环境失败——本机缺 Chromium 内核，零新增）；关联面
+（蜂群收窄/guest agent/api computer/security）1263 passed；前端全量 vitest
+2546 passed＋vue-tsc 0 错。活体（真后端 9577 实例）：`/api/v1/computer/status`
+七轴含 som（诚实标注启发式档）、`/doctor` 全项真探、截图 200；帧权威全链
+（发帧→新鲜→变更失效→stale_frame）、剪贴板写读回逐字一致（并当场抓出 64 位
+句柄截断缺陷，见 `25b89b6fa`）、UIA 缺失时 list_windows 诚实拒绝
+（unsupported_method）。附带：同名函数盘点台账按守卫重生成（`0d6983b36`）。
