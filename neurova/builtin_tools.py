@@ -1340,6 +1340,35 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["subagent_id", "message"],
         },
     },
+    "request_approval": {
+        # 并行能力声明：写共享审批存储（ApprovalManager）并可能阻塞等待裁决，非只读。
+        "capability": {"readOnly": False, "concurrentSafe": True, "writeScopes": ("shared",)},
+        "description": "【请求审批】子代理要执行超出自身授权的操作时，向父代理/用户发起审批请求（跨 agent 审批链）。等级：L0 低危可逆（自动放行+记账）/ L1 中危（请父代理裁决）/ L2 高危不可逆（强制人工确认）。返回 approved=true 才可执行；pending/denied 都不得执行。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "要请求执行的具体操作（做什么、对哪个对象；会做危险命令检测，命中将至少按 L1 处理）"},
+                "reason": {"type": "string", "description": "为什么需要这个操作（给裁决人看）"},
+                "level": {"type": "string", "enum": ["L0", "L1", "L2"], "description": "自评危险等级：L0 可逆低危 / L1 中危 / L2 高危不可逆（默认 L1）"},
+                "context": {"type": "string", "description": "补充上下文（影响范围、备选方案等）"},
+            },
+            "required": ["action"],
+        },
+    },
+    "decide_subagent_approval": {
+        # 并行能力声明：裁决写共享审批存储并唤醒等待中的子代理，非只读、不可重放。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【裁决子代理审批】对子代理发起的审批单（request_approval 创建）做批准/拒绝。只受理蜂群审批单；已裁决的幂等失败。仅主代理可用（子代理工具面已剔除本工具）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "request_id": {"type": "string", "description": "审批单 ID（邮箱审批信封/审批记录中的 request_id）"},
+                "decision": {"type": "string", "enum": ["approve", "reject"], "description": "approve 批准 / reject 拒绝"},
+                "note": {"type": "string", "description": "裁决备注（会随结果回传给子代理）"},
+            },
+            "required": ["request_id", "decision"],
+        },
+    },
     "custom_node_create": {
         # 并行能力声明：写共享的自定义节点注册表——同批两个创建会撞同一份注册表与版本表。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
@@ -2190,6 +2219,8 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "spawn_subagent",
     # 子代理续跑：等价一次新派生（member 会话续写 + 邮箱投递），重放制造新运行
     "continue_subagent",
+    # 跨 agent 审批链（P3-1）：建单/裁决都改共享审批状态，重放制造第二张审批单
+    "request_approval", "decide_subagent_approval",
     # 多步编排：内层步进可能含任意写操作，重放制造新变更
     "orchestrate_tools",
 })

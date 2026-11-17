@@ -171,8 +171,11 @@ def computeSubagentToolAllowlist(
                 readonlyNames.append(toolName)
         return frozenset(readonlyNames)
     # general：全量内置工具 − 递归派生/续跑（子代理不得再派生孙代理，
-    # 也不得续跑兄弟——两者都是"从子代理回合里再拉起一条执行链"）
-    base = frozenset(get_registered_tool_names()) - {"spawn_subagent", "continue_subagent"}
+    # 也不得续跑兄弟——两者都是"从子代理回合里再拉起一条执行链"）；
+    # − 审批裁决（P3-1：子代理不得裁决自己发起的审批单——自己批自己=审批链失效）
+    base = frozenset(get_registered_tool_names()) - {
+        "spawn_subagent", "continue_subagent", "decide_subagent_approval",
+    }
     return base | frozenset(borrowMcp)
 
 
@@ -208,6 +211,9 @@ class SubAgentRun:
     # P1-3（评测报告 G-5）：监督评审记录（passed/findings/rounds/reworked 或 skipped）。
     # None = 未评审（reviewMode != supervisor）。
     review: Optional[Dict[str, Any]] = None
+    # P3-1（评测报告 G-11）：运行中审批请求记录（request_approval 工具写入，
+    # approval_chain.requestRunApproval 落账）——谁在何时请求了什么、裁决到哪一步。
+    approvals: List[Dict[str, Any]] = field(default_factory=list)
     status: str = SUBAGENT_PENDING  # 取值域见 SUBAGENT_STATUSES（本模块常量，唯一出处）
     # P2-10 增强：子代理升级/结构化结果提交（escalate/submit_result 工具写入，
     # 随邮箱投递发起者会话；只作读数与通知，不改变运行状态机）
@@ -254,6 +260,7 @@ class SubAgentRun:
             "task_unit": self.task_unit,
             "acceptance": self.acceptance,
             "review": self.review,
+            "approvals": list(self.approvals),
             "escalation": self.escalation,
             "submitted_result": self.submitted_result,
             "tool_allowlist_size": len(self.tool_allowlist) if self.tool_allowlist else None,
