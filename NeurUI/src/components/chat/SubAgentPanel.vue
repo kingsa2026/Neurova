@@ -305,9 +305,9 @@ function shortTime(iso: string): string {
   border-radius: 50%;
   background: var(--nr-primary-light, #818cf8);
 }
-.tl-dot.tl-terminal { background: rgba(74, 222, 128, 0.9); }
-.tl-dot.tl-failed, .tl-dot.tl-cancelled { background: rgba(248, 113, 113, 0.9); }
-.tl-dot.tl-stalled { background: rgba(245, 158, 11, 0.9); }
+.tl-dot.tl-terminal { background: var(--nr-success, rgba(74, 222, 128, 0.9)); }
+.tl-dot.tl-failed, .tl-dot.tl-cancelled { background: var(--nr-error, rgba(248, 113, 113, 0.9)); }
+.tl-dot.tl-stalled { background: var(--nr-warning, rgba(245, 158, 11, 0.9)); }
 .tl-head { font-size: 11px; font-weight: 600; color: var(--nr-text-primary, #e2e8f0); }
 .tl-time { font-weight: 400; color: var(--nr-text-tertiary, var(--nr-text-tertiary)); }
 .tl-detail {
