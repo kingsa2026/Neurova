@@ -86,9 +86,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listBenchmarkSuites, listBenchmarkResults, runBenchmarkSuite } from '@/api/modules/benchmark'
+import { listBenchmarkSuites, listBenchmarkResults, runBenchmarkSuite, getBenchmarkRun } from '@/api/modules/benchmark'
 import { useAgentStore } from '@/stores/agents'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -217,6 +217,11 @@ const runBenchmark = async () => {
       agent_id: effectiveAgentId.value,
     })
     message.success(res?.message || t('common.success'))
+    // N3 真执行器：run 返回 running（后台执行），轮询 runs/{run_id} 到终态再刷新。
+    const data = res?.data ?? res
+    if (data?.status === 'running' && data?.run_id) {
+      await pollRunUntilSettled(String(data.run_id))
+    }
     await fetchResults(selectedSuite.value.id)
   } catch {
     message.error(t('common.error'))
@@ -233,6 +238,11 @@ const runSuite = async (suiteId: string) => {
       agent_id: effectiveAgentId.value,
     })
     message.success(res?.message || t('common.success'))
+    // N3 真执行器：同 runBenchmark——running 响应轮询到终态。
+    const data = res?.data ?? res
+    if (data?.status === 'running' && data?.run_id) {
+      await pollRunUntilSettled(String(data.run_id))
+    }
     await fetchResults(suiteId)
     await fetchSuites()
   } catch {
@@ -241,6 +251,39 @@ const runSuite = async (suiteId: string) => {
     running.value = false
   }
 }
+
+// 轮询 runs/{run_id} 直到终态（completed/failed/simulated）或超限。
+// 首查立即执行，其后间隔 2s、上限 60 次（2 分钟）；查询失败静默停
+// （结果列表仍可手动刷新）。
+const POLL_INTERVAL_MS = 2000
+const POLL_MAX_ATTEMPTS = 60
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+
+const pollRunUntilSettled = async (runId: string) => {
+  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+    try {
+      const res: any = await getBenchmarkRun(runId)
+      const data = res?.data ?? res
+      if (data?.status !== 'running') {
+        pollTimer = null
+        return
+      }
+    } catch {
+      pollTimer = null
+      return
+    }
+    if (attempt < POLL_MAX_ATTEMPTS - 1) {
+      await new Promise((resolve) => {
+        pollTimer = setTimeout(resolve, POLL_INTERVAL_MS)
+      })
+    }
+  }
+  pollTimer = null
+}
+
+onUnmounted(() => {
+  if (pollTimer !== null) clearTimeout(pollTimer)
+})
 
 onMounted(() => {
   fetchSuites()
