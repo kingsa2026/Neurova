@@ -1389,17 +1389,31 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "continue_subagent": {
-        # 并行能力声明：续跑走 spawn 同一条治理闸与执行路径（子代理可能跑任意工具），非只读。
+        # 并行能力声明：续跑/改需求走 spawn 同一条治理闸与执行路径（子代理可能跑任意工具），非只读。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
-        "description": "【续跑子代理】对一条已结束（completed/failed）的子代理下达追加指令并复活它。member 会话历史保留（不是从零重派），上一段产出（失败时为已产出的部分报告）自动附带衔接。适用：失败续跑、基于已完成结果追加分析、修正方向重跑。仅主代理可用（子代理不得续跑兄弟——与递归派生同禁）。",
+        "description": "【续跑/改需求子代理】对子代理下达追加指令。已结束（completed/failed）的子代理被复活：member 会话历史保留（不是从零重派），上一段产出自动附带衔接。运行中（running/in_review）的子代理也可改需求：mode=steer 把新指令注入其会话（下一工具轮生效，尽力而为——若成员已不再调用工具则不会送达）；mode=restart 先叫停再按新指令重派（保留溯源）。适用：失败续跑、追加分析、修正方向。仅主代理可用（子代理不得续跑兄弟——与递归派生同禁）。",
         "parameters": {
             "type": "object",
             "properties": {
-                "subagent_id": {"type": "string", "description": "要续跑的子代理 ID（spawn_subagent/subagent_status 返回的 subagent_id）"},
-                "message": {"type": "string", "description": "续跑指令：接着做什么/修正什么/补充什么约束"},
-                "background": {"type": "boolean", "description": "是否后台执行（默认 false，前台等结果）"},
+                "subagent_id": {"type": "string", "description": "要续跑/改需求的子代理 ID（spawn_subagent/subagent_status 返回的 subagent_id）"},
+                "message": {"type": "string", "description": "续跑/修正指令：接着做什么/修正什么/补充什么约束"},
+                "background": {"type": "boolean", "description": "是否后台执行（默认 false，前台等结果；仅终态续跑时有效）"},
+                "mode": {"type": "string", "enum": ["steer", "restart"], "description": "运行中子代理的改需求方式：steer 注入会话（下一工具轮生效，尽力而为，默认）/ restart 先叫停再按新指令重派（保留溯源）。已终态的子代理忽略本参数，直接走续跑链"},
             },
             "required": ["subagent_id", "message"],
+        },
+    },
+    "cancel_subagent": {
+        # 并行能力声明：叫停会改共享运行状态并终止成员任务，非只读、不可重放。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【叫停子代理】取消一个运行中的子代理：终态以 failed(subagent_cancelled) 落账，已产出的部分报告随失败交接保留，派生槽立即释放；依赖等待中的派生件被叫停后不再被拉起。已终态的运行无需叫停（幂等失败）。仅主代理可用（子代理不得叫停自己/兄弟）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "subagent_id": {"type": "string", "description": "要叫停的子代理 ID（spawn_subagent/subagent_status 返回的 subagent_id）"},
+                "reason": {"type": "string", "description": "叫停原因（留痕进事件账本与失败交接文案）"},
+            },
+            "required": ["subagent_id"],
         },
     },
     "request_approval": {
@@ -2283,6 +2297,8 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "continue_subagent",
     # 跨 agent 审批链（P3-1）：建单/裁决都改共享审批状态，重放制造第二张审批单
     "request_approval", "decide_subagent_approval",
+    # 叫停（H 批补差）：改共享运行状态并终止成员任务，重放制造第二次取消
+    "cancel_subagent",
     # 多步编排：内层步进可能含任意写操作，重放制造新变更
     "orchestrate_tools",
 })
