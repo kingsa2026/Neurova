@@ -30,9 +30,47 @@ export interface RoomMessage {
   sender_id: string
   content: string
   streaming?: boolean
-  kind?: 'message' | 'error'
+  kind?: 'message' | 'error' | 'swarm_approval' | 'swarm_escalate' | 'swarm_candidate'
   /** 助手回应附带的工具/推理步骤（与 ChatPage 同源契约，供 MessageSteps 渲染）。 */
   steps?: ChatStep[]
+  /** S9 蜂群系统消息的结构化载荷（审批卡/升级卡/候选徽标渲染用）。 */
+  swarm?: RoomSwarmMeta
+}
+
+/** 蜂群房间消息的结构化字段（RoomStore 历史 meta 与 WS payload 同名平铺）。 */
+export interface RoomSwarmMeta {
+  request_id?: string
+  candidate_id?: string
+  status?: string
+  level?: string
+  action?: string
+  reason?: string
+  severity?: string
+  subagent_id?: string
+  agent_name?: string
+}
+
+const SWARM_KINDS = ['swarm_approval', 'swarm_escalate', 'swarm_candidate'] as const
+
+function swarmMetaFrom(record: Record<string, unknown> | undefined): RoomSwarmMeta | undefined {
+  const src = record || {}
+  const kind = String(src.kind ?? '')
+  if (!SWARM_KINDS.includes(kind as (typeof SWARM_KINDS)[number])) return undefined
+  const pick = (k: string): string | undefined => {
+    const v = src[k]
+    return v == null || v === '' ? undefined : String(v)
+  }
+  return {
+    request_id: pick('request_id'),
+    candidate_id: pick('candidate_id'),
+    status: pick('status'),
+    level: pick('level'),
+    action: pick('action'),
+    reason: pick('reason'),
+    severity: pick('severity'),
+    subagent_id: pick('subagent_id'),
+    agent_name: pick('agent_name'),
+  }
 }
 
 /** 后端历史行（RoomStore.history 形状）。 */
@@ -117,11 +155,14 @@ export async function getRoomMessages(roomId: string, limit = 200): Promise<Room
   const rows = unwrap<RawRoomMessage[]>(res) || []
   return rows.map((r, i) => {
     const steps = stepsFromMeta(r.meta)
+    const swarm = swarmMetaFrom(r.meta)
     return {
       id: `h${i}-${r.ts ?? ''}`,
       sender_type: (r.sender_type as RoomMessage['sender_type']) || (r.role === 'user' ? 'user' : 'agent'),
       sender_id: r.sender_id || '',
       content: r.content || '',
+      kind: swarm ? (String((r.meta as Record<string, unknown>)?.kind) as RoomMessage['kind']) : undefined,
+      swarm,
       steps: steps.length ? steps : undefined,
     }
   })
@@ -140,6 +181,44 @@ export interface UpdateRoomPayload {
 
 export async function updateRoom(roomId: string, payload: UpdateRoomPayload): Promise<void> {
   await api.put(`${BASE}/rooms/${encodeURIComponent(roomId)}`, payload)
+}
+
+// ── S9 蜂群×房间：审批判定 / 候选拦截 / pending 读面 ──────────────────
+
+/** 房间审批卡判定（群主/管理员；普通成员走房间回复记议见）。 */
+export async function decideRoomApproval(
+  roomId: string,
+  requestId: string,
+  decision: 'approve' | 'reject',
+  note = '',
+): Promise<void> {
+  await api.post(
+    `${BASE}/rooms/${encodeURIComponent(roomId)}/approvals/${encodeURIComponent(requestId)}/decide`,
+    { decision, note },
+  )
+}
+
+/** 房间候选直接处置：intercept（拦截否决）/ merge（采纳合入）。 */
+export async function roomCandidateAction(
+  roomId: string,
+  candidateId: string,
+  action: 'intercept' | 'merge',
+): Promise<void> {
+  await api.post(
+    `${BASE}/rooms/${encodeURIComponent(roomId)}/candidates/${encodeURIComponent(candidateId)}/${action}`,
+  )
+}
+
+export interface RoomSwarmPending {
+  approvals: string[]
+  candidates: string[]
+}
+
+/** 房间当前待裁决审批单与可拦截候选 id 清单。 */
+export async function getRoomSwarmPending(roomId: string): Promise<RoomSwarmPending> {
+  const res = await api.get(`${BASE}/rooms/${encodeURIComponent(roomId)}/swarm/pending`)
+  const data = unwrap<RoomSwarmPending>(res)
+  return { approvals: data?.approvals ?? [], candidates: data?.candidates ?? [] }
 }
 
 /**
@@ -171,6 +250,22 @@ export function applyRoomEvent(messages: RoomMessage[], event: RoomEvent): RoomM
     return [
       ...messages,
       { id: event.event_id, sender_type: 'agent', sender_id: senderId, content: data, streaming: true },
+    ]
+  }
+
+  // S9：蜂群系统消息（审批卡/升级/候选事件）经 AGENT_REPLY 通道平铺 sender_type=system
+  if (type === 'agent_reply' && p.sender_type === 'system') {
+    const swarm = swarmMetaFrom(p as Record<string, unknown>)
+    return [
+      ...messages,
+      {
+        id: event.event_id,
+        sender_type: 'system',
+        sender_id: senderId || 'swarm',
+        content: String(p.content ?? ''),
+        kind: swarm ? (String(p.kind) as RoomMessage['kind']) : 'message',
+        swarm,
+      },
     ]
   }
 
