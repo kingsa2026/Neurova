@@ -41,6 +41,43 @@
       </div>
     </GlassCard>
 
+    <!-- S2 子代理邮箱健康卡：数据源=resources 响应的 mailbox 快照（fail-soft，
+         后端邮箱不可用时字段为 null——整卡不渲染，不拿零读数冒充健康） -->
+    <GlassCard v-if="mailboxStats" :title="t('system.mailboxHealth')" style="margin-top: 20px">
+      <div class="mailbox-grid">
+        <div class="mailbox-item">
+          <span class="mailbox-num">{{ mailboxStats.leasedTotal ?? 0 }}</span>
+          <span class="mailbox-label">{{ t('system.mailboxLeased') }}</span>
+        </div>
+        <div class="mailbox-item">
+          <span class="mailbox-num">{{ mailboxStats.readyTotal ?? 0 }}</span>
+          <span class="mailbox-label">{{ t('system.mailboxReady') }}</span>
+        </div>
+        <div class="mailbox-item">
+          <span class="mailbox-num">{{ mailboxStats.ackedTotal ?? 0 }}</span>
+          <span class="mailbox-label">{{ t('system.mailboxAcked') }}</span>
+        </div>
+        <div class="mailbox-item">
+          <span class="mailbox-num">{{ mailboxStats.reclaimedTotal ?? 0 }}</span>
+          <span class="mailbox-label">{{ t('system.mailboxReclaimed') }}</span>
+        </div>
+        <div class="mailbox-item">
+          <span class="mailbox-num">{{ mailboxStats.dedupedTotal ?? 0 }}</span>
+          <span class="mailbox-label">{{ t('system.mailboxDeduped') }}</span>
+        </div>
+        <div class="mailbox-item">
+          <span class="mailbox-num">{{ mailboxStats.sessions ?? 0 }}</span>
+          <span class="mailbox-label">{{ t('system.mailboxSessions') }}</span>
+        </div>
+      </div>
+      <div class="mailbox-priority">
+        <span class="mailbox-label">{{ t('system.mailboxPriorityDist') }}</span>
+        <a-tag color="blue">{{ t('system.priorityNormal') }} {{ mailboxStats.priorityDistribution?.normal ?? 0 }}</a-tag>
+        <a-tag color="orange">{{ t('system.priorityHigh') }} {{ mailboxStats.priorityDistribution?.high ?? 0 }}</a-tag>
+        <a-tag color="red">{{ t('system.priorityUrgent') }} {{ mailboxStats.priorityDistribution?.urgent ?? 0 }}</a-tag>
+      </div>
+    </GlassCard>
+
     <!-- Connections and Alerts side by side -->
     <div class="two-col" style="margin-top: 20px">
       <GlassCard :title="t('system.connections')">
@@ -87,6 +124,7 @@ import {
   getMonitorConnections,
   getMonitorResources,
   resolveMonitorAlert,
+  type MonitorMailboxStats,
 } from '@/api/modules/monitor'
 import { useAuthStore } from '@/stores/auth'
 import GlassCard from '@/components/GlassCard.vue'
@@ -106,6 +144,9 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 const resources = ref<Record<string, any>>({ cpu: {}, memory: {}, disk: {} })
 const connections = ref<any[]>([])
 const alerts = ref<any[]>([])
+
+// S2：邮箱运维快照（/monitor/resources 响应的 mailbox 字段；null=邮箱不可用，整卡缺席）
+const mailboxStats = computed<MonitorMailboxStats | null>(() => (resources.value?.mailbox ?? null) as MonitorMailboxStats | null)
 
 const getProgressColor = (pct: number) => {
   if (pct >= 90) return '#ef4444'
@@ -173,4 +214,9 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 .conn-detail { font-size: 12px; color: var(--nr-text-tertiary); margin-left: auto; }
 .alert-item { display: flex; align-items: center; gap: 8px; width: 100%; }
 .alert-msg { flex: 1; font-size: 13px; color: var(--nr-text-secondary); }
+.mailbox-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.mailbox-item { display: flex; flex-direction: column; gap: 4px; }
+.mailbox-num { font-family: var(--nr-font-mono); font-size: 20px; font-weight: 600; color: var(--nr-text-primary); }
+.mailbox-label { font-size: 12px; color: var(--nr-text-secondary); }
+.mailbox-priority { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 </style>
