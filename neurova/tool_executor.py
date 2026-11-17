@@ -147,6 +147,13 @@ def computerActionRefreshTools() -> frozenset:
 ACTION_REFRESH_DELAY_SECONDS = 0.5  # 等待 UI 渲染出动作效果后再补拍
 ACTION_REFRESH_NOTE = "操作后的画面已实时回传到操作面板（如需在结果中确认请再调用 computer_screenshot）"
 
+# ── P2-5 跨会话前台输入租约（CONTROLLER_BUSY）──────────────────
+# 鼠标/键盘是全局单例：一个会话正在注入前台输入时，其它会话的前台桌面动作
+# 必须被拒（对齐 ZCode CUA 的 CONTROLLER_BUSY，retry=never）。观察面与
+# shell/ssh 不持租约。owner=会话键（_somSessionKey 同源）。
+_foregroundLeaseLock = threading.RLock()
+_foregroundLease = {"owner": None}
+
 
 # ── R1-3 执行前归一化层──────────────────
 # computer/browser 工具的 LLM 产出参数在分发前统一归一：button 词表、
@@ -2613,12 +2620,27 @@ class ToolExecutor:
         if tool_name in COMPUTER_USE_TOOLS or tool_name.startswith("browser_"):
             import time as _t
 
+            # P2-5 前台输入租约：跨会话互斥（它 session 正在注入前台输入 → 拒）
+            lease_token = None
+            if tool_name.startswith("computer_"):
+                from neurova.computer_use import foregroundDesktopTools
+
+                if tool_name in foregroundDesktopTools():
+                    lease_token = self._acquireForegroundLease()
+                    if lease_token is None:
+                        return self._gate_refusal(
+                            tool_name,
+                            "controller_busy",
+                            "另一会话正在操控前台输入（鼠标/键盘全局单例）——请等待其完成，或改走隔离会话（沙箱/远程平面）",
+                        )
             _t0 = _t.time()
             try:
                 result = await getattr(self, method_name)(params)
             except Exception:
                 self._record_desktop_audit(tool_name, params, {"success": False}, (_t.time() - _t0) * 1000)
                 raise
+            finally:
+                self._releaseForegroundLease(lease_token)
             self._record_desktop_audit(tool_name, params, result, (_t.time() - _t0) * 1000)
             return result
         return await getattr(self, method_name)(params)
@@ -6153,6 +6175,28 @@ class ToolExecutor:
             frame_registry.invalidateFrame(self._somSessionKey())
         except Exception:  # noqa: BLE001 — 帧失效失败不影响动作结果
             logger.debug("桌面帧失效失败（不影响动作结果）", exc_info=True)
+
+    def _acquireForegroundLease(self) -> Optional[str]:
+        """P2-5：领取前台输入租约（跨会话互斥）。
+
+        空闲→持有并返回本会话键；本会话已持有→重入放行；它 session 持有→None
+        （调用方转 controller_busy 拒绝，retry=never）。
+        """
+        key = self._somSessionKey()
+        with _foregroundLeaseLock:
+            owner = _foregroundLease["owner"]
+            if owner is None or owner == key:
+                _foregroundLease["owner"] = key
+                return key
+            return None
+
+    def _releaseForegroundLease(self, token: Optional[str]) -> None:
+        """释放前台输入租约（仅本人持有才清，防误释放他人的）。"""
+        if token is None:
+            return
+        with _foregroundLeaseLock:
+            if _foregroundLease["owner"] == token:
+                _foregroundLease["owner"] = None
 
     async def _execute_computer_screenshot(self, params: Dict) -> Dict:
         """执行屏幕截图
