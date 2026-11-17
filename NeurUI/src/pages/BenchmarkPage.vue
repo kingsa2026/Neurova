@@ -82,13 +82,107 @@
         </template>
       </a-table>
     </GlassCard>
+
+    <!-- S1-1E 多 agent 基线报告（只读：runner 落盘报告的取回面） -->
+    <GlassCard :title="t('benchmark.baselineReports')" style="margin-top: 20px">
+      <a-table
+        v-if="baselineReports.length"
+        :columns="baselineColumns"
+        :data-source="baselineReports"
+        :loading="loadingBaseline"
+        row-key="report_id"
+        :pagination="{ pageSize: 10 }"
+        size="small"
+        data-testid="baseline-table"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'generated_at'">
+            <span class="mono">{{ formatTimestampText(record.generated_at) }}</span>
+          </template>
+          <template v-if="column.key === 'isolated'">
+            <a-tag v-if="record.task_isolated_memory === true" color="green">{{ t('benchmark.isolatedOn') }}</a-tag>
+            <a-tag v-else-if="record.task_isolated_memory === false" color="orange">{{ t('benchmark.isolatedOff') }}</a-tag>
+            <span v-else class="mono">—</span>
+          </template>
+          <template v-if="column.key === 'swarm_success'">
+            <span class="mono">{{ modeRate(record, 'swarm') }}</span>
+          </template>
+          <template v-if="column.key === 'swarm_tokens'">
+            <span class="mono">{{ modeNumber(record, 'swarm', 'total_tokens') }}</span>
+          </template>
+          <template v-if="column.key === 'swarm_steps'">
+            <span class="mono">{{ modeNumber(record, 'swarm', 'total_steps') }}</span>
+          </template>
+          <template v-if="column.key === 'swarm_tools'">
+            <span class="mono">{{ modeNumber(record, 'swarm', 'total_tool_calls') }}</span>
+          </template>
+          <template v-if="column.key === 'actions'">
+            <GlassButton
+              variant="ghost"
+              size="sm"
+              :loading="loadingDetailId === record.report_id"
+              data-testid="baseline-detail-btn"
+              @click="openBaselineDetail(record.report_id)"
+            >
+              {{ t('benchmark.baselineDetail') }}
+            </GlassButton>
+          </template>
+        </template>
+      </a-table>
+      <a-empty v-else-if="!loadingBaseline" :description="t('common.noData')" />
+    </GlassCard>
+
+    <!-- 基线报告详情：逐任务 usage 与轨迹列（内联展开，不弹层） -->
+    <GlassCard v-if="baselineDetail" :title="`${t('benchmark.baselineDetail')} · ${baselineDetailId}`" style="margin-top: 20px">
+      <div class="baseline-detail-head">
+        <a-tag v-if="baselineDetail.task_isolated_memory === true" color="green">{{ t('benchmark.isolatedOn') }}</a-tag>
+        <a-tag v-else-if="baselineDetail.task_isolated_memory === false" color="orange">{{ t('benchmark.isolatedOff') }}</a-tag>
+        <GlassButton variant="ghost" size="sm" @click="closeBaselineDetail">{{ t('common.close') }}</GlassButton>
+      </div>
+      <a-table
+        :columns="baselineTaskColumns"
+        :data-source="baselineDetail.tasks ?? []"
+        row-key="task_id"
+        :pagination="false"
+        size="small"
+        data-testid="baseline-tasks"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'passed'">
+            <a-tag :color="record.passed ? 'green' : 'red'">{{ record.passed ? t('benchmark.pass') : t('benchmark.fail') }}</a-tag>
+          </template>
+          <template v-if="column.key === 'prompt_tokens'">
+            <span class="mono">{{ usageNumber(record, 'promptTokens') }}</span>
+          </template>
+          <template v-if="column.key === 'completion_tokens'">
+            <span class="mono">{{ usageNumber(record, 'completionTokens') }}</span>
+          </template>
+          <template v-if="column.key === 'total_tokens'">
+            <span class="mono">{{ usageNumber(record, 'totalTokens') }}</span>
+          </template>
+          <template v-if="column.key === 'steps'">
+            <span class="mono">{{ usageNumber(record, 'steps') }}</span>
+          </template>
+          <template v-if="column.key === 'tool_calls'">
+            <span class="mono">{{ usageNumber(record, 'toolCalls') }}</span>
+          </template>
+          <template v-if="column.key === 'trajectory'">
+            <span class="mono">{{ (record.trajectory?.toolsUsed ?? []).join(' → ') || '—' }}</span>
+          </template>
+          <template v-if="column.key === 'error'">
+            <span class="mono">{{ record.error || (record.rejected ? `rejected:${record.rejection_code}` : '—') }}</span>
+          </template>
+        </template>
+      </a-table>
+    </GlassCard>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listBenchmarkSuites, listBenchmarkResults, runBenchmarkSuite, getBenchmarkRun } from '@/api/modules/benchmark'
+import { listBenchmarkSuites, listBenchmarkResults, runBenchmarkSuite, getBenchmarkRun, getBaselineReports, getBaselineReport } from '@/api/modules/benchmark'
+import type { BaselineReportListItem, BaselineReportDetail } from '@/api/modules/benchmark'
 import { useAgentStore } from '@/stores/agents'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -207,6 +301,91 @@ const selectSuite = (suite: any) => {
   fetchResults(suite.id)
 }
 
+// ── S1-1E 基线报告视图：清单（新→旧）+ 详情逐任务 usage/轨迹列 ──────────
+const baselineReports = ref<BaselineReportListItem[]>([])
+const loadingBaseline = ref(false)
+const loadingDetailId = ref('')
+const baselineDetailId = ref('')
+const baselineDetail = ref<BaselineReportDetail | null>(null)
+
+const modeMetricsOf = (row: any, mode: string) =>
+  (row?.metrics?.[mode] ?? null) as Record<string, any> | null
+
+const modeRate = (row: any, mode: string) => {
+  const m = modeMetricsOf(row, mode)
+  return m?.success_rate == null ? '—' : `${Math.round(Number(m.success_rate) * 1000) / 10}%`
+}
+
+// total_tokens 可能为 null（全 mock 桩跑数），空读数如实显示 —
+const modeNumber = (row: any, mode: string, key: string) => {
+  const m = modeMetricsOf(row, mode)
+  return m?.[key] == null ? '—' : String(m[key])
+}
+
+const usageNumber = (row: any, key: string) =>
+  row?.usage?.[key] == null ? '—' : String(row.usage[key])
+
+const baselineColumns = computed(() => [
+  { title: t('benchmark.agent'), dataIndex: 'report_id', key: 'report_id' },
+  { title: t('common.createdAt'), key: 'generated_at', width: 160 },
+  { title: t('benchmark.testsRun'), dataIndex: 'task_count', key: 'task_count', width: 90 },
+  { title: t('benchmark.colSwarmSuccess'), key: 'swarm_success', width: 110 },
+  { title: t('benchmark.colSwarmTokens'), key: 'swarm_tokens', width: 110 },
+  { title: t('benchmark.colSwarmSteps'), key: 'swarm_steps', width: 100 },
+  { title: t('benchmark.colSwarmTools'), key: 'swarm_tools', width: 110 },
+  { title: t('benchmark.isolatedOn'), key: 'isolated', width: 90 },
+  { title: t('common.actions'), key: 'actions', width: 90 },
+])
+
+const baselineTaskColumns = computed(() => [
+  { title: t('benchmark.taskId'), dataIndex: 'task_id', key: 'task_id' },
+  { title: t('benchmark.mode'), dataIndex: 'mode', key: 'mode', width: 80 },
+  { title: t('common.status'), key: 'passed', width: 80 },
+  { title: t('benchmark.score'), dataIndex: 'score', key: 'score', width: 70 },
+  { title: t('benchmark.duration'), dataIndex: 'elapsed_seconds', key: 'elapsed_seconds', width: 80 },
+  { title: t('benchmark.colPrompt'), key: 'prompt_tokens', width: 90 },
+  { title: t('benchmark.colCompletion'), key: 'completion_tokens', width: 100 },
+  { title: t('benchmark.colTotalTokens'), key: 'total_tokens', width: 90 },
+  { title: t('benchmark.colSteps'), key: 'steps', width: 70 },
+  { title: t('benchmark.colToolCalls'), key: 'tool_calls', width: 80 },
+  { title: t('benchmark.colTrajectory'), key: 'trajectory', width: 220 },
+  { title: t('system.details'), key: 'error', width: 140 },
+])
+
+const fetchBaselineReports = async () => {
+  loadingBaseline.value = true
+  try {
+    const res: any = await getBaselineReports()
+    // 契约：信封 {code, data:{items,total}}；data 缺 items 时如实置空
+    baselineReports.value = res?.data?.items ?? (Array.isArray(res?.data) ? res.data : [])
+  } catch {
+    baselineReports.value = []
+  } finally {
+    loadingBaseline.value = false
+  }
+}
+
+const openBaselineDetail = async (reportId: string) => {
+  loadingDetailId.value = reportId
+  try {
+    const res: any = await getBaselineReport(reportId)
+    // 404 等故障由 api 层抛错进 catch：详情不渲染，不拿空对象冒充报告
+    baselineDetailId.value = reportId
+    baselineDetail.value = (res?.data ?? null) as BaselineReportDetail | null
+  } catch {
+    baselineDetail.value = null
+    baselineDetailId.value = ''
+    message.error(t('common.error'))
+  } finally {
+    loadingDetailId.value = ''
+  }
+}
+
+const closeBaselineDetail = () => {
+  baselineDetail.value = null
+  baselineDetailId.value = ''
+}
+
 const runBenchmark = async () => {
   // 未选套件时头部按钮已禁用；此处兜底防止程序化调用发空 payload（422）。
   if (!selectedSuite.value) return
@@ -288,6 +467,7 @@ onUnmounted(() => {
 onMounted(() => {
   fetchSuites()
   fetchResults()
+  fetchBaselineReports()
 })
 </script>
 
@@ -306,4 +486,5 @@ onMounted(() => {
 .agent-select { min-width: 160px; }
 .agent-name { font-weight: 500; color: var(--nr-text-primary); }
 .mono { font-family: var(--nr-font-mono); font-size: 13px; }
+.baseline-detail-head { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
 </style>
