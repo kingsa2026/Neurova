@@ -237,12 +237,13 @@ S1–S8 全部落地 ──→ S9 重评分与超越判定
 
 **仓内既有能力（开工前现场复核符号与行号）**
 - 协作房间：`neurova/collaboration/room_store.py`（room_id = 协作 project_id 的既有等式，复用 SessionRepository 零新表）、`room_bus.py`（广播）、`room_turn_router.py`（@路由 + 默认应答者，人→agent 已通）。
+- 群主制度（已生效，非仅展示）：房间发消息/编辑/成员增删均按 **admin/owner/成员**三级鉴权（`neurova/api/endpoints/collaboration_room_api.py`，owner 永不被移除）；团队亦有 `owner_id`（`teams_api.py`）。
 - 团队名册：`neurova/api/endpoints/teams_api.py`（团队 + 成员 + 每成员职责 prompt + team prompt-context，JSON 落盘）。
 - 记忆作用域：`neurova/collaboration/memory_scope.py`（`direct` / `room:<room_id>` / `chgrp:` 三作用域，群群隔离，读写侧共用单源）。
 - ACP 多角色编排：`neurova/agent/team.py`（AgentTeam.add_member/orchestrate，task_assignment→task_result，共享 trace_id）。
 
 **接入点（按批挂靠，不另立批次）**
-1. **S3/S8 × 房间 = 人在环闭环（B4/E1 受益）**：SwarmManager 的 escalate 与审批链 L1/L2 的 ASK 投递到协作房间（sender_type=system/agent 的房间消息）；人在房间回复 → 经新桥接（approval_chain ↔ room_bus 的 pending-approval 匹配）回灌 `decideSwarmApproval`。审批审计（S8）天然多了一个人类可读的呈现面。红线：房间只做"呈现 + 应答回灌"，判定权仍在审批链单源。
+1. **S3/S8 × 房间 = 人在环闭环（B4/E1 受益）**：SwarmManager 的 escalate 与审批链 L1/L2 的 ASK 投递到协作房间（sender_type=system/agent 的房间消息）；人在房间回复 → 经新桥接（approval_chain ↔ room_bus 的 pending-approval 匹配）回灌 `decideSwarmApproval`。审批审计（S8）天然多了一个人类可读的呈现面。**决策权限复用房间既有群主制度**（`collaboration_room_api.py` 已生效的三级鉴权：发消息/编辑/成员增删均按 admin/owner/成员把关，且 owner 永不被移除）——L2 必审的决策人限**群主（project.owner_id）或平台 admin**，普通成员的房间回复只记为议见不判定，避免"房间里任何人回复都算拍板"；审批审计记录决策人的房间身份。红线：房间只做"呈现 + 应答回灌"，判定权仍在审批链单源。
 2. **S4 × 房间/项目 = 候选制的产品面（B5 受益）**：CandidateReport 的 submitted/merged/conflict 事件投递到所属房间，人在房间里可直接拦截合并（COS 的 B5 锚点"人工可拦截"由此落地）；artifactKeys 优先指向协作 project 的既有产物空间。
 3. **团队名册 × spawn = 动态组队（A1 受益，现分 2vs3）**：spawn 支持从团队名册按成员职责 prompt 选人（list_agents 辅助选人已有），角色复用 `collaboration_template.AgentRole`——补"按任务动态组队"缺口；不引入角色辩护等重机制。
 4. **memory_scope × 蜂群 = 共享黑板（D1/D2 受益）**：蜂群 run 的跨成员共享记忆复用 `room:<room_id>` 作用域语义（或并列新增 `run:<run_id>` 作用域，与 room/chgrp 同构），群群隔离与"读单聊基线"语义直接继承，不新造作用域体系。
