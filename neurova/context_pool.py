@@ -11,10 +11,13 @@ from __future__ import annotations
 - 模型切换时的上下文适配
 """
 
+import hashlib
+import json
 import threading
 import time
 import weakref
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 from neurova.core.logger import get_logger
 from datetime import datetime, timedelta
@@ -34,6 +37,154 @@ def iter_live_pools():
     """当前存活 ContextPool 的快照列表（弱引用，复制后返回防迭代期变更）。"""
     with _LIVE_POOLS_LOCK:
         return list(_LIVE_POOLS)
+
+
+# ════════════════════════════════════════════════════════════════
+# S6 压缩纪律（D3）：自动触发水位 / 严格变小守卫 / 压缩事件化
+# ════════════════════════════════════════════════════════════════
+
+#: 主动压缩触发水位：上下文估算 token 达到 预算×该比例 即压缩（不必等硬溢出）。
+#: 具名常量（钉子纪律：长度/阈值尺度不得散落字面量）。
+CONTEXT_COMPACT_TRIGGER_RATIO = 0.85
+
+#: 未知模型窗口时，压缩目标按当前体量的该份额兜底（压缩器内部还会再折）。
+CONTEXT_COMPACT_FALLBACK_TARGET_SHARE = 0.5
+
+#: 会话时间线上压缩事件的种类标识（append_timeline_event 的 kind 字段）。
+COMPRESSION_TIMELINE_KIND = "context_compacted"
+
+#: 指纹长度（sha256 十六进制截取位数——标识尺度，非正文截断）。
+_CONTEXT_FINGERPRINT_CHARS = 16
+
+
+class CompactionNotShrinkingError(RuntimeError):
+    """压缩后上下文未严格变小——拒绝重发（防"越压越大"循环）。
+
+    溢出重试前必须校验新上下文 token 数严格小于原值；不满足时以本错误
+    显式报错（诚实形态暴露，不静默拿原体量再撞同一堵墙）。
+    """
+
+
+@dataclass
+class CompressionEvent:
+    """一次上下文压缩的事实记录（非破坏锚点：原始消息永不删除）。
+
+    落会话时间线（session_manager 既有公开接口），视图可按 cutoffIndex
+    + summary 重建；原始消息仍在会话盘上。
+    """
+
+    cutoffIndex: int          # 原序列中被折叠前缀的截止位置（前闭后开）
+    cutoffMessageId: str      # 被折叠末条消息的指纹（定位锚）
+    summaryFingerprint: str   # 摘要指纹（幂等/对账用）
+    tokensBefore: int
+    tokensAfter: int
+    foldedCount: int
+    reason: str               # threshold | overflow_retry
+    summary: str = ""         # 摘要正文（重建视图用；可为空=纯结构折叠）
+    createdAt: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "cutoffIndex": int(self.cutoffIndex),
+            "cutoffMessageId": self.cutoffMessageId,
+            "summaryFingerprint": self.summaryFingerprint,
+            "tokensBefore": int(self.tokensBefore),
+            "tokensAfter": int(self.tokensAfter),
+            "foldedCount": int(self.foldedCount),
+            "reason": self.reason,
+            "summary": self.summary,
+            "createdAt": self.createdAt,
+        }
+
+
+def estimateContextTokens(messages: Iterable) -> int:
+    """消息序列的 token 估算（窗口计量单源 window_compactor 的无状态入口）。"""
+    from neurova.context.window_compactor import estimate_window_tokens
+
+    return int(estimate_window_tokens(messages or []))
+
+
+def contextFingerprint(message: Any) -> str:
+    """单条消息的稳定指纹（role+content 的 sha 前缀；定位/对账用）。"""
+    payload = json.dumps(
+        {
+            "role": (message or {}).get("role", "") if isinstance(message, dict) else str(message),
+            "content": (message or {}).get("content", "") if isinstance(message, dict) else str(message),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8", "replace")).hexdigest()[:_CONTEXT_FINGERPRINT_CHARS]
+
+
+def assertCompactionShrinks(tokensBefore: int, tokensAfter: int) -> None:
+    """严格变小守卫：压缩后必须严格小于原值，否则显式报错。"""
+    if int(tokensAfter) >= int(tokensBefore):
+        raise CompactionNotShrinkingError(
+            f"压缩未严格变小：{tokensBefore} → {tokensAfter} tokens；"
+            "拒绝重发同体量内容（防越压越大循环）"
+        )
+
+
+def buildCompressionEvent(
+    originalMessages: List[Any],
+    compactedWindow: List[Any],
+    *,
+    summary: str = "",
+    reason: str = "",
+) -> CompressionEvent:
+    """由折叠前/后序列构造压缩事件（cutoff 对齐到被折叠前缀的末条）。"""
+    originalMessages = list(originalMessages or [])
+    compactedWindow = list(compactedWindow or [])
+    # 折叠窗头部若为摘要行（system），其后的即保留尾部
+    kept = compactedWindow
+    if kept and (kept[0] or {}).get("role") == "system":
+        kept = kept[1:]
+    cutoffIndex = max(0, len(originalMessages) - len(kept))
+    lastFolded = originalMessages[cutoffIndex - 1] if cutoffIndex > 0 else None
+    return CompressionEvent(
+        cutoffIndex=cutoffIndex,
+        cutoffMessageId=contextFingerprint(lastFolded) if lastFolded is not None else "",
+        summaryFingerprint=(
+            hashlib.sha256(str(summary or "").encode("utf-8", "replace")).hexdigest()[:_CONTEXT_FINGERPRINT_CHARS]
+            if summary else ""
+        ),
+        tokensBefore=estimateContextTokens(originalMessages),
+        tokensAfter=estimateContextTokens(compactedWindow),
+        foldedCount=cutoffIndex,
+        reason=str(reason or ""),
+        summary=str(summary or ""),
+        createdAt=datetime.now().isoformat(),
+    )
+
+
+def persistCompressionEvent(
+    sessionManager: Any,
+    agentId: str,
+    sessionId: str,
+    event: CompressionEvent,
+) -> bool:
+    """压缩事件经 session_manager 既有公开接口落会话时间线（append-only）。
+
+    时间线独立于会话消息格式（JSONL 追加），NEUROVA_SESSION_JSONL 关与不开
+    都能落。fail-open：时间线是增强面，写失败只记日志不影响对话主链路。
+    """
+    if sessionManager is None:
+        return False
+    try:
+        return bool(sessionManager.append_timeline_event(
+            str(agentId or ""),
+            str(sessionId or ""),
+            {
+                "kind": COMPRESSION_TIMELINE_KIND,
+                "ts": datetime.now().isoformat(),
+                "event": event.to_dict(),
+            },
+        ))
+    except Exception as e:  # noqa: BLE001 - 落盘失败不阻断对话
+        logger.warning("压缩事件落盘失败（忽略）: %s", e)
+        return False
 
 
 class ContextPool:
