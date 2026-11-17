@@ -250,6 +250,104 @@ async def search_audit_logs(
         )
 
 
+def _approval_event_shape(entry: AuditLogEntry) -> Dict[str, Any]:
+    """审批审计事件的轨迹投影（请求+决定成对展示的最小公共形状）。"""
+    details = entry.details or {}
+    return {
+        "timestamp": entry.timestamp,
+        "action": entry.action,
+        "user_id": entry.user_id,
+        "severity": entry.severity.value,
+        "phase": details.get("phase"),
+        "request_id": details.get("request_id"),
+        "run_id": details.get("run_id"),
+        "agent_id": details.get("agent_id"),
+        "level": details.get("level"),
+        "effective_level": details.get("effective_level"),
+        "mode": details.get("mode"),
+        "operation": details.get("operation"),
+        "reason": details.get("reason"),
+        "decision": details.get("decision"),
+        "decided_by": details.get("decided_by"),
+        "note": details.get("note"),
+        "path_values": details.get("path_values"),
+        "latency_ms": details.get("latency_ms"),
+    }
+
+
+@router.get("/approvals")
+async def get_approval_trajectory(
+    request: Request,
+    run_id: str = Query(..., description="蜂群 run 标识（subagent_id）"),
+    limit: int = Query(default=50, ge=1, le=500),
+    _admin: Dict[str, Any] = Depends(require_admin()),
+):
+    """按 runId 拉取蜂群审批轨迹：请求+决定成对展示（S8 审批审计持久化）。
+
+    挂既有 /v1/audit 管理查询域（不新开平行端点域）；鉴权与同域一致（admin，
+    见 test_s08_trace_audit_zero_auth 的审计面契约）。
+    """
+    try:
+        if get_audit_logger is None:
+            logger.warning("Audit logger service not available")
+            return {"code": 0, "message": "success", "data": {
+                "run_id": run_id, "total": 0, "requests": [],
+            }}
+        entries = get_audit_logger().query(
+            event_type=AuditEventType.APPROVAL, resource_id=run_id, limit=limit
+        )
+        entries.sort(key=lambda e: e.timestamp)
+        paired: Dict[str, Dict[str, Any]] = {}
+        order: List[str] = []
+        for entry in entries:
+            details = entry.details or {}
+            requestId = str(details.get("request_id") or "")
+            if not requestId:
+                continue
+            slot = paired.get(requestId)
+            if slot is None:
+                slot = {"request": None, "decision": None}
+                paired[requestId] = slot
+                order.append(requestId)
+            shape = _approval_event_shape(entry)
+            if details.get("phase") == "decide":
+                if slot["decision"] is None:
+                    slot["decision"] = shape
+            elif slot["request"] is None:
+                slot["request"] = shape
+        items = []
+        for requestId in order:
+            slot = paired[requestId]
+            requestShape = slot["request"] or {}
+            decideShape = slot["decision"] or {}
+            items.append({
+                "request_id": requestId,
+                "run_id": run_id,
+                "level": requestShape.get("level") or decideShape.get("level"),
+                "effective_level": requestShape.get("effective_level") or decideShape.get("effective_level"),
+                "operation": requestShape.get("operation") or decideShape.get("operation"),
+                "reason": requestShape.get("reason"),
+                "mode": requestShape.get("mode"),
+                "status": "decided" if slot["decision"] else "pending",
+                "decision": decideShape.get("decision"),
+                "decided_by": decideShape.get("decided_by"),
+                "requested_at": requestShape.get("timestamp"),
+                "decided_at": decideShape.get("timestamp"),
+                "latency_ms": decideShape.get("latency_ms"),
+                "request_event": slot["request"],
+                "decision_event": slot["decision"],
+            })
+        return {"code": 0, "message": "success", "data": {
+            "run_id": run_id, "total": len(items), "requests": items,
+        }}
+    except Exception as e:
+        logger.exception("Failed to get approval trajectory: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get approval trajectory: {str(e)}",
+        )
+
+
 @router.get("/stats", response_model=AuditStats)
 async def get_audit_stats(
     request: Request,
