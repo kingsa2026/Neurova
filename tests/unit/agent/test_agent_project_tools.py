@@ -10,6 +10,8 @@
 ③ room_post：非成员被拒；成员发言落房间历史（kind 语义）；限频拦截。
 ④ 四工具（project_create/project_list/project_detail/room_post）对成员不可见：
    MAIN_AGENT_ONLY_TOOLS 声明 + 执行咽喉成员上下文结构化拒绝。
+⑤（波M 移交项①）成员工具面剔除集并集收口：单源于 builtin_tools.MAIN_AGENT_ONLY_TOOLS，
+   swarm 自有第二份声明退役；白名单派生期即不含全部成员专属工具。
 """
 from __future__ import annotations
 
@@ -342,3 +344,45 @@ class TestHiddenFromMembers:
         out = await exe._execute_single_tool("project_create", {"name": "主代理建的项目"})
         assert out.get("code") != "subagent_tool_not_allowed", out
         assert out.get("success") is True, out
+
+
+# ── ⑤ 移交项①（波M）：成员工具面剔除集并集收口单源 ──────────────────
+
+
+class TestMemberExclusionSingleSource:
+    """S13 声明集（MAIN_AGENT_ONLY_TOOLS）与 S10 声明集（MEMBER_EXCLUDED_TOOLS）
+    语义同为"成员工具面剔除集"，收口为单一事实源（教义第 6 条）；并集收口后
+    白名单派生期即不含全部成员专属工具，执行咽喉成员门降为纵深防御。"""
+
+    def test_union_declared_at_single_source(self):
+        import neurova.agent.swarm as swarmModule
+        from neurova.builtin_tools import _BUILTIN_SCHEMAS, MAIN_AGENT_ONLY_TOOLS
+
+        assert not hasattr(swarmModule, "MEMBER_EXCLUDED_TOOLS"), (
+            "成员工具面剔除集必须单源于 builtin_tools.MAIN_AGENT_ONLY_TOOLS"
+            "（swarm 自有第二份声明即教义第 6 条违规）"
+        )
+        assert MAIN_AGENT_ONLY_TOOLS == frozenset({
+            # 递归派生/续跑/裁决/叫停（P3-1 与 H 批先例）
+            "spawn_subagent", "continue_subagent", "decide_subagent_approval",
+            "cancel_subagent",
+            # 团队编排三工具（S10）
+            "list_teams", "dispatch_team", "propose_team",
+            # 项目/群聊四工具（S13）
+            "project_create", "project_list", "project_detail", "room_post",
+        }), "剔除集=全部成员专属工具并集（缺一即成员面泄漏）"
+        unknown = MAIN_AGENT_ONLY_TOOLS - set(_BUILTIN_SCHEMAS)
+        assert not unknown, f"剔除集不得含未注册幻名: {sorted(unknown)}"
+
+    def test_member_allowlist_derivation_excludes_all_main_agent_tools(self):
+        """白名单派生期（computeSubagentToolAllowlist）即剔除全部主 agent 专属工具
+        ——不得再靠执行咽喉门兜底（S13 移交的并集未收口问题）。"""
+        from neurova.builtin_tools import MAIN_AGENT_ONLY_TOOLS
+        from neurova.agent.swarm import computeSubagentToolAllowlist
+
+        for subagentType in ("general", "explore"):
+            allow = computeSubagentToolAllowlist(subagentType)
+            leaked = allow & MAIN_AGENT_ONLY_TOOLS
+            assert not leaked, (
+                f"{subagentType} 成员工具面仍含主 agent 专属工具: {sorted(leaked)}"
+            )

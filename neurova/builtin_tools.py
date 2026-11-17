@@ -2463,13 +2463,18 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "orchestrate_tools",
 })
 
-# S13：主 agent 专属工具（成员工具面剔除集——S10 先例 ``MEMBER_EXCLUDED_TOOLS``
-# 的项目/群聊扩容项）。声明单源在本文件；执行咽喉（ToolExecutor._execute_single_tool）
-# 对成员上下文（子代理白名单已绑定）强制结构化拒绝。
-# 声明式并集收口移交：swarm.computeSubagentToolAllowlist 的 MEMBER_EXCLUDED_TOOLS
-# 待与本集取并（swarm.py 本批次为另一会话在途文件，避免双写冲突——收口后成员
-# 白名单在派生期即不含这些工具，执行咽喉的门保留为纵深防御）。
+# 成员工具面剔除集（主 agent 专属工具）——**单一事实源**（教义第 6 条）。
+# 消费方两处读同一份声明：swarm.computeSubagentToolAllowlist（白名单派生期剔除）
+# 与 ToolExecutor._execute_single_tool 成员门（执行期结构化拒绝，纵深防御）。
+# 语义分组：
+# - 递归派生/续跑：子代理不得再拉起执行链（孙代理/兄弟续跑）；
+# - 审批裁决（P3-1）：子代理不得裁决自己发起的审批单（自己批自己=审批链失效）；
+# - 叫停（H 批补差）：子代理不得叫停自己/兄弟的运行；
+# - 团队编排三工具（S10）：成员自行派团/立队等于绕过发起者的治理面；
+# - 项目/群聊四工具（S13）：成员建项目/房间发言须过主 agent 的治理面。
 MAIN_AGENT_ONLY_TOOLS = frozenset({
+    "spawn_subagent", "continue_subagent", "decide_subagent_approval",
+    "cancel_subagent", "list_teams", "dispatch_team", "propose_team",
     "project_create", "project_list", "project_detail", "room_post",
 })
 

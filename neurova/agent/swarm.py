@@ -232,16 +232,8 @@ def mcpBorrowedToolNames() -> frozenset:
         return frozenset()
 
 
-#: 成员工具面剔除集（主 agent 专属工具）——general/explore 两条白名单共同的减法项。
-#: - 递归派生/续跑：子代理不得再拉起执行链（孙代理/兄弟续跑）；
-#: - 审批裁决（P3-1）：子代理不得裁决自己发起的审批单（自己批自己=审批链失效）；
-#: - 叫停（H 批补差）：子代理不得叫停自己/兄弟的运行；
-#: - 团队编排三工具（S10）：list_teams/dispatch_team/propose_team 均主 agent 专属——
-#:   成员自行派团/立队等于绕过发起者的治理面。
-MEMBER_EXCLUDED_TOOLS = frozenset({
-    "spawn_subagent", "continue_subagent", "decide_subagent_approval",
-    "cancel_subagent", "list_teams", "dispatch_team", "propose_team",
-})
+#: 成员工具面剔除集收口于 builtin_tools.MAIN_AGENT_ONLY_TOOLS（单一事实源，
+#: 教义第 6 条；S13 移交项①并集收口）——白名单派生与执行咽喉成员门读同一份声明。
 
 
 def computeSubagentToolAllowlist(
@@ -249,13 +241,14 @@ def computeSubagentToolAllowlist(
 ) -> frozenset:
     """按子代理类型计算工具面白名单（P1 蜂群对照；spawn 与测试共用的单一出口）。
 
-    - general：全量内置工具 − 成员剔除集（见 ``MEMBER_EXCLUDED_TOOLS``）；
+    - general：全量内置工具 − 成员剔除集（见 ``MAIN_AGENT_ONLY_TOOLS``）；
       可选借用父上下文的 MCP 调用面（``borrowMcp`` 快照，P3 #8）；
     - explore：只读白名单 − 成员剔除集（检索/侦察型子代理不拿写工具，也不借 MCP）。
     执行咽喉（ToolExecutor._execute_single_tool）据 member 上下文绑定的
     白名单强制拦截面外工具。
     """
     from neurova.builtin_tools import (
+        MAIN_AGENT_ONLY_TOOLS,
         get_builtin_tool_capability,
         get_registered_tool_names,
     )
@@ -266,12 +259,12 @@ def computeSubagentToolAllowlist(
             cap = get_builtin_tool_capability(toolName)
             if cap is not None and getattr(cap, "readOnly", False):
                 readonlyNames.append(toolName)
-        return frozenset(readonlyNames) - MEMBER_EXCLUDED_TOOLS
+        return frozenset(readonlyNames) - MAIN_AGENT_ONLY_TOOLS
     # 前台输入注入族（P2-4 电脑操控对照）：对齐「CUA 仅主代理」——多代理并发抢
     # 真实鼠标/键盘 = 互踩用户桌面；观察面与 shell/ssh 保留。
     from neurova.computer_use import foregroundDesktopTools
 
-    return (frozenset(get_registered_tool_names()) - MEMBER_EXCLUDED_TOOLS
+    return (frozenset(get_registered_tool_names()) - MAIN_AGENT_ONLY_TOOLS
             - foregroundDesktopTools()) | frozenset(borrowMcp)
 
 
