@@ -10,9 +10,6 @@ class TelegramWebhookMixin:
     """Telegram webhook management mixin."""
 
     def set_webhook(self: Any, webhook_url: str, secret_token: str = "") -> bool:
-        self._webhook_url = webhook_url
-        self._webhook_secret = secret_token
-
         payload: dict[str, Any] = {"url": webhook_url}
         if secret_token:
             payload["secret_token"] = secret_token
@@ -20,6 +17,10 @@ class TelegramWebhookMixin:
         data = self._api_request("POST", f"/bot{self.bot_token}/setWebhook", json=payload)
 
         if data.get("ok"):
+            # 本地验签状态只随平台侧真实结果落地：API 失败仍写 _webhook_secret，
+            # 会留下"本端验签认这份密钥、Telegram 侧根本没配"的假状态。
+            self._webhook_url = webhook_url
+            self._webhook_secret = secret_token
             logger.info("Telegram Webhook 已设置: %s", webhook_url)
             return True
         logger.error("Telegram Webhook 设置失败: %s", data)
