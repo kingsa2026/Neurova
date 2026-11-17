@@ -59,7 +59,9 @@ class TestBothBypassPathsShareOneProjection:
                 initiator_agent=initiator,
             )
 
-        mails = get_agent_mailbox().drain(PARENT_SESSION)
+        _leased = get_agent_mailbox().lease(PARENT_SESSION)
+        mails = [m["message"] for m in _leased]
+        get_agent_mailbox().acknowledge(PARENT_SESSION, [m["id"] for m in _leased])
         assert len(mails) == 1
         assert captured, "池归档没落地，无从比对两份投影"
 
@@ -96,7 +98,9 @@ class TestFailedTerminalStillProjectsKeyInfo:
                 task="注定失败", session_id=PARENT_SESSION, initiator_agent=initiator
             )
 
-        mails = get_agent_mailbox().drain(PARENT_SESSION)
+        _leased = get_agent_mailbox().lease(PARENT_SESSION)
+        mails = [m["message"] for m in _leased]
+        get_agent_mailbox().acknowledge(PARENT_SESSION, [m["id"] for m in _leased])
         assert mails, "失败终态也要回灌，否则主 Agent 只看到沉默"
         env = _parseSideChannel(mails[0])
         assert "429" in json.dumps(env, ensure_ascii=False), "成因属关键信息，须留在信封里"

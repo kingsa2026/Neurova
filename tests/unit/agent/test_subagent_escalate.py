@@ -92,7 +92,9 @@ class TestEscalate:
         # 升级信封投递到发起者（父）会话邮箱
         from neurova.agent.mailbox import get_agent_mailbox
 
-        mailbox = get_agent_mailbox().drain(PARENT_SESSION)
+        _leased = get_agent_mailbox().lease(PARENT_SESSION)
+        mailbox = [m["message"] for m in _leased]
+        get_agent_mailbox().acknowledge(PARENT_SESSION, [m["id"] for m in _leased])
         assert any("子Agent升级" in m and "缺 API key" in m for m in mailbox)
 
     def test_escalate_requires_reason(self, env, asSubagent):
@@ -119,7 +121,9 @@ class TestSubmitResult:
         assert run.report == "已完成数据迁移，剩余 2 项待确认"
         from neurova.agent.mailbox import get_agent_mailbox
 
-        mailbox = get_agent_mailbox().drain(PARENT_SESSION)
+        _leased = get_agent_mailbox().lease(PARENT_SESSION)
+        mailbox = [m["message"] for m in _leased]
+        get_agent_mailbox().acknowledge(PARENT_SESSION, [m["id"] for m in _leased])
         assert any("子Agent结果" in m and "partial" in m for m in mailbox)
 
     def test_submit_result_requires_summary(self, env, asSubagent):
