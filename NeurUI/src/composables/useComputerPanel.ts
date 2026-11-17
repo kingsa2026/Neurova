@@ -211,6 +211,8 @@ export function describeComputerAction(tool: string, params: Record<string, unkn
         host: String(p.host ?? ''),
         cmd: ellipsize(String(p.command ?? ''), 60),
       })
+    case 'computer_list_windows':
+      return i18n.global.t('computerPanel.actListWindows')
     default:
       return tool
   }

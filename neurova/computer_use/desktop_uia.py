@@ -124,6 +124,20 @@ class DesktopUIAManager:
                 "max_depth": max_depth,
             }
 
+    # ── 窗口枚举（P2-6）────────────────────────────────
+
+    def list_windows(self, limit: int = 50) -> Dict[str, Any]:
+        """枚举桌面顶层窗口（观察，无投递语义 → 不带 action_result）。"""
+        if self._backend is None:
+            return self._refused(
+                "桌面 UIA 层不可用（非 Windows 或缺少 uiautomation）", "unsupported_method"
+            )
+        try:
+            rows = self._backend.list_windows(max(1, int(limit or 50)))
+        except Exception as e:
+            return self._refused(f"窗口枚举失败: {e}", "backend_error")
+        return {"success": True, "count": len(rows), "windows": rows}
+
     # ── 点击（五级递降链）──────────────────────────────
 
     def click_element(
@@ -409,6 +423,43 @@ class UiautomationBackend:
 
         visit(root, 0)
         return elements
+
+    def list_windows(self, limit: int = 50) -> list:
+        """枚举桌面顶层窗口（P2-6）：title/class/pid/hwnd/rect/focused。
+
+        与 snapshot 的窗口解析同源（GetRootControl 子树 + _window_info），
+        focused 以前台窗口 hwnd 比对判定。
+        """
+        import uiautomation as auto
+
+        focused_hwnd = 0
+        try:
+            focused = auto.GetFocusedControl()
+            focused_hwnd = int(focused.NativeWindowHandle or 0) if focused else 0
+        except Exception:  # noqa: BLE001 — 前台解析失败不挡枚举
+            focused_hwnd = 0
+        rows: list = []
+        for child in auto.GetRootControl().GetChildren():
+            if len(rows) >= limit:
+                break
+            info = self._window_info(child)
+            if not info:
+                continue
+            try:
+                class_name = str(child.ClassName or "")
+            except Exception:  # noqa: BLE001
+                class_name = ""
+            rect = info.get("rect") or (0, 0, 0, 0)
+            hwnd = int(info.get("hwnd") or 0)
+            rows.append({
+                "title": str(info.get("title") or ""),
+                "class_name": class_name,
+                "pid": int(info.get("pid") or 0),
+                "hwnd": hwnd,
+                "rect": {"x": rect[0], "y": rect[1], "w": rect[2], "h": rect[3]},
+                "focused": bool(hwnd and hwnd == focused_hwnd),
+            })
+        return rows
 
     # ── 语义动作（元素 dict 携带 _control）──────────
 

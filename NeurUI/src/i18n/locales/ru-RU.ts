@@ -2261,6 +2261,7 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
     actSomSnapshot: 'Создать SOM-снимок с метками',
     actClickMark: 'Клик по метке SOM {id}',
     actSsh: 'SSH {host}: {cmd}',
+    actListWindows: 'Список окон рабочего стола',
     actBrowserDomSnapshot: 'Получить снимок доступности страницы',
     actBrowserDomRead: 'Читать снимок страницы по частям',
     actBrowserClickRole: 'Кликнуть {role} «{name}»',

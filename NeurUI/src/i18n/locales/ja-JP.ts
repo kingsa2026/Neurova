@@ -2261,6 +2261,7 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     actSomSnapshot: 'SOM番号付きスナップショットを生成',
     actClickMark: 'SOM番号 {id} をクリック',
     actSsh: 'SSH {host}: {cmd}',
+    actListWindows: 'デスクトップウィンドウを列挙',
     actBrowserDomSnapshot: 'ページのアクセシビリティスナップショットを取得',
     actBrowserDomRead: 'ページスナップショットを分割読み込み',
     actBrowserClickRole: '{role}「{name}」をクリック',

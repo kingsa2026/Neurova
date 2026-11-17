@@ -6,7 +6,7 @@ Computer Use 能力 v1.0.0-beta13 - 浏览器自动化增强版（集成 browser
 能力:
 1. 桌面截图识别 (screenshot) - 真实实现 + 视觉理解
 2. 鼠标/键盘操作 (click, type, scroll) - 真实实现
-3. 窗口管理 (window management) - 模拟实现
+3. 窗口枚举 (computer_list_windows) - 真实实现（UIA 枚举顶层窗口）
 4. 文件操作 (file operations) - 真实实现
 5. 浏览器操作 (browser operations) - 真实实现（多后端支持）
 """
