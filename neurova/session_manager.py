@@ -36,6 +36,22 @@ def toolTurnViewEnabled() -> bool:
     """工具轮进模型上下文是否启用（默认启用，关闭是逃生动作）。"""
     return (os.environ.get(_TOOL_TURN_VIEW_ENV, "1") or "1").strip() != "0"
 
+
+# ── S5 会话存储追加式改造（两段式：JSONL 增量 + 快照行） ──────────────
+#: 环境门控：`=1/true/on/yes` 打开两段式；默认关闭（保持全量 JSON 写法不变）。
+_SESSION_JSONL_ENV = "NEUROVA_SESSION_JSONL"
+#: 快照行格式版本：读侧只认这个版本；更高版本报错留盘不隔离（待升级）。
+SESSION_JSONL_FORMAT_VERSION = 2
+#: 每 N 条增量消息滚动一份快照行（写放大摊薄系数）。
+SESSION_SNAPSHOT_EVERY = 50
+#: 增量区字节阈值：超过即滚动快照，防止单文件增量区无界。
+SESSION_SNAPSHOT_DELTA_BYTES_MAX = 256 * 1024
+
+
+def sessionJsonlEnabled() -> bool:
+    """会话存储是否走两段式（JSONL 增量 + 快照行）。默认关闭。"""
+    return (os.environ.get(_SESSION_JSONL_ENV, "") or "").strip().lower() in ("1", "true", "on", "yes")
+
 # 净化时标记"应丢弃"的哨兵值（与 None 区分——None 是合法 JSON 值）
 _JSON_DROP = object()
 
@@ -447,6 +463,10 @@ class SessionManager(SessionRepository):
 
     def _read_session_file(self, file_path: Path) -> Optional[Dict[str, Any]]:
         """读取session文件"""
+        if sessionJsonlEnabled():
+            # S5 两段式：按内容判别旧/新形态，快照+重放增量，坏行跳过
+            data, _info = self._loadSessionState(file_path)
+            return data
         if not file_path.exists():
             return None
 
@@ -494,7 +514,13 @@ class SessionManager(SessionRepository):
         with file_lock:
             return self._write_session_file_unlocked(file_path, data)
 
-    def _write_session_file_unlocked(self, file_path: Path, data: Dict[str, Any]) -> bool:
+    def _write_session_file_unlocked(
+        self,
+        file_path: Path,
+        data: Dict[str, Any],
+        new_messages: Optional[List[Dict[str, Any]]] = None,
+        state_info: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """写入session文件 (无锁版本,调用方必须已持有 file_lock).
 
         S4 修复 (Critical #5 跨锁 RMW): 从 _write_session_file 抽出无锁版本,
@@ -506,7 +532,16 @@ class SessionManager(SessionRepository):
         先序列化后写文件: 原实现先 open("w") 截断文件再 json.dump 流式写入,
         序列化中途抛异常（如 metadata 混入函数对象）会把文件截断成非法 JSON,
         损坏已有会话历史。现在先在内存中完成序列化,失败则不触碰文件。
+
+        S5 两段式：门控开时优先 O(1) 追加（调用方带 new_messages + state_info
+        且文件已是两段式、增量预算未满）；否则整文件写单行快照。两段式写失败
+        回退旧全量写法（fail-open，错误日志可见）；序列化失败则各形态都拒写、
+        不碰文件（保护既有历史）。
         """
+        if sessionJsonlEnabled():
+            if self._writeJsonlState(file_path, data, new_messages, state_info):
+                return True
+            logger.error("会话两段式写入失败，回退旧全量写法: %s", file_path)
         # 不可序列化的 metadata 一律在上游 `_json_safe` 剔掉；真到这一步仍抛，
         # 就**不写文件**——旧实现用 open("w") 先截断再 dump，异常会把已有会话
         # 历史留成非法 JSON（判据见 test_unserializable_data_does_not_corrupt_existing_file
@@ -541,6 +576,176 @@ class SessionManager(SessionRepository):
             # 上下文),内层重复 error 会产生双 error 日志 noise. 内层 debug = 详情层.
             logger.debug("写入 session 文件失败 (内层详情): %s", e, exc_info=True)
             return False
+
+    # ── S5 两段式（JSONL 增量 + 快照行）读写原语 ──────────────────────
+
+    def _loadSessionState(
+        self, file_path: Path, quarantine: bool = True
+    ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+        """读一份会话文件，返回 (数据, 装载信息)。
+
+        读侧按内容判别形态：整读可解析 → 旧全量 JSON；否则按两段式
+        （快照行 + 增量行）重放。增量行逐行解析、坏行跳过——断电撕裂的
+        半行不炸读取、不污染既有消息。快照行缺失按损坏隔离（与旧读法同
+        卫生）；快照版本不识别则报错留盘不隔离（待升级）。
+
+        info 字段：
+          format            missing / legacy / jsonl
+          pending_appends   快照行之后的增量条数（jsonl 时有效）
+          delta_bytes       快照行之后的字节量（滚动阈值判定用）
+          ends_with_newline 文件尾是否停在完整换行（撕裂行封口判定）
+        """
+        info = {"format": "missing", "pending_appends": 0, "delta_bytes": 0, "ends_with_newline": True}
+        if not file_path.exists():
+            return None, info
+        try:
+            raw = file_path.read_bytes()
+        except OSError as e:
+            logger.error("读取session文件失败: %s", e)
+            return None, info
+        info["ends_with_newline"] = raw.endswith(b"\n")
+        text = raw.decode("utf-8", errors="replace")
+
+        # 1) 旧全量 JSON（含单行紧凑 JSON）先整读判别
+        try:
+            whole = json.loads(text)
+        except Exception:
+            whole = None
+        if isinstance(whole, dict) and whole.get("t") != "snap":
+            info["format"] = "legacy"
+            return whole, info
+
+        # 2) 两段式：快照行 + 增量重放（按 \n 切行——不用 splitlines，
+        #    避免正文里的 U+2028 等被误当行界切断 JSON）
+        snapshot = None
+        replayed: List[Dict[str, Any]] = []
+        bad = 0
+        snapshot_end = 0
+        offset = 0
+        for raw_line in raw.split(b"\n"):
+            offset += len(raw_line) + 1
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line.decode("utf-8", errors="replace"))
+            except Exception:
+                bad += 1
+                continue
+            if not isinstance(obj, dict):
+                bad += 1
+                continue
+            if snapshot is None:
+                if obj.get("t") != "snap":
+                    bad += 1
+                    continue
+                if obj.get("v") != SESSION_JSONL_FORMAT_VERSION or not isinstance(obj.get("meta"), dict):
+                    logger.error(
+                        "session 快照版本不识别(v=%r)，跳过读取留盘待升级: %s", obj.get("v"), file_path,
+                    )
+                    return None, info
+                snapshot = obj
+                snapshot_end = offset
+            elif obj.get("t") == "app" and isinstance(obj.get("m"), dict):
+                replayed.append(obj["m"])
+            else:
+                bad += 1
+
+        if snapshot is None:
+            if quarantine:
+                self._quarantine_broken_file(file_path)
+                logger.warning(
+                    "读取session文件失败(无有效快照行，坏行 %d 条)，已隔离 %s", bad, file_path,
+                )
+            else:
+                logger.debug("session 文件无有效快照行(按调用方要求跳过隔离): %s", file_path)
+            return None, info
+        if bad:
+            logger.warning("session JSONL 跳过坏行 %d 条: %s", bad, file_path)
+
+        data = dict(snapshot["meta"])
+        messages = list(snapshot.get("messages") or []) + replayed
+        data["messages"] = messages
+        data["total_messages"] = len(messages)
+        if replayed:
+            last_ts = str(replayed[-1].get("timestamp") or "")
+            if last_ts:
+                data["updated_at"] = last_ts
+        info["format"] = "jsonl"
+        info["pending_appends"] = len(replayed)
+        info["delta_bytes"] = max(0, len(raw) - snapshot_end)
+        return data, info
+
+    @staticmethod
+    def _dumpJsonlLine(payload: Dict[str, Any]) -> Optional[str]:
+        """单行 JSON 序列化；失败返回 None（调用方拒写，不碰文件）。"""
+        try:
+            return json.dumps(payload, ensure_ascii=False)
+        except (TypeError, ValueError, OverflowError) as e:
+            logger.debug("JSONL 行序列化失败, 拒写以保护现有文件: %s", e)
+            return None
+
+    def _appendJsonlLines(self, file_path: Path, lines: List[str], seal_newline: bool) -> bool:
+        """把增量消息行追加到会话文件尾（O(新增字节)，不做全量重写）。
+
+        seal_newline：文件尾若停在半行（断电撕裂），先补一个换行把它封口，
+        新行另起——撕裂行读侧按坏行跳过，不会与后续追加粘连成更长坏行。
+        """
+        try:
+            with open(file_path, "ab") as f:
+                if seal_newline:
+                    f.write(b"\n")
+                for line in lines:
+                    f.write(line.encode("utf-8") + b"\n")
+                f.flush()
+                os.fsync(f.fileno())
+            return True
+        except Exception as e:
+            logger.error("会话 JSONL 追加失败: %s: %s", file_path, e)
+            return False
+
+    def _writeJsonlSnapshot(self, file_path: Path, data: Dict[str, Any]) -> bool:
+        """把全会话状态写成单行快照（原子写）；消息以外的字段全部进 meta。"""
+        meta = {k: v for k, v in data.items() if k != "messages"}
+        payload = {
+            "v": SESSION_JSONL_FORMAT_VERSION,
+            "t": "snap",
+            "meta": meta,
+            "messages": data.get("messages", []),
+        }
+        return self._atomic_write_json(file_path, payload)
+
+    def _writeJsonlState(
+        self,
+        file_path: Path,
+        data: Dict[str, Any],
+        new_messages: Optional[List[Dict[str, Any]]],
+        state_info: Optional[Dict[str, Any]],
+    ) -> bool:
+        """两段式写：能追加则只追加增量行（O(新增字节)）；否则整文件快照重写。
+
+        追加条件：文件已是两段式（state_info.format == "jsonl"）、带了本轮新
+        消息、且增量预算（条数/字节）未满。预算满即滚动快照（摊薄写放大）。
+        新消息序列化失败返回 False（不碰文件；旧全量写法对同一数据同样拒写）。
+        """
+        if new_messages and state_info and state_info.get("format") == "jsonl":
+            lines = []
+            for msg in new_messages:
+                line = self._dumpJsonlLine({"t": "app", "m": msg})
+                if line is None:
+                    return False
+                lines.append(line)
+            new_bytes = sum(len(line.encode("utf-8")) + 1 for line in lines)
+            if (
+                state_info.get("pending_appends", 0) + len(lines) < SESSION_SNAPSHOT_EVERY
+                and state_info.get("delta_bytes", 0) + new_bytes < SESSION_SNAPSHOT_DELTA_BYTES_MAX
+            ):
+                if self._appendJsonlLines(
+                    file_path, lines, seal_newline=not state_info.get("ends_with_newline", True)
+                ):
+                    return True
+                logger.error("会话 JSONL 追加失败，回退快照重写: %s", file_path)
+        return self._writeJsonlSnapshot(file_path, data)
 
     def _fenceRefusesWrite(self, agent_id: str, session_id: str, writer_claim) -> bool:
         """P1-10 写入围栏的唯一判据：配了 claim 且已失效 → 拒写（跳过，不抛异常）。
@@ -620,8 +825,12 @@ class SessionManager(SessionRepository):
 
         # S4: 整个 read-modify-write 在 file_lock 内,保证原子性
         with file_lock:
-            # 读取现有数据
-            session_data = self._read_session_file(file_path)
+            # 读取现有数据（两段式门控开时附增量信息，供追加判定）
+            if sessionJsonlEnabled():
+                session_data, state_info = self._loadSessionState(file_path)
+            else:
+                session_data = self._read_session_file(file_path)
+                state_info = None
 
             now = datetime.now().isoformat()
             user_msg = {
@@ -671,10 +880,12 @@ class SessionManager(SessionRepository):
                 if user_id and not session_data.get("user_id"):
                     session_data["user_id"] = str(user_id)
 
-            # 写入文件 (无锁版本,避免重入死锁)
+            # 写入文件 (无锁版本,避免重入死锁)。两段式开时优先 O(1) 追加。
             # WARN #4 修复: 检查返回值,失败时 logger.error + 抛 IOError.
             # 原代码静默忽略写入失败 → lost update 用户无感.
-            write_ok = self._write_session_file_unlocked(file_path, session_data)
+            write_ok = self._write_session_file_unlocked(
+                file_path, session_data, new_messages=new_messages, state_info=state_info,
+            )
             if not write_ok:
                 logger.error(
                     "add_message 写入 session 文件失败: agent_id=%s, session_id=%s, file=%s",
@@ -1333,7 +1544,12 @@ class SessionManager(SessionRepository):
         # file_lock——原锁外读陈旧快照写回，并发 add_message 会静默回滚最后一轮
         file_lock = self._get_file_lock(file_path)
         with file_lock:
-            session_data = self._read_session_file(file_path)
+            # 两段式门控开时附增量信息，供追加判定
+            if sessionJsonlEnabled():
+                session_data, state_info = self._loadSessionState(file_path)
+            else:
+                session_data = self._read_session_file(file_path)
+                state_info = None
 
             # 持久化边界净化：与 `add_message` 用同一个 `_json_safe`、同一口径。
             # metadata 里可能带着调用方（console/chat 的 SSE 桥接）注入的
@@ -1375,8 +1591,11 @@ class SessionManager(SessionRepository):
                 session_data["total_messages"] = len(session_data["messages"])
 
             # S4: 写入在 file_lock 内；B-9 sidecar 同步索引（assistant 消息
-            # 携带 feedback 时计入增量——fork 复制带反馈历史的消息走此路径）
-            write_ok = self._write_session_file_unlocked(file_path, session_data)
+            # 携带 feedback 时计入增量——fork 复制带反馈历史的消息走此路径）。
+            # S5: 两段式开时优先 O(1) 追加。
+            write_ok = self._write_session_file_unlocked(
+                file_path, session_data, new_messages=[msg], state_info=state_info,
+            )
             if write_ok:
                 fb = (
                     self._feedback_from_data({"messages": [msg]})
@@ -1837,7 +2056,12 @@ class SessionManager(SessionRepository):
         dislike = 0
         items: List[Dict[str, Any]] = []
         for fp in self._find_session_files(agent_dir, session_id):
-            data = self._read_session_file(fp) if quarantine else self._read_json_plain(fp)
+            if quarantine:
+                data = self._read_session_file(fp)
+            else:
+                # sidecar 锁内不可取会话文件锁/隔离（锁序成环）——装载器以
+                # quarantine=False 跳过隔离，旧全量与两段式两种形态都能读
+                data = self._loadSessionState(fp, quarantine=False)[0]
             if not data:
                 continue
             summary = self._summary_from_data(data)
