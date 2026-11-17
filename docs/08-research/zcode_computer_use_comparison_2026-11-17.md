@@ -370,3 +370,23 @@ reward==1.0（harness.py＋test_cua_sim_tasks.py）。
 （发帧→新鲜→变更失效→stale_frame）、剪贴板写读回逐字一致（并当场抓出 64 位
 句柄截断缺陷，见 `25b89b6fa`）、UIA 缺失时 list_windows 诚实拒绝
 （unsupported_method）。附带：同名函数盘点台账按守卫重生成（`0d6983b36`）。
+
+## 8. 增强项实施（2026-11-17，评测三项可选增强全部落地）
+
+用户追加拍板「实施增强项」，三项当日完成：
+
+| 增强 | 提交 | 要点 |
+|---|---|---|
+| ① 重试建议上徽标 | `bf6ab0ce4` | `actionBadgeText` 追加 retry 提示（↻reobserve/↻retry/⛔never），`extractActionResult` 同步抽取 |
+| ② 拒绝可见性 | `6b9fe9eb2`（后端）＋`bf6ab0ce4`（前端） | controller_busy/运行档/审核待批三类门控拒绝在分发咽喉统一广播 computer_action——分屏面板看得见"为什么没动" |
+| ③ 窗口清单表格 | `6b9fe9eb2`（载荷）＋`bf6ab0ce4`（表格） | `windows` 进事件载荷（按需出现），ComputerUsePanel 渲染窗口表格（标题/类名/PID/前台高亮），i18n 五键×11 |
+
+**验证**：新增后端测试 5 例（拒绝广播 3＋载荷 2）与前端测试 6 例（徽标 4＋状态 2）
+均先红后绿（前端红灯以「换回 HEAD 版 composable 实跑 4 failed」取证）；全量
+vitest 2555 passed＋vue-tsc 0 错。附带清偿：并行批次 9d507ecd7 新增的三处裸
+rgba 触发色守卫，机械改令牌（`0346ac057`）。
+
+**过程记录（并行会话撞车处置）**：取红灯证据时 `git stash push` 与并行会话
+的 stash 操作撞车（stash@{0} 成为对方 neurova WIP，我的前端改动未受影响仍留在
+工作树）——改用「checkout HEAD 版单文件→实跑红灯→恢复实现→绿灯」的换文件法
+取证，未触碰他人 stash。
