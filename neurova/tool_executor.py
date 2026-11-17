@@ -43,6 +43,73 @@ from neurova.core.ast_scan import parseSource
 
 logger = get_logger(__name__)
 
+
+# ════════════════════════════════════════════════════════════════
+# S6 工具结果有界投影（D3）：与既有折叠/句柄机制合流的体量闸门
+# ════════════════════════════════════════════════════════════════
+
+#: 工具结果进入压缩视图的投影上限（字符）。具名常量——正文长度尺度
+#: 不得散落字面量（钉子纪律）。与 maybe_output_ref（大输出落盘引用）、
+#: apply_offload_policy（回环溢出分层）分工：本投影服务压缩/折叠视图，
+#: 句柄（tool_call_id）指向可经 recall_history 直取的原文。
+TOOL_RESULT_PROJECTION_CHARS = 2000
+
+#: 投影头尾各占上限的份额（中段以显式省略标注衔接，不静默消失）。
+_TOOL_PROJECTION_EDGE_SHARE = 0.4
+
+#: 轨迹 end 事件错误正文的呈现尺度（轨迹判据只需可定位，不需全文）。
+TOOL_SPAN_ERROR_CHARS = 300
+
+
+def toolResultLooksFailed(content: str) -> bool:
+    """判断工具结果正文是否为失败形态（"失败结果不折叠"纪律的判据单源）。
+
+    结构化 JSON 按 success=False / 非空 error 判；非结构化原文保守视为
+    非失败（不因判据缺失而额外折叠诊断信息）。
+    """
+    try:
+        data = json.loads(str(content or ""))
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    if data.get("success") is False:
+        return True
+    return bool(data.get("error"))
+
+
+def projectToolResult(
+    content: str,
+    *,
+    success: bool,
+    tool_name: str = "",
+    call_id: str = "",
+) -> str:
+    """工具结果有界投影：超上限的成功结果换成 头+显式省略+尾 的投影。
+
+    - 失败结果**一律不折叠**（诊断正文是模型自我纠正的依据，既有纪律）；
+    - 句柄（tool/call_id）随投影携带，指向可取回的原文（recall_history 直取）；
+    - 上限 TOOL_RESULT_PROJECTION_CHARS 具名，头尾份额具名——无字面量尺度。
+    """
+    text = str(content or "")
+    if not success:
+        return text
+    if len(text) <= TOOL_RESULT_PROJECTION_CHARS:
+        return text
+    edge = max(1, int(TOOL_RESULT_PROJECTION_CHARS * _TOOL_PROJECTION_EDGE_SHARE))
+    omitted = len(text) - edge * 2
+    pointer = (
+        f"[工具结果有界投影: tool={tool_name or 'tool'} call={call_id or '未知'} "
+        f"原始 {len(text)} 字符，中段省略 {omitted} 字符；"
+        f'完整原文经 recall_history(session_id, tool_call_id="{call_id or ""}") 取回]'
+    )
+    projected = f"{text[:edge]}\n{pointer}\n{text[-edge:]}"
+    if len(projected) > TOOL_RESULT_PROJECTION_CHARS:
+        # 防御性钳制（头尾份额理论内不超限；尺度仍走具名常量）
+        projected = projected[:TOOL_RESULT_PROJECTION_CHARS]
+    return projected
+
+
 _SLUG_RE = re.compile(r"[^A-Za-z0-9]+")
 
 
@@ -1336,6 +1403,25 @@ class ToolExecutor:
                 return False
         return True
 
+    def _recordToolSpanEvent(self, tool_name: str, event_type: str, data: Dict[str, Any]) -> None:
+        """S1 轨迹生产点：把工具事件落到当前活动轨迹（P3-2 span 轨迹）。
+
+        benchmark 侧 `_toolFactsFromTrace` 读 tool_call_start 聚合 toolCalls；
+        swarm member 轨迹在 member 任务上下文内经 get_trace_id() 命中。
+        不进 H-4 事件账本（账本纪律：正文与高频细节不进账本）；
+        无活动轨迹/轨迹面故障时 no-op（fail-open，不阻断工具执行）。
+        """
+        try:
+            from neurova.core.trace_context import get_trace_id
+            from neurova.core.trace_recorder import get_trajectory_recorder
+
+            traceId = get_trace_id()
+            if not traceId:
+                return
+            get_trajectory_recorder().record_event(traceId, event_type, data)
+        except Exception:  # noqa: BLE001 - 轨迹是增强面，故障不阻断执行
+            logger.debug("工具轨迹事件落点失败（忽略）", exc_info=True)
+
     async def _execute_single_tool(self, tool_name: str, params: Dict,
                                    skip_governance: bool = False) -> Dict:
         """单工具执行入口（P2-1：PreToolUse/PostToolUse hooks 链挂接层）。
@@ -1385,6 +1471,10 @@ class ToolExecutor:
         except Exception:  # noqa: BLE001
             logger.debug("PreToolUse hook 链失败(忽略)", exc_info=True)
 
+        # S1 轨迹生产点：执行前落 tool_call_start（工具名），执行后按成败落
+        # tool_call_end / tool_call_error（耗时/成败/错误摘要）。
+        self._recordToolSpanEvent(tool_name, "tool_call_start", {"tool_name": tool_name})
+
         started = time.monotonic()
         try:
             result = await self._execute_single_tool_inner(tool_name, params, skip_governance)
@@ -1395,7 +1485,27 @@ class ToolExecutor:
                 duration_ms=(time.monotonic() - started) * 1000,
                 layer="executor",
             )
+            self._recordToolSpanEvent(tool_name, "tool_call_error", {
+                "tool_name": tool_name,
+                "success": False,
+                "error_message": f"{type(exc).__name__}: {exc}"[:TOOL_SPAN_ERROR_CHARS],
+                "execution_time_ms": round((time.monotonic() - started) * 1000, 2),
+            })
             raise
+        _spanSuccess = self._result_is_success(result)
+        self._recordToolSpanEvent(
+            tool_name,
+            "tool_call_end" if _spanSuccess else "tool_call_error",
+            {
+                "tool_name": tool_name,
+                "success": _spanSuccess,
+                "error_message": (
+                    str(result.get("error"))[:TOOL_SPAN_ERROR_CHARS]
+                    if isinstance(result, dict) else ""
+                ),
+                "execution_time_ms": round((time.monotonic() - started) * 1000, 2),
+            },
+        )
         recordToolTrace(
             tool_name, params, success=self._result_is_success(result),
             error=(result.get("error") if isinstance(result, dict) else "") or "",
