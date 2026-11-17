@@ -88,6 +88,7 @@ READERS: Dict[str, Set[str]] = {
         "neurova/agent/turn_state.py::TurnState.current_user_id",
         "neurova/computer_use/browser_manager.py::BrowserManager._get_or_create_user_camofox_backend",
         "neurova/computer_use/camofox_server_backend.py::CamofoxServerBackend._eff_user_id",
+        "neurova/core/request_archive.py::recordRequestArchive",
         "neurova/llm/multi_model_client.py::MultiModelLLMClient._chat_single_attempt",
         "neurova/llm/multi_model_client.py::MultiModelLLMClient.chat_stream",
         "neurova/llm/multi_model_client.py::_consume_llm_quota",
