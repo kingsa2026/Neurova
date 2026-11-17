@@ -54,6 +54,10 @@ class TeamInfo(BaseModel):
     members_detail: List[Dict[str, Any]] = []
     created_at: float = 0
     updated_at: float = 0
+    # S10 团队来源：manual（人工创建）/ agent_proposed（蜂群沉淀提议经人批准）
+    origin: str = "manual"
+    approved_by: str = ""
+    promoted_from_run: str = ""
 
 
 class TeamCreate(BaseModel):
@@ -99,6 +103,10 @@ def _team_view(team: Dict[str, Any]) -> TeamInfo:
         members_detail=team.get("members_detail", []),
         created_at=team.get("created_at", 0),
         updated_at=team.get("updated_at", 0),
+        # S10 来源字段：旧数据缺省回退 manual（JSON 落盘 .get 兼容）
+        origin=str(team.get("origin") or "manual"),
+        approved_by=str(team.get("approved_by") or ""),
+        promoted_from_run=str(team.get("promoted_from_run") or ""),
     )
 
 
@@ -133,6 +141,78 @@ def getTeamRoster(team_id: str) -> Optional[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# S10 临时团队沉淀（agent 提议 → 人批准 → 写入本单源）
+# 团队是用户资产，agent 不得自行立队：提议先挂审批链（L1），批准前只进
+# _pendingTeamProposals 进程内登记表，批准动作的调用方（decide 工具/房间裁决端点）
+# 经 applyTeamProposalDecision 回灌——写入点只有 createAgentProposedTeam 一处。
+# ---------------------------------------------------------------------------
+
+_pendingTeamProposals: Dict[str, Dict[str, Any]] = {}
+
+
+def registerTeamProposal(request_id: str, snapshot: Dict[str, Any]) -> None:
+    """登记一笔待批团队沉淀提议（request_id → 成员+职责快照）。"""
+    rid = str(request_id or "").strip()
+    if rid:
+        _pendingTeamProposals[rid] = dict(snapshot or {})
+
+
+def popTeamProposal(request_id: str) -> Optional[Dict[str, Any]]:
+    """取出并移除待批提议（幂等：二次取出返回 None）。"""
+    return _pendingTeamProposals.pop(str(request_id or "").strip(), None)
+
+
+def createAgentProposedTeam(
+    name: str,
+    description: str,
+    membersDetail: List[Dict[str, Any]],
+    promotedFromRun: str = "",
+    approvedBy: str = "",
+) -> Dict[str, Any]:
+    """agent 沉淀提议经人批准后写入团队单源（origin=agent_proposed）。"""
+    now = time.time()
+    team = {
+        "id": str(uuid.uuid4()),
+        "name": str(name or "").strip() or "未命名团队",
+        "description": str(description or ""),
+        "project_id": None,
+        "owner_id": "default",
+        "members_detail": [dict(m) for m in (membersDetail or [])],
+        "created_at": now,
+        "updated_at": now,
+        "origin": "agent_proposed",
+        "approved_by": str(approvedBy or ""),
+        "promoted_from_run": str(promotedFromRun or ""),
+    }
+    _teams_store[team["id"]] = team
+    _save_store()
+    return dict(team)
+
+
+def applyTeamProposalDecision(
+    request_id: str, decision: str, decidedBy: str = "",
+) -> Dict[str, Any]:
+    """审批裁决回灌：批准 → 把登记的成员+职责快照落成固定团队。
+
+    两个裁决入口（decide_subagent_approval 工具 / 房间裁决端点）共用本函数；
+    驳回/无登记 → 不写 teams_api（幂等：登记表 pop 一次即清）。
+    """
+    snapshot = popTeamProposal(request_id)
+    if snapshot is None:
+        return {"applied": False, "reason": "no_pending_proposal"}
+    if str(decision or "").strip().lower() != "approve":
+        return {"applied": False, "reason": "rejected"}
+    team = createAgentProposedTeam(
+        name=snapshot.get("name", ""),
+        description=snapshot.get("description", ""),
+        membersDetail=snapshot.get("members_detail") or [],
+        promotedFromRun=snapshot.get("promoted_from_run", ""),
+        approvedBy=decidedBy,
+    )
+    return {"applied": True, "team": team}
+
+
+# ---------------------------------------------------------------------------
 # 路由
 # ---------------------------------------------------------------------------
 
@@ -149,6 +229,9 @@ async def create_team(body: TeamCreate):
         "members_detail": [],
         "created_at": time.time(),
         "updated_at": time.time(),
+        "origin": "manual",
+        "approved_by": "",
+        "promoted_from_run": "",
     }
     _teams_store[team["id"]] = team
     _save_store()
