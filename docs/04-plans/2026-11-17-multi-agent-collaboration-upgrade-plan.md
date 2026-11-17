@@ -135,7 +135,7 @@ P3 产品化增强      G-11 跨 agent 审批链 / G-12 蜂群 span 级 trace / 
 
 ---
 
-## P3 批（产品化增强，暂列不排期）
+## P3 批（产品化增强，已执行 2026-11-17 第二批，见执行记录）
 
 - **P3-1 跨 agent 审批链（G-11）**：参照 AutoSwarm approvals.py 状态机（request/decision/resolution 三文件 + 幂等 + `--by user` 只许转达真实答案）与 multi-agent-practice `TwoManRuleGate` 的 L0/L1/L2 危险分级（L2 不可逆强制人工，interactive/auto_approve 双模式），为子代理运行中权限请求建"代理给父/用户"通道；与 skill_pool 审批流、权限域收窄整合，不建第二套审批。
 - **P3-2 蜂群 span 级 trace（G-12）**：trace_id 贯穿 spawn→member 会话→回流全程，接 OTel bridge；台账行与 span 关联。
@@ -179,6 +179,11 @@ P3 产品化增强      G-11 跨 agent 审批链 / G-12 蜂群 span 级 trace / 
 | P2-1 | `fa574c1b0` | 子任务 run 启动收敛钉子（机制已现役：agent_runs 表 + reconcile_at_startup；崩溃遗留 running→failed(process_died) 且可溯源） | 绿：2 passed |
 | P2-2 | `6d8d5eae7` | 外部 Agent 握手/注册持久化（JSON 原子落盘 data/external_agents_state.json，启动恢复，损坏按空态起步） | 红：用例先行必红；绿：4 passed |
 | P2-4/5 | `ba5cb1e7e` | integrationReport 集成核对面（subagent_status view=integration）+ escalate 带 suggested_action/action_note 闭环 + to_dict 补 escalation/submitted_result 投影 | 红：stash 后 8 failed；绿：8 passed + 蜂群七套件 67 passed |
+| P3-1 | `3d018e601` | 跨 agent 审批链（neurova/agent/approval_chain.py）：L0/L1/L2 分级（声明只升不降，危险命令检测强制升档）、L2 任何模式强制人工、interactive/auto_approve 双模式（NEUROVA_SWARM_APPROVAL_MODE）；request_approval / decide_subagent_approval 双工具，member 面剔除裁决权；审批单只落既有 ApprovalManager（不建第二套），等待/唤醒复用 approval_relay；run.approvals 进 to_dict | 红：ModuleNotFoundError；绿：18 passed |
+| P3-3 | `f05e88b3c` | APEX 式 T3 任务集扩到 11 条（DCF/可比/并购/授信/LBO/财报/IPO/尽调/董事会备忘录 + 不可解题）+ effort_inference 变量报告（逐任务 effort/effort_source + by_effort 分档聚合 + Markdown 档位节）+ registerBuiltinSuites 幂等收口（修掉 registerSeedTasks 零调用方断点，死入口同批退役） | 红：collection error；绿：tests/unit/benchmark 50 passed |
+| P3-2/4 | `c8bbde9b9` | **P3-2 span 级 trace**：spawn 捕获 parent_trace_id + member 经 TrajectoryRecorder 开轨迹/swarm_member_run span（挂根成树，OTel bridge 既有 observer 投影）+ agent_runs v4 迁移列 trace_id（台账行↔span 关联）+ 事件/信封带 trace_id + NEUROVA_SWARM_TRACE 开关（fail-open）。**P3-4 数据面围栏**（neurova/agent/context_firewall.py）：中英文注入特征扫描 + untrustedPayload 不可信槽位（警示前缀+BEGIN/END 物理标记，原文不改写）+ spawn 命中只标记（run.data_fence）与告警、不阻断。**审批邮箱写点收口**（P3-1 回归修复）：SwarmManager.pushParentMail 唯一写点收拢五处邮箱投递 | 红：span trace 8 failed + firewall collection error + 邮箱单源钉子多出引用面；绿：8+15+12 passed；core 串行 22 失败与基线一致；agent+collaboration+benchmark 终跑 35 failed=基线、2527 passed |
+
+**P3 批终验（2026-11-17 第二批）**：tests/unit/core 串行 A/B——22 条预存失败与基线**逐条一致（零新增）**；首跑曾现 1 条全仓 AST 扫描档（test_theTakeoverTableMatchesTheSharedEntry）失败，经单跑（31s 通过）与串行复跑证实为两套件并行争抢 CPU 的超时假红，非回归。tests/unit/agent+collaboration+benchmark 终跑 35 failed 与基线一致、2527 passed（+67 全为本轮与并行批次新用例）。期间终验抓到并当场修复 1 条 P3-1 回归：审批信封直连邮箱撞"邮箱写点单源"钉子（testOnlySwarmWritesParentMailbox），按教义第 5/6 条收口为 `SwarmManager.pushParentMail` 唯一写点（swarm 内五处投递同批收拢）。P3-1..P3-4 至此全部落地，本方案 P0–P3 四批闭环。
 
 **终验（A/B）**：tests/unit/agent + collaboration + benchmark 全量三连跑——基线 35 条预存失败与终跑**逐条一致（零新增）**，通过数 2395→2460（+65 全为本轮新用例）。
 **live-verify**：真后端起 9541（`/v1/providers` 注册行在位；5 条 ERROR 均为环境内 MCP filesystem 不可达重连噪声，与本轮无关）；签发管理员令牌走真实设置链：GET 默认 False → 管理员 PUT True → 后端 `acceptanceEnabled()` 读数 True → 恢复 False；普通用户 PUT 被 403 拒——设置面板保存链、后端判据读数、越权面全部符合预期。
