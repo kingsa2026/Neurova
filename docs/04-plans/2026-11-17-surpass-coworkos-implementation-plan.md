@@ -378,3 +378,26 @@ S14 同框重评分与超越判定
 5. **契约钉子同批同步**（A7）：改枚举/路由/schema 的会话在提交说明里显式列出"动了哪些钉子"，供其他会话感知。
 6. **共享文档并发编辑**：0-index/本方案/记忆文件改前必须重读（已有两次并发修改冲突实证）。
 7. **执行记录台账**：仿审计批 SUMMARY.md，各会话完成一批即登记（批次/commit 号/一句话结果/移交项），波6 收尾会话据此汇总并更新本方案执行记录。
+
+## 附录 D：前端 UI 适配清单（NeurUI，按批挂靠）
+
+> 现有落点（2026-11-17 实查）：房间页 `pages/CollaborationRoomPage.vue`、协作页 `pages/CollaborationPage.vue`、团队页 `pages/TeamPage.vue`、审计页 `pages/AuditPage.vue`、聊天页 `pages/ChatPage.vue`（经 `components/chat/SubAgentWindowStack.vue` + `composables/useSubAgentWindows.ts` 挂 SubAgentPanel）、基准页 `pages/BenchmarkPage.vue`；API 模块 `api/modules/{collaboration,collaborationRoom,audit,benchmark,console}.ts`。横切纪律：新文案 11 locale 对齐（locale-consistency 测试拦）、禁硬编码色值（themes 契约）、`npm run test` + `npx vue-tsc --noEmit` 两道门全绿、API 模块补契约测试。
+
+| 批次 | 适配要求 | 涉及文件 |
+|---|---|---|
+| S1 | 无强制项。可选：BenchmarkPage 基线报告展示 usage/轨迹列 | BenchmarkPage.vue、api/modules/benchmark.ts |
+| S2 | 无强制项。可选：监控页展示邮箱回收计数（运维读数） | MonitorPage.vue |
+| S3 | **必改**：`SubAgentWindowState.status` 联合类型与 `status-*` 样式、statusIcon 映射覆盖迁移表正式化后的全部状态（blocked/cancelled 等）；useSubAgentWindows 状态同步；状态文案 i18n | SubAgentPanel.vue、useSubAgentWindows.ts、SubAgentPanel.test.ts |
+| S4 | **必改**：候选状态徽标（submitted/accepted/rejected/reviseRequired）与冲突列表+"重议"入口——呈现位置随 S9 房间（首选）或 ChatPage 蜂群汇总区 | CollaborationRoomPage.vue、SubAgentPanel.vue |
+| S5 | 无（读写数据形态不变） | — |
+| S6 | 可选：自动压缩触发时的会话内轻提示；context 设置页参数展示 | ChatPage.vue、context 设置页 |
+| S7 | 无直接 UI（拒收记录经 S8 审计面可见） | — |
+| S8 | **必改**：AuditPage 增审批审计查询视图（按 runId/时间/级别筛选，请求+决定成对展示）；audit.ts 模块扩展 | AuditPage.vue、api/modules/audit.ts |
+| S9 | **必改**：房间页①升级/审批消息卡片（群主专属 批准/拒绝/改议 按钮，普通成员只读+议见入口）；②候选事件徽标与拦截入口；③成员列表 owner 群主徽标；API 模块扩展 | CollaborationRoomPage.vue、api/modules/collaborationRoom.ts |
+| S10 | 可选：TeamPage 显示团队来源（人工/agent 沉淀+批准人）；SubAgentPanel 的 teamId 徽标 | TeamPage.vue、SubAgentPanel.vue |
+| S11 | **必改（最大新 UI）**：房间页"发起协作"入口（选成员/预算/任务书表单）→ 触发 swarm；房间内协作进度区（复用 H-4 时间线形态）；终态报告卡片（采纳/拦截） | CollaborationRoomPage.vue、api/modules/collaborationRoom.ts |
+| S12 | **必改**：项目详情增"协作档案"视图——五类记录聚合时间线（消息/run/事件/候选/审批）+ 封卷总结 + initiator=agent 来源标；api 增 getProjectCollaboration | CollaborationPage.vue（项目详情）、api/modules/collaboration.ts |
+| S13 | 无新 UI（工具为模型面）；治理 ASK 卡片复用 ChatPage/房间既有审批组件；initiator 标随 S12 | — |
+| S14 | 无 | — |
+
+**工作量集中点**：S9/S11/S12 三个房间与项目页面的改造是前端主战场；S3/S4/S8 为小改；其余可选或无。每项适配随对应后端批次同批交付（含契约测试与 i18n），不单独拖尾。
