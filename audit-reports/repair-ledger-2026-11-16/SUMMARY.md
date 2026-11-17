@@ -143,3 +143,26 @@ needs_attention 后总控直接接手，R6/U1 全部完成。本轮（R7，总�
   （multi-agent 协作计划/评估，非本任务产物）。
 - **后续可选**：OpenAIAdapter 真流式、TelegramWebhookMixin 端点挂出、
   Benchmark 真评测执行器（三者均为新建能力，另立批次）。
+
+---
+
+# 新建能力轮复核结论（2026-11-17 第五轮·已全部落地）
+
+审计收尾后登记的三个"新建能力"级后续，派 N1/N2/N3 三会话并行完成（N3 卡
+权限期间由总控验收提交，TDD 留痕缺失已如实记台账）：
+
+| 会话 | 提交 | 交付 |
+|---|---|---|
+| N1 真流式 | 219216ab9 | OpenAIAdapter.stream_call 真流式（aiohttp SSE 逐 token、[DONE] 终止、错误诚实抛），契约对齐 provider_interface.py:97；本地假 SSE 服务真 HTTP 红绿 |
+| N2 telegram webhook | cb6fab308 | webhook 接收端点（verify_webhook_signature fail-closed→_process_update）+ 管理三端点挂出（admin 门、to_thread）|
+| N3 benchmark 执行器 | 48acfafb4 | 新增 neurova/benchmark/suite_eval.py（SuiteTask/CheckFn/任务库注册/runSuite 故障隔离判分）+ run_benchmark 分流（真执行=后台线程+GET /runs/{run_id} 轮询；simulated 语义保留；无 LLM 通道 503）+ 四 suite 任务库种子注册 |
+
+抽验：N3 三测试文件 29 passed；N1/N2 台账入库（N1-真流式.md 99 行、
+N2-telegram-webhook.md 167 行、N3-benchmark执行器.md 由总控补记）。
+
+## 全任务最终态
+
+- 四轮派单（S1-S8 → R1-R6 → U1-U2 → N1-N3）+ 总控直接收口，合计 **64 笔提交**；
+- P0 2/2、P1 39/39、P2 106 条全部清偿或登记；三个"新建能力"全部落地；
+- 终局健康抽查 68 passed（提交门/收录门/防绕守卫/shards/memory 域）；
+- 工作树仅剩 WebSocketAdapter.ets 用户在途文件与另一工作线的 docs 产物。
