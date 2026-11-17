@@ -2651,12 +2651,44 @@ class ToolExecutor:
     def _pixel_action_result() -> Dict:
         """像素动作（click/type/scroll/click_mark）的 ActionResult 档：远程会话绑定
         →route=remote/delivery=background（来宾隔离机，不抢用户真机焦点，回执即确认）；
-        本地→global_input/foreground 诚实档（pyautogui 无投递回执）。"""
+        本地→global_input/foreground 诚实档（pyautogui 无投递回执，建议=重新观察）。"""
         from neurova.computer_use import action_result as _ar, get_active_remote_desktop
 
         if get_active_remote_desktop() is not None:
             return _ar.confirmed("remote", "background", ["delivery_ack"])
-        return _ar.unverifiable("global_input", "foreground")
+        return _ar.build("global_input", "unverifiable", delivery="foreground", retry="reobserve")
+
+    @staticmethod
+    def _gateRefusalRoute(tool_name: str) -> str:
+        """门控拒绝的 route=动作的**意图投递面**（未选中后端前的最近似通道）：
+        远程命令→remote、本机命令→shell、浏览器→playwright_role、其余桌面→global_input。"""
+        if tool_name == "computer_ssh_exec":
+            return "remote"
+        if tool_name == "computer_shell":
+            return "shell"
+        if tool_name.startswith("browser_"):
+            return "playwright_role"
+        return "global_input"
+
+    def _gate_refusal(
+        self, tool_name: str, refusal_code: str, message: str, **extra: Any
+    ) -> Dict:
+        """门控拒绝统一出口：拒绝结果携带 ActionResult 契约（P1-2）——
+        模型据 refusal_code/retry 知道"该不该重试"（权限/互斥类 never，事实类 reobserve）。
+        契约附加失败不影响拒绝主结果。"""
+        from neurova.computer_use import action_result as _ar
+
+        out: Dict[str, Any] = {
+            "success": False,
+            "error": message,
+            "tool_name": tool_name,
+            **extra,
+        }
+        try:
+            _ar.attach(out, _ar.refused(self._gateRefusalRoute(tool_name), refusal_code))
+        except Exception:  # noqa: BLE001 — 契约附加失败不改变拒绝事实
+            logger.debug("门控拒绝契约附加失败", exc_info=True)
+        return out
 
     def _sandbox_scope(self, tool_name: str, skip_governance: bool):
         """沙箱运行/自动档的会话领用上下文：变更动作需进隔离桌面且当前无活动会话、
@@ -2711,11 +2743,12 @@ class ToolExecutor:
 
             if get_active_remote_desktop() is not None:
                 return None  # 已在隔离桌面会话中执行
-            return {
-                "success": False,
-                "error": "桌面运行档要求隔离沙箱会话，但当前无活动会话（未领用/未配置会话池）",
-                "desktop_runtime": {"mode": mode, "action": action, "reason": decision["reason"]},
-            }
+            return self._gate_refusal(
+                tool_name,
+                "sandbox_session_required",
+                "桌面运行档要求隔离沙箱会话，但当前无活动会话（未领用/未配置会话池）",
+                desktop_runtime={"mode": mode, "action": action, "reason": decision["reason"]},
+            )
         # REQUIRE_APPROVAL：铸审批请求，批准后由 approve 端点重放执行（metadata 带 tool_name/params）
         try:
             from neurova.security.approval_manager import get_approval_manager
@@ -2735,24 +2768,25 @@ class ToolExecutor:
                 },
             )
             rid = getattr(req, "request_id", None)
-            return {
-                "success": False,
-                # 顶层 pending_approval/approval_id 契约：console._extract_approval_payload
-                # 据此发 approval_required SSE 事件，对话页交互面板弹出审批；
-                # 批准后 approve 端点按 metadata 重放（skip_governance 旁路本门）。
-                "pending_approval": True,
-                "approval_id": rid,
-                "tool_name": tool_name,
-                "params": params,
-                "error": f"审核模式：{tool_name} 待用户批准（审批请求 {rid}）",
-                "desktop_runtime": {"mode": mode, "action": action, "request_id": rid},
-            }
+            # 顶层 pending_approval/approval_id 契约：console._extract_approval_payload
+            # 据此发 approval_required SSE 事件，对话页交互面板弹出审批；
+            # 批准后 approve 端点按 metadata 重放（skip_governance 旁路本门）。
+            return self._gate_refusal(
+                tool_name,
+                "permission_required",
+                f"审核模式：{tool_name} 待用户批准（审批请求 {rid}）",
+                pending_approval=True,
+                approval_id=rid,
+                params=params,
+                desktop_runtime={"mode": mode, "action": action, "request_id": rid},
+            )
         except Exception as e:  # noqa: BLE001 — 审批子系统不可用仍 fail-closed
-            return {
-                "success": False,
-                "error": f"审核模式：无法发起审批（{e}），已拒绝",
-                "desktop_runtime": {"mode": mode, "action": action},
-            }
+            return self._gate_refusal(
+                tool_name,
+                "permission_required",
+                f"审核模式：无法发起审批（{e}），已拒绝",
+                desktop_runtime={"mode": mode, "action": action},
+            )
 
     def _profile_grant_gate(self, tool_name: str) -> Optional[Dict]:
         """R3-4 附身授权门（fail-closed）。browser_* 若将走携带登录态的 camofox
@@ -2778,14 +2812,17 @@ class ToolExecutor:
             )
             if out.get("granted"):
                 return None
-            return {
-                "success": False,
-                "error": out.get("message", "需要附身授权"),
-                "profile_grant": {"granted": False, "request_id": out.get("request_id")},
-            }
+            return self._gate_refusal(
+                tool_name,
+                "permission_required",
+                out.get("message", "需要附身授权"),
+                profile_grant={"granted": False, "request_id": out.get("request_id")},
+            )
         except Exception as e:  # noqa: BLE001 — 授权子系统异常仍 fail-closed 拒绝
             logger.warning("profile 授权门异常（fail-closed 拒绝）: %s", e)
-            return {"success": False, "error": f"附身授权检查失败，已拒绝: {e}"}
+            return self._gate_refusal(
+                tool_name, "permission_required", f"附身授权检查失败，已拒绝: {e}"
+            )
 
     def _inject_browser_identity(self) -> None:
         """从 _agent_identity 取 userId,写到 ContextVar + 通知 supervisor track。

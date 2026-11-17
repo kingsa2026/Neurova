@@ -58,6 +58,7 @@ class TestConvenienceConstructors:
             "effect": "confirmed",
             "delivery": "background",
             "evidence": ["locator_ack"],
+            "action_sent": True,  # P1-2：非 refused 档=已尝试投递
         }
 
     def test_refused(self):
@@ -126,6 +127,7 @@ class TestBrowserDerivation:
             "effect": "confirmed",
             "delivery": "background",
             "evidence": ["locator_ack"],
+            "action_sent": True,  # P1-2：非 refused 档=已尝试投递
         }
 
     def test_success_without_route_no_result(self):
