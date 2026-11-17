@@ -114,6 +114,9 @@ def create_app(manager: Any = None, uia_manager: Any = None, token: Optional[str
                     actions.drag, mgr, p.get("start_x"), p.get("start_y"),
                     p.get("end_x"), p.get("end_y"), p.get("duration", 0.5), p.get("button", "left"),
                 )
+            if kind == "screen_metadata":
+                meta = await asyncio.to_thread(mgr.screen_metadata)
+                return {"success": meta is not None, "metadata": meta}
             return {"error": f"guest agent 未知动作: {kind}"}
         except Exception as e:  # noqa: BLE001 — guest 语义：错误也回结构化
             logger.warning("guest agent 动作 %s 失败: %s", kind, e)

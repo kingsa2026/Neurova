@@ -23,6 +23,8 @@ class RemoteComputerUseManager:
     def __init__(self, client: Any, session_id: str = ""):
         self._client = client
         self.session_id = session_id
+        # P3-9：来宾屏幕元数据缓存（屏幕几何不会轮次变化，一次真取即可）
+        self._screen_metadata_cache: Optional[Dict[str, Any]] = None
 
     # ── 与本地 manager 同面的动作 ──────────────────────────────
 
@@ -89,7 +91,19 @@ class RemoteComputerUseManager:
         return True
 
     def screen_metadata(self) -> Optional[Dict[str, Any]]:
-        # 来宾元数据由 guest 端截图结果附带；此处尽力从 health 拿不到则 None
+        """来宾屏幕元数据（P3-9）：经 guest agent 真取并缓存，失败诚实回 None。
+
+        此前恒返 None → 远程坐标链退化为恒等（RDP 150% 缩放下 LLM 的截图像素
+        坐标直接当屏幕坐标用，点击错位）。元数据由 guest 端同源
+        `compute_screen_metadata` 产出，宿主侧不做第二份换算。
+        """
+        if self._screen_metadata_cache is not None:
+            return self._screen_metadata_cache
+        out = self._client.action("screen_metadata", {})
+        meta = out.get("metadata") if isinstance(out, dict) and out.get("success") else None
+        if isinstance(meta, dict) and meta:
+            self._screen_metadata_cache = meta
+            return meta
         return None
 
 
