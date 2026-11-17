@@ -62,8 +62,46 @@ REFUSAL_CODES = frozenset(
         "element_not_clickable",   # 元素无可投递交互/无可点击区域
         "missing_params",          # 必要参数缺失
         "backend_error",           # 后端执行错误（兜底）
+        "sandbox_session_required",  # 运行档要求隔离会话但当前无活动会话
+        "stale_frame",             # 坐标所属观测帧已过期（画面已变化），须重新观察
+        "controller_busy",         # 另一会话正持有前台输入，拒绝并发操控
     }
 )
+
+# 重试建议三值（P1-2，对齐 ZCode CUA 错误契约的 retry 语义）：
+# - reobserve：画面/事实可能已变，先重新观察再行动（非幂等动作禁止凭旧事实重放）
+# - retry：同一调用可安全重试（瞬时故障/后端未就绪）
+# - never：重试无意义或危险（权限拒绝/参数非法/互斥占用），模型应停止或换路径
+RETRY_MODES = frozenset({"reobserve", "retry", "never"})
+
+#: 每个拒绝码的重试建议（新增拒绝码必须同步登记，守卫见
+#: tests/unit/computer_use/test_action_result_retry_contract.py）
+REFUSAL_RETRY_ADVICE = {
+    "stale_generation": "reobserve",
+    "ref_not_found": "reobserve",
+    "ambiguous_ref": "reobserve",
+    "background_unavailable": "reobserve",
+    "background_occluded": "reobserve",
+    "element_not_clickable": "reobserve",
+    "stale_frame": "reobserve",
+    "permission_required": "never",
+    "unsupported_method": "never",
+    "missing_params": "never",
+    "sandbox_session_required": "never",
+    "controller_busy": "never",
+    "not_initialized": "retry",
+    "backend_error": "retry",
+}
+
+#: 永不重试的拒绝码（NEVER_RETRY 集合，消费方据此封死非幂等动作的盲重放）
+NEVER_RETRY_REFUSAL_CODES = frozenset(
+    code for code, advice in REFUSAL_RETRY_ADVICE.items() if advice == "never"
+)
+
+
+def retry_advice_for(refusal_code: str) -> str:
+    """拒绝码 → 重试建议（未知码回保守的 retry；词表封闭由守卫测试保证）。"""
+    return REFUSAL_RETRY_ADVICE.get(refusal_code, "retry")
 
 
 class ActionResultError(ValueError):
@@ -77,14 +115,24 @@ def build(
     evidence: Optional[List[str]] = None,
     refusal_code: Optional[str] = None,
     escalation: Optional[Dict[str, str]] = None,
+    action_sent: Optional[bool] = None,
+    retry: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """构造并校验 action_result（封闭契约的唯一构造入口）"""
+    """构造并校验 action_result（封闭契约的唯一构造入口）。
+
+    action_sent：动作是否（可能）已下发——refused 恒 False 且禁止声明 True
+    （与 delivery=not_applicable 同一条"未投递"不变式）；其余档缺省 True
+    （已尝试投递）。retry：重试建议三值，refused 缺省按拒绝码从
+    REFUSAL_RETRY_ADVICE 推导，显式传参可覆盖。
+    """
     if route not in ROUTES:
         raise ActionResultError(f"route 越界: {route!r}")
     if effect not in EFFECTS:
         raise ActionResultError(f"effect 越界: {effect!r}")
     if delivery not in DELIVERIES:
         raise ActionResultError(f"delivery 越界: {delivery!r}")
+    if retry is not None and retry not in RETRY_MODES:
+        raise ActionResultError(f"retry 越界: {retry!r}（允许 {sorted(RETRY_MODES)}）")
 
     result: Dict[str, Any] = {"route": route, "effect": effect, "delivery": delivery}
     if effect == "refused":
@@ -96,7 +144,11 @@ def build(
             raise ActionResultError("refused 必须携带 refusal_code")
         if refusal_code not in REFUSAL_CODES:
             raise ActionResultError(f"refusal_code 越界: {refusal_code!r}")
+        if action_sent is True:
+            raise ActionResultError("refused 不得声明 action_sent=True（未投递）")
         result["refusal_code"] = refusal_code
+        result["action_sent"] = False
+        result["retry"] = retry or retry_advice_for(refusal_code)
         if escalation is not None:
             result["escalation"] = escalation
         return result
@@ -115,6 +167,9 @@ def build(
         result["evidence"] = list(evidence)
     if escalation is not None:
         result["escalation"] = escalation
+    result["action_sent"] = True if action_sent is None else bool(action_sent)
+    if retry is not None:
+        result["retry"] = retry
     return result
 
 
@@ -126,8 +181,11 @@ def refused(
     route: str,
     refusal_code: str,
     escalation: Optional[Dict[str, str]] = None,
+    retry: Optional[str] = None,
 ) -> Dict[str, Any]:
-    return build(route, "refused", refusal_code=refusal_code, escalation=escalation)
+    return build(
+        route, "refused", refusal_code=refusal_code, escalation=escalation, retry=retry
+    )
 
 
 def unverifiable(route: str, delivery: str) -> Dict[str, Any]:
