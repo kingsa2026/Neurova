@@ -1,53 +1,42 @@
-# 超越 CoworkOS 实施方案（对照评测 H 批后续，细化到可直接执行）
+# 超越 CoworkOS 实施方案（完整实施版：S1–S12）
 
-- 日期：2026-11-17
+- 日期：2026-11-17（v2 修订：应用户拍板，把团队/群聊能力接入与固定团队开放、多 agent 双入口两项拓展**取消拓展项区分，统一编入批次**，全方案 S1–S12 一次成型）
 - 依据：
   - [CoworkOS 与 Neurova 多 Agent 协作对照评测](../08-research/coworkos_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)（下称"COS 评测"；§6 逐维评分、§6.x 总分表、§7 H 系清单是本方案直接输入）
   - [deepagents 与 Neurova 对照评测](../08-research/deepagents_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)（下称"DA 评测"；其 §8「按本仓代码现状逐条对照的学习落点」是 S5/S6/S7 的规格来源）
   - 真模型基线报告 [multi_agent_bench_baseline_2026-11-17.md](../08-research/multi_agent_bench_baseline_2026-11-17.md)（S1 的输入：T1 不可用、记忆串扰、usage 缺失三条实证）
 - 目标：同框评测总分从当前 **84/110** 越过 CoworkOS 的 **95/110**（判定线 ≥96），且不损失既有领先维（A 协作形成 14、E 治理安全 13）。
-- 范围：`neurova/agent/`（swarm.py、mailbox.py、swarm_event_log.py、candidate_merge.py 新增、memory_admission.py 新增、loops/base.py、chat_pipeline.py、goal_verifier.py）、`neurova/session_manager.py`、`neurova/context_pool.py`、`neurova/tool_executor.py`、`neurova/mem_core.py`、`neurova/benchmark/multi_agent/`、`tests/unit/`、`docs/08-research/`。
-- 执行者须知：本方案按批次（S1–S9）组织，**每批独立可交付、可红绿验证、可单独提交**。开工任何一批前，先读本方案附录 A（共享避坑清单）并对目标文件做撞车复核（`git log --oneline -5 -- <file>` + `git status`）；文中所有 `file:line` 均以**开工当日现场复核为准**（行号会漂移，符号名是锚）。
+- 范围：`neurova/agent/`（swarm.py、mailbox.py、swarm_event_log.py、team.py、candidate_merge.py 新增、memory_admission.py 新增、loops/base.py、chat_pipeline.py、goal_verifier.py）、`neurova/builtin_tools.py`、`neurova/tool_executor.py`、`neurova/session_manager.py`、`neurova/context_pool.py`、`neurova/mem_core.py`、`neurova/collaboration/`（room_*、memory_scope）、`neurova/api/endpoints/`（teams_api.py、collaboration_room_api.py）、`neurova/benchmark/multi_agent/`、`tests/unit/`、`docs/08-research/`。
+- 执行者须知：本方案按批次（S1–S12）组织，**每批独立可交付、可红绿验证、可单独提交**。开工任何一批前，先读本方案附录 A（共享避坑清单）并对目标文件做撞车复核（`git log --oneline -5 -- <file>` + `git status`）；文中所有 `file:line` 均以**开工当日现场复核为准**（行号会漂移，符号名是锚）。
 - 纪律：每项先红后绿（红灯测试实证期望行为，附实测输出）；净新增 LOC 尽量为负或逐条列明去向；live-verify 真链路自证；同根因全命中点扫荡；不建第二套平行体系。
 
 ---
 
-## 0. 评估结论与总路线
+## 0. 总路线
 
-### 0.1 对初版路线的评估调整（为什么这样排）
-
-初版路线（口述版）提了 8 项。逐项评估后做如下调整：
-
-| 初版项 | 评估结论 | 调整 |
-|---|---|---|
-| F2 评测体系补全 | 一切改进的红绿验证前提；H-7 已实证三处断点（T1 不可用/记忆串扰/usage 缺失） | **提到最前（S1）**，拆成判据记账（1A/1B）、记忆隔离（1C）、T1 重设计（1D） |
-| H-6 压缩纪律 | 最大单点缺口（D3 3vs5），但动会话存储与上下文装配主干，风险最高 | **拆成 S5（会话存储追加式，前置地基）+ S6（压缩纪律）两批**，S5 先行 |
-| H-3 候选制 | B5 是最大单子项差距（3vs5）；但"共享应用层 CAS"在本仓的对应物是结果回流面而非文件系统 | **范围收窄为"结果候选制"（S4）**：candidate 对象 + 主侧合并 + 冲突保留，不碰工作区文件 CAS |
-| 邮箱语义补全 | mailbox.py 刚完成两阶段改造（H-1），补幂等/优先级/死主回收是顺势小批 | **S2，趁热做** |
-| B1/B2 持久化协调 | 把 `_runs` 全量搬库是大手术且 swarm.py 是多会话热区 | **范围收窄（S3）**：生命周期迁移表显式化 + 状态变更复用 H-4 账本归档 + 启动重放收敛，不做全量搬库 |
-| H-5 记忆准入 | 动 MemCore 主干须独立方案（H 批已有裁定） | **只做轻量先行（S7）**：写入前拦截，不改记忆内部结构；3-Task 转正另立项 |
-| G2 MCP 深度集成 | 产品面大、与协作机制分无关 | **移出本方案**，另立项 |
-| H-8 长程目标 park/恢复 | 依赖目标/监督者产品面 | **移出本方案**（维持 P3 登记不变） |
-| （新增）S8 审批审计持久化 | E 维是本仓领先维（13vs11），CoworkOS 授权持久化生产面缺失、DA 评测确认其审批也不落审计——这是最能拉开差距的反超点 | **新增 S8** |
-| （新增）S9 重评分 | "超越"必须用同框数据宣告，不许凭感觉 | **新增 S9 收尾批** |
-
-### 0.2 批次依赖与并行建议
+### 0.1 批次总览与依赖
 
 ```
-S1 评测地基 ──┬─→ S2 邮箱语义（独立，可并行）
-              ├─→ S3 生命周期迁移表/状态归档 ──→ S4 结果候选制（同文件域，建议同会话连做）
-              └─→（S1 产出判据供 S9 复用）
-S5 会话存储追加式 ──→ S6 压缩纪律（严格依赖 S5 的事件落盘面）
-S7 记忆准入（独立，随时可插）
-S8 审批审计（独立，随时可插）
-S1–S8 全部落地 ──→ S9 重评分与超越判定
+S1  评测地基（usage/轨迹判据/记忆隔离/T1 重设计）
+S2  邮箱可靠性语义（幂等/优先级/死主回收）
+S3  run 生命周期迁移表 + 状态事件归档 ──┐
+S4  结果候选制（candidate→CAS 合入→冲突保留）─┤
+S5  会话存储追加式（JSONL+快照）→ S6 压缩纪律
+S7  记忆准入轻量先行
+S8  审批审计持久化
+S9  团队/房间能力接入蜂群（人在环回灌+群主权限/候选房间呈现/动态组队/共享黑板/AgentTeam 边界）
+S10 固定团队开放（list_teams/dispatch_team/临时团队沉淀）
+S11 多 agent 协作双入口（主 agent 编排发起 + 用户经项目房间直发）
+S12 同框重评分与超越判定
 ```
 
-- 可并行开工会话：S1、S2、S7、S8 互不碰文件域（S2 碰 mailbox/loops，S7 碰 mem_core 写入口，S8 碰审批/审计面）。
-- 必须串行：S3→S4（同在 swarm.py 结果/状态面）；S5→S6（同在会话存储与上下文装配面）。
-- 规模预估（按一个专注会话计）：S1 中、S2 小、S3 中、S4 中大、S5 大、S6 大、S7 小、S8 小中、S9 小。
+依赖与并行：
+- S1、S2、S7、S8 互不碰文件域，**可四会话并行**；
+- S3→S4 **串行**（同在 swarm.py 状态/回流面，建议同会话连做）；S5→S6 **串行**（S6 依赖 S5 的事件落盘面）；
+- S9 依赖 S4（候选房间呈现）与 S8（审批回灌）；S10 依赖 S9（团队接缝）与 S4；S11 依赖 S9/S10；
+- S12 收尾：S1–S11 全部落地后执行。
 
-### 0.3 涨分预算（诚实口径）
+### 0.2 涨分预算（诚实口径）
 
 | 批次 | 对应子项（COS 评测现分） | 保守 | 满额 |
 |---|---|---|---|
@@ -59,24 +48,28 @@ S1–S8 全部落地 ──→ S9 重评分与超越判定
 | S5+S6 | D3 3→5 | +1 | +2 |
 | S7 | D2 4→5 | 0 | +1 |
 | S8 | E1 4→5 | +1 | +1 |
-| **合计** | | **+8 → 92** | **+16 → 100（封顶前留诚实折扣，按 ≥96 判超越）** |
+| S9 | B4 4→5（人在环房间闭环） | +1 | +1 |
+| S10 | A1 2→4（名册选人+沉淀闭环） | +1 | +2 |
+| S11 | A1/B4 支撑（产品入口，机制经 S9/S10 计分） | 0 | +1 |
+| **合计** | | **+10 → 94** | **+20 → 锚点封顶内按证据计** |
 
-> 读法：满额路径需要 S1–S8 全部到位且重评时逐子项证据充分。若只做 S1–S4，保守落在 92–94，**尚不足以超越**——S5/S6（D3）与 S4（B5）是绕不开的两座山。评分是每子项 0–5 锚点制，涨分必须以证据支撑（S9 给出逐子项证据清单要求）。
+> 读法：判定线 **≥96**。保守路径（94）不足以宣告超越——S4（B5）、S5+S6（D3）、S10（A1）三处必须做实；满额路径超锚点上限时按实际证据计，不硬凑。评分是每子项 0–5 锚点制，涨分必须以证据支撑（S12 给出逐子项证据清单要求）。
 
-### 0.4 明确不做（防过度工程与违反裁定）
+### 0.3 明确不做（防过度工程与违反裁定）
 
 - 不把 `_runs` 全量搬 SQLite/不引入中心化调度常驻服务（进程内架构不变）；
 - 不动 MemCore 内部结构（S7 只做写入前拦截；3-Task 候选转正另立项）；
 - 不引入 LangGraph/LangChain 等图运行时（DA 评测"不学清单"）；
-- 不做 MCP 深度集成与长程目标 park/恢复（已移出，另行立项）；
+- 不做 MCP 深度集成与长程目标 park/恢复（G2/H-8 维持登记，另行立项；S10 的"MCP 第二阶段"仅指团队能力的外部暴露，非 G2 本体）；
 - 不以削弱治理三明治/工具面收窄换"灵活性"（E 维领先是本仓资产）；
-- 不新建第二套压缩/记忆/验收判定体系（复用 context_pool、goal_verifier、review、审批链单源）。
+- 不新建第二套压缩/记忆/验收/编排体系（复用 context_pool、goal_verifier、review、审批链、SwarmManager 单源）；
+- **不做群聊解题**（AutoSwarm 方案不做清单：论文实证去中心化讨论 39.32% < 单 agent 60.68%）——房间只做人的监督面/发起面/共享产物面。
 
 ---
 
 ## S1 评测地基补全（F2：3→5）
 
-**动机**：H-7 真基线（140 次真实调用）暴露三处 harness 断点——token usage 未进结果、无轨迹效率判据、跨任务记忆串扰污染对照；T1 虚构来源任务对真模型不可用。没有这批，后续所有改进都无法红绿验证、也无法在 S9 重评分。
+**动机**：H-7 真基线（140 次真实调用）暴露三处 harness 断点——token usage 未进结果、无轨迹效率判据、跨任务记忆串扰污染对照；T1 虚构来源任务对真模型不可用。没有这批，后续所有改进都无法红绿验证、也无法在 S12 重评分。
 
 **现状**：harness 在 `neurova/benchmark/multi_agent/`（runner.py、tasks.py、metrics.py、report.py、suites/）；结果对象 `TaskOutcome` 字段以现场为准；真模型驱动方式见基线报告（临时驱动 + `NEUROVA_DATA_DIR` 隔离 + 清代理 env）。
 
@@ -142,7 +135,7 @@ S1–S8 全部落地 ──→ S9 重评分与超越判定
 
 **红灯**：新增 `test_candidate_merge.py`——直传结果不再直接定案（先 submitted）；CAS 冲突保留双方并升级；验收驳回走 reviseRequired。
 **绿灯验收**：swarm 回流/续跑/验收门既有测试 A/B 零新增失败；integrationReport 含 candidates 与 conflicts 字段。
-**避坑**：不新造第二套验收判定器（复用 goal_verifier/review，附录 A14）；integrationReport 字段变化会撞契约断言——同批更新；本批与 S3 同在 swarm.py，**同一会话连做**，避免两 会话改同一文件。
+**避坑**：不新造第二套验收判定器（复用 goal_verifier/review，附录 A14）；integrationReport 字段变化会撞契约断言——同批更新；本批与 S3 同在 swarm.py，**同一会话连做**，避免两会话改同一文件。
 
 ---
 
@@ -160,7 +153,7 @@ S1–S8 全部落地 ──→ S9 重评分与超越判定
 
 **红灯**：新增 `test_session_store_append_only.py`——追加 200 条消息后文件写放大呈 O(1)（对比全量重写）；断电模拟（写一半的 JSONL 行）读取不炸、跳过坏行；旧格式文件懒迁移后读数一致。
 **绿灯验收**：会话相关全量测试（core+api 的 history/timeline/搜索）A/B 零新增失败；live-verify：起真后端对话数轮后检查会话文件确为 JSONL+snapshot 形态。
-**避坑**：本批是全方案**风险最高**的一项——务必独立会话专做、先设计后动手；线程锁语义保持既有（附录 A6 的 SQLite 锁纪律不适用于文件，但并发写同一会话文件的锁必须保住）；截断/阈值一律具名常量（附录 A2）。
+**避坑**：本批是全方案**风险最高**的一项——务必独立会话专做、先设计后动手；线程锁语义保持既有；截断/阈值一律具名常量（附录 A2）。
 
 ---
 
@@ -207,7 +200,7 @@ S1–S8 全部落地 ──→ S9 重评分与超越判定
 **改动文件**：`neurova/agent/approval_chain.py`、审批治理面（`tool_executor.py` 的 ASK/决定点，以现场为准）、对应测试。
 
 **实现要点**
-- `requestRunApproval` 与 `decideSwarmApproval` 的每次请求/决定落**审计事件**（复用仓内既有审计单源，以现场复核为准；U1 批已验证审计事件机制可用）：级别、动作、path_values、发起 run、决策人、决策、时延。
+- `requestRunApproval` 与 `decideSwarmApproval` 的每次请求/决定落**审计事件**（复用仓内既有审计单源，以现场复核为准）：级别、动作、path_values、发起 run、决策人、决策、时延。
 - 查询面：挂现有管理/运维查询端点域，**不新开平行端点域**。
 - fail-open：审计写失败不阻断审批主流程，但错误必须可见（日志 + 计数），不许静默吞。
 
@@ -217,7 +210,72 @@ S1–S8 全部落地 ──→ S9 重评分与超越判定
 
 ---
 
-## S9 重评分与超越判定
+## S9 团队/房间能力接入蜂群（B4：4→5；A1/D1/D2 联动）
+
+**动机**：COS 的 B4 5 分含 askhuman 人在环面、B5 含"人工可拦截"、A1 含动态组队——本仓已有现成接缝（协作房间/团队名册/记忆作用域/群主制度），接入后这些子项的机制缺口直接补上，且给 S4 候选制、S8 审批审计提供产品呈现面。
+
+**现状接缝（开工前现场复核符号与行号）**
+- 协作房间：`neurova/collaboration/room_store.py`（room_id = 协作 project_id 的既有等式，复用 SessionRepository 零新表）、`room_bus.py`（广播）、`room_turn_router.py`（@路由 + 默认应答者，人→agent 已通）。
+- 群主制度（已生效，非仅展示）：房间发消息/编辑/成员增删均按 **admin/owner/成员**三级鉴权（`neurova/api/endpoints/collaboration_room_api.py`，owner 永不被移除）；团队亦有 `owner_id`（`teams_api.py`）。
+- 团队名册：`neurova/api/endpoints/teams_api.py`（团队 + 成员 + 每成员职责 prompt + team prompt-context，JSON 落盘 `NEUROVA_TEAMS_PATH`）。
+- 记忆作用域：`neurova/collaboration/memory_scope.py`（`direct` / `room:<room_id>` / `chgrp:` 三作用域，群群隔离，读写侧共用单源）。
+- ACP 多角色编排：`neurova/agent/team.py`（AgentTeam.add_member/orchestrate，task_assignment→task_result，共享 trace_id）。
+
+**范围钉死**：本批「群」**仅指协作房间**（room_id = 协作 project_id，听众是同批登录用户+成员 agent）。渠道群聊（飞书/QQ/Discord 等，`chgrp:` 作用域，听众是外部第三方身份，群主/管理员是平台侧概念）**不在整合范围**——两类群在 memory_scope 里本就是并列不同职的两个作用域，渠道群不参与蜂群审批链与候选拦截。
+
+**实现要点**
+1. **升级/审批 × 房间 = 人在环闭环**：SwarmManager 的 escalate 与审批链 L1/L2 的 ASK 投递到协作房间（sender_type=system/agent 的房间消息）；人在房间回复 → 经新桥接（approval_chain ↔ room_bus 的 pending-approval 匹配）回灌 `decideSwarmApproval`。**决策权限复用房间既有群主制度**：L2 必审的决策人限**群主（project.owner_id）或平台 admin**，普通成员的房间回复只记为议见不判定；审批审计（S8）记录决策人的房间身份。红线：房间只做"呈现 + 应答回灌"，判定权仍在审批链单源。
+2. **候选 × 房间 = 人工可拦截的产品面**：CandidateReport 的 submitted/merged/conflict 事件投递到所属房间，人在房间里可直接拦截合并；artifactKeys 优先指向协作 project 的既有产物空间。
+3. **团队名册 × spawn = 动态组队**：spawn 支持从团队名册按成员职责 prompt 选人（list_agents 辅助选人已有），角色复用 `collaboration_template.AgentRole`——补"按任务动态组队"缺口；不引入角色辩护等重机制。
+4. **memory_scope × 蜂群 = 共享黑板**：蜂群 run 的跨成员共享记忆复用 `room:<room_id>` 作用域语义（或并列新增 `run:<run_id>` 作用域，与 room/chgrp 同构），群群隔离与"读单聊基线"语义直接继承，不新造作用域体系。
+5. **AgentTeam 与 Swarm 的双实现取舍（教义第 7 条）**：两者定位不同——AgentTeam 是 ACP 面向外部 agent 的步骤编排，Swarm 是进程内子代理治理（评测评分对象）。初步裁定**双轨保留、边界写清**，但本批落地时必须复核两者是否出现同功能重复点；出现即按"先比后合"收口，不并存各调各的。
+
+**红灯**：新增 `test_swarm_room_integration.py`——升级与审批消息在房间可见；群主回复回灌判定成功、普通成员回复只记议见；候选合并事件在房间可查；按名册选人 spawn 生效。
+**绿灯验收**：room/collaboration 既有测试 A/B 零新增失败；live-verify 真房间走一次 升级→群主拍板→回灌判定。
+**避坑**：房间消息走既有 RoomBus/RoomStore，**零新表零新协议**；房间持久层复用 SessionRepository，勿另写存储；权限判定复用 collaboration_room_api 既有三级鉴权谓词，不新造第二套权限体系。
+
+---
+
+## S10 固定团队开放给主 agent（A1：2→4）
+
+**动机**：用户拍板：把现有固定团队作为可调用资源开放给主 agent——主 agent 既能通过任务编排调用满足需求的固定团队，也能在固定团队不满足需求时发起临时团队。COS 的 A1（团队组成与角色分配）现分 2vs3，本批连同 S9 的名册选人把它补上。
+
+**形态选型（已裁定）**：**原生 builtin 工具优先，MCP 仅作外部开放的第二阶段**。主 agent 是进程内调用方，原生工具直接进既有治理面（工具面收窄/审批链/台账/成本闸）；本仓 MCP server（`mcp_ontology_server.py`，双鉴权）定位是给外部消费者开放能力——内部能力绕 MCP 是多一跳无收益。第二阶段若外部 agent 需要用团队，再按该 server 既有模式加 MCP tools（工具壳两层、机制单源）。
+
+**改动文件**：`neurova/builtin_tools.py`（新工具 schema）、`neurova/tool_executor.py`（执行点）、`neurova/agent/swarm.py`（多路 spawn 编排）、`tests/unit/agent/`。
+
+**实现要点**
+1. `list_teams()`：列固定团队（id/名称/成员与职责摘要）。数据单源=teams_api 的 JSON 落盘，**不另建团队存储**。
+2. `dispatch_team(teamId, task|taskUnit)`：把固定团队整体派活——按名册生成多路 spawn（成员职责 prompt 注入任务书角色段），TaskUnit.dependencies 做步间编排；run 带 teamId 溯源标（origin="team_dispatch"）；验收门/评审相位/候选制照走；治理三明治按主 agent 现有预算执行。
+3. **临时团队不新增工具**：现有 `spawn_subagent` 自由选人+依赖编排本就是临时组队。补两件增量——`spawn_subagent` 增可选 `teamId`（固定团队骨干+临时外援混编）；**临时团队沉淀**：run 成功收尾后主 agent 可经治理 ASK（审批链 L1）提议把本次组合（成员+职责快照）沉淀为固定团队，**人批准后才写 teams_api**——团队是用户资产，agent 不得自行立队。此沉淀闭环是 CoworkOS 没有的产品循环。
+4. 三个工具均为**主 agent 专属**：加入成员工具面剔除集（先例=spawn/cancel_subagent 的 allowlist 排除）。
+
+**红灯**：新增 `test_team_dispatch.py`——list_teams 返回名册；dispatch_team 按名册生成多路 spawn 且职责入任务书；无 teamId 的 dispatch 报错；沉淀提议未经批准不写 teams_api、批准后写入；三工具对成员不可见。
+**绿灯验收**：swarm 既有测试 A/B 零新增失败；live-verify 用真团队走一次 派团→验收→候选合并。
+**避坑**：dispatch_team 是多路 spawn 的编排糖，**不得绕过治理三明治**（广度/预算/冷却照算）；成员职责 prompt 来自团队名册（用户资产），注入前过 context_firewall；工具 schema 变更同步前端类型与路由快照（附录 A3/A7）。
+
+---
+
+## S11 多 agent 协作双入口（A1/B4 支撑）
+
+**动机**：用户拍板：多 agent 协作要有两个入口——主 agent 按情况经任务编排主动发起（已有），以及**用户经项目直接发起**多 agent 协作。双入口让蜂群既可被 agent 自主驱动，也可被人直接驱动。
+
+**改动文件**：`neurova/collaboration/room_turn_router.py`、`neurova/agent/swarm.py`（入口适配）、`neurova/api/endpoints/collaboration_room_api.py`（如需动作端点）、对应测试。
+
+**实现要点**
+1. **入口一（已有）**：主 agent 经任务编排主动发起——`spawn_subagent` / `dispatch_team`，一切照旧。
+2. **入口二（新增）：用户经项目房间直发**——用户在协作房间发协作指令（@全部成员消息或房间"发起协作"动作）。`room_turn_router` 识别协作模式后**不再逐个独立应答**（现状是逐个调 `Agent.chat`），而是把房间成员交给 SwarmManager 编排（按成员职责定主从/依赖，TaskUnit 统一拼装）。
+3. **观测与产出**：执行事件回房间广播（H-4 事件时间线可复用到房间视图）；终态报告以 candidate 落房间，用户按群主/成员权限拦截或采纳（S9 的呈现面）。
+4. **关键裁定**：入口二只是**发起面+观测面**换到房间，执行机制与入口一共用同一套 SwarmManager——**不建第二套编排引擎**（教义第 6 条；AgentTeam/Swarm 双实现错误不得再演）。
+5. **鉴权与治理**：发起人须为房间成员（三级鉴权已有）；L2 拦截权=群主/admin；预算由发起人显式给或沿用房间所属 agent 治理参数，治理三明治照常生效。
+
+**红灯**：新增 `test_room_collab_entry.py`——房间协作消息触发 swarm 编排（mock agent 成员）而非逐个独立应答；进度事件回房间广播；非成员发起被 403；预算参数生效。
+**绿灯验收**：room 既有测试 A/B 零新增失败；live-verify 真房间发起一次双人协作并看到事件流与终态报告。
+**避坑**：房间协作的共享历史注入沿用 `turn_origin=collaboration` 既有语义；成员间记忆仍按 memory_scope 作用域隔离；不要把房间消息当 TaskUnit 正文直通——经统一任务书拼装（正文截断守具名常量纪律，附录 A2）。
+
+---
+
+## S12 同框重评分与超越判定
 
 **动机**："超越"必须以同框口径的数据宣告。
 
@@ -227,62 +285,7 @@ S1–S8 全部落地 ──→ S9 重评分与超越判定
 3. 判定：合计 **≥96** 即超越成立；未达则列剩余差距与下一轮清单，不降低口径硬凑。
 4. 报告更新后按惯例推双远端（origin + github）。
 
-**避坑**：评分锚点看的是"机制是否存在且被消费"（写入→读取→反馈闭环），只落库没人读的机制不涨分——S9 评审时逐项核闭环。
-
----
-
-## 整合扩展：既有团队/群聊能力接入蜂群（响应用户追加问询，挂靠 S3/S4/S8 执行）
-
-> 结论：**可以整合，且有现成接缝**——但要按「人的监督面 + 共享产物面」整合，**不是**把群聊当多 agent 讨论解题器（AutoSwarm 方案"不做清单"明令禁止：论文实证去中心化讨论 39.32% < 单 agent 60.68%）。
->
-> **范围钉死：本节「群」仅指协作房间**（room_id = 协作 project_id，听众是同批登录用户+成员 agent）。渠道群聊（飞书/QQ/Discord 等，`chgrp:` 作用域，听众是外部第三方身份，群主/管理员是平台侧概念）**不在本整合范围**——两类群在 `memory_scope.py` 里本就是并列不同职的两个作用域，不参与蜂群审批链与候选拦截。
-
-**仓内既有能力（开工前现场复核符号与行号）**
-- 协作房间：`neurova/collaboration/room_store.py`（room_id = 协作 project_id 的既有等式，复用 SessionRepository 零新表）、`room_bus.py`（广播）、`room_turn_router.py`（@路由 + 默认应答者，人→agent 已通）。
-- 群主制度（已生效，非仅展示）：房间发消息/编辑/成员增删均按 **admin/owner/成员**三级鉴权（`neurova/api/endpoints/collaboration_room_api.py`，owner 永不被移除）；团队亦有 `owner_id`（`teams_api.py`）。
-- 团队名册：`neurova/api/endpoints/teams_api.py`（团队 + 成员 + 每成员职责 prompt + team prompt-context，JSON 落盘）。
-- 记忆作用域：`neurova/collaboration/memory_scope.py`（`direct` / `room:<room_id>` / `chgrp:` 三作用域，群群隔离，读写侧共用单源）。
-- ACP 多角色编排：`neurova/agent/team.py`（AgentTeam.add_member/orchestrate，task_assignment→task_result，共享 trace_id）。
-
-**接入点（按批挂靠，不另立批次）**
-1. **S3/S8 × 房间 = 人在环闭环（B4/E1 受益）**：SwarmManager 的 escalate 与审批链 L1/L2 的 ASK 投递到协作房间（sender_type=system/agent 的房间消息）；人在房间回复 → 经新桥接（approval_chain ↔ room_bus 的 pending-approval 匹配）回灌 `decideSwarmApproval`。审批审计（S8）天然多了一个人类可读的呈现面。**决策权限复用房间既有群主制度**（`collaboration_room_api.py` 已生效的三级鉴权：发消息/编辑/成员增删均按 admin/owner/成员把关，且 owner 永不被移除）——L2 必审的决策人限**群主（project.owner_id）或平台 admin**，普通成员的房间回复只记为议见不判定，避免"房间里任何人回复都算拍板"；审批审计记录决策人的房间身份。红线：房间只做"呈现 + 应答回灌"，判定权仍在审批链单源。
-2. **S4 × 房间/项目 = 候选制的产品面（B5 受益）**：CandidateReport 的 submitted/merged/conflict 事件投递到所属房间，人在房间里可直接拦截合并（COS 的 B5 锚点"人工可拦截"由此落地）；artifactKeys 优先指向协作 project 的既有产物空间。
-3. **团队名册 × spawn = 动态组队（A1 受益，现分 2vs3）**：spawn 支持从团队名册按成员职责 prompt 选人（list_agents 辅助选人已有），角色复用 `collaboration_template.AgentRole`——补"按任务动态组队"缺口；不引入角色辩护等重机制。
-4. **memory_scope × 蜂群 = 共享黑板（D1/D2 受益）**：蜂群 run 的跨成员共享记忆复用 `room:<room_id>` 作用域语义（或并列新增 `run:<run_id>` 作用域，与 room/chgrp 同构），群群隔离与"读单聊基线"语义直接继承，不新造作用域体系。
-5. **AgentTeam 与 Swarm 的双实现取舍（教义第 7 条）**：两者定位不同——AgentTeam 是 ACP 面向外部 agent 的步骤编排，Swarm 是进程内子代理治理（评测评分对象）。初步裁定**双轨保留、边界写清**（外部协作 vs 内部蜂群），但 S3/S4 落地时必须复核两者是否出现同功能重复点；出现即按"先比后合"收口，不并存各调各的。
-
-**红灯/验收（随挂靠批走）**：升级与审批消息在房间可见且回复能回灌判定（S3/S8 测试内）；候选合并事件在房间可查、人工拦截生效（S4 测试内）；团队选人 spawn 的测试（S4 或独立小测试）。
-**避坑**：房间消息走既有 RoomBus/RoomStore，**零新表零新协议**；不要在房间里做自由讨论式多 agent 解题（违反 AutoSwarm 方案不做清单）；房间持久层复用 SessionRepository，勿另写存储。
-
----
-
-## 拓展批（A/B 项）：固定团队开放给主 agent + 多 agent 协作双入口
-
-> 用户追加拍板的两项拓展。依赖：S3 迁移表与 S4 候选制先落地（本批消费其产物）；排 S4 之后执行。**设计总裁定：两条拓展全部复用 SwarmManager 单源机制（spawn/TaskUnit/依赖门控/验收门/候选制/治理三明治），不建第二套编排引擎**（教义第 6 条）。
-
-### A 项：固定团队作为可调用资源开放给主 agent
-
-**形态选型（已裁定）**：**原生 builtin 工具优先，MCP 仅作外部开放的第二阶段**。主 agent 是进程内调用方，原生工具直接进既有治理面（工具面收窄/审批链/台账/成本闸）；本仓 MCP server（`mcp_ontology_server.py`，双鉴权）定位是给外部消费者开放能力——内部能力绕 MCP 是多一跳无收益。第二阶段若外部 agent 需要用团队，再按该 server 既有模式加 MCP tools（工具壳两层、机制单源）。
-
-**新增主 agent 工具（成员工具面剔除，先例=spawn/cancel_subagent）**
-1. `list_teams()`：列固定团队（id/名称/成员与职责摘要）。数据单源=teams_api 的 JSON 落盘（`NEUROVA_TEAMS_PATH`），**不另建团队存储**。
-2. `dispatch_team(teamId, task|taskUnit)`：把固定团队整体派活——按名册生成多路 spawn（成员职责 prompt 注入任务书角色段），TaskUnit.dependencies 做步间编排；run 带 teamId 溯源标（origin="team_dispatch"）；验收门/评审相位/候选制照走；治理三明治按主 agent 现有预算执行。
-3. **临时团队不新增工具**：现有 `spawn_subagent` 自由选人+依赖编排本就是临时组队。补两件增量——`spawn_subagent` 增可选 `teamId`（固定团队骨干+临时外援混编）；**临时团队沉淀**：run 成功收尾后主 agent 可经治理 ASK（审批链 L1）提议把本次组合（成员+职责快照）沉淀为固定团队，**人批准后才写 teams_api**——团队是用户资产，agent 不得自行立队。此沉淀闭环是 CoworkOS 没有的产品循环，直接支撑 A1"团队组成"得分点。
-
-**红灯**：新增 `test_team_dispatch.py`——list_teams 返回名册；dispatch_team 按名册生成多路 spawn 且职责入任务书；无 teamId 的 dispatch 报错；沉淀提议未经批准不写 teams_api、批准后写入。
-**绿灯验收**：swarm 既有测试 A/B 零新增失败；live-verify 用真房间/真团队走一次 派团→验收→候选合并。
-**避坑**：dispatch_team 是多路 spawn 的编排糖，**不得绕过治理三明治**（广度/预算/冷却照算）；成员职责 prompt 来自团队名册（用户资产），注入前过 context_firewall；工具 schema 变更同步前端类型与路由快照（附录 A3/A7）。
-
-### B 项：多 agent 协作双入口
-
-- **入口一（已有）**：主 agent 经任务编排主动发起——`spawn_subagent` / `dispatch_team`，一切照旧。
-- **入口二（新增）：用户经项目直接发起**——用户在协作房间（room_id=协作 project_id）里发起协作（@全部成员消息或房间"发起协作"动作）。`room_turn_router` 识别协作模式后**不再逐个独立应答**，而是把房间成员交给 SwarmManager 编排（按成员职责定主从/依赖），执行事件回房间广播（H-4 时间线可复用到房间视图），终态报告以 candidate 落房间，用户按群主/成员权限拦截或采纳。
-- **关键裁定**：入口二只是**发起面+观测面**换到房间，执行机制与入口一共用同一套 SwarmManager——否则就是 AgentTeam/Swarm 双实现错误的再演（教义第 6/7 条）。
-- **鉴权与治理**：发起人须为房间成员（三级鉴权已有）；L2 拦截权=群主/admin（前批已定）；预算由发起人显式给或沿用房间所属 agent 治理参数，三明治照常生效。
-
-**红灯**：新增 `test_room_collab_entry.py`——房间协作消息触发 swarm 编排（mock agent 成员）而非逐个独立应答；进度事件回房间广播；非成员发起被 403。
-**绿灯验收**：room 既有测试 A/B 零新增失败；live-verify 真房间发起一次双人协作并看到事件流与终态报告。
-**避坑**：房间协作的共享历史注入沿用 `turn_origin=collaboration` 既有语义；成员间记忆仍按 memory_scope 作用域隔离；不要把房间消息当 TaskUnit 正文直通——经统一任务书拼装（正文截断守具名常量纪律，附录 A2）。
+**避坑**：评分锚点看的是"机制是否存在且被消费"（写入→读取→反馈闭环），只落库没人读的机制不涨分——S12 评审时逐项核闭环。
 
 ---
 
