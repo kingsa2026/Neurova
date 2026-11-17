@@ -68,6 +68,36 @@ class LoopExitDecision:
         return cls(action=LOOP_CONTINUE, continuation_prompt=prompt, gate_name=gate_name)
 
 
+def _backgroundWaitNotice(pending: Dict[str, Any]) -> str:
+    """H-2：后台待办的事实化通知（单源措辞；调用方只拼数字）。"""
+    parts = []
+    if pending.get("active"):
+        parts.append(f"{len(pending['active'])} 个子代理仍在运行")
+    if pending.get("mailbox_pending"):
+        parts.append(f"{pending['mailbox_pending']} 条子代理结果待回灌")
+    return (
+        "⚠️ 后台任务尚未全部收尾（" + "；".join(parts) +
+        "）：完成后结果将自动回灌本会话，subagent_status 可查。"
+    )
+
+
+def _exitDecision(bgNotice: str = "") -> LoopExitDecision:
+    """正常收口；带后台待办时出口决定携带等待事实（reason 供调用方并入正文）。"""
+    if bgNotice:
+        return LoopExitDecision(action=LOOP_DONE, reason=bgNotice, gate_name="background_work")
+    return LoopExitDecision.done()
+
+
+def appendExitNotice(response: Any, notice: str) -> None:
+    """出口通知就地并进 `response.content`（幂等：已在正文不重复追加）。"""
+    if not notice:
+        return
+    content = getattr(response, "content", "") or ""
+    if notice in content:
+        return
+    response.content = content + ("\n\n" if content else "") + notice
+
+
 async def evaluateLoopExit(
     loop: "BaseAgentLoop",
     *,
@@ -96,20 +126,37 @@ async def evaluateLoopExit(
     """
     from neurova.core import turn_context as turnContext
 
+    # H-2 机械完成闸门：后台工作未清（活跃子代理/未回灌邮箱件）时，"完成"不得
+    # 静默通过——与目标门无关（无目标也核账），先于目标门执行。发现而不裁决：
+    # 不续跑模型（防忙等），只把等待事实落盘留痕并随出口带出；结果完成后仍走
+    # 既有邮箱回灌通道。
+    try:
+        from neurova.agent.swarm import get_swarm_manager
+
+        _pendingBg = get_swarm_manager().pendingBackgroundForSession(
+            getattr(loop.agent, "current_session_id", "")
+        )
+    except Exception:  # noqa: BLE001 - 蜂群不可用不阻断出口（fail-open）
+        _pendingBg = {"pending": False}
+    bgNotice = _backgroundWaitNotice(_pendingBg) if _pendingBg.get("pending") else ""
+    if bgNotice:
+        persistModelVisibleAnnouncement(loop.agent, bgNotice, source="completion_gate")
+        logger.info("机械完成闸门：出口带后台待办（%s）", bgNotice)
+
     goal = loop.resolveTurnGoal()
     if not goal or not goalVerificationEnabled():
         # **无目标就不求值**（D-4），这是本求值点的成本边界，也是语义边界：
         # 出口求值要抓的是"假完成"——一个伪命题在没有目标时并不存在。
         # 若在此照跑门控集合，死循环门会拿出口签名去判重，普通对话会因此
         # 收到一次没有意义的"换策略"续跑（实测：length 恢复重试被多打一轮）。
-        return LoopExitDecision.done()
+        return _exitDecision(bgNotice)
 
     # 优先用本轮 state 上的执行器（Issue #268）：实例引用是"最后进入本 loop 的
     # 会话"留下的，交叠会话下会把别人的门控窗口接过来。无 state 的调用方仍走
     # 实例兜底（直接驱动本函数的老用例）。
     runner = gateRunner if gateRunner is not None else loop.gateRunnerForExit()
     if runner is None:
-        return LoopExitDecision.done()
+        return _exitDecision(bgNotice)
 
     from neurova.agent.gates import StopAction
     from neurova.agent.goal_verifier import verifyGoalCompletion
@@ -136,7 +183,7 @@ async def evaluateLoopExit(
         _recordHarnessGapFromExit(decision.gate_name, achieved=achieved,
                                   reason=decision.reason)
         if achieved:
-            return LoopExitDecision.done()
+            return _exitDecision(bgNotice)
         return LoopExitDecision.stop(decision.reason, decision.gate_name)
     if decision.action == StopAction.INTERRUPT_AND_CONTINUE:
         # 出口续跑是 goal 门控的能力，**预算归它所有**：任何门控在出口请求续跑
@@ -155,7 +202,7 @@ async def evaluateLoopExit(
         turnContext.mark_turn_goal_continuation()
         logger.info("主出口门控 %s 软干预（提示将注入消息序列）: %s", decision.gate_name, decision.reason)
         return LoopExitDecision.resume(decision.continuation_prompt, decision.gate_name)
-    return LoopExitDecision.done()
+    return _exitDecision(bgNotice)
 
 
 def _recordHarnessGapFromExit(gateName: str, *, achieved: bool, reason: str = "") -> None:
