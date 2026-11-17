@@ -120,6 +120,10 @@ from neurova.core.agent_run_ledger import (
     SUBAGENT_CAUSE_CANCELLED, SUBAGENT_CAUSE_TIMEOUT,
 )
 
+# H-4 事件账本里 task/error 的摘要上界（具名声明——正文长度尺度不许散落数字上界）
+EVENT_TASK_SUMMARY_CHARS = 80
+EVENT_ERROR_SUMMARY_CHARS = 160
+
 
 def mcpBorrowedToolNames() -> frozenset:
     """P3（蜂群对照 #8）：父上下文当前可用的 MCP 工具名快照（借用面）。
@@ -224,6 +228,8 @@ class SubAgentRun:
     # P3-4（评测报告 G-13）：数据面围栏扫描摘要（task_hits/payload_hits/hit_count）。
     # None = 未命中（干净任务不留标记噪音）；命中只标记与告警，不改写不阻断。
     data_fence: Optional[Dict[str, Any]] = None
+    # H-4：本 run 最后一笔归档事件的 id（事件账本因果链的串接锚点；内部记账）。
+    last_event_id: str = ""
     status: str = SUBAGENT_PENDING  # 取值域见 SUBAGENT_STATUSES（本模块常量，唯一出处）
     # P2-10 增强：子代理升级/结构化结果提交（escalate/submit_result 工具写入，
     # 随邮箱投递发起者会话；只作读数与通知，不改变运行状态机）
@@ -582,6 +588,13 @@ class SwarmManager:
             self._runs[run.subagent_id] = run
             self._evict_finished_runs()
 
+        # H-4：派生事实入 run 事件账本（正文不进账本，task 只留摘要）
+        self._logRunEvent(run, "spawned", {
+            "task": run.task[:EVENT_TASK_SUMMARY_CHARS], "origin": run.origin, "depth": run.depth,
+            "subagent_type": run.subagent_type, "model": run.model,
+            "parent_trace_id": run.parent_trace_id,
+        })
+
         if fallback:
             logger.info("Swarm: 请求的 agent_id=%s 不存在，回退到 %s", agent_id, resolved_id)
 
@@ -688,6 +701,22 @@ class SwarmManager:
         with self._lock:
             runs = sorted(self._runs.values(), key=lambda r: r.started_at, reverse=True)
         return [r.to_dict() for r in runs[:limit]]
+
+    # ── H-4：run 级事件归档（JSONL 账本，因果链沿 last_event_id 串接）──
+
+    def _logRunEvent(self, run: SubAgentRun, eventType: str,
+                     payload: Optional[Dict[str, Any]] = None) -> None:
+        """run 生命周期事件入归档；fail-open（归档故障不阻断蜂群主流程）。"""
+        try:
+            from neurova.agent.swarm_event_log import appendRunEvent
+
+            eventId = appendRunEvent(
+                run.subagent_id, eventType, payload,
+                causationId=getattr(run, "last_event_id", ""),
+            )
+            run.last_event_id = eventId
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Swarm: 事件归档失败 (%s/%s): %s", run.subagent_id, eventType, e)
 
     def pendingBackgroundForSession(self, session_id: Optional[str]) -> Dict[str, Any]:
         """H-2 机械完成闸门的判定输入：本会话还有哪些蜂群后台工作未清。
@@ -829,6 +858,11 @@ class SwarmManager:
         )
         with self._lock:
             self._runs[run.subagent_id] = run
+        self._logRunEvent(run, "spawned", {
+            "task": run.task[:EVENT_TASK_SUMMARY_CHARS], "origin": run.origin, "depth": run.depth,
+            "subagent_type": run.subagent_type, "model": run.model,
+            "parent_trace_id": run.parent_trace_id,
+        })
         execTask = asyncio.create_task(
             self._execute(run, agent, info["initiator_agent"], info["stream"])
         )
@@ -864,6 +898,11 @@ class SwarmManager:
         with self._lock:
             self._runs[bid] = run
             self._evict_finished_runs()
+        self._logRunEvent(run, "spawned", {"task": run.task[:EVENT_TASK_SUMMARY_CHARS],
+                                           "origin": run.origin,
+                                           "depth": run.depth, "blocked": True})
+        self._logRunEvent(run, "terminal", {"status": run.status, "cause": run.cause,
+                                            "error": (run.error or "")[:EVENT_ERROR_SUMMARY_CHARS]})
 
 
     async def resumeFinishedRun(
@@ -1184,6 +1223,10 @@ class SwarmManager:
             }
             await self._broadcast(run, "subagent_stalled", payload)
             self._notifyStallMail(run, payload)
+            self._logRunEvent(run, "stalled", {
+                "stalled_seconds": payload["stalled_seconds"],
+                "reminder_count": payload["reminder_count"],
+            })
             threshold = min(threshold * 2, cap)
 
     def _notifyStallMail(self, run: SubAgentRun, payload: Dict[str, Any]) -> None:
@@ -1308,6 +1351,10 @@ class SwarmManager:
             task=run.task,
             traceId=run.trace_id,
         )
+        # H-4：started 事件入账（因果链接在 spawned 之后）
+        self._logRunEvent(run, "started", {
+            "status": run.status, "model": run.model, "trace_id": run.trace_id,
+        })
         await self._broadcast(
             run,
             "subagent_started",
@@ -1458,6 +1505,13 @@ class SwarmManager:
             # 台账终态与蜂群终态同一个落点：`completed`/`failed`/超时/取消都从这里收尾，
             # 缺一条就在台账里留一行永久 running 的幽灵（L 条的另一副面孔）。
             closeSubagentRun(ledgerRunId, run.status, run.cause)
+            # H-4：终态事件入账（成败/超时/取消都从这里落，不留幽灵）；
+            # error 摘要随行（cause 为空时它是唯一起因线索；截断防正文进账本）
+            self._logRunEvent(run, "terminal", {
+                "status": run.status, "cause": run.cause,
+                "error": (run.error or "")[:EVENT_ERROR_SUMMARY_CHARS],
+                "duration_ms": round(run.duration * 1000, 3),
+            })
             self._endMemberTrace(recorder, memberSpanId, run)
             reset_subagent_depth(depth_token)
             set_subagent_tool_allowlist(None)
@@ -1710,6 +1764,10 @@ class SwarmManager:
             "suggested_action": run.escalation["suggested_action"],
             "action_note": run.escalation["action_note"],
         }
+        self._logRunEvent(run, "escalated", {
+            "reason": run.escalation["reason"], "severity": run.escalation["severity"],
+            "suggested_action": run.escalation["suggested_action"],
+        })
         self.pushParentMail(run, "子Agent升级", envelope)
         return envelope
 
@@ -1733,6 +1791,7 @@ class SwarmManager:
             "summary": run.submitted_result["summary"],
             "status": run.submitted_result["status"],
         }
+        self._logRunEvent(run, "result_submitted", {"status": run.submitted_result["status"]})
         self.pushParentMail(run, "子Agent结果", envelope)
         return envelope
 
