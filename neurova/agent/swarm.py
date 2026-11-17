@@ -726,6 +726,15 @@ class SwarmManager:
         except Exception as e:  # noqa: BLE001
             logger.debug("Swarm: 事件归档失败 (%s/%s): %s", run.subagent_id, eventType, e)
 
+    def runEvents(self, subagent_id: str) -> Dict[str, Any]:
+        """H-4 读侧：按 run 取事件账本（事件因果链完整保留；账本独立于内存
+        逐出——run 被逐出后仍可查）。未知/无事件的 run 返回空列表。"""
+        sid = str(subagent_id or "").strip()
+        from neurova.agent.swarm_event_log import readRunEvents
+
+        events = readRunEvents(sid) if sid else []
+        return {"subagent_id": sid, "count": len(events), "events": events}
+
     def pendingBackgroundForSession(self, session_id: Optional[str]) -> Dict[str, Any]:
         """H-2 机械完成闸门的判定输入：本会话还有哪些蜂群后台工作未清。
 

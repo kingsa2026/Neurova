@@ -1269,7 +1269,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "subagent_status": {
         # 并行能力声明：只读蜂群运行记录（SwarmManager 的 status/list_all 在 RLock 下读内存态）。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
-        "description": "【查询子Agent状态】查蜂群子 Agent 的执行状态与最终报告；配合 background=true 或前台转后台后的轮询。subagent_id 省略时返回最近派生列表（新→旧，report 截断）。view=integration 返回集成前核对面（各子任务验收/评审/依赖状态与 blockers）。",
+        "description": "【查询子Agent状态】查蜂群子 Agent 的执行状态与最终报告；配合 background=true 或前台转后台后的轮询。subagent_id 省略时返回最近派生列表（新→旧，report 截断）。view=integration 返回集成前核对面（各子任务验收/评审/依赖状态与 blockers）。view=events 返回该 run 的事件账本（spawned/started/stalled/escalated/terminal 全程 + 因果链，H-4）。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1279,8 +1279,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 },
                 "view": {
                     "type": "string",
-                    "enum": ["runs", "integration"],
-                    "description": "runs（默认）按 run 查询；integration（P2-4）返回集成前核对面：integration_ready + blockers + 各子任务验收/评审状态——主任务汇总前用它确认无未验收挂账",
+                    "enum": ["runs", "integration", "events"],
+                    "description": "runs（默认）按 run 查询；integration（P2-4）返回集成前核对面：integration_ready + blockers + 各子任务验收/评审状态——主任务汇总前用它确认无未验收挂账；events（H-4）返回该 run 的事件账本（需 subagent_id）",
                 },
             },
             "required": [],
