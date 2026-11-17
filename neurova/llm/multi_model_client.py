@@ -503,6 +503,45 @@ class MultiModelLLMClient:
         except Exception:  # noqa: BLE001 - 观测失败不得影响错误上抛
             pass
 
+    def _archiveRequestAttempt(
+        self,
+        *,
+        client,
+        messages: List[Dict[str, str]],
+        durationMs: int,
+        success: bool,
+        errorKind: str = "",
+        errorSummary: str = "",
+        usage: Optional[Dict[str, Any]] = None,
+        stream: bool = False,
+        firstTokenMs: int = 0,
+        responseId: Optional[str] = None,
+    ) -> None:
+        """S17 F1：请求级归档单点（chat/chat_stream 的每次真实尝试经此入队）。
+
+        fail-soft：归档模块内部日志+计数（`requestArchiveWriteStats` 可读），
+        不阻断调用；消费面在档案聚合（projects_api dossier 读时 join）。
+        独立于 H-4 事件账本——不往账本写请求级事件，账本纪律不变。
+        """
+        try:
+            from neurova.core.request_archive import recordRequestArchive
+
+            recordRequestArchive(
+                provider=getattr(getattr(client, "provider", None), "id", "") or "",
+                model=getattr(client, "model", "") or "",
+                messages=messages,
+                usage=usage or {},
+                durationMs=durationMs,
+                success=success,
+                errorKind=errorKind,
+                errorSummary=errorSummary,
+                stream=stream,
+                firstTokenMs=firstTokenMs,
+                responseId=responseId,
+            )
+        except Exception as archiveError:  # noqa: BLE001 - 归档故障不阻断调用
+            logger.debug("请求归档失败: %s", archiveError)
+
     @staticmethod
     def _classify_error(error: Exception) -> str:
         """B1-2 错误分类单源委托（neurova.llm.model_error_policy）。
@@ -841,6 +880,10 @@ class MultiModelLLMClient:
                 get_metrics().record_llm_call(client.provider.id, client.model, True, duration)
             except Exception:
                 pass
+            # S17 F1：归档读的 usage 初值 hoist 到记账 try 之外——usage 记账故障
+            # 时归档仍按手头事实落盘（fail-soft 各自独立，互不拖死）
+            _prompt, _completion, _estimated = None, None, False
+            _cache_read, _cache_write = 0, 0
             try:
                 from neurova.core.usage_accounting import get_usage_accounting
 
@@ -923,6 +966,21 @@ class MultiModelLLMClient:
                 pass
             finally:
                 limiter.release(model_key)
+            # S17 F1：成功请求归档（一次真实 provider 调用 = 一条）
+            self._archiveRequestAttempt(
+                client=client,
+                messages=messages,
+                usage={
+                    "promptTokens": _prompt or 0,
+                    "completionTokens": _completion or 0,
+                    "estimated": bool(_estimated),
+                    "cacheReadTokens": _cache_read,
+                    "cacheWriteTokens": _cache_write,
+                },
+                durationMs=int(duration * 1000),
+                success=True,
+                responseId=getattr(result, "response_id", None) or getattr(result, "id", None),
+            )
             return {
                 "success": True,
                 "response": result,
@@ -943,6 +1001,15 @@ class MultiModelLLMClient:
                 pass
             finally:
                 limiter.release(model_key)
+            # S17 F1：熔断拒绝也归档（"没打出去"的请求按失败族留痕，摘要带熔断事实）
+            self._archiveRequestAttempt(
+                client=client,
+                messages=messages,
+                durationMs=int((time.time() - start_time) * 1000),
+                success=False,
+                errorKind=self._classify_error(e),
+                errorSummary=str(e),
+            )
             return {
                 "success": False,
                 "error": f"熔断打开（连续失败暂停请求）: {e}",
@@ -981,6 +1048,15 @@ class MultiModelLLMClient:
                 pass
             finally:
                 limiter.release(model_key)
+            # S17 F1：失败请求归档（错误族 + 脱敏摘要，与成功路径同单源）
+            self._archiveRequestAttempt(
+                client=client,
+                messages=messages,
+                durationMs=int((time.time() - start_time) * 1000),
+                success=False,
+                errorKind=error_kind,
+                errorSummary=str(e),
+            )
             return {
                 "success": False,
                 "error": str(e),
@@ -1231,6 +1307,8 @@ class MultiModelLLMClient:
                 # 无 usage 也记 1 次调用（calls 恒 0 的根因），有 usage 记真实 token。
                 # 网关不回传 usage 时（实测 sensetime 流式恒空）用 tiktoken 估值并
                 # 显式标记 estimated=True，供对账区分真值/估计值。
+                # S17 F1：归档读的 usage 初值 hoist 到记账 try 之外（同 chat 路径）
+                _prompt, _completion, _estimated = None, None, False
                 try:
                     from neurova.core.usage_accounting import get_usage_accounting
 
@@ -1289,6 +1367,23 @@ class MultiModelLLMClient:
                         )
                 except Exception:
                     logger.debug("流式 usage 入账跳过", exc_info=True)
+                # S17 F1：流式成功归档（一次真实流 = 一条，带首块时延）
+                self._archiveRequestAttempt(
+                    client=client,
+                    messages=messages,
+                    usage={
+                        "promptTokens": _prompt or 0,
+                        "completionTokens": _completion or 0,
+                        "estimated": bool(_estimated),
+                        "cacheReadTokens": _cache_read,
+                        "cacheWriteTokens": _cache_write,
+                    },
+                    durationMs=int(duration * 1000),
+                    success=True,
+                    stream=True,
+                    firstTokenMs=first_token_ms,
+                    responseId=_stream_response_id,
+                )
                 return
             except Exception as e:
                 client.increment_request(success=False)
@@ -1304,6 +1399,18 @@ class MultiModelLLMClient:
                 elif error_kind == "model_not_found":
                     self._note_404_reconnect(client.provider.id, client.model)
                 self._notePairingReject(e)
+                # S17 F1：失败流式请求归档——本地闸门拒绝（_acquire_blocked）没打
+                # 出真实 provider 请求，不落，避免把"没发生的请求"写成归档
+                if not getattr(e, "_acquire_blocked", False):
+                    self._archiveRequestAttempt(
+                        client=client,
+                        messages=messages,
+                        durationMs=int((time.time() - start_time) * 1000),
+                        success=False,
+                        errorKind=error_kind,
+                        errorSummary=str(e),
+                        stream=True,
+                    )
                 try:
                     from neurova.core.metrics import get_metrics
 

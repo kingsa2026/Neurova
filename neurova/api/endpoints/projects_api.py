@@ -508,6 +508,24 @@ def build_collaboration_dossier(project_id: str) -> Dict[str, Any]:
         logger.debug("档案房间消息读取失败 (project=%s): %s", project_id, e)
         roomMessages = []
 
+    # S17 F1：请求归档摘要——本项目 run 归属会话的 JSONL 归档（session→run→project
+    # 读时 join，不建第二本账）。摘要单源在 request_archive.summarizeSessionArchives。
+    requestArchiveSummary: Dict[str, Any] = {}
+    try:
+        from neurova.core.request_archive import summarizeSessionArchives
+
+        sessionIds: List[str] = []
+        seenSessions = set()
+        for row in runRows:
+            sessionId = str(row.get("session_id") or "")
+            if sessionId and sessionId not in seenSessions:
+                seenSessions.add(sessionId)
+                sessionIds.append(sessionId)
+        requestArchiveSummary = summarizeSessionArchives(sessionIds)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("档案请求归档摘要读取失败 (project=%s): %s", project_id, e)
+        requestArchiveSummary = {}
+
     return {
         "project_id": project_id,
         "generated_at": time.time(),
@@ -516,12 +534,14 @@ def build_collaboration_dossier(project_id: str) -> Dict[str, Any]:
         "candidates": candidates,
         "approvals": approvals,
         "room_messages": roomMessages,
+        "request_archive": requestArchiveSummary,
         "counts": {
             "runs": len(runs),
             "events": len(events),
             "candidates": len(candidates),
             "approvals": len(approvals),
             "room_messages": len(roomMessages),
+            "request_archive": requestArchiveSummary.get("requestCount", 0),
         },
     }
 
