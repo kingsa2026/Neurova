@@ -1,6 +1,6 @@
 # 超越 CoworkOS 实施方案（完整实施版：S1–S12）
 
-- 日期：2026-11-17（v3 修订：追加 S12 项目协作档案与 S13 项目/团队/群聊的 agent 工具面——项目管理与多 agent 协作整合、留底可观测、用户和 agent 都可发起；原重评分顺延 S14。v2 曾统一 S1–S12，初版为 S1–S9）
+- 日期：2026-11-17（v4 修订：附录 D 四项可选前端适配**转必改**，并把它需要的后端支撑设计进对应批次——S1 报告读面端点、S2 邮箱运维计数入系统状态读面、S6 压缩事件随会话事件流下发+参数读面暴露、S10 团队来源字段与 run/WS 载荷增 team_id。v3 曾纳入项目管理整合与 agent 发起面，v2 统一 S1–S12，初版 S1–S9）
 - 依据：
   - [CoworkOS 与 Neurova 多 Agent 协作对照评测](../08-research/coworkos_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)（下称"COS 评测"；§6 逐维评分、§6.x 总分表、§7 H 系清单是本方案直接输入）
   - [deepagents 与 Neurova 对照评测](../08-research/deepagents_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)（下称"DA 评测"；其 §8「按本仓代码现状逐条对照的学习落点」是 S5/S6/S7 的规格来源）
@@ -85,6 +85,8 @@ S14 同框重评分与超越判定
 - 1B 轨迹效率判据（DA 评测 I-1）：判据 DSL 增加 `expect_trajectory(maxSteps=None, maxToolCalls=None, allowedTools=None)`；数据源**优先复用 P3-2 的 span trace 与 agent_runs 台账计数**，禁止往 H-4 事件账本新增工具级事件（账本纪律：正文与高频细节不进账本）。
 - 1C 记忆隔离：runner 增 `taskIsolatedMemory` 模式（每任务独立 agent 实例或独立记忆命名空间，二选一以现场结构定），正式对比默认开启；跑基线时在报告里注明是否隔离。
 - 1D T1 重设计：虚构来源标记任务两条路任选其一落地——(a) 提示词内给出真实来源材料，任务改为"依据给定材料归纳"；(b) 判定翻转，"诚实说明无法引用不存在来源"计为得分行为。改 `tasks.py` T1 族任务与判据，mock 测试同步更新。
+- 1E 报告读面（前端 BenchmarkPage 展示的后端支撑）：runner 报告落盘后，`neurova/api/endpoints/benchmark.py` 增**只读端点**列出/取回多 agent 基线报告（含 usage/轨迹列）；注意该文件是多会话热区，动手前撞车复核（附录 A5），新增路由同步路由快照（附录 A3）。
+- 1F 真模型复跑：v2 报告产出后归档替换首版基线报告（旧版保留作对照）。
 
 **红灯**：先写 `test_outcome_carries_usage_and_trajectory`（断言 TaskOutcome 含 usage/轨迹字段且 `expect_trajectory` 可约束超步数任务）——当前必红。
 **绿灯验收**：mock LLM 下全任务集报告含 usage 与轨迹列；`pytest tests/unit/benchmark -q` 全绿；用真模型重跑一次基线产出 v2 报告（**密钥只进进程，脚本即用即删**，见附录 A11）。
@@ -102,6 +104,7 @@ S14 同框重评分与超越判定
 - 幂等：消息体带 `messageId`（uuid，投递点生成）；`pushParentMail` 对同 id 重复投递直接去重；`acknowledge` 对已 ack 的 id 重复调用幂等（计数不重复扣减）。
 - 优先级：消息带 `priority`（normal/high/urgent，缺省 normal）；`lease` 返回按优先级降序、同级按时间升序；审批/升级类投递默认 high。
 - 死主回收：现 TTL 只清 ready 态；扩展为 **leased 超时未 ack 也回收回 ready**（回收计数进运维读数），配合幂等 id 保证"宁重不丢"不升级成"重复生效"。
+- 运维读数暴露（前端监控页的后端支撑）：mailbox 增加 `stats()` 快照（在途租约数/ack 计数/回收计数/优先级分布），**并入既有系统状态读面响应**（console 域 `/debug/status` 或 MonitorPage 现用端点，以现场为准；不新增路由，避免路由快照 churn），MonitorPage 据此展示邮箱健康卡。
 
 **红灯**：`test_mailbox_two_phase.py` 增三例——重复 messageId 只生效一次；高优先级先出；leased 超 TTL 被回收且回收后可再 lease。
 **绿灯验收**：上述测试全绿；trio 全量 A/B 零新增失败（附录 A1）。
@@ -174,6 +177,7 @@ S14 同框重评分与超越判定
 - 严格变小：溢出重试前校验新上下文 token 数**严格小于**原值，否则显式报错拒绝重发（防"越压越大"循环）。
 - 工具结果有界投影：与既有折叠/UUID 句柄机制**合流**（句柄指向投影），投影上限 `TOOL_RESULT_PROJECTION_CHARS` 具名常量；保持"失败结果不折叠"既有纪律。
 - 与手动 `/compact` 共存：手动命令优先级高，自动触发不抢已手动压缩的会话。
+- 前端支撑（可选项转正）：①压缩事件**随会话事件流下发**（复用既有 SSE/会话事件通道加一类压缩通知事件，含 cutoff 摘要），ChatPage 据此展示"已自动压缩"轻提示；②压缩参数（`CONTEXT_COMPACT_TRIGGER_RATIO` 等）经**既有 context 统计/设置读面**扩展返回（不新建端点），设置页展示。
 
 **红灯**：新增 `test_context_compact_discipline.py`——超阈值自动触发；溢出异常兜底重试；重试内容不变时（不严格变小）显式报错；压缩事件落盘后视图可重建且原消息仍在。
 **绿灯验收**：chat_pipeline/context_pool 既有测试 A/B 零新增失败；live-verify 长对话压一次后检查会话文件中的压缩事件与可读性。
@@ -254,6 +258,7 @@ S14 同框重评分与超越判定
 2. `dispatch_team(teamId, task|taskUnit)`：把固定团队整体派活——按名册生成多路 spawn（成员职责 prompt 注入任务书角色段），TaskUnit.dependencies 做步间编排；run 带 teamId 溯源标（origin="team_dispatch"）；验收门/评审相位/候选制照走；治理三明治按主 agent 现有预算执行。
 3. **临时团队不新增工具**：现有 `spawn_subagent` 自由选人+依赖编排本就是临时组队。补两件增量——`spawn_subagent` 增可选 `teamId`（固定团队骨干+临时外援混编）；**临时团队沉淀**：run 成功收尾后主 agent 可经治理 ASK（审批链 L1）提议把本次组合（成员+职责快照）沉淀为固定团队，**人批准后才写 teams_api**——团队是用户资产，agent 不得自行立队。此沉淀闭环是 CoworkOS 没有的产品循环。
 4. 三个工具均为**主 agent 专属**：加入成员工具面剔除集（先例=spawn/cancel_subagent 的 allowlist 排除）。
+5. 前端支撑（可选项转正）：①teams_api 团队记录增 `origin`（manual/agent_proposed）、`approved_by`、`promoted_from_run` 字段（JSON 落盘 .get 缺省回退，旧数据兼容）；②SubAgentRun.to_dict、台账行与 WS 同步载荷增 `team_id`，useSubAgentWindows 映射进窗口态，SubAgentPanel 显示团队徽标。
 
 **红灯**：新增 `test_team_dispatch.py`——list_teams 返回名册；dispatch_team 按名册生成多路 spawn 且职责入任务书；无 teamId 的 dispatch 报错；沉淀提议未经批准不写 teams_api、批准后写入；三工具对成员不可见。
 **绿灯验收**：swarm 既有测试 A/B 零新增失败；live-verify 用真团队走一次 派团→验收→候选合并。
@@ -385,19 +390,19 @@ S14 同框重评分与超越判定
 
 | 批次 | 适配要求 | 涉及文件 |
 |---|---|---|
-| S1 | 无强制项。可选：BenchmarkPage 基线报告展示 usage/轨迹列 | BenchmarkPage.vue、api/modules/benchmark.ts |
-| S2 | 无强制项。可选：监控页展示邮箱回收计数（运维读数） | MonitorPage.vue |
+| S1 | **必改**：BenchmarkPage 增多 agent 基线报告视图（usage/轨迹列）。后端支撑=S1 1E 报告只读端点 | BenchmarkPage.vue、api/modules/benchmark.ts |
+| S2 | **必改**：监控页邮箱健康卡（在途租约/ack/回收计数）。后端支撑=S2 stats 快照并入既有系统状态读面（不新增路由） | MonitorPage.vue |
 | S3 | **必改**：`SubAgentWindowState.status` 联合类型与 `status-*` 样式、statusIcon 映射覆盖迁移表正式化后的全部状态（blocked/cancelled 等）；useSubAgentWindows 状态同步；状态文案 i18n | SubAgentPanel.vue、useSubAgentWindows.ts、SubAgentPanel.test.ts |
 | S4 | **必改**：候选状态徽标（submitted/accepted/rejected/reviseRequired）与冲突列表+"重议"入口——呈现位置随 S9 房间（首选）或 ChatPage 蜂群汇总区 | CollaborationRoomPage.vue、SubAgentPanel.vue |
 | S5 | 无（读写数据形态不变） | — |
-| S6 | 可选：自动压缩触发时的会话内轻提示；context 设置页参数展示 | ChatPage.vue、context 设置页 |
+| S6 | **必改**：自动压缩会话内轻提示（压缩事件随会话事件流下发）+ 设置页压缩参数展示。后端支撑=S6 事件流通知 + 既有 context 读面扩展参数 | ChatPage.vue、context 设置页 |
 | S7 | 无直接 UI（拒收记录经 S8 审计面可见） | — |
 | S8 | **必改**：AuditPage 增审批审计查询视图（按 runId/时间/级别筛选，请求+决定成对展示）；audit.ts 模块扩展 | AuditPage.vue、api/modules/audit.ts |
 | S9 | **必改**：房间页①升级/审批消息卡片（群主专属 批准/拒绝/改议 按钮，普通成员只读+议见入口）；②候选事件徽标与拦截入口；③成员列表 owner 群主徽标；API 模块扩展 | CollaborationRoomPage.vue、api/modules/collaborationRoom.ts |
-| S10 | 可选：TeamPage 显示团队来源（人工/agent 沉淀+批准人）；SubAgentPanel 的 teamId 徽标 | TeamPage.vue、SubAgentPanel.vue |
+| S10 | **必改**：TeamPage 团队来源标（人工/agent 沉淀+批准人）+ SubAgentPanel teamId 徽标。后端支撑=S10 teams_api 增 origin/approved_by/promoted_from_run、run 台账与 WS 同步载荷增 team_id | TeamPage.vue、SubAgentPanel.vue、useSubAgentWindows.ts |
 | S11 | **必改（最大新 UI）**：房间页"发起协作"入口（选成员/预算/任务书表单）→ 触发 swarm；房间内协作进度区（复用 H-4 时间线形态）；终态报告卡片（采纳/拦截） | CollaborationRoomPage.vue、api/modules/collaborationRoom.ts |
 | S12 | **必改**：项目详情增"协作档案"视图——五类记录聚合时间线（消息/run/事件/候选/审批）+ 封卷总结 + initiator=agent 来源标；api 增 getProjectCollaboration | CollaborationPage.vue（项目详情）、api/modules/collaboration.ts |
 | S13 | 无新 UI（工具为模型面）；治理 ASK 卡片复用 ChatPage/房间既有审批组件；initiator 标随 S12 | — |
 | S14 | 无 | — |
 
-**工作量集中点**：S9/S11/S12 三个房间与项目页面的改造是前端主战场；S3/S4/S8 为小改；其余可选或无。每项适配随对应后端批次同批交付（含契约测试与 i18n），不单独拖尾。
+**工作量集中点**：S9/S11/S12 三个房间与项目页面的改造是前端主战场；S3/S4/S8 与转正后的 S1/S2/S6/S10 为小改（各 1–2 个组件/页面 + api 模块扩展）；无适配=S5/S7/S13/S14。每项适配随对应后端批次同批交付（含契约测试与 i18n），不单独拖尾。
