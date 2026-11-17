@@ -174,6 +174,31 @@ async function doRunCommand() {
         <span class="cu-url" :title="state.browserUrl">{{ state.browserUrl }}</span>
       </div>
 
+      <!-- 增强③：窗口清单表格（computer_list_windows 结果） -->
+      <div v-if="state.latestWindows && state.latestWindows.length" class="cu-windows">
+        <div class="cu-windows-head">{{ t('computerPanel.windowListTitle') }}</div>
+        <div class="cu-windows-scroll">
+          <table class="cu-win-table">
+            <thead>
+              <tr>
+                <th>{{ t('computerPanel.winTitle') }}</th>
+                <th>{{ t('computerPanel.winClass') }}</th>
+                <th>{{ t('computerPanel.winPid') }}</th>
+                <th class="cu-win-focused">{{ t('computerPanel.winFocused') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="w in state.latestWindows" :key="w.hwnd || w.title" :class="{ focused: w.focused }">
+                <td class="cu-win-title" :title="w.title">{{ w.title || '—' }}</td>
+                <td>{{ w.class_name || '—' }}</td>
+                <td class="cu-win-mono">{{ w.pid }}</td>
+                <td class="cu-win-focused">{{ w.focused ? '●' : '○' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- Action log -->
       <div class="cu-log">
         <div class="cu-log-head">
@@ -420,6 +445,55 @@ async function doRunCommand() {
   direction: rtl;
   text-align: left;
 }
+
+/* 增强③：窗口清单表格（颜色一律 var() 兜底形态，不新增裸色值） */
+.cu-windows {
+  flex-shrink: 0;
+  max-height: 30%;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--nr-border-light, rgba(255, 255, 255, 0.04));
+}
+.cu-windows-head {
+  padding: 6px 12px 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--nr-text-tertiary, var(--nr-text-tertiary));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cu-windows-scroll {
+  overflow-y: auto;
+  padding: 0 6px 6px;
+}
+.cu-win-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  color: var(--nr-text-secondary, #cbd5e1);
+}
+.cu-win-table th {
+  text-align: left;
+  padding: 3px 6px;
+  font-weight: 500;
+  color: var(--nr-text-tertiary, var(--nr-text-tertiary));
+  border-bottom: 1px solid var(--nr-border-light, rgba(255, 255, 255, 0.04));
+}
+.cu-win-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--nr-border-light, rgba(255, 255, 255, 0.04));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+.cu-win-table tr.focused td {
+  color: var(--nr-text-primary, #e2e8f0);
+  background: var(--nr-primary-soft, rgba(99, 102, 241, 0.12));
+}
+.cu-win-title { max-width: 180px; }
+.cu-win-mono { font-family: var(--nr-font-mono, monospace); }
+.cu-win-focused { text-align: center; }
 
 /* Action log */
 .cu-log {

@@ -354,3 +354,73 @@ describe('SSH/shell 终端视图', () => {
     expect(panel.state.view).toBe('desktop')
   })
 })
+
+describe('增强①：重试建议上徽标', () => {
+  it('refused 带 never 建议时徽标追加 ⛔never', () => {
+    expect(
+      actionBadgeText({ effect: 'refused', refusalCode: 'controller_busy', retry: 'never' }),
+    ).toBe('controller_busy ⛔never')
+  })
+
+  it('refused 带跳级去向与 reobserve 时两者齐显', () => {
+    expect(
+      actionBadgeText({
+        effect: 'refused',
+        refusalCode: 'background_unavailable',
+        escalation: { target: 'pixel', reason: 'route_unavailable' },
+        retry: 'reobserve',
+      }),
+    ).toBe('background_unavailable→pixel ↻reobserve')
+  })
+
+  it('unverifiable 带 reobserve 建议时追加 ↻reobserve', () => {
+    expect(
+      actionBadgeText({
+        route: 'global_input',
+        delivery: 'foreground',
+        effect: 'unverifiable',
+        retry: 'reobserve',
+      }),
+    ).toBe('global_input·foreground·unverifiable ↻reobserve')
+  })
+
+  it('无 retry 字段不追加（既有徽标形态不变）', () => {
+    expect(actionBadgeText({ effect: 'refused', refusalCode: 'backend_error' })).toBe(
+      'backend_error',
+    )
+    expect(
+      actionBadgeText({ route: 'app_post', delivery: 'background', effect: 'confirmed' }),
+    ).toBe('app_post·background·confirmed')
+  })
+})
+
+describe('增强③：窗口清单进面板状态', () => {
+  it('handleComputerAction 吸收 payload.windows 并更新 latestWindows', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({
+      tool: 'computer_list_windows',
+      success: true,
+      windows: [
+        { title: '记事本', class_name: 'Notepad', pid: 1, hwnd: 10, rect: { x: 0, y: 0, w: 800, h: 600 }, focused: true },
+        { title: '浏览器', class_name: 'Chrome', pid: 2, hwnd: 11, rect: { x: 0, y: 0, w: 800, h: 600 }, focused: false },
+      ],
+    })
+    expect(panel.state.latestWindows?.length).toBe(2)
+    expect(panel.state.latestWindows?.[0].title).toBe('记事本')
+    expect(panel.state.latestWindows?.[0].focused).toBe(true)
+    expect(panel.state.actions[0].windows?.length).toBe(2)
+  })
+
+  it('clear 清空窗口清单；无窗口载荷不残留', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({
+      tool: 'computer_list_windows',
+      success: true,
+      windows: [{ title: 'w', class_name: 'c', pid: 1, hwnd: 9, rect: { x: 0, y: 0, w: 1, h: 1 }, focused: false }],
+    })
+    panel.clear()
+    expect(panel.state.latestWindows).toBeUndefined()
+    panel.handleComputerAction({ tool: 'computer_click', params: { x: 1, y: 2 }, success: true })
+    expect(panel.state.latestWindows).toBeUndefined()
+  })
+})

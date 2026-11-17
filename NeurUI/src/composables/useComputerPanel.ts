@@ -11,6 +11,16 @@ import i18n from '@/i18n'
  * Agent 操作电脑/浏览器时面板自动打开（分屏），展示实时截图与动作日志。
  */
 
+/** 窗口清单行（computer_list_windows 的事件载荷形状，增强③） */
+export interface ComputerWindowRow {
+  title: string
+  class_name: string
+  pid: number
+  hwnd: number
+  rect: { x: number; y: number; w: number; h: number }
+  focused: boolean
+}
+
 export interface ComputerActionEntry {
   id: string
   /** 工具名，如 computer_click / browser_navigate */
@@ -31,12 +41,16 @@ export interface ComputerActionEntry {
   effect?: string
   /** R1-2 ActionResult 契约：精确拒绝码（refused 时） */
   refusalCode?: string
+  /** P1-2 ActionResult 契约：重试建议（reobserve/retry/never） */
+  retry?: string
   /** T-01 ActionResult 契约：投递平面（background/foreground/isolated_plane/not_applicable） */
   delivery?: string
   /** T-01 ActionResult 契约：验证证据（有则面板给"已验证"档，无则明示未验证） */
   evidence?: string[]
   /** T-01 ActionResult 契约：跳级去向（refused 时点名"为何降级到下一级"） */
   escalation?: Record<string, string>
+  /** 增强③：窗口清单（computer_list_windows 结果） */
+  windows?: ComputerWindowRow[]
   /** SSH/shell 终端负载（命令 + 输出），面板渲染成终端窗口 */
   terminal?: { command: string; stdout: string; stderr: string; host?: string; exit?: number }
 }
@@ -55,6 +69,8 @@ export interface ComputerPanelState {
   view: 'desktop' | 'terminal'
   /** 累积终端转录（$ 命令 + stdout + stderr），终端视口渲染 */
   terminalTranscript: string
+  /** 增强③：最近一次窗口清单（computer_list_windows），面板渲染表格 */
+  latestWindows?: ComputerWindowRow[]
 }
 
 const COMPUTER_TOOL_PREFIXES = ['computer_', 'browser_']
@@ -236,6 +252,7 @@ interface ActionResultFields {
   route?: string
   effect?: string
   refusalCode?: string
+  retry?: string
   delivery?: string
   evidence?: string[]
   escalation?: Record<string, string>
@@ -254,6 +271,7 @@ function extractActionResult(payload: Record<string, any>): ActionResultFields |
   if (typeof ar.route === 'string') out.route = ar.route
   if (typeof ar.effect === 'string') out.effect = ar.effect
   if (typeof ar.refusal_code === 'string') out.refusalCode = ar.refusal_code
+  if (typeof ar.retry === 'string') out.retry = ar.retry
   if (typeof ar.delivery === 'string') out.delivery = ar.delivery
   if (Array.isArray(ar.evidence)) {
     out.evidence = ar.evidence.filter((kind: unknown) => typeof kind === 'string')
@@ -262,31 +280,48 @@ function extractActionResult(payload: Record<string, any>): ActionResultFields |
     out.escalation = ar.escalation as Record<string, string>
   }
   const hasAny =
-    out.route || out.effect || out.refusalCode || out.delivery || out.evidence || out.escalation
+    out.route || out.effect || out.refusalCode || out.retry || out.delivery || out.evidence || out.escalation
   return hasAny ? out : undefined
+}
+
+/** 增强①：重试建议 → 徽标提示（技术码形态，与 route/effect 同风格） */
+const RETRY_HINTS: Record<string, string> = {
+  reobserve: '↻reobserve',
+  retry: '↻retry',
+  never: '⛔never',
+}
+
+function retryHint(retry?: string): string {
+  if (!retry) return ''
+  return RETRY_HINTS[retry] ?? `↻${retry}`
 }
 
 /** T-01 投递事实徽标文本：一行呈现"走了哪条通道 / 有没有碰真实输入设备 / 是否被验证"。
  *
  * 无抢占不是口号——`delivery=foreground` 就意味着动了用户的光标键盘，
  * `evidence` 为空则代表"投递了但没验证手段"。这一行是该事实在 dock 上唯一可被证伪处。
+ * 增强①：`retry` 建议随行（reobserve=先重观察 / never=不可重试 / retry=可重试）。
  */
 export function actionBadgeText(
   entry: Pick<
     ComputerActionEntry,
-    'route' | 'delivery' | 'effect' | 'refusalCode' | 'evidence' | 'escalation'
+    'route' | 'delivery' | 'effect' | 'refusalCode' | 'retry' | 'evidence' | 'escalation'
   >,
 ): string {
+  const hint = retryHint(entry.retry)
   if (entry.effect === 'refused') {
     const code = entry.refusalCode ?? ''
     const to = entry.escalation?.target
-    return to ? (code ? `${code}→${to}` : `→${to}`) : code
+    const base = to ? (code ? `${code}→${to}` : `→${to}`) : code
+    return hint ? (base ? `${base} ${hint}` : hint) : base
   }
   const head = [entry.route, entry.delivery, entry.effect]
     .filter((part): part is string => !!part)
     .join('·')
-  if (!head) return ''
-  return entry.evidence && entry.evidence.length > 0 ? `${head} ✓` : head
+  const parts = [head, hint].filter((part): part is string => !!part)
+  if (!parts.length) return ''
+  const text = parts.join(' ')
+  return entry.evidence && entry.evidence.length > 0 ? `${text} ✓` : text
 }
 
 export function createComputerPanel(maxActions = 50): ComputerPanelApi {
@@ -310,6 +345,10 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
       unknown
     >
     const actionResult = extractActionResult(payload)
+    // 增强③：窗口清单（computer_list_windows 载荷）吸收进条目与面板状态
+    const windows = Array.isArray(payload.windows)
+      ? (payload.windows as ComputerWindowRow[]).filter((w) => w && typeof w === 'object')
+      : undefined
     const term =
       payload.terminal && typeof payload.terminal === 'object'
         ? (payload.terminal as { command?: string; stdout?: string; stderr?: string; host?: string; exit?: number })
@@ -341,6 +380,7 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
       terminal: term
         ? { command: String(term.command ?? ''), stdout: String(term.stdout ?? ''), stderr: String(term.stderr ?? ''), host: term.host ? String(term.host) : undefined, exit: typeof term.exit === 'number' ? term.exit : undefined }
         : undefined,
+      ...(windows && windows.length ? { windows } : {}),
       ...(actionResult ?? {}),
     }
 
@@ -350,6 +390,8 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
     }
     if (entry.screenshot) state.latestScreenshot = entry.screenshot
     if (entry.url) state.browserUrl = entry.url
+    // 增强③：窗口清单刷新面板状态（表格视图数据源）
+    if (entry.windows && entry.windows.length) state.latestWindows = entry.windows
     // 终端视图：SSH/shell 命令到达 → 累积转录并切到终端视口；截图动作切回桌面
     if (entry.terminal) {
       const t = entry.terminal
@@ -422,6 +464,7 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
     state.clickMarker = undefined
     state.terminalTranscript = ''
     state.view = 'desktop'
+    state.latestWindows = undefined
   }
 
   return (_sharedPanel = { state, handleComputerAction, handleToolCall, markIdle, open, close, toggleMinimized, clear })
