@@ -406,3 +406,13 @@ S14 同框重评分与超越判定
 | S14 | 无 | — |
 
 **工作量集中点**：S9/S11/S12 三个房间与项目页面的改造是前端主战场；S3/S4/S8 与转正后的 S1/S2/S6/S10 为小改（各 1–2 个组件/页面 + api 模块扩展）；无适配=S5/S7/S13/S14。每项适配随对应后端批次同批交付（含契约测试与 i18n），不单独拖尾。
+
+## 执行记录（统筹者汇总，按波次补记）
+
+| 批次 | commit | 结果 | 偏差 / 移交 |
+|---|---|---|---|
+| S1 评测地基 | a79c10ba7 | 完成：usage 回传、expect_trajectory 判据、taskIsolatedMemory（默认开）、T1 改材料归纳、/baseline-reports 只读端点；benchmark 69 passed + 受影响 api 17 passed | 1F 真模型复跑待用户提供密钥；swarm 轨迹生产者未接线（tool_executor/loops 不产 span 工具事件，swarm 轨迹暂读 0）→ 移交波2 F 接线；BenchmarkPage 报告视图 → 前端专项 |
+| S2 邮箱语义 | 763abece7 | 完成：messageId 幂等、priority 队列、leased 超时回收、stats() 并入 /monitor/resources（未新增路由）；A/B 181→185 零新增 | 审批投递 priority=high → 移交 S8（approval_chain.py 审批投递点）；MonitorPage 邮箱健康卡 → 前端专项 |
+| S5 会话追加式 | 1444143c1 | 完成：JSONL+快照两段式（追加/撕裂封口/坏行跳过/懒迁移 fail-open），NEUROVA_SESSION_JSONL 默认 off；core 全量基线 23 预存失败逐行一致；live-verify 真后端 4 轮对话文件形态实拍 | 偏差：保留 .json 扩展名按内容判别格式（换 .jsonl 扩大爆炸半径）；翻 on 前必须先收口 shutdown_guard.py:268 与 memory_ingest/intake.py:108 两处绕过 manager 的直读；_get_file_lock 非重入 Lock 与注释不符（既有问题，另立批） |
+| S7 记忆准入 | 90a2fb84d | 完成：写入前敏感拦截（SENSITIVE_KEY_PATTERNS）+ 准入清单提示词，审计走 security/audit_logger 单源；live-verify 假 key 拒收入审计、记忆库零命中、正常偏好照常落库 | pending_memories.propose 待审队列未过闸（建议接 screenMemoryContent）；清单提示词可接 rules_sections 记忆规则段 |
+| 波1 收口 | e3fab73ed | trio 35 failed=基线（2592 passed，净增 19 新通过）；api 17 failed=基线（3213 passed）——零新增失败 | 唯一漂移=身份读方台账缺 memory_admission 审计读点，按"钉子随契约扩容同步"登记（fd2e5937f 先例），断言不放宽 |
