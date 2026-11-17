@@ -256,6 +256,36 @@ S1–S8 全部落地 ──→ S9 重评分与超越判定
 
 ---
 
+## 拓展批（A/B 项）：固定团队开放给主 agent + 多 agent 协作双入口
+
+> 用户追加拍板的两项拓展。依赖：S3 迁移表与 S4 候选制先落地（本批消费其产物）；排 S4 之后执行。**设计总裁定：两条拓展全部复用 SwarmManager 单源机制（spawn/TaskUnit/依赖门控/验收门/候选制/治理三明治），不建第二套编排引擎**（教义第 6 条）。
+
+### A 项：固定团队作为可调用资源开放给主 agent
+
+**形态选型（已裁定）**：**原生 builtin 工具优先，MCP 仅作外部开放的第二阶段**。主 agent 是进程内调用方，原生工具直接进既有治理面（工具面收窄/审批链/台账/成本闸）；本仓 MCP server（`mcp_ontology_server.py`，双鉴权）定位是给外部消费者开放能力——内部能力绕 MCP 是多一跳无收益。第二阶段若外部 agent 需要用团队，再按该 server 既有模式加 MCP tools（工具壳两层、机制单源）。
+
+**新增主 agent 工具（成员工具面剔除，先例=spawn/cancel_subagent）**
+1. `list_teams()`：列固定团队（id/名称/成员与职责摘要）。数据单源=teams_api 的 JSON 落盘（`NEUROVA_TEAMS_PATH`），**不另建团队存储**。
+2. `dispatch_team(teamId, task|taskUnit)`：把固定团队整体派活——按名册生成多路 spawn（成员职责 prompt 注入任务书角色段），TaskUnit.dependencies 做步间编排；run 带 teamId 溯源标（origin="team_dispatch"）；验收门/评审相位/候选制照走；治理三明治按主 agent 现有预算执行。
+3. **临时团队不新增工具**：现有 `spawn_subagent` 自由选人+依赖编排本就是临时组队。补两件增量——`spawn_subagent` 增可选 `teamId`（固定团队骨干+临时外援混编）；**临时团队沉淀**：run 成功收尾后主 agent 可经治理 ASK（审批链 L1）提议把本次组合（成员+职责快照）沉淀为固定团队，**人批准后才写 teams_api**——团队是用户资产，agent 不得自行立队。此沉淀闭环是 CoworkOS 没有的产品循环，直接支撑 A1"团队组成"得分点。
+
+**红灯**：新增 `test_team_dispatch.py`——list_teams 返回名册；dispatch_team 按名册生成多路 spawn 且职责入任务书；无 teamId 的 dispatch 报错；沉淀提议未经批准不写 teams_api、批准后写入。
+**绿灯验收**：swarm 既有测试 A/B 零新增失败；live-verify 用真房间/真团队走一次 派团→验收→候选合并。
+**避坑**：dispatch_team 是多路 spawn 的编排糖，**不得绕过治理三明治**（广度/预算/冷却照算）；成员职责 prompt 来自团队名册（用户资产），注入前过 context_firewall；工具 schema 变更同步前端类型与路由快照（附录 A3/A7）。
+
+### B 项：多 agent 协作双入口
+
+- **入口一（已有）**：主 agent 经任务编排主动发起——`spawn_subagent` / `dispatch_team`，一切照旧。
+- **入口二（新增）：用户经项目直接发起**——用户在协作房间（room_id=协作 project_id）里发起协作（@全部成员消息或房间"发起协作"动作）。`room_turn_router` 识别协作模式后**不再逐个独立应答**，而是把房间成员交给 SwarmManager 编排（按成员职责定主从/依赖），执行事件回房间广播（H-4 时间线可复用到房间视图），终态报告以 candidate 落房间，用户按群主/成员权限拦截或采纳。
+- **关键裁定**：入口二只是**发起面+观测面**换到房间，执行机制与入口一共用同一套 SwarmManager——否则就是 AgentTeam/Swarm 双实现错误的再演（教义第 6/7 条）。
+- **鉴权与治理**：发起人须为房间成员（三级鉴权已有）；L2 拦截权=群主/admin（前批已定）；预算由发起人显式给或沿用房间所属 agent 治理参数，三明治照常生效。
+
+**红灯**：新增 `test_room_collab_entry.py`——房间协作消息触发 swarm 编排（mock agent 成员）而非逐个独立应答；进度事件回房间广播；非成员发起被 403。
+**绿灯验收**：room 既有测试 A/B 零新增失败；live-verify 真房间发起一次双人协作并看到事件流与终态报告。
+**避坑**：房间协作的共享历史注入沿用 `turn_origin=collaboration` 既有语义；成员间记忆仍按 memory_scope 作用域隔离；不要把房间消息当 TaskUnit 正文直通——经统一任务书拼装（正文截断守具名常量纪律，附录 A2）。
+
+---
+
 ## 附录 A：共享避坑清单（每批开工前必读）
 
 1. **A/B 必须串行**：pytest 并行曾致全仓 AST 扫描档（`test_theTakeoverTableMatchesTheSharedEntry` 一族）超时假红。涉及共享文件的批次，提交前 `git stash push -- <本批文件>` → 跑套件 → `git stash pop`，失败清单逐条比对，**新增失败才算回归**。trio（agent+collaboration+benchmark）约 4 分钟，api 约 8.5 分钟。
