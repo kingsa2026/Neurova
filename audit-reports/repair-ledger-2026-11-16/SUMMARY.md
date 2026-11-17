@@ -166,3 +166,24 @@ N2-telegram-webhook.md 167 行、N3-benchmark执行器.md 由总控补记）。
 - P0 2/2、P1 39/39、P2 106 条全部清偿或登记；三个"新建能力"全部落地；
 - 终局健康抽查 68 passed（提交门/收录门/防绕守卫/shards/memory 域）；
 - 工作树仅剩 WebSocketAdapter.ets 用户在途文件与另一工作线的 docs 产物。
+
+---
+
+# N3 前端适配轮（2026-11-17 第六轮·收口）
+
+复盘实锤 N3 真执行器的前端适配缺口（run 由同步返回结果变为"后台执行+状态
+查询"，PC/移动两端 BenchmarkPage 均无轮询——用户拍板 PC+移动都做）：
+
+- **PC**（0068ff8fd）：benchmark.ts 新增 getBenchmarkRun(runId)；
+  BenchmarkPage run 后轮询 GET /runs/{run_id} 到终态（首查立即、间隔 2s、
+  上限 60 次、失败静默停、onUnmounted 清理）。红灯 1 failed（零轮询）→
+  绿灯 2/2 + 既有 6/6 + vue-tsc 0 错。
+- **移动**（7bfec4177）：runSuite 成功且 status=running 时延迟刷新历史两次
+  （3s/8s）。红绿以 Node harness 提取 runSuite 就地求值实证（旧实现
+  immediate/4s/9s = 1/1/1 [RED]；新实现 1/2/3 [GREEN]）；hvigor ArkTS
+  编译 BUILD SUCCESSFUL。
+- 复核中修正两处测试自身缺陷：按钮选择被头部 disabled 按钮的空串 attributes
+  迷惑（改取尾部套件卡按钮）；a-spin stub 未渲染默认插槽导致套件卡不可见。
+
+至此 N1/N2/N3 三个新建能力连同前端适配全部闭环；审计 147 条 + 三新建能力
+任务完结。工作树仅剩 WebSocketAdapter.ets 用户在途文件。
