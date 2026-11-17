@@ -19,12 +19,23 @@ from neurova.api.endpoints import get_agent_instance
 from neurova.collaboration.collaboration_isolation import MemberRole, get_collaboration_manager
 from neurova.collaboration.room_store import get_room_store
 from neurova.collaboration.room_turn_router import get_room_turn_router
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
 
 class PostMessageBody(BaseModel):
     text: str
+
+
+class StartCollaborationBody(BaseModel):
+    """S11 入口二：房间"发起协作"动作的请求体。"""
+
+    task: str
+    budget_seconds: Optional[float] = None
+    max_members: Optional[int] = None
 
 
 class ApprovalDecisionBody(BaseModel):
@@ -140,6 +151,35 @@ async def post_room_message(
     return {"code": 0, "message": "success", "data": {"ok": True, "swarm_bridge": bridge}}
 
 
+@router.post("/rooms/{room_id}/collaboration")
+async def start_room_collaboration(
+    room_id: str,
+    body: StartCollaborationBody,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """S11 入口二：用户经房间"发起协作"动作直发多 agent 协作。
+
+    发起人须为房间成员（三级鉴权谓词复用）；编排交 SwarmManager（与入口一
+    同一套引擎）；执行事件回房间广播，终态报告以 candidate 落房间。
+    """
+    project = _require_project(room_id)
+    actor = _room_actor(current_user)
+    _require_room_member(project, actor, current_user)
+    text = (body.task or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="task 不能为空")
+    meta = getattr(project, "metadata", {}) or {}
+    result = await get_room_turn_router().orchestrateRoomCollaboration(
+        room_id, text, actor, _member_dicts(project),
+        responder_agent_id=meta.get("responder_agent_id", ""),
+        budgetSeconds=body.budget_seconds,
+        maxMembers=body.max_members,
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=409, detail=result.get("error", "协作发起未成功"))
+    return {"code": 0, "message": "success", "data": result}
+
+
 @router.get("/rooms/{room_id}/swarm/pending")
 async def room_swarm_pending(
     room_id: str,
@@ -184,6 +224,18 @@ async def decide_room_approval(
     if not result.get("success"):
         raise HTTPException(status_code=409, detail=result.get("error", "裁决未生效"))
     clearRoomApprovalPending(request_id)
+    # S10：批准的是团队沉淀提议（team_consolidation）时，把登记的成员+职责快照
+    # 落成固定团队（人批准才写 teams_api；两个裁决入口共用同一回灌单源）。
+    if str(result.get("decision")) == "approve":
+        try:
+            from neurova.api.endpoints import teams_api
+
+            applied = teams_api.applyTeamProposalDecision(
+                request_id, "approve", decidedBy=actor)
+            if applied.get("applied"):
+                result["team_created"] = applied.get("team")
+        except Exception as e:  # noqa: BLE001 - 沉淀回灌失败不影响裁决本身
+            logger.warning("团队沉淀回灌失败 (%s): %s", request_id, e)
     verb = "批准" if body.decision == "approve" else "驳回"
     publishRoomSystemMessage(
         room_id,
