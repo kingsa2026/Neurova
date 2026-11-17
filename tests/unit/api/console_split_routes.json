@@ -569,6 +569,71 @@
  },
  {
   "kind": "APIRoute",
+  "path": "/chat/subagents/{subagent_id}/events",
+  "methods": [
+   "GET"
+  ],
+  "name": "get_console_subagent_events",
+  "unique_id": "get_console_subagent_events_chat_subagents__subagent_id__events_get",
+  "operation_id": null,
+  "response_model": null,
+  "status_code": null,
+  "parameters": [
+   {
+    "name": "subagent_id",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "builtins.str",
+    "default": "<empty>"
+   },
+   {
+    "name": "request",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "starlette.requests.Request",
+    "default": "<empty>"
+   },
+   {
+    "name": "current_user",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "typing.Dict[str, typing.Any]",
+    "default": {
+     "dependency": {
+      "name": "neurova.api.auth.get_current_userWithQueryToken",
+      "closure": []
+     },
+     "use_cache": true
+    }
+   }
+  ],
+  "return": "<empty>",
+  "dependencies": {
+   "call": null,
+   "name": null,
+   "use_cache": true,
+   "children": [
+    {
+     "call": {
+      "name": "neurova.api.auth.get_current_userWithQueryToken",
+      "closure": []
+     },
+     "name": "current_user",
+     "use_cache": true,
+     "children": [
+      {
+       "call": {
+        "name": "neurova.api.auth.BearerOrQuery",
+        "closure": []
+       },
+       "name": "credentials",
+       "use_cache": true,
+       "children": []
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "kind": "APIRoute",
   "path": "/chat/history",
   "methods": [
    "GET"

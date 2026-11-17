@@ -17,7 +17,11 @@ vi.mock('@/api', () => ({
 }))
 
 import api from '@/api'
-import { getConsoleSessionTimeline, getConsoleChatHistory } from '@/api/modules/console'
+import {
+  getConsoleSessionTimeline,
+  getConsoleChatHistory,
+  getConsoleSubagentEvents,
+} from '@/api/modules/console'
 
 const mockGet = vi.mocked(api.get)
 
@@ -51,5 +55,14 @@ describe('getConsoleChatHistory（既有端点，回归锚点）', () => {
   it('history 与 timeline 走同族路径', async () => {
     await getConsoleChatHistory('s-1')
     expect(mockGet).toHaveBeenCalledWith('/console/chat/history?session_id=s-1')
+  })
+})
+
+describe('getConsoleSubagentEvents（H-4 子任务事件账本读面）', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('subagentId 需 URL 编码（防路径注入）', async () => {
+    await getConsoleSubagentEvents('swarm_a/b')
+    expect(mockGet).toHaveBeenCalledWith('/console/chat/subagents/swarm_a%2Fb/events')
   })
 })

@@ -452,6 +452,16 @@ class AgentRunStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_run_by_subagent(self, subagent_id: str) -> Optional[Dict[str, Any]]:
+        """按 subagent_id 取最近一条台账行（蜂群事件读面的归属判据）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM agent_runs WHERE subagent_id=?"
+                " ORDER BY seq DESC LIMIT 1",
+                (subagent_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def stats(self) -> Dict[str, int]:
         with self._lock:
             # parked 必须单列：把它折进 terminal 就等于把"等人续跑"读成"已结束"

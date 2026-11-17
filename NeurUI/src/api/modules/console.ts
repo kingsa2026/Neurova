@@ -163,6 +163,29 @@ export function getConsoleChatRuns(sessionId: string, scope?: string) {
   })
 }
 
+/** 子任务事件账本的一条事件（H-4：JSONL 归档原样形态，payload 按事件类型变化）。 */
+export interface SubagentEvent {
+  event_id: string
+  type: string
+  subagent_id: string
+  causation_id: string
+  payload: Record<string, unknown>
+  occurred_at: string
+}
+
+export interface SubagentEventsResult {
+  subagent_id: string
+  count: number
+  events: SubagentEvent[]
+}
+
+/** 取子任务的事件账本（H-4 闭环读侧：spawned→…→terminal 全程 + 因果链）。 */
+export function getConsoleSubagentEvents(subagentId: string) {
+  return api.get<ApiResponse<SubagentEventsResult>>(
+    `${BASE}/chat/subagents/${encodeURIComponent(subagentId)}/events`,
+  )
+}
+
 /** 音频（TTS/ASR）能力状态。 */
 export function getAudioStatus() {
   return api.get<ApiResponse<Record<string, unknown>>>('/audio/status')
