@@ -232,15 +232,26 @@ def mcpBorrowedToolNames() -> frozenset:
         return frozenset()
 
 
+#: 成员工具面剔除集（主 agent 专属工具）——general/explore 两条白名单共同的减法项。
+#: - 递归派生/续跑：子代理不得再拉起执行链（孙代理/兄弟续跑）；
+#: - 审批裁决（P3-1）：子代理不得裁决自己发起的审批单（自己批自己=审批链失效）；
+#: - 叫停（H 批补差）：子代理不得叫停自己/兄弟的运行；
+#: - 团队编排三工具（S10）：list_teams/dispatch_team/propose_team 均主 agent 专属——
+#:   成员自行派团/立队等于绕过发起者的治理面。
+MEMBER_EXCLUDED_TOOLS = frozenset({
+    "spawn_subagent", "continue_subagent", "decide_subagent_approval",
+    "cancel_subagent", "list_teams", "dispatch_team", "propose_team",
+})
+
+
 def computeSubagentToolAllowlist(
     subagentType: str, borrowMcp: frozenset = frozenset()
 ) -> frozenset:
     """按子代理类型计算工具面白名单（P1 蜂群对照；spawn 与测试共用的单一出口）。
 
-    - general：全量内置工具 − 递归派生/续跑（子代理不得再派生孙代理，
-      也不得续跑兄弟——两者都是"从子代理回合里再拉起一条执行链"）；
+    - general：全量内置工具 − 成员剔除集（见 ``MEMBER_EXCLUDED_TOOLS``）；
       可选借用父上下文的 MCP 调用面（``borrowMcp`` 快照，P3 #8）；
-    - explore：只读白名单（检索/侦察型子代理不拿写工具，也不借 MCP）。
+    - explore：只读白名单 − 成员剔除集（检索/侦察型子代理不拿写工具，也不借 MCP）。
     执行咽喉（ToolExecutor._execute_single_tool）据 member 上下文绑定的
     白名单强制拦截面外工具。
     """
@@ -255,20 +266,13 @@ def computeSubagentToolAllowlist(
             cap = get_builtin_tool_capability(toolName)
             if cap is not None and getattr(cap, "readOnly", False):
                 readonlyNames.append(toolName)
-        return frozenset(readonlyNames)
-    # general：全量内置工具 − 递归派生/续跑（子代理不得再派生孙代理，
-    # 也不得续跑兄弟——两者都是"从子代理回合里再拉起一条执行链"）；
-    # − 审批裁决（P3-1：子代理不得裁决自己发起的审批单——自己批自己=审批链失效）
-    # − 叫停（H 批补差：子代理不得叫停自己/兄弟的运行）
-    # − 前台输入注入族（P2-4 电脑操控对照：对齐 ZCode「CUA 仅主代理」——
-    #   多代理并发抢真实鼠标/键盘 = 互踩用户桌面；观察面与 shell/ssh 保留）
+        return frozenset(readonlyNames) - MEMBER_EXCLUDED_TOOLS
+    # 前台输入注入族（P2-4 电脑操控对照）：对齐「CUA 仅主代理」——多代理并发抢
+    # 真实鼠标/键盘 = 互踩用户桌面；观察面与 shell/ssh 保留。
     from neurova.computer_use import foregroundDesktopTools
 
-    base = frozenset(get_registered_tool_names()) - {
-        "spawn_subagent", "continue_subagent", "decide_subagent_approval",
-        "cancel_subagent",
-    } - foregroundDesktopTools()
-    return base | frozenset(borrowMcp)
+    return (frozenset(get_registered_tool_names()) - MEMBER_EXCLUDED_TOOLS
+            - foregroundDesktopTools()) | frozenset(borrowMcp)
 
 
 @dataclass
@@ -350,6 +354,9 @@ class SubAgentRun:
     team_id: str = ""
     team_role: str = ""
     team_member: Optional[Dict[str, Any]] = None  # {user_id, name, role, prompt}
+    # S10/S11：单条 run 的运行窗口覆盖（秒；0 = 用治理面默认读数）。房间协作发起人
+    # 显式给预算时落在这里——只影响本 run，不改进程级 env（避免并发互踩）。
+    runtime_budget_sec: float = 0.0
 
     @property
     def duration(self) -> float:
@@ -403,6 +410,19 @@ def memberChatScope(run: Any) -> str:
     """
     roomId = str(getattr(run, "room_id", "") or "").strip()
     return f"room:{roomId}" if roomId else ""
+
+
+def composeTeamDutyTask(task: str, member: Any) -> str:
+    """团队成员职责 prompt 拼进任务书角色段（S9/S10 唯一拼装形态）。
+
+    职责来自团队名册（用户资产），进任务书前受 ``TEAM_DUTY_PROMPT_MAX_CHARS``
+    约束（"正文不得按字面量砍长度"钉子：上限是具名常量）。无职责时原样返回。
+    """
+    duty = str((member or {}).get("prompt") or "").strip()
+    if not duty:
+        return task
+    roleLabel = str((member or {}).get("role") or "participant")
+    return f"[团队职责 · {roleLabel}] {duty[:TEAM_DUTY_PROMPT_MAX_CHARS]}\n\n{task}"
 
 
 def _settingsDefaultSubagentDepth() -> int:
@@ -490,6 +510,8 @@ class SwarmManager:
         room_id: Optional[str] = None,
         team_id: Optional[str] = None,
         team_role: Optional[str] = None,
+        teamMemberOverride: Optional[dict] = None,
+        runtimeBudgetSec: Optional[float] = None,
     ) -> Dict[str, Any]:
         """派生子 Agent 执行任务
 
@@ -498,7 +520,7 @@ class SwarmManager:
             agent_id: 目标子 Agent ID；None 用 default；不存在回退 default
             session_id: 聊天会话 ID（事件广播目标；None 则不广播）
             background: True 后台执行（立即返回 subagent_id）
-            origin: 来源（chat | workflow），用于事件追踪
+            origin: 来源（chat | workflow | team_dispatch | room_collab），用于事件追踪
             stream: True 时子 Agent 的 content/reasoning 逐 chunk 广播
             initiator_agent: 发起者 Agent 实例（用于结果归档进其上下文池）
             node_id / execution_id: workflow 来源时的定位信息
@@ -509,6 +531,9 @@ class SwarmManager:
                 到该房间（人在环闭环），member 记忆按 room:<room_id> 作用域共享
             team_id / team_role: S9 动态组队——按团队名册选人（team_role 复用
                 collaboration_template.AgentRole），成员职责 prompt 拼进任务书
+            teamMemberOverride: S10 dispatch_team 显式点名成员（跳过按角色/任务
+                文本的自动选人——同名角色多名成员时自动选人会歧义）
+            runtimeBudgetSec: S10/S11 本 run 的运行窗口覆盖（秒）；None/0 用治理面默认
 
         Returns:
             前台: {subagent_id, agent_id, agent_name, status, report, duration, ...}
@@ -519,16 +544,19 @@ class SwarmManager:
 
         # S9 动态组队：按团队名册选人；选中成员的职责 prompt 拼进任务书角色段
         #（长度校验在拼装之后统一做，职责段一并受 MAX_TASK_CHARS 管辖）。
-        teamMember, teamRejection = self._resolveTeamMember(team_id, team_role, str(task))
-        if teamRejection is not None:
-            return teamRejection
+        # S10：dispatch_team 显式点名成员时跳过自动选人（override 来自名册本身，
+        # 职责段已由 dispatchTeam 经 composeTeamDutyTask 拼好，此处不重复注入）。
+        if teamMemberOverride is not None:
+            teamMember, teamRejection = dict(teamMemberOverride), None
+        else:
+            teamMember, teamRejection = self._resolveTeamMember(team_id, team_role, str(task))
+            if teamRejection is not None:
+                return teamRejection
         teamRoleLabel = ""
         if teamMember:
             teamRoleLabel = str(teamMember.get("role") or team_role or "")
-            duty = str(teamMember.get("prompt") or "").strip()
-            if duty:
-                task = (f"[团队职责 · {teamRoleLabel or 'participant'}] "
-                        f"{duty[:TEAM_DUTY_PROMPT_MAX_CHARS]}\n\n{task}")
+            if teamMemberOverride is None:
+                task = composeTeamDutyTask(task, teamMember)
 
         # P1-1（评测报告 G-2）：结构化任务单元——解析失败走结构化拒绝（决策非故障）
         try:
@@ -674,6 +702,7 @@ class SwarmManager:
                         "team_id": str(team_id or "").strip() if teamMember else "",
                         "team_role": teamRoleLabel,
                         "team_member": dict(teamMember) if teamMember else None,
+                        "runtime_budget_sec": max(0.0, float(runtimeBudgetSec or 0.0)),
                         "deps": list(deps), "status": "blocked", "created_at": time.time(),
                     }
             return {
@@ -710,6 +739,7 @@ class SwarmManager:
             team_id=str(team_id or "").strip() if teamMember else "",
             team_role=teamRoleLabel,
             team_member=dict(teamMember) if teamMember else None,
+            runtime_budget_sec=max(0.0, float(runtimeBudgetSec or 0.0)),
         )
         # 通过全部治理闸 → 预留模型并发槽 + 打派生时间戳（错峰）
         with self._lock:
@@ -807,6 +837,125 @@ class SwarmManager:
 
         await self._execute(run, agent, initiator_agent, stream)
         return {**run.to_dict(), **self._quota_snapshot()}
+
+    # ── S10：固定团队整体派活（多路 spawn 的编排糖，治理三明治照走）────────
+
+    async def dispatchTeam(
+        self,
+        teamId: str,
+        task: str,
+        taskUnit: Optional[dict] = None,
+        session_id: Optional[str] = None,
+        initiator_agent: Optional[Any] = None,
+        background: bool = True,
+        subagentType: str = "general",
+        runtimeBudgetSec: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """把固定团队整体派活：按名册生成多路 spawn（每成员一路）。
+
+        - 成员职责 prompt 注入任务书角色段（复用 spawn 的 teamMember 注入形态）；
+        - taskUnit.dependencies 做**步间编排**：依赖项按名册序号（"0"/"1"…）或
+          成员 user_id/显示名声明，派生时映射为该成员的 subagent_id——只允许
+          指向名册中更早的成员（后向引用在 spawn 的依赖门处诚实拒绝）；
+        - 每一路都走完整 spawn 治理三明治（深度/广度/预算/冷却/并发/错峰照算，
+          不绕过）；run 带 teamId 溯源标（origin="team_dispatch"）；
+        - 验收门/评审相位/候选制照走（spawn 主链路原样）。
+        """
+        tid = str(teamId or "").strip()
+        if not tid:
+            return self._rejection("TEAM_ID_REQUIRED", "dispatch_team 需要 teamId（要派活的固定团队）")
+        if not task or not str(task).strip():
+            return {"error": "task 不能为空"}
+        from neurova.api.endpoints.teams_api import getTeamRoster
+
+        roster = getTeamRoster(tid)
+        if roster is None:
+            return self._rejection("TEAM_UNKNOWN", f"团队不存在: {tid}")
+        members = [m for m in (roster.get("members_detail") or [])
+                   if str(m.get("user_id") or "").strip()]
+        if not members:
+            return self._rejection("TEAM_EMPTY", f"团队 {tid} 名册为空——请先添加团队成员")
+
+        try:
+            parsedUnit = parseTaskUnit(taskUnit)
+        except ValueError as exc:
+            return self._rejection("TASK_UNIT_INVALID", f"task_unit 非法：{exc}")
+
+        # 依赖引用解析表：名册序号 / user_id / 显示名 → 成员位次
+        indexByKey: Dict[str, int] = {}
+        for idx, member in enumerate(members):
+            indexByKey[str(idx)] = idx
+            indexByKey.setdefault(str(member.get("user_id") or ""), idx)
+            memberName = str(member.get("name") or "")
+            if memberName:
+                indexByKey.setdefault(memberName, idx)
+
+        dispatches: List[Dict[str, Any]] = []
+        spawnedIds: Dict[int, str] = {}
+        for idx, member in enumerate(members):
+            memberTask = composeTeamDutyTask(str(task), member)
+            memberUnit: Optional[Dict[str, Any]] = None
+            droppedDeps: List[str] = []
+            if parsedUnit is not None:
+                unitDict = parsedUnit.toDict()
+                remapped: List[str] = []
+                for dep in unitDict.get("dependencies") or []:
+                    depKey = str(dep or "").strip()
+                    targetIdx = indexByKey.get(depKey)
+                    if targetIdx is None:
+                        # 名册外引用原样保留（外部 subagent_id，交给依赖门判定）
+                        remapped.append(depKey)
+                    elif targetIdx < idx and targetIdx in spawnedIds:
+                        # 名册内更早成员 → 已派生的 subagent_id（依赖门按 run 编排）
+                        remapped.append(spawnedIds[targetIdx])
+                    else:
+                        # 自引用/名册内后向引用：本批派生按名册序进行，该依赖在本批内
+                        # 不可满足（等自己/等还没派生的兄弟 = 永久 blocked）——如实丢弃
+                        droppedDeps.append(depKey)
+                unitDict["dependencies"] = remapped
+                memberUnit = unitDict
+            result = await self.spawn(
+                task=memberTask,
+                agent_id=str(member.get("user_id") or "").strip(),
+                session_id=session_id,
+                background=background,
+                origin="team_dispatch",
+                stream=True,
+                initiator_agent=initiator_agent,
+                subagent_type=subagentType,
+                task_unit=memberUnit,
+                team_id=tid,
+                team_role=str(member.get("role") or "") or None,
+                teamMemberOverride=dict(member),
+                runtimeBudgetSec=runtimeBudgetSec,
+            )
+            spawnedIds[idx] = str(result.get("subagent_id") or "")
+            entry = {
+                "member": dict(member),
+                "subagent_id": result.get("subagent_id"),
+                "status": result.get("status"),
+                "rejected": bool(result.get("rejected")),
+                "rejection": result.get("rejection"),
+                "error": result.get("error"),
+            }
+            if droppedDeps:
+                entry["dropped_dependencies"] = droppedDeps
+            dispatches.append(entry)
+        failed = [d for d in dispatches if d["rejected"] or d.get("error")]
+        return {
+            "success": True,
+            "team_id": tid,
+            "team_name": roster.get("name", ""),
+            "origin": "team_dispatch",
+            "dispatches": dispatches,
+            "subagent_ids": [d["subagent_id"] for d in dispatches if d["subagent_id"]],
+            "failed_count": len(failed),
+            "background": bool(background),
+            "hint": "各成员 run 已按名册派生（背景执行用 subagent_status 轮询；"
+                    "依赖门按 taskUnit.dependencies 步间编排）" if background else
+                    "各成员 run 已按名册派生并等待完成",
+            **self._quota_snapshot(),
+        }
 
     def _resolveTeamMember(
         self, teamId: Optional[str], teamRole: Optional[str], task: str,
@@ -1289,6 +1438,7 @@ class SwarmManager:
             team_id=info.get("team_id") or "",
             team_role=info.get("team_role") or "",
             team_member=info.get("team_member"),
+            runtime_budget_sec=float(info.get("runtime_budget_sec") or 0.0),
         )
         with self._lock:
             self._runs[run.subagent_id] = run
@@ -1950,6 +2100,9 @@ class SwarmManager:
                 "execution_id": run.execution_id,
                 "trace_id": run.trace_id,
                 "parent_trace_id": run.parent_trace_id,
+                # S10：团队溯源标（前端 SubAgentPanel 团队徽标）
+                "team_id": run.team_id,
+                "team_role": run.team_role,
             },
         )
 
@@ -2001,7 +2154,8 @@ class SwarmManager:
             # K 条根修：流式把"整段总窗口"交给了调用方，而 `multi_model_client` 的
             # 静默看门狗**只留 WARNING 不中止**——上游停滞死流时这条 run 永久停在
             # running，既逐不出去也永远占着派生槽。故在此加一条与工具层同源的总闸。
-            budget = self._effectiveRuntimeBudget()
+            # S10/S11：发起人显式给的 run 级预算（runtime_budget_sec>0）优先于默认读数。
+            budget = run.runtime_budget_sec if run.runtime_budget_sec > 0 else self._effectiveRuntimeBudget()
             # P1-1：member 实际收到的是"原始任务描述 + 结构化任务书"拼装提示词；
             # 台账/事件里的 run.task 保持原始文本不混排。
             memberPrompt = renderTaskUnitPrompt(run.task, run.task_unit)
@@ -2127,6 +2281,9 @@ class SwarmManager:
                 "execution_id": run.execution_id,
                 "trace_id": run.trace_id,
                 "parent_trace_id": run.parent_trace_id,
+                # S10：团队溯源标（前端 SubAgentPanel 团队徽标）
+                "team_id": run.team_id,
+                "team_role": run.team_role,
             },
         )
 
@@ -2314,10 +2471,12 @@ class SwarmManager:
         """父会话邮箱投递的**唯一写点**（邮箱写点单源钉子：生产面只许 swarm.py 一处写）。
 
         终态回灌/卡死提醒/升级/结果提交/审批信封（P3-1）都经这里投递；
-        仅 chat 来源且有会话才投；失败不影响调用方主流程（诚实 debug，不吞成无声）。
+        仅 chat/team_dispatch 来源且有会话才投（workflow 的报告交引擎 output；
+        room_collab 的报告经候选板/房间通道，房间会话无 loop 排空邮箱）；
+        失败不影响调用方主流程（诚实 debug，不吞成无声）。
         `priority` 透传邮箱优先级队列（S2）：审批/升级类投递默认 high。
         """
-        if run.origin != "chat" or not run.session_id:
+        if run.origin not in ("chat", "team_dispatch") or not run.session_id:
             return False
         try:
             from neurova.agent.mailbox import get_agent_mailbox

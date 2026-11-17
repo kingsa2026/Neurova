@@ -1266,6 +1266,85 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["task"],
         },
     },
+    "list_teams": {
+        # 并行能力声明：只读团队名册快照（teams_api JSON 落盘，本执行体不落盘）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
+        "description": "【列出固定团队】列出可派活的固定团队（id/名称/成员与职责摘要）。在 dispatch_team 前调用，以便挑选合适的团队。把本次蜂群组合沉淀为新团队用 propose_team（需人批准）。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    "dispatch_team": {
+        # 并行能力声明：按名册多路派生（每路都有蜂群副作用），非只读、不可重放。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【派活固定团队】把一个固定团队整体派活：按名册为每个成员各派一路子任务（成员职责 prompt 自动注入任务书角色段）；task_unit.dependencies 可按名册序号（\"0\"/\"1\"…）或成员 id/名声明步间依赖，派生时映射为对应成员的 subagent_id。每一路都走完整治理三明治（广度/预算/冷却照算），默认后台执行，用 subagent_status 轮询。【何时不用】只需单个成员时直接 spawn_subagent；自由临时组队也用 spawn_subagent（本工具只按既有固定团队名册派活）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "team_id": {
+                    "type": "string",
+                    "description": "固定团队 ID（先用 list_teams 查看可用团队与成员职责）",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "交给团队的完整、自包含任务描述（每个成员都会收到，成员职责段按名册自动注入）",
+                },
+                "task_unit": {
+                    "type": "object",
+                    "description": "结构化任务单元（可选，同 spawn_subagent.task_unit）；dependencies 按名册序号/成员 id/成员名声明步间依赖（如 [\"0\"] = 等名册第 1 个成员的产出）",
+                    "properties": {
+                        "goal": {"type": "string", "description": "任务目标（必填）"},
+                        "expectedResult": {"type": "string", "description": "预期产物"},
+                        "acceptanceCriteria": {"type": "array", "items": {"type": "string"}, "description": "验收条件逐条列出"},
+                        "requiredInputs": {"type": "array", "items": {"type": "string"}, "description": "所需输入"},
+                        "artifactOwnership": {"type": "string", "description": "产物归属与后续用途"},
+                        "reviewMode": {"type": "string", "enum": ["none", "supervisor"], "description": "评审方式：none（默认）/ supervisor"},
+                        "dependencies": {"type": "array", "items": {"type": "string"}, "description": "依赖的名册成员（序号如 \"0\"，或成员 id/名）；派生时映射为该成员的 subagent_id"},
+                        "untrustedPayload": {"type": "string", "description": "不可信外部内容槽位（数据面围栏）"},
+                    },
+                    "required": ["goal"],
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "是否后台执行（默认 true=立即返回各成员 subagent_id；false=等待全部完成）",
+                },
+            },
+            "required": ["team_id", "task"],
+        },
+    },
+    "propose_team": {
+        # 并行能力声明：写团队单源（经审批后）+ 审批单副作用，非只读、不可重放。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【提议沉淀团队】把一次成功的蜂群组合（成员+职责快照）提议沉淀为固定团队。走治理审批（L1）：人批准后才写入团队列表——团队是用户资产，agent 不得自行立队；未经批准不会生效。批准后新团队可用 list_teams 查到、可用 dispatch_team 派活。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "提议的团队名称"},
+                "description": {"type": "string", "description": "团队职责说明"},
+                "members": {
+                    "type": "array",
+                    "description": "成员与职责快照（来自本次蜂群 run 的实际组合，至少一名成员）",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "userId": {"type": "string", "description": "成员 Agent ID"},
+                            "name": {"type": "string", "description": "成员显示名"},
+                            "role": {"type": "string", "description": "团队角色（author/reviewer/…）"},
+                            "prompt": {"type": "string", "description": "成员职责描述"},
+                        },
+                        "required": ["userId"],
+                    },
+                },
+                "promoted_from_run": {
+                    "type": "string",
+                    "description": "来源 subagent_id（本次成功 run 的溯源标，可选）",
+                },
+            },
+            "required": ["name", "members"],
+        },
+    },
     "subagent_status": {
         # 并行能力声明：只读蜂群运行记录（SwarmManager 的 status/list_all 在 RLock 下读内存态）。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
@@ -2293,6 +2372,10 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "exec_command", "write_stdin",
     # 子代理派生：spawn 有副作用
     "spawn_subagent",
+    # 固定团队派活（S10）：按名册多路派生，重放制造新一整批子任务
+    "dispatch_team",
+    # 团队沉淀提议（S10）：重放会重复建审批单/重复写团队
+    "propose_team",
     # 子代理续跑：等价一次新派生（member 会话续写 + 邮箱投递），重放制造新运行
     "continue_subagent",
     # 跨 agent 审批链（P3-1）：建单/裁决都改共享审批状态，重放制造第二张审批单

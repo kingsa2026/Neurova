@@ -542,6 +542,10 @@ class ToolExecutor:
         "git": "_execute_git",
         "spawn_subagent": "_execute_spawn_subagent",
         "subagent_status": "_execute_subagent_status",
+        # S10：固定团队开放给主 agent（列名册/派团/沉淀提议，均主 agent 专属）
+        "list_teams": "_execute_list_teams",
+        "dispatch_team": "_execute_dispatch_team",
+        "propose_team": "_execute_propose_team",
         "list_agents": "_execute_list_agents",
         # P2-10 增强：子代理升级/结构化结果提交
         "escalate": "_execute_escalate",
@@ -2689,14 +2693,31 @@ class ToolExecutor:
         """P3-1（评测报告 G-11）：主代理裁决子代理审批单（decide_subagent_approval）。
 
         不限子代理上下文（父代理/主会话侧调用）；只认蜂群审批单，幂等。
+        S10：批准的是团队沉淀提议（team_consolidation）时，经
+        teams_api.applyTeamProposalDecision 把登记的成员+职责快照落成固定团队
+        （人批准才写 teams_api；驳回/无登记不写）。
         """
         from neurova.agent.approval_chain import decideSwarmApproval
 
-        return decideSwarmApproval(
-            str(params.get("request_id") or ""),
+        requestId = str(params.get("request_id") or "")
+        result = decideSwarmApproval(
+            requestId,
             str(params.get("decision") or ""),
             note=str(params.get("note") or ""),
         )
+        if result.get("success") and str(result.get("decision")) == "approve":
+            try:
+                from neurova.api.endpoints import teams_api
+
+                applied = teams_api.applyTeamProposalDecision(
+                    requestId, "approve",
+                    decidedBy=str(result.get("decided_by") or ""),
+                )
+                if applied.get("applied"):
+                    result["team_created"] = applied.get("team")
+            except Exception as e:  # noqa: BLE001 - 沉淀回灌失败不影响裁决本身
+                logger.warning("团队沉淀回灌失败 (%s): %s", requestId, e)
+        return result
 
     async def _execute_builtin_tool(self, tool_name: str, params: Dict) -> Dict:
         """执行内置工具(分派表驱动,见 _builtin_dispatch 注释)"""
@@ -3049,6 +3070,145 @@ class ToolExecutor:
             return get_swarm_manager().runEvents(subagent_id)
         subagent_id = str(params.get("subagent_id") or "").strip()
         return get_swarm_manager().status(subagent_id)
+
+    # ── S10：固定团队开放给主 agent（list_teams / dispatch_team / propose_team）──
+
+    async def _execute_list_teams(self, params: Dict) -> Dict:
+        """列出固定团队名册（数据单源 = teams_api 的 JSON 落盘，不另建团队存储）。"""
+        from neurova.api.endpoints import teams_api
+
+        views = await teams_api.list_teams()
+        teams = []
+        for view in views:
+            info = view.model_dump() if hasattr(view, "model_dump") else dict(view)
+            teams.append({
+                "id": info.get("id", ""),
+                "name": info.get("name", ""),
+                "description": info.get("description", ""),
+                "origin": info.get("origin", "manual"),
+                "approved_by": info.get("approved_by", ""),
+                "members": [
+                    {
+                        "userId": m.get("user_id", ""),
+                        "name": m.get("name", ""),
+                        "role": m.get("role", ""),
+                        "duty": m.get("prompt", ""),
+                    }
+                    for m in (info.get("members_detail") or []) if m.get("user_id")
+                ],
+            })
+        return {"teams": teams, "count": len(teams)}
+
+    async def _execute_dispatch_team(self, params: Dict) -> Dict:
+        """固定团队整体派活：按名册多路 spawn（治理三明治在 swarm.dispatchTeam→spawn 照走）。"""
+        from neurova.agent.swarm import get_swarm_manager
+        from neurova.security.permission_mode import (
+            inheritedModeScope,
+            resolveEffectivePermissionMode,
+        )
+
+        teamId = str(params.get("team_id") or "").strip()
+        task = str(params.get("task") or "")
+        if not teamId:
+            return {"error": "缺少 team_id 参数（先用 list_teams 查看可用团队）"}
+        if not task.strip():
+            return {"error": "缺少 task 参数"}
+        swarm = get_swarm_manager()
+        session_id = getattr(self._agent, "current_session_id", None)
+        with inheritedModeScope(resolveEffectivePermissionMode(self._agent)):
+            result = await swarm.dispatchTeam(
+                teamId=teamId,
+                task=task,
+                taskUnit=params.get("task_unit") or None,
+                session_id=session_id,
+                initiator_agent=self._agent,
+                background=bool(params.get("background", True)),
+            )
+        return result
+
+    async def _execute_propose_team(self, params: Dict) -> Dict:
+        """临时团队沉淀提议：经治理审批（L1），人批准后才写 teams_api。
+
+        团队是用户资产，agent 不得自行立队——本工具只发起审批提议：
+        - 立即获批（auto 模式）→ 直接写入（origin=agent_proposed）；
+        - 进入待审 → 登记快照，批准动作（decide 工具/房间裁决）经
+          teams_api.applyTeamProposalDecision 回灌写入。
+        """
+        import uuid as _uuid
+
+        from types import SimpleNamespace
+
+        from neurova.agent.approval_chain import requestRunApproval
+        from neurova.api.endpoints import teams_api
+
+        name = str(params.get("name") or "").strip()
+        if not name:
+            return {"error": "缺少 name 参数（提议的团队名称）"}
+        memberRows = []
+        for raw in (params.get("members") or []):
+            if not isinstance(raw, dict):
+                continue
+            uid = str(raw.get("userId") or raw.get("user_id") or "").strip()
+            if not uid:
+                continue
+            memberRows.append({
+                "user_id": uid,
+                "name": str(raw.get("name") or uid),
+                "role": str(raw.get("role") or "member"),
+                "prompt": str(raw.get("prompt") or ""),
+            })
+        if not memberRows:
+            return {"error": "缺少 members 参数（成员+职责快照，至少一名有效成员）"}
+        description = str(params.get("description") or "")
+        promotedFromRun = str(params.get("promoted_from_run") or "")
+
+        # 审批链需要一个 run 形状的载体（agent_id/subagent_id/session 链路）——
+        # 提议方是主 agent 本轮，不是蜂群 member，这里构造轻量载体（不进 _runs）。
+        agentConfig = getattr(self._agent, "config", None)
+        runLike = SimpleNamespace(
+            agent_id=(getattr(agentConfig, "agent_id", "") or "default"),
+            agent_name=(getattr(agentConfig, "name", "") or "主代理"),
+            subagent_id=f"team_proposal_{_uuid.uuid4().hex[:8]}",
+            member_session_id="",
+            session_id=getattr(self._agent, "current_session_id", None),
+            task=f"提议沉淀固定团队：{name}",
+            origin="chat",
+            room_id="",
+            approvals=[],
+        )
+        result = await requestRunApproval(
+            runLike,
+            action="team_consolidation",
+            reason=(f"把本次蜂群组合沉淀为固定团队「{name}」"
+                    f"（{len(memberRows)} 名成员）"),
+            level="L1",
+            context="team_consolidation",
+        )
+        if result.get("approved"):
+            team = teams_api.createAgentProposedTeam(
+                name, description, memberRows,
+                promotedFromRun=promotedFromRun,
+                approvedBy=str(result.get("decided_by") or ""),
+            )
+            return {"success": True, "approved": True,
+                    "request_id": result.get("request_id"), "team": team}
+        if result.get("pending"):
+            teams_api.registerTeamProposal(str(result.get("request_id") or ""), {
+                "name": name,
+                "description": description,
+                "members_detail": memberRows,
+                "promoted_from_run": promotedFromRun,
+            })
+        return {
+            "success": True,
+            "approved": False,
+            "pending": True,
+            "denied": bool(result.get("denied")),
+            "request_id": result.get("request_id"),
+            "status": result.get("status"),
+            "hint": "团队沉淀提议已进入审批（L1）：人批准后才写入团队列表，"
+                    "agent 不得自行立队",
+        }
 
     async def _execute_continue_subagent(self, params: Dict) -> Dict:
         """P2（工具清单 3.1-3 续）+ H 批补差：续跑/改需求。
