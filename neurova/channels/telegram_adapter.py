@@ -307,6 +307,16 @@ class TelegramAdapter(
             asyncio.run_coroutine_threadsafe(
                 self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg), self._main_loop)
 
+    def processWebhookUpdate(self, upd: Dict[str, Any]) -> None:
+        """webhook 推送处理入口（公开）——与轮询路径共享 _process_update 单一实现。
+
+        线程安全契约：可在任意线程调用，事件回投主循环走 run_coroutine_threadsafe
+        （轮询线程已在用的同一通道）。方法内含同步重活（语音字节下载等），执行线程
+        由调用方决定——HTTP 端点侧以 to_thread 后台任务派发，不占 FastAPI 事件循环、
+        不拖慢 2xx 应答。
+        """
+        self._process_update(upd)
+
     def _handle_my_chat_member(self, mcm: Dict[str, Any]) -> None:
         """机器人被移出群（my_chat_member new_status=kicked/left）→ CHAT_BOT_REMOVED。"""
         new = (mcm.get("new_chat_member") or {})

@@ -17,11 +17,14 @@ import re
 - POST /api/v1/channel-adapters/{channel_type}/connect           - 连接该实例
 - POST /api/v1/channel-adapters/{channel_type}/disconnect        - 断开该实例
 - POST /api/v1/channel-adapters/{channel_type}/send              - 经该实例发送消息
-- POST /api/v1/channel-adapters/{channel_type}/webhook           - 平台回调入口（飞书/钉钉/企微）
+- POST /api/v1/channel-adapters/{channel_type}/webhook           - 平台回调入口（飞书/钉钉/企微/微信客服/Telegram）
+- POST /api/v1/channel-adapters/{channel_type}/webhook/set       - 设置 Telegram Webhook（admin/属主）
+- DELETE /api/v1/channel-adapters/{channel_type}/webhook         - 删除 Telegram Webhook（admin/属主）
+- GET  /api/v1/channel-adapters/{channel_type}/webhook/info      - 查询 Telegram Webhook 状态（admin/属主）
 - POST /api/v1/channel-adapters/{channel_type}/restart           - 重启该实例
 - POST /api/v1/channel-adapters/{channel_type}/clear-queue       - 清空该实例待处理队列
 
-除 webhook 与 conflicts/check 外都接受 `agent_id` Query（缺省 default，实例表主键是
+除**接收** webhook 与 conflicts/check 外都接受 `agent_id` Query（缺省 default，实例表主键是
 `(agent_id, channel_type)`）。这份清单由判据按真路由表**双向**核对——此前它写的是
 `/channel-adapters/channels/...`（多一段、实际不存在）还漏了前端真正在用的三条；
 契约文本错比没写更坏：它看起来是权威的。
@@ -319,6 +322,15 @@ def inboundCredentialPredicate(channelType: str, body: bytes, queryParams, heade
 
         return _wecomOk
 
+    if channelType == "telegram":
+        # Telegram 推送只带一个头：X-Telegram-Bot-Api-Secret-Token 恒定时间比对。
+        # 未配密钥的实例 verify_webhook_signature 返回 False（fail-closed），
+        # 多实例时天然按"谁配了这份密钥"落到谁头上。
+        def _telegramOk(adapter) -> bool:
+            return bool(adapter.verify_webhook_signature(headers or {}))
+
+        return _telegramOk
+
     return None
 
 
@@ -330,6 +342,7 @@ async def handle_webhook(channel_type: str, request: Request):
     - 飞书: POST JSON，包含 challenge / header / event
     - 钉钉: POST JSON 或 form-data
     - 企业微信: POST XML
+    - Telegram: POST JSON update，鉴权靠 X-Telegram-Bot-Api-Secret-Token 头
     """
     manager = get_channel_manager()
     # 先取体再解析：落哪一只实例由这条回调自己的凭据说（§6-197）。解析仍只在
@@ -353,6 +366,8 @@ async def handle_webhook(channel_type: str, request: Request):
             return await _handle_wecom_webhook(adapter, body, request.query_params, request)
         elif channel_type == "wechat":
             return await _handle_wechat_webhook(adapter, body, request.query_params)
+        elif channel_type == "telegram":
+            return await _handle_telegram_webhook(adapter, body, request.headers)
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported webhook for {channel_type}")
     except HTTPException:
@@ -510,6 +525,140 @@ async def _handle_wecom_webhook(adapter, body: bytes, query_params, request) -> 
     if reply_xml:
         return Response(content=reply_xml, media_type="application/xml")
     return {"errcode": 0}
+
+
+# Telegram webhook 后台处理任务的登记面：fire-and-forget 任务若不持引用会被
+# 事件循环 GC 掉；done 回调负责除名并把异常记进日志（诚实暴露，不静默吞）。
+_telegramWebhookTasks: set = set()
+
+
+def _telegramWebhookTaskDone(task) -> None:
+    _telegramWebhookTasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("Telegram webhook 后台处理失败: %s", exc)
+
+
+async def _handle_telegram_webhook(adapter, body: bytes, headers) -> dict:
+    """处理 Telegram Webhook 推送（update → _process_update → manager）。
+
+    鉴权只有一道：`X-Telegram-Bot-Api-Secret-Token` 恒定时间比对（适配器
+    `verify_webhook_signature`，未配密钥 fail-closed 拒绝）。注意
+    `resolveInboundAdapter` 在"唯一候选"时不会问凭据谓词——这道门必须在这里
+    **无条件**再核一遍，单实例部署才没有"不验签直投"的旁路。
+
+    响应要快（Telegram 等 2xx）：`_process_update` 是同步方法且含重活（语音字节
+    下载是同步 HTTP），直调会阻塞 FastAPI 事件循环、`await to_thread` 又会把下载
+    时长算进应答——故以后台任务派发（create_task + to_thread），立即回 2xx。
+    线程安全依据：`processWebhookUpdate`/`_process_update` 的事件回投走
+    `run_coroutine_threadsafe`（与轮询线程同一通道）；实例从未 connect 过时
+    `_main_loop` 为空，这里借本端点的事件循环兜底——webhook 模式不依赖
+    connect() 启动的 getUpdates 轮询。
+    """
+    import json
+
+    if not adapter.verify_webhook_signature(headers or {}):
+        raise ValueError(
+            "Telegram webhook rejected: missing or bad X-Telegram-Bot-Api-Secret-Token")
+    try:
+        upd = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise ValueError(f"Telegram webhook payload is not valid JSON: {e}")
+    if not isinstance(upd, dict):
+        raise ValueError("Telegram webhook payload must be a JSON object")
+
+    mainLoop = getattr(adapter, "_main_loop", None)
+    if mainLoop is None or not mainLoop.is_running():
+        adapter._main_loop = asyncio.get_running_loop()
+
+    task = asyncio.create_task(asyncio.to_thread(adapter.processWebhookUpdate, upd))
+    _telegramWebhookTasks.add(task)
+    task.add_done_callback(_telegramWebhookTaskDone)
+    return {"ok": True}
+
+
+# ============================================================
+# 渠道 Webhook 管理面（Telegram setWebhook / deleteWebhook / getWebhookInfo）
+# ============================================================
+
+
+class WebhookSetRequest(BaseModel):
+    """Webhook 设置请求（Telegram setWebhook）"""
+
+    webhook_url: str = Field(..., description="Webhook 回调 URL（平台要求 https）")
+    secret_token: str = Field("", description="X-Telegram-Bot-Api-Secret-Token 校验密钥")
+
+
+def _requireWebhookCapableAdapter(channel_type: str, agent_id: str):
+    """取实例并确认真有 webhook 管理三方法（目前由 TelegramWebhookMixin 提供）。
+
+    404（实例不存在）与 400（实例在但不具备该能力）分开：运维分得清"没配渠道"
+    和"渠道不支持"。
+    """
+    adapter = get_channel_manager().get_adapter(channel_type, agent_id=agent_id)
+    if adapter is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Channel '{channel_type}' not found (agent={agent_id})")
+    missing = [m for m in ("set_webhook", "delete_webhook", "get_webhook_info")
+               if not hasattr(adapter, m)]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Channel '{channel_type}' 不支持 webhook 管理面（缺 {'、'.join(missing)}）")
+    return adapter
+
+
+@router.post("/{channel_type}/webhook/set", summary="设置渠道 Webhook（Telegram setWebhook）")
+async def set_channel_webhook(
+    channel_type: str,
+    request: WebhookSetRequest,
+    agent_id: str = Query(default="default", description="Agent ID（实例表主键的一半）"),
+    current_user: Any = Depends(get_current_user),
+):
+    """设置 Telegram Webhook 并登记本地验签密钥（结果透传）。
+
+    归属门与 restart/clear-queue 同源：webhook 配置决定"谁的 bot 从哪里收推送、
+    用什么密钥验签"，非属主不得改。mixin 三方法是同步 requests HTTP，经
+    to_thread 下沉工作线程，不阻塞事件循环（S5 同款）。
+    """
+    agent = _norm_agent(agent_id)
+    requireAgentOwner(agent, current_user, action="设置 Webhook")
+    adapter = _requireWebhookCapableAdapter(channel_type, agent)
+    ok = await asyncio.to_thread(adapter.set_webhook, request.webhook_url, request.secret_token)
+    return {"success": bool(ok), "channel_type": channel_type, "agent_id": agent}
+
+
+@router.delete("/{channel_type}/webhook", summary="删除渠道 Webhook（Telegram deleteWebhook）")
+async def delete_channel_webhook(
+    channel_type: str,
+    agent_id: str = Query(default="default", description="Agent ID（实例表主键的一半）"),
+    drop_pending_updates: bool = Query(default=False, description="是否丢弃平台侧未推送的积压"),
+    current_user: Any = Depends(get_current_user),
+):
+    """删除 Telegram Webhook（结果透传：Telegram 拒绝时 success=false，不谎报）。"""
+    agent = _norm_agent(agent_id)
+    requireAgentOwner(agent, current_user, action="删除 Webhook")
+    adapter = _requireWebhookCapableAdapter(channel_type, agent)
+    ok = await asyncio.to_thread(adapter.delete_webhook, drop_pending_updates)
+    return {"success": bool(ok), "channel_type": channel_type, "agent_id": agent}
+
+
+@router.get("/{channel_type}/webhook/info", summary="查询渠道 Webhook 状态（Telegram getWebhookInfo）")
+async def get_channel_webhook_info(
+    channel_type: str,
+    agent_id: str = Query(default="default", description="Agent ID（实例表主键的一半）"),
+    current_user: Any = Depends(get_current_user),
+):
+    """查询 Telegram Webhook 状态（getWebhookInfo 结果原样透传；失败 success=false）。"""
+    agent = _norm_agent(agent_id)
+    requireAgentOwner(agent, current_user, action="查询 Webhook")
+    adapter = _requireWebhookCapableAdapter(channel_type, agent)
+    info = await asyncio.to_thread(adapter.get_webhook_info)
+    return {"success": info is not None, "data": info,
+            "channel_type": channel_type, "agent_id": agent}
 
 
 # ============================================================
