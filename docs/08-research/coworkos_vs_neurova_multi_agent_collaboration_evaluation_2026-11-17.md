@@ -10,6 +10,8 @@
 
 **总分：Neurova 84/110（76.4%），CoworkOS 参照系 95/110（86.4%）**——七维廿二子项等权求和（§6 总分表）。与上轮相比，Neurova 从 70 → 84（+14，全部来自 P1–P3 升级批的机制化落地）；CoworkOS 是迄今评测过的最强参照系（AutoSwarm 84、ZCode 对照另计）。
 
+> **【2026-11-18 S14 重评】** 超越方案 S1–S13 全部落地、H 系（H-1/H-2/H-4 三段/H-7）与父侧叫停/运行中改需求补评后，同框重评 **Neurova 98/110（89.1%）**——越过超越判定线 ≥96，**超越成立**（逐子项证据、执行记录与判定见 §6.y；§6.x 总分表已增重评列）。
+
 双方形态不同：CoworkOS 是"**本机单用户长程工作 harness**"（Electron/CLI 双入口，任务策略与执行管理分离，Main/Coordinator/Subagent 三层，共享应用层人机共编，RSI 后训练闭环）；Neurova 是"**产品化的多渠道多 Agent 平台**"（蜂群派生 + ACP 团队 + 协作房间 + 工作流 + 定时任务）。
 
 关键结论：
@@ -209,18 +211,86 @@ CoworkOS 组织实验：GLM-5.3 当控制器与数据教师，Qwen3.6-35B-A3B �
 
 ### 6.x 总分表与两轮走势
 
-| 维 | Neurova（上轮） | Neurova（本轮） | CoworkOS | 上轮 AutoSwarm |
-|---|---|---|---|---|
-| A 协作形成 | 9 | **14** | 13 | 20 |
-| B 执行协调 | 14 | **19** | 22 | 23 |
-| C 通信 | 11 | **12** | 14 | 11 |
-| D 记忆共享 | 10 | **11** | 14 | 5 |
-| E 治理安全 | 13 | **13** | 11 | 9 |
-| F 观测评测 | 6 | **7** | 10 | 7 |
-| G 异构互操作 | 7 | **8** | 9 | 9 |
-| **合计** | **70（63.6%）** | **84（76.4%）** | **95（86.4%）** | 84（76.4%） |
+| 维 | Neurova（上轮） | Neurova（本轮 11-17） | Neurova（重评 11-18） | CoworkOS | 上轮 AutoSwarm |
+|---|---|---|---|---|---|
+| A 协作形成 | 9 | 14 | **16** | 13 | 20 |
+| B 执行协调 | 14 | 19 | **24** | 22 | 23 |
+| C 通信 | 11 | 12 | **14** | 14 | 11 |
+| D 记忆共享 | 10 | 11 | **13** | 14 | 5 |
+| E 治理安全 | 13 | 13 | **14** | 11 | 9 |
+| F 观测评测 | 6 | 7 | **9** | 10 | 7 |
+| G 异构互操作 | 7 | 8 | **8** | 9 | 9 |
+| **合计** | **70（63.6%）** | **84（76.4%）** | **98（89.1%）** | **95（86.4%）** | 84（76.4%） |
 
 > 读法：Neurova 已追平上轮 AutoSwarm 的分数，但在更强的 CoworkOS 面前仍差 11 分；差距集中在 **B1/B5（持久化协调与候选制集成）、C1/C3（邮箱可靠性语义）、D3（压缩纪律）、F1/F2（事件溯源与实测基准）**。E 治理安全是 Neurova 仅存的明确领先维（B3 依赖门控是 CoworkOS 没有的机制，已计入 A4/B3）。
+> 【11-18 重评读法】上述 11 分差距恰是 S1–S13 的攻击面：重评后 Neurova 98 反超 CoworkOS 95——A（16 vs 13）/B（24 vs 22）/E（14 vs 11）领先，C（14 vs 14）持平，D（13 vs 14）/F（9 vs 10）/G（8 vs 9）各差 1 分；判定线 ≥96 达成，**超越成立**（证据与剩余差距见 §6.y）。
+
+### 6.y 2026-11-18 重评（S14 同框重评分）
+
+> **方法**：维度体系与锚点不变（§2.2，0=无实现 / 1=骨架无消费 / 2=部分实现仅靠自觉 / 3=机制化覆盖主链路 / 4=机制化+测试守卫+治理完备 / 5=机制化+测试+治理+实证闭环）。对每个涨分子项到现场代码核证据——**机制落点（file:line）+ 消费方（写入→读取→反馈闭环）+ 测试/实测**，无证据不涨分；本节引证的 commit 号已经 `git log` 逐一核验存在，file:line 为 2026-11-18 现场读数。上轮（2026-11-17）评分过程原样保留于 §6 各维小节，两轮可直接对比。评分纪律：宁可少评不可虚高——不足以支撑锚点上一格的子项维持原分并写明原因（A2/A3/A4/B3/C2/D1/D2/E2/G1/G2 与 E3 满锚共 11 项不动）。
+
+#### 重评逐子项（22 项全表）
+
+| 子项 | 上轮 | 重评 | 变动依据（机制落点 + 消费方 + 测试/实测） |
+|---|---|---|---|
+| A1 团队组成与角色分配 | 2 | **4** | 名册选人：spawn 按团队职责生成任务书角色段（`swarm.py:416`，受 `TEAM_DUTY_PROMPT_MAX_CHARS` 约束 `swarm.py:125`）+ `list_teams`/`dispatch_team`/`propose_team` 三工具（`builtin_tools.py:1269/1279/1317`，主 agent 专属、成员面声明集+执行咽喉双保险剔除 `tool_executor.py:1563`）+ 临时团队沉淀经治理 L1 ASK、人批准才经 `createAgentProposedTeam` 写入（`teams_api.py:165` 唯一写点，origin/approved_by/promoted_from_run）+ 前端 TeamPage 来源标（`TeamPage.vue:22`）。测试 `test_team_dispatch.py` 17 用例；live-verify 9641/9651。**不给 5**：角色贡献辩护机制仍缺（CoworkOS 亦无，非超越必需） |
+| A2 任务单元结构化 | 4 | 4 | TaskUnit 上轮已评 4；S3/S4 只增依赖与产物声明的消费面（候选 artifactKeys 来自 TaskUnit.artifactOwnership），结构未变 |
+| A3 验收条件 | 4 | 4 | 验收门+回炉上轮已评 4；S4 候选 `reviseRequired` 复用同一验收判定（不新造判定器），锚点未变 |
+| A4 依赖与评审关系 | 4 | 4 | 依赖门控+in_review 评审相位上轮已评 4 |
+| B1 共享执行状态 | 4 | **5** | `RUN_STATUS_TRANSITIONS` 全量出边表（`swarm.py:141`）+ `transitionRun` 唯一收口（`swarm.py:154`，swarm 7 处+review_gate 6 处赋值点改道）+ 每次迁移落 `status_changed` 入 H-4 账本 + `replayRunTailStatus`（`swarm.py:190`）/`reconcileRunFromEvents`（`swarm.py:1090`）启动重放校正 + 台账 SQLite v5 增 project_id/team_id 列（`agent_run_store.py:138`，PRAGMA user_version 通道）。测试 `test_run_status_transitions.py`（`test_illegal_transition_completed_to_running_raises` 钉非法迁移、`test_legal_chain_running_in_review_completed_logs_events` 钉落账）；live-verify 9631 迁移序列与账本逐条对上 |
+| B2 单元生命周期 | 4 | **5** | 迁移表强校验：非法迁移显式抛 `IllegalRunStatusTransition`（`swarm.py:150,170`，不静默不吞）+ H-2 机械完成闸门 `pendingBackgroundForSession`（`swarm.py:1118`，`052abda7d`：后台未清完成声明不得静默通过、等待事实并入出口正文且不续跑模型防忙等）+ in_review 占槽评审相位；live-verify 9631 |
+| B3 依赖门控与前沿并行 | 4 | 4 | 依赖门控+blocked 不占槽+结算放行上轮已评 4（CoworkOS 至今无 η 门，本项维持领先） |
+| B4 事件驱动交互与阻塞升级 | 4 | **5** | H-1 邮箱两阶段确认（`98074146b`）+ H-2 等待核账 + S9 escalate/审批投递协作房间→`handleRoomSwarmReply` 回灌 `decideSwarmApproval`（`collaboration_room_api.py:147`，`79551406e`：L2 判定限群主/admin、普通成员只记议见、重启从房间历史补建 pending 索引）+ 父侧叫停 `cancel_subagent`→`cancelRun` 兜底落账（`swarm.py:1520`，`60ef5dd81`）+ 运行中改需求 `continue_subagent`/`updateSubagent` mode=steer 注入成员会话插话队列（`swarm.py:1598`）。测试 `test_swarm_room_integration.py` 14 用例；live-verify 9641 群主回复→桥接匹配→判定成功→裁决卡上墙全程实测 |
+| B5 结果集成 | 3 | **5** | `CandidateMergeBoard`（`candidate_merge.py:105`）提交即互标冲突双方保留 + CAS 合入 `mergeCandidate`（`candidate_merge.py:182`，baseRevision≠revision 判冲突、绝不静默覆盖）+ 回流先落候选不直传定案（`swarm.py:1209` submitCandidate、回炉重提 `swarm.py:2255`）+ `integrationReport` 增 revision/candidates/conflicts（`swarm.py:1193`）+ 房间拦截/采纳端点（S9，判定权在候选板单源）+ 人工拦截经审批链分级（NEUROVA_SWARM_MERGE_APPROVAL_LEVEL）。测试 `test_candidate_merge.py` 19 用例；live-verify 9651 候选两次 CAS 合并上墙 |
+| C1 寻址/路由/邮箱 | 4 | **5** | messageId 幂等去重（`mailbox.py:78`）+ priority 三级队列、lease 降序同级时间升序（`mailbox.py:101`）+ leased 超时回收回 ready（回收计数进 `stats()` `mailbox.py:149`）+ stats 快照并入 /monitor/resources→MonitorPage 邮箱健康卡（`MonitorPage.vue:44`，`19bc07376`）；唯一写点 pushParentMail 纪律保持（钉死 swarm.py+loops/base.py） |
+| C2 实时性 | 4 | 4 | SSE/WS 流式+广播上轮已评 4；provider 侧真流式（N1）属模型调用面，不改变本子项锚点 |
+| C3 可靠性语义 | 4 | **5** | CoworkOS 三件套对齐：两阶段确认 lease→落盘→acknowledge（`mailbox.py:127`，`98074146b`，破坏性 drain 退役）+ messageId 幂等（S2 `763abece7`）+ 死主回收（leased 超 TTL 回收重投）——"宁重不丢"不升级成"重复生效"靠消费侧判重闭环（`loops/base.py:102` 幂等窗口、`loops/base.py:956` 重投件只补确认）；测试 `test_mailbox_two_phase.py`（`test_duplicateMessageIdDeliveredOnce`/`test_unacked_message_is_redelivered_on_next_lease`/`test_drain_removed` 等） |
+| D1 跨 agent 上下文共享 | 4 | 4 | 三通道回流+member 会话持久上轮已评 4；S9 room 作用域黑板计入 D2 侧，未改本子项锚点 |
+| D2 共享黑板/工作记忆 | 4 | 4 | S7 写入前敏感拦截+准入清单提示词已落地（`memory_admission.py:108` SENSITIVE_KEY_PATTERNS、`memory_admission.py:171` screenMemoryContent，`mem_core.py:481` installMemoryAdmission 单点接线，审计走 security/audit_logger 单源；`90a2fb84d`）+ live-verify 假 key 拒收入审计。**不涨的原因**：3-Task 独立佐证转正/人工审阅/世代失效缺位——按方案保守口径 0 分预算，写入门已补但整体准入纪律仍不及 CoworkOS |
+| D3 历史压缩与成本 | 3 | **5** | S5 会话追加式 JSONL+快照两段式（`session_manager.py:42,46`，追加/撕裂封口/坏行跳过/懒迁移，`1444143c1`）+ S6 四件（`c340f5e80`）：`CONTEXT_COMPACT_TRIGGER_RATIO=0.85` 越水位自动折叠（`context_pool.py:48`、`chat_pipeline.py:2863`）+ 溢出错误族兜底压缩重试一次 + `assertCompactionShrinks` 严格变小守卫（`context_pool.py:121`）+ `CompressionEvent` 落时间线且原消息永不删（`context_pool.py:69,162`）+ 工具结果有界投影句柄回取、失败不折叠（`chat_pipeline.py:3017`）+ swarm 轨迹生产者接线。消费：ChatPage 认领 context_compacted 轻提示（`ChatPage.vue:2007`，`d2209118c`）。测试 `test_context_compact_discipline.py` 19 用例 + `test_session_store_append_only.py`；live-verify 9632 真后端压缩全链。诚实边界：CoworkOS 的失败冷却与子代理 20k 软目标暂无等价物（见剩余差距清单） |
+| E1 权限/审批（人在环） | 4 | **5** | S8 审批审计持久化（`cd695139d`）：请求/决定成对落审计单源（`approval_chain.py:137`，swarm_approval_request/decide，fail-open 但错误可见）+ GET /v1/audit/approvals?run_id= 成对轨迹查询（admin 门）+ AuditPage 成对查询面板（`audit.ts:98` getApprovalTrajectory，`e1944819f`）+ 房间裁决记 decided_by_channel + 审批投递 priority=high（S2 移交闭环）。测试 `test_approval_audit_persistence.py` 9 用例 + 审批链既有 18 例；审计链路经 live-verify 9641（房间裁决）/9663（按 resource_id 查台账）实证 |
+| E2 工具面收窄 | 4 | 4 | 白名单+执行咽喉+explore 只读上轮已评 4；收尾波 MAIN_AGENT_ONLY_TOOLS 声明集单源收口（`458ae1e8d`，`tool_executor.py:1563` 降为执行期纵深防御第二道）是 4 分内部强化；无 CUA 沙箱等价物，不给 5 |
+| E3 资源治理 | 5 | 5 | 治理三明治（广度/深度/预算/冷却/错峰硬闸）满锚未变；S10/S11/S13 新工具全部入治理三明治照算 |
+| F1 台账/trace/事件 | 4 | **5** | H-4 run 级 JSONL 事件账本+causation_id 因果链（`swarm_event_log.py:35`，`51a2aaf92`）+ `runEvents` 读面（`swarm.py:1081`）+ view=events 端点（`3c9c14901`）+ SubAgentPanel 事件时间线前端（`9d507ecd7`）+ S12 台账 v5 project_id/team_id 归属列（`agent_run_store.py:130`，`1e829d308`）+ GET /projects/{id}/collaboration 五类记录聚合+归档封卷自动总结（`projects_api.py:11`）+ CollaborationPage 档案面板（`collaboration.ts:669`，`0338a5823`）。脱敏纪律：正文不进账本、档案只出摘要与句柄。测试 `test_project_collab_dossier.py` 10 用例；live-verify 9661 spawned→started→terminal 完整因果链+封卷留底。诚实边界：模型请求级全量归档（CoworkOS \*-requests.jsonl 形态）暂无 |
+| F2 基准评测 harness | 3 | **4** | S1 评测地基（`a79c10ba7`）：usage 回传（`runner.py:6`、`metrics.py:22` 聚合）+ `expect_trajectory` 轨迹判据（`tasks.py:85`）+ taskIsolatedMemory 默认开（`runner.py:9`）+ T1 改材料归纳 + /baseline-reports 只读端点（`benchmark.py:379`）+ BenchmarkPage 报告视图（`benchmark.ts:110`，`da7a70ffd`）+ N3 suite_eval 真执行器后台轮询（`48acfafb4`）+ H-7 真模型基线 140 次真实调用在案（[multi_agent_bench_baseline_2026-11-17.md](multi_agent_bench_baseline_2026-11-17.md)）。**不给 5**：新判据+记忆隔离下的 v2 真模型复跑待密钥供给（S1 移交 1F），缺"新口径实测"这一环 |
+| G1 多模型/多 provider | 4 | 4 | 多 provider+渠道未变 |
+| G2 互操作协议 | 4 | 4 | ACP+MQTT+外部 agent 握手+MCP 客户端未变；MCP 深度集成维持登记（方案明确不做，另行立项） |
+
+**维度小计**：A 16（+2）、B 24（+5）、C 14（+2）、D 13（+2）、E 14（+1）、F 9（+2）、G 8（0）——**合计 98/110（89.1%）**，较上轮 84 净 +14。
+
+#### 判定
+
+**98 ≥ 96——超越成立。** Neurova 98/110 超过 CoworkOS 95/110 三分。A 协作形成（16 vs 13）、B 执行协调（24 vs 22）、E 治理安全（14 vs 11）三维领先，C 通信持平（14 vs 14），D 记忆共享、F 观测评测、G 异构互操作各差 1 分——三处落后均为**单件深度差距**（D 缺压缩失败冷却/子代理软目标与记忆重纪律、F 缺请求级归档与 v2 复跑、G 缺 MCP 深度集成），非结构性缺口。判定不降低口径：F2 若按最严口径守 3 分、D3 若按"对标件齐全"口径守 4 分，总分仍为 96~97，判定不变。
+
+#### S1–S13 执行记录（commit 号均已 git log 核验；与方案文档执行记录段一致）
+
+| 批次 | commit | 交付一句话 |
+|---|---|---|
+| S1 评测地基 | `a79c10ba7` | usage 回传、expect_trajectory 判据、taskIsolatedMemory 默认开、T1 材料归纳重设计、/baseline-reports 只读端点 |
+| S2 邮箱语义 | `763abece7` | messageId 幂等、priority 队列、leased 超时回收、stats() 并入 /monitor/resources |
+| S3 迁移表 | `73d05aa63` | RUN_STATUS_TRANSITIONS + transitionRun 唯一收口（13 赋值点改道）+ status_changed 落账 + 启动重放校正 |
+| S4 候选制 | `ee6be8c2e` | CandidateMergeBoard CAS 合入、冲突双保留升级、审批分级、integrationReport 增 candidates/conflicts |
+| S5 会话追加式 | `1444143c1` | JSONL+快照两段式（追加/撕裂封口/懒迁移），NEUROVA_SESSION_JSONL 门控 |
+| S6 压缩纪律 | `c340f5e80` | 0.85 水位自动触发、溢出兜底、严格变小守卫、CompressionEvent 落时间线、有界投影、轨迹生产者接线 |
+| S7 记忆准入 | `90a2fb84d` | 写入前敏感拦截 + 准入清单提示词 + 审计单源 |
+| S8 审批审计 | `cd695139d` | 请求/决定成对落审计单源 + 按 runId 轨迹查询 + 审批邮件 priority=high |
+| S9 团队/房间接入 | `79551406e` + `ebf0cb284` | 人在环房间闭环（回灌判定/群主权限/pending 补建）+ 名册选人 + room 作用域黑板 + 前端审批/候选卡片 |
+| S10 固定团队开放 | `305f47c8d` | list_teams/dispatch_team/propose_team 三工具 + 沉淀 ASK 闭环 + 治理三明治照算 |
+| S11 双入口 | `68e65982a` | 房间直发交 SwarmManager 统一编排（零第二编排引擎）+ 事件回房间 + 终态走候选板 |
+| S12 项目协作档案 | `1e829d308` + `0338a5823` | run→project 归属标落台账 v5 + 五类记录聚合读面 + 封卷留底 + 前端档案面板 |
+| S13 agent 工具面 | `f10f448f3` | project_create/list/detail/room_post 四工具 + 创建即建房间 + L1 ASK 治理 |
+| 收尾波·后端（S13 移交清偿） | `458ae1e8d` + `f7f346694` + `9702d8cd9` | MAIN_AGENT_ONLY_TOOLS 并集收口单一事实源 + 房间裁决回灌项目治理 ASK + docstring 残引扫荡 |
+| 收尾波·前端（附录 D 清零） | `da7a70ffd` + `19bc07376` + `d2209118c` + `e1944819f` + `7e0c3b953` | S1 报告视图 / S2 邮箱健康卡 / S6 压缩轻提示 / S8 审计面板 / S3 类型复核 |
+| H 系补评（评测后落地，本批计入对应子项） | `98074146b`（H-1）/ `052abda7d`（H-2）/ `51a2aaf92` + `3c9c14901` + `9d507ecd7`（H-4 三段）/ `fd2e5937f`（钉子清偿） | 两阶段确认 / 机械完成闸门 / 事件账本+读面+前端时间线（§7 执行记录已有详述） |
+| 父侧叫停/运行中改需求（评测后落地） | `60ef5dd81` | cancel_subagent→cancelRun 落账；continue_subagent/updateSubagent steer 注入/restart 重派 |
+| N3 评测执行器 | `48acfafb4` | suite_eval 判据注入真执行器 + 后台轮询（计入 F2） |
+
+#### 剩余差距与下一轮清单（不降低口径的诚实清单）
+
+1. **D 维收尾**：压缩失败冷却与子代理软目标（CoworkOS D3 剩余件）；记忆 3-Task 候选转正/世代失效（H-5 重纪律，触碰 MemCore 主干，须独立方案先行）——D2 维持 4 的原因。
+2. **F 维收尾**：F2 的 v2 真模型复跑（新判据+记忆隔离下重出基线，S1 移交 1F 待密钥）；F1 的模型请求级归档（H-4 纪律刻意不进账本，如需另立 trace 归档面，不破坏账本脱敏纪律）。
+3. **G 维**：MCP 深度集成（G2 4→5 的唯一路径，方案 §0.3 明确另行立项）。
+4. **A1 的 5 分路径**：角色贡献辩护机制（参照系亦无，非超越必需，按需另立项）。
 
 ---
 
@@ -254,3 +324,4 @@ CoworkOS 组织实验：GLM-5.3 当控制器与数据教师，Qwen3.6-35B-A3B �
 1. P1–P3 升级批使 Neurova 从 70 → 84 分，**已追平上轮 AutoSwarm 参照系**；协作形成维（A）从最大差距维变为反超项，验证了 TaskUnit/验收门/评审相位/依赖门控的落地价值。
 2. CoworkOS 代表当前最强的"执行可靠性工程"形态（95/110）：其价值不在协作形成（反而无依赖门控、无自动验收），而在**持久化协调、崩溃一致性、上下文压缩纪律与事件溯源**——这恰是 Neurova 下一步（H-1/H-2/H-4/H-6）的镜子。
 3. 两轮对照的元结论：AutoSwarm 教"怎么组织协作"，CoworkOS 教"怎么让协作在真实长程环境中不死不丢不糊"；Neurova 的下一步升级应从前者转向后者。
+4. **【2026-11-18 S14 重评后】** S1–S13 与 H 系、父侧叫停/运行中改需求全部落地，同框重评 **98/110**，越过判定线 ≥96——**对 CoworkOS 的超越成立**（逐子项证据与执行记录见 §6.y）。领先项：A 协作形成（16 vs 13）、B 执行协调（24 vs 22）、E 治理安全（14 vs 11）；持平：C 通信（14 vs 14）；落后各 1 分：D 记忆共享（13 vs 14）、F 观测评测（9 vs 10）、G 异构互操作（8 vs 9），均为单件深度差距，下一轮清单见 §6.y。
