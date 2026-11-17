@@ -1,13 +1,13 @@
 # 超越 CoworkOS 实施方案（完整实施版：S1–S12）
 
-- 日期：2026-11-17（v2 修订：应用户拍板，把团队/群聊能力接入与固定团队开放、多 agent 双入口两项拓展**取消拓展项区分，统一编入批次**，全方案 S1–S12 一次成型）
+- 日期：2026-11-17（v3 修订：追加 S12 项目协作档案与 S13 项目/团队/群聊的 agent 工具面——项目管理与多 agent 协作整合、留底可观测、用户和 agent 都可发起；原重评分顺延 S14。v2 曾统一 S1–S12，初版为 S1–S9）
 - 依据：
   - [CoworkOS 与 Neurova 多 Agent 协作对照评测](../08-research/coworkos_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)（下称"COS 评测"；§6 逐维评分、§6.x 总分表、§7 H 系清单是本方案直接输入）
   - [deepagents 与 Neurova 对照评测](../08-research/deepagents_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)（下称"DA 评测"；其 §8「按本仓代码现状逐条对照的学习落点」是 S5/S6/S7 的规格来源）
   - 真模型基线报告 [multi_agent_bench_baseline_2026-11-17.md](../08-research/multi_agent_bench_baseline_2026-11-17.md)（S1 的输入：T1 不可用、记忆串扰、usage 缺失三条实证）
 - 目标：同框评测总分从当前 **84/110** 越过 CoworkOS 的 **95/110**（判定线 ≥96），且不损失既有领先维（A 协作形成 14、E 治理安全 13）。
 - 范围：`neurova/agent/`（swarm.py、mailbox.py、swarm_event_log.py、team.py、candidate_merge.py 新增、memory_admission.py 新增、loops/base.py、chat_pipeline.py、goal_verifier.py）、`neurova/builtin_tools.py`、`neurova/tool_executor.py`、`neurova/session_manager.py`、`neurova/context_pool.py`、`neurova/mem_core.py`、`neurova/collaboration/`（room_*、memory_scope）、`neurova/api/endpoints/`（teams_api.py、collaboration_room_api.py）、`neurova/benchmark/multi_agent/`、`tests/unit/`、`docs/08-research/`。
-- 执行者须知：本方案按批次（S1–S12）组织，**每批独立可交付、可红绿验证、可单独提交**。开工任何一批前，先读本方案附录 A（共享避坑清单）并对目标文件做撞车复核（`git log --oneline -5 -- <file>` + `git status`）；文中所有 `file:line` 均以**开工当日现场复核为准**（行号会漂移，符号名是锚）。
+- 执行者须知：本方案按批次（S1–S14）组织，**每批独立可交付、可红绿验证、可单独提交**。开工任何一批前，先读本方案附录 A（共享避坑清单）并对目标文件做撞车复核（`git log --oneline -5 -- <file>` + `git status`）；文中所有 `file:line` 均以**开工当日现场复核为准**（行号会漂移，符号名是锚）。
 - 纪律：每项先红后绿（红灯测试实证期望行为，附实测输出）；净新增 LOC 尽量为负或逐条列明去向；live-verify 真链路自证；同根因全命中点扫荡；不建第二套平行体系。
 
 ---
@@ -27,14 +27,17 @@ S8  审批审计持久化
 S9  团队/房间能力接入蜂群（人在环回灌+群主权限/候选房间呈现/动态组队/共享黑板/AgentTeam 边界）
 S10 固定团队开放（list_teams/dispatch_team/临时团队沉淀）
 S11 多 agent 协作双入口（主 agent 编排发起 + 用户经项目房间直发）
-S12 同框重评分与超越判定
+S12 项目协作档案（留底+可观测：run→project 归属标签 + 聚合读面 + 收尾封卷）
+S13 项目/团队/群聊的 agent 工具面（用户和 agent 都可发起项目）
+S14 同框重评分与超越判定
 ```
 
 依赖与并行：
 - S1、S2、S7、S8 互不碰文件域，**可四会话并行**；
 - S3→S4 **串行**（同在 swarm.py 状态/回流面，建议同会话连做）；S5→S6 **串行**（S6 依赖 S5 的事件落盘面）；
 - S9 依赖 S4（候选房间呈现）与 S8（审批回灌）；S10 依赖 S9（团队接缝）与 S4；S11 依赖 S9/S10；
-- S12 收尾：S1–S11 全部落地后执行。
+- S12 依赖 S3/S4/S8/S11（聚合既有事件面与房间发起链，不建新账本）；S13 依赖 S9/S10（房间/团队语义）并依赖 S12（档案可见）；
+- S14 收尾：S1–S13 全部落地后执行。
 
 ### 0.2 涨分预算（诚实口径）
 
@@ -51,9 +54,11 @@ S12 同框重评分与超越判定
 | S9 | B4 4→5（人在环房间闭环） | +1 | +1 |
 | S10 | A1 2→4（名册选人+沉淀闭环） | +1 | +2 |
 | S11 | A1/B4 支撑（产品入口，机制经 S9/S10 计分） | 0 | +1 |
-| **合计** | | **+10 → 94** | **+20 → 锚点封顶内按证据计** |
+| S12 | F1 4→5（项目留底+可观测聚合） | +1 | +1 |
+| S13 | A1/E1 支撑（agent 发起面+分级治理） | 0 | +1 |
+| **合计** | | **+11 → 95** | **+22 → 锚点封顶内按证据计** |
 
-> 读法：判定线 **≥96**。保守路径（94）不足以宣告超越——S4（B5）、S5+S6（D3）、S10（A1）三处必须做实；满额路径超锚点上限时按实际证据计，不硬凑。评分是每子项 0–5 锚点制，涨分必须以证据支撑（S12 给出逐子项证据清单要求）。
+> 读法：判定线 **≥96**。保守路径（95）仍差一步——S4（B5）、S5+S6（D3）、S10（A1）必须做实方可越过；满额路径超锚点上限时按实际证据计，不硬凑。评分是每子项 0–5 锚点制，涨分必须以证据支撑（S14 给出逐子项证据清单要求）。
 
 ### 0.3 明确不做（防过度工程与违反裁定）
 
@@ -275,7 +280,48 @@ S12 同框重评分与超越判定
 
 ---
 
-## S12 同框重评分与超越判定
+## S12 项目协作档案：留底 + 可观测（F1：4→5）
+
+**动机**：用户拍板：项目管理与多 agent 协作整合，做到**留底、可观测**。COS 的 F1 5 分=事件溯源+因果链+请求级归档+脱敏；本仓 H-4 账本、S8 审计、房间存储已各自成面，缺的是**按项目聚合的观测读面**——项目是协作的一等容器（room_id = 协作 project_id 既有等式），把散落账本聚到项目视角。
+
+**现状**：`collaboration_isolation.py` 的 Project 已聚合 teams/tasks/workflows/files（单源落盘）；`projects_api.py` 的 stats 只数团队/任务/工作流——协作运行态（runs/事件/候选/审批）不在项目视野内。
+
+**改动文件**：`neurova/agent/swarm.py`（spawn 打 project 标）、`neurova/api/endpoints/projects_api.py`（档案读面）、`tests/unit/api/` 或 `tests/unit/collaboration/` 新增测试。
+
+**实现要点**
+1. run→project 归属标签：经房间发起的协作（S11 入口二）spawn 时把 project_id 写入 run 台账行（agent_run_store 加列走 db_migration 注册表，附录 A6）；主 agent 直发（入口一）带项目上下文时同样打标。
+2. 档案读面：`GET /projects/{id}/collaboration`（挂既有 projects 域，不新开端点域）——聚合返回：房间消息（RoomStore）、run 列表（台账按 project 标）、事件时间线（H-4 账本按 run 归属拉取）、候选记录（S4）、审批审计（S8）。**全部读既有持久面，不建第二本账**（教义第 6 条）。
+3. 收尾封卷：项目 status 转 closed 时自动从账本生成协作总结（参与 run 数/候选收驳/审批记录/关键事件链），作为"留底"的封卷动作落项目档案。
+4. 脱敏沿用账本纪律：正文不进账本，档案展示摘要与句柄，不搬运大正文。
+
+**红灯**：新增 `test_project_collab_dossier.py`——房间发起的 run 带项目标；档案端点聚合 run/事件/候选/审批四类记录；封卷生成总结；无 project 标的 run 不串入档案。
+**绿灯验收**：projects_api 既有测试 A/B 零新增失败；live-verify 房间发起一次协作后从档案端点看到完整轨迹。
+**避坑**：聚合是**读时 join**，不改各账本写格式；跨账本查询走既有单源 API（readRunEvents/台账查询/审计查询），不直接翻文件；统计口径进 `get_project_stats` 时保持向后兼容字段。
+
+---
+
+## S13 项目/团队/群聊的 agent 工具面（用户和 agent 都可发起）
+
+**动机**：用户拍板：用户和 agent 都可以发起项目；项目管理、团队管理、群聊开放给 agent 作为工具。至此发起面三合一：用户经项目直发（S11）、主 agent 编排发起（S10/S11 入口一）、agent 直接建项目/群聊（本批）。
+
+**改动文件**：`neurova/builtin_tools.py`、`neurova/tool_executor.py`、对应测试。
+
+**实现要点**
+1. 新增主 agent 工具（成员工具面剔除，先例同 S10）：
+   - `project_create(name, description, visibility, memberAgentIds?)`：agent 发起项目——**直接可建但强制审计 + 预算入账**；owner 记为发起 agent 的属主用户；**新增人类成员/改可见性 → 审批链 L1 ASK**（影响人必须过人）；对外分享 → L2。
+   - `project_list()` / `project_detail(projectId)`：读面（复用 projects_api 与 collaboration_isolation 数据单源）。
+   - `room_post(projectId, message, kind)`：agent 向自己所在房间发消息（kind=report/question/note），经治理限频；escalate/候选/审批走 S9 既有通道，本工具是通用发言面。
+   - 团队管理**不加新工具**：固定团队开放在 S10（list/dispatch/沉淀 ASK），项目内团队（ProjectTeam）暂不开放给 agent——防工具面膨胀（DA 评测点名的反面教材），有真实需求再立项。
+2. 创建即建房间：project_id = room_id 等式自动成立，零额外接线。
+3. 治理：全部工具进治理三明治与台账；agent 发起的项目在档案（S12）中带 initiator=agent 标，便于用户区分来源。
+
+**红灯**：新增 `test_agent_project_tools.py`——agent 建项目成功且审计可查；加人类成员触发 ASK、未批准不生效；非成员 room_post 被拒；三工具对成员不可见。
+**绿灯验收**：builtin_tools/tool_executor 既有测试 A/B 零新增失败；live-verify agent 真实发起一个项目并从档案（S12）看到留底。
+**避坑**：每加一个工具先问"能否并进既有工具"；agent 建项目的名称/描述过 context_firewall；`project_create` 不允许 agent 直接把 visibility 设为对外（L2 保留给人）；room_post 限频参数进治理三明治，防刷屏消耗他人 token。
+
+---
+
+## S14 同框重评分与超越判定
 
 **动机**："超越"必须以同框口径的数据宣告。
 
@@ -285,7 +331,7 @@ S12 同框重评分与超越判定
 3. 判定：合计 **≥96** 即超越成立；未达则列剩余差距与下一轮清单，不降低口径硬凑。
 4. 报告更新后按惯例推双远端（origin + github）。
 
-**避坑**：评分锚点看的是"机制是否存在且被消费"（写入→读取→反馈闭环），只落库没人读的机制不涨分——S12 评审时逐项核闭环。
+**避坑**：评分锚点看的是"机制是否存在且被消费"（写入→读取→反馈闭环），只落库没人读的机制不涨分——S14 评审时逐项核闭环。
 
 ---
 
