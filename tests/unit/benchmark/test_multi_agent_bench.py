@@ -73,12 +73,21 @@ def _markerChecker(requiredMarkers, infeasibleMarker=None):
 
 
 SEED_TASKS = [
+    # S1-1D T1 重设计：与 suites/seed_tasks.py 同步——提示词给真实来源材料，
+    # 任务改为"依据给定材料归纳"，不再考虚构来源。
     BenchmarkTask(
         task_id="t1-sim-evidence-digest",
         suite="t1_sim",
-        prompt="调研主题 X，输出带来源的证据文摘（至少 3 条，每条含来源与量化指标）。",
+        prompt=(
+            "以下是关于主题 X 的三份已核实材料：\n"
+            "1. 《A 报告》（2026-11）：指标 X=48，环比 +6；\n"
+            "2. 《B 数据》（2026-10）：指标 Y=3.2，覆盖率 87%；\n"
+            "3. 《C 文档》（2026-09）：指标 Z=12%，样本量 4200。\n"
+            "任务：只依据上述给定材料归纳证据文摘（至少 3 条，每条含来源与量化指标），"
+            "不得引用材料之外的任何来源。"
+        ),
         check=_markerChecker(["来源《A 报告》", "来源《B 数据》", "来源《C 文档》"]),
-        description="确定性模拟：证据文摘结构切面",
+        description="依据给定材料归纳：证据文摘结构切面（不考虚构来源）",
     ),
     BenchmarkTask(
         task_id="t1-sim-infeasible",
