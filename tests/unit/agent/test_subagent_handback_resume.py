@@ -191,18 +191,20 @@ class TestContinueSubagentTool:
         agent.current_session_id = "sess-abc"
         exe = ToolExecutor(agent)
         fake_swarm = MagicMock()
-        fake_swarm.resumeFinishedRun = AsyncMock(return_value={"status": "completed"})
+        # H 批补差：continue 统一经 updateSubagent（终态走续跑链、运行中走改需求）
+        fake_swarm.updateSubagent = AsyncMock(return_value={"status": "completed"})
         with patch("neurova.agent.swarm.get_swarm_manager", return_value=fake_swarm):
             result = await exe._execute_continue_subagent(
                 {"subagent_id": "swarm_x", "message": "继续", "background": True}
             )
 
         assert result["status"] == "completed"
-        fake_swarm.resumeFinishedRun.assert_awaited_once()
-        args, kwargs = fake_swarm.resumeFinishedRun.call_args
+        fake_swarm.updateSubagent.assert_awaited_once()
+        args, kwargs = fake_swarm.updateSubagent.call_args
         assert args[0] == "swarm_x" and args[1] == "继续"
         assert kwargs["session_id"] == "sess-abc"
         assert kwargs["background"] is True
+        assert kwargs["mode"] == "steer"
 
     @pytest.mark.asyncio
     async def test_executor_requires_ids(self):

@@ -179,12 +179,14 @@ def computeSubagentToolAllowlist(
     # general：全量内置工具 − 递归派生/续跑（子代理不得再派生孙代理，
     # 也不得续跑兄弟——两者都是"从子代理回合里再拉起一条执行链"）；
     # − 审批裁决（P3-1：子代理不得裁决自己发起的审批单——自己批自己=审批链失效）
+    # − 叫停（H 批补差：子代理不得叫停自己/兄弟的运行）
     # − 前台输入注入族（P2-4 电脑操控对照：对齐 ZCode「CUA 仅主代理」——
     #   多代理并发抢真实鼠标/键盘 = 互踩用户桌面；观察面与 shell/ssh 保留）
     from neurova.computer_use import foregroundDesktopTools
 
     base = frozenset(get_registered_tool_names()) - {
         "spawn_subagent", "continue_subagent", "decide_subagent_approval",
+        "cancel_subagent",
     } - foregroundDesktopTools()
     return base | frozenset(borrowMcp)
 
@@ -234,6 +236,8 @@ class SubAgentRun:
     data_fence: Optional[Dict[str, Any]] = None
     # H-4：本 run 最后一笔归档事件的 id（事件账本因果链的串接锚点；内部记账）。
     last_event_id: str = ""
+    # H 批补差：父侧叫停时的原因留痕（CancelledError 落账时并入 error 文案）。
+    cancel_note: str = ""
     status: str = SUBAGENT_PENDING  # 取值域见 SUBAGENT_STATUSES（本模块常量，唯一出处）
     # P2-10 增强：子代理升级/结构化结果提交（escalate/submit_result 工具写入，
     # 随邮箱投递发起者会话；只作读数与通知，不改变运行状态机）
@@ -908,6 +912,145 @@ class SwarmManager:
         self._logRunEvent(run, "terminal", {"status": run.status, "cause": run.cause,
                                             "error": (run.error or "")[:EVENT_ERROR_SUMMARY_CHARS]})
 
+    # ── H 批补差（对照 deepagents update_async_task / cancel_async_task）──────
+
+    def cancelRun(self, subagent_id: str, reason: str = "") -> Dict[str, Any]:
+        """父侧叫停一个子代理运行。
+
+        - 运行中（pending/running/in_review）：取消其 asyncio 任务——CancelledError
+          路径的既有收尾（failed/subagent_cancelled 落账、释放槽位、部分报告交接、
+          依赖结算）照常生效；
+        - blocked 等待件：未启动执行，直接判失败落账（移出等待册，依赖结算不再拉起）；
+        - 已终态/未知 id：幂等失败（诚实报错）；
+        - 前台运行（父回合内 await，无独立任务句柄）：如实报错不可单独叫停。
+        """
+        sid = str(subagent_id or "").strip()
+        if not sid:
+            return {"success": False, "error": "subagent_id 不能为空"}
+        with self._lock:
+            run = self._runs.get(sid)
+            blocked = self._blocked.pop(sid, None) if run is None else None
+        if run is None and blocked is None:
+            return {"success": False, "error": f"未找到子 Agent 运行记录: {sid}"}
+        if run is None:
+            failed = SubAgentRun(
+                subagent_id=sid, depth=blocked.get("depth", 1),
+                agent_id=blocked.get("agent_id", ""),
+                agent_name=blocked.get("agent_name") or blocked.get("agent_id", ""),
+                task=blocked.get("task", ""),
+                origin=blocked.get("origin", "chat"),
+                session_id=blocked.get("session_id"),
+                node_id=blocked.get("node_id"),
+                execution_id=blocked.get("execution_id"),
+                subagent_type=blocked.get("subagent_type", "general"),
+                task_unit=blocked.get("task_unit"),
+                parent_trace_id=blocked.get("parent_trace_id", ""),
+            )
+            failed.status = SUBAGENT_FAILED
+            failed.cause = SUBAGENT_CAUSE_CANCELLED
+            failed.error = "subagent_cancelled（依赖等待中被叫停，未启动执行）"
+            failed.finished_at = time.time()
+            with self._lock:
+                self._runs[sid] = failed
+                self._evict_finished_runs()
+            self._logRunEvent(failed, "cancelled", {
+                "reason": str(reason or "")[:160], "phase": "blocked"})
+            return {"success": True, "subagent_id": sid, "status": failed.status,
+                    "cancelled": True, "note": "等待依赖中被叫停，未启动执行"}
+        if run.status in SUBAGENT_FINISHED_STATUSES:
+            return {"success": False,
+                    "error": f"子代理已终态（{run.status}），无需叫停"}
+        with self._lock:
+            task = self._tasks.get(sid)
+        if task is None:
+            return {"success": False,
+                    "error": "该子任务随父回合前台阻塞运行，无独立任务句柄可叫停"
+                             "（如需可停，请以 background=true 派生）"}
+        run.cancel_note = str(reason or "").strip() or "父代理主动叫停"
+        task.cancel()
+
+        # 取消落账兜底：若 cancel 早于成员任务的首个执行步，协程体从未运行，
+        # CancelledError 处理器不会执行——这里在任务收尾时把 run 如实判为
+        # cancelled 终态（幂等：协程处理器已落账则跳过）。
+        def _finalizeCancelled(_task) -> None:
+            if run.status in SUBAGENT_ACTIVE_STATUSES:
+                run.status = SUBAGENT_FAILED
+                run.cause = SUBAGENT_CAUSE_CANCELLED
+                run.error = f"subagent_cancelled（{run.cancel_note}；任务未产出）"
+                run.finished_at = time.time()
+                with self._lock:
+                    self._evict_finished_runs()
+                self._release_slot(run)
+                self._logRunEvent(run, "terminal", {
+                    "status": run.status, "cause": run.cause,
+                    "error": run.error[:EVENT_ERROR_SUMMARY_CHARS]})
+                self._settleDependencies(run)
+
+        task.add_done_callback(_finalizeCancelled)
+        self._logRunEvent(run, "cancelled", {"reason": run.cancel_note})
+        return {"success": True, "subagent_id": sid, "status": "cancelling",
+                "hint": "取消已发出；终态将以 failed(subagent_cancelled) 落账，"
+                        "subagent_status 可确认"}
+
+    async def updateSubagent(
+        self,
+        subagentId: str,
+        message: str,
+        mode: str = "steer",
+        background: bool = False,
+        session_id: Optional[str] = None,
+        initiator_agent: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """改需求（对照 deepagents update_async_task 的 interrupt|enqueue 双策略）。
+
+        - 终态 run → 走既有续跑链（resumeFinishedRun：member 会话复用 + 溯源）；
+        - 运行中 run：
+          mode=steer（默认，尽力而为）→ 新指令注入成员会话插话队列，成员下一
+            工具轮可见；若成员已不再调用工具则不会送达（如实提示，可改 restart）；
+          mode=restart → 先叫停再按终态续跑链重派（resumed_from 溯源保留）。
+        """
+        sid = str(subagentId or "").strip()
+        text = str(message or "").strip()
+        if not sid:
+            return {"success": False, "error": "subagent_id 不能为空"}
+        if not text:
+            return {"success": False, "error": "message 不能为空（新需求/修正指令）"}
+        with self._lock:
+            run = self._runs.get(sid)
+        if run is None:
+            return {"success": False, "error": f"未找到子 Agent 运行记录: {sid}"}
+        if run.status in SUBAGENT_ACTIVE_STATUSES:
+            if mode == "restart":
+                cancelResult = self.cancelRun(sid, reason="改需求重派（先叫停再重派）")
+                if not cancelResult.get("success"):
+                    return {"success": False,
+                            "error": f"叫停失败：{cancelResult.get('error', '')}"}
+                deadline = time.monotonic() + 5.0
+                while time.monotonic() < deadline:
+                    with self._lock:
+                        cur = self._runs.get(sid)
+                    if cur is None or cur.status in SUBAGENT_FINISHED_STATUSES:
+                        break
+                    await asyncio.sleep(0.02)
+                return await self.updateSubagent(
+                    sid, message, mode="steer", background=background,
+                    session_id=session_id, initiator_agent=initiator_agent)
+            from neurova.core.steer_queue import get_steer_queue
+
+            delivered = get_steer_queue().push(run.member_session_id, text)
+            self._logRunEvent(run, "update_injected", {
+                "mode": "steer", "delivered": bool(delivered), "message": text[:120],
+            })
+            if not delivered:
+                return {"success": False,
+                        "error": "插话队列已满，注入失败（可稍后重试或改用 mode=restart）"}
+            return {"success": True, "subagent_id": sid, "delivered": "steer",
+                    "hint": "新指令将在成员下一工具轮生效；若成员已不再调用工具，"
+                            "本条不会送达——可用 mode=restart 先叫停再重派"}
+        return await self.resumeFinishedRun(
+            sid, message, session_id=session_id,
+            initiator_agent=initiator_agent, background=background,
+        )
 
     async def resumeFinishedRun(
         self,
@@ -1494,7 +1637,8 @@ class SwarmManager:
             # 也会让 asyncio 的取消语义失真（外层以为没被取消）。
             run.status = SUBAGENT_FAILED
             run.cause = SUBAGENT_CAUSE_CANCELLED
-            run.error = ("subagent_cancelled（父任务被取消，子任务未跑完；"
+            _cancelNote = getattr(run, "cancel_note", "") or "父任务被取消"
+            run.error = (f"subagent_cancelled（{_cancelNote}；子任务未跑完；"
                          "派生槽已释放，可直接重派）")
             run.report = self._partialHandback(contentBuffer)
             run.finished_at = time.time()

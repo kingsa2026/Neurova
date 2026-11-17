@@ -481,6 +481,8 @@ class ToolExecutor:
         "submit_result": "_execute_submit_result",
         # P2（工具清单 3.1-3 续）：续跑已终态的子代理（失败交接的复活通道）
         "continue_subagent": "_execute_continue_subagent",
+        # H 批补差：父侧叫停运行中的子代理
+        "cancel_subagent": "_execute_cancel_subagent",
         # P3-1（评测报告 G-11）：跨 agent 审批链——子代理请求 / 父代理裁决
         "request_approval": "_execute_request_approval",
         "decide_subagent_approval": "_execute_decide_approval",
@@ -2927,11 +2929,12 @@ class ToolExecutor:
         return get_swarm_manager().status(subagent_id)
 
     async def _execute_continue_subagent(self, params: Dict) -> Dict:
-        """P2（工具清单 3.1-3 续）：续跑已终态的子 Agent（复活/追加指令）。
+        """P2（工具清单 3.1-3 续）+ H 批补差：续跑/改需求。
 
-        member 会话原样复用（子 Agent 历史由既有会话恢复带回）；上一段
-        report（失败时为部分交接件）随续跑任务附带。治理闸与全新派生同路；
-        权限档只收窄不升级（与 spawn 同一继承纪律）。
+        终态子代理 → 既有复活链（member 会话历史保留、上一段产出衔接、
+        治理闸与全新派生同路、权限档只收窄不升级）。
+        运行中子代理 → mode=steer 把新指令注入成员会话插话队列（下一工具轮
+        生效，尽力而为）；mode=restart 先叫停再按续跑链重派（溯源保留）。
         """
         from neurova.agent.swarm import get_swarm_manager
         from neurova.security.permission_mode import (
@@ -2945,18 +2948,37 @@ class ToolExecutor:
             return {"error": "缺少 subagent_id 参数"}
         if not message:
             return {"error": "缺少 message 参数（续跑指令）"}
+        mode = str(params.get("mode") or "steer").strip().lower()
+        if mode not in ("steer", "restart"):
+            return {"error": "mode 仅支持 steer/restart"}
 
         swarm = get_swarm_manager()
         session_id = getattr(self._agent, "current_session_id", None)
         with inheritedModeScope(resolveEffectivePermissionMode(self._agent)):
-            result = await swarm.resumeFinishedRun(
+            result = await swarm.updateSubagent(
                 subagentId,
                 message,
+                mode=mode,
                 session_id=session_id,
                 initiator_agent=self._agent,
                 background=bool(params.get("background", False)),
             )
         return result
+
+    async def _execute_cancel_subagent(self, params: Dict) -> Dict:
+        """H 批补差（对照 deepagents cancel_async_task）：父侧叫停运行中的子代理。
+
+        终态以 failed(subagent_cancelled) 落账；已产出的部分报告随失败交接保留；
+        派生槽立即释放。仅主代理可用（成员工具面已剔除）。
+        """
+        from neurova.agent.swarm import get_swarm_manager
+
+        subagentId = str(params.get("subagent_id") or "").strip()
+        if not subagentId:
+            return {"success": False, "error": "cancel_subagent 需要 subagent_id"}
+        return get_swarm_manager().cancelRun(
+            subagentId, reason=str(params.get("reason") or "")
+        )
 
     async def _execute_list_agents(self, params: Dict) -> Dict:
         """列出可用 Agent（供蜂群派生时挑选执行者）"""
