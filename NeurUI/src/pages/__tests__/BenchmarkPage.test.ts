@@ -207,7 +207,10 @@ describe('BenchmarkPage Agent 层契约', () => {
     const wrapper = mountPage()
     await flushPromises()
     const tables = wrapper.findAll('.stub-table')
-    expect(tables.length).toBe(2)
+    // S1 起页面有第三张表（基线报告清单）：本档 mock 对所有 URL 无差别返回
+    // runsEnvelope，基线表同样拿到 data.items 非空而渲染——计数 2→3。
+    // 前两张表顺序不变（results → perAgent），索引语义保持。
+    expect(tables.length).toBe(3)
     const runRows = tables[0].text()
     expect(runRows).toContain('r1')
     // stub 表只渲染原始数据源;suite_name 的 i18n 映射在 bodyCell 插槽层
