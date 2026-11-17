@@ -91,6 +91,7 @@ READERS: Dict[str, Set[str]] = {
         "neurova/llm/multi_model_client.py::MultiModelLLMClient._chat_single_attempt",
         "neurova/llm/multi_model_client.py::MultiModelLLMClient.chat_stream",
         "neurova/llm/multi_model_client.py::_consume_llm_quota",
+        "neurova/memory_admission.py::_recordRejectionAudit",
         "neurova/post_chat_pipeline.py::resolveSessionOwner",
         "neurova/tool_executor.py::ToolExecutor._execute_computer_ssh_exec",
         "neurova/tool_layers/mcp_server.py::NeurovaMCPServer._current_user_id",
