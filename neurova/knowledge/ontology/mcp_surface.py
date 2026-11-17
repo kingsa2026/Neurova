@@ -57,6 +57,14 @@ CURATED_TOOLS: Tuple[dict, ...] = (
      "when_to_use": "回答前先做覆盖预检：coverage 低就向用户澄清，不要硬答。"},
     {"name": "ontology_readiness",
      "when_to_use": "会话开始时探一次部署就绪态（术语/事实/目录/源），避免静默死胡同。"},
+    {"name": "team_list",
+     "when_to_use": "派团前先看固定团队名册与成员职责，选对团队再 dispatch。"},
+    {"name": "team_dispatch",
+     "when_to_use": "把整个固定团队按名册派活（多路 spawn+依赖编排，治理照走）；单成员任务直接 spawn。"},
+    {"name": "project_list",
+     "when_to_use": "先列当前可见项目拿 project_id，再进详情或协作房间。"},
+    {"name": "project_detail",
+     "when_to_use": "查单个项目的成员/可见性/状态与团队任务计数，判断能否协作接入。"},
 )
 
 
