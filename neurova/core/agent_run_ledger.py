@@ -358,13 +358,15 @@ def subagentTerminalRow(runStatus: str, cause: str) -> typing.Tuple[str, str]:
 
 def openSubagentRun(
     *, memberSessionId: str, subagentId: str, parentSessionId: str,
-    userId: str, agentId: str, task: str,
+    userId: str, agentId: str, task: str, traceId: str = "",
 ) -> Optional[str]:
     """子任务进台账：`intake` → 晋升 `running`。返回 run_id，失败返回 None。
 
     **同步而非协程**：终态必须写回，而取消路径上协程 `await` 会被第二次 cancel 打断
     （行就永久停在 running——正是 §6-84 刚收掉的那类半死态）。台账这几步是短 SQL，
     起止各一次，不在高频流式循环里。
+
+    `traceId`（P3-2）：该子任务轨迹的 trace_id，台账行与 span 树由此关联。
 
     **为什么不走 `AgentRunLedger.acquire()`**：那条是回合准入闸（排队、让位、park
     等人工续跑），而 park 对子任务没有对应 UI——把它塞进让位闸会造出"挂着等人点的
@@ -379,7 +381,7 @@ def openSubagentRun(
             return None
         store = _ars.get_agent_run_store()
         run_id = store.intake(memberSessionId, userId, agentId, task,
-                              subagentId, parentSessionId)
+                              subagentId, parentSessionId, traceId)
         claimed = store.claim_next(memberSessionId)
         if claimed != run_id:
             # 没晋升（同 member 会话已有 running 行）→ 弃 queued 行，绝不留幽灵 running

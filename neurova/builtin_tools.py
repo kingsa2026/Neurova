@@ -1197,6 +1197,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                         "artifactOwnership": {"type": "string", "description": "产物归属与后续用途"},
                         "reviewMode": {"type": "string", "enum": ["none", "supervisor"], "description": "评审方式：none 不评审（默认）/ supervisor 回流前由发起方按验收条件评审"},
                         "dependencies": {"type": "array", "items": {"type": "string"}, "description": "依赖的前置 subagent_id 列表（全部验收通过后本任务才启动）"},
+                        "untrustedPayload": {"type": "string", "description": "不可信外部内容槽位（P3-4 数据面围栏）：来自外部检索/用户材料的原文放这里，渲染时被隔离进显式不可信段并做注入特征扫描（命中只标记告警，不改写不阻断）；不要把任务指令混进这个字段"},
                     },
                     "required": ["goal"],
                 },

@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from neurova.agent.context_firewall import fenceUntrustedPayload
+
 REVIEW_MODES = ("none", "supervisor")
 
 
@@ -27,6 +29,9 @@ class TaskUnit:
     artifactOwnership: str = ""
     reviewMode: str = "none"
     dependencies: List[str] = field(default_factory=list)
+    # P3-4（评测报告 G-13）：不可信外部内容槽位——外部检索/用户材料类内容走这里，
+    # 渲染时被隔离进显式不可信段（fenceUntrustedPayload），与可信任务指令物理分槽。
+    untrustedPayload: str = ""
 
     def toDict(self) -> Dict[str, Any]:
         return {
@@ -37,6 +42,7 @@ class TaskUnit:
             "artifactOwnership": self.artifactOwnership,
             "reviewMode": self.reviewMode,
             "dependencies": list(self.dependencies),
+            "untrustedPayload": self.untrustedPayload,
         }
 
 
@@ -84,6 +90,8 @@ def parseTaskUnit(data: Optional[Any]) -> Optional[TaskUnit]:
         artifactOwnership=str(_pick(data, "artifactOwnership", "artifact_ownership") or "").strip(),
         reviewMode=reviewMode,
         dependencies=_asStringList(_pick(data, "dependencies")),
+        untrustedPayload=str(_pick(data, "untrustedPayload", "untrusted_payload",
+                                   "externalData", "external_data") or "").strip(),
     )
 
 
@@ -109,4 +117,8 @@ def renderTaskUnitPrompt(task: str, unitData: Optional[Any]) -> str:
         lines.append(f"- 产物归属：{unit.artifactOwnership}")
     if unit.reviewMode == "supervisor":
         lines.append("- 评审方式：提交后由发起方按上述验收条件评审，不通过将带批注退回重做")
+    if unit.untrustedPayload:
+        # P3-4：不可信内容进显式隔离槽位段（警示 + BEGIN/END 标记），不与任务指令混排
+        lines.append("")
+        lines.append(fenceUntrustedPayload(unit.untrustedPayload))
     return "\n".join(lines)

@@ -109,6 +109,20 @@ def _migrateToV3(conn: sqlite3.Connection) -> None:
 
 register_migration(3, _migrateToV3, domain="agent_runs")
 
+
+def _migrateToV4(conn: sqlite3.Connection) -> None:
+    """v4：蜂群 span 级 trace（P3-2）——台账行以 trace_id 与轨迹 span 树关联。
+
+    每条子任务 run 记下 member 执行期开设的轨迹 trace_id，排查时从台账行直达
+    该子任务全过程 span；与父请求链路的接续经 SubAgentRun.parent_trace_id。
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(agent_runs)")}
+    if "trace_id" not in columns:
+        conn.execute("ALTER TABLE agent_runs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''")
+
+
+register_migration(4, _migrateToV4, domain="agent_runs")
+
 TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 
 # 挂起态：非终态。它的存在意义就是"活过进程、等人点续跑"，因此
@@ -191,22 +205,23 @@ class AgentRunStore:
 
     def intake(
         self, session_id: str, user_id: str = "", agent_id: str = "", message: str = "",
-        subagent_id: str = "", parent_session_id: str = "",
+        subagent_id: str = "", parent_session_id: str = "", trace_id: str = "",
     ) -> str:
         """请求落库（queued）。返回 run_id。message 只存摘要（正文真相在会话）。
 
         `subagent_id`/`parent_session_id` 只由蜂群记账路径填（见
-        `agent_run_ledger.openSubagentRun`）；回合入口留空，语义与改前一致。
+        `agent_run_ledger.openSubagentRun`）；`trace_id`（P3-2）关联该子任务的
+        轨迹 span 树；回合入口留空，语义与改前一致。
         """
         run_id = f"run_{uuid.uuid4().hex[:16]}"
         now = time.time()
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO agent_runs (run_id, session_id, user_id, agent_id,"
-                " subagent_id, parent_session_id,"
-                " message_digest, status, created_at) VALUES (?,?,?,?,?,?,?,'queued',?)",
+                " subagent_id, parent_session_id, trace_id,"
+                " message_digest, status, created_at) VALUES (?,?,?,?,?,?,?,?,'queued',?)",
                 (run_id, session_id, user_id, agent_id, subagent_id, parent_session_id,
-                 (message or "")[:200], now),
+                 trace_id, (message or "")[:200], now),
             )
         return run_id
 

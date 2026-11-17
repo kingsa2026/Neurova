@@ -17,7 +17,6 @@ governance API + 站内通知镜像），本模块只做蜂群侧的分级、投
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import time
@@ -106,17 +105,17 @@ def _parentEnvelope(
 
 
 def _notifyParent(run: Any, envelope: Dict[str, Any]) -> None:
-    """审批信封投父会话邮箱（与升级/终态回灌同一通道；失败不影响审批单本身）。"""
-    if run.origin != "chat" or not run.session_id:
-        return
-    try:
-        from neurova.agent.mailbox import get_agent_mailbox
+    """审批信封投父会话邮箱——经 ``SwarmManager.pushParentMail`` 唯一写点。
 
-        get_agent_mailbox().push(
-            run.session_id,
-            "[子代理审批] " + json.dumps(envelope, ensure_ascii=False),
-        )
-    except Exception as e:  # noqa: BLE001
+    邮箱写点单源钉子（test_subagentTerminalReachesParentMail）：``get_agent_mailbox``
+    的生产面引用只许 swarm.py（写）与 loops/base.py（读）各一处；本模块直连邮箱
+    就是第二事实源，故一律经蜂群管理器投递。
+    """
+    try:
+        from neurova.agent.swarm import get_swarm_manager
+
+        get_swarm_manager().pushParentMail(run, "子代理审批", envelope)
+    except Exception as e:  # noqa: BLE001 - 通知失败不影响审批单本身
         logger.debug("审批请求邮箱投递失败 (%s): %s", envelope.get("request_id"), e)
 
 
