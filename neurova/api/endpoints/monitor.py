@@ -68,6 +68,8 @@ class ResourceUsage(BaseModel):
     cpu: ResourceSnapshot
     memory: ResourceSnapshot
     disk: ResourceSnapshot
+    # S2 邮箱运维快照（在途租约/ack/回收/优先级分布）；fail-soft，缺省 None
+    mailbox: Optional[Dict[str, Any]] = None
 
 
 class ConnectionStatus(BaseModel):
@@ -102,6 +104,21 @@ def _trend(history: List[float]) -> float:
     if len(history) >= 2:
         return round(history[-1] - history[-2], 2)
     return 0.0
+
+
+def _mailboxStatsSnapshot() -> Optional[Dict[str, Any]]:
+    """子代理邮箱运维快照（S2）：在途租约/ack/回收/优先级分布。
+
+    只并入既有 `/resources` 响应（不新增路由）；邮箱不可用时 fail-soft，
+    不拖垮资源读数。
+    """
+    try:
+        from neurova.agent.mailbox import get_agent_mailbox
+
+        return get_agent_mailbox().stats()
+    except Exception as e:  # noqa: BLE001 - 观测面故障不改变资源读数语义
+        logger.debug("mailbox stats snapshot failed: %s", e)
+        return None
 
 
 @router.get("/status", response_model=SystemStatus)
@@ -146,11 +163,13 @@ async def get_resource_usage(request: Request, _admin: dict = Depends(require_ad
                 usage=disk.percent, trend=_trend(disk_hist), history=disk_hist,
                 used=disk.used, total=disk.total,
             ),
+            mailbox=_mailboxStatsSnapshot(),
         )
     except Exception as e:
         logger.warning("resource monitoring failed: %s", e)
         return ResourceUsage(
-            cpu=ResourceSnapshot(), memory=ResourceSnapshot(), disk=ResourceSnapshot()
+            cpu=ResourceSnapshot(), memory=ResourceSnapshot(), disk=ResourceSnapshot(),
+            mailbox=_mailboxStatsSnapshot(),
         )
 
 

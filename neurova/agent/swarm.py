@@ -1872,11 +1872,12 @@ class SwarmManager:
                 return run
         return None
 
-    def pushParentMail(self, run: SubAgentRun, tag: str, envelope: Dict[str, Any]) -> bool:
+    def pushParentMail(self, run: SubAgentRun, tag: str, envelope: Dict[str, Any], priority: str = "normal") -> bool:
         """父会话邮箱投递的**唯一写点**（邮箱写点单源钉子：生产面只许 swarm.py 一处写）。
 
         终态回灌/卡死提醒/升级/结果提交/审批信封（P3-1）都经这里投递；
         仅 chat 来源且有会话才投；失败不影响调用方主流程（诚实 debug，不吞成无声）。
+        `priority` 透传邮箱优先级队列（S2）：审批/升级类投递默认 high。
         """
         if run.origin != "chat" or not run.session_id:
             return False
@@ -1886,6 +1887,7 @@ class SwarmManager:
             get_agent_mailbox().push(
                 run.session_id,
                 f"[{tag}] " + json.dumps(envelope, ensure_ascii=False),
+                priority=priority,
             )
             return True
         except Exception as e:  # noqa: BLE001 - 投递失败不影响主流程
@@ -1925,7 +1927,7 @@ class SwarmManager:
             "reason": run.escalation["reason"], "severity": run.escalation["severity"],
             "suggested_action": run.escalation["suggested_action"],
         })
-        self.pushParentMail(run, "子Agent升级", envelope)
+        self.pushParentMail(run, "子Agent升级", envelope, priority="high")
         return envelope
 
     def recordSubmittedResult(

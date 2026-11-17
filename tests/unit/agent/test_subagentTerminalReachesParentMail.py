@@ -268,9 +268,19 @@ class TestMailboxWriteSideIsSingleSource:
         assert referencing == {
             "neurova/agent/swarm.py",
             "neurova/agent/loops/base.py",
+            # S2：monitor.py 是运维快照的**只读**面（stats()），非第二写点；
+            # 只读性由下方 monitor 端点守卫单独钉住。
+            "neurova/api/endpoints/monitor.py",
         }, (
             "邮箱写点应在蜂群终态一处、读点在 loop 排空一处；"
             f"实得 {sorted(referencing)}——多出的那份就是第二事实源"
+        )
+
+    def testMonitorMailboxSurfaceIsReadOnly(self):
+        """S2 运维读面只读：monitor.py 不得对邮箱产生任何写入。"""
+        monitorSrc = (REPO_ROOT / "neurova/api/endpoints/monitor.py").read_text(encoding="utf-8")
+        assert "get_agent_mailbox().push" not in monitorSrc, (
+            "monitor 只许读 stats() 快照；出现 push 即第二写点（写点唯一钉子被击穿）"
         )
 
 

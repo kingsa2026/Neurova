@@ -6,6 +6,7 @@ Agent Loop 基类 - 定义标准接口
 
 import asyncio
 import json
+from collections import OrderedDict
 from neurova.core.logger import get_logger
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -96,6 +97,31 @@ def appendExitNotice(response: Any, notice: str) -> None:
     if notice in content:
         return
     response.content = content + ("\n\n" if content else "") + notice
+
+
+#: 消费侧幂等窗口（S2）：每会话记住最近已注入**并落盘**的 mailbox messageId，
+#: 重投件（确认前中断/死主回收回 ready）不再重复进上下文，只补确认。
+_MAILBOX_SEEN_WINDOW = 512
+_mailboxInjectedIds: Dict[str, OrderedDict] = {}
+
+
+def _mailboxAlreadyInjected(sessionId: str, messageId: str) -> bool:
+    """该 messageId 是否已在本进程生命周期内注入过会话上下文。
+
+    邮箱是进程内态，重投只发生在同进程内（未 ack 再 lease / 死主回收），
+    故进程级窗口即完整闭环；跨进程无邮箱态可重投。
+    """
+    seen = _mailboxInjectedIds.get(sessionId)
+    return bool(seen and messageId in seen)
+
+
+def _mailboxMarkInjected(sessionId: str, messageId: str) -> None:
+    """登记已生效的 messageId（有界窗口，FIFO 淘汰最旧）。"""
+    seen = _mailboxInjectedIds.setdefault(sessionId, OrderedDict())
+    seen[messageId] = None
+    seen.move_to_end(messageId)
+    while len(seen) > _MAILBOX_SEEN_WINDOW:
+        seen.popitem(last=False)
 
 
 async def evaluateLoopExit(
@@ -927,13 +953,19 @@ class BaseAgentLoop(ABC):
         # P1（loop 对照 #2）：同样先落盘再进历史（轮次证据完整可查）。
         # H-1 两阶段确认：lease → 逐条落盘 → acknowledge。落盘失败不 ack——
         # 邮箱是内存态，ack 掉就再无副本；下轮至少一次重投（宁重不丢）。
+        # S2 幂等闭环：重投件（确认前中断/死主回收）携同一 messageId——
+        # 已注入并落盘过的只补确认，不再重复进上下文（不升级成重复生效）。
         try:
             from neurova.agent.mailbox import get_agent_mailbox
 
-            _sid = getattr(self.agent, "current_session_id", "") or ""
+            _sid = str(getattr(self.agent, "current_session_id", "") or "")
             _mailbox = get_agent_mailbox()
             _acked = []
-            for _mail in _mailbox.lease(str(_sid)):
+            for _mail in _mailbox.lease(_sid):
+                _messageId = str(_mail.get("messageId") or "")
+                if _messageId and _mailboxAlreadyInjected(_sid, _messageId):
+                    _acked.append(_mail["id"])
+                    continue
                 _persisted = persistModelVisibleAnnouncement(
                     self.agent, _mail["message"], source="subagent_mail"
                 )
@@ -941,9 +973,11 @@ class BaseAgentLoop(ABC):
                     {"role": "user", "content": _mail["message"]}
                 )
                 if _persisted:
+                    if _messageId:
+                        _mailboxMarkInjected(_sid, _messageId)
                     _acked.append(_mail["id"])
             if _acked:
-                _mailbox.acknowledge(str(_sid), _acked)
+                _mailbox.acknowledge(_sid, _acked)
         except Exception:  # noqa: BLE001
             logger.debug("子代理邮箱排空失败(忽略)", exc_info=True)
 
