@@ -41,6 +41,7 @@ from typing import Any, Callable, Dict, List, Optional
 from neurova.agent.task_unit import parseTaskUnit, renderTaskUnitPrompt
 from neurova.agent.acceptance_gate import runAcceptanceLoop
 from neurova.agent.review_gate import runReviewLoop
+from neurova.agent.candidate_merge import CandidateMergeBoard
 from neurova.agent.context_firewall import buildDataFence
 from neurova.core.lazy_singleton import lazySingleton
 from neurova.core.trace_context import get_trace_id
@@ -114,6 +115,10 @@ STALL_FIRST_REMINDER_ENV = "NEUROVA_SWARM_STALL_FIRST_S"
 STALL_REMINDER_CAP_ENV = "NEUROVA_SWARM_STALL_CAP_S"
 STALL_FIRST_REMINDER_DEFAULT_S = 900.0
 STALL_REMINDER_CAP_DEFAULT_S = 14400.0
+
+#: S4 结果候选制的合入审批分级（L0 自动放行留痕 / L1 提示 / L2 必审）。
+#: 合入是可逆记账动作（候选正文始终保留在板上），默认 L0；运维可调高。
+MERGE_APPROVAL_LEVEL_ENV = "NEUROVA_SWARM_MERGE_APPROVAL_LEVEL"
 # 收尾成因的常量由台账侧持有（`agent_run_ledger`），swarm 只引用不自造第二份：
 # 台账的 error_type 与这里的 cause 必须是同一批词值。
 from neurova.core.agent_run_ledger import (
@@ -434,6 +439,9 @@ class SwarmManager:
         # P1-4（评测报告 G-4）：依赖未就绪的派生请求（subagent_id → 启动信息）。
         # 不占派生槽、不入 _runs；依赖终态结算时放行或判失败。status() 可查。
         self._blocked: Dict[str, Dict[str, Any]] = {}
+        # S4 结果候选板：member 结果先落候选（submitted），主侧 CAS 合入；
+        # 冲突保留升级。随管理器单例存活，留痕经 H-4 run 事件账本。
+        self._candidates = CandidateMergeBoard()
         self._lock = threading.RLock()
 
     # ── 公共接口 ──────────────────────────────────────────────
@@ -901,12 +909,135 @@ class SwarmManager:
                 "reason": "dependencies_unsatisfied",
                 "detail": f"等待依赖: {b.get('deps', [])}",
             })
+        board = self._candidates.snapshot()
         return {
             "integration_ready": not blockers,
             "blockers": blockers,
             "blocked_count": len(blocked),
             "subtasks": subtasks,
+            # S4 结果候选制：集成版本（CAS 基准）、在途/已裁候选、冲突清单
+            "revision": board["revision"],
+            "candidates": board["candidates"],
+            "conflicts": board["conflicts"],
         }
+
+    # ── S4：结果候选制（member 产出先落候选，主侧审批 + CAS 合入）────────
+
+    def _submitResultCandidate(self, run: SubAgentRun, report: str):
+        """member 结果回传先落候选（submitted）——不直接定案。
+
+        artifactKeys 取自 TaskUnit.artifactOwnership（该结果主张触碰的产物/记忆键）；
+        同 key 同基准的候选在提交时即互相标记冲突（都保留），并升级人工裁决。
+        """
+        from neurova.agent.candidate_merge import artifactKeysFromOwnership
+
+        unit = run.task_unit or {}
+        keys = artifactKeysFromOwnership(str(unit.get("artifactOwnership") or ""))
+        candidate = self._candidates.submitCandidate(
+            runId=run.subagent_id, content=report, artifactKeys=keys)
+        self._logRunEvent(run, "candidate_submitted", {
+            "candidate_id": candidate.candidateId,
+            "base_revision": candidate.baseRevision,
+            "artifact_keys": keys,
+        })
+        if candidate.conflictWith:
+            self._logRunEvent(run, "candidate_conflict_flagged", {
+                "candidate_id": candidate.candidateId,
+                "conflict_with": list(candidate.conflictWith),
+            })
+            self.recordEscalation(
+                run, reason="merge_conflict",
+                question=f"候选 {candidate.candidateId} 与 {list(candidate.conflictWith)}"
+                         " 主张同一产物且基准版本相同，需人工裁决采纳哪份",
+                severity="high", suggestedAction="clarify")
+        return candidate
+
+    def _rejectCandidateForRun(self, run: SubAgentRun, candidate, reason: str) -> None:
+        """验收/评审驳回：候选置 reviseRequired（回炉走既有链），事件留痕。"""
+        try:
+            self._candidates.markReviseRequired(candidate.candidateId, reason)
+        except Exception as e:  # noqa: BLE001 - 候选板故障不改写验收结论
+            logger.debug("Swarm: 候选置 reviseRequired 失败 (%s): %s",
+                         candidate.candidateId, e)
+        self._logRunEvent(run, "candidate_revise_required", {
+            "candidate_id": candidate.candidateId,
+            "reason": str(reason or "")[:EVENT_ERROR_SUMMARY_CHARS],
+        })
+
+    async def _mergeCandidateForRun(self, run: SubAgentRun, candidate) -> Dict[str, Any]:
+        """主侧合入候选：审批链分级（默认 L0 自动留痕）+ CAS；冲突升级人工裁决。
+
+        Returns:
+            merged=True → 已合入（run 可定案 completed）；
+            merged=False → cause=merge_conflict/merge_blocked/merge_failed，
+            候选保留在板上，run 如实判失败（结果未入集成）。
+        """
+        from neurova.agent.candidate_merge import (
+            CandidateConflictError,
+            CandidateMergeError,
+        )
+
+        approved, approvalNote = await self._approveMerge(run, candidate)
+        if not approved:
+            return {"merged": False, "cause": "merge_blocked",
+                    "error": f"结果合入未获准（{approvalNote}）；候选保留待人工处置"}
+        try:
+            outcome = self._candidates.mergeCandidate(candidate.candidateId)
+        except CandidateConflictError as e:
+            self._logRunEvent(run, "candidate_conflict", {
+                "candidate_id": candidate.candidateId,
+                "detail": str(e)[:EVENT_ERROR_SUMMARY_CHARS],
+            })
+            self.recordEscalation(
+                run, reason="merge_conflict",
+                question=f"候选 {candidate.candidateId} CAS 合入冲突：{e}",
+                severity="high", suggestedAction="clarify")
+            return {"merged": False, "cause": "merge_conflict",
+                    "error": f"结果合入冲突（候选已保留并升级人工裁决）：{e}"}
+        except CandidateMergeError as e:
+            self._logRunEvent(run, "candidate_merge_rejected", {
+                "candidate_id": candidate.candidateId,
+                "detail": str(e)[:EVENT_ERROR_SUMMARY_CHARS],
+            })
+            return {"merged": False, "cause": "merge_failed",
+                    "error": f"结果合入被拒：{e}"}
+        self._logRunEvent(run, "candidate_merged", {
+            "candidate_id": candidate.candidateId,
+            "revision": outcome.get("revision"),
+            "approval": approvalNote,
+        })
+        return {"merged": True, "revision": outcome.get("revision")}
+
+    async def _approveMerge(self, run: SubAgentRun, candidate) -> tuple:
+        """merge 动作纳入既有审批链（L0 自动放行留痕；env 可调 L1/L2）。
+
+        审批通道故障时按放行留痕处理（warning 可见 + merged 事件带 approval
+        注记）——候选板与事件账本仍完整可查，集成主流程不因审批基础设施抖动
+        而卡死；审批分级本身不受影响（L1/L2 的等待与拒绝语义照常生效）。
+        """
+        import os as _os
+
+        from neurova.agent.approval_chain import requestRunApproval
+
+        raw = (_os.environ.get(MERGE_APPROVAL_LEVEL_ENV) or "").strip().upper()
+        level = raw if raw in ("L0", "L1", "L2") else "L0"
+        try:
+            verdict = await requestRunApproval(
+                run,
+                action=f"merge_candidate:{candidate.candidateId}",
+                reason=(f"合入子任务结果候选（run={run.subagent_id}，"
+                        f"baseRevision={candidate.baseRevision}）"),
+                level=level,
+                context="swarm_candidate_merge",
+            )
+            if verdict.get("approved"):
+                return True, f"approved:{verdict.get('level', level)}"
+            return False, (verdict.get("pending_reason")
+                           or verdict.get("status") or "not_approved")
+        except Exception as e:  # noqa: BLE001 - 审批通道故障不阻断集成（留痕可见）
+            logger.warning("Swarm: merge 审批通道故障，按放行留痕处理 (%s): %s",
+                           candidate.candidateId, e)
+            return True, "approval_channel_unavailable"
 
     # ── P1-4（评测报告 G-4）：依赖门控 ──────────────────────────
 
@@ -1704,6 +1835,9 @@ class SwarmManager:
                 return textOut
 
             report = await doMemberChat(memberPrompt)
+            # S4 结果候选制：member 结果回传**先落候选**（submitted），不直接定案；
+            # 验收/评审通过后由主侧经审批链 + CAS 合入，冲突保留升级人工裁决。
+            candidate = self._submitResultCandidate(run, report)
             # P1-2（评测报告 G-3）验收门：判定 → 不达标带 missing 回炉一次 →
             # 再不达标置 failed（cause=acceptance_failed，产出不作合格结果回流）；
             # 判定器不可用诚实降级（completed + acceptance.skipped 标注）。
@@ -1717,6 +1851,7 @@ class SwarmManager:
             if gate.info is not None:
                 run.acceptance = gate.info
             if gate.failedReason:
+                self._rejectCandidateForRun(run, candidate, gate.failedReason)
                 run.cause = gate.cause
                 raise RuntimeError(gate.failedReason)
             report = gate.report
@@ -1732,11 +1867,18 @@ class SwarmManager:
             if review.info is not None:
                 run.review = review.info
             if review.failedReason:
+                self._rejectCandidateForRun(run, candidate, review.failedReason)
                 run.cause = review.cause
                 raise RuntimeError(review.failedReason)
             report = review.report
-            run.report = report
-            transitionRun(run, SUBAGENT_COMPLETED, cause="gates_passed")
+            # 终稿回填候选（回炉/评审修正后的完整产出），再走主侧审批 + CAS 合入
+            candidate = self._candidates.resubmitCandidate(candidate.candidateId, report)
+            mergeOutcome = await self._mergeCandidateForRun(run, candidate)
+            if not mergeOutcome.get("merged"):
+                run.cause = mergeOutcome.get("cause") or "merge_failed"
+                raise RuntimeError(str(mergeOutcome.get("error") or "结果合入未完成"))
+            run.report = candidate.content
+            transitionRun(run, SUBAGENT_COMPLETED, cause="candidate_merged")
             run.finished_at = time.time()
         except asyncio.CancelledError:
             # 取消不是「没发生」：`CancelledError` 继承 `BaseException`，改前那一条
