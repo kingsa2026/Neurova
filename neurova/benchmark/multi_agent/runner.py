@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 from typing import List, Optional, Sequence
 
+from neurova.agent.effort_inference import resolveQueryEffort
 from neurova.benchmark.multi_agent.tasks import BenchmarkTask, TaskOutcome, getTask
 from neurova.core.logger import get_logger
 
@@ -101,6 +102,8 @@ class BenchRunner:
             logger.warning("[bench] 任务执行异常 task=%s mode=%s: %s", task.task_id, mode, exc)
 
         elapsed = round(time.time() - started, 3)
+        # P3-3：思考档位变量（effort_inference 单源）——逐任务随事实记录，报告按档聚合
+        effort, effortSource = resolveQueryEffort(task.prompt)
         outcome = TaskOutcome(
             task_id=task.task_id,
             mode=mode,
@@ -130,6 +133,8 @@ class BenchRunner:
             "subagent_id": subagent_id,
             "elapsed_seconds": elapsed,
             "tokens": tokens,
+            "effort": effort,
+            "effort_source": effortSource,
             "report_snippet": report[:400],
         }
 
@@ -149,6 +154,9 @@ class BenchRunner:
         return results
 
     async def runAll(self, modes: Sequence[str] = MODES) -> List[dict]:
+        from neurova.benchmark.multi_agent.suites import registerBuiltinSuites
         from neurova.benchmark.multi_agent.tasks import listTasks
 
+        # P3-3：评测入口统一登记内置任务集（幂等）——修掉"种子任务零调用方"的接线断点
+        registerBuiltinSuites()
         return await self.runTasks([t.task_id for t in listTasks()], modes=modes)
