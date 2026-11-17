@@ -53,6 +53,25 @@ def renderMarkdown(report: dict) -> str:
         )
     lines.append("")
 
+    # P3-3：思考档位变量（effort_inference）——同任务集按档位拆开的成功率/均分
+    effortRows = [(mode, m.get("by_effort") or {})
+                  for mode, m in (report.get("metrics") or {}).items()
+                  if m.get("by_effort")]
+    if effortRows:
+        lines.append("## 思考档位变量（effort_inference）")
+        lines.append("")
+        for mode, byEffort in effortRows:
+            lines.append(f"**{mode}**")
+            lines.append("")
+            lines.append("| 档位 | 任务数 | 通过 | 成功率 | 均分 |")
+            lines.append("|---|---|---|---|---|")
+            for level, b in byEffort.items():
+                lines.append(
+                    f"| {level} | {b['task_count']} | {b['passed_count']} "
+                    f"| {b['success_rate']} | {b['mean_score']} |"
+                )
+            lines.append("")
+
     lines.append("## 逐任务明细")
     lines.append("")
     lines.append("| 任务 | 模式 | 通过 | 得分 | 耗时(s) | 错误/拒绝 |")

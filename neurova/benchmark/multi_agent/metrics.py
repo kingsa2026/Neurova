@@ -20,6 +20,24 @@ def aggregate(results: List[dict]) -> Dict[str, dict]:
         unsolvable_ok = sum(1 for r in unsolvable if r.get("passed"))
         elapsed = [float(r["elapsed_seconds"]) for r in items if r.get("elapsed_seconds") is not None]
         tokens = [float(r["tokens"]) for r in items if r.get("tokens") is not None]
+        # P3-3：按思考档位（effort_inference）分档聚合——同任务集在不同档位下的表现变量
+        byEffort: Dict[str, dict] = {}
+        for r in items:
+            bucket = byEffort.setdefault(str(r.get("effort") or "unknown"),
+                                         {"task_count": 0, "passed_count": 0, "_scores": []})
+            bucket["task_count"] += 1
+            if r.get("passed"):
+                bucket["passed_count"] += 1
+            bucket["_scores"].append(float(r.get("score") or 0.0))
+        effortOut: Dict[str, dict] = {}
+        for level in sorted(byEffort):
+            b = byEffort[level]
+            effortOut[level] = {
+                "task_count": b["task_count"],
+                "passed_count": b["passed_count"],
+                "success_rate": round(b["passed_count"] / b["task_count"], 4),
+                "mean_score": round(sum(b["_scores"]) / len(b["_scores"]), 2),
+            }
         out[mode] = {
             "task_count": total,
             "passed_count": passed,
@@ -31,6 +49,7 @@ def aggregate(results: List[dict]) -> Dict[str, dict]:
             "mean_elapsed_seconds": round(sum(elapsed) / len(elapsed), 3) if elapsed else None,
             "total_tokens": sum(tokens) if tokens else None,
             "error_count": sum(1 for r in items if r.get("error")),
+            "by_effort": effortOut,
         }
     return out
 
