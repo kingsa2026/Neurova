@@ -253,6 +253,17 @@ class TrajectoryRecorder:
             span.end(status=status, error_message=error_message)
             logger.debug("Ended span %s, status: %s", span_id, status)
 
+    def activeRootSpanId(self, trace_id: str) -> Optional[str]:
+        """活动轨迹的根 span id（P3-2：蜂群 member span 挂链用）。
+
+        trace 不在活动注册表（已结束/不存在）时返回 None——调用方据此把
+        parent_span_id 留空，span 仍会入轨迹，只是不成树。
+        """
+        trace = self._active_traces.get(trace_id)
+        if trace is None or trace.root_span is None:
+            return None
+        return trace.root_span.span_id
+
     def record_event(
         self,
         trace_id: str,

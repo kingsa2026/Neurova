@@ -41,7 +41,9 @@ from typing import Any, Callable, Dict, List, Optional
 from neurova.agent.task_unit import parseTaskUnit, renderTaskUnitPrompt
 from neurova.agent.acceptance_gate import runAcceptanceLoop
 from neurova.agent.review_gate import runReviewLoop
+from neurova.agent.context_firewall import buildDataFence
 from neurova.core.lazy_singleton import lazySingleton
+from neurova.core.trace_context import get_trace_id
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +216,14 @@ class SubAgentRun:
     # P3-1（评测报告 G-11）：运行中审批请求记录（request_approval 工具写入，
     # approval_chain.requestRunApproval 落账）——谁在何时请求了什么、裁决到哪一步。
     approvals: List[Dict[str, Any]] = field(default_factory=list)
+    # P3-2（评测报告 G-12）：span 级 trace——parent_trace_id 是发起请求那一刻的
+    # 请求级 trace（spawn 时刻从 ContextVar 捕获，可为空）；trace_id 是 member
+    # 执行期自己开设的轨迹（台账行经 agent_runs.trace_id 与之关联）。
+    parent_trace_id: str = ""
+    trace_id: str = ""
+    # P3-4（评测报告 G-13）：数据面围栏扫描摘要（task_hits/payload_hits/hit_count）。
+    # None = 未命中（干净任务不留标记噪音）；命中只标记与告警，不改写不阻断。
+    data_fence: Optional[Dict[str, Any]] = None
     status: str = SUBAGENT_PENDING  # 取值域见 SUBAGENT_STATUSES（本模块常量，唯一出处）
     # P2-10 增强：子代理升级/结构化结果提交（escalate/submit_result 工具写入，
     # 随邮箱投递发起者会话；只作读数与通知，不改变运行状态机）
@@ -261,6 +271,9 @@ class SubAgentRun:
             "acceptance": self.acceptance,
             "review": self.review,
             "approvals": list(self.approvals),
+            "parent_trace_id": self.parent_trace_id,
+            "trace_id": self.trace_id,
+            "data_fence": self.data_fence,
             "escalation": self.escalation,
             "submitted_result": self.submitted_result,
             "tool_allowlist_size": len(self.tool_allowlist) if self.tool_allowlist else None,
@@ -468,6 +481,17 @@ class SwarmManager:
             borrowMcp=mcpBorrowedToolNames() if subagent_type == "general" else frozenset(),
         )
 
+        # P3-4（评测报告 G-13）：数据面围栏——任务文本与不可信槽位做注入特征扫描，
+        # 命中只标记与告警（不改写任务文本、不阻断派生主链路，处置权在主代理/用户）
+        dataFence = buildDataFence(task, parsedUnit.untrustedPayload if parsedUnit else "")
+        if dataFence["hit_count"]:
+            logger.warning(
+                "Swarm: 数据面围栏命中注入特征 run_task=%r task_hits=%s payload_hits=%s",
+                task[:120],
+                [(h["pattern"], h["excerpt"]) for h in dataFence["task_hits"]],
+                [(h["pattern"], h["excerpt"]) for h in dataFence["payload_hits"]],
+            )
+
         # P1-4（评测报告 G-4）：依赖门控——dependencies 只能指向已存在的 run
         #（结构性防环：run 按创建序存在，后者不可依赖前者之外的 id）。未满足的
         # 依赖 → 登记为 blocked（不占派生槽），终态结算时自动放行或判失败。
@@ -505,15 +529,18 @@ class SwarmManager:
                         "execution_id": execution_id, "subagent_type": subagent_type,
                         "task_unit": parsedUnit.toDict() if parsedUnit else None,
                         "tool_allowlist": toolAllowlist, "depth": child_depth,
+                        "parent_trace_id": get_trace_id() or "",
+                        "data_fence": dataFence,
                         "deps": list(deps), "status": "blocked", "created_at": time.time(),
                     }
-                return {
-                    "subagent_id": blockedId, "agent_id": resolved_id,
-                    "status": "blocked", "background": True,
-                    "dependencies": list(deps), "unsatisfied": unsatisfied,
-                    "hint": "依赖未就绪，已登记等待；依赖验收通过后自动启动（subagent_status 查询）",
-                    **self._quota_snapshot(),
-                }
+            return {
+                "subagent_id": blockedId, "agent_id": resolved_id,
+                "status": "blocked", "background": True,
+                "dependencies": list(deps), "unsatisfied": unsatisfied,
+                "data_fence": dataFence,
+                "hint": "依赖未就绪，已登记等待；依赖验收通过后自动启动（subagent_status 查询）",
+                **self._quota_snapshot(),
+            }
 
         run = SubAgentRun(
             depth=child_depth,
@@ -529,6 +556,8 @@ class SwarmManager:
             subagent_type=subagent_type,
             tool_allowlist=toolAllowlist,
             task_unit=parsedUnit.toDict() if parsedUnit else None,
+            parent_trace_id=get_trace_id() or "",
+            data_fence=dataFence if dataFence["hit_count"] else None,
             resumed_from=resumed_from or "",
         )
         # 通过全部治理闸 → 预留模型并发槽 + 打派生时间戳（错峰）
@@ -575,6 +604,7 @@ class SwarmManager:
                 "member_session_id": run.member_session_id,
                 "status": SUBAGENT_PENDING,
                 "background": True,
+                "data_fence": dataFence,
                 "hint": "使用 subagent_status 工具查询执行结果",
                 **quota,
             }
@@ -605,6 +635,7 @@ class SwarmManager:
                 "status": run.status,
                 "background": True,
                 "auto_background": True,
+                "data_fence": dataFence,
                 "hint": (
                     f"前台等待 {autoBgAfter:g}s 未完成已自动转后台"
                     "（subagent_status 查询；终态会自动回灌本会话）"
@@ -763,6 +794,8 @@ class SwarmManager:
             subagent_type=info["subagent_type"],
             tool_allowlist=info["tool_allowlist"],
             task_unit=info["task_unit"],
+            parent_trace_id=info.get("parent_trace_id") or "",
+            data_fence=info.get("data_fence") if (info.get("data_fence") or {}).get("hit_count") else None,
         )
         with self._lock:
             self._runs[run.subagent_id] = run
@@ -790,6 +823,8 @@ class SwarmManager:
             execution_id=info["execution_id"],
             subagent_type=info["subagent_type"],
             task_unit=info["task_unit"],
+            parent_trace_id=info.get("parent_trace_id") or "",
+            data_fence=info.get("data_fence") if (info.get("data_fence") or {}).get("hit_count") else None,
         )
         run.status = SUBAGENT_FAILED
         run.cause = "dependency_failed"
@@ -1123,29 +1158,97 @@ class SwarmManager:
 
     def _notifyStallMail(self, run: SubAgentRun, payload: Dict[str, Any]) -> None:
         """卡死提醒投父会话邮箱（与终态回灌同通道；失败不影响主流程）"""
-        if run.origin != "chat" or not run.session_id:
+        self.pushParentMail(run, "子Agent卡顿", {
+            "kind": "subagent_stalled",
+            "subagent_id": run.subagent_id,
+            "agent_id": run.agent_id,
+            "task": run.task,
+            "stalled_seconds": payload["stalled_seconds"],
+            "reminder_count": payload["reminder_count"],
+            "member_session_id": run.member_session_id,
+        })
+
+    # ── P3-2（评测报告 G-12）：member span 级轨迹 ─────────────────
+
+    @staticmethod
+    def _traceEnabled() -> bool:
+        """span 轨迹开关（kill-switch）：NEUROVA_SWARM_TRACE=off 关闭，默认开。"""
+        return (os.environ.get("NEUROVA_SWARM_TRACE") or "on").strip().lower() != "off"
+
+    def _startMemberTrace(self, run: SubAgentRun, userId: str) -> tuple:
+        """开 member 轨迹与主 span，返回 (recorder, spanId)；关闭/故障返回 (None, None)。
+
+        trace_id 落 run.trace_id（台账行经 agent_runs.trace_id 关联）；span 挂到
+        轨迹根 span 成树；started 事件随 span 落轨迹。OTel bridge 在位时这些
+        span/事件经既有 observer 投影到 OTel（不另接第二条导出通路）。
+        """
+        if not self._traceEnabled():
+            return None, None
+        try:
+            from neurova.core.trace_recorder import get_trajectory_recorder
+
+            recorder = get_trajectory_recorder()
+            run.trace_id = recorder.start_trace(
+                session_id=run.member_session_id,
+                agent_id=run.agent_id,
+                user_id=userId,
+                metadata={
+                    "kind": "swarm_member",
+                    "subagent_id": run.subagent_id,
+                    "parent_trace_id": run.parent_trace_id,
+                    "parent_session_id": run.session_id or "",
+                    "task": (run.task or "")[:200],
+                    "depth": run.depth,
+                },
+            )
+            if not run.trace_id:
+                return None, None
+            spanId = recorder.start_span(
+                run.trace_id, "swarm_member_run", "swarm",
+                parent_span_id=recorder.activeRootSpanId(run.trace_id),
+            )
+            recorder.record_event(
+                run.trace_id, "info",
+                {
+                    "event": "subagent_started",
+                    "subagent_id": run.subagent_id,
+                    "agent_id": run.agent_id,
+                    "model": run.model,
+                    "origin": run.origin,
+                    "depth": run.depth,
+                },
+                span_id=spanId,
+            )
+            return recorder, spanId
+        except Exception as e:  # noqa: BLE001 - 轨迹故障不阻断子任务
+            logger.debug("Swarm: member 轨迹开启失败（不阻断）: %s", e)
+            return None, None
+
+    def _endMemberTrace(self, recorder: Any, spanId: Optional[str], run: SubAgentRun) -> None:
+        """收 span/轨迹：终态事件 + span 状态按 run 终态落，轨迹自动存档可查询。"""
+        if recorder is None or not run.trace_id:
             return
         try:
-            from neurova.agent.mailbox import get_agent_mailbox
-
-            get_agent_mailbox().push(
-                run.session_id,
-                "[子Agent卡顿] "
-                + json.dumps(
-                    {
-                        "kind": "subagent_stalled",
-                        "subagent_id": run.subagent_id,
-                        "agent_id": run.agent_id,
-                        "task": run.task,
-                        "stalled_seconds": payload["stalled_seconds"],
-                        "reminder_count": payload["reminder_count"],
-                        "member_session_id": run.member_session_id,
-                    },
-                    ensure_ascii=False,
-                ),
+            ok = run.status == SUBAGENT_COMPLETED
+            if spanId:
+                recorder.end_span(
+                    spanId,
+                    status="completed" if ok else "failed",
+                    error_message=run.error or run.cause or None,
+                )
+            recorder.record_event(
+                run.trace_id, "info",
+                {
+                    "event": "subagent_terminal",
+                    "subagent_id": run.subagent_id,
+                    "status": run.status,
+                    "cause": run.cause,
+                    "duration_ms": round(run.duration * 1000, 3),
+                },
             )
-        except Exception as e:  # noqa: BLE001 - 回灌失败不影响主流程
-            logger.debug("Swarm: 卡死提醒投递失败 (%s): %s", run.subagent_id, e)
+            recorder.end_trace(run.trace_id)
+        except Exception as e:  # noqa: BLE001 - 轨迹收尾故障不阻断子任务
+            logger.debug("Swarm: member 轨迹收尾失败（不阻断）: %s", e)
 
     async def _run_member(
         self,
@@ -1158,6 +1261,11 @@ class SwarmManager:
     ) -> None:
         """执行子 Agent 任务：广播 STARTED → chat（可流式）→ 广播 COMPLETED → 池归档"""
         run.status = SUBAGENT_RUNNING
+        # P3-2（评测报告 G-12）：member 轨迹 trace——spawn→member→回流共一条可查询
+        # 的 span 树；fail-open（轨迹故障/开关关闭不阻断子任务，与台账同口径）。
+        userId = str(getattr(initiator_agent, "current_user_id", "")
+                     or getattr(initiator_agent, "owner_user_id", "") or "")
+        recorder, memberSpanId = self._startMemberTrace(run, userId)
         # 台账记账（§6-78 L 条）：写侧仍只在 `agent_run_ledger` 那一处，这里只调用。
         from neurova.core.agent_run_ledger import closeSubagentRun, openSubagentRun
 
@@ -1165,10 +1273,10 @@ class SwarmManager:
             memberSessionId=run.member_session_id,
             subagentId=run.subagent_id,
             parentSessionId=run.session_id or "",
-            userId=str(getattr(initiator_agent, "current_user_id", "")
-                       or getattr(initiator_agent, "owner_user_id", "") or ""),
+            userId=userId,
             agentId=run.agent_id,
             task=run.task,
+            traceId=run.trace_id,
         )
         await self._broadcast(
             run,
@@ -1186,6 +1294,8 @@ class SwarmManager:
                 "subagent_type": run.subagent_type,
                 "node_id": run.node_id,
                 "execution_id": run.execution_id,
+                "trace_id": run.trace_id,
+                "parent_trace_id": run.parent_trace_id,
             },
         )
 
@@ -1318,6 +1428,7 @@ class SwarmManager:
             # 台账终态与蜂群终态同一个落点：`completed`/`failed`/超时/取消都从这里收尾，
             # 缺一条就在台账里留一行永久 running 的幽灵（L 条的另一副面孔）。
             closeSubagentRun(ledgerRunId, run.status, run.cause)
+            self._endMemberTrace(recorder, memberSpanId, run)
             reset_subagent_depth(depth_token)
             set_subagent_tool_allowlist(None)
 
@@ -1335,6 +1446,8 @@ class SwarmManager:
                 "duration": run.duration,
                 "node_id": run.node_id,
                 "execution_id": run.execution_id,
+                "trace_id": run.trace_id,
+                "parent_trace_id": run.parent_trace_id,
             },
         )
 
@@ -1479,6 +1592,8 @@ class SwarmManager:
             "model": run.model,
             "node_id": run.node_id,
             "execution_id": run.execution_id,
+            "trace_id": run.trace_id,
+            "parent_trace_id": run.parent_trace_id,
             "transcript": {
                 "agent_id": run.agent_id,
                 "session_id": run.member_session_id,
@@ -1500,18 +1615,7 @@ class SwarmManager:
         只认 chat 来源——workflow 派生的报告交给引擎的 `output`，它的 `session_id`
         只是事件广播目标，投进邮箱无人排空。
         """
-        if run.origin != "chat" or not run.session_id:
-            return
-        try:
-            from neurova.agent.mailbox import get_agent_mailbox
-
-            get_agent_mailbox().push(
-                run.session_id,
-                "[子Agent终态] "
-                + json.dumps(self._uplinkEnvelope(run), ensure_ascii=False),
-            )
-        except Exception as e:  # noqa: BLE001 - 回灌失败不影响主流程
-            logger.debug("Swarm: 邮箱回灌失败 (%s): %s", run.subagent_id, e)
+        self.pushParentMail(run, "子Agent终态", self._uplinkEnvelope(run))
 
 
     def getRunByMemberSession(self, memberSessionId: str) -> Optional[SubAgentRun]:
@@ -1526,6 +1630,26 @@ class SwarmManager:
             ):
                 return run
         return None
+
+    def pushParentMail(self, run: SubAgentRun, tag: str, envelope: Dict[str, Any]) -> bool:
+        """父会话邮箱投递的**唯一写点**（邮箱写点单源钉子：生产面只许 swarm.py 一处写）。
+
+        终态回灌/卡死提醒/升级/结果提交/审批信封（P3-1）都经这里投递；
+        仅 chat 来源且有会话才投；失败不影响调用方主流程（诚实 debug，不吞成无声）。
+        """
+        if run.origin != "chat" or not run.session_id:
+            return False
+        try:
+            from neurova.agent.mailbox import get_agent_mailbox
+
+            get_agent_mailbox().push(
+                run.session_id,
+                f"[{tag}] " + json.dumps(envelope, ensure_ascii=False),
+            )
+            return True
+        except Exception as e:  # noqa: BLE001 - 投递失败不影响主流程
+            logger.debug("Swarm: 父会话邮箱投递失败 (%s): %s", run.subagent_id, e)
+            return False
 
     def recordEscalation(
         self, run: SubAgentRun, reason: str, question: str = "", severity: str = "normal",
@@ -1556,16 +1680,7 @@ class SwarmManager:
             "suggested_action": run.escalation["suggested_action"],
             "action_note": run.escalation["action_note"],
         }
-        if run.origin == "chat" and run.session_id:
-            try:
-                from neurova.agent.mailbox import get_agent_mailbox
-
-                get_agent_mailbox().push(
-                    run.session_id,
-                    "[子Agent升级] " + json.dumps(envelope, ensure_ascii=False),
-                )
-            except Exception as e:  # noqa: BLE001 - 回灌失败不影响升级本身
-                logger.debug("Swarm: 升级邮箱投递失败 (%s): %s", run.subagent_id, e)
+        self.pushParentMail(run, "子Agent升级", envelope)
         return envelope
 
     def recordSubmittedResult(
@@ -1588,16 +1703,7 @@ class SwarmManager:
             "summary": run.submitted_result["summary"],
             "status": run.submitted_result["status"],
         }
-        if run.origin == "chat" and run.session_id:
-            try:
-                from neurova.agent.mailbox import get_agent_mailbox
-
-                get_agent_mailbox().push(
-                    run.session_id,
-                    "[子Agent结果] " + json.dumps(envelope, ensure_ascii=False),
-                )
-            except Exception as e:  # noqa: BLE001 - 投递失败不影响提交本身
-                logger.debug("Swarm: 结果邮箱投递失败 (%s): %s", run.subagent_id, e)
+        self.pushParentMail(run, "子Agent结果", envelope)
         return envelope
 
 
