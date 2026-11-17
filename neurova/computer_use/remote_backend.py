@@ -65,6 +65,21 @@ class RemoteComputerUseManager:
         """枚举来宾桌面顶层窗口（与本地 DesktopUIAManager.list_windows 同签名）"""
         return self._client.action("list_windows", {"limit": limit})
 
+    def press_key(self, key: str, repeat: int = 1, interval: float = 0.05) -> bool:
+        return bool(self._client.action(
+            "key", {"key": key, "repeat": repeat, "interval": interval}
+        ).get("success"))
+
+    def paste_text(self, text: str) -> bool:
+        return bool(self._client.action("paste", {"text": text}).get("success"))
+
+    def drag(self, start_x: Any, start_y: Any, end_x: Any, end_y: Any,
+             duration: float = 0.5, button: str = "left") -> bool:
+        return bool(self._client.action("drag", {
+            "start_x": start_x, "start_y": start_y, "end_x": end_x, "end_y": end_y,
+            "duration": duration, "button": button,
+        }).get("success"))
+
     # ── 能力声明（远程恒 background 投递）──────────────────────
 
     def input_available(self) -> bool:

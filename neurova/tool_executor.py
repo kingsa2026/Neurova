@@ -71,6 +71,9 @@ COMPUTER_USE_TOOLS = frozenset(
         "computer_click_mark",
         "computer_ssh_exec",
         "computer_list_windows",
+        "computer_key",
+        "computer_paste",
+        "computer_drag",
         "browser_navigate",
         "browser_click",
         "browser_type",
@@ -161,6 +164,9 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "computer_som_snapshot": frozenset(),
     "computer_click_mark": frozenset({"index", "button", "frame_id"}),
     "computer_list_windows": frozenset(),
+    "computer_key": frozenset({"key", "repeat", "interval"}),
+    "computer_paste": frozenset({"text"}),
+    "computer_drag": frozenset({"start_x", "start_y", "end_x", "end_y", "duration", "button"}),
     "computer_ssh_exec": frozenset({"host", "command", "user", "port", "timeout"}),
     "browser_navigate": frozenset({"url", "generation"}),
     "browser_click": frozenset({"selector", "text"}),
@@ -203,8 +209,8 @@ _BUTTON_ALIASES = {
     "primary": "left", "secondary": "right", "middle_button": "middle",
 }
 
-_INT_KEYS = frozenset({"scroll_x", "scroll_y", "max_nodes", "max_depth", "generation", "index", "offset", "chunk_size", "ms", "delay"})
-_FLOAT_KEYS = frozenset({"x", "y", "interval"})
+_INT_KEYS = frozenset({"scroll_x", "scroll_y", "max_nodes", "max_depth", "generation", "index", "offset", "chunk_size", "ms", "delay", "repeat"})
+_FLOAT_KEYS = frozenset({"x", "y", "interval", "start_x", "start_y", "end_x", "end_y", "duration"})
 
 
 def normalize_computer_params(tool_name: str, params: Optional[Dict]) -> Dict:
@@ -406,6 +412,9 @@ class ToolExecutor:
         "computer_click_mark": "_execute_computer_click_mark",
         "computer_ssh_exec": "_execute_computer_ssh_exec",
         "computer_list_windows": "_execute_computer_list_windows",
+        "computer_key": "_execute_computer_key",
+        "computer_paste": "_execute_computer_paste",
+        "computer_drag": "_execute_computer_drag",
         "browser_navigate": "_execute_browser_navigate",
         "browser_click": "_execute_browser_click",
         "browser_type": "_execute_browser_type",
@@ -6317,6 +6326,89 @@ class ToolExecutor:
         except Exception as e:
             logger.error("滚动执行失败: %s", e)
             return {"error": f"滚动执行失败: {str(e)}"}
+
+    async def _execute_computer_key(self, params: Dict) -> Dict:
+        """按键/组合键（P2-7；键盘是全局单例，成功后失效帧）"""
+        try:
+            from neurova.computer_use import actions, get_computer_use_manager
+
+            result = await asyncio.to_thread(
+                actions.press_key,
+                get_computer_use_manager(),
+                params.get("key"),
+                params.get("repeat", 1),
+                params.get("interval", 0.05),
+            )
+            success = result.get("success") is True
+            if success:
+                result["refreshed_screenshot"] = True
+                result["note"] = ACTION_REFRESH_NOTE
+                from neurova.computer_use import action_result as _ar
+
+                _ar.attach(result, self._pixel_action_result())
+                self._invalidateDesktopFrame()
+            await self._emit_computer_event("computer_key", params, result)
+            if success:
+                await self._emit_action_refreshed_screenshot("computer_key", params, result)
+            return result
+        except Exception as e:
+            logger.error("按键执行失败: %s", e)
+            return {"error": f"按键执行失败: {str(e)}"}
+
+    async def _execute_computer_paste(self, params: Dict) -> Dict:
+        """剪贴板粘贴（P2-7；写剪贴板+ctrl+v，成功后失效帧）"""
+        try:
+            from neurova.computer_use import actions, get_computer_use_manager
+
+            result = await asyncio.to_thread(
+                actions.paste_text, get_computer_use_manager(), params.get("text")
+            )
+            success = result.get("success") is True
+            if success:
+                result["refreshed_screenshot"] = True
+                result["note"] = ACTION_REFRESH_NOTE
+                from neurova.computer_use import action_result as _ar
+
+                _ar.attach(result, self._pixel_action_result())
+                self._invalidateDesktopFrame()
+            await self._emit_computer_event("computer_paste", params, result)
+            if success:
+                await self._emit_action_refreshed_screenshot("computer_paste", params, result)
+            return result
+        except Exception as e:
+            logger.error("粘贴执行失败: %s", e)
+            return {"error": f"粘贴执行失败: {str(e)}"}
+
+    async def _execute_computer_drag(self, params: Dict) -> Dict:
+        """拖拽（P2-7；截图像素坐标经坐标链换算，成功后失效帧）"""
+        try:
+            from neurova.computer_use import actions, get_computer_use_manager
+
+            result = await asyncio.to_thread(
+                actions.drag,
+                get_computer_use_manager(),
+                params.get("start_x"),
+                params.get("start_y"),
+                params.get("end_x"),
+                params.get("end_y"),
+                params.get("duration", 0.5),
+                params.get("button", "left"),
+            )
+            success = result.get("success") is True
+            if success:
+                result["refreshed_screenshot"] = True
+                result["note"] = ACTION_REFRESH_NOTE
+                from neurova.computer_use import action_result as _ar
+
+                _ar.attach(result, self._pixel_action_result())
+                self._invalidateDesktopFrame()
+            await self._emit_computer_event("computer_drag", params, result)
+            if success:
+                await self._emit_action_refreshed_screenshot("computer_drag", params, result)
+            return result
+        except Exception as e:
+            logger.error("拖拽执行失败: %s", e)
+            return {"error": f"拖拽执行失败: {str(e)}"}
 
     async def _execute_computer_shell(self, params: Dict) -> Dict:
         """执行 shell 命令"""

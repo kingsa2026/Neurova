@@ -213,6 +213,17 @@ export function describeComputerAction(tool: string, params: Record<string, unkn
       })
     case 'computer_list_windows':
       return i18n.global.t('computerPanel.actListWindows')
+    case 'computer_key':
+      return i18n.global.t('computerPanel.actKey', { key: String(p.key ?? '?') })
+    case 'computer_paste':
+      return i18n.global.t('computerPanel.actPaste', { text: ellipsize(String(p.text ?? ''), 30) })
+    case 'computer_drag':
+      return i18n.global.t('computerPanel.actDrag', {
+        sx: p.start_x ?? '?',
+        sy: p.start_y ?? '?',
+        ex: p.end_x ?? '?',
+        ey: p.end_y ?? '?',
+      })
     default:
       return tool
   }
