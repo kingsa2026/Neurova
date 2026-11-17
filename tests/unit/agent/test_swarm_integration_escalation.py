@@ -91,7 +91,8 @@ class TestIntegrationReport:
     def test_schema_exposes_view(self):
         props = _BUILTIN_SCHEMAS["subagent_status"]["parameters"]["properties"]
         assert "view" in props
-        assert set(props["view"]["enum"]) == {"runs", "integration"}
+        # events = H-4 事件账本读面（3c9c14901 补读侧时扩入枚举）
+        assert set(props["view"]["enum"]) == {"runs", "integration", "events"}
 
 
 class TestEscalationClosure:
