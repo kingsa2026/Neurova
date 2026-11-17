@@ -8,6 +8,13 @@
 - confirm 经注入的 remember_fn 真正落库——本模块不依赖 MemoryManager，
   依赖方向是调用方（API/执行器）注入；
 - remember_fn 失败时记录保持 pending（未确认的记忆不能凭空消失）。
+
+S16 人工审阅接通（NEUROVA_MEMORY_DISCIPLINE 门控，默认 off）：
+propose（store 动作）过 screenMemoryContent——命中敏感模式族即落
+``sensitive_rule`` 标记（迁移 v4 加列）+ 审计留痕，进入人工审阅；
+confirm 对敏感候选要求显式 ``allow_sensitive=True``（缺省诚实报错，
+绝不静默放行），显式放行经 memory_admission.memoryAdmissionRelease
+作用域令牌过 S7 准入闸，放行人/规则留痕；人工拒收同样留痕。
 """
 
 from __future__ import annotations
@@ -18,6 +25,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -45,7 +53,8 @@ CREATE TABLE IF NOT EXISTS pending_memories (
     decided_at   REAL,
     note         TEXT,
     proposed_action TEXT NOT NULL DEFAULT 'store',
-    target_memory_id TEXT NOT NULL DEFAULT ''
+    target_memory_id TEXT NOT NULL DEFAULT '',
+    sensitive_rule TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS pending_memories_status_idx
     ON pending_memories (status, created_at DESC);
@@ -191,10 +200,40 @@ CREATE TABLE IF NOT EXISTS content_tombstones (
 );
 """
 
+# 核验轮修复②：存量库幂等列迁移（CREATE TABLE 只覆盖新建库）。旧库缺
+# proposed_action/target_memory_id 两列时补齐，默认值保持旧行为语义
+# （store、无目标）。
+def _migrate_action_columns(conn: "sqlite3.Connection") -> None:
+    existing = {
+        row[1] for row in conn.execute("PRAGMA table_info(pending_memories)").fetchall()
+    }
+    if "proposed_action" not in existing:
+        conn.execute(
+            "ALTER TABLE pending_memories ADD COLUMN proposed_action TEXT NOT NULL DEFAULT 'store'"
+        )
+    if "target_memory_id" not in existing:
+        conn.execute(
+            "ALTER TABLE pending_memories ADD COLUMN target_memory_id TEXT NOT NULL DEFAULT ''"
+        )
+
+
+# S16 人工审阅接通：敏感候选标记列（propose 点筛查落规则名，空串=非敏感）。
+# 存量库幂等补列，默认空串保持旧行为语义。
+def _migrate_sensitive_column(conn: "sqlite3.Connection") -> None:
+    existing = {
+        row[1] for row in conn.execute("PRAGMA table_info(pending_memories)").fetchall()
+    }
+    if "sensitive_rule" not in existing:
+        conn.execute(
+            "ALTER TABLE pending_memories ADD COLUMN sensitive_rule TEXT NOT NULL DEFAULT ''"
+        )
+
+
 # ── schema 版本域（审计 3.3-2）：全链演进经注册表，按 user_version 幂等跳过 ──
 # v1 建表（待审账+遗忘墓碑）并废弃两个历史索引定义
 # v2 存量库补 proposed_action/target_memory_id 列
 # v3 堆积收敛（pending/rejected 分区去重）+ 重建隔离唯一索引
+# v4 S16 人工审阅：存量库补 sensitive_rule 列（propose 点敏感筛查标记）
 # 顺序即原 __init__ 手拼序列，搬进版本链后不再每次启动全量重跑。
 PENDING_MEMORY_DOMAIN = "pending_memories"
 
@@ -209,6 +248,7 @@ register_migration(
     _LEGACY_CLEANUP + _LIVE_FP_INDEX,
     domain=PENDING_MEMORY_DOMAIN,
 )
+register_migration(4, _migrate_sensitive_column, domain=PENDING_MEMORY_DOMAIN)
 
 
 class PendingMemoryStore:
@@ -270,7 +310,12 @@ class PendingMemoryStore:
 
         核验轮修复②（forget 审批闭环）：proposed_action 标记动作类型
         （store 新增 / forget 遗忘），confirm 端点据此分流执行——此前
-        forget 提议与普通新增无差别，确认会把遗忘摘要当新记忆入主库。"""
+        forget 提议与普通新增无差别，确认会把遗忘摘要当新记忆入主库。
+
+        S16 人工审阅接通：store 提议（会进主库的动作）经
+        screenPendingProposal 过敏感模式族，命中即落 sensitive_rule 标记
+        + 审计留痕，进入人工审阅；forget 提议（内容是删除摘要，不进主库）
+        不做筛查。门控关闭时行为与现状完全一致（不标记）。"""
         content = (content or "").strip()
         if not content:
             raise ValueError("待确认记忆内容不能为空")
@@ -284,6 +329,14 @@ class PendingMemoryStore:
         # forget 动作提议不受内容墓碑误伤（其语义是"删目标记忆"，非复活）。
         if action == "store" and self.is_content_tombstoned(content):
             return {"rejected": True, "reason": "previously_forgotten", "content": content}
+        # S16：propose 点敏感筛查（仅 store 动作；命中只标记不拒收——本队列
+        # 即人工审阅面，放行/拒收由人工决定并留痕）。
+        sensitiveHit = None
+        if action == "store":
+            from neurova.memory_discipline import screenPendingProposal
+
+            sensitiveHit = screenPendingProposal(content)
+        sensitiveRule = getattr(sensitiveHit, "ruleName", "") if sensitiveHit else ""
         fp = _fingerprint(content)
         # 审计⑤：forget 提议的判重指纹只绑定目标记忆——content 是模型自填
         # 摘要（展示用），旧口径哈希 content 导致：不同 target 的同摘要提议
@@ -309,8 +362,9 @@ class PendingMemoryStore:
             self._conn.execute(
                 "INSERT INTO pending_memories"
                 " (id, content, category, memory_type, source_sentence, status,"
-                "  fingerprint, proposed_by, created_at, proposed_action, target_memory_id)"
-                " VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
+                "  fingerprint, proposed_by, created_at, proposed_action, target_memory_id,"
+                "  sensitive_rule)"
+                " VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
                 (
                     rec_id,
                     content,
@@ -322,10 +376,15 @@ class PendingMemoryStore:
                     time.time(),
                     action,
                     target,
+                    sensitiveRule,
                 ),
             )
             self._conn.commit()
             rec = self.get(rec_id)
+            if sensitiveHit is not None and rec is not None:
+                from neurova.memory_discipline import auditPendingSensitiveProposed
+
+                auditPendingSensitiveProposed(rec, sensitiveHit)
             return rec if rec is not None else {"id": rec_id, "status": "pending"}
 
     # ── P2-2 提炼租约────────────────
@@ -404,7 +463,7 @@ class PendingMemoryStore:
         with self._lock:
             row = self._conn.execute(
                 "SELECT id, content, category, memory_type, source_sentence, status,"
-                " memory_id, proposed_by, created_at, decided_by, decided_at, note, proposed_action, target_memory_id"
+                " memory_id, proposed_by, created_at, decided_by, decided_at, note, proposed_action, target_memory_id, sensitive_rule"
                 " FROM pending_memories WHERE id = ?",
                 (pending_id,),
             ).fetchone()
@@ -416,7 +475,7 @@ class PendingMemoryStore:
             if proposed_by:
                 rows = self._conn.execute(
                     "SELECT id, content, category, memory_type, source_sentence, status,"
-                    " memory_id, proposed_by, created_at, decided_by, decided_at, note, proposed_action, target_memory_id"
+                    " memory_id, proposed_by, created_at, decided_by, decided_at, note, proposed_action, target_memory_id, sensitive_rule"
                     " FROM pending_memories WHERE status = 'pending' AND proposed_by = ?"
                     " ORDER BY created_at DESC, rowid DESC",
                     (str(proposed_by),),
@@ -424,7 +483,7 @@ class PendingMemoryStore:
             else:
                 rows = self._conn.execute(
                     "SELECT id, content, category, memory_type, source_sentence, status,"
-                    " memory_id, proposed_by, created_at, decided_by, decided_at, note, proposed_action, target_memory_id"
+                    " memory_id, proposed_by, created_at, decided_by, decided_at, note, proposed_action, target_memory_id, sensitive_rule"
                     " FROM pending_memories WHERE status = 'pending'"
                     " ORDER BY created_at DESC, rowid DESC"
                 ).fetchall()
@@ -437,7 +496,7 @@ class PendingMemoryStore:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, content, category, memory_type, source_sentence, status,"
-                " memory_id, proposed_by, created_at, decided_by, decided_at, note, proposed_action, target_memory_id"
+                " memory_id, proposed_by, created_at, decided_by, decided_at, note, proposed_action, target_memory_id, sensitive_rule"
                 " FROM pending_memories WHERE status = ? ORDER BY decided_at DESC, rowid DESC",
                 (status,),
             ).fetchall()
@@ -460,13 +519,26 @@ class PendingMemoryStore:
             "note": row[11],
             "proposed_action": row[12],
             "target_memory_id": row[13],
+            "sensitive_rule": row[14],
         }
 
     # ── 裁决 ──────────────────────────────────────────────────
 
-    def confirm(self, pending_id: str, remember_fn: Callable[[str, str, str], str]) -> Dict[str, Any]:
+    def confirm(
+        self,
+        pending_id: str,
+        remember_fn: Callable[[str, str, str], str],
+        *,
+        allow_sensitive: bool = False,
+        decided_by: str = "",
+    ) -> Dict[str, Any]:
         """确认入主库：remember_fn(content, category, memory_type) -> memory_id。
-        remember_fn 失败时记录保持 pending（异常向上传播，由调用方提示）。"""
+        remember_fn 失败时记录保持 pending（异常向上传播，由调用方提示）。
+
+        S16 人工审阅接通：敏感候选（propose 点命中或 confirm 时门控开启态
+        现场复检命中）未显式 ``allow_sensitive=True`` 一律拒绝执行——诚实
+        报错、记录保持 pending；显式放行经 memoryAdmissionRelease 作用域
+        令牌过 S7 准入闸，放行人/规则/摘要审计留痕（绝不静默放行）。"""
         with self._lock:
             rec = self.get(pending_id)
             if rec is None:
@@ -485,18 +557,45 @@ class PendingMemoryStore:
                 )
                 self._conn.commit()
                 raise ValueError("该内容已被用户遗忘（墓碑拦截），不能确认入库")
-            memory_id = remember_fn(rec["content"], rec["category"], rec["memory_type"])
+            # S16：confirm 点敏感复检（propose 后门控才开启/规则族更新的兜底）
+            # + 显式放行门。命中且未显式放行 → 诚实报错，记录保持 pending。
+            releaseHit = None
+            if rec.get("proposed_action", "store") != "forget":
+                from neurova.memory_discipline import screenPendingProposal
+
+                releaseHit = screenPendingProposal(rec["content"])
+            effectiveRule = (
+                getattr(releaseHit, "ruleName", "") if releaseHit else str(rec.get("sensitive_rule") or "")
+            )
+            if effectiveRule and not allow_sensitive:
+                raise ValueError(
+                    "敏感候选（规则 %s）需人工显式放行（allow_sensitive=True）或拒绝，"
+                    "不会静默写入主库" % effectiveRule
+                )
+            released = bool(effectiveRule) and bool(allow_sensitive)
+            if released:
+                from neurova.memory_admission import memoryAdmissionRelease
+                from neurova.memory_discipline import auditPendingSensitiveReleased
+
+                auditPendingSensitiveReleased(rec, releaseHit, decided_by)
+                rememberScope = memoryAdmissionRelease()
+            else:
+                rememberScope = nullcontext()
+            with rememberScope:
+                memory_id = remember_fn(rec["content"], rec["category"], rec["memory_type"])
             self._conn.execute(
                 "UPDATE pending_memories SET status = 'confirmed', memory_id = ?,"
-                " decided_at = ? WHERE id = ?",
-                (str(memory_id), time.time(), pending_id),
+                " decided_by = ?, decided_at = ? WHERE id = ?",
+                (str(memory_id), str(decided_by or ""), time.time(), pending_id),
             )
             self._conn.commit()
             out = self.get(pending_id)
             return out if out is not None else {"id": pending_id, "memory_id": str(memory_id)}
 
     def reject(self, pending_id: str, rejected_by: str = "", note: str = "") -> Dict[str, Any]:
-        """拒绝提议并记指纹（同内容不再被重复提议）。"""
+        """拒绝提议并记指纹（同内容不再被重复提议）。
+
+        S16：敏感候选的拒收同样留痕（拒收人/规则进审计与计数）。"""
         with self._lock:
             rec = self.get(pending_id)
             if rec is None:
@@ -510,6 +609,10 @@ class PendingMemoryStore:
             )
             self._conn.commit()
             out = self.get(pending_id)
+            if out is not None and str(out.get("sensitive_rule") or ""):
+                from neurova.memory_discipline import auditPendingSensitiveRejected
+
+                auditPendingSensitiveRejected(out, rejected_by)
             return out if out is not None else {"id": pending_id, "status": "rejected"}
 
     def close(self) -> None:

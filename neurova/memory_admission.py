@@ -17,6 +17,8 @@ mem_core.save_conversation_memory、memory 技能 store、API 记忆写入、缓
 放行通道：:func:`setMemoryAdmissionPolicy`（或环境变量
 ``NEUROVA_MEMORY_ADMISSION``）。``enforce``（默认）命中即拒收；``audit``
 放行但逐条留痕计数；``off`` 运行期紧急开关（仍有 debug 日志，不静默）。
+S16 人工审阅接通后另有作用域放行令牌 :func:`memoryAdmissionRelease`——仅供
+pending confirm 的人工显式放行使用，放行逐次留痕，不改变全局策略。
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from __future__ import annotations
 import os
 import re
 import threading
+from contextlib import contextmanager
 from typing import Any, NamedTuple, Optional, Tuple
 
 from neurova.core.identity_context import get_request_user_id
@@ -203,6 +206,7 @@ _counters = {
     "rejected": 0,
     "auditOnlyPassed": 0,
     "auditWriteFailures": 0,
+    "releasedSensitiveWrites": 0,
 }
 _countersLock = threading.Lock()
 
@@ -273,6 +277,32 @@ def _recordRejectionAudit(hit: SensitiveHit, contentLength: int, origin: str, po
 
 
 # ──────────────────────────────────────────────────────────────
+# 人工放行令牌（S16 人工审阅接通：pending confirm 显式放行敏感候选的唯一通道）
+# ──────────────────────────────────────────────────────────────
+
+_releaseState = threading.local()
+
+
+@contextmanager
+def memoryAdmissionRelease():
+    """作用域内放行一次敏感写入（S16 人工审阅：pending confirm 显式放行用）。
+
+    仅显式人工决定（allow_sensitive=True 的 confirm）允许进入本作用域，
+    且放行本身逐次审计留痕（releasedSensitiveWrites 计数 + 审计单源），
+    绝不静默放行。作用域退出即恢复原策略（不黏连、不全局改策）。
+    """
+    _releaseState.active = True
+    try:
+        yield
+    finally:
+        _releaseState.active = False
+
+
+def _releaseTokenActive() -> bool:
+    return bool(getattr(_releaseState, "active", False))
+
+
+# ──────────────────────────────────────────────────────────────
 # 准入异常与强制闸
 # ──────────────────────────────────────────────────────────────
 
@@ -305,6 +335,16 @@ def enforceMemoryAdmission(content: Any, *, origin: str = "") -> Any:
         return content
     _bumpCounter("sensitiveHits")
     _recordRejectionAudit(hit, len(text), origin, policy)
+    if _releaseTokenActive():
+        # S16 人工审阅接通：显式放行作用域内的敏感写入（留痕后放行，不静默）
+        _bumpCounter("releasedSensitiveWrites")
+        logger.warning(
+            "记忆准入人工放行：rule=%s origin=%s excerpt=%s（人工显式决定，留痕）",
+            hit.ruleName,
+            origin,
+            hit.redactedExcerpt,
+        )
+        return content
     logger.warning(
         "记忆准入拒收：rule=%s origin=%s policy=%s excerpt=%s",
         hit.ruleName,
