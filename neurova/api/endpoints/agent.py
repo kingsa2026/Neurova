@@ -592,6 +592,14 @@ async def create_agent(
             _applyExecProfile(agent_id, body.exec_profile)
 
         info = agent_to_info(agent)
+        # created_at 事实源回填（R7 扫平：create 响应与 list/get 同源——
+        # B11 登记面已落行，POST 响应此前恒 null；登记面无行维持 None 诚实缺省）
+        try:
+            cfg = get_agent_config_manager().get_agent(agent_id) or {}
+            if cfg.get("created_at"):
+                info["created_at"] = cfg["created_at"]
+        except Exception as e:
+            logger.warning("AgentConfigManager.get_agent 失败: %s", e)
         return AgentInfo(**info)
 
     except Exception as e:
@@ -722,6 +730,13 @@ async def update_agent(
         _applyExecProfile(agent_id, body.exec_profile)
 
     info = agent_to_info(agent)
+    # created_at 事实源回填（R7 扫平：update 响应与 list/get 同源，PUT 响应此前恒 null）
+    try:
+        cfg = get_agent_config_manager().get_agent(agent_id) or {}
+        if cfg.get("created_at"):
+            info["created_at"] = cfg["created_at"]
+    except Exception as e:
+        logger.warning("AgentConfigManager.get_agent 失败: %s", e)
     return AgentInfo(**info)
 
 
