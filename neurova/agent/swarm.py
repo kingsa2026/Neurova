@@ -101,6 +101,12 @@ SUBAGENT_FINISHED_STATUSES = frozenset({SUBAGENT_COMPLETED, SUBAGENT_FAILED})
 #: `spawn_subagent` 那份读数（同一件事只许有一个尺度，见 `_effectiveRuntimeBudget`）
 SUBAGENT_BUDGET_ENV = "NEUROVA_SWARM_SUBAGENT_BUDGET_SEC"
 
+#: 子代理（swarm member）会话上下文软目标（token 估算）：member 会话估算 token
+#: 越过该线即**先于硬预算**（模型窗口×触发水位）触发压缩，防止 member 长任务把
+#: 上下文顶到模型上限。与 S6 压缩机制合流（同一触发/守卫/事件面，不新造第二套）；
+#: 识别单源是 turn_origin.resolve_turn_origin（metadata source=swarm 既有约定）。
+SUBAGENT_CONTEXT_SOFT_TARGET_TOKENS = 20000
+
 #: 前台自动转后台的定时器（秒；P2 蜂群对照 #4）。>0 时前台派生若在窗口内
 #: 未跑完，即脱离父 turn 转后台继续（返回 background 信封 + subagent_id，
 #: 终态仍走既有邮箱/广播回灌），父会话不再被长任务阻塞到预算墙。

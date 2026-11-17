@@ -159,6 +159,118 @@ def buildCompressionEvent(
     )
 
 
+# ════════════════════════════════════════════════════════════════
+# S15 压缩失败冷却（D3 收尾）：递增步长 / 冷却状态机 / 时间线持久化
+# ════════════════════════════════════════════════════════════════
+
+#: 压缩失败递增冷却步长（秒）：连续失败第 N 次进入 steps[min(N-1, 末位)] 的
+#: 冷却期，期内跳过自动触发（手动 /compact 不受限）；超出表长封顶在末位。
+#: 具名常量（钉子纪律：阈值尺度不得散落字面量）。
+COMPACTION_FAILURE_COOLDOWN_STEPS = (5, 15, 30)
+
+#: 会话时间线上压缩失败冷却事件的种类标识（append_timeline_event 的 kind 字段）。
+COMPACTION_COOLDOWN_TIMELINE_KIND = "compaction_cooldown"
+
+
+@dataclass
+class CompactionCooldownState:
+    """压缩失败冷却状态（时间线为事实源，内存为缓存）。
+
+    连续失败计数只在压缩成功时复位（时间线上的 context_compacted 事件即
+    复位标记，重建语义见 rebuildCompactionCooldown）。
+    """
+
+    consecutiveFailures: int = 0   # 连续失败次数（成功压缩复位）
+    cooldownUntil: float = 0.0     # 冷却截止（epoch 秒；0 = 不在冷却）
+
+    def isCooling(self, now: Optional[float] = None) -> bool:
+        now = time.time() if now is None else now
+        return self.cooldownUntil > now
+
+    def remainingSeconds(self, now: Optional[float] = None) -> float:
+        """距冷却截止的剩余秒数（不在冷却时为 0）。"""
+        now = time.time() if now is None else now
+        return max(0.0, self.cooldownUntil - now)
+
+    def nextCooldownSeconds(self) -> int:
+        """下一次失败将使用的步长（已连续失败 N 次 → steps[min(N, 末位)]）。"""
+        idx = min(max(self.consecutiveFailures, 0), len(COMPACTION_FAILURE_COOLDOWN_STEPS) - 1)
+        return int(COMPACTION_FAILURE_COOLDOWN_STEPS[idx])
+
+    def enterCooldown(self, now: Optional[float] = None) -> int:
+        """失败后进入递增冷却；返回本次冷却步长（秒）。"""
+        now = time.time() if now is None else now
+        step = self.nextCooldownSeconds()  # 基于当前失败次数取步长，再计数
+        self.consecutiveFailures += 1
+        self.cooldownUntil = now + step
+        return step
+
+    def resetOnSuccess(self) -> None:
+        """压缩成功复位：失败计数归零、冷却解除（下次失败从最小步长重新递增）。"""
+        self.consecutiveFailures = 0
+        self.cooldownUntil = 0.0
+
+
+def rebuildCompactionCooldown(timelineEvents: Iterable) -> CompactionCooldownState:
+    """从会话时间线重建冷却状态（进程重启不丢：时间线是事实源）。
+
+    倒序取最近一条相关事件：冷却事件给出失败次数与冷却截止（ts + 步长）；
+    遇到压缩成功事件（context_compacted）即复位；其余种类与冷却无关，跳过。
+    """
+    state = CompactionCooldownState()
+    for row in reversed(list(timelineEvents or [])):
+        kind = str((row or {}).get("kind") or "")
+        if kind == COMPRESSION_TIMELINE_KIND:
+            break  # 最近一次压缩成功：失败计数复位
+        if kind == COMPACTION_COOLDOWN_TIMELINE_KIND:
+            payload = (row or {}).get("event") or {}
+            state.consecutiveFailures = max(1, int(payload.get("consecutiveFailures") or 1))
+            step = float(payload.get("cooldownSeconds") or 0)
+            try:
+                until = datetime.fromisoformat(str((row or {}).get("ts") or "")).timestamp() + step
+            except ValueError:
+                until = 0.0
+            state.cooldownUntil = max(state.cooldownUntil, until)
+            break  # 最近一条冷却事件即最新状态
+    return state
+
+
+def persistCompactionCooldownEvent(
+    sessionManager: Any,
+    agentId: str,
+    sessionId: str,
+    *,
+    consecutiveFailures: int,
+    cooldownSeconds: int,
+    reason: str,
+) -> bool:
+    """冷却事件经 session_manager 既有公开接口落会话时间线（append-only）。
+
+    与 persistCompressionEvent 同一条事件面（S5/S6），重启后经
+    rebuildCompactionCooldown 读回。fail-open：落盘失败不阻断对话主链路。
+    """
+    if sessionManager is None:
+        return False
+    try:
+        return bool(sessionManager.append_timeline_event(
+            str(agentId or ""),
+            str(sessionId or ""),
+            {
+                "kind": COMPACTION_COOLDOWN_TIMELINE_KIND,
+                "ts": datetime.now().isoformat(),
+                "event": {
+                    "consecutiveFailures": int(consecutiveFailures),
+                    "cooldownSeconds": int(cooldownSeconds),
+                    "reason": str(reason or ""),
+                    "phase": "context_compact_cooldown",
+                },
+            },
+        ))
+    except Exception as e:  # noqa: BLE001 - 落盘失败不阻断对话
+        logger.warning("冷却事件落盘失败（忽略）: %s", e)
+        return False
+
+
 def persistCompressionEvent(
     sessionManager: Any,
     agentId: str,
