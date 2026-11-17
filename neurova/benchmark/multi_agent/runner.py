@@ -20,6 +20,13 @@ MODES = ("solo", "swarm")
 
 
 def _extractText(result) -> str:
+    """从执行结果提取报告正文（判据的**唯一输入**）。
+
+    卫生纪律（真模型基线实测抓到的假通过根因）：dict 没有正文键时**如实返回
+    空串**，不得回退 `str(result)`——那会把 reasoning/内部字段的 repr 当"报告"
+    喂给判据（实测：某任务正文为空，量规标记却匹配在 reasoning 的 repr 里，
+    判了假通过）。没有正文 = 判据按失败计，这才是诚实形态。
+    """
     if result is None:
         return ""
     if isinstance(result, str):
@@ -29,7 +36,10 @@ def _extractText(result) -> str:
             value = result.get(key)
             if isinstance(value, str) and value.strip():
                 return value
-    return str(result)
+        return ""
+    if hasattr(result, "content"):
+        return str(result.content)
+    return ""
 
 
 def _extractTokens(result) -> Optional[int]:
