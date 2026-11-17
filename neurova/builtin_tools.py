@@ -383,6 +383,55 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": [],
         },
     },
+    "computer_key": {
+        # 执行语义声明：改变共享桌面的画面（全局键盘）⇒ 动作后补拍有意义。
+        "interactive_desktop": True,
+        # 并行能力声明：键盘焦点是全局单例，并发按键会串到对方的窗口。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【按键】向桌面发送按键或组合键（如 enter、ctrl+s、alt+f4），repeat 可重复。用于快捷键/确认框/切窗口；别名自动归一（cmd→win、esc→escape 等），键表外键名会被拒绝。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "按键名或 + 组合键，如 enter / ctrl+s / alt+f4"},
+                "repeat": {"type": "integer", "description": "重复次数（默认 1）", "minimum": 1},
+                "interval": {"type": "number", "description": "重复间隔秒（默认 0.05）"},
+            },
+            "required": ["key"],
+        },
+    },
+    "computer_paste": {
+        # 执行语义声明：改变共享桌面的画面（键盘输入）⇒ 动作后补拍有意义。
+        "interactive_desktop": True,
+        # 并行能力声明：写系统剪贴板+派发 ctrl+v——剪贴板与键盘焦点都是全局单例。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【粘贴】把文本写入系统剪贴板并派发 ctrl+v 到当前焦点控件（比逐字符键入快，适合长文本/特殊字符）。目标控件需已聚焦（可先 computer_click/computer_click_element 聚焦）；粘贴后剪贴板内容即为本文本。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "要粘贴的文本"},
+            },
+            "required": ["text"],
+        },
+    },
+    "computer_drag": {
+        # 执行语义声明：改变共享桌面的画面（鼠标拖拽）⇒ 动作后补拍有意义。
+        "interactive_desktop": True,
+        # 并行能力声明：鼠标是全局单例，并发拖拽会互相打断。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【拖拽】按截图像素坐标把鼠标从起点拖到终点（默认左键拖拽，时长可调）。坐标口径同 computer_click（截图像素坐标，DPI/多屏换算已内置）。适合滑块/拖放排序/画布类交互。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "start_x": {"type": "number", "description": "起点 X（截图像素坐标）"},
+                "start_y": {"type": "number", "description": "起点 Y（截图像素坐标）"},
+                "end_x": {"type": "number", "description": "终点 X（截图像素坐标）"},
+                "end_y": {"type": "number", "description": "终点 Y（截图像素坐标）"},
+                "duration": {"type": "number", "description": "拖拽时长秒（默认 0.5，过快可能丢事件）"},
+                "button": {"type": "string", "description": "鼠标按钮 left/right/middle", "default": "left"},
+            },
+            "required": ["start_x", "start_y", "end_x", "end_y"],
+        },
+    },
     "computer_ssh_exec": {
         # 壳方言声明：command 文本交给真 shell 执行（|/;/&& 是命令连接符），
         # 故它必须走分段审批面（成员资格收口到本声明，见 governance.listSegmentedShellTools）。

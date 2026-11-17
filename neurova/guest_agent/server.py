@@ -103,6 +103,17 @@ def create_app(manager: Any = None, uia_manager: Any = None, token: Optional[str
                 return await asyncio.to_thread(
                     _uia_mgr().list_windows, int(p.get("limit") or 50)
                 )
+            if kind == "key":
+                return await asyncio.to_thread(
+                    actions.press_key, mgr, p.get("key"), p.get("repeat", 1), p.get("interval", 0.05)
+                )
+            if kind == "paste":
+                return await asyncio.to_thread(actions.paste_text, mgr, p.get("text"))
+            if kind == "drag":
+                return await asyncio.to_thread(
+                    actions.drag, mgr, p.get("start_x"), p.get("start_y"),
+                    p.get("end_x"), p.get("end_y"), p.get("duration", 0.5), p.get("button", "left"),
+                )
             return {"error": f"guest agent 未知动作: {kind}"}
         except Exception as e:  # noqa: BLE001 — guest 语义：错误也回结构化
             logger.warning("guest agent 动作 %s 失败: %s", kind, e)

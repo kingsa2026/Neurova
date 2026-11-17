@@ -110,6 +110,28 @@ def screen_point_to_screenshot_px(
     return ((float(x) - origin_x) * scale, (float(y) - origin_y) * scale)
 
 
+# P2-7 按键别名单源：模型/用户给的键名 → pyautogui 键表名。
+# 只收"跨平台叫法不一"的别名，不做通配转写；最终合法性仍以 pyautogui 键表校验。
+KEY_ALIASES = {
+    "cmd": "win",
+    "command": "win",
+    "super": "win",
+    "ctl": "ctrl",
+    "control": "ctrl",
+    "esc": "escape",
+    "del": "delete",
+    "ins": "insert",
+    "return": "enter",
+    "spacebar": "space",
+}
+
+
+def normalizeKeyName(part: str) -> str:
+    """单键名归一（小写+别名表）；空串原样返回由调用方拒绝。"""
+    raw = str(part or "").strip().lower()
+    return KEY_ALIASES.get(raw, raw)
+
+
 class ComputerUseManager:
     """计算机使用管理器 - 整合桌面操作、文件操作和浏览器操作"""
 
@@ -429,6 +451,137 @@ class ComputerUseManager:
             return False
         except Exception as e:
             logger.error("滚动失败: %s", e)
+            return False
+
+    def press_key(self, key: str, repeat: int = 1, interval: float = 0.05) -> bool:
+        """按键/组合键（P2-7）：'+' 组合键走 hotkey，单键走 press；别名归一后以
+        pyautogui 键表校验，表外键名拒绝（不盲发）。"""
+        try:
+            import pyautogui
+
+            names = []
+            for part in str(key or "").split("+"):
+                normalized = normalizeKeyName(part)
+                if not normalized:
+                    logger.warning("按键参数为空: %r", part)
+                    return False
+                names.append(normalized)
+            if not names:
+                return False
+            valid = set(getattr(pyautogui, "KEYBOARD_KEYS", []) or [])
+            for name in names:
+                if name not in valid:
+                    logger.warning("按键不在 pyautogui 键表: %r（合法示例 enter/ctrl+s）", name)
+                    return False
+            repeat = max(1, int(repeat or 1))
+            interval = max(0.0, float(interval or 0.0))
+            for i in range(repeat):
+                if len(names) == 1:
+                    pyautogui.press(names[0], interval=interval)
+                else:
+                    pyautogui.hotkey(*names)
+                if i < repeat - 1 and interval:
+                    import time
+
+                    time.sleep(interval)
+            return True
+        except ImportError:
+            logger.warning("按键失败：缺少 pyautogui")
+            return False
+        except Exception as e:
+            logger.error("按键失败: %s", e)
+            return False
+
+    def paste_text(self, text: str) -> bool:
+        """粘贴（P2-7）：文本写入系统剪贴板 → 派发 ctrl+v 到当前焦点控件。
+
+        Windows 剪贴板通道（CF_UNICODETEXT）；目标控件需已聚焦（聚焦语义见
+        computer_type 的语义路径）。粘贴后不恢复剪贴板原值（与 ZCode paste 的
+        差异如实声明于工具描述）。
+        """
+        if os.name != "nt":
+            logger.warning("粘贴失败：剪贴板通道仅 Windows（当前 os.name=%r）", os.name)
+            return False
+        if not str(text or ""):
+            logger.warning("粘贴失败：文本为空")
+            return False
+        if not self._setClipboardText(str(text)):
+            return False
+        try:
+            import pyautogui
+
+            pyautogui.hotkey("ctrl", "v")
+            return True
+        except Exception as e:
+            logger.error("粘贴派发失败: %s", e)
+            return False
+
+    @staticmethod
+    def _setClipboardText(text: str) -> bool:
+        """win32 剪贴板写入（CF_UNICODETEXT；无第三方依赖）。"""
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            CF_UNICODETEXT = 13
+            GMEM_MOVEABLE = 0x0002
+            if not user32.OpenClipboard(None):
+                logger.warning("剪贴板打开失败（可能被其它进程占用）")
+                return False
+            try:
+                user32.EmptyClipboard()
+                size = (len(text) + 1) * ctypes.sizeof(wintypes.WCHAR)
+                handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, size)
+                if not handle:
+                    return False
+                pointer = kernel32.GlobalLock(handle)
+                if not pointer:
+                    kernel32.GlobalFree(handle)
+                    return False
+                try:
+                    ctypes.memmove(pointer, ctypes.create_unicode_buffer(text), size)
+                finally:
+                    kernel32.GlobalUnlock(handle)
+                if not user32.SetClipboardData(CF_UNICODETEXT, handle):
+                    kernel32.GlobalFree(handle)
+                    return False
+                return True
+            finally:
+                user32.CloseClipboard()
+        except Exception as e:
+            logger.error("剪贴板写入失败: %s", e)
+            return False
+
+    def drag(
+        self,
+        start_x: typing.Any,
+        start_y: typing.Any,
+        end_x: typing.Any,
+        end_y: typing.Any,
+        duration: float = 0.5,
+        button: str = "left",
+    ) -> bool:
+        """拖拽（P2-7）：截图像素坐标经坐标链换算后 moveTo+dragTo。"""
+        if button not in ("left", "right", "middle"):
+            logger.warning("不支持的拖拽按钮: %r", button)
+            return False
+        try:
+            import pyautogui
+
+            sx, sy = self.convert_screenshot_point(start_x, start_y)
+            ex, ey = self.convert_screenshot_point(end_x, end_y)
+            pyautogui.moveTo(int(sx), int(sy))
+            pyautogui.dragTo(
+                int(ex), int(ey), duration=max(0.05, float(duration or 0.5)), button=button
+            )
+            return True
+        except ImportError:
+            logger.warning("拖拽失败：缺少 pyautogui")
+            return False
+        except Exception as e:
+            logger.error("拖拽失败: %s", e)
             return False
 
     def file_read(self, path: str) -> typing.Optional[str]:

@@ -64,3 +64,58 @@ def scroll(
 def screenshot_bytes(manager: Any, region=None) -> Optional[bytes]:
     """截图原始 PNG 字节（None=无可用后端）"""
     return manager.screenshot(region)
+
+
+def press_key(manager: Any, key: Any, repeat: Any = 1, interval: Any = 0.05) -> Dict:
+    """按键/组合键（P2-7；键名归一与键表校验在 manager 层单源）"""
+    if not str(key or "").strip():
+        return {"error": "缺少按键参数 key"}
+    try:
+        repeat_n = max(1, int(repeat or 1))
+    except (TypeError, ValueError):
+        repeat_n = 1
+    try:
+        interval_f = max(0.0, float(interval or 0.0))
+    except (TypeError, ValueError):
+        interval_f = 0.05
+    success = manager.press_key(str(key), repeat_n, interval_f)
+    if success:
+        return {"success": True, "key": key, "repeat": repeat_n}
+    return {"error": f"按键失败或键名不支持: {key!r}（示例 enter / ctrl+s / alt+f4）"}
+
+
+def paste_text(manager: Any, text: Any) -> Dict:
+    """剪贴板写入 + ctrl+v 粘贴（P2-7；Windows 剪贴板通道）"""
+    if not str(text or ""):
+        return {"error": "缺少粘贴文本"}
+    success = manager.paste_text(str(text))
+    if success:
+        return {"success": True, "text": text, "length": len(str(text))}
+    return {"error": "粘贴失败（需要 Windows 剪贴板与 pyautogui，目标控件需已聚焦）"}
+
+
+def drag(
+    manager: Any,
+    start_x: Any,
+    start_y: Any,
+    end_x: Any,
+    end_y: Any,
+    duration: Any = 0.5,
+    button: str = "left",
+) -> Dict:
+    """按截图像素坐标拖拽（P2-7；DPI/多屏换算在 manager 坐标链）"""
+    if start_x is None or start_y is None or end_x is None or end_y is None:
+        return {"error": "缺少坐标参数 start_x/start_y/end_x/end_y"}
+    try:
+        duration_f = max(0.05, float(duration or 0.5))
+    except (TypeError, ValueError):
+        duration_f = 0.5
+    success = manager.drag(start_x, start_y, end_x, end_y, duration_f, button or "left")
+    if success:
+        return {
+            "success": True,
+            "start": [start_x, start_y],
+            "end": [end_x, end_y],
+            "button": button or "left",
+        }
+    return {"error": "拖拽操作失败"}
