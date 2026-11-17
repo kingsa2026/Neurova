@@ -123,6 +123,28 @@ def _migrateToV4(conn: sqlite3.Connection) -> None:
 
 register_migration(4, _migrateToV4, domain="agent_runs")
 
+
+def _migrateToV5(conn: sqlite3.Connection) -> None:
+    """v5：run→project/team 归属标签（S12 项目协作档案 + S10 移交闭环）。
+
+    - `project_id`：协作房间发起的 run 按 ``room_id = 协作 project_id`` 等式打标；
+      主 agent 直发带项目上下文时显式传入。项目档案（GET /projects/{id}/collaboration）
+      按这一列聚合 run/事件/候选/审批——**没有它，跨账本的档案读面无从归属**。
+    - `team_id`：S10 团队派活的溯源标（此前只活在内存 run 对象与 WS 载荷里，
+      重启即失——S10 执行记录明确移交本批同通道落库）。
+    均为可空缺省串：普通聊天回合两列留空，读写行为与改前完全一致。
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(agent_runs)")}
+    for name, decl in (("project_id", "TEXT NOT NULL DEFAULT ''"),
+                       ("team_id", "TEXT NOT NULL DEFAULT ''")):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {name} {decl}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_runs_project ON agent_runs(project_id, seq)")
+
+
+register_migration(5, _migrateToV5, domain="agent_runs")
+
 TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 
 # 挂起态：非终态。它的存在意义就是"活过进程、等人点续跑"，因此
@@ -184,7 +206,8 @@ class AgentRunStore:
         self.db_path = str(db_path or _default_db_path())
         self.lease_seconds = float(lease_seconds)
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
+        # SQLite 多线程访问持 RLock（AGENTS.md §3；可重入不改变既有串行语义）
+        self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -206,22 +229,26 @@ class AgentRunStore:
     def intake(
         self, session_id: str, user_id: str = "", agent_id: str = "", message: str = "",
         subagent_id: str = "", parent_session_id: str = "", trace_id: str = "",
+        project_id: str = "", team_id: str = "",
     ) -> str:
         """请求落库（queued）。返回 run_id。message 只存摘要（正文真相在会话）。
 
         `subagent_id`/`parent_session_id` 只由蜂群记账路径填（见
         `agent_run_ledger.openSubagentRun`）；`trace_id`（P3-2）关联该子任务的
         轨迹 span 树；回合入口留空，语义与改前一致。
+        `project_id`/`team_id`（S12/S10）：协作归属标——房间发起按
+        ``room_id=project_id`` 等式打标，团队派活带 team_id；普通回合留空。
         """
         run_id = f"run_{uuid.uuid4().hex[:16]}"
         now = time.time()
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO agent_runs (run_id, session_id, user_id, agent_id,"
-                " subagent_id, parent_session_id, trace_id,"
-                " message_digest, status, created_at) VALUES (?,?,?,?,?,?,?,?,'queued',?)",
+                " subagent_id, parent_session_id, trace_id, project_id, team_id,"
+                " message_digest, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,'queued',?)",
                 (run_id, session_id, user_id, agent_id, subagent_id, parent_session_id,
-                 trace_id, (message or "")[:200], now),
+                 trace_id, str(project_id or ""), str(team_id or ""),
+                 (message or "")[:200], now),
             )
         return run_id
 
@@ -461,6 +488,33 @@ class AgentRunStore:
                 (subagent_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def list_runs_by_project(self, project_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """按项目标列 run（S12 项目协作档案的台账读面）。
+
+        只认显式 project_id 标——空标（普通聊天回合）不归属任何项目，这是
+        "无标 run 不串入档案"的判据落点（按列精确匹配，不做时间/会话兜底）。
+        """
+        pid = str(project_id or "").strip()
+        if not pid:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM agent_runs WHERE project_id=? ORDER BY seq DESC LIMIT ?",
+                (pid, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_runs_by_project(self, project_id: str) -> int:
+        """项目标 run 计数（get_project_stats 的 runs_count 口径单源）。"""
+        pid = str(project_id or "").strip()
+        if not pid:
+            return 0
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM agent_runs WHERE project_id=?", (pid,)
+            ).fetchone()
+        return int(row[0]) if row else 0
 
     def stats(self) -> Dict[str, int]:
         with self._lock:

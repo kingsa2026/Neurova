@@ -350,6 +350,10 @@ class SubAgentRun:
     # 投递到该房间（人在环闭环），member 记忆按 room:<room_id> 作用域共享（共享黑板）。
     # 空串 = 不关联房间（行为与改前完全一致）。
     room_id: str = ""
+    # S12：run→project 归属标（台账行 project_id 列的来源）。房间发起的协作按
+    # ``room_id = 协作 project_id`` 等式取 room_id；主 agent 直发带项目上下文时
+    # 显式传入。空串 = 不归属项目（档案读面不收录）。
+    project_id: str = ""
     # S9 动态组队：按团队名册选中的成员与角色（角色复用 collaboration_template.AgentRole）。
     team_id: str = ""
     team_role: str = ""
@@ -396,6 +400,7 @@ class SubAgentRun:
             "execution_id": self.execution_id,
             "resumed_from": self.resumed_from,
             "room_id": self.room_id,
+            "project_id": self.project_id,
             "team_id": self.team_id,
             "team_role": self.team_role,
         }
@@ -508,6 +513,7 @@ class SwarmManager:
         reuse_member_session_id: Optional[str] = None,
         resumed_from: Optional[str] = None,
         room_id: Optional[str] = None,
+        project_id: Optional[str] = None,
         team_id: Optional[str] = None,
         team_role: Optional[str] = None,
         teamMemberOverride: Optional[dict] = None,
@@ -529,6 +535,9 @@ class SwarmManager:
             resumed_from: 被续跑的 subagent_id（溯源读数；空 = 全新派生）
             room_id: S9 关联协作房间（=协作 project_id）——审批/升级/候选事件投递
                 到该房间（人在环闭环），member 记忆按 room:<room_id> 作用域共享
+            project_id: S12 run→project 归属标（落台账 project_id 列，项目档案按
+                此聚合）；缺省取 room_id（房间发起的协作按等式自动打标），显式
+                传入时优先——主 agent 直发带项目上下文走这一入口
             team_id / team_role: S9 动态组队——按团队名册选人（team_role 复用
                 collaboration_template.AgentRole），成员职责 prompt 拼进任务书
             teamMemberOverride: S10 dispatch_team 显式点名成员（跳过按角色/任务
@@ -557,6 +566,10 @@ class SwarmManager:
             teamRoleLabel = str(teamMember.get("role") or team_role or "")
             if teamMemberOverride is None:
                 task = composeTeamDutyTask(task, teamMember)
+
+        # S12 run→project 归属标：显式 project_id 优先（入口一直发带项目上下文），
+        # 否则按 ``room_id = 协作 project_id`` 等式取房间标（入口二房间发起）。
+        effectiveProjectId = str(project_id or "").strip() or str(room_id or "").strip()
 
         # P1-1（评测报告 G-2）：结构化任务单元——解析失败走结构化拒绝（决策非故障）
         try:
@@ -699,6 +712,7 @@ class SwarmManager:
                         "parent_trace_id": get_trace_id() or "",
                         "data_fence": dataFence,
                         "room_id": str(room_id or "").strip(),
+                        "project_id": effectiveProjectId,
                         "team_id": str(team_id or "").strip() if teamMember else "",
                         "team_role": teamRoleLabel,
                         "team_member": dict(teamMember) if teamMember else None,
@@ -711,6 +725,7 @@ class SwarmManager:
                 "dependencies": list(deps), "unsatisfied": unsatisfied,
                 "data_fence": dataFence,
                 "room_id": str(room_id or "").strip(),
+                "project_id": effectiveProjectId,
                 "team_id": str(team_id or "").strip() if teamMember else "",
                 "team_role": teamRoleLabel,
                 "selected_member": teamMember,
@@ -736,6 +751,7 @@ class SwarmManager:
             data_fence=dataFence if dataFence["hit_count"] else None,
             resumed_from=resumed_from or "",
             room_id=str(room_id or "").strip(),
+            project_id=effectiveProjectId,
             team_id=str(team_id or "").strip() if teamMember else "",
             team_role=teamRoleLabel,
             team_member=dict(teamMember) if teamMember else None,
@@ -794,6 +810,7 @@ class SwarmManager:
                 "background": True,
                 "data_fence": dataFence,
                 "room_id": run.room_id,
+                "project_id": run.project_id,
                 "team_id": run.team_id,
                 "team_role": run.team_role,
                 "selected_member": teamMember,
@@ -1371,6 +1388,17 @@ class SwarmManager:
         return {"success": True, "action": "merge", "candidate_id": candidateId,
                 "revision": outcome.get("revision")}
 
+    def candidateRecordsForRuns(self, runIds: List[str]) -> List[Dict[str, Any]]:
+        """S12 档案读面：按 run 集合取候选记录（候选板单源读面，供读时 join）。
+
+        只读不改；runIds 为空返回空表。返回 toDict 投影——content 是候选定稿
+        正文引用，档案层按脱敏纪律截断展示，不搬运大正文。
+        """
+        wanted = {str(r or "").strip() for r in (runIds or []) if str(r or "").strip()}
+        if not wanted:
+            return []
+        return [c.toDict() for c in self._candidates.allCandidates() if c.runId in wanted]
+
     # ── P1-4（评测报告 G-4）：依赖门控 ──────────────────────────
 
     def _depSatisfied(self, run: SubAgentRun) -> bool:
@@ -1435,6 +1463,7 @@ class SwarmManager:
             parent_trace_id=info.get("parent_trace_id") or "",
             data_fence=info.get("data_fence") if (info.get("data_fence") or {}).get("hit_count") else None,
             room_id=info.get("room_id") or "",
+            project_id=info.get("project_id") or "",
             team_id=info.get("team_id") or "",
             team_role=info.get("team_role") or "",
             team_member=info.get("team_member"),
@@ -1474,6 +1503,7 @@ class SwarmManager:
             parent_trace_id=info.get("parent_trace_id") or "",
             data_fence=info.get("data_fence") if (info.get("data_fence") or {}).get("hit_count") else None,
             room_id=info.get("room_id") or "",
+            project_id=info.get("project_id") or "",
             team_id=info.get("team_id") or "",
             team_role=info.get("team_role") or "",
             team_member=info.get("team_member"),
@@ -1678,6 +1708,10 @@ class SwarmManager:
             subagent_type=old.subagent_type,
             reuse_member_session_id=old.member_session_id,
             resumed_from=old.subagent_id,
+            # S12：续跑是同一条协作的延续，project/room 归属标随行（档案才不断链）；
+            # team_id 不随行——重走选人会改变续跑语义（团队续跑属需人裁，未立项）。
+            room_id=old.room_id or None,
+            project_id=old.project_id or None,
         )
 
     # ── 内部实现 ──────────────────────────────────────────────
@@ -2077,6 +2111,8 @@ class SwarmManager:
             agentId=run.agent_id,
             task=run.task,
             traceId=run.trace_id,
+            projectId=run.project_id,
+            teamId=run.team_id,
         )
         # H-4：started 事件入账（因果链接在 spawned 之后）
         self._logRunEvent(run, "started", {
