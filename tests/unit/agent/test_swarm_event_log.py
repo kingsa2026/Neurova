@@ -107,3 +107,38 @@ class TestSpawnLifecycleEvents:
                    side_effect=OSError("disk full")):
             result = await swarm.spawn(task="子任务", agent_id="researcher")
         assert result["status"] == "completed", "归档故障不得阻断蜂群主流程（fail-open）"
+
+
+class TestStatusEventsView:
+    """H-4 闭环读侧：subagent_status(view=events) 返回 run 事件账本（因果链完整）。"""
+
+    @pytest.mark.asyncio
+    async def test_status_view_events_returns_chained_events(self, swarm):
+        from neurova.tool_executor import ToolExecutor
+
+        with patch("neurova.api.endpoints.get_agent_instance", return_value=make_agent()):
+            result = await swarm.spawn(task="子任务内容", agent_id="researcher")
+        exe = ToolExecutor(MagicMock())
+        view = await exe._execute_subagent_status(
+            {"subagent_id": result["subagent_id"], "view": "events"}
+        )
+        assert view["subagent_id"] == result["subagent_id"]
+        types = [e["type"] for e in view["events"]]
+        assert types[0] == "spawned" and types[-1] == "terminal"
+        for prev, cur in zip(view["events"], view["events"][1:]):
+            assert cur["causation_id"] == prev["event_id"]
+
+    @pytest.mark.asyncio
+    async def test_status_view_events_requires_id(self):
+        from neurova.tool_executor import ToolExecutor
+
+        exe = ToolExecutor(MagicMock())
+        result = await exe._execute_subagent_status({"view": "events"})
+        assert "error" in result
+
+    def test_swarm_run_events_method(self, swarm):
+        appendRunEvent("swarm_evt9", "spawned", {"task": "t"})
+        view = swarm.runEvents("swarm_evt9")
+        assert view["subagent_id"] == "swarm_evt9"
+        assert view["count"] == 1
+        assert view["events"][0]["type"] == "spawned"

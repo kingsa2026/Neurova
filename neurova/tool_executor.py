@@ -2920,11 +2920,17 @@ class ToolExecutor:
         return result
 
     async def _execute_subagent_status(self, params: Dict) -> Dict:
-        """查询后台子 Agent 状态/结果（subagent_id 可省略→最近派生列表；view=integration→集成核对面）"""
+        """查询后台子 Agent 状态/结果（subagent_id 可省略→最近派生列表；view=integration→集成核对面；view=events→run 事件账本）"""
         from neurova.agent.swarm import get_swarm_manager
 
-        if str(params.get("view") or "").strip().lower() == "integration":
+        view = str(params.get("view") or "").strip().lower()
+        if view == "integration":
             return get_swarm_manager().integrationReport()
+        if view == "events":
+            subagent_id = str(params.get("subagent_id") or "").strip()
+            if not subagent_id:
+                return {"error": "view=events 需要 subagent_id"}
+            return get_swarm_manager().runEvents(subagent_id)
         subagent_id = str(params.get("subagent_id") or "").strip()
         return get_swarm_manager().status(subagent_id)
 
