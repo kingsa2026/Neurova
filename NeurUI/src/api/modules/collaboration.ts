@@ -564,3 +564,108 @@ export function retryDueDeliveries() {
     `${NF_BASE}/trigger/deliveries/retry-due`,
   )
 }
+
+// ---------------------------------------------------------------------------
+// S12 项目协作档案：留底 + 可观测（GET /projects/{id}/collaboration）
+// ---------------------------------------------------------------------------
+
+/** 台账 run 投影（正文不进档案，只带 task 摘要与句柄） */
+export interface DossierRun {
+  run_id: string
+  subagent_id: string
+  agent_id: string
+  user_id: string
+  parent_session_id: string
+  status: string
+  error_type: string
+  project_id: string
+  team_id: string
+  task_summary: string
+  created_at?: number | null
+  started_at?: number | null
+  finished_at?: number | null
+}
+
+/** H-4 账本事件投影（payload 只含摘要字段） */
+export interface DossierEvent {
+  event_id: string
+  subagent_id: string
+  type: string
+  causation_id: string
+  occurred_at?: string | null
+  payload: Record<string, unknown>
+}
+
+/** S4 候选投影（content 只出摘要，全文在 member 会话） */
+export interface DossierCandidate {
+  candidate_id: string
+  run_id: string
+  status: string
+  artifact_keys: string[]
+  base_revision?: number | null
+  conflict_with: string[]
+  note: string
+  created_at?: number | null
+  decided_at?: number | null
+  content_summary: string
+}
+
+/** S8 审批审计成对轨迹（请求+决定） */
+export interface DossierApproval {
+  request_id: string
+  run_id: string
+  level?: string | null
+  operation?: string | null
+  reason?: string | null
+  status: string
+  decision?: string | null
+  decided_by?: string | null
+  requested_at?: number | null
+  decided_at?: number | null
+}
+
+/** 房间消息投影（room_id = project_id；content 只出摘要） */
+export interface DossierRoomMessage {
+  sender_type: string
+  sender_id: string
+  kind: string
+  ts?: number | string | null
+  content_summary: string
+}
+
+/** 封卷总结（项目归档时从账本自动生成并留底项目档案） */
+export interface DossierSummary {
+  closed_at: number
+  runs_count: number
+  events_count: number
+  candidates_total: number
+  candidates_accepted: number
+  candidates_rejected: number
+  approvals_total: number
+  approvals_decided: number
+  key_events: Array<{ subagent_id: string; type: string; occurred_at?: string | null }>
+}
+
+/** 项目协作档案聚合（五类记录读时 join，未建第二本账） */
+export interface ProjectCollaboration {
+  project_id: string
+  generated_at: number
+  runs: DossierRun[]
+  events: DossierEvent[]
+  candidates: DossierCandidate[]
+  approvals: DossierApproval[]
+  room_messages: DossierRoomMessage[]
+  counts: {
+    runs: number
+    events: number
+    candidates: number
+    approvals: number
+    room_messages: number
+  }
+  summary?: DossierSummary | null
+}
+
+/** 项目协作档案：按项目聚合房间消息 / run 台账 / 事件时间线 / 候选 / 审批审计。 */
+export function getProjectCollaboration(projectId: string) {
+  return api.get<ApiResponse<ProjectCollaboration>>(`/projects/${projectId}/collaboration`)
+}

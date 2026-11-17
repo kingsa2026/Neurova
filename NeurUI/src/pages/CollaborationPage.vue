@@ -45,6 +45,115 @@
       </a-spin>
     </GlassPanel>
 
+    <!-- S12 项目协作档案：按项目聚合五类记录（消息/run/事件/候选/审批）+ 封卷总结 -->
+    <GlassPanel variant="default" padding="20px 24px">
+      <div class="list-header">
+        <h3 class="section-title">{{ t('collab.dossierTitle') }}</h3>
+        <a-select
+          v-model:value="dossierProjectId"
+          :options="dossierProjectOptions"
+          :placeholder="t('collab.dossierSelectProject')"
+          style="min-width: 220px"
+          allow-clear
+          @change="loadDossier"
+        />
+      </div>
+      <a-spin :spinning="dossierLoading">
+        <a-empty v-if="!dossier" :description="t('collab.dossierEmpty')" />
+        <template v-else>
+          <div class="dossier-counts">
+            <a-tag color="blue">{{ t('collab.dossierRuns') }}: {{ dossier.counts.runs }}</a-tag>
+            <a-tag color="purple">{{ t('collab.dossierEvents') }}: {{ dossier.counts.events }}</a-tag>
+            <a-tag color="cyan">{{ t('collab.dossierCandidates') }}: {{ dossier.counts.candidates }}</a-tag>
+            <a-tag color="orange">{{ t('collab.dossierApprovals') }}: {{ dossier.counts.approvals }}</a-tag>
+            <a-tag color="green">{{ t('collab.dossierMessages') }}: {{ dossier.counts.room_messages }}</a-tag>
+          </div>
+
+          <!-- 封卷总结（项目归档时自动生成并留底） -->
+          <div v-if="dossier.summary" class="dossier-summary">
+            <div class="dossier-sub-title">{{ t('collab.dossierSummary') }}</div>
+            <div class="dossier-counts">
+              <a-tag color="blue">{{ t('collab.dossierRunsCount') }}: {{ dossier.summary.runs_count }}</a-tag>
+              <a-tag color="cyan">{{ t('collab.dossierCandidatesAccepted') }}: {{ dossier.summary.candidates_accepted }}</a-tag>
+              <a-tag color="red">{{ t('collab.dossierCandidatesRejected') }}: {{ dossier.summary.candidates_rejected }}</a-tag>
+              <a-tag color="orange">{{ t('collab.dossierApprovalsDecided') }}: {{ dossier.summary.approvals_decided }}</a-tag>
+            </div>
+            <template v-if="dossier.summary.key_events.length">
+              <div class="dossier-dim">{{ t('collab.dossierKeyEvents') }}</div>
+              <a-timeline class="dossier-timeline">
+                <a-timeline-item v-for="(ev, idx) in dossier.summary.key_events" :key="idx">
+                  <span class="dossier-mono">{{ ev.type }}</span>
+                  <span class="dossier-dim"> · {{ ev.subagent_id }}</span>
+                </a-timeline-item>
+              </a-timeline>
+            </template>
+          </div>
+          <div v-else class="dossier-dim">{{ t('collab.dossierSummaryPending') }}</div>
+
+          <!-- 协作 Run 台账 -->
+          <div class="dossier-sub-title">{{ t('collab.dossierRuns') }}</div>
+          <GlassTable
+            :columns="dossierRunColumns"
+            :data-source="dossier.runs"
+            :pagination="false"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'status'">
+                <a-tag :color="statusColor(record.status)">{{ statusLabel(record.status) }}</a-tag>
+              </template>
+              <template v-if="column.key === 'task_summary'">
+                <span class="dossier-dim">{{ record.task_summary || '—' }}</span>
+              </template>
+            </template>
+          </GlassTable>
+
+          <!-- 事件时间线（最近 20 条，新→旧） -->
+          <div class="dossier-sub-title">{{ t('collab.dossierEvents') }}</div>
+          <a-timeline v-if="dossierRecentEvents.length" class="dossier-timeline">
+            <a-timeline-item v-for="ev in dossierRecentEvents" :key="ev.event_id">
+              <span class="dossier-mono">{{ ev.type }}</span>
+              <span class="dossier-dim"> · {{ ev.subagent_id }}<template v-if="ev.occurred_at"> · {{ ev.occurred_at }}</template></span>
+            </a-timeline-item>
+          </a-timeline>
+          <a-empty v-else :description="t('collab.dossierEmpty')" />
+
+          <!-- 结果候选 -->
+          <div class="dossier-sub-title">{{ t('collab.dossierCandidates') }}</div>
+          <div v-if="dossier.candidates.length" class="dossier-list">
+            <div v-for="c in dossier.candidates" :key="c.candidate_id" class="dossier-item">
+              <a-tag :color="candidateColor(c.status)">{{ c.status }}</a-tag>
+              <span class="dossier-mono">{{ c.candidate_id }}</span>
+              <span class="dossier-dim"> · {{ c.content_summary || c.note }}</span>
+            </div>
+          </div>
+          <a-empty v-else :description="t('collab.dossierEmpty')" />
+
+          <!-- 审批审计（请求+决定成对） -->
+          <div class="dossier-sub-title">{{ t('collab.dossierApprovals') }}</div>
+          <div v-if="dossier.approvals.length" class="dossier-list">
+            <div v-for="a in dossier.approvals" :key="a.request_id" class="dossier-item">
+              <a-tag :color="a.status === 'decided' ? 'green' : 'orange'">
+                {{ a.status === 'decided' ? `${a.decision ?? ''}` : t('collab.dossierStatusPending') }}
+              </a-tag>
+              <span class="dossier-mono">{{ a.operation || a.request_id }}</span>
+              <span class="dossier-dim"> · {{ a.run_id }}<template v-if="a.decided_by"> · {{ a.decided_by }}</template></span>
+            </div>
+          </div>
+          <a-empty v-else :description="t('collab.dossierEmpty')" />
+
+          <!-- 房间消息（摘要） -->
+          <div class="dossier-sub-title">{{ t('collab.dossierMessages') }}</div>
+          <div v-if="dossier.room_messages.length" class="dossier-list">
+            <div v-for="(m, idx) in dossier.room_messages" :key="idx" class="dossier-item">
+              <a-tag>{{ m.sender_type }}: {{ m.sender_id || '—' }}</a-tag>
+              <span class="dossier-dim">{{ m.content_summary }}</span>
+            </div>
+          </div>
+          <a-empty v-else :description="t('collab.dossierEmpty')" />
+        </template>
+      </a-spin>
+    </GlassPanel>
+
     <!-- Initiate collaboration drawer -->
     <a-drawer v-model:open="showInitiate" :title="t('collab.initiate')" placement="right" width="520" :keyboard="!membersOpen" :body-style="{ padding: '20px 24px' }">
       <a-steps :current="initStep" size="small" style="margin-bottom: 24px">
@@ -161,6 +270,8 @@ import GlassTable from '@/components/GlassTable.vue'
 import { useCollaboration } from '@/composables/useCollaboration'
 import { useAgentStore } from '@/stores/agents'
 import { getRoom, updateRoom } from '@/api/modules/collaborationRoom'
+import { getProjectCollaboration, type ProjectCollaboration } from '@/api/modules/collaboration'
+import { listProjects } from '@/api/modules/projects'
 import type { CollabSession, CollabTemplate } from '@/api/modules/collaboration'
 
 const { t } = useI18n()
@@ -324,7 +435,60 @@ onMounted(() => {
   loadSessions()
   loadTemplates()
   agentStore.loadAgents()
+  loadDossierProjectOptions()
 })
+
+// ── S12 项目协作档案：按项目聚合五类记录（消息/run/事件/候选/审批）──
+const dossierProjectId = ref<string>()
+const dossierProjectOptions = ref<Array<{ label: string; value: string }>>([])
+const dossier = ref<ProjectCollaboration | null>(null)
+const dossierLoading = ref(false)
+
+const dossierRecentEvents = computed(() => (dossier.value?.events ?? []).slice(-20).reverse())
+
+const dossierRunColumns = computed(() => [
+  { title: 'subagent_id', dataIndex: 'subagent_id', key: 'subagent_id' },
+  { title: t('collab.members'), dataIndex: 'agent_id', key: 'agent_id' },
+  { title: t('common.status'), dataIndex: 'status', key: 'status' },
+  { title: t('collab.dossierTeam'), dataIndex: 'team_id', key: 'team_id' },
+  { title: t('common.description'), dataIndex: 'task_summary', key: 'task_summary' },
+])
+
+function candidateColor(status: string): string {
+  if (status === 'accepted') return 'success'
+  if (status === 'rejected') return 'error'
+  if (status === 'reviseRequired') return 'warning'
+  return 'processing'
+}
+
+async function loadDossierProjectOptions() {
+  try {
+    const res: any = await listProjects()
+    const items = Array.isArray(res?.data) ? res.data : []
+    dossierProjectOptions.value = items.map((p: any) => ({
+      label: p.name || p.project_id,
+      value: p.project_id,
+    }))
+  } catch {
+    /* 项目列表失败不阻断页面，选择器留空 */
+  }
+}
+
+async function loadDossier() {
+  if (!dossierProjectId.value) {
+    dossier.value = null
+    return
+  }
+  dossierLoading.value = true
+  try {
+    const res: any = await getProjectCollaboration(dossierProjectId.value)
+    dossier.value = res?.data ?? null
+  } catch {
+    dossier.value = null
+  } finally {
+    dossierLoading.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -347,4 +511,13 @@ onMounted(() => {
 .tpl-option.selected { border-color: var(--nr-primary); background: rgba(99,102,241,0.1); }
 .tpl-desc { font-size: 13px; color: var(--nr-text-tertiary); }
 .wizard-hint { margin: 12px 0 0; font-size: 12px; color: var(--nr-text-secondary); }
+/* ── S12 项目协作档案 ── */
+.dossier-counts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.dossier-summary { padding: 12px 16px; border: 1px solid var(--nr-glass-border); border-radius: 10px; margin-bottom: 16px; }
+.dossier-sub-title { color: var(--nr-text-primary); font-weight: 600; font-size: 14px; margin: 16px 0 8px; }
+.dossier-dim { color: var(--nr-text-tertiary); font-size: 13px; }
+.dossier-mono { font-family: var(--nr-font-mono, monospace); font-size: 13px; color: var(--nr-text-primary); }
+.dossier-timeline { margin-top: 8px; }
+.dossier-list { display: flex; flex-direction: column; gap: 6px; }
+.dossier-item { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 </style>
