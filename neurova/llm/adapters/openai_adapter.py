@@ -3,8 +3,9 @@ Neurova OpenAI Provider Adapter
 OpenAI 提供商适配器 - 实现统一接口
 """
 
+import json
 import time
-from typing import Optional, Dict, Any, List, Generator
+from typing import Optional, Dict, Any, List, AsyncGenerator
 
 from neurova.core.logger import get_logger
 from neurova.llm.interfaces.provider_interface import (
@@ -93,18 +94,85 @@ class OpenAIAdapter(LLMAbstractProvider):
         self,
         messages: List[Message],
         temperature: Optional[float] = None,
-    ) -> Generator[str, None, None]:
-        """流式未实现：显式点名失败，不以 `pass` 静默返回 None。
+    ) -> AsyncGenerator[str, None]:
+        """真流式输出：aiohttp SSE 逐 token 产出（N1）。
 
-        空桩时代调用方迭代返回值会在别处炸 `TypeError: NoneType is not
-        iterable`——报错点与根因无关（S5 移交 R6 诚实化）。真流式
-        （aiohttp SSE）属新建能力，另立批次；grep 复核全仓无生产消费方
-        （2026-11-17：基类 @abstractmethod 占位之外仅桩测试）。
+        与 call() 同一形态——同凭据校验、同端点、同沙箱闸、同错误诚实姿态：
+        `data: {...}` → choices[0].delta.content 增量 yield；
+        `data: [DONE]` 终止；HTTP >= 400 / 连接失败 / 凭据缺失 /
+        SSE 帧损坏一律以异常诚实暴露，不伪造空流、不吞错。
         """
-        raise NotImplementedError(
-            "OpenAIAdapter.stream_call 未实现流式输出（仅支持非流式 call）；"
-            "实现前调用在此显式失败，不再以 None 拖到迭代处炸 TypeError"
+        if not self.config.api_key:
+            raise ValueError(
+                "OpenAI API key 未配置（ProviderConfig.api_key 为空），拒绝伪造响应"
+            )
+        try:
+            import aiohttp
+        except ImportError as e:
+            raise RuntimeError("aiohttp 未安装，无法执行真实 OpenAI 流式调用") from e
+
+        estimated_tokens = self._estimate_message_tokens(messages)
+        is_valid, reason = self._sandbox.validate_request(
+            messages=messages,
+            requested_tokens=estimated_tokens + 1000,
+            tools_to_use=[],
         )
+        if not is_valid:
+            raise ValueError(f"Sandbox validation failed: {reason}")
+
+        base_url = (self.config.base_url or "https://api.openai.com/v1").rstrip("/")
+        payload = {
+            "model": self.config.model_name,
+            "messages": [
+                {"role": msg.role, "content": msg.content}
+                for msg in messages
+            ],
+            "temperature": temperature or self.config.temperature,
+            "max_tokens": self.config.max_tokens_per_call,
+            "stream": True,
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.config.api_key}",
+        }
+        timeout = aiohttp.ClientTimeout(total=self.config.timeout_seconds)
+
+        async with self._sandbox.acquire_resource():
+            self._call_count += 1
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                    timeout=timeout,
+                ) as response:
+                    if response.status >= 400:
+                        detail = await response.text()
+                        self._last_error = f"HTTP {response.status}: {detail}"
+                        raise RuntimeError(
+                            f"OpenAI 流式调用失败: HTTP {response.status}: {detail}"
+                        )
+                    async for raw_line in response.content:
+                        line = raw_line.decode("utf-8", errors="replace").strip()
+                        if not line.startswith("data:"):
+                            continue  # 空行 / SSE 注释 / event、id 等非数据帧
+                        data_str = line[len("data:"):].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                        except json.JSONDecodeError as e:
+                            self._last_error = f"不可解析 SSE 帧: {data_str!r}"
+                            raise RuntimeError(
+                                f"OpenAI 流式响应含不可解析 SSE 帧: {data_str!r}"
+                            ) from e
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue  # 仅携带 role / usage 的帧无正文增量
+                        delta = choices[0].get("delta") or {}
+                        content = delta.get("content")
+                        if content:
+                            yield content
     
     def estimate_cost(
         self,
