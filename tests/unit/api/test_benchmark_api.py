@@ -33,11 +33,15 @@ def test_run_requires_agent_id():
 
 
 def test_run_with_agent_id_records_run():
-    """带 agent_id 运行成功，且按 agent 记录落库，/runs 可查回"""
+    """带 agent_id 运行成功，且按 agent 记录落库，/runs 可查回。
+
+    N3 起已接库 suite 默认走真执行（无 LLM 通道 503）；本档锁的是
+    "agent_id 必填 + 运行按 agent 记录可查" 契约，故显式走 simulated 路径。
+    """
     client = _make_client()
     resp = client.post(
         "/api/v1/benchmark/run",
-        json={"suite_id": "reasoning-v1", "agent_id": "default"},
+        json={"suite_id": "reasoning-v1", "agent_id": "default", "config": {"simulated": True}},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -64,8 +68,12 @@ def test_run_unknown_suite_404():
 
 
 def test_run_is_marked_simulated_and_has_no_fabricated_score():
+    """simulated 路径（显式 config.simulated）如实标注，不编造分数/延迟。"""
     client = _make_client()
-    resp = client.post("/api/v1/benchmark/run", json={"suite_id": "reasoning-v1", "agent_id": "default"})
+    resp = client.post(
+        "/api/v1/benchmark/run",
+        json={"suite_id": "reasoning-v1", "agent_id": "default", "config": {"simulated": True}},
+    )
     assert resp.status_code == 200
     run = resp.json()["data"]
     assert run["simulated"] is True, "模拟运行必须如实标注"

@@ -14,6 +14,7 @@ Benchmark 基准测试框架 API 端点 v1.0.0
 
 import datetime
 from neurova.core.logger import get_logger
+import threading
 import typing
 import uuid
 
@@ -83,41 +84,123 @@ _SUITES: typing.List[dict] = [
 
 _RUNS_STORE: typing.Dict[str, dict] = {}  # run_id -> run data
 _USER_RUNS: typing.Dict[str, list] = {}  # user_id -> [run_ids]
+_RUNS_LOCK = threading.RLock()
 
 
 def _get_user_id(request: Request) -> str:
     return getattr(request.state, "user_id", "anonymous")
 
 
-# ── Endpoints ──────────────────────────────────────────
+# ── Endpoints ──────────────────────────────────────────────────────────
 
 
 @router.get("/suites")
 async def list_suites():
-    """列出可用的基准测试套件"""
-    return {"code": 0, "message": "success", "data": {"suites": _SUITES, "total": len(_SUITES)}}
+    """列出可用的基准测试套件（wired=已接真执行任务库；executable_tasks=可执行题数）。"""
+    from neurova.benchmark.suite_eval import getSuiteTasks, suiteWired
+
+    suites = [
+        {
+            **suite,
+            "wired": suiteWired(suite["id"]),
+            "executable_tasks": len(getSuiteTasks(suite["id"])),
+        }
+        for suite in _SUITES
+    ]
+    return {"code": 0, "message": "success", "data": {"suites": suites, "total": len(suites)}}
+
+
+def _executeBenchmarkRun(runId: str, suiteId: str, answerFn, limit: typing.Optional[int]) -> None:
+    """后台执行真评测并把终态写回运行台账（POST 即返 running，本函数只在线程里跑）。"""
+    from neurova.benchmark.suite_eval import getSuiteTasks, runSuite
+
+    try:
+        report = runSuite(getSuiteTasks(suiteId), answerFn, limit=limit)
+        updates = {
+            "status": report["status"],
+            "score": report["score"],
+            "tasks_total": report["tasks_total"],
+            "tasks_correct": report["tasks_correct"],
+            "avg_latency_ms": report["avg_latency_ms"],
+            "per_task": report["per_task"],
+            "executed_at": report["executed_at"],
+        }
+    except Exception as exc:  # noqa: BLE001 - 执行器意外故障如实落账，不静默
+        logger.error("Benchmark run %s executor failed: %s", runId, exc)
+        updates = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
+
+    with _RUNS_LOCK:
+        run = _RUNS_STORE.get(runId)
+        if run is not None:
+            run.update(updates)
+            run["completed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 @router.post("/run")
 async def run_benchmark(body: BenchmarkRunRequest, request: Request):
-    """执行基准测试（2026-09-12 P6 诚实化）
+    """执行基准测试（N3 真执行器，2026-11-17）。
 
-    原实现用 random.randint 伪造分数/延迟并谎称 status=completed——假数据。
-    真实评测执行器（当年 `neurova/benchmark` 门面里那套框架 + LLM 答题打分）**从未接线**，
-    本端点不投机实现；现如实记录一次 simulated 运行：仅登记"跑了个模拟"的事实，
-    score 等指标一律 None，不编造数字。
+    历史：原实现用 random.randint 伪造分数/延迟并谎称 completed——P6 诚实化后
+    改为记录 simulated 运行（score=None，不编造数字）；当年 `neurova/benchmark`
+    门面从未服务过本端点（/suites 用本文件 _SUITES，台账用进程内 _RUNS_STORE），
+    已按票④退役。现按 rag_eval 同构模式**新建**真执行器 `neurova.benchmark.suite_eval`：
 
-    那套门面实装已于票④第一包退役（它连本端点都没服务过：`/suites` 用的是本文件的
-    `_SUITES` 常量，运行台账用进程内 `_RUNS_STORE`）。因此"接真评测执行器"从今天起是
-    **新建能力**而不是接线——要做，按现役 `rag_eval` 那条路另立批次，别在门门面重写第二份。
+    - 已接任务库的 suite（reasoning/coding/memory/creative）→ 真执行：被测 agent
+      的 LLM 通道（_rag_llm_fn 单一事实源）逐任务作答、按判据打分，产出真实
+      tasks_total/tasks_correct/score/avg_latency_ms。执行形态=后台线程+状态查询
+      （POST 即返 running，GET /runs/{run_id} 轮询终态），长 suite 不阻塞请求。
+    - 未接任务库的 suite（multimodal-v1：文本 LLM 通道无法诚实考多模态）或显式
+      config.simulated=true → 保留 simulated 记录路径（score=None，不编造）。
+    - 无可用 LLM 通道 → 503 如实拒绝，不伪造回答。
     """
     suite = next((s for s in _SUITES if s["id"] == body.suite_id), None)
     if not suite:
         raise HTTPException(status_code=404, detail=f"Suite '{body.suite_id}' not found")
 
+    from neurova.benchmark.suite_eval import getSuiteTasks
+
+    config = body.config or {}
+    tasks = getSuiteTasks(body.suite_id)
+    limit = config.get("limit")
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) and limit >= 1 else None
+    simulated = bool(config.get("simulated")) or not tasks
+
     user_id = _get_user_id(request)
     run_id = str(uuid.uuid4())
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    if simulated:
+        reason = "显式 simulated 配置" if config.get("simulated") else "该 suite 未接真执行任务库"
+        run_data = {
+            "run_id": run_id,
+            "suite_id": body.suite_id,
+            "suite_name": suite["name"],
+            "agent_id": body.agent_id,
+            "user_id": user_id,
+            "status": "simulated",
+            "simulated": True,
+            "score": None,
+            "tasks_total": suite["tasks"],
+            "tasks_correct": None,
+            "avg_latency_ms": None,
+            "tags": body.tags,
+            "config": config,
+            "started_at": now,
+            "completed_at": now,
+        }
+        with _RUNS_LOCK:
+            _RUNS_STORE[run_id] = run_data
+            _USER_RUNS.setdefault(user_id, []).append(run_id)
+        logger.info("Benchmark simulated run %s recorded (%s)", run_id, reason)
+        return {
+            "code": 0,
+            "message": f"Benchmark simulated run recorded — {reason}，未产生真实分数",
+            "data": run_data,
+        }
+
+    answerFn = _rag_llm_fn(body.agent_id)
+    if answerFn is None:
+        raise HTTPException(status_code=503, detail="LLM 通道不可用（无已配置模型），真评测拒绝伪造回答")
 
     run_data = {
         "run_id": run_id,
@@ -125,25 +208,32 @@ async def run_benchmark(body: BenchmarkRunRequest, request: Request):
         "suite_name": suite["name"],
         "agent_id": body.agent_id,
         "user_id": user_id,
-        "status": "simulated",
-        "simulated": True,
+        "status": "running",
+        "simulated": False,
         "score": None,
-        "tasks_total": suite["tasks"],
+        "tasks_total": min(len(tasks), limit or len(tasks)),
         "tasks_correct": None,
         "avg_latency_ms": None,
         "tags": body.tags,
-        "config": body.config or {},
+        "config": config,
         "started_at": now,
-        "completed_at": now,
+        "completed_at": None,
     }
+    with _RUNS_LOCK:
+        _RUNS_STORE[run_id] = run_data
+        _USER_RUNS.setdefault(user_id, []).append(run_id)
 
-    _RUNS_STORE[run_id] = run_data
-    _USER_RUNS.setdefault(user_id, []).append(run_id)
-
-    logger.info("Benchmark simulated run %s recorded (engine not wired)", run_id)
+    worker = threading.Thread(
+        target=_executeBenchmarkRun,
+        args=(run_id, body.suite_id, answerFn, limit),
+        name=f"benchmark-run-{run_id[:8]}",
+        daemon=True,
+    )
+    worker.start()
+    logger.info("Benchmark run %s started (suite=%s agent=%s tasks=%s)", run_id, body.suite_id, body.agent_id, run_data["tasks_total"])
     return {
         "code": 0,
-        "message": "Benchmark simulated run recorded — 评测执行器未接线，未产生真实分数",
+        "message": "Benchmark run started — 后台执行中，GET /runs/{run_id} 查询进度与结果",
         "data": run_data,
     }
 
