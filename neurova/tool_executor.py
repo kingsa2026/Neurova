@@ -71,11 +71,13 @@ def _registerPendingProjectGovernance(requestId: str, snapshot: Dict[str, Any]) 
         _pendingProjectGovernance[requestId] = snapshot
 
 
-def applyProjectGovernanceDecision(requestId: str, decidedBy: str = "") -> Dict[str, Any]:
+def applyProjectGovernanceDecision(requestId: str, decidedBy: str = "",
+                                   decidedByChannel: str = "") -> Dict[str, Any]:
     """审批批准后回灌项目治理申请（人类成员写入/可见性放宽）。
 
     与 teams_api.applyTeamProposalDecision 同形：无登记返回 applied=False；
-    批准才动项目数据（人批准才生效），并落审计台账。
+    批准才动项目数据（人批准才生效），并落审计台账（S8 口径：decided_by_channel
+    标记裁决通道——decide_subagent_approval 工具路径=parent_agent，房间裁决=room）。
     """
     with _pendingProjectGovernanceLock:
         snapshot = _pendingProjectGovernance.pop(requestId, None)
@@ -105,6 +107,7 @@ def applyProjectGovernanceDecision(requestId: str, decidedBy: str = "") -> Dict[
     _auditProjectAction("project_governance_applied", project.project_id, {
         "request_id": requestId, "added_members": added,
         "visibility": visibilityApplied, "decided_by": decidedBy,
+        "decided_by_channel": str(decidedByChannel or ""),
         "initiator": "agent",
     })
     return {"applied": True, "added_members": added, "visibility": visibilityApplied}
@@ -2845,7 +2848,8 @@ class ToolExecutor:
             # 与团队沉淀同一裁决出口，人批准才动项目数据。
             try:
                 projectApplied = applyProjectGovernanceDecision(
-                    requestId, decidedBy=str(result.get("decided_by") or ""))
+                    requestId, decidedBy=str(result.get("decided_by") or ""),
+                    decidedByChannel=str(result.get("decided_by_channel") or "parent_agent"))
                 if projectApplied.get("applied"):
                     result["project_governance_applied"] = projectApplied
             except Exception as e:  # noqa: BLE001 - 回灌失败不影响裁决本身

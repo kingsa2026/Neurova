@@ -236,6 +236,19 @@ async def decide_room_approval(
                 result["team_created"] = applied.get("team")
         except Exception as e:  # noqa: BLE001 - 沉淀回灌失败不影响裁决本身
             logger.warning("团队沉淀回灌失败 (%s): %s", request_id, e)
+        # S13 收尾（波M 移交项②）：批准的是项目治理申请（人类成员写入/可见性放宽）
+        # 时，同点回灌生效——与团队沉淀同一裁决出口、同一回灌单源
+        # （applyProjectGovernanceDecision），等待预算耗尽后房间裁决仍能落地。
+        try:
+            from neurova.tool_executor import applyProjectGovernanceDecision
+
+            projectApplied = applyProjectGovernanceDecision(
+                request_id, decidedBy=actor,
+                decidedByChannel=str(result.get("decided_by_channel") or "room"))
+            if projectApplied.get("applied"):
+                result["project_governance_applied"] = projectApplied
+        except Exception as e:  # noqa: BLE001 - 治理回灌失败不影响裁决本身
+            logger.warning("项目治理回灌失败 (%s): %s", request_id, e)
     verb = "批准" if body.decision == "approve" else "驳回"
     publishRoomSystemMessage(
         room_id,
