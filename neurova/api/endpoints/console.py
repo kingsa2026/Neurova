@@ -1565,6 +1565,36 @@ async def get_console_chat_runs(
     }
 
 
+@router.get("/chat/subagents/{subagent_id}/events")
+async def get_console_subagent_events(
+    subagent_id: str,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """子任务事件账本读面（H-4 闭环）：该 run 的全程事件 + 因果链。
+
+    账本（JSONL 归档）独立于台账与内存逐出——run 被逐出后仍可查。归属判定
+    与 runs 读面同一谓词（`_check_session_ownership`，教义第 6 条）：台账行在
+    → 按行内 user_id 判；台账无行（gate off/早期运行）→ 非管理员 fail-closed。
+    """
+    from neurova.agent.swarm_event_log import readRunEvents
+    from neurova.core import agent_run_store as _ars
+
+    user_id = _get_user_id(request, current_user)
+    row = await asyncio.to_thread(
+        _ars.get_agent_run_store().get_run_by_subagent, subagent_id)
+    if not _isAdminIdentity(current_user):
+        if row is None:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        _check_session_ownership({"user_id": row.get("user_id") or ""}, user_id)
+    events = await asyncio.to_thread(readRunEvents, subagent_id)
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"subagent_id": subagent_id, "count": len(events), "events": events},
+    }
+
+
 @router.get("/chat/history")
 async def get_chat_history(
     session_id: str,

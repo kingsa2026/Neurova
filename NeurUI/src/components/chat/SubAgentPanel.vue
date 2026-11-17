@@ -5,10 +5,11 @@
  * 显示主 Agent 派生的子 Agent 的任务与流式输出；支持最小化（折叠为标题条）、
  * 恢复、关闭。多个小窗在聊天页右下角堆叠（由父容器 flex 布局管理）。
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import UiIcon from '@/components/UiIcon.vue'
 import { isNearBottom } from '@/utils/chatSteps'
+import { getConsoleSubagentEvents, type SubagentEvent } from '@/api/modules/console'
 
 export interface SubAgentWindowState {
   subagentId: string
@@ -74,6 +75,79 @@ function onOutputScroll(e: Event): void {
   const el = e.target as HTMLElement
   outputStick.value = isNearBottom(el.scrollTop, el.scrollHeight, el.clientHeight)
 }
+
+// ── H-4 事件时间线：subagent_status(view=events) 读侧的可视化 ──────────
+const showTimeline = ref(false)
+const timeline = ref<SubagentEvent[]>([])
+const timelineLoading = ref(false)
+let timelineTimer: ReturnType<typeof setInterval> | null = null
+
+async function fetchTimeline(): Promise<void> {
+  timelineLoading.value = true
+  try {
+    const res = await getConsoleSubagentEvents(props.state.subagentId)
+    timeline.value = res.data?.events ?? []
+  } catch {
+    timeline.value = []
+  } finally {
+    timelineLoading.value = false
+  }
+}
+
+function stopTimelinePolling(): void {
+  if (timelineTimer !== null) {
+    clearInterval(timelineTimer)
+    timelineTimer = null
+  }
+}
+
+function toggleTimeline(): void {
+  showTimeline.value = !showTimeline.value
+  stopTimelinePolling()
+  if (showTimeline.value) {
+    void fetchTimeline()
+    // 运行中每 5s 刷新一次账本；终态到达时补拉最终版并停止
+    if (isBusy.value) timelineTimer = setInterval(() => void fetchTimeline(), 5000)
+  }
+}
+
+watch(() => props.state.status, (status) => {
+  if (showTimeline.value && status !== 'running' && status !== 'in_review') {
+    stopTimelinePolling()
+    void fetchTimeline()
+  }
+})
+
+onUnmounted(stopTimelinePolling)
+
+function eventLabel(type: string): string {
+  const map: Record<string, string> = {
+    spawned: t('ui.subagentEvSpawned'),
+    started: t('ui.subagentEvStarted'),
+    stalled: t('ui.subagentEvStalled'),
+    escalated: t('ui.subagentEvEscalated'),
+    update_injected: t('ui.subagentEvUpdate'),
+    cancelled: t('ui.subagentEvCancelled'),
+    terminal: t('ui.subagentEvTerminal'),
+  }
+  return map[type] || type
+}
+
+function eventDetail(ev: SubagentEvent): string {
+  const p = (ev.payload || {}) as Record<string, unknown>
+  if (ev.type === 'spawned') return String(p.task || '')
+  if (ev.type === 'terminal') return [p.status, p.cause || p.error].filter(Boolean).map(String).join(' · ')
+  if (ev.type === 'stalled') return `${String(p.stalled_seconds || '')}s`
+  if (ev.type === 'escalated') return String(p.reason || '')
+  if (ev.type === 'update_injected') return String(p.message || '')
+  if (ev.type === 'cancelled') return String(p.reason || '')
+  return ''
+}
+
+function shortTime(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString()
+}
 </script>
 
 <template>
@@ -87,6 +161,7 @@ function onOutputScroll(e: Event): void {
         class="panel-type-chip"
         :title="state.subagentType"
       >{{ state.subagentType }}</span>
+      <button class="panel-btn" :title="t('ui.subagentTimeline')" @click.stop="toggleTimeline">≡</button>
       <button class="panel-btn" :title="minimized ? t('ui.expand') : t('ui.minimize')" @click.stop="toggleMinimize">
         {{ minimized ? '▢' : '—' }}
       </button>
@@ -94,6 +169,18 @@ function onOutputScroll(e: Event): void {
     </div>
     <div v-if="!minimized" class="panel-body">
       <div class="panel-task" :title="state.task">{{ state.task }}</div>
+      <!-- H-4 事件时间线：run 事件账本的可视化（发现而不裁决的观测面） -->
+      <div v-if="showTimeline" class="panel-timeline">
+        <div v-if="timelineLoading && !timeline.length" class="tl-empty">{{ t('ui.thinking') }}</div>
+        <div v-else-if="!timeline.length" class="tl-empty">{{ t('ui.subagentTimelineEmpty') }}</div>
+        <div v-for="ev in timeline" :key="ev.event_id" class="tl-row">
+          <span class="tl-dot" :class="`tl-${ev.type}`"></span>
+          <div class="tl-body">
+            <div class="tl-head">{{ eventLabel(ev.type) }}<span class="tl-time"> · {{ shortTime(ev.occurred_at) }}</span></div>
+            <div v-if="eventDetail(ev)" class="tl-detail">{{ eventDetail(ev) }}</div>
+          </div>
+        </div>
+      </div>
       <!-- P2（蜂群对照）：卡死渐进提醒（发现而不裁决：只提示，等/停由用户决定） -->
       <div v-if="isBusy && state.stallNotice" class="panel-stall">
         ⏸ {{ t('ui.subagentStalled', { minutes: Math.max(1, Math.round(state.stallNotice.stalledSeconds / 60)), count: state.stallNotice.reminderCount }) }}
@@ -198,4 +285,37 @@ function onOutputScroll(e: Event): void {
 }
 .cursor { animation: blink 1s step-start infinite; color: var(--nr-primary-light, #818cf8); }
 @keyframes blink { 50% { opacity: 0; } }
+
+.panel-timeline {
+  margin: 4px 10px 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--nr-border, rgba(99, 102, 241, 0.25));
+  background: rgba(99, 102, 241, 0.06);
+  max-height: 140px;
+  overflow-y: auto;
+}
+.tl-empty { font-size: 11px; color: var(--nr-text-tertiary, var(--nr-text-tertiary)); }
+.tl-row { display: flex; gap: 6px; padding: 3px 0; align-items: flex-start; }
+.tl-row + .tl-row { border-top: 1px dashed rgba(255, 255, 255, 0.06); }
+.tl-dot {
+  flex-shrink: 0;
+  width: 7px; height: 7px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--nr-primary-light, #818cf8);
+}
+.tl-dot.tl-terminal { background: rgba(74, 222, 128, 0.9); }
+.tl-dot.tl-failed, .tl-dot.tl-cancelled { background: rgba(248, 113, 113, 0.9); }
+.tl-dot.tl-stalled { background: rgba(245, 158, 11, 0.9); }
+.tl-head { font-size: 11px; font-weight: 600; color: var(--nr-text-primary, #e2e8f0); }
+.tl-time { font-weight: 400; color: var(--nr-text-tertiary, var(--nr-text-tertiary)); }
+.tl-detail {
+  font-size: 11px;
+  color: var(--nr-text-secondary, #cbd5e1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
 </style>

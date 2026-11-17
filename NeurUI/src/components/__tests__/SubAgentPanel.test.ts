@@ -5,17 +5,36 @@
  * 1. running 时渲染累积正文（原 chunks.join('') 等价）；
  * 2. completed 且有 report 时渲染 report（原语义优先级不变）。
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { nextTick, reactive } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import SubAgentPanel from '../chat/SubAgentPanel.vue'
 import type { SubAgentWindowState } from '../chat/SubAgentPanel.vue'
 
+// H-4 事件时间线：面板经 console API 拉事件账本——这里 mock 掉网络面
+const { getConsoleSubagentEventsMock } = vi.hoisted(() => ({
+  getConsoleSubagentEventsMock: vi.fn(),
+}))
+vi.mock('@/api/modules/console', () => ({
+  getConsoleSubagentEvents: getConsoleSubagentEventsMock,
+}))
+
+const TIMELINE_EVENTS = [
+  { event_id: 'e1', type: 'spawned', subagent_id: 'a1', causation_id: '',
+    payload: { task: '找资料' }, occurred_at: '2026-11-17T01:00:00+00:00' },
+  { event_id: 'e2', type: 'terminal', subagent_id: 'a1', causation_id: 'e1',
+    payload: { status: 'completed' }, occurred_at: '2026-11-17T01:00:05+00:00' },
+]
+
 const i18n = createI18n({
   legacy: false,
   locale: 'zh-CN',
-  messages: { 'zh-CN': { ui: { subagent: '子代理', thinking: '思考中' }, common: { close: '关闭' } } },
+  messages: { 'zh-CN': { ui: {
+    subagent: '子代理', thinking: '思考中',
+    subagentTimeline: '事件时间线', subagentTimelineEmpty: '暂无事件',
+    subagentEvSpawned: '派生', subagentEvTerminal: '终态',
+  }, common: { close: '关闭' } } },
 })
 
 function mountPanel(state: Partial<SubAgentWindowState>) {
@@ -90,5 +109,32 @@ describe('SubAgentPanel 流式输出滚动跟随（2026-09-12 同根因）', () 
     await nextTick()
     await nextTick()
     expect(el.scrollTop).toBe(300)
+  })
+})
+
+describe('SubAgentPanel 事件时间线（H-4 闭环读侧）', () => {
+  it('点开时间线后拉取并渲染事件账本（因果链序）', async () => {
+    getConsoleSubagentEventsMock.mockResolvedValue({
+      data: { subagent_id: 'a1', count: TIMELINE_EVENTS.length, events: TIMELINE_EVENTS },
+    })
+    const w = mountPanel({ status: 'running' })
+    const btn = w.find('button[title="事件时间线"]')
+    expect(btn.exists()).toBe(true)
+    await btn.trigger('click')
+    await flushPromises()
+    expect(getConsoleSubagentEventsMock).toHaveBeenCalledWith('a1')
+    expect(w.find('.panel-timeline').exists()).toBe(true)
+    expect(w.text()).toContain('派生')
+    expect(w.text()).toContain('终态')
+  })
+
+  it('空账本显示暂无事件', async () => {
+    getConsoleSubagentEventsMock.mockResolvedValue({
+      data: { subagent_id: 'a1', count: 0, events: [] },
+    })
+    const w = mountPanel({ status: 'completed' })
+    await w.find('button[title="事件时间线"]').trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('暂无事件')
   })
 })
