@@ -60,7 +60,10 @@ LEGACY_MEMBERS = {
 }
 
 #: 执行体里真的会调刷新链的工具（判据侧独立复算，见 `_actualRefreshCallers`）。
-EXPECTED_MEMBERS = LEGACY_MEMBERS | {"computer_click_mark"}
+EXPECTED_MEMBERS = LEGACY_MEMBERS | {"computer_click_mark"} | {
+    # P2-7 三动词同属前台输入族（见 foregroundDesktopTools），补拍语义一致
+    "computer_key", "computer_paste", "computer_drag",
+}
 
 
 def _declaredInteractive() -> set:
