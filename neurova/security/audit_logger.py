@@ -47,6 +47,7 @@ class AuditEventType(str, Enum):
     SECURITY_EVENT = "security_event"
     DATA_ACCESS = "data_access"
     TOOL_EXECUTION = "tool_execution"
+    APPROVAL = "approval"
 
 
 class AuditSeverity(str, Enum):
@@ -388,6 +389,7 @@ class AuditLogger:
         severity: Optional[AuditSeverity] = None,
         start_time: Optional[float] = None,
         end_time: Optional[float] = None,
+        resource_id: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> List[AuditLogEntry]:
@@ -400,6 +402,7 @@ class AuditLogger:
             severity: 严重级别过滤
             start_time: 开始时间
             end_time: 结束时间
+            resource_id: 资源ID精确过滤（如蜂群审批轨迹按 run 标识拉取）
             limit: 限制数量
             offset: 偏移量
 
@@ -433,6 +436,10 @@ class AuditLogger:
             if end_time:
                 query += " AND timestamp <= ?"
                 params.append(end_time)
+
+            if resource_id:
+                query += " AND resource_id = ?"
+                params.append(resource_id)
 
             query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
             params.extend([limit, offset])

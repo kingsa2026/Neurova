@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict
 
@@ -109,12 +110,13 @@ def _notifyParent(run: Any, envelope: Dict[str, Any]) -> None:
 
     邮箱写点单源钉子（test_subagentTerminalReachesParentMail）：``get_agent_mailbox``
     的生产面引用只许 swarm.py（写）与 loops/base.py（读）各一处；本模块直连邮箱
-    就是第二事实源，故一律经蜂群管理器投递。
+    就是第二事实源，故一律经蜂群管理器投递。审批属高优信件（S2 优先级队列），
+    固定 ``priority="high"``。
     """
     try:
         from neurova.agent.swarm import get_swarm_manager
 
-        get_swarm_manager().pushParentMail(run, "子代理审批", envelope)
+        get_swarm_manager().pushParentMail(run, "子代理审批", envelope, priority="high")
     except Exception as e:  # noqa: BLE001 - 通知失败不影响审批单本身
         logger.debug("审批请求邮箱投递失败 (%s): %s", envelope.get("request_id"), e)
 
@@ -124,6 +126,114 @@ def _recordRunApproval(run: Any, entry: Dict[str, Any]) -> None:
     run.approvals.append(entry)
     if len(run.approvals) > 50:
         del run.approvals[:-50]
+
+
+# ── 审计单源落点（S8 审批审计持久化）：请求/决定都进 neurova.security.audit_logger ──
+
+APPROVAL_AUDIT_RESOURCE = "swarm_approval"
+APPROVAL_REQUEST_ACTION = "swarm_approval_request"
+APPROVAL_DECIDE_ACTION = "swarm_approval_decide"
+
+_auditCountersLock = threading.RLock()
+_auditCounters: Dict[str, int] = {}
+
+
+def approvalAuditCounters() -> Dict[str, int]:
+    """审批审计写面计数快照（失败可见性的"计数"半边，配 error 日志使用）。"""
+    with _auditCountersLock:
+        return dict(_auditCounters)
+
+
+def _bumpAuditCounter(name: str) -> None:
+    with _auditCountersLock:
+        _auditCounters[name] = _auditCounters.get(name, 0) + 1
+
+
+def _emitApprovalAudit(
+    phase: str,
+    operation: str,
+    request: Any,
+    *,
+    actor: str,
+    decision: str,
+    latencyMs: float,
+    runId: str = "",
+    agentName: str = "",
+    task: str = "",
+    level: str = "",
+    effective: str = "",
+    mode: str = "",
+    note: str = "",
+) -> bool:
+    """一次审批请求/决定落审计单源；fail-open——写失败不阻断审批主流程。
+
+    字段对齐方案 S8：级别（level/effective_level）、动作（operation）、
+    path_values（run_id/request_id 定位对）、发起 run（run_id/agent_id/
+    member_session_id/parent_session_id）、决策人（decided_by/user_id）、
+    决策（decision）、时延（latency_ms）。写失败（异常或返回 False）记
+    ``auditWriteFailures`` 计数 + error 日志，不静默吞。
+    """
+    from neurova.security.audit_logger import (
+        AuditEventType,
+        AuditSeverity,
+        log_audit,
+    )
+
+    meta = getattr(request, "metadata", None) or {}
+    requestId = str(getattr(request, "request_id", "") or "")
+    runId = str(runId or meta.get("subagent_id") or "")
+    level = str(level or meta.get("declared_level") or "")
+    effective = str(effective or meta.get("effective_level") or "")
+    mode = str(mode or meta.get("mode") or "")
+    severityMap = {
+        LEVEL_L0: AuditSeverity.LOW,
+        LEVEL_L1: AuditSeverity.MEDIUM,
+        LEVEL_L2: AuditSeverity.HIGH,
+    }
+    details: Dict[str, Any] = {
+        "phase": phase,
+        "request_id": requestId,
+        "run_id": runId,
+        "agent_id": str(getattr(request, "agent_id", "") or ""),
+        "agent_name": str(agentName or ""),
+        "task": str(task or "")[:200],
+        "member_session_id": str(meta.get("member_session_id") or ""),
+        "parent_session_id": str(meta.get("parent_session_id") or ""),
+        "operation": str(operation or "")[:200],
+        "reason": str(getattr(request, "description", "") or "")[:200],
+        "level": level,
+        "effective_level": effective,
+        "mode": mode,
+        "decision": str(decision or ""),
+        "decided_by": str(actor or "") if phase == "decide" else "",
+        "note": str(note or "")[:200],
+        "path_values": [
+            ["run_id", runId],
+            ["request_id", requestId],
+        ],
+        "latency_ms": round(max(0.0, float(latencyMs)), 3),
+    }
+    try:
+        ok = log_audit(
+            AuditEventType.APPROVAL,
+            severityMap.get(effective, AuditSeverity.MEDIUM),
+            user_id=str(actor or ""),
+            action=APPROVAL_REQUEST_ACTION if phase == "request" else APPROVAL_DECIDE_ACTION,
+            details=details,
+            resource_type=APPROVAL_AUDIT_RESOURCE,
+            resource_id=runId,
+            metadata={"source": "swarm"},
+        )
+    except Exception as exc:  # noqa: BLE001 - 审计异常不得影响审批主流程
+        logger.error("审批审计写入异常（phase=%s request_id=%s）：%s", phase, requestId, exc)
+        ok = False
+    if not ok:
+        _bumpAuditCounter("auditWriteFailures")
+        logger.error(
+            "审批审计未落库（phase=%s request_id=%s run_id=%s）——审批已生效，这条须人工复核",
+            phase, requestId, runId,
+        )
+    return bool(ok)
 
 
 def _pendingShape(
@@ -157,6 +267,7 @@ async def requestRunApproval(
     """
     from neurova.security.approval_manager import get_approval_manager
 
+    started = time.time()
     act = str(action or "").strip()
     if not act:
         raise ValueError("action 不能为空（说明要请求执行什么操作）")
@@ -191,6 +302,13 @@ async def requestRunApproval(
         "at": time.time(),
     }
     _recordRunApproval(run, entry)
+    _emitApprovalAudit(
+        "request", act, request,
+        actor=run.agent_id, decision="pending",
+        latencyMs=(time.time() - started) * 1000,
+        runId=run.subagent_id, agentName=run.agent_name, task=run.task,
+        level=declared, effective=effective, mode=mode,
+    )
 
     # ── 自动放行支路：L0，或 auto_approve 模式下的 L1 ──
     if effective == LEVEL_L0 or (effective == LEVEL_L1 and mode == MODE_AUTO_APPROVE):
@@ -200,6 +318,13 @@ async def requestRunApproval(
             note="低危自动放行" if effective == LEVEL_L0 else "auto_approve 模式放行",
         )
         entry["status"] = "approved"
+        _emitApprovalAudit(
+            "decide", act, request,
+            actor=f"auto_rule:{effective}", decision="approve",
+            latencyMs=(time.time() - started) * 1000,
+            runId=run.subagent_id, agentName=run.agent_name, task=run.task,
+            level=declared, effective=effective, mode=mode,
+        )
         return {
             "approved": True, "auto_approved": True, "pending": False,
             "request_id": request.request_id, "level": effective,
@@ -279,6 +404,12 @@ def decideSwarmApproval(requestId: str, decision: str, note: str = "") -> Dict[s
     if not ok:
         return {"success": False, "error": "裁决未生效（审批单可能刚过期）"}
     decided = manager.get_request(rid)
+    _emitApprovalAudit(
+        "decide", request.command, request,
+        actor="parent_agent", decision=act,
+        latencyMs=(time.time() - request.created_at.timestamp()) * 1000,
+        note=str(note or ""),
+    )
     return {
         "success": True,
         "request_id": rid,
