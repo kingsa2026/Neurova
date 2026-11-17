@@ -74,6 +74,7 @@ class TestTypeSemantic:
             "effect": "confirmed",
             "delivery": "background",
             "evidence": ["value_readback"],
+            "action_sent": True,  # P1-2 契约扩展
         }
 
     def test_empty_current_value(self):
