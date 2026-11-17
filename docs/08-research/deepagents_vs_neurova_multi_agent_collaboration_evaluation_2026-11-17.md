@@ -151,7 +151,62 @@ LangChain 官方"opinionated agent harness"：三层栈 = LangGraph（运行时�
 
 ---
 
-## 8. 结论
+## 8. 值得本仓学习和改进的具体落点（按本仓代码现状逐条对照）
+
+> 应用户要求补录：不看抽象维度分，逐条对照**本仓代码现状**（file:line 实查）与 deepagents 的对应实现，给出可执行的改法与优先级。原则不变：只学机制形态，不引其运行时与依赖。
+
+### 8.1 会话存储的写放大 → 追加式事件 + 快照（优先级：高）
+
+- **Neurova 现状**：`session_manager.py:570 add_message` 对每个会话文件做 **read-modify-write 全量重写**（`session_manager.py:622-624` 锁内 `_read_session_file` 后整文件回写）。会话按 (agent, session, 日期) 分文件，长会话单文件无界增长，每条消息的写成本 O(当前全文长度)，且每次保存都要序列化/反序列化全部历史。
+- **deepagents 做法**：`_messages_reducer.py:31-90` 的 DeltaChannel——checkpoint 只存增量（按消息 id 去重 + RemoveMessage 墓碑 + 快照频率 50），把 checkpoint 增长从 O(N²) 降到 O(N)（graph.py:77-80 注释明示）。
+- **建议落点**：会话文件改"**追加 JSONL + 定期快照**"两段式——新消息 append 进 `session_*.jsonl`，每 N 条或按大小滚动出 snapshot；读侧 = 快照 + 重放增量。落点 `session_manager.py`（读写路径单点在此，mem_core.save_to_session:1423 经它落盘）。这是本仓会话存储最大的一处结构性改进，直接影响所有长会话的写放大与磁盘占用。
+
+### 8.2 上下文压缩的事件化与自动触发（优先级：高，即 H-6 的具体化）
+
+- **Neurova 现状**：已有 `/compact` 手动命令（`chat_pipeline.py:1169 _check_compact_command`）与 context_pool 的折叠语义（`context_pool.py:1136`——被折叠 chunk 保留、摘要只是压缩视图入口，**非破坏意识已在**）；缺**自动触发**（输入预算阈值/溢出异常兜底）与**压缩事件持久化**（重启后压缩视图可重建）。
+- **deepagents 做法**：`summarization.py`——trigger=输入预算 85%、provider 溢出异常兜底（`_is_context_overflow:532-552` 九种文案模式）；压缩以 `_summarization_event`（cutoff_index/cutoff_message_id）记录、**视图按事件重建而原始消息永不动**；溢出重试前 `_check_reduction`（:1559-1567）强制"请求必须严格变小，否则抛错绝不原样重发"；另有 `compact_conversation` 手动工具（门槛=自动触发的 50%，:2309-2311）。
+- **建议落点**：本仓压缩改造按此三件套立规格——①自动触发（预算阈值 + 溢出异常兜底）；②压缩以**事件**落盘（会话 jsonl 里记 cutoff，视图重建单点）；③重试前"严格变小"校验。落点 `chat_pipeline` 上下文装配处 + 会话存储（依赖 8.1 的事件化）。
+
+### 8.3 超大工具结果的"落盘 + 预览 + 指引"（优先级：中）
+
+- **Neurova 现状**：工具输出已有折叠机制（`tool_executor.py:4997` available_fold_seqs、`:4566` truncated 标记；`chat_pipeline.py:235` UUID→m/k 句柄注入/解码）——方向与 deepagents 一致，但句柄是**会话/内存层**的，超大体量结果没有磁盘归档。
+- **deepagents 做法**：`_message_eviction.py:260-279` 把超大 ToolMessage 写入后端文件，消息替换为含**保存路径 + head/tail 预览 + 分段读取指引**的 stub；写失败返回 None、调用方保留原文（不丢诊断）。`_overflow_clip.py` 对溢出尾批只裁"连续大工具结果"且 read_file 结果直接 head 切片 + 指回原路径。
+- **建议落点**：本仓折叠处补"超大结果落盘到工作区 + stub 携带路径与 head/tail 预览 + 指引模型分段 read"一层，与既有句柄机制**合流**（句柄指向落盘文件），不另起第二套。注意保持既有纪律：失败结果不折叠（`tool_executor.py:1585`）。
+
+### 8.4 HITL 审批的参数粒度与四决策（优先级：中）
+
+- **Neurova 现状**：治理裁决按"工具 + 理由 + path_values"（`tool_executor.py:1906-1910`）逐调用出 ASK，审批链按 L0/L1/L2 分级——粒度已到调用级；缺**用户可配置的参数谓词规则**（glob 路径 × 操作 × allow/deny/ask）与 edit/respond 两种决策（当前只有批准/拒绝）。
+- **deepagents 做法**：`_fs_interrupt.py:39-155`——规则 = (操作, glob 路径, mode)；exact 工具查"请求路径 + symlink 解析路径"双份，bulk 工具按搜索子树与锚点重叠判定，并专门封堵 `path="."`（:137-143）与 glob 重定向（:146-152）两类绕过；决策四种含 **edit（人工改参后执行）** 与 **respond（回答后继续）**。
+- **建议落点**：治理 ASK 增加可配置参数谓词规则（落点 governance 规则面），审批决策集扩为 approve/edit/reject/respond（落点审批链与 `Command(resume)` 等价物——本仓已有批准重放通路，edit/respond 是增量）。同时补审批**审计持久化**（deepagents 也缺，本仓台账可以做得更全——这是本仓能反超的点）。
+
+### 8.5 技能渐进披露工具（优先级：中低）
+
+- **Neurova 现状**：技能经 `skills/skill_injection.py` 注入提示词面；工具面对技能内容不感知。
+- **deepagents 做法**：`skills.py:1320-1391`——SKILL.md frontmatter 的 `include_tools` 声明的工具，**只有模型读过该技能（或调用方 pin）后**才进入当次模型请求（wrap_model_call 披露 + wrap_tool_call 执行 gate 双闸），防"工具面常驻膨胀"与"未读说明就调用"。
+- **建议落点**：本仓技能 frontmatter 增加 include_tools，`skill_injection` 记录本轮已披露技能，`tool_coordinator` 白名单合并时按披露状态过滤。收益随技能生态规模线性增长，可等技能市场用量上来再做。
+
+### 8.6 记忆写入准入的第一步：显式清单提示词（优先级：中，即 H-5 的轻量先行）
+
+- **Neurova 现状**：MemCore 写入面较自动（对话即入记忆），无准入纪律（H-5 已登记 CoworkOS 式"3 个不同任务候选转正"方案，属重改）。
+- **deepagents 做法**：更轻的第一步——`memory.py:104-169` MEMORY_SYSTEM_PROMPT 以 `<memory_guidelines>` 给模型**显式更新/不更新清单**（含"绝不存密钥"：145-146），写入走模型主动 `edit_file`，无自动学习通道。
+- **建议落点**：在 MemCore 写入前先落"提示词清单 + 敏感信息正则拦截"这层轻准入（零结构改动），3-Task 候选转正等重纪律作为 H-5 第二步。两步都做时提示词清单是子集，不冲突。
+
+### 8.7 评测 harness 补轨迹效率判据（优先级：中，即 I-1）
+
+- **Neurova 现状**：multi_agent harness 判据只看结果（标记/结构），不看过程；token 读数未进结果。
+- **deepagents 做法**：`tests/evals/utils.py:1198+` 的 `.expect(agent_steps=N, tool_call_requests=M, tool_calls=[...])` 轨迹断言 + `.success(final_text_contains/file_equals/file_absent)`，效率数据以 feedback 上报；多试验统计（均值/中位数/方差）。
+- **建议落点**：`TaskOutcome` 增加 steps/tool_calls 事实（swarm 模式从 H-4 事件账本取，solo 从轮次态取），判据增加 `expect_trajectory(max_steps, allowed_tools)`；顺手补 usage 回传（Token 倍数列当前空缺）。落点 `benchmark/multi_agent/{runner,tasks}.py`。
+
+### 8.8 明确不学清单
+
+- **LangGraph/LangChain 运行时依赖**：本仓自研运行时与产品面（多渠道/工作流/蜂群）不同源，引入图运行时是推倒重来不是学习。
+- **recursion_limit=9999 + 无并发上限 + 无预算闸**：deepagents 把资源治理完全交给调用方；本仓治理三明治（广度/深度/预算/冷却/错峰硬闸）是实测踩坑换来的正确取舍。
+- **审批不落审计**：deepagents 的审批留痕只有 trace/检查点；本仓台账+审计方向更全，学其粒度不学其留痕方式。
+- **巨文件与散布的权限逻辑**：filesystem.py 4000 行、权限判定散布三处——本仓 size ratchet 与单一事实源教义是对的抗衡手段，别学。
+
+---
+
+## 9. 结论
 
 1. deepagents（81/110）是"**库形态的优秀 harness**"：上下文工程与评测体系满分级，但协作机制（结构化任务单元/依赖门控/资源治理）与产品面（多渠道/工作流/观测台账）缺位——它验证了"middleware 组合 + 可插拔后端"路线的工程上限，也暴露了该路线在多 agent 协作机制上的天然空白。
 2. Neurova（84/110）连续第二轮稳住对开源 harness 参照系的优势（AutoSwarm 84、deepagents 81），对 CoworkOS（95）的差距仍集中在执行可靠性工程与评测体系——与 H 系登记方向一致，无需改道。
