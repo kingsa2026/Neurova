@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""种子任务集（T1 确定性模拟 + T3 量规打样）。
+"""种子任务集（T1 材料归纳/不可解题 + T3 量规打样）。
 
-判据为最小切面断言（报告标记/结构），CI 用假 agent 验 harness 管道；
-真模型跑（NEUROVA_BENCH_LIVE=1）时同判据即可产出基线报告。
+T1 族不考虚构来源：证据文摘题在提示词内给真实来源材料，任务为"依据给定
+材料归纳"；不可解题仍考"诚实声明不可行"。判据为最小切面断言（报告标记/
+结构），CI 用假 agent 验 harness 管道；真模型跑（NEUROVA_BENCH_LIVE=1）时
+同判据即可产出基线报告。
 真实任务集扩充在各自 suites 模块（如 apex_tasks），登记统一走
 `suites.registerBuiltinSuites()`（幂等）——本模块只暴露 SEED_TASKS 数据面。
 """
@@ -28,12 +30,22 @@ def markerChecker(requiredMarkers: Tuple[str, ...], infeasibleMarker: str = ""):
 
 
 SEED_TASKS = (
+    # S1-1D T1 重设计：原题让真模型凭空"调研主题 X"再标来源，等于考虚构来源
+    # （H-7 真基线实测：真模型要么拒答要么编造）。改为提示词内给真实来源材料，
+    # 任务改为"依据给定材料归纳"——考归纳与引用纪律，不考编造。
     BenchmarkTask(
         task_id="t1-sim-evidence-digest",
         suite="t1_sim",
-        prompt="调研主题 X，输出带来源的证据文摘（至少 3 条，每条含来源与量化指标）。",
+        prompt=(
+            "以下是关于主题 X 的三份已核实材料：\n"
+            "1. 《A 报告》（2026-11）：指标 X=48，环比 +6；\n"
+            "2. 《B 数据》（2026-10）：指标 Y=3.2，覆盖率 87%；\n"
+            "3. 《C 文档》（2026-09）：指标 Z=12%，样本量 4200。\n"
+            "任务：只依据上述给定材料归纳证据文摘（至少 3 条，每条含来源与量化指标），"
+            "不得引用材料之外的任何来源。"
+        ),
         check=markerChecker(("来源《A 报告》", "来源《B 数据》", "来源《C 文档》")),
-        description="确定性模拟：证据文摘结构切面",
+        description="依据给定材料归纳：证据文摘结构切面（不考虚构来源）",
     ),
     BenchmarkTask(
         task_id="t1-sim-infeasible",

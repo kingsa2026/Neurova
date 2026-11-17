@@ -10,6 +10,8 @@ Benchmark 基准测试框架 API 端点 v1.0.0
   GET  /api/v1/benchmark/runs/{run_id}
   GET  /api/v1/benchmark/agents/{agent_id}
   POST /api/v1/benchmark/compare
+  GET  /api/v1/benchmark/baseline-reports            (S1-1E 只读：多 agent 基线报告列表)
+  GET  /api/v1/benchmark/baseline-reports/{report_id} (S1-1E 只读：单份基线报告全文)
 """
 
 import datetime
@@ -367,6 +369,31 @@ async def compare_agents(request_body: dict, request: Request):
         }
 
     return {"code": 0, "message": "success", "data": {"comparison": results}}
+
+
+# ── S1-1E：多 agent 协作评测基线报告（只读） ────────────────────────────
+# 数据源 = BenchRunner.runAllWithReport 的既有落盘（report.saveReport →
+# <数据根>/benchmark/multi_agent/*.json），本端点只读取回，不建第二套存储。
+
+
+@router.get("/baseline-reports")
+async def list_baseline_reports(request: Request):
+    """列出多 agent 协作评测基线报告（新→旧，含 usage/轨迹聚合列与隔离注记）。"""
+    from neurova.benchmark.multi_agent.report import listReports
+
+    items = listReports()
+    return {"code": 0, "message": "success", "data": {"items": items, "total": len(items)}}
+
+
+@router.get("/baseline-reports/{report_id}")
+async def get_baseline_report(report_id: str, request: Request):
+    """取回单份基线报告全文（逐任务含 usage 与轨迹列）。"""
+    from neurova.benchmark.multi_agent.report import loadReport
+
+    report = loadReport(report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Baseline report '{report_id}' not found")
+    return {"code": 0, "message": "success", "data": report}
 
 
 # ── RAG 评估──

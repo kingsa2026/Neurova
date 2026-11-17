@@ -19,7 +19,20 @@ def aggregate(results: List[dict]) -> Dict[str, dict]:
         unsolvable = [r for r in items if r.get("unsolvable")]
         unsolvable_ok = sum(1 for r in unsolvable if r.get("passed"))
         elapsed = [float(r["elapsed_seconds"]) for r in items if r.get("elapsed_seconds") is not None]
-        tokens = [float(r["tokens"]) for r in items if r.get("tokens") is not None]
+        # S1-1A：usage 列优先（runner 回传的规范键）；无 usage 的旧记录回退 legacy tokens
+        def _usageNum(r: dict, key: str) -> float:
+            usage = r.get("usage") or {}
+            value = usage.get(key)
+            return float(value) if isinstance(value, (int, float)) else 0.0
+
+        promptTokens = [ _usageNum(r, "promptTokens") for r in items ]
+        completionTokens = [ _usageNum(r, "completionTokens") for r in items ]
+        steps = [ _usageNum(r, "steps") for r in items ]
+        toolCalls = [ _usageNum(r, "toolCalls") for r in items ]
+        tokens = [
+            float((r.get("usage") or {}).get("totalTokens") or r.get("tokens") or 0.0)
+            for r in items
+        ]
         # P3-3：按思考档位（effort_inference）分档聚合——同任务集在不同档位下的表现变量
         byEffort: Dict[str, dict] = {}
         for r in items:
@@ -48,6 +61,13 @@ def aggregate(results: List[dict]) -> Dict[str, dict]:
             "unsolvable_identified_rate": round(unsolvable_ok / len(unsolvable), 4) if unsolvable else None,
             "mean_elapsed_seconds": round(sum(elapsed) / len(elapsed), 3) if elapsed else None,
             "total_tokens": sum(tokens) if tokens else None,
+            # S1-1A：usage/轨迹效率聚合列（报告与只读端点共用这份口径）
+            "total_prompt_tokens": int(sum(promptTokens)),
+            "total_completion_tokens": int(sum(completionTokens)),
+            "total_steps": int(sum(steps)),
+            "total_tool_calls": int(sum(toolCalls)),
+            "mean_steps": round(sum(steps) / len(steps), 2) if steps else None,
+            "mean_tool_calls": round(sum(toolCalls) / len(toolCalls), 2) if toolCalls else None,
             "error_count": sum(1 for r in items if r.get("error")),
             "by_effort": effortOut,
         }
