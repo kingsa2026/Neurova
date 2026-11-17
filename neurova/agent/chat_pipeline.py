@@ -39,7 +39,12 @@ from neurova.agent.continuation_hint import isApiConfigError
 from neurova.agent.tkg_retriever_adapter import TKGRetrieverAdapter
 from neurova.agent.tool_execution_manager import ExecutionStatus, TimeoutStrategy, ToolExecutionManager
 from neurova.agent.actionability import evaluate_actionability, get_actionability_config
-from neurova.agent.turn_origin import is_machine_origin, is_machine_origin_value, resolve_turn_origin
+from neurova.agent.turn_origin import (
+    TurnOrigin,
+    is_machine_origin,
+    is_machine_origin_value,
+    resolve_turn_origin,
+)
 from neurova.voice_context_module import VOICE_CONTEXT_KEY
 
 logger = get_logger(__name__)
@@ -100,6 +105,10 @@ _TRUNCATED_FINISH_REASONS = frozenset({"length", "max_tokens"})
 # S6 压缩纪律：压缩视图里保留原文的最新工具结果条数（更早的换有界投影）。
 # 具名常量——阈值尺度不散落字面量。
 _COMPACT_TOOL_KEEP_RECENT = 2
+
+# S15 压缩失败冷却：从时间线重建冷却态时的重放窗口（最近 N 条事件足够覆盖
+# "连续冷却事件 + 其间的成功压缩事件"）。具名常量——阈值尺度不散落字面量。
+_COOLDOWN_REPLAY_LIMIT = 100
 
 # 附件分派三类集合与图像切片拼法的**实现在** `attachment_turn_injection`（单个事实源）；
 # 这里保留同名模块级引用，既有消费方与判据的取数面不变。
@@ -274,6 +283,9 @@ class ChatPipeline:
             agent_id=getattr(self.config, "agent_id", None),
             user_id=getattr(self.config, "user_id", None),
         )
+        # S15 压缩失败冷却：按 session_id 的内存缓存（首见会话从时间线重建，
+        # 事实源在时间线盘上——重启不丢）。同一管线实例跨轮复用。
+        self._compactionCooldowns = {}
         logger.debug(
             "ChatPipeline initialized with ToolExecutionManager, MemoryRetrievalChain, and CrystallizedExperienceManager"
         )
@@ -2863,10 +2875,11 @@ class ChatPipeline:
         # S6 主动压缩：越过触发水位（预算×CONTEXT_COMPACT_TRIGGER_RATIO）即折叠。
         # 严格变小守卫失败（CompactionNotShrinkingError）不阻断本轮——主动路径
         # 宁可带着偏大的上下文走，也不因压缩器异常丢轮；溢出兜底路径才显式报错。
+        # S15：失败已在 _autoCompactContextIfNeeded 内计入递增冷却后原样上抛。
         try:
             await self._autoCompactContextIfNeeded(ctx)
         except Exception:
-            logger.warning("主动上下文压缩失败（不阻断本轮）", exc_info=True)
+            logger.warning("主动上下文压缩失败（不阻断本轮，已进入冷却）", exc_info=True)
 
         if self.loop:
             # 上下文组成实测（聊天页"上下文容量"面板数据源）：
@@ -3050,14 +3063,17 @@ class ChatPipeline:
             }
         return out
 
-    async def _compactTurnContext(self, ctx: ChatContext, *, reason: str) -> bool:
+    async def _compactTurnContext(self, ctx: ChatContext, *, reason: str,
+                                  targetBudget: Optional[int] = None) -> bool:
         """对本轮待发上下文执行一次压缩（严格变小守卫 + 事件化落盘）。
 
         - system 消息整段保留（角色契约），只对非 system 区做预算折叠；
         - 压缩后必须严格变小，否则 CompactionNotShrinkingError 显式报错
           （溢出重试路径据此拒绝重发）；
         - 压缩事件经 session_manager 既有公开接口落会话时间线，并随既有
-          会话事件通道下发通知；原始会话消息永不删除（视图级压缩）。
+          会话事件通道下发通知；原始会话消息永不删除（视图级压缩）；
+        - targetBudget：折叠目标预算（S15 软目标路径传触发线）；缺省按
+          硬预算取触发线（_contextCompactionTarget 既有语义）。
 
         Returns:
             是否实际压缩（False = 无可折叠/未超预算）。
@@ -3083,7 +3099,10 @@ class ChatPipeline:
         # 压缩后 = system + 折叠窗。只拿非 system 区比对会把 system 体积算成
         # "越压越大"（live-verify 实测 7446→17126 假阳性即此根因）。
         tokensBefore = estimateContextTokens(msgs)
-        budget = self._contextCompactionTarget(tokensBefore)
+        if targetBudget is not None and int(targetBudget) > 0:
+            budget = int(targetBudget)
+        else:
+            budget = self._contextCompactionTarget(tokensBefore)
 
         # 摘要桥与 manual_compact 同源（ContextOrchestrator 的池侧摘要通道）；
         # 桥不可用时退化为纯结构折叠（尾保留），压缩事实照常落盘。
@@ -3122,6 +3141,7 @@ class ChatPipeline:
             ctx.session_id or "default",
             event,
         )
+        self._resetCompactionCooldown(ctx)
         self._emitCompressionNotice(ctx, event)
         logger.info(
             "[CTX_COMPACT] %s: session=%s 折叠 %d 条，token %d → %d",
@@ -3132,10 +3152,23 @@ class ChatPipeline:
     async def _autoCompactContextIfNeeded(self, ctx: ChatContext) -> bool:
         """S6 主动压缩：估算 token 越过 预算×CONTEXT_COMPACT_TRIGGER_RATIO 即折叠。
 
+        S15 增量：
+        - 失败冷却：冷却期内跳过自动触发（手动 /compact 不受限——命令轮经
+          command_dispatched 短路本就不会走到这里）；
+        - 子代理软目标：member 会话（turn_origin 单源识别）软目标低于硬触发线
+          时按软目标先压缩，防止 member 长任务把上下文顶到模型上限。
+
         与手动 /compact 共存：命令轮经 command_dispatched 短路（本方法位于
         LLM 步，命令轮不会走到）；同轮已压缩过不再重复（轮次 metadata 标记）。
         """
         if isinstance(ctx.metadata, dict) and ctx.metadata.get("context_auto_compacted"):
+            return False
+        cooldown = self._compactionCooldownState(ctx)
+        if cooldown.isCooling():
+            logger.info(
+                "[CTX_COMPACT] 冷却期内跳过主动压缩: session=%s 剩余 %.1fs",
+                ctx.session_id, cooldown.remainingSeconds(),
+            )
             return False
         budget = self._resolveContextBudget()
         if not budget:
@@ -3143,13 +3176,32 @@ class ChatPipeline:
         from neurova.context_pool import CONTEXT_COMPACT_TRIGGER_RATIO, estimateContextTokens
 
         threshold = max(1, int(budget * CONTEXT_COMPACT_TRIGGER_RATIO))
+        triggerReason = "threshold"
+        # S15 子代理软目标：member 会话软目标低于硬触发线时先于硬预算压缩
+        #（min 语义——软目标永远不得把触发线抬到硬线之上）。
+        if resolve_turn_origin(ctx.metadata) == TurnOrigin.SWARM:
+            from neurova.agent.swarm import SUBAGENT_CONTEXT_SOFT_TARGET_TOKENS
+
+            softTarget = int(SUBAGENT_CONTEXT_SOFT_TARGET_TOKENS)
+            if 0 < softTarget < threshold:
+                threshold = softTarget
+                triggerReason = "soft_target"
         if estimateContextTokens(ctx.context or []) < threshold:
             return False
         logger.info(
-            "[CTX_COMPACT] 主动压缩触发: session=%s 预算=%d 触发线=%d",
-            ctx.session_id, budget, threshold,
+            "[CTX_COMPACT] 主动压缩触发: session=%s 预算=%d 触发线=%d（%s）",
+            ctx.session_id, budget, threshold, triggerReason,
         )
-        compacted = await self._compactTurnContext(ctx, reason="threshold")
+        try:
+            # 触发线同时作为折叠目标（软目标场景压缩器直接折到软目标，
+            # 否则折叠目标仍是硬预算、压缩器无可折叠）。
+            compacted = await self._compactTurnContext(
+                ctx, reason=triggerReason, targetBudget=threshold,
+            )
+        except Exception:
+            # S15：主动压缩失败计入递增冷却后原样上抛（外层不阻断本轮）。
+            self._recordCompactionFailure(ctx, reason=triggerReason)
+            raise
         if compacted:
             ctx.metadata = dict(ctx.metadata or {})
             ctx.metadata["context_auto_compacted"] = True
@@ -3163,6 +3215,8 @@ class ChatPipeline:
         这里兜的是逃逸到管线的溢出（legacy 路径 / 流中途溢出 / loop 熔断上抛）。
         压缩不严格变小 → CompactionNotShrinkingError 显式报错拒绝重发（防越压
         越大循环）；重试仍溢出原样上抛（不二次重试）。
+        S15：压缩失败或重试仍溢出计入递增冷却（本路径不设冷却门——provider
+        已拒绝请求时压缩是唯一恢复路径，但其失败照常记账）。
         """
         try:
             return await self._call_agent_loop(ctx, tools_for_llm)
@@ -3176,10 +3230,28 @@ class ChatPipeline:
             logger.warning("[CTX_COMPACT] 管线级溢出兜底: %s", exc)
             ctx.metadata = dict(ctx.metadata or {})
             ctx.metadata["context_overflow_retried"] = True
-            compacted = await self._compactTurnContext(ctx, reason="overflow_retry")
+            try:
+                compacted = await self._compactTurnContext(ctx, reason="overflow_retry")
+            except Exception:
+                self._recordCompactionFailure(ctx, reason="overflow_retry")
+                raise
             if not compacted:
                 raise  # 无可折叠内容，恢复无意义——不吞原错误
-            return await self._call_agent_loop(ctx, tools_for_llm)
+            try:
+                return await self._call_agent_loop(ctx, tools_for_llm)
+            except Exception as retryExc:  # noqa: BLE001 - 重试仍溢出先记账再上抛
+                if is_context_overflow_error(retryExc):
+                    self._recordCompactionFailure(ctx, reason="overflow_retry")
+                raise
+
+    def _resolveEventEmitter(self, ctx: ChatContext):
+        """事件发射器解析单源：ctx.event_emitter 属性优先，其次 metadata 注入。"""
+        emitter = getattr(ctx, "event_emitter", None)
+        if not callable(emitter) and isinstance(ctx.metadata, dict):
+            candidate = ctx.metadata.get("event_emitter")
+            if callable(candidate):
+                emitter = candidate
+        return emitter if callable(emitter) else None
 
     def _emitCompressionNotice(self, ctx: ChatContext, event: Any) -> None:
         """压缩通知随既有会话事件通道下发（console 桥 upstream_status 透传）。
@@ -3187,17 +3259,86 @@ class ChatPipeline:
         复用既有透传型事件类（新增一类 phase=context_compacted 通知），载荷含
         cutoffIndex/摘要；前端轻提示由前端专项消费，不在本批。
         """
-        emitter = getattr(ctx, "event_emitter", None)
-        if not callable(emitter) and isinstance(ctx.metadata, dict):
-            candidate = ctx.metadata.get("event_emitter")
-            if callable(candidate):
-                emitter = candidate
-        if not callable(emitter):
+        emitter = self._resolveEventEmitter(ctx)
+        if emitter is None:
             return
         try:
             emitter("upstream_status", {"phase": "context_compacted", **event.to_dict()})
         except Exception:  # noqa: BLE001 - 通知发不出去不阻断对话
             logger.debug("压缩通知发射失败（忽略）", exc_info=True)
+
+    def _emitCooldownNotice(self, ctx: ChatContext, *, consecutiveFailures: int,
+                            cooldownSeconds: int, reason: str) -> None:
+        """S15 冷却通知：复用 context_compacted 同形态（upstream_status 透传，
+        phase=context_compact_cooldown 区分），前端消费不在本批。"""
+        emitter = self._resolveEventEmitter(ctx)
+        if emitter is None:
+            return
+        try:
+            emitter("upstream_status", {
+                "phase": "context_compact_cooldown",
+                "consecutiveFailures": int(consecutiveFailures),
+                "cooldownSeconds": int(cooldownSeconds),
+                "reason": str(reason or ""),
+            })
+        except Exception:  # noqa: BLE001 - 通知发不出去不阻断对话
+            logger.debug("冷却通知发射失败（忽略）", exc_info=True)
+
+    def _compactionCooldownState(self, ctx: ChatContext):
+        """按会话取冷却状态（内存缓存；首见会话从时间线重建——重启不丢）。"""
+        from neurova.context_pool import rebuildCompactionCooldown
+
+        key = str(ctx.session_id or "default")
+        state = self._compactionCooldowns.get(key)
+        if state is None:
+            events = []
+            try:
+                events = self.session_manager.read_timeline(
+                    getattr(self.config, "agent_id", "") or "default",
+                    key,
+                    limit=_COOLDOWN_REPLAY_LIMIT,
+                ) or []
+            except Exception:  # noqa: BLE001 - 时间线读不到按无历史处理
+                logger.debug("冷却态时间线读取失败（按无历史处理）", exc_info=True)
+            state = rebuildCompactionCooldown(events)
+            self._compactionCooldowns[key] = state
+        return state
+
+    def _recordCompactionFailure(self, ctx: ChatContext, *, reason: str) -> None:
+        """S15 失败冷却入口：递增冷却 + 事件落时间线 + 事件通道可见。
+
+        冷却期内自动触发被跳过（_autoCompactContextIfNeeded），手动 /compact
+        不受限；状态随会话持久（时间线事实源），进程重启经重建不丢。
+        """
+        from neurova.context_pool import persistCompactionCooldownEvent
+
+        state = self._compactionCooldownState(ctx)
+        step = state.enterCooldown()
+        persistCompactionCooldownEvent(
+            self.session_manager,
+            getattr(self.config, "agent_id", "") or "default",
+            str(ctx.session_id or "default"),
+            consecutiveFailures=state.consecutiveFailures,
+            cooldownSeconds=step,
+            reason=reason,
+        )
+        self._emitCooldownNotice(
+            ctx,
+            consecutiveFailures=state.consecutiveFailures,
+            cooldownSeconds=step,
+            reason=reason,
+        )
+        logger.warning(
+            "[CTX_COMPACT] 压缩失败进入冷却: session=%s 连续第 %d 次失败，冷却 %ds（%s）",
+            ctx.session_id, state.consecutiveFailures, step, reason,
+        )
+
+    def _resetCompactionCooldown(self, ctx: ChatContext) -> None:
+        """S15 压缩成功复位：该会话失败计数归零（时间线上的压缩事件即复位标记）。"""
+        key = str(ctx.session_id or "default")
+        state = self._compactionCooldowns.get(key)
+        if state is not None:
+            state.resetOnSuccess()
 
     async def _call_agent_loop(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
         """通过 Agent Loop 调用 LLM"""
