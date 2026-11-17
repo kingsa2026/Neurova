@@ -82,13 +82,14 @@ async def runReviewLoop(
     if not reviewNeededFor(run):
         return ReviewResult(report=firstReport, info=None)
 
-    # 惰性导入：swarm 的相位常量是唯一出处；本模块被 swarm 导入，函数内取用避免环。
-    from neurova.agent.swarm import SUBAGENT_IN_REVIEW, SUBAGENT_RUNNING
+    # 惰性导入：swarm 的相位常量与迁移收口是唯一出处；本模块被 swarm 导入，
+    # 函数内取用避免环。
+    from neurova.agent.swarm import SUBAGENT_IN_REVIEW, SUBAGENT_RUNNING, transitionRun
 
     report = firstReport
     rounds = 0
     while True:
-        run.status = SUBAGENT_IN_REVIEW
+        transitionRun(run, SUBAGENT_IN_REVIEW, cause="review_phase")
         try:
             verdict = await run_review(
                 verifyChannel,
@@ -100,7 +101,7 @@ async def runReviewLoop(
                 "Swarm: 评审子会话通道故障（%s），run %s 诚实放行并标注",
                 str(exc)[:120], getattr(run, "subagent_id", "?"),
             )
-            run.status = SUBAGENT_RUNNING
+            transitionRun(run, SUBAGENT_RUNNING, cause="reviewer_unavailable")
             return ReviewResult(
                 report=report,
                 info={"passed": None, "skipped": "reviewer_unavailable",
@@ -111,14 +112,14 @@ async def runReviewLoop(
                 "Swarm: 评审子会话不可用（%s），run %s 诚实放行并标注",
                 str(verdict.get("raw", ""))[:120], getattr(run, "subagent_id", "?"),
             )
-            run.status = SUBAGENT_RUNNING
+            transitionRun(run, SUBAGENT_RUNNING, cause="reviewer_unavailable")
             return ReviewResult(
                 report=report,
                 info={"passed": None, "skipped": "reviewer_unavailable",
                       "detail": str(verdict.get("raw", ""))[:200], "rounds": rounds},
             )
         if str(verdict.get("overall_correctness")) == "correct":
-            run.status = SUBAGENT_RUNNING
+            transitionRun(run, SUBAGENT_RUNNING, cause="review_passed")
             return ReviewResult(
                 report=report,
                 info={**verdict, "passed": True, "rounds": rounds, "reworked": rounds > 0},
@@ -126,7 +127,7 @@ async def runReviewLoop(
         if rounds >= MAX_REVIEW_ROUNDS:
             findings = verdict.get("findings") or []
             titles = "；".join(str(f.get("title") or "") for f in findings[:5]) or "评审未通过"
-            run.status = SUBAGENT_RUNNING
+            transitionRun(run, SUBAGENT_RUNNING, cause="review_failed")
             return ReviewResult(
                 report=report,
                 info={**verdict, "passed": False, "rounds": rounds, "reworked": rounds > 1},
@@ -138,7 +139,7 @@ async def runReviewLoop(
             "Swarm: 评审未通过，回炉第 %d 次（run %s）",
             rounds, getattr(run, "subagent_id", "?"),
         )
-        run.status = SUBAGENT_RUNNING
+        transitionRun(run, SUBAGENT_RUNNING, cause="review_rework")
         report = await chatFn(reviewRevisionInstructions(renderBase(run), verdict))
 
 

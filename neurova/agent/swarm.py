@@ -124,6 +124,77 @@ from neurova.core.agent_run_ledger import (
 EVENT_TASK_SUMMARY_CHARS = 80
 EVENT_ERROR_SUMMARY_CHARS = 160
 
+# ── S3：run 生命周期迁移表（唯一收口 transitionRun）────────────────────
+# 迁移合法性从各赋值点收拢到这一张表：键=现役状态，值=允许去的下一态集合。
+# 终态（completed/failed）无出边；pending 只能启动或直接判失败（依赖门拦下/
+# 等待中被叫停，均未执行）；in_review 可回 running（放行/回炉/降级）、可直接
+# 完成、也可判失败（评审期被叫停）。改状态赋值点一律走 transitionRun。
+RUN_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
+    SUBAGENT_PENDING: frozenset({SUBAGENT_RUNNING, SUBAGENT_FAILED}),
+    SUBAGENT_RUNNING: frozenset({SUBAGENT_IN_REVIEW, SUBAGENT_COMPLETED, SUBAGENT_FAILED}),
+    SUBAGENT_IN_REVIEW: frozenset({SUBAGENT_RUNNING, SUBAGENT_COMPLETED, SUBAGENT_FAILED}),
+    SUBAGENT_COMPLETED: frozenset(),
+    SUBAGENT_FAILED: frozenset(),
+}
+
+
+class IllegalRunStatusTransition(RuntimeError):
+    """非法 run 状态迁移（迁移表拒绝）——显式暴露，不静默、不吞、不改状态。"""
+
+
+def transitionRun(run: "SubAgentRun", newStatus: str, cause: str = "") -> str:
+    """run 状态迁移唯一收口（S3）：迁移表强校验 + status_changed 事件归档。
+
+    - 合法迁移：改状态并落一条 status_changed 事件（复用 H-4 账本，因果链沿
+      last_event_id 串接；归档故障 fail-open，不阻断状态机——与 H-4 同纪律）；
+    - 非法迁移：显式抛 IllegalRunStatusTransition，状态保持不变；
+    - 同态重申：幂等 no-op（不抛错、不重复落事件）。
+    返回迁移后的状态。
+    """
+    target = str(newStatus or "").strip()
+    if target not in SUBAGENT_STATUSES:
+        raise IllegalRunStatusTransition(
+            f"未知 run 状态 {newStatus!r}（合法域 {sorted(SUBAGENT_STATUSES)}）")
+    current = run.status
+    if target == current:
+        return current
+    if target not in RUN_STATUS_TRANSITIONS.get(current, frozenset()):
+        raise IllegalRunStatusTransition(
+            f"非法 run 状态迁移 {current} → {target}"
+            f"（subagent={run.subagent_id} cause={cause or 'n/a'}；"
+            f"合法去向 {sorted(RUN_STATUS_TRANSITIONS.get(current, frozenset()))}）")
+    run.status = target
+    try:
+        from neurova.agent.swarm_event_log import appendRunEvent
+
+        eventId = appendRunEvent(
+            run.subagent_id, "status_changed",
+            {"from": current, "to": target, "cause": str(cause or "")},
+            causationId=getattr(run, "last_event_id", ""),
+        )
+        run.last_event_id = eventId
+    except Exception as e:  # noqa: BLE001 - 归档故障不阻断状态机（H-4 fail-open 同纪律）
+        logger.debug("Swarm: status_changed 归档失败 (%s): %s", run.subagent_id, e)
+    return target
+
+
+def replayRunTailStatus(subagentId: str) -> str:
+    """从 H-4 事件账本重放某 run 的末态（S3 启动收敛增强：补强台账，不替代）。
+
+    取账本里最后一条 status_changed 的目标态或 terminal 的状态；账本缺失/无
+    状态事件返回空串（如实说不知道，不猜）。进程重启后内存 run 表为空，台账
+    （agent_run_ledger）仍是权威事实源；本函数供一致性校正与排查下钻。
+    """
+    from neurova.agent.swarm_event_log import readRunEvents
+
+    tail = ""
+    for event in readRunEvents(str(subagentId or "").strip()):
+        if event.get("type") == "status_changed":
+            tail = str((event.get("payload") or {}).get("to") or "") or tail
+        elif event.get("type") == "terminal":
+            tail = str((event.get("payload") or {}).get("status") or "") or tail
+    return tail
+
 
 def mcpBorrowedToolNames() -> frozenset:
     """P3（蜂群对照 #8）：父上下文当前可用的 MCP 工具名快照（借用面）。
@@ -735,6 +806,34 @@ class SwarmManager:
         events = readRunEvents(sid) if sid else []
         return {"subagent_id": sid, "count": len(events), "events": events}
 
+    def reconcileRunFromEvents(self, subagent_id: str) -> Dict[str, Any]:
+        """S3 启动收敛增强：用事件账本末态校正内存 run 的漂移（补强，不替代台账）。
+
+        内存无此 run → 如实报告（重启后常态，不凭账本复活对象）；一致 → noop；
+        漂移 → 按账本末态直改并落一条 status_corrected 事件留痕。校正不是生命
+        周期迁移（重启期间账本可能推进到迁移表不可达的跳变，如 running→completed
+        的跨相位补账），故不走 transitionRun，但必须留痕可查。
+        """
+        sid = str(subagent_id or "").strip()
+        tail = replayRunTailStatus(sid)
+        with self._lock:
+            run = self._runs.get(sid)
+            if run is None:
+                return {"subagent_id": sid, "corrected": False,
+                        "reason": "not_in_memory", "event_tail_status": tail}
+            if tail not in SUBAGENT_STATUSES:
+                return {"subagent_id": sid, "corrected": False,
+                        "reason": "no_event_tail" if not tail else "invalid_tail_status",
+                        "status": run.status, "event_tail_status": tail}
+            if run.status == tail:
+                return {"subagent_id": sid, "corrected": False, "reason": "consistent",
+                        "status": run.status, "event_tail_status": tail}
+            before = run.status
+            run.status = tail
+            self._logRunEvent(run, "status_corrected",
+                              {"from": before, "to": tail, "cause": "event_log_replay"})
+            return {"subagent_id": sid, "corrected": True, "from": before, "to": tail}
+
     def pendingBackgroundForSession(self, session_id: Optional[str]) -> Dict[str, Any]:
         """H-2 机械完成闸门的判定输入：本会话还有哪些蜂群后台工作未清。
 
@@ -907,7 +1006,7 @@ class SwarmManager:
             parent_trace_id=info.get("parent_trace_id") or "",
             data_fence=info.get("data_fence") if (info.get("data_fence") or {}).get("hit_count") else None,
         )
-        run.status = SUBAGENT_FAILED
+        transitionRun(run, SUBAGENT_FAILED, cause="dependency_failed")
         run.cause = "dependency_failed"
         run.error = (f"dependency_failed（前置 {upstream.subagent_id} 未验收通过："
                      f"{upstream.status}）；本任务未执行，请修复或重派前置后重新派生")
@@ -955,7 +1054,7 @@ class SwarmManager:
                 task_unit=blocked.get("task_unit"),
                 parent_trace_id=blocked.get("parent_trace_id", ""),
             )
-            failed.status = SUBAGENT_FAILED
+            transitionRun(failed, SUBAGENT_FAILED, cause=SUBAGENT_CAUSE_CANCELLED)
             failed.cause = SUBAGENT_CAUSE_CANCELLED
             failed.error = "subagent_cancelled（依赖等待中被叫停，未启动执行）"
             failed.finished_at = time.time()
@@ -983,7 +1082,7 @@ class SwarmManager:
         # cancelled 终态（幂等：协程处理器已落账则跳过）。
         def _finalizeCancelled(_task) -> None:
             if run.status in SUBAGENT_ACTIVE_STATUSES:
-                run.status = SUBAGENT_FAILED
+                transitionRun(run, SUBAGENT_FAILED, cause=SUBAGENT_CAUSE_CANCELLED)
                 run.cause = SUBAGENT_CAUSE_CANCELLED
                 run.error = f"subagent_cancelled（{run.cancel_note}；任务未产出）"
                 run.finished_at = time.time()
@@ -1489,7 +1588,7 @@ class SwarmManager:
         toolAllowlist: Optional[frozenset] = None,
     ) -> None:
         """执行子 Agent 任务：广播 STARTED → chat（可流式）→ 广播 COMPLETED → 池归档"""
-        run.status = SUBAGENT_RUNNING
+        transitionRun(run, SUBAGENT_RUNNING, cause="member_started")
         # P3-2（评测报告 G-12）：member 轨迹 trace——spawn→member→回流共一条可查询
         # 的 span 树；fail-open（轨迹故障/开关关闭不阻断子任务，与台账同口径）。
         userId = str(getattr(initiator_agent, "current_user_id", "")
@@ -1637,14 +1736,14 @@ class SwarmManager:
                 raise RuntimeError(review.failedReason)
             report = review.report
             run.report = report
-            run.status = SUBAGENT_COMPLETED
+            transitionRun(run, SUBAGENT_COMPLETED, cause="gates_passed")
             run.finished_at = time.time()
         except asyncio.CancelledError:
             # 取消不是「没发生」：`CancelledError` 继承 `BaseException`，改前那一条
             # `except Exception` 抓不到它——run 就永久停在 running，槽位被占死（K 条）。
             # 现写终态、释放槽位，然后**照常上抛**：吞掉取消既是教义第 2 条的禁物，
             # 也会让 asyncio 的取消语义失真（外层以为没被取消）。
-            run.status = SUBAGENT_FAILED
+            transitionRun(run, SUBAGENT_FAILED, cause=SUBAGENT_CAUSE_CANCELLED)
             run.cause = SUBAGENT_CAUSE_CANCELLED
             _cancelNote = getattr(run, "cancel_note", "") or "父任务被取消"
             run.error = (f"subagent_cancelled（{_cancelNote}；子任务未跑完；"
@@ -1654,7 +1753,7 @@ class SwarmManager:
             raise
         except Exception as e:  # noqa: BLE001 - 子 Agent 故障隔离
             logger.warning("Swarm: 子 Agent %s 执行失败: %s", run.subagent_id, e)
-            run.status = SUBAGENT_FAILED
+            transitionRun(run, SUBAGENT_FAILED, cause=run.cause or "execution_failed")
             run.error = str(e)
             run.report = self._partialHandback(contentBuffer)
             run.finished_at = time.time()
