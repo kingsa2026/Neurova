@@ -28,3 +28,8 @@ export function listBenchmarkResults(params?: { suite_id?: string }) {
 export function runBenchmarkSuite(data: BenchmarkRunPayload) {
   return api.post<unknown>('/benchmark/run', data)
 }
+
+/** Get a single benchmark run（N3 真执行器：run 为后台执行，轮询终态用）。 */
+export function getBenchmarkRun(runId: string) {
+  return api.get<unknown>(`/benchmark/runs/${runId}`)
+}
