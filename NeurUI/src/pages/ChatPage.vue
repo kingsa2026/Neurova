@@ -113,6 +113,17 @@
               <span class="nr-retry-notice-icon"><UiIcon name="radar" :size="13" /></span>
               <span class="nr-retry-notice-label">{{ retryNoticeText(msg) }}</span>
             </div>
+            <!-- S6 自动压缩轻提示：cutoff 摘要（折叠条数 + tokens 前→后），随气泡保留 -->
+            <div v-if="msg.compactNotice" class="nr-compact-notice">
+              <span class="nr-compact-notice-icon"><UiIcon name="archive" :size="13" /></span>
+              <span class="nr-compact-notice-label">
+                {{ t('chat.contextCompactedNotice', {
+                  folded: msg.compactNotice.foldedCount,
+                  before: msg.compactNotice.tokensBefore,
+                  after: msg.compactNotice.tokensAfter,
+                }) }}
+              </span>
+            </div>
             <!-- P2-8：让位闸等不到额度 → 本轮挂起，run_id 是唯一续跑凭据 -->
             <div v-if="msg.parkedNotice" class="nr-parked-notice">
               <span class="nr-parked-notice-label">{{ t('chat.turnParked') }}</span>
@@ -1993,6 +2004,17 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     }
 
     case 'upstream_status': {
+      // S6 自动压缩通知（phase=context_compacted）：cutoff 摘要写轻提示条随
+      // 气泡保留——不是静默，不得落 silence 分支占住"上游零字节"语义。
+      if (event.phase === 'context_compacted') {
+        msg.compactNotice = {
+          foldedCount: Number(event.foldedCount || 0),
+          tokensBefore: Number(event.tokensBefore || 0),
+          tokensAfter: Number(event.tokensAfter || 0),
+          reason: event.reason ? String(event.reason) : undefined,
+        }
+        break
+      }
       // 上游静默（网关长时间零字节）：复用同一条提示条，phase 区分数义。
       // 不启本地倒数——恢复出字时 content/reasoning 分支会 clearRetryNotice。
       msg.retryNotice = {
@@ -3463,6 +3485,30 @@ onBeforeUnmount(() => {
 .nr-retry-notice-label {
   font-size: 12px;
   color: var(--nr-warning);
+  white-space: nowrap;
+}
+
+/* S6 自动压缩轻提示：cutoff 摘要。颜色一律走令牌，不硬编码色值。 */
+.nr-compact-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px 5px 10px;
+  margin: 0 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--nr-border);
+  background: var(--nr-glass-bg);
+  max-width: 100%;
+}
+
+.nr-compact-notice-icon {
+  display: inline-flex;
+  color: var(--nr-text-tertiary);
+}
+
+.nr-compact-notice-label {
+  font-size: 12px;
+  color: var(--nr-text-secondary);
   white-space: nowrap;
 }
 

@@ -619,6 +619,7 @@ export default {
     retryExhausted: 'Auto-retried across {count} models without success',
     retryYieldWait: 'Yielding for concurrency quota - retrying in {seconds}s (attempt {retry}/{max})',
     upstreamSilence: 'No data from upstream for {seconds}s, still waiting…',
+    contextCompactedNotice: 'Auto-compacted: folded {folded} messages, context {before} → {after} tokens',
     turnParked: 'This turn is parked - waiting for a manual resume',
     turnStillRunning: 'Still generating this turn',
     parkedPinnedModel: 'Pinned model {pinned}; this request used {requested}',

@@ -618,6 +618,7 @@ export default {
     retryExhausted: 'Reintentos automáticos en {count} modelos sin éxito',
     retryYieldWait: 'Cediendo por cuota de concurrencia - reintento en {seconds} s (intento {retry}/{max})',
     upstreamSilence: 'Sin datos del upstream durante {seconds}s, se sigue esperando…',
+    contextCompactedNotice: 'Compactado automático: {folded} mensajes plegados, contexto {before} → {after} tokens',
     turnParked: 'Este turno está en pausa - se requiere reanudación manual',
     turnStillRunning: 'Esta respuesta sigue generándose',
     parkedPinnedModel: 'Modelo fijado {pinned}; esta solicitud {requested}',
