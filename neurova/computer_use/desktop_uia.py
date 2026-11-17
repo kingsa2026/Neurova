@@ -241,7 +241,9 @@ class DesktopUIAManager:
                 return {
                     "success": True,
                     "index": element.get("index"),
-                    "action_result": ar.unverifiable("global_input", "foreground"),
+                    "action_result": ar.build(
+                        "global_input", "unverifiable", delivery="foreground", retry="reobserve"
+                    ),
                 }
             return self._refused(
                 "元素不可通过 ValuePattern 赋值，且全局输入未开启"

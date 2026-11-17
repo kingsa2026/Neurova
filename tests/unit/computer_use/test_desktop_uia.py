@@ -151,6 +151,7 @@ class TestClickDeliveryChain:
             "effect": "confirmed",
             "delivery": "background",
             "evidence": ["delivery_ack"],
+            "action_sent": True,  # P1-2 契约扩展
         }
 
     def test_fallback_to_post_message(self, manager):
@@ -247,6 +248,7 @@ class TestSetValue:
             "effect": "confirmed",
             "delivery": "background",
             "evidence": ["value_readback"],
+            "action_sent": True,  # P1-2 契约扩展
         }
 
     def test_no_settable_no_gate_refused(self, manager, monkeypatch):
@@ -268,6 +270,8 @@ class TestSetValue:
             "route": "global_input",
             "effect": "unverifiable",
             "delivery": "foreground",
+            "action_sent": True,  # P1-2 契约扩展
+            "retry": "reobserve",
         }
 
 

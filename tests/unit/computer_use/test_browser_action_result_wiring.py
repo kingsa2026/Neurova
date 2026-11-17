@@ -96,6 +96,9 @@ class TestPyautoguiHonesty:
             "route": "global_input",
             "effect": "unverifiable",
             "delivery": "foreground",
+            # P1-2 契约扩展：action_sent/retry 随像素档自动推导
+            "action_sent": True,
+            "retry": "reobserve",
         }
 
 
