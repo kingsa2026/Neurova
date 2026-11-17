@@ -17,6 +17,12 @@
           padding="18px 22px"
         >
           <div class="team-meta">
+            <!-- S10：团队来源标（agent 沉淀的团队带批准人） -->
+            <a-tag
+              v-if="team.origin === 'agent_proposed'"
+              color="purple"
+              :title="team.approved_by ? `${t('collab.teamApprovedBy')}: ${team.approved_by}` : t('collab.teamOriginAgent')"
+            >◈ {{ t('collab.teamOriginAgent') }}</a-tag>
             <a-tag color="blue">{{ team.members?.length ?? 0 }} {{ t('collab.members') }}</a-tag>
           </div>
           <div class="team-members">
