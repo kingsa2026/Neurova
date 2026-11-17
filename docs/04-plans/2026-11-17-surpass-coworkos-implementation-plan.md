@@ -340,6 +340,76 @@ S14 同框重评分与超越判定
 
 ---
 
+## S15 D3 收尾：压缩失败冷却 + 子代理软目标（会话P）
+
+**动机**：S14 重评后 D3 的诚实边界——CoworkOS 的**失败冷却（5-15-30s）**与**子代理软目标（20k）**两件对标件缺位。用户拍板补齐。
+
+**改动文件**：`neurova/agent/chat_pipeline.py`、`neurova/context_pool.py`、`neurova/agent/swarm.py`（member 会话软目标）、对应测试。
+
+**实现要点**
+- 失败冷却：压缩/摘要失败或溢出兜底重试仍失败后，进入**递增冷却**（`COMPACTION_FAILURE_COOLDOWN_STEPS = (5, 15, 30)` 秒，具名常量）；冷却期内跳过自动触发（手动 /compact 不受限）；冷却状态随会话持久（复用 S5/S6 事件面），进程重启不丢。
+- 子代理软目标：swarm member 会话上下文逼近 `SUBAGENT_CONTEXT_SOFT_TARGET_TOKENS`（具名常量）时**先于硬预算**触发压缩，保留近期原文（与 S6 投影/折叠合流，不新造第二套）。
+- 冷却与软目标事件均随会话事件面可见（复用 S6 的 context_compacted 通知通道形态）。
+
+**红灯**：连续失败后冷却期内不自动压缩、冷却按 5/15/30 递增；member 上下文过软目标即提前压缩且近期原文保留。
+**验收**：chat_pipeline/context_pool/swarm 既有测试 A/B 零新增；live-verify 真后端压一次失败进入冷却的实测。
+**避坑**：与 S6 机制合流不并立（教义第 6 条）；全部阈值具名常量（附录 A2）。
+
+---
+
+## S16 D2 收尾：记忆重纪律（3-Task 候选转正/世代失效/人工审阅接通）（会话Q）
+
+**动机**：S14 重评后 D2 维持 4 的原因——3-Task 独立佐证转正、人工审阅、世代失效缺位。用户拍板补齐（原"不动 MemCore 内部结构"裁定由用户本轮解除，仍须独立方案先行、主干敬畏）。
+
+**改动文件**：`neurova/mem_core.py` / memory_manager（增量层）、`neurova/memory_admission.py` 或新增 `neurova/memory_discipline.py`、pending_memories 待审队列消费点、对应测试。
+
+**实现要点**
+- **独立方案先行**：动手前先在现场勘察 MemCore 存储结构与记忆生命周期，把设计（候选/世代字段落哪、消费方是谁、转正判定在哪个单点）写进提交说明，再实现。
+- **3-Task 候选转正**：新记忆带来源任务/会话标入候选；跨 **≥3 个独立任务**再观测才转正为持久记忆（`MEMORY_PROMOTION_MIN_TASKS = 3` 具名常量）；转正前可见性按候选语义，不影响既有读路径。
+- **世代失效**：新事实与旧记忆矛盾时使旧代失效（标记 superseded，保留可追溯，不物理删）。
+- **人工审阅接通**：S7 移交项——`screenMemoryContent` 接入 pending_memories 的 propose/confirm 两点，敏感候选人工放行/拒收留痕。
+- **门控**：`NEUROVA_MEMORY_DISCIPLINE` 环境门控默认 off（MemCore 主干风险高，先 live-verify 再议翻默认）；门控关闭时行为与现状完全一致。
+
+**红灯**：跨 3 任务第 3 次观测才转正、前两次不转；矛盾事实使旧代失效且可追溯；待审候选经 screenMemoryContent 拦截敏感内容；门控关闭时行为不变。
+**验收**：mem_core 既有测试 A/B 零新增（门控关闭态）；门控开启态新测试全绿；live-verify 真后端走一次 候选→3 任务→转正 与 矛盾→失效。
+**避坑**：附录 A14 主干敬畏——只做增量层；SQLite 变更走 db_migration 注册表（附录 A6）；具名常量。
+
+---
+
+## S17 F1 收尾：模型请求级归档（会话R）
+
+**动机**：S14 重评后 F1 的诚实边界——CoworkOS 的模型请求级 JSONL 归档（\*-requests.jsonl 形态）缺位。用户拍板补齐（H-4 账本脱敏纪律不破坏，归档是独立 trace 面）。
+
+**改动文件**：新增 `neurova/core/request_archive.py`（或按现场落 `neurova/llm/`）；`neurova/llm/multi_model_client.py`（chat/chat_stream 边界挂点）；`neurova/api/endpoints/projects_api.py`（档案聚合增请求归档摘要——消费面）；对应测试。
+
+**实现要点**
+- 每 run/会话一份 JSONL（`<数据根>/request_archives/`），记录：时间戳、model/provider、消息角色与字符数、usage、时延、成败/错误族；**默认不落全文**，落脱敏摘要（复用 S7 的 SENSITIVE_KEY_PATTERNS 做脱敏；全文归档留 `NEUROVA_REQUEST_ARCHIVE_FULL` 门控另议）。
+- 写入 fail-soft 不阻断主链路（错误日志+计数可见，不静默吞）；尺寸上限具名常量（附录 A2）。
+- **消费面**：S12 档案聚合（GET /projects/{id}/collaboration）增请求归档摘要（次数/token/时延分布/最近错误），形成写入→读取→反馈闭环。
+
+**红灯**：一次 LLM 调用产生一条归档（含 usage/时延/角色计数）；含 key 样式内容被脱敏；档案聚合能读到归档摘要；写失败不阻断调用。
+**验收**：multi_model_client 既有测试 A/B 零新增；live-verify 真后端调用后归档文件与档案摘要一致。
+**避坑**：归档独立于 H-4 事件账本（不往账本加请求级事件，账本纪律不变）；异步/延迟写避免拖慢调用路径。
+
+---
+
+## S18 G2 收尾：MCP 深度集成——团队能力外部暴露（会话S）
+
+**动机**：S14 重评后 G2 4 分的剩余件——MCP 深度集成（方案 §0.3 原裁定另立项，用户本轮拍板纳入）。形态沿用已裁定原则：**工具壳两层、机制单源**——MCP server 只做协议壳，执行复用既有单源。
+
+**改动文件**：`neurova/mcp_ontology_server.py`（增协作工具壳）、既有 tool_executor 执行体（只复用不改动；如需抽出可调用面以最小增量进行）、对应测试。
+
+**实现要点**
+1. MCP 工具壳新增：`team_list`、`team_dispatch`（映射 list_teams/dispatch_team 既有执行体）、`project_list`、`project_detail`（映射 S13 读面）——外部 agent 经 MCP 获得与主 agent 同源的团队能力。
+2. 双鉴权照旧（server 既有鉴权谓词）；治理照走（dispatch 经同一治理三明治与审批链，MCP 调用方身份按 server 既有身份语义传递）。
+3. 不新建第二套执行逻辑——MCP 壳只做参数适配与协议封装（教义第 6 条）；工具描述与 schema 与原生工具同源（不复制粘贴两份）。
+
+**红灯**：经 MCP 调用 team_dispatch 与原生 dispatch_team 同结果（同一 run 溯源标/治理计数）；未通过鉴权的调用被拒；成员面剔除语义在 MCP 侧同样生效（不可经 MCP 绕过成员限制）。
+**验收**：mcp server 既有测试 A/B 零新增；live-verify 真 MCP 握手后走一次 team_list→team_dispatch。
+**避坑**：server 是外部暴露面——任何新工具先过鉴权与治理再谈便利；不把内部工具面全量搬上 MCP（防工具面膨胀，附录 A14 精神）。
+
+---
+
 ## 附录 A：共享避坑清单（每批开工前必读）
 
 1. **A/B 必须串行**：pytest 并行曾致全仓 AST 扫描档（`test_theTakeoverTableMatchesTheSharedEntry` 一族）超时假红。涉及共享文件的批次，提交前 `git stash push -- <本批文件>` → 跑套件 → `git stash pop`，失败清单逐条比对，**新增失败才算回归**。trio（agent+collaboration+benchmark）约 4 分钟，api 约 8.5 分钟。
