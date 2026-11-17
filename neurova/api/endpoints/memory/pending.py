@@ -31,6 +31,9 @@ logger = get_logger(__name__)
 
 class PendingDecisionRequest(BaseModel):
     note: str = Field(default="", description="裁决备注")
+    # S16 人工审阅接通：敏感候选（sensitive_rule 非空）必须显式放行才可确认，
+    # 缺省 False 时确认诚实报错（绝不静默放行）；拒收无需本字段。
+    allow_sensitive: bool = Field(default=False, description="敏感候选显式放行")
 
 
 def _get_store():
@@ -136,7 +139,7 @@ async def confirm_pending_memory(
                         logger.warning("遗忘墓碑登记失败: %s", target, exc_info=True)
                 return target
 
-            out = store.confirm(pending_id, _do_forget)
+            out = store.confirm(pending_id, _do_forget, decided_by=uid)
             return success_response(
                 data={"memory_id": out.get("memory_id"), "pending_id": pending_id, "action": "forget"},
                 message="记忆已确认遗忘",
@@ -161,7 +164,12 @@ async def confirm_pending_memory(
                 metadata={"from_pending": True, "pending_id": pending_id},
             )
 
-        out = store.confirm(pending_id, _do_remember)
+        out = store.confirm(
+            pending_id,
+            _do_remember,
+            allow_sensitive=body.allow_sensitive,
+            decided_by=uid,
+        )
         return success_response(
             data={"memory_id": out.get("memory_id"), "pending_id": pending_id},
             message="记忆已确认入库",
@@ -169,6 +177,9 @@ async def confirm_pending_memory(
         )
     except APIError:
         raise
+    except ValueError as e:
+        # S16：敏感候选未显式放行等业务拒绝——诚实 4xx 带原因，不当 500 吞掉
+        raise APIError(ErrorCodes.VALIDATION_ERROR, str(e)) from e
     except Exception as e:
         logger.exception("确认记忆失败: %s", e)
         raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, f"确认记忆失败: {str(e)}") from e
