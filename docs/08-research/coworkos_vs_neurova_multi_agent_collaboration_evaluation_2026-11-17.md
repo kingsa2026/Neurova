@@ -239,6 +239,8 @@ CoworkOS 组织实验：GLM-5.3 当控制器与数据教师，Qwen3.6-35B-A3B �
 | H-7 | **真模型基线实测** | F2 3/5；harness 已有 11 条 T3 但未跑真模型出基线报告 | CoworkOS：12 benchmark 常态实测 | P2 |
 | H-8 | **长程监控/目标持久化** | B4/B1 部分覆盖；Neurova 有定时任务但无"目标 park/恢复"语义 | CoworkOS：Goal/Watch/Supervisor 三件套，泊车记录等待条件与下一步意图 | P3 |
 
+**执行记录（2026-11-17 第二批，同日无人值守）**：H-1（`98074146b`，邮箱两阶段确认：lease→落盘→acknowledge，破坏性 drain 退役，至少一次投递宁重不丢）；H-2（`052abda7d`，机械完成闸门：`SwarmManager.pendingBackgroundForSession` 核账 + 主出口把等待事实并入正文并落会话盘，**不续跑模型**防忙等，fail-open）；H-4（`51a2aaf92`，run 级 JSONL 事件账本 `<数据根>/swarm_runs/<id>.events.jsonl` + causation_id 因果链，spawned/started/terminal/stalled/escalated/result_submitted 全落档，正文不进账本）。**H-3/H-5/H-6/H-8 登记不盲做**：H-3 候选制的核心价值在保护共享产物，而本仓子代理当前只回传报告、不改共享资源（报告质量已有验收门 + integrationReport 把关），待共享产物编辑场景出现再立项；H-5/H-6 触碰 MemCore 与上下文压缩主干，须独立方案先行；H-8 依赖目标/监督者产品面，另立项。**H-7 需真模型供给，待拍板**。终验：agent+collaboration+benchmark 35 failed 与基线逐条一致（零新增）、2550 passed；途中撞"正文不得按字面量砍长度"常驻钉子（H-4 事件摘要截断撞 `testSwarmNoLongerSlicesBodyByLiteralLength`），按其明示口径改为具名常量（`EVENT_TASK_SUMMARY_CHARS`/`EVENT_ERROR_SUMMARY_CHARS`）后回绿。
+
 **不可照搬项（诚实边界）**：CoworkOS 的纯 JSON 文件存储在多任务规模下有性能天花板（其自认 listTasks 需遍历校验每个目录），Neurova 的 SQLite 台账方向更对；其"无并发上限+靠 Main 自律"不可学（本仓治理三明治是正确取舍）；其 macOS-only 的 GUI 驱动与 Electron 形态与 Neurova 产品定位不同；其 RSI 后训练依赖特定模型供给（GLM-5.3 控制器），属基础设施级投入，非协作机制本身。
 
 ---
