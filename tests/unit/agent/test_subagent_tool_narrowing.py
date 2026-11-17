@@ -205,3 +205,51 @@ class TestMcpBorrow:
         run = get_swarm_manager()._runs[result["subagent_id"]]
         # spawn 时刻的 MCP 快照冻结进 run.tool_allowlist（执行期不再重查）
         assert "mcp.s1.search" in run.tool_allowlist
+
+
+class TestSubagentForegroundDesktopPolicy:
+    """P2-4（ZCode 电脑操控对照评测）：子代理不得注入前台输入。
+
+    对齐 ZCode「CUA 仅主代理」：多个代理并发抢真实鼠标/键盘 = 互踩用户桌面。
+    子代理保留观察面（截图/快照/窗口枚举）与命令面（shell/ssh），剔除
+    前台输入注入族。成员单源在 computer_use.foregroundDesktopTools()。
+    """
+
+    def test_general_allowlist_excludes_foreground_desktop(self):
+        from neurova.computer_use import foregroundDesktopTools
+
+        allowlist = computeSubagentToolAllowlist("general")
+        removed = foregroundDesktopTools() & allowlist
+        assert not removed, f"前台桌面动作漏出子代理面：{sorted(removed)}"
+
+    def test_foreground_set_covers_input_injection_family(self):
+        from neurova.computer_use import foregroundDesktopTools
+
+        assert {
+            "computer_click", "computer_type", "computer_scroll",
+            "computer_key", "computer_paste", "computer_drag",
+            "computer_click_element", "computer_set_value", "computer_click_mark",
+        } <= foregroundDesktopTools()
+
+    def test_observation_and_command_faces_survive(self):
+        allowlist = computeSubagentToolAllowlist("general")
+        for keep in (
+            "computer_screenshot", "computer_dom_snapshot", "computer_som_snapshot",
+            "computer_list_windows", "computer_shell", "computer_ssh_exec",
+        ):
+            assert keep in allowlist, f"观察/命令面被误删：{keep}"
+
+    def test_explore_allowlist_still_excludes_foreground(self):
+        from neurova.computer_use import foregroundDesktopTools
+
+        allowlist = computeSubagentToolAllowlist("explore")
+        assert not (foregroundDesktopTools() & allowlist)
+
+    def test_single_source_is_pure_desktop_subset(self):
+        """单源集合必须全是已注册的 computer_* 工具——防名单与工具面漂移。"""
+        from neurova.builtin_tools import get_registered_tool_names
+        from neurova.computer_use import foregroundDesktopTools
+
+        registered = set(get_registered_tool_names())
+        assert foregroundDesktopTools() <= registered
+        assert all(n.startswith("computer_") for n in foregroundDesktopTools())

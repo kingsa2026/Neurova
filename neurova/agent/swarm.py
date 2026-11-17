@@ -179,9 +179,13 @@ def computeSubagentToolAllowlist(
     # general：全量内置工具 − 递归派生/续跑（子代理不得再派生孙代理，
     # 也不得续跑兄弟——两者都是"从子代理回合里再拉起一条执行链"）；
     # − 审批裁决（P3-1：子代理不得裁决自己发起的审批单——自己批自己=审批链失效）
+    # − 前台输入注入族（P2-4 电脑操控对照：对齐 ZCode「CUA 仅主代理」——
+    #   多代理并发抢真实鼠标/键盘 = 互踩用户桌面；观察面与 shell/ssh 保留）
+    from neurova.computer_use import foregroundDesktopTools
+
     base = frozenset(get_registered_tool_names()) - {
         "spawn_subagent", "continue_subagent", "decide_subagent_approval",
-    }
+    } - foregroundDesktopTools()
     return base | frozenset(borrowMcp)
 
 

@@ -132,6 +132,30 @@ def normalizeKeyName(part: str) -> str:
     return KEY_ALIASES.get(raw, raw)
 
 
+# P2-4（ZCode 电脑操控对照评测）：前台输入注入族——会动用户真实鼠标/键盘的
+# 桌面动作。子代理工具面收窄时整族剔除（对齐 ZCode「CUA 仅主代理」）：
+# 多代理并发抢全局输入设备 = 互踩用户桌面。观察面（截图/快照/窗口枚举）与
+# 命令面（shell/ssh）不受限。单一事实源：swarm 收窄与本表对账（判据测试钉住）。
+FOREGROUND_DESKTOP_TOOLS = frozenset(
+    {
+        "computer_click",
+        "computer_type",
+        "computer_scroll",
+        "computer_key",
+        "computer_paste",
+        "computer_drag",
+        "computer_click_element",
+        "computer_set_value",
+        "computer_click_mark",
+    }
+)
+
+
+def foregroundDesktopTools() -> frozenset:
+    """前台输入注入族（子代理收窄面消费；常量即函数，留函数位便于日后按档投影）。"""
+    return FOREGROUND_DESKTOP_TOOLS
+
+
 class ComputerUseManager:
     """计算机使用管理器 - 整合桌面操作、文件操作和浏览器操作"""
 
