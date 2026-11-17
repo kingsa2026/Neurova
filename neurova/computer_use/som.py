@@ -15,7 +15,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
-from typing import Any, Callable, Dict, List, Optional
+import os
+from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 
 from neurova.core.logger import get_logger
 
@@ -25,6 +26,20 @@ logger = get_logger(__name__)
 _MIN_AREA = 400
 _MAX_MARKS = 60
 _GRID = 8  # 编号稳定用的中心量化格（像素）
+
+#: 检测器选型环境变量（P3-10）
+SOM_DETECTOR_ENV = "NEUROVA_SOM_DETECTOR"
+
+
+@runtime_checkable
+class SomDetector(Protocol):
+    """SOM 检测器协议（P3-10）：``callable(png_bytes) -> regions``。
+
+    结构化类型（非继承）：default_detector 与未来 ONNX/OCR 检测器均按形状接入。
+    region 形状：{"bbox": (x0, y0, x1, y1), "label": str}。
+    """
+
+    def __call__(self, png_bytes: bytes) -> List[Dict[str, Any]]: ...
 
 
 def stable_id(cx: int, cy: int, label: str, grid: int = _GRID) -> int:
@@ -63,6 +78,27 @@ def default_detector(png_bytes: bytes) -> List[Dict[str, Any]]:
     return regions[:_MAX_MARKS]
 
 
+def get_som_detector() -> Callable[[bytes], List[Dict[str, Any]]]:
+    """检测器选型单点（P3-10）：env ``NEUROVA_SOM_DETECTOR`` 选型。
+
+    现仅登记 "heuristic"（默认：边缘幅值+连通域）；ONNX/OCR 检测器就绪后在
+    此登记 名字→实现 映射，mark_screenshot/工具面零改动。未知选型回启发式
+    并告警——不静默换实现、也不崩。
+    """
+    raw = os.environ.get(SOM_DETECTOR_ENV, "").strip().lower()
+    if raw and raw != "heuristic":
+        logger.warning("NEUROVA_SOM_DETECTOR=%r 尚无已登记实现，回退启发式检测器", raw)
+    return default_detector
+
+
+def somDetectorName() -> str:
+    """当前生效检测器名（与 get_som_detector 同一选型口径，能力面消费）。
+
+    选型表现只有 heuristic；接入 ONNX/OCR 后按 env 解析真名。
+    """
+    return "heuristic"
+
+
 def mark_screenshot(
     png_bytes: bytes,
     detector: Optional[Callable[[bytes], List[Dict[str, Any]]]] = None,
@@ -72,7 +108,7 @@ def mark_screenshot(
     Returns:
         {annotated_png_b64, marks:[{id,bbox,center,label}], id2xy:{id:(x,y)}}
     """
-    det = detector or default_detector
+    det = detector or get_som_detector()
     try:
         regions = det(png_bytes) or []
     except Exception as e:  # noqa: BLE001 — 检测失败降级为无标注（不抛）
@@ -107,4 +143,12 @@ def mark_screenshot(
     }
 
 
-__all__ = ["mark_screenshot", "default_detector", "stable_id"]
+__all__ = [
+    "mark_screenshot",
+    "default_detector",
+    "stable_id",
+    "SomDetector",
+    "get_som_detector",
+    "somDetectorName",
+    "SOM_DETECTOR_ENV",
+]
