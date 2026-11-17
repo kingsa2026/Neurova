@@ -119,6 +119,10 @@ STALL_REMINDER_CAP_DEFAULT_S = 14400.0
 #: S4 结果候选制的合入审批分级（L0 自动放行留痕 / L1 提示 / L2 必审）。
 #: 合入是可逆记账动作（候选正文始终保留在板上），默认 L0；运维可调高。
 MERGE_APPROVAL_LEVEL_ENV = "NEUROVA_SWARM_MERGE_APPROVAL_LEVEL"
+
+# S9 动态组队：团队成员职责 prompt 拼进任务书角色段时的上限（具名常量——
+# "正文不得按字面量砍长度"常驻钉子；超限职责由 TASK_TOO_LARGE 硬限诚实拒绝）
+TEAM_DUTY_PROMPT_MAX_CHARS = 2000
 # 收尾成因的常量由台账侧持有（`agent_run_ledger`），swarm 只引用不自造第二份：
 # 台账的 error_type 与这里的 cause 必须是同一批词值。
 from neurova.core.agent_run_ledger import (
@@ -338,6 +342,14 @@ class SubAgentRun:
     stall_reminder_count: int = 0
     # 运行时状态：预留的模型并发槽（None=未占用）；_execute 的 finally 据此释放
     slot_model: Optional[str] = field(default=None, repr=False)
+    # S9 团队/房间接入：room_id = 协作房间（=协作 project_id）——审批/升级/候选事件
+    # 投递到该房间（人在环闭环），member 记忆按 room:<room_id> 作用域共享（共享黑板）。
+    # 空串 = 不关联房间（行为与改前完全一致）。
+    room_id: str = ""
+    # S9 动态组队：按团队名册选中的成员与角色（角色复用 collaboration_template.AgentRole）。
+    team_id: str = ""
+    team_role: str = ""
+    team_member: Optional[Dict[str, Any]] = None  # {user_id, name, role, prompt}
 
     @property
     def duration(self) -> float:
@@ -376,7 +388,21 @@ class SubAgentRun:
             "node_id": self.node_id,
             "execution_id": self.execution_id,
             "resumed_from": self.resumed_from,
+            "room_id": self.room_id,
+            "team_id": self.team_id,
+            "team_role": self.team_role,
         }
+
+
+def memberChatScope(run: Any) -> str:
+    """蜂群 member 轮的记忆作用域标签（S9 要点4 共享黑板）。
+
+    run 关联协作房间时复用 ``room:<room_id>`` 作用域语义（不新造作用域体系）：
+    同房间内跨成员共享、群群隔离、读单聊基线，全部继承 room 既有语义。
+    返回空串 = 无房间关联，走缺省 direct。
+    """
+    roomId = str(getattr(run, "room_id", "") or "").strip()
+    return f"room:{roomId}" if roomId else ""
 
 
 def _settingsDefaultSubagentDepth() -> int:
@@ -461,6 +487,9 @@ class SwarmManager:
         task_unit: Optional[dict] = None,
         reuse_member_session_id: Optional[str] = None,
         resumed_from: Optional[str] = None,
+        room_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        team_role: Optional[str] = None,
     ) -> Dict[str, Any]:
         """派生子 Agent 执行任务
 
@@ -476,6 +505,10 @@ class SwarmManager:
             reuse_member_session_id: 复用既有 member 会话键（续跑用——子 Agent
                 的历史由既有会话恢复机制带回）；None 新建
             resumed_from: 被续跑的 subagent_id（溯源读数；空 = 全新派生）
+            room_id: S9 关联协作房间（=协作 project_id）——审批/升级/候选事件投递
+                到该房间（人在环闭环），member 记忆按 room:<room_id> 作用域共享
+            team_id / team_role: S9 动态组队——按团队名册选人（team_role 复用
+                collaboration_template.AgentRole），成员职责 prompt 拼进任务书
 
         Returns:
             前台: {subagent_id, agent_id, agent_name, status, report, duration, ...}
@@ -483,6 +516,19 @@ class SwarmManager:
         """
         if not task or not str(task).strip():
             return {"error": "task 不能为空"}
+
+        # S9 动态组队：按团队名册选人；选中成员的职责 prompt 拼进任务书角色段
+        #（长度校验在拼装之后统一做，职责段一并受 MAX_TASK_CHARS 管辖）。
+        teamMember, teamRejection = self._resolveTeamMember(team_id, team_role, str(task))
+        if teamRejection is not None:
+            return teamRejection
+        teamRoleLabel = ""
+        if teamMember:
+            teamRoleLabel = str(teamMember.get("role") or team_role or "")
+            duty = str(teamMember.get("prompt") or "").strip()
+            if duty:
+                task = (f"[团队职责 · {teamRoleLabel or 'participant'}] "
+                        f"{duty[:TEAM_DUTY_PROMPT_MAX_CHARS]}\n\n{task}")
 
         # P1-1（评测报告 G-2）：结构化任务单元——解析失败走结构化拒绝（决策非故障）
         try:
@@ -624,6 +670,10 @@ class SwarmManager:
                         "tool_allowlist": toolAllowlist, "depth": child_depth,
                         "parent_trace_id": get_trace_id() or "",
                         "data_fence": dataFence,
+                        "room_id": str(room_id or "").strip(),
+                        "team_id": str(team_id or "").strip() if teamMember else "",
+                        "team_role": teamRoleLabel,
+                        "team_member": dict(teamMember) if teamMember else None,
                         "deps": list(deps), "status": "blocked", "created_at": time.time(),
                     }
             return {
@@ -631,6 +681,10 @@ class SwarmManager:
                 "status": "blocked", "background": True,
                 "dependencies": list(deps), "unsatisfied": unsatisfied,
                 "data_fence": dataFence,
+                "room_id": str(room_id or "").strip(),
+                "team_id": str(team_id or "").strip() if teamMember else "",
+                "team_role": teamRoleLabel,
+                "selected_member": teamMember,
                 "hint": "依赖未就绪，已登记等待；依赖验收通过后自动启动（subagent_status 查询）",
                 **self._quota_snapshot(),
             }
@@ -652,6 +706,10 @@ class SwarmManager:
             parent_trace_id=get_trace_id() or "",
             data_fence=dataFence if dataFence["hit_count"] else None,
             resumed_from=resumed_from or "",
+            room_id=str(room_id or "").strip(),
+            team_id=str(team_id or "").strip() if teamMember else "",
+            team_role=teamRoleLabel,
+            team_member=dict(teamMember) if teamMember else None,
         )
         # 通过全部治理闸 → 预留模型并发槽 + 打派生时间戳（错峰）
         with self._lock:
@@ -705,6 +763,10 @@ class SwarmManager:
                 "status": SUBAGENT_PENDING,
                 "background": True,
                 "data_fence": dataFence,
+                "room_id": run.room_id,
+                "team_id": run.team_id,
+                "team_role": run.team_role,
+                "selected_member": teamMember,
                 "hint": "使用 subagent_status 工具查询执行结果",
                 **quota,
             }
@@ -745,6 +807,58 @@ class SwarmManager:
 
         await self._execute(run, agent, initiator_agent, stream)
         return {**run.to_dict(), **self._quota_snapshot()}
+
+    def _resolveTeamMember(
+        self, teamId: Optional[str], teamRole: Optional[str], task: str,
+    ) -> tuple:
+        """S9 动态组队：按团队名册选人（不引入角色辩护等重机制）。
+
+        匹配顺序：角色命中（member.role == teamRole，或职责 prompt 含角色值）→
+        任务文本点名（成员显示名 / user_id）→ 首个有职责 prompt 的成员 → 首个成员。
+        数据单源 = teams_api 的 JSON 落盘（``getTeamRoster`` 只读），不另建团队存储。
+
+        Returns:
+            (member dict 或 None, rejection dict 或 None)——rejection 非 None 时
+            spawn 直接结构化拒绝（TEAM_UNKNOWN / TEAM_EMPTY / TEAM_ROLE_UNKNOWN）。
+        """
+        if not teamId:
+            return None, None
+        from neurova.agent.templates.collaboration_template import AgentRole
+        from neurova.api.endpoints.teams_api import getTeamRoster
+
+        roster = getTeamRoster(teamId)
+        if roster is None:
+            return None, self._rejection("TEAM_UNKNOWN", f"团队不存在: {teamId}")
+        members = [m for m in (roster.get("members_detail") or [])
+                   if str(m.get("user_id") or "").strip()]
+        if not members:
+            return None, self._rejection(
+                "TEAM_EMPTY", f"团队 {teamId} 名册为空——请先添加团队成员")
+        roleValue = str(teamRole or "").strip()
+        if roleValue and roleValue not in {r.value for r in AgentRole}:
+            return None, self._rejection(
+                "TEAM_ROLE_UNKNOWN",
+                f"未知团队角色 {roleValue!r}（可选：{', '.join(r.value for r in AgentRole)}）")
+        selected: Optional[Dict[str, Any]] = None
+        if roleValue:
+            for m in members:
+                if (str(m.get("role") or "") == roleValue
+                        or roleValue in str(m.get("prompt") or "")):
+                    selected = m
+                    break
+        if selected is None:
+            for m in members:
+                name = str(m.get("name") or "")
+                uid = str(m.get("user_id") or "")
+                if (name and name in task) or (uid and uid in task):
+                    selected = m
+                    break
+        if selected is None:
+            for m in members:
+                if str(m.get("prompt") or "").strip():
+                    selected = m
+                    break
+        return (selected or members[0]), None
 
     def _autoBackgroundSeconds(self) -> float:
         """前台自动转后台的窗口（秒）；0/未设 = 关闭（前台等到底）。"""
@@ -940,17 +1054,33 @@ class SwarmManager:
             "base_revision": candidate.baseRevision,
             "artifact_keys": keys,
         })
+        # S9：候选提交事件上墙（人工可拦截的产品面）
+        self._notifyRoomCandidateSafe(run, "submitted", candidate.candidateId,
+                                      detail=f"baseRevision={candidate.baseRevision}")
         if candidate.conflictWith:
             self._logRunEvent(run, "candidate_conflict_flagged", {
                 "candidate_id": candidate.candidateId,
                 "conflict_with": list(candidate.conflictWith),
             })
+            self._notifyRoomCandidateSafe(run, "conflict", candidate.candidateId,
+                                          detail=f"冲突对象 {list(candidate.conflictWith)}")
             self.recordEscalation(
                 run, reason="merge_conflict",
                 question=f"候选 {candidate.candidateId} 与 {list(candidate.conflictWith)}"
                          " 主张同一产物且基准版本相同，需人工裁决采纳哪份",
                 severity="high", suggestedAction="clarify")
         return candidate
+
+    def _notifyRoomCandidateSafe(self, run: SubAgentRun, status: str,
+                                 candidateId: str, detail: str = "") -> None:
+        """候选状态事件投协作房间（run 无房间时为空操作；故障不上抛）。"""
+        try:
+            from neurova.agent.approval_chain import notifyRoomCandidate
+
+            notifyRoomCandidate(run, status, candidateId, detail=detail)
+        except Exception as e:  # noqa: BLE001 - 房间呈现失败不影响候选主流程
+            logger.debug("Swarm: 候选事件房间投递失败 (%s/%s): %s",
+                         candidateId, status, e)
 
     def _rejectCandidateForRun(self, run: SubAgentRun, candidate, reason: str) -> None:
         """验收/评审驳回：候选置 reviseRequired（回炉走既有链），事件留痕。"""
@@ -988,6 +1118,8 @@ class SwarmManager:
                 "candidate_id": candidate.candidateId,
                 "detail": str(e)[:EVENT_ERROR_SUMMARY_CHARS],
             })
+            self._notifyRoomCandidateSafe(run, "conflict", candidate.candidateId,
+                                          detail=str(e)[:EVENT_ERROR_SUMMARY_CHARS])
             self.recordEscalation(
                 run, reason="merge_conflict",
                 question=f"候选 {candidate.candidateId} CAS 合入冲突：{e}",
@@ -999,6 +1131,8 @@ class SwarmManager:
                 "candidate_id": candidate.candidateId,
                 "detail": str(e)[:EVENT_ERROR_SUMMARY_CHARS],
             })
+            self._notifyRoomCandidateSafe(run, "merge_failed", candidate.candidateId,
+                                          detail=str(e)[:EVENT_ERROR_SUMMARY_CHARS])
             return {"merged": False, "cause": "merge_failed",
                     "error": f"结果合入被拒：{e}"}
         self._logRunEvent(run, "candidate_merged", {
@@ -1006,6 +1140,8 @@ class SwarmManager:
             "revision": outcome.get("revision"),
             "approval": approvalNote,
         })
+        self._notifyRoomCandidateSafe(run, "merged", candidate.candidateId,
+                                      detail=f"revision={outcome.get('revision')}")
         return {"merged": True, "revision": outcome.get("revision")}
 
     async def _approveMerge(self, run: SubAgentRun, candidate) -> tuple:
@@ -1038,6 +1174,53 @@ class SwarmManager:
             logger.warning("Swarm: merge 审批通道故障，按放行留痕处理 (%s): %s",
                            candidate.candidateId, e)
             return True, "approval_channel_unavailable"
+
+    def applyRoomCandidateAction(self, candidateId: str, action: str, actor: str = "") -> Dict[str, Any]:
+        """S9：人在房间对候选的直接处置（拦截=否决 / 采纳=CAS 合入）。
+
+        判定权仍在候选板单源（CandidateMergeBoard），房间只是应答入口；
+        采纳走 CAS 合入——冲突时候选保留、如实返回冲突（不静默覆盖）。
+        """
+        from neurova.agent.candidate_merge import CandidateConflictError, CandidateMergeError
+
+        act = str(action or "").strip().lower()
+        if act not in ("intercept", "merge"):
+            return {"success": False, "error": "action 仅支持 intercept/merge"}
+        candidate = self._candidates.candidate(candidateId)
+        if candidate is None:
+            return {"success": False, "error": f"候选不存在: {candidateId}"}
+        run = self._runs.get(candidate.runId)
+        if act == "intercept":
+            rejected = self._candidates.rejectCandidate(
+                candidateId, reason=f"房间拦截（by {actor or '群主'}）")
+            if run is not None:
+                self._logRunEvent(run, "candidate_rejected", {
+                    "candidate_id": candidateId, "by": "room", "actor": str(actor or ""),
+                })
+                self._notifyRoomCandidateSafe(run, "rejected", candidateId,
+                                              detail=f"房间拦截（by {actor or '群主'}）")
+            return {"success": True, "action": "intercept",
+                    "candidate_id": candidateId, "status": rejected.status}
+        try:
+            outcome = self._candidates.mergeCandidate(candidateId)
+        except CandidateConflictError as e:
+            if run is not None:
+                self._notifyRoomCandidateSafe(run, "conflict", candidateId,
+                                              detail=str(e)[:EVENT_ERROR_SUMMARY_CHARS])
+            return {"success": False, "action": "merge", "conflict": True,
+                    "candidate_id": candidateId, "error": str(e)}
+        except CandidateMergeError as e:
+            return {"success": False, "action": "merge",
+                    "candidate_id": candidateId, "error": str(e)}
+        if run is not None:
+            self._logRunEvent(run, "candidate_merged", {
+                "candidate_id": candidateId, "revision": outcome.get("revision"),
+                "approval": f"room_action_by:{actor or '群主'}",
+            })
+            self._notifyRoomCandidateSafe(run, "merged", candidateId,
+                                          detail=f"revision={outcome.get('revision')}")
+        return {"success": True, "action": "merge", "candidate_id": candidateId,
+                "revision": outcome.get("revision")}
 
     # ── P1-4（评测报告 G-4）：依赖门控 ──────────────────────────
 
@@ -1102,6 +1285,10 @@ class SwarmManager:
             task_unit=info["task_unit"],
             parent_trace_id=info.get("parent_trace_id") or "",
             data_fence=info.get("data_fence") if (info.get("data_fence") or {}).get("hit_count") else None,
+            room_id=info.get("room_id") or "",
+            team_id=info.get("team_id") or "",
+            team_role=info.get("team_role") or "",
+            team_member=info.get("team_member"),
         )
         with self._lock:
             self._runs[run.subagent_id] = run
@@ -1136,6 +1323,10 @@ class SwarmManager:
             task_unit=info["task_unit"],
             parent_trace_id=info.get("parent_trace_id") or "",
             data_fence=info.get("data_fence") if (info.get("data_fence") or {}).get("hit_count") else None,
+            room_id=info.get("room_id") or "",
+            team_id=info.get("team_id") or "",
+            team_role=info.get("team_role") or "",
+            team_member=info.get("team_member"),
         )
         transitionRun(run, SUBAGENT_FAILED, cause="dependency_failed")
         run.cause = "dependency_failed"
@@ -1795,6 +1986,12 @@ class SwarmManager:
                 "subagent_id": run.subagent_id,
                 "session_id": run.member_session_id,
             }
+            # S9 共享黑板：run 关联协作房间时，member 轮记忆按 room:<room_id> 作用域
+            # 打标/召回（写读两侧经 memory_scope 的显式 chat_scope 透传，同构继承
+            # room 语义——群群隔离、读单聊基线），不新造作用域体系。
+            scopeTag = memberChatScope(run)
+            if scopeTag:
+                spawn_metadata["chat_scope"] = scopeTag
             if emitter is not None:
                 spawn_metadata["event_emitter"] = emitter
             # stream=True（2026-09-10 蜂群超时排查）：非流式的读超时是"整段
@@ -2169,6 +2366,13 @@ class SwarmManager:
             "suggested_action": run.escalation["suggested_action"],
         })
         self.pushParentMail(run, "子Agent升级", envelope, priority="high")
+        # S9：run 关联协作房间时，升级同步上墙（人在环闭环的房间呈现面）
+        try:
+            from neurova.agent.approval_chain import notifyRoomEscalation
+
+            notifyRoomEscalation(run, envelope)
+        except Exception as e:  # noqa: BLE001 - 房间投递失败不影响升级主流程
+            logger.debug("Swarm: 升级房间投递失败 (%s): %s", run.subagent_id, e)
         return envelope
 
     def recordSubmittedResult(

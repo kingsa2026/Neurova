@@ -2,6 +2,10 @@
 
 薄控制器：仅做鉴权、成员归属解析、编排调用；逻辑在 RoomStore/RoomBus/RoomTurnRouter。
 实时订阅复用既有 session_sync WS/SSE（session_id=room_id），此处不新增传输端点。
+
+S9：房间发言经 handleRoomSwarmReply 回灌蜂群审批/候选（人在环闭环）；另开
+审批判定 / 候选拦截 / pending 读面三个动作端点——鉴权复用既有三级谓词
+（admin/owner/成员），判定与拦截限群主/admin（群主制度），不新造权限体系。
 """
 from __future__ import annotations
 
@@ -23,6 +27,11 @@ class PostMessageBody(BaseModel):
     text: str
 
 
+class ApprovalDecisionBody(BaseModel):
+    decision: str  # approve | reject
+    note: str = ""
+
+
 class UpdateRoomBody(BaseModel):
     """编辑房间：名称/描述/默认应答者 + 期望成员全集（做增删 diff）。"""
 
@@ -40,6 +49,26 @@ def _require_project(room_id: str) -> Any:
     if project is None:
         raise HTTPException(status_code=404, detail=f"Room '{room_id}' not found")
     return project
+
+
+def _room_actor(current_user: Dict[str, Any]) -> str:
+    return str(current_user.get("user_id") or current_user.get("id") or "")
+
+
+def _require_room_member(project: Any, actor: str, current_user: Dict[str, Any]) -> None:
+    """三级鉴权谓词（admin/owner/成员）——房间全部动作端点共用同一判据。"""
+    members = project.members or {}
+    if not (current_user.get("role") == "admin" or actor == project.owner_id or actor in members):
+        raise HTTPException(status_code=403, detail="仅房间成员可执行该操作")
+
+
+def _require_room_decisioner(project: Any, actor: str, current_user: Dict[str, Any]) -> None:
+    """判定/拦截权限 = 群主（project.owner_id）或平台 admin（群主制度；与桥接同口径）。"""
+    _require_room_member(project, actor, current_user)
+    if not (current_user.get("role") == "admin" or actor == project.owner_id):
+        raise HTTPException(
+            status_code=403,
+            detail="仅群主或平台管理员可判定/拦截；普通成员的房间回复将记为议见")
 
 
 def _agent_display_name(agent_id: str) -> str:
@@ -95,17 +124,96 @@ async def post_room_message(
     text = (body.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text 不能为空")
-    actor = str(current_user.get("user_id") or current_user.get("id") or "")
+    actor = _room_actor(current_user)
     # §3.1-P2（2026-11-16 审计）：发言成员校验——与 update_room 同一判据
     # （admin/owner/成员）；否则任意登录用户可向任意房间写入并消耗他人 agent token。
-    members = project.members or {}
-    if not (current_user.get("role") == "admin" or actor == project.owner_id or actor in members):
-        raise HTTPException(status_code=403, detail="仅房间成员可发言")
+    _require_room_member(project, actor, current_user)
     meta = getattr(project, "metadata", {}) or {}
     await get_room_turn_router().handle_user_message(
         room_id, text, actor, _member_dicts(project), meta.get("responder_agent_id", "")
     )
-    return {"code": 0, "message": "success", "data": {"ok": True}}
+    # S9 人在环闭环：房间回复回灌蜂群审批/候选（无 pending 时为普通聊天，不动作）
+    from neurova.agent.approval_chain import handleRoomSwarmReply
+
+    bridge = handleRoomSwarmReply(
+        room_id, actor, isAdmin=current_user.get("role") == "admin", text=text)
+    return {"code": 0, "message": "success", "data": {"ok": True, "swarm_bridge": bridge}}
+
+
+@router.get("/rooms/{room_id}/swarm/pending")
+async def room_swarm_pending(
+    room_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """房间当前待裁决审批单与可拦截候选（S9 房间呈现面的读数）。"""
+    project = _require_project(room_id)
+    _require_room_member(project, _room_actor(current_user), current_user)
+    from neurova.agent.approval_chain import roomPendingApprovals, roomPendingCandidates
+
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "approvals": roomPendingApprovals(room_id),
+            "candidates": roomPendingCandidates(room_id),
+        },
+    }
+
+
+@router.post("/rooms/{room_id}/approvals/{request_id}/decide")
+async def decide_room_approval(
+    room_id: str,
+    request_id: str,
+    body: ApprovalDecisionBody,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """房间审批卡显式判定（群主/admin；普通成员走房间回复记议见）。"""
+    project = _require_project(room_id)
+    actor = _room_actor(current_user)
+    _require_room_decisioner(project, actor, current_user)
+    from neurova.agent.approval_chain import (
+        clearRoomApprovalPending,
+        decideSwarmApproval,
+    )
+    from neurova.collaboration.room_bus import publishRoomSystemMessage
+
+    result = decideSwarmApproval(
+        request_id, body.decision, note=str(body.note or ""),
+        decidedBy=actor, decidedByChannel="room",
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=409, detail=result.get("error", "裁决未生效"))
+    clearRoomApprovalPending(request_id)
+    verb = "批准" if body.decision == "approve" else "驳回"
+    publishRoomSystemMessage(
+        room_id,
+        f"【裁决】{actor} 已{verb}审批单 {request_id}（生效）",
+        meta={"kind": "swarm_approval", "request_id": request_id,
+              "status": result.get("status", ""), "decided_by": actor},
+    )
+    return {"code": 0, "message": "success", "data": result}
+
+
+@router.post("/rooms/{room_id}/candidates/{candidate_id}/{action}")
+async def room_candidate_action(
+    room_id: str,
+    candidate_id: str,
+    action: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """房间候选直接处置：intercept（拦截否决）/ merge（采纳 CAS 合入）——群主/admin。"""
+    project = _require_project(room_id)
+    actor = _room_actor(current_user)
+    _require_room_decisioner(project, actor, current_user)
+    act = str(action or "").strip().lower()
+    if act not in ("intercept", "merge"):
+        raise HTTPException(status_code=400, detail="action 仅支持 intercept/merge")
+    from neurova.agent.swarm import get_swarm_manager
+
+    outcome = get_swarm_manager().applyRoomCandidateAction(candidate_id, act, actor=actor)
+    if not outcome.get("success"):
+        raise HTTPException(status_code=409, detail=outcome.get("error", "候选处置未生效"))
+    return {"code": 0, "message": "success", "data": outcome}
 
 
 @router.put("/rooms/{room_id}")

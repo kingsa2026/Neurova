@@ -122,6 +122,16 @@ def _reboot_load() -> None:
 _load_store()
 
 
+def getTeamRoster(team_id: str) -> Optional[Dict[str, Any]]:
+    """只读读取团队名册（S9 蜂群动态组队消费；不改字段、不加写点）。
+
+    Returns:
+        团队 dict 的浅拷贝（members_detail 原样引用只读）；团队不存在返回 None。
+    """
+    team = _teams_store.get(str(team_id or "").strip())
+    return dict(team) if team else None
+
+
 # ---------------------------------------------------------------------------
 # 路由
 # ---------------------------------------------------------------------------

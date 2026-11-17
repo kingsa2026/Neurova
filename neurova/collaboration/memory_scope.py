@@ -17,6 +17,23 @@ DIRECT_SCOPE = "direct"
 #: 渠道群聊作用域前缀。与协作房间 `room:` 并列而**不同职**：房间里的听众是同一批登录
 #: 用户，群里的听众是外部第三方身份（飞书/telegram 的 open_id），所以群轮默认不召回个人记忆。
 CHANNEL_GROUP_PREFIX = "chgrp:"
+#: 蜂群 run 作用域前缀（S9 要点4）：一次蜂群 run 的跨成员共享黑板，与 `room:` 同构——
+#: 听众是该 run 的各成员 agent，读单聊基线语义继承 room（{direct, run:<id>}），群群隔离。
+RUN_SCOPE_PREFIX = "run:"
+
+_SCOPE_PREFIXES = ("room:", RUN_SCOPE_PREFIX, CHANNEL_GROUP_PREFIX)
+
+
+def isExplicitScope(tag: Any) -> bool:
+    """是否合法的显式作用域标签（direct / room:x / run:x / chgrp:x:y）。"""
+    tag = str(tag or "").strip()
+    if not tag:
+        return False
+    if tag == DIRECT_SCOPE:
+        return True
+    return any(
+        tag.startswith(p) and len(tag) > len(p) for p in _SCOPE_PREFIXES
+    )
 
 
 def turnScopeContext(metadata, session_id: str = "") -> Dict[str, Any]:
@@ -26,6 +43,10 @@ def turnScopeContext(metadata, session_id: str = "") -> Dict[str, Any]:
     仍打 `direct`，群内容反而比改前更不可见，而且没有任何一格会红。渠道群判据是
     `chat_type == "group"` 且带 `source_channel` + `chat_id`（三者由 `channel_router` 备齐），
     协作轮优先——两边同时成立时按协作处理，不叠加成第三种作用域。
+
+    S9：metadata 带合法显式 `chat_scope`（如蜂群 member 轮由 swarm 注入的
+    `room:<room_id>`）时经 `explicit_scope` 透传，优先级高于按 turn_origin/session_id
+    的推断——注入方负责标签正确性，本函数只认形态。
     """
     md = metadata or {}
     collab = md.get("turn_origin") == "collaboration"
@@ -33,12 +54,14 @@ def turnScopeContext(metadata, session_id: str = "") -> Dict[str, Any]:
     chatId = str(md.get("chat_id") or "")
     channelGroup = ((not collab) and str(md.get("chat_type") or "") == "group"
                     and bool(channel and chatId))
+    explicit = str(md.get("chat_scope") or "").strip()
     return {
         "collab": collab,
         "room_id": (session_id or "") if collab else "",
         "channel_group": channelGroup,
         "channel": channel if channelGroup else "",
         "chat_id": chatId if channelGroup else "",
+        "explicit_scope": explicit if isExplicitScope(explicit) else "",
     }
 
 
@@ -47,8 +70,14 @@ def _channelGroupTag(channel_group: bool, channel: str, chat_id: str) -> str:
 
 
 def scope_tag_for_turn(*, collab: bool = False, room_id: str = "", channel_group: bool = False,
-                       channel: str = "", chat_id: str = "") -> str:
-    """本轮写入应打的记忆作用域标签。"""
+                       channel: str = "", chat_id: str = "", explicit_scope: str = "") -> str:
+    """本轮写入应打的记忆作用域标签。
+
+    S9：显式 `explicit_scope`（来自 metadata.chat_scope，形态经 `isExplicitScope` 校验）
+    优先——蜂群 member 轮由 swarm 注入 `room:<room_id>`，写读两侧同走这一个标签。
+    """
+    if explicit_scope:
+        return explicit_scope
     if collab and room_id:
         return f"room:{room_id}"
     return _channelGroupTag(channel_group, channel, chat_id) or DIRECT_SCOPE
@@ -56,7 +85,7 @@ def scope_tag_for_turn(*, collab: bool = False, room_id: str = "", channel_group
 
 def allowed_scopes_for_turn(*, collab: bool = False, room_id: str = "",
                              channel_group: bool = False, channel: str = "",
-                             chat_id: str = "") -> Set[str]:
+                             chat_id: str = "", explicit_scope: str = "") -> Set[str]:
     """本轮可召回的作用域集。
 
     协作群 = direct + 本房间；渠道群 = **只有本群**；私聊 = 仅 direct。
@@ -65,7 +94,7 @@ def allowed_scopes_for_turn(*, collab: bool = False, room_id: str = "",
     """
     return allowed_scopes_for_tag(scope_tag_for_turn(
         collab=collab, room_id=room_id, channel_group=channel_group,
-        channel=channel, chat_id=chat_id))
+        channel=channel, chat_id=chat_id, explicit_scope=explicit_scope))
 
 
 def allowed_scopes_for_tag(turn_scope_tag: str) -> Set[str]:
@@ -74,11 +103,16 @@ def allowed_scopes_for_tag(turn_scope_tag: str) -> Set[str]:
     池的读侧只拿得到 `turn_scope` 这一个字符串（`context_pool._allowedRecallItems`），
     若那里另写一套 room/chgrp 判断，就会出现"写 chgrp: 读 {direct}"= 群归档永远召不回。
     渠道群只召回本群（不含 direct）的保守口径也在此唯一表达。
+    `run:<id>`（S9 蜂群共享黑板）与 `room:` 同构：direct 基线 + 本 run，群群隔离。
     """
     tag = turn_scope_tag or DIRECT_SCOPE
     if tag.startswith(CHANNEL_GROUP_PREFIX):
         return {tag}
-    if tag.startswith("room:") and len(tag) > len("room:"):
+    isRoomLike = (
+        (tag.startswith("room:") and len(tag) > len("room:"))
+        or (tag.startswith(RUN_SCOPE_PREFIX) and len(tag) > len(RUN_SCOPE_PREFIX))
+    )
+    if isRoomLike:
         return {DIRECT_SCOPE, tag}
     return {DIRECT_SCOPE}
 
@@ -111,7 +145,8 @@ def memory_scope(mem: Dict[str, Any]) -> str:
 
 
 def filter_by_scope(items, metadata_of, *, collab: bool = False, room_id: str = "",
-                    channel_group: bool = False, channel: str = "", chat_id: str = ""):
+                    channel_group: bool = False, channel: str = "", chat_id: str = "",
+                    explicit_scope: str = ""):
     """通用作用域过滤：`metadata_of(item)` 返回该条的 metadata dict。
 
     供记忆（relevant_memories）与上下文池归档（历史回忆）共用同一隔离规则；
@@ -119,16 +154,17 @@ def filter_by_scope(items, metadata_of, *, collab: bool = False, room_id: str = 
     """
     allowed = allowed_scopes_for_turn(collab=collab, room_id=room_id,
                                        channel_group=channel_group, channel=channel,
-                                       chat_id=chat_id)
+                                       chat_id=chat_id, explicit_scope=explicit_scope)
     return [it for it in (items or []) if scope_from_metadata(metadata_of(it)) in allowed]
 
 
 def filter_memories_by_scope(
     memories: List[Dict[str, Any]], *, collab: bool = False, room_id: str = "",
     channel_group: bool = False, channel: str = "", chat_id: str = "",
+    explicit_scope: str = "",
 ) -> List[Dict[str, Any]]:
     """按本轮允许作用域过滤召回结果（读侧单点闸口，防跨群/跨单聊泄漏）。"""
     allowed = allowed_scopes_for_turn(collab=collab, room_id=room_id,
                                        channel_group=channel_group, channel=channel,
-                                       chat_id=chat_id)
+                                       chat_id=chat_id, explicit_scope=explicit_scope)
     return [m for m in (memories or []) if memory_scope(m) in allowed]
