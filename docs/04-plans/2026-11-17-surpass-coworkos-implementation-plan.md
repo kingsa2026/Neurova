@@ -231,6 +231,28 @@ S1–S8 全部落地 ──→ S9 重评分与超越判定
 
 ---
 
+## 整合扩展：既有团队/群聊能力接入蜂群（响应用户追加问询，挂靠 S3/S4/S8 执行）
+
+> 结论：**可以整合，且有现成接缝**——但要按「人的监督面 + 共享产物面」整合，**不是**把群聊当多 agent 讨论解题器（AutoSwarm 方案"不做清单"明令禁止：论文实证去中心化讨论 39.32% < 单 agent 60.68%）。
+
+**仓内既有能力（开工前现场复核符号与行号）**
+- 协作房间：`neurova/collaboration/room_store.py`（room_id = 协作 project_id 的既有等式，复用 SessionRepository 零新表）、`room_bus.py`（广播）、`room_turn_router.py`（@路由 + 默认应答者，人→agent 已通）。
+- 团队名册：`neurova/api/endpoints/teams_api.py`（团队 + 成员 + 每成员职责 prompt + team prompt-context，JSON 落盘）。
+- 记忆作用域：`neurova/collaboration/memory_scope.py`（`direct` / `room:<room_id>` / `chgrp:` 三作用域，群群隔离，读写侧共用单源）。
+- ACP 多角色编排：`neurova/agent/team.py`（AgentTeam.add_member/orchestrate，task_assignment→task_result，共享 trace_id）。
+
+**接入点（按批挂靠，不另立批次）**
+1. **S3/S8 × 房间 = 人在环闭环（B4/E1 受益）**：SwarmManager 的 escalate 与审批链 L1/L2 的 ASK 投递到协作房间（sender_type=system/agent 的房间消息）；人在房间回复 → 经新桥接（approval_chain ↔ room_bus 的 pending-approval 匹配）回灌 `decideSwarmApproval`。审批审计（S8）天然多了一个人类可读的呈现面。红线：房间只做"呈现 + 应答回灌"，判定权仍在审批链单源。
+2. **S4 × 房间/项目 = 候选制的产品面（B5 受益）**：CandidateReport 的 submitted/merged/conflict 事件投递到所属房间，人在房间里可直接拦截合并（COS 的 B5 锚点"人工可拦截"由此落地）；artifactKeys 优先指向协作 project 的既有产物空间。
+3. **团队名册 × spawn = 动态组队（A1 受益，现分 2vs3）**：spawn 支持从团队名册按成员职责 prompt 选人（list_agents 辅助选人已有），角色复用 `collaboration_template.AgentRole`——补"按任务动态组队"缺口；不引入角色辩护等重机制。
+4. **memory_scope × 蜂群 = 共享黑板（D1/D2 受益）**：蜂群 run 的跨成员共享记忆复用 `room:<room_id>` 作用域语义（或并列新增 `run:<run_id>` 作用域，与 room/chgrp 同构），群群隔离与"读单聊基线"语义直接继承，不新造作用域体系。
+5. **AgentTeam 与 Swarm 的双实现取舍（教义第 7 条）**：两者定位不同——AgentTeam 是 ACP 面向外部 agent 的步骤编排，Swarm 是进程内子代理治理（评测评分对象）。初步裁定**双轨保留、边界写清**（外部协作 vs 内部蜂群），但 S3/S4 落地时必须复核两者是否出现同功能重复点；出现即按"先比后合"收口，不并存各调各的。
+
+**红灯/验收（随挂靠批走）**：升级与审批消息在房间可见且回复能回灌判定（S3/S8 测试内）；候选合并事件在房间可查、人工拦截生效（S4 测试内）；团队选人 spawn 的测试（S4 或独立小测试）。
+**避坑**：房间消息走既有 RoomBus/RoomStore，**零新表零新协议**；不要在房间里做自由讨论式多 agent 解题（违反 AutoSwarm 方案不做清单）；房间持久层复用 SessionRepository，勿另写存储。
+
+---
+
 ## 附录 A：共享避坑清单（每批开工前必读）
 
 1. **A/B 必须串行**：pytest 并行曾致全仓 AST 扫描档（`test_theTakeoverTableMatchesTheSharedEntry` 一族）超时假红。涉及共享文件的批次，提交前 `git stash push -- <本批文件>` → 跑套件 → `git stash pop`，失败清单逐条比对，**新增失败才算回归**。trio（agent+collaboration+benchmark）约 4 分钟，api 约 8.5 分钟。
