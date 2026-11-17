@@ -44,8 +44,8 @@ OWNER_AGENT = "agent"        # 重试或换一条能力路径即可
 
 CAPABILITY_TTL_SECONDS = 5.0
 
-#: 面板全集：截图 / 输入 / UIA / aria / camofox / 视觉
-CAPABILITY_NAMES = ("screenshot", "input", "uia", "aria", "camofox", "vision")
+#: 面板全集：截图 / 输入 / UIA / aria / camofox / 视觉 / SOM
+CAPABILITY_NAMES = ("screenshot", "input", "uia", "aria", "camofox", "vision", "som")
 
 
 @dataclass(frozen=True)
@@ -227,6 +227,23 @@ def camofoxReachable(url: str, timeoutSeconds: float = 1.5) -> typing.Tuple[bool
         return False, f"{type(e).__name__}: {e}"
 
 
+def _probeSom(_manager=None) -> CapabilityReading:
+    """som 轴（P3-10）：如实标注当前检测器档位——启发式是"可用"档，
+    但不是完整视觉理解（ONNX/OCR 未接入），reason 里点名，不给虚假读数。"""
+    try:
+        from neurova.computer_use.som import get_som_detector, somDetectorName
+
+        if get_som_detector() is not None:
+            return CapabilityReading(
+                "som", CAP_AVAILABLE, OWNER_AGENT,
+                f"SOM 检测器={somDetectorName()}（启发式：边缘+连通域；ONNX/OCR 未接入）",
+            )
+    except Exception as e:  # noqa: BLE001 — 探测失败是读数，不是崩溃
+        return CapabilityReading("som", CAP_NOT_CONFIGURED, OWNER_HOST,
+                                 f"SOM 检测器不可用：{type(e).__name__}: {e}")
+    return CapabilityReading("som", CAP_NOT_CONFIGURED, OWNER_HOST, "SOM 检测器未配置")
+
+
 def _probeVision(_manager=None) -> CapabilityReading:
     """视觉轴的证据次序：实测（学习型缓存）> provider 声明 > 没有证据=`unknown`。
 
@@ -318,6 +335,7 @@ def reading(name: str, *, refresh: bool = False, manager: typing.Any = None) -> 
         "aria": _probeAria,
         "camofox": _probeCamofox,
         "vision": _probeVision,
+        "som": _probeSom,
     }
     probe = probes.get(name)
     if probe is None:
