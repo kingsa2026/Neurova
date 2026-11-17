@@ -2261,6 +2261,7 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
     actSomSnapshot: 'Générer un instantané annoté SOM',
     actClickMark: 'Cliquer la marque SOM {id}',
     actSsh: 'SSH {host} : {cmd}',
+    actListWindows: 'Lister les fenêtres du bureau',
     actBrowserDomSnapshot: "Capturer l'instantané d'accessibilité de la page",
     actBrowserDomRead: "Lire l'instantané de la page par fragments",
     actBrowserClickRole: 'Cliquer {role} « {name} »',

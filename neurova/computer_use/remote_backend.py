@@ -61,6 +61,10 @@ class RemoteComputerUseManager:
             "window_title": window_title, "generation": generation,
         })
 
+    def list_windows(self, limit: int = 50) -> Dict[str, Any]:
+        """枚举来宾桌面顶层窗口（与本地 DesktopUIAManager.list_windows 同签名）"""
+        return self._client.action("list_windows", {"limit": limit})
+
     # ── 能力声明（远程恒 background 投递）──────────────────────
 
     def input_available(self) -> bool:

@@ -70,6 +70,7 @@ COMPUTER_USE_TOOLS = frozenset(
         "computer_som_snapshot",
         "computer_click_mark",
         "computer_ssh_exec",
+        "computer_list_windows",
         "browser_navigate",
         "browser_click",
         "browser_type",
@@ -159,6 +160,7 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "computer_set_value": frozenset({"value", "index", "runtime_id", "window_title", "generation"}),
     "computer_som_snapshot": frozenset(),
     "computer_click_mark": frozenset({"index", "button", "frame_id"}),
+    "computer_list_windows": frozenset(),
     "computer_ssh_exec": frozenset({"host", "command", "user", "port", "timeout"}),
     "browser_navigate": frozenset({"url", "generation"}),
     "browser_click": frozenset({"selector", "text"}),
@@ -403,6 +405,7 @@ class ToolExecutor:
         "computer_som_snapshot": "_execute_computer_som_snapshot",
         "computer_click_mark": "_execute_computer_click_mark",
         "computer_ssh_exec": "_execute_computer_ssh_exec",
+        "computer_list_windows": "_execute_computer_list_windows",
         "browser_navigate": "_execute_browser_navigate",
         "browser_click": "_execute_browser_click",
         "browser_type": "_execute_browser_type",
@@ -6542,6 +6545,17 @@ class ToolExecutor:
         except Exception as e:
             logger.error("桌面快照失败: %s", e)
             return {"error": f"桌面快照失败: {str(e)}"}
+
+    async def _execute_computer_list_windows(self, params: Dict) -> Dict:
+        """枚举桌面顶层窗口（P2-6；观察面：定位目标窗口/确认应用在跑）"""
+        try:
+            manager = self._desktop_uia()
+            result = await asyncio.to_thread(manager.list_windows)
+            await self._emit_computer_event("computer_list_windows", params, result)
+            return result
+        except Exception as e:
+            logger.error("窗口枚举失败: %s", e)
+            return {"error": f"窗口枚举失败: {str(e)}"}
 
     async def _execute_computer_click_element(self, params: Dict) -> Dict:
         """按快照元素点击桌面控件（五级递降链，默认不抢焦点）"""

@@ -373,6 +373,16 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["index"],
         },
     },
+    "computer_list_windows": {
+        # 并行能力声明：只读（窗口清单枚举，读共享桌面的瞬时状态）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
+        "description": "【窗口清单】枚举桌面顶层窗口（标题/类名/PID/矩形/是否前台）。用于定位目标窗口（配合 computer_dom_snapshot 的 window_title 参数）或确认某应用是否在跑。只读动作，无副作用。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
     "computer_ssh_exec": {
         # 壳方言声明：command 文本交给真 shell 执行（|/;/&& 是命令连接符），
         # 故它必须走分段审批面（成员资格收口到本声明，见 governance.listSegmentedShellTools）。

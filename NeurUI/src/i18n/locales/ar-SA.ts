@@ -2261,6 +2261,7 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     actSomSnapshot: 'إنشاء لقطة مؤرقة SOM',
     actClickMark: 'النقر على علامة SOM {id}',
     actSsh: 'SSH {host}: {cmd}',
+    actListWindows: 'سرد نوافذ سطح المكتب',
     actBrowserDomSnapshot: 'التقاط لقطة إتاحة الصفحة',
     actBrowserDomRead: 'قراءة لقطة الصفحة على أجزاء',
     actBrowserClickRole: 'النقر على {role} «{name}»',

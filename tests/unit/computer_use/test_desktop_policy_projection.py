@@ -61,6 +61,8 @@ PINNED_DECISIONS = {
     "computer_set_value": ("proceed", "require_sandbox", "require_approval", "require_sandbox"),
     "computer_shell": ("proceed", "require_sandbox", "require_approval", "require_sandbox"),
     "computer_ssh_exec": ("proceed", "proceed", "require_approval", "proceed"),
+    # P2-6：窗口枚举是只读动作，任何档直接放行（与截图/快照同档）
+    "computer_list_windows": ("proceed", "proceed", "proceed", "proceed"),
 }
 
 MODES = ("full", "sandbox", "review", "auto")
@@ -177,6 +179,7 @@ class TestMembersMatchDeclarationSurface:
             "computer_screenshot",
             "computer_dom_snapshot",
             "computer_som_snapshot",
+            "computer_list_windows",
         }
         assert rp.desktopHighRiskTools() == {"computer_shell", "computer_ssh_exec"}
         assert rp.desktopRemoteExecutionTools() == {"computer_ssh_exec"}

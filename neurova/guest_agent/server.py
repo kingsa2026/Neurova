@@ -99,6 +99,10 @@ def create_app(manager: Any = None, uia_manager: Any = None, token: Optional[str
                 )
             if kind in ("dom_snapshot", "click_element", "set_value"):
                 return await asyncio.to_thread(_uia_action, kind, p, _uia_mgr())
+            if kind == "list_windows":
+                return await asyncio.to_thread(
+                    _uia_mgr().list_windows, int(p.get("limit") or 50)
+                )
             return {"error": f"guest agent 未知动作: {kind}"}
         except Exception as e:  # noqa: BLE001 — guest 语义：错误也回结构化
             logger.warning("guest agent 动作 %s 失败: %s", kind, e)

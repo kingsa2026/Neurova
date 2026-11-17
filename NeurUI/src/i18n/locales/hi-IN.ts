@@ -2261,6 +2261,7 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     actSomSnapshot: 'SOM अंकित स्नैपशॉट बनाएँ',
     actClickMark: 'SOM मार्क {id} पर क्लिक करें',
     actSsh: 'SSH {host}: {cmd}',
+    actListWindows: 'डेस्कटॉप विंडो सूचीबद्ध करें',
     actBrowserDomSnapshot: 'पेज का एक्सेसिबिलिटी स्नैपशॉट लें',
     actBrowserDomRead: 'पेज स्नैपशॉट को खंडों में पढ़ें',
     actBrowserClickRole: '{role} "{name}" पर क्लिक करें',
