@@ -253,6 +253,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "x": {"type": "number", "description": "X 坐标"},
                 "y": {"type": "number", "description": "Y 坐标"},
                 "button": {"type": "string", "description": "鼠标按钮", "default": "left"},
+                "frame_id": {"type": "string", "description": "可选。最近一次 computer_screenshot/computer_som_snapshot 返回的帧 id；携带时校验帧新鲜度，画面已变则拒绝（stale_frame）并要求重新观察"},
             },
             "required": ["x", "y"],
         },
@@ -367,6 +368,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "properties": {
                 "index": {"type": "integer", "description": "SOM 编号（来自 computer_som_snapshot 的 marks.id）"},
                 "button": {"type": "string", "description": "鼠标按钮 left/right/middle", "default": "left"},
+                "frame_id": {"type": "string", "description": "可选。最近一次 computer_som_snapshot 返回的帧 id；携带时校验帧新鲜度，画面已变则拒绝（stale_frame）并要求重新快照"},
             },
             "required": ["index"],
         },
