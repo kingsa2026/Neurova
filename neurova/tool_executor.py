@@ -462,6 +462,9 @@ class ToolExecutor:
         "submit_result": "_execute_submit_result",
         # P2（工具清单 3.1-3 续）：续跑已终态的子代理（失败交接的复活通道）
         "continue_subagent": "_execute_continue_subagent",
+        # P3-1（评测报告 G-11）：跨 agent 审批链——子代理请求 / 父代理裁决
+        "request_approval": "_execute_request_approval",
+        "decide_subagent_approval": "_execute_decide_approval",
         "create_skill": "_execute_create_skill",
         # 构建问询：写 BuildSession 交互并返回 paused，回答后由面板恢复
         "ask_user": "_execute_ask_user",
@@ -2510,6 +2513,59 @@ class ToolExecutor:
             "status": envelope.get("status"),
             "guidance": "结果已提交并通知主代理；请在最终回复中重述要点",
         }
+
+    async def _execute_request_approval(self, params: Dict) -> Dict:
+        """P3-1（评测报告 G-11）：子代理运行中权限请求（跨 agent 审批链）。
+
+        仅子代理运行内可用；L0/auto_approve-L1 自动放行，L1 代理给父，L2 强制人工。
+        """
+        from neurova.agent.approval_chain import requestRunApproval
+        from neurova.agent.swarm import get_swarm_manager
+        from neurova.core.turn_context import get_turn_session_id
+
+        action = str(params.get("action") or "").strip()
+        if not action:
+            return {"success": False, "error": "request_approval 需要 action（要请求执行的操作）"}
+        memberSession = get_turn_session_id()
+        run = (
+            get_swarm_manager().getRunByMemberSession(memberSession)
+            if memberSession
+            else None
+        )
+        if run is None:
+            return {
+                "success": False,
+                "error": "仅子代理运行内可发起审批（当前调用不在子代理上下文）",
+            }
+        try:
+            result = await requestRunApproval(
+                run,
+                action,
+                reason=str(params.get("reason") or ""),
+                level=str(params.get("level") or "L1"),
+                context=str(params.get("context") or ""),
+            )
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+        guidance = (
+            "已获准：请继续执行该操作并在报告中说明"
+            if result.get("approved")
+            else "未获准：不要执行该操作；如仍必要，请在最终回复中说明并升级（escalate）"
+        )
+        return {"success": True, **result, "guidance": guidance}
+
+    async def _execute_decide_approval(self, params: Dict) -> Dict:
+        """P3-1（评测报告 G-11）：主代理裁决子代理审批单（decide_subagent_approval）。
+
+        不限子代理上下文（父代理/主会话侧调用）；只认蜂群审批单，幂等。
+        """
+        from neurova.agent.approval_chain import decideSwarmApproval
+
+        return decideSwarmApproval(
+            str(params.get("request_id") or ""),
+            str(params.get("decision") or ""),
+            note=str(params.get("note") or ""),
+        )
 
     async def _execute_builtin_tool(self, tool_name: str, params: Dict) -> Dict:
         """执行内置工具(分派表驱动,见 _builtin_dispatch 注释)"""
