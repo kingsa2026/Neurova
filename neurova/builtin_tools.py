@@ -1345,6 +1345,80 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["name", "members"],
         },
     },
+    "project_create": {
+        # 并行能力声明：写共享项目存储（collaboration_isolation 单源）+ 审批单副作用。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【发起项目】agent 发起创建一个协作项目（创建即建协作房间：project_id=room_id）。直接可建，但强制审计与预算入账；项目所有者记为发起 agent 的属主用户，发起 agent 自动成为项目成员。治理约束：新增人类成员（memberUserIds）或把可见性放宽为 team 走审批链 L1（人批准才生效，未批准不生效）；对外公开（public）不开放给 agent——L2 判定保留给人。名称/描述过数据面围栏扫描（命中只标记不阻断）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "项目名称（必填）"},
+                "description": {"type": "string", "description": "项目描述"},
+                "visibility": {
+                    "type": "string",
+                    "enum": ["private", "team"],
+                    "description": "可见性：private 仅成员可见（默认）；team 团队可见（需 L1 审批）。public 对外分享不开放给 agent（L2 保留给人）",
+                },
+                "memberAgentIds": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "直接加入的 agent 成员 id 列表（可选）",
+                },
+                "memberUserIds": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "拟加入的人类用户 id 列表（可选）——影响人必须过人：走 L1 审批，未批准不生效",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    "project_list": {
+        # 并行能力声明：只读项目名册快照（collaboration_isolation 内存态读）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
+        "description": "【列出项目】列出当前 agent 可见的项目：自己是成员的、属主用户参与的、以及公开项目。返回项目 id（同时是协作房间 room_id）、名称、可见性、initiator 标（agent 发起的项目带 initiator=agent）。配合 project_detail 查看详情。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    "project_detail": {
+        # 并行能力声明：只读项目详情快照（collaboration_isolation 内存态读）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
+        "description": "【项目详情】查看单个项目的成员、可见性、状态、团队/任务计数与 initiator 标。仅对当前 agent 可见的项目返回（非成员且非公开一律拒绝）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_id": {
+                    "type": "string",
+                    "description": "项目 ID（project_list 返回的 project_id，同时是协作房间 room_id）",
+                },
+            },
+            "required": ["project_id"],
+        },
+    },
+    "room_post": {
+        # 并行能力声明：向共享房间投递消息（RoomStore 落库 + 事件广播）。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【房间发言】向自己所在的项目协作房间发一条消息（kind=report 进展汇报 / question 提问 / note 备注）。仅限自己为成员的房间（非成员一律拒绝）；治理限频防刷屏（超频被拒）。审批/升级/候选请走既有专用通道（request_approval / escalate / submit_result），本工具是通用发言面。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_id": {
+                    "type": "string",
+                    "description": "项目/房间 ID（project_id=room_id）",
+                },
+                "message": {"type": "string", "description": "消息内容（非空）"},
+                "kind": {
+                    "type": "string",
+                    "enum": ["report", "question", "note"],
+                    "description": "消息种类：report 进展汇报 / question 提问 / note 备注（默认 note）",
+                },
+            },
+            "required": ["project_id", "message"],
+        },
+    },
     "subagent_status": {
         # 并行能力声明：只读蜂群运行记录（SwarmManager 的 status/list_all 在 RLock 下读内存态）。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
@@ -2376,6 +2450,9 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "dispatch_team",
     # 团队沉淀提议（S10）：重放会重复建审批单/重复写团队
     "propose_team",
+    # 项目发起/房间发言（S13）：重放会建出第二个项目/重复投递房间消息
+    "project_create",
+    "room_post",
     # 子代理续跑：等价一次新派生（member 会话续写 + 邮箱投递），重放制造新运行
     "continue_subagent",
     # 跨 agent 审批链（P3-1）：建单/裁决都改共享审批状态，重放制造第二张审批单
@@ -2384,6 +2461,16 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "cancel_subagent",
     # 多步编排：内层步进可能含任意写操作，重放制造新变更
     "orchestrate_tools",
+})
+
+# S13：主 agent 专属工具（成员工具面剔除集——S10 先例 ``MEMBER_EXCLUDED_TOOLS``
+# 的项目/群聊扩容项）。声明单源在本文件；执行咽喉（ToolExecutor._execute_single_tool）
+# 对成员上下文（子代理白名单已绑定）强制结构化拒绝。
+# 声明式并集收口移交：swarm.computeSubagentToolAllowlist 的 MEMBER_EXCLUDED_TOOLS
+# 待与本集取并（swarm.py 本批次为另一会话在途文件，避免双写冲突——收口后成员
+# 白名单在派生期即不含这些工具，执行咽喉的门保留为纵深防御）。
+MAIN_AGENT_ONLY_TOOLS = frozenset({
+    "project_create", "project_list", "project_detail", "room_post",
 })
 
 

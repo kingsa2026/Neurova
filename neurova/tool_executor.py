@@ -45,6 +45,106 @@ logger = get_logger(__name__)
 
 
 # ════════════════════════════════════════════════════════════════
+# S13 项目/群聊 agent 工具面：治理状态与审计/入账单点
+# ════════════════════════════════════════════════════════════════
+
+#: 项目治理审批的 pending 快照（request_id → 申请内容）——人批准后由
+#: decide_subagent_approval 工具路径经 applyProjectGovernanceDecision 回灌生效
+#: （与 teams_api._pendingTeamProposals 同形；房间裁决路径的同步等待由
+#: requestRunApproval 的 waiter 预算覆盖）。
+_pendingProjectGovernance: Dict[str, Dict[str, Any]] = {}
+_pendingProjectGovernanceLock = threading.RLock()
+_PENDING_PROJECT_GOVERNANCE_MAX = 200
+
+#: room_post 治理限频的滑动窗口（agent_id → 窗口内发言时间戳）；参数见
+#: ToolExecutor.ROOM_POST_RATE_LIMIT_MAX / ROOM_POST_RATE_WINDOW_SECONDS。
+_roomPostTimestamps: Dict[str, List[float]] = {}
+_roomPostRateLock = threading.RLock()
+
+
+def _registerPendingProjectGovernance(requestId: str, snapshot: Dict[str, Any]) -> None:
+    """登记待批项目治理快照（有界，防无审结的登记表无限增长）。"""
+    with _pendingProjectGovernanceLock:
+        if requestId not in _pendingProjectGovernance and len(_pendingProjectGovernance) >= _PENDING_PROJECT_GOVERNANCE_MAX:
+            oldest = next(iter(_pendingProjectGovernance))
+            _pendingProjectGovernance.pop(oldest, None)
+        _pendingProjectGovernance[requestId] = snapshot
+
+
+def applyProjectGovernanceDecision(requestId: str, decidedBy: str = "") -> Dict[str, Any]:
+    """审批批准后回灌项目治理申请（人类成员写入/可见性放宽）。
+
+    与 teams_api.applyTeamProposalDecision 同形：无登记返回 applied=False；
+    批准才动项目数据（人批准才生效），并落审计台账。
+    """
+    with _pendingProjectGovernanceLock:
+        snapshot = _pendingProjectGovernance.pop(requestId, None)
+    if not snapshot:
+        return {"applied": False}
+    from neurova.collaboration.collaboration_isolation import (
+        MemberRole,
+        ProjectVisibility,
+        get_collaboration_manager,
+    )
+
+    iso = get_collaboration_manager()
+    project = iso.get_project(str(snapshot.get("project_id") or ""))
+    if project is None:
+        return {"applied": False, "reason": "project_missing"}
+    added: List[str] = []
+    for uid in snapshot.get("member_user_ids") or []:
+        if uid and not project.is_member(uid):
+            project.add_member(uid, MemberRole.VIEWER, invited_by=snapshot.get("agent_id") or None)
+            added.append(uid)
+    visibilityApplied = ""
+    if snapshot.get("visibility") == "team":
+        project.visibility = ProjectVisibility.TEAM
+        project.updated_at = time.time()
+        visibilityApplied = "team"
+    iso._save_project(project)
+    _auditProjectAction("project_governance_applied", project.project_id, {
+        "request_id": requestId, "added_members": added,
+        "visibility": visibilityApplied, "decided_by": decidedBy,
+        "initiator": "agent",
+    })
+    return {"applied": True, "added_members": added, "visibility": visibilityApplied}
+
+
+def _auditProjectAction(action: str, projectId: str, details: Dict[str, Any],
+                        severity: str = "medium") -> None:
+    """S13 项目工具审计单点（强制台账；失败不阻断主流程，日志可见）。"""
+    try:
+        from neurova.security.audit_logger import (
+            AuditEventType,
+            AuditLogEntry,
+            AuditSeverity,
+            get_audit_logger,
+        )
+
+        get_audit_logger().log(AuditLogEntry(
+            event_type=AuditEventType.TOOL_EXECUTION,
+            severity=AuditSeverity(severity),
+            user_id=str(details.get("owner_user_id") or details.get("agent_id") or ""),
+            action=action,
+            resource_type="project",
+            resource_id=projectId,
+            details=dict(details),
+        ))
+    except Exception as e:  # noqa: BLE001 - 审计故障不阻断工具主流程
+        logger.warning("项目审计落账失败 (%s/%s): %s", action, projectId, e)
+
+
+def _ledgerProjectEvent(eventName: str, agentId: str, context: Dict[str, Any]) -> None:
+    """项目生命周期事件入成本账本（outbox 出口单源；失败不阻断）。"""
+    try:
+        from neurova.collaboration.cost_ledger_integration import on_collaboration_event
+
+        on_collaboration_event(eventName, [agentId] if agentId else [], context)
+    except Exception as e:  # noqa: BLE001 - 入账故障不阻断工具主流程
+        logger.warning("项目事件入账失败 (%s): %s", eventName, e)
+
+
+# ════════════════════════════════════════════════════════════════
 # S6 工具结果有界投影（D3）：与既有折叠/句柄机制合流的体量闸门
 # ════════════════════════════════════════════════════════════════
 
@@ -546,6 +646,11 @@ class ToolExecutor:
         "list_teams": "_execute_list_teams",
         "dispatch_team": "_execute_dispatch_team",
         "propose_team": "_execute_propose_team",
+        # S13：项目/群聊 agent 工具面（主 agent 专属，成员上下文在执行咽喉拒绝）
+        "project_create": "_execute_project_create",
+        "project_list": "_execute_project_list",
+        "project_detail": "_execute_project_detail",
+        "room_post": "_execute_room_post",
         "list_agents": "_execute_list_agents",
         # P2-10 增强：子代理升级/结构化结果提交
         "escalate": "_execute_escalate",
@@ -614,6 +719,11 @@ class ToolExecutor:
 
     # calculator 指数上限 — 防止 9**999999999 这类表达式撑爆内存
     _CALC_MAX_EXPONENT = 10000
+
+    # S13 room_post 治理限频（防刷屏消耗他人 token）——滑动窗口参数，具名常量
+    ROOM_POST_RATE_LIMIT_MAX = 10
+    ROOM_POST_RATE_WINDOW_SECONDS = 60.0
+    _ROOM_POST_KINDS = ("report", "question", "note")
 
     def __init__(self, agent_ref):
         """
@@ -1445,6 +1555,20 @@ class ToolExecutor:
                 "error": (
                     f"子代理工具面不含该工具: {tool_name}"
                     "（蜂群派生时已按子代理类型收窄工具面）"
+                ),
+            }
+        # S13：主 agent 专属工具的成员面剔除——声明集 builtin_tools.MAIN_AGENT_ONLY_TOOLS
+        # （S10 MEMBER_EXCLUDED_TOOLS 的项目/群聊扩容项）。成员上下文（白名单已绑定）
+        # 一律结构化拒绝；声明式并集收口前由本门兜住（先于治理/审批，不可 bypass）。
+        from neurova.builtin_tools import MAIN_AGENT_ONLY_TOOLS
+
+        if _toolAllowlist is not None and tool_name in MAIN_AGENT_ONLY_TOOLS:
+            return {
+                "success": False,
+                "code": "subagent_tool_not_allowed",
+                "error": (
+                    f"子代理工具面不含该工具: {tool_name}"
+                    "（主 agent 专属工具，成员上下文不可用）"
                 ),
             }
         try:
@@ -2717,6 +2841,15 @@ class ToolExecutor:
                     result["team_created"] = applied.get("team")
             except Exception as e:  # noqa: BLE001 - 沉淀回灌失败不影响裁决本身
                 logger.warning("团队沉淀回灌失败 (%s): %s", requestId, e)
+            # S13：项目治理申请（人类成员/可见性放宽）批准后同点回灌——
+            # 与团队沉淀同一裁决出口，人批准才动项目数据。
+            try:
+                projectApplied = applyProjectGovernanceDecision(
+                    requestId, decidedBy=str(result.get("decided_by") or ""))
+                if projectApplied.get("applied"):
+                    result["project_governance_applied"] = projectApplied
+            except Exception as e:  # noqa: BLE001 - 回灌失败不影响裁决本身
+                logger.warning("项目治理回灌失败 (%s): %s", requestId, e)
         return result
 
     async def _execute_builtin_tool(self, tool_name: str, params: Dict) -> Dict:
@@ -3208,6 +3341,326 @@ class ToolExecutor:
             "status": result.get("status"),
             "hint": "团队沉淀提议已进入审批（L1）：人批准后才写入团队列表，"
                     "agent 不得自行立队",
+        }
+
+    # ── S13：项目/团队/群聊 agent 工具面 ──────────────────────────────
+    # 项目数据单源 = collaboration_isolation（projects_api 同源，不另建存储）；
+    # 房间 = project_id 等式（RoomStore/RoomBus 复用），创建即建房间零接线。
+    # 治理：名称/描述/发言过 context_firewall（发现而不裁决）；人类成员与可见性
+    # 放宽走审批链 L1（影响人必须过人，未批准不生效）；对外公开（L2）不开放给
+    # agent；room_post 治理限频防刷屏。全部工具经执行咽喉（治理三明治+台账）。
+
+    async def _execute_project_create(self, params: Dict) -> Dict:
+        """agent 发起项目：直接可建 + 强制审计/预算入账 + 创建即建房间。
+
+        owner 记为发起 agent 的属主用户（config.owner_user_id，缺省回落请求级
+        身份）；发起 agent 自动成为成员（否则 room_post 的成员判据会把它挡在
+        自己建的房间外）。治理：memberUserIds（人类成员）与 visibility=team
+        （可见性放宽）走审批链 L1——未批准不生效；visibility=public 直接拒绝
+        （对外分享属 L2 决策，保留给人）。
+        """
+        from neurova.agent.context_firewall import scanInjectionFeatures
+        from neurova.collaboration.collaboration_isolation import (
+            MemberRole,
+            ProjectVisibility,
+            get_collaboration_manager,
+        )
+
+        name = str(params.get("name") or "").strip()
+        if not name:
+            return {"error": "缺少 name 参数（项目名称）"}
+        description = str(params.get("description") or "")
+        visibilityReq = str(params.get("visibility") or "private").strip().lower()
+        if visibilityReq == "public":
+            return {
+                "error": "agent 不得把项目设为对外公开（public）——对外分享属 L2 决策，保留给用户",
+                "code": "visibility_l2_reserved_for_human",
+            }
+        if visibilityReq not in ("private", "team"):
+            return {"error": f"visibility 仅支持 private/team，收到: {visibilityReq}"}
+        memberAgentIds = [str(x).strip() for x in (params.get("memberAgentIds") or []) if str(x).strip()]
+        memberUserIds = [str(x).strip() for x in (params.get("memberUserIds") or []) if str(x).strip()]
+
+        userId, agentId = self._agent_identity()
+        config = getattr(self._agent, "config", None)
+        ownerUserId = str(getattr(config, "owner_user_id", "") or userId or "default")
+
+        # 数据面围栏：名称/描述过注入特征扫描（发现而不裁决——命中只标记+告警，
+        # 与 spawn 任务书同纪律；是否继续由人与治理面决定）
+        firewallHits = scanInjectionFeatures(name) + scanInjectionFeatures(description)
+        if firewallHits:
+            logger.warning("project_create 名称/描述命中注入特征（只标记）: %s", firewallHits)
+
+        iso = get_collaboration_manager()
+        project = iso.create_project(
+            name=name,
+            description=description,
+            owner_id=ownerUserId,
+            visibility=ProjectVisibility.PRIVATE,
+            metadata={
+                "initiator": "agent",
+                "initiator_agent_id": agentId or "",
+                "initiator_owner_user_id": ownerUserId,
+                "created_via": "project_create_tool",
+                "visibility_requested": visibilityReq,
+            },
+        )
+        if project is None:
+            return {"error": "项目创建失败（collaboration_isolation 拒绝）"}
+        if agentId and not project.is_member(agentId):
+            project.add_member(agentId, MemberRole.ADMIN, invited_by=agentId)
+        for aid in memberAgentIds:
+            if aid != agentId and not project.is_member(aid):
+                project.add_member(aid, MemberRole.EDITOR, invited_by=agentId or None)
+        iso._save_project(project)
+
+        # ── 治理 ASK：人类成员 / 可见性放宽（影响人必须过人；未批准不生效）──
+        needsAsk = bool(memberUserIds) or visibilityReq == "team"
+        pending = False
+        requestId = ""
+        askStatus = ""
+        if needsAsk:
+            import uuid as _uuid
+
+            from types import SimpleNamespace
+
+            from neurova.agent.approval_chain import requestRunApproval
+
+            askParts = []
+            if memberUserIds:
+                askParts.append(f"新增人类成员 {','.join(memberUserIds)}")
+            if visibilityReq == "team":
+                askParts.append("可见性放宽为 team")
+            # 审批链需要 run 形状的载体（同 propose_team 先例：轻量载体，不进 _runs）；
+            # room_id 带上项目 id——审批卡上墙到项目自己的房间（S9 人在环）。
+            runLike = SimpleNamespace(
+                agent_id=agentId or "default",
+                agent_name=(getattr(config, "name", "") or "主代理"),
+                subagent_id=f"project_gov_{_uuid.uuid4().hex[:8]}",
+                member_session_id="",
+                session_id=getattr(self._agent, "current_session_id", None),
+                task=f"项目「{name}」治理申请：{'；'.join(askParts)}",
+                origin="chat",
+                room_id=project.project_id,
+                approvals=[],
+            )
+            ask = await requestRunApproval(
+                runLike,
+                action=f"project_governance: {'; '.join(askParts)}",
+                reason=f"agent 发起项目「{name}」的治理申请（影响人必须过人）",
+                level="L1",
+                context="project_governance",
+            )
+            requestId = str(ask.get("request_id") or "")
+            askStatus = str(ask.get("status") or "")
+            if ask.get("approved"):
+                for uid in memberUserIds:
+                    if uid and not project.is_member(uid):
+                        project.add_member(uid, MemberRole.VIEWER, invited_by=agentId or None)
+                if visibilityReq == "team":
+                    project.visibility = ProjectVisibility.TEAM
+                iso._save_project(project)
+            else:
+                pending = True
+                if requestId:
+                    _registerPendingProjectGovernance(requestId, {
+                        "project_id": project.project_id,
+                        "member_user_ids": memberUserIds,
+                        "visibility": "team" if visibilityReq == "team" else "",
+                        "agent_id": agentId or "",
+                        "project_name": name,
+                    })
+
+        # ── 强制审计 + 预算入账（直接可建 ≠ 免账）──
+        _auditProjectAction("project_create", project.project_id, {
+            "initiator": "agent", "agent_id": agentId or "",
+            "owner_user_id": ownerUserId, "name": name,
+            "visibility_requested": visibilityReq,
+            "member_agent_ids": memberAgentIds, "member_user_ids": memberUserIds,
+            "firewall_hits": firewallHits,
+            "governance": ("pending" if pending else ("approved" if needsAsk else "not_required")),
+            "request_id": requestId,
+        })
+        _ledgerProjectEvent("project_created", agentId or "", {
+            "project_id": project.project_id, "owner_user_id": ownerUserId,
+            "initiator": "agent", "room_id": project.project_id,
+            "session_id": getattr(self._agent, "current_session_id", None),
+        })
+
+        return {
+            "success": True,
+            "project_id": project.project_id,
+            "room_id": project.project_id,  # project_id = room_id 等式
+            "name": name,
+            "owner_user_id": ownerUserId,
+            "visibility": project.visibility.value,
+            "visibility_pending": bool(pending and visibilityReq == "team"),
+            "members": sorted(project.members.keys()),
+            "governance_pending": pending,
+            "request_id": requestId,
+            "request_status": askStatus,
+            "firewall_hits": firewallHits,
+            "hint": ("治理申请已进入审批（L1）：人类成员/可见性放宽未批准前不生效"
+                     if pending else ""),
+        }
+
+    async def _execute_project_list(self, params: Dict) -> Dict:
+        """agent 可见项目列表：自己作为成员的 ∪ 属主用户可见的（含公开）。
+
+        数据单源 collaboration_isolation；可见性过滤复用其 _can_access_project
+        判据（成员或公开），不另写一套口径。
+        """
+        from neurova.collaboration.collaboration_isolation import get_collaboration_manager
+
+        userId, agentId = self._agent_identity()
+        config = getattr(self._agent, "config", None)
+        ownerUserId = str(getattr(config, "owner_user_id", "") or userId or "")
+        iso = get_collaboration_manager()
+        seen: Dict[str, Any] = {}
+        for requester in (agentId or "", ownerUserId):
+            if not requester:
+                continue
+            for project in iso.list_projects(requester_id=requester):
+                seen[project.project_id] = project
+        rows = []
+        for project in seen.values():
+            rows.append({
+                "project_id": project.project_id,
+                "room_id": project.project_id,
+                "name": project.name,
+                "description": project.description,
+                "visibility": project.visibility.value,
+                "owner_id": project.owner_id,
+                "initiator": (project.metadata or {}).get("initiator", "user"),
+                "member_count": len(project.members),
+                "updated_at": project.updated_at,
+            })
+        rows.sort(key=lambda r: r["updated_at"], reverse=True)
+        return {"projects": rows, "count": len(rows)}
+
+    async def _execute_project_detail(self, params: Dict) -> Dict:
+        """项目详情（可见性判据与 project_list 同源：agent 成员或属主用户可见）。"""
+        from neurova.collaboration.collaboration_isolation import get_collaboration_manager
+
+        projectId = str(params.get("project_id") or "").strip()
+        if not projectId:
+            return {"error": "缺少 project_id 参数"}
+        userId, agentId = self._agent_identity()
+        config = getattr(self._agent, "config", None)
+        ownerUserId = str(getattr(config, "owner_user_id", "") or userId or "")
+        iso = get_collaboration_manager()
+        project = None
+        for requester in (agentId or "", ownerUserId):
+            if requester:
+                project = iso.get_project(projectId, user_id=requester)
+                if project is not None:
+                    break
+        if project is None:
+            return {"error": f"项目不存在或不可见: {projectId}", "code": "project_not_visible"}
+        return {
+            "success": True,
+            "project_id": project.project_id,
+            "room_id": project.project_id,
+            "name": project.name,
+            "description": project.description,
+            "visibility": project.visibility.value,
+            "status": project.status.value,
+            "owner_id": project.owner_id,
+            "initiator": (project.metadata or {}).get("initiator", "user"),
+            "initiator_agent_id": (project.metadata or {}).get("initiator_agent_id", ""),
+            "members": [
+                {"id": uid, "role": m.role.value, "joined_at": m.joined_at}
+                for uid, m in project.members.items()
+            ],
+            "teams_count": len(project.teams),
+            "tasks_count": len(project.tasks),
+            "created_at": project.created_at,
+            "updated_at": project.updated_at,
+        }
+
+    async def _execute_room_post(self, params: Dict) -> Dict:
+        """agent 向自己所在的项目房间发言（report/question/note）。
+
+        成员判据 fail-closed（非成员一律拒——发言是成员资格，不是管理权）；
+        治理限频（滑动窗口按发起 agent 计数）防刷屏消耗他人 token；发言落
+        RoomStore（room_id=project_id，可回看）并尽力广播（复用 AGENT_REPLY
+        通道，零新协议）。
+        """
+        from neurova.agent.context_firewall import scanInjectionFeatures
+        from neurova.collaboration.collaboration_isolation import get_collaboration_manager
+
+        projectId = str(params.get("project_id") or "").strip()
+        message = str(params.get("message") or "").strip()
+        kind = str(params.get("kind") or "note").strip().lower()
+        if not projectId:
+            return {"error": "缺少 project_id 参数"}
+        if not message:
+            return {"error": "缺少 message 参数（消息内容）"}
+        if kind not in self._ROOM_POST_KINDS:
+            return {"error": f"kind 仅支持 {'/'.join(self._ROOM_POST_KINDS)}，收到: {kind}"}
+
+        userId, agentId = self._agent_identity()
+        iso = get_collaboration_manager()
+        project = iso.get_project(projectId)
+        if project is None:
+            return {"error": f"房间不存在: {projectId}", "code": "room_not_found"}
+        if not (agentId and project.is_member(agentId)):
+            return {"error": f"非房间成员，不可发言: {projectId}", "code": "not_room_member"}
+
+        # 治理限频：滑动窗口（防刷屏消耗他人 token；超限结构化拒绝，不静默丢弃）
+        now = time.time()
+        with _roomPostRateLock:
+            window = [ts for ts in _roomPostTimestamps.get(agentId or "", [])
+                      if now - ts < self.ROOM_POST_RATE_WINDOW_SECONDS]
+            if len(window) >= self.ROOM_POST_RATE_LIMIT_MAX:
+                retryAfter = max(
+                    round(self.ROOM_POST_RATE_WINDOW_SECONDS - (now - window[0]), 1), 0.1)
+                _auditProjectAction("room_post_rate_limited", projectId, {
+                    "agent_id": agentId or "", "kind": kind,
+                    "window_seconds": self.ROOM_POST_RATE_WINDOW_SECONDS,
+                    "limit": self.ROOM_POST_RATE_LIMIT_MAX,
+                }, severity="low")
+                return {
+                    "error": (f"room_post 触发限频（{self.ROOM_POST_RATE_LIMIT_MAX} 条/"
+                              f"{int(self.ROOM_POST_RATE_WINDOW_SECONDS)}s），稍后再发"),
+                    "code": "rate_limited", "retry_after_seconds": retryAfter,
+                }
+            window.append(now)
+            _roomPostTimestamps[agentId or ""] = window
+
+        firewallHits = scanInjectionFeatures(message)
+        if firewallHits:
+            logger.warning("room_post 命中注入特征（只标记）: %s", firewallHits)
+
+        config = getattr(self._agent, "config", None)
+        displayName = str(getattr(config, "name", "") or agentId or "agent")
+        meta: Dict[str, Any] = {"kind": kind, "display_name": displayName}
+        if firewallHits:
+            meta["firewall_hits"] = firewallHits
+        from neurova.collaboration.room_store import get_room_store
+
+        get_room_store().append(projectId, "agent", agentId or "", message, meta=meta)
+        # 尽力广播（实时刷新；无订阅者时为 no-op，失败不影响已落库消息）
+        try:
+            import asyncio as _asyncio
+
+            from neurova.collaboration.room_bus import get_room_bus
+            from neurova.sync.session_sync_manager import EventType
+
+            payload = {"sender_id": agentId or "", "sender_type": "agent",
+                       "content": message, "kind": kind, "display_name": displayName}
+            loop = _asyncio.get_running_loop()
+            loop.create_task(get_room_bus().publish(projectId, EventType.AGENT_REPLY.value, payload))
+        except Exception as e:  # noqa: BLE001 - 广播失败不影响已落库消息
+            logger.debug("room_post 广播失败 (room=%s): %s", projectId, e)
+
+        _auditProjectAction("room_post", projectId, {
+            "agent_id": agentId or "", "kind": kind, "chars": len(message),
+            "firewall_hits": firewallHits,
+        }, severity="low")
+        return {
+            "success": True, "room_id": projectId, "kind": kind,
+            "sender_id": agentId or "", "firewall_hits": firewallHits,
         }
 
     async def _execute_continue_subagent(self, params: Dict) -> Dict:
