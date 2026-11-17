@@ -878,17 +878,25 @@ class BaseAgentLoop(ABC):
         # P2-5：排空子代理回传邮箱——后台子代理的完成
         # 结果逐轮可见；嵌套模式的完成摘要同样显式回灌
         # P1（loop 对照 #2）：同样先落盘再进历史（轮次证据完整可查）。
+        # H-1 两阶段确认：lease → 逐条落盘 → acknowledge。落盘失败不 ack——
+        # 邮箱是内存态，ack 掉就再无副本；下轮至少一次重投（宁重不丢）。
         try:
             from neurova.agent.mailbox import get_agent_mailbox
 
             _sid = getattr(self.agent, "current_session_id", "") or ""
-            for _mail_text in get_agent_mailbox().drain(str(_sid)):
-                persistModelVisibleAnnouncement(
-                    self.agent, _mail_text, source="subagent_mail"
+            _mailbox = get_agent_mailbox()
+            _acked = []
+            for _mail in _mailbox.lease(str(_sid)):
+                _persisted = persistModelVisibleAnnouncement(
+                    self.agent, _mail["message"], source="subagent_mail"
                 )
                 new_messages.append(
-                    {"role": "user", "content": _mail_text}
+                    {"role": "user", "content": _mail["message"]}
                 )
+                if _persisted:
+                    _acked.append(_mail["id"])
+            if _acked:
+                _mailbox.acknowledge(str(_sid), _acked)
         except Exception:  # noqa: BLE001
             logger.debug("子代理邮箱排空失败(忽略)", exc_info=True)
 

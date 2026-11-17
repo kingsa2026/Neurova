@@ -74,7 +74,9 @@ async def _awaitMailArrival(sessionId: str, seconds: float = 2.0) -> list[str]:
         if box.pending(sessionId):
             break
         await asyncio.sleep(0.01)
-    return box.drain(sessionId)
+    leased = box.lease(sessionId)
+    box.acknowledge(sessionId, [m["id"] for m in leased])
+    return [m["message"] for m in leased]
 
 
 class TestTerminalStateReachesParentMail:
@@ -86,7 +88,9 @@ class TestTerminalStateReachesParentMail:
         with patch("neurova.api.endpoints.get_agent_instance", return_value=agent):
             result = await swarm.spawn(task="调研 β 方案", session_id=PARENT_SESSION)
 
-        mails = get_agent_mailbox().drain(PARENT_SESSION)
+        _leased = get_agent_mailbox().lease(PARENT_SESSION)
+        mails = [m["message"] for m in _leased]
+        get_agent_mailbox().acknowledge(PARENT_SESSION, [m["id"] for m in _leased])
         assert len(mails) == 1, f"父会话邮箱应恰有一条终态回灌，实得 {mails}"
         env = _envelope(mails[0])
         assert env["status"] == result["status"]
@@ -132,7 +136,9 @@ class TestTerminalStateReachesParentMail:
             result = await swarm.spawn(task="会失败的任务", session_id=PARENT_SESSION)
 
         assert result["status"] not in (SUBAGENT_PENDING, "completed")
-        mails = get_agent_mailbox().drain(PARENT_SESSION)
+        _leased = get_agent_mailbox().lease(PARENT_SESSION)
+        mails = [m["message"] for m in _leased]
+        get_agent_mailbox().acknowledge(PARENT_SESSION, [m["id"] for m in _leased])
         assert mails and "LLM 上游 503" in mails[0], (
             "失败终态要把成因带回父会话，否则主 agent 只看到沉默"
         )

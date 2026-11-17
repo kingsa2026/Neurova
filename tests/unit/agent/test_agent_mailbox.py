@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""P2-5 子代理完成回传 mailbox。
+"""P2-5 子代理完成回传 mailbox（H-1 两阶段确认语义）。
 
 - 会话级 mailbox：子代理完成结果投递父会话邮箱；agent loop 工具轮间隙
-  排空注入（嵌套等待模式是增强可见性，后台模式是唯一回传通道）
+  lease 取件注入，落盘后 acknowledge（嵌套等待模式是增强可见性，后台模式
+  是唯一回传通道）
 - 与 steer 队列同构（TTL/上限/会话隔离）
 """
 import pytest
@@ -19,18 +20,25 @@ def mailbox(monkeypatch):
     monkeypatch.setattr(mb, "_MAILBOX", None)
 
 
+def _take(box, sid):
+    """测试便利：lease 全部并立即 ack（等价旧 drain 的读数，不做双重语义）。"""
+    leased = box.lease(sid)
+    box.acknowledge(sid, [m["id"] for m in leased])
+    return [m["message"] for m in leased]
+
+
 class TestAgentMailbox:
-    def test_push_drain(self, mailbox):
+    def test_push_lease_ack(self, mailbox):
         assert mailbox.push("s1", "子代理A 完成：已生成报告") is True
-        assert mailbox.drain("s1") == ["子代理A 完成：已生成报告"]
-        assert mailbox.drain("s1") == []
+        assert _take(mailbox, "s1") == ["子代理A 完成：已生成报告"]
+        assert _take(mailbox, "s1") == []
 
     def test_session_isolation_and_empty(self, mailbox):
         mailbox.push("s1", "a")
         mailbox.push("s2", "b")
-        assert mailbox.drain("s1") == ["a"]
-        assert mailbox.drain("") == []
-        assert mailbox.drain("nope") == []
+        assert _take(mailbox, "s1") == ["a"]
+        assert _take(mailbox, "") == []
+        assert _take(mailbox, "nope") == []
 
     def test_ttl_expiry(self, mailbox):
         mailbox.ttl_seconds = 0.01
@@ -38,7 +46,7 @@ class TestAgentMailbox:
 
         mailbox.push("s1", "old")
         time.sleep(0.05)
-        assert mailbox.drain("s1") == []
+        assert _take(mailbox, "s1") == []
 
     def test_max_cap(self, mailbox):
         mailbox.max_per_session = 2
