@@ -48,7 +48,7 @@
 | `post_message` | `app_post` | 现值 |
 | `send_input` | `global_input` | 现值（注释已点名"会移动真实光标、抢前台"） |
 | `vm_plane` | `remote` | 现值（注释"远程会话平面（RS 批次预留）"正是此批） |
-| `browser_cdp` | `playwright_role` / `camofox_ref` / `dom` | 现值，三值比单一别名更精确，**不新造别名** |
+| `browser_cdp` | `playwright_role` / `playwright_ref` / `camofox_ref` / `dom` | 现值，多值比单一别名更精确，**不新造别名**（`playwright_ref` 为快照 [eN] ref 路径自报，2026-11-17 补登词表） |
 | `ax`（macOS） | `accessibility` | 现值（注释即"AX/UIA 语义动作"） |
 | `atspi`（Linux） | **`atspi`** | 新增——`uia` 既已单列，Linux 侧对称单列 |
 | `xdotool`（X11） | **`xdotool`** | 新增 |
@@ -90,7 +90,7 @@
 
 ```
 CLI 命令目标 ──► shell 通道（天然无抢占，不走输入设备；在哪跑由 runtime_policy 裁决）  route=shell
-浏览器类目标 ──► CDP 独立 profile 实例（browser_manager，已有，三平台通用）           route=playwright_role|camofox_ref|dom
+浏览器类目标 ──► CDP 独立 profile 实例（browser_manager，已有，三平台通用）           route=playwright_role|playwright_ref|camofox_ref|dom
 桌面类目标(Win) ─► ① desktop_uia Invoke/DoDefaultAction（不抢焦点）                  route=uia
                  ├─ ② PostMessage WM_LBUTTON* 后台消息（控件不支持 Invoke）           route=app_post
                  ├─ ③ 会话池虚拟平面执行（rdp_provider/remote_backend）               route=remote
@@ -278,7 +278,7 @@ dock computer tab 内按最近动作的 `route` 渲染形态，`useComputerPanel
 | 无 GUI 服务器（Linux） | — | — | 会话池按需起 Xvfb | **`ssh_runner`（已有）+ `shell_sessions`**，dock 走终端态 | 不适用（无输入设备） |
 
 浏览器动作三平台统一走 CDP 独立实例（`browser_manager` 已有，`route` 为
-`playwright_role`/`camofox_ref`/`dom` 三值之一），不进矩阵。
+`playwright_role`/`playwright_ref`/`camofox_ref`/`dom` 四值之一），不进矩阵。
 
 **本机验证边界**：当前实施机为 Windows。Linux/macOS 三行、以及"无 GUI 服务器"行的
 `atspi`/`xdotool`/`accessibility`/evdev/CGEventTap 五条通道**在本机无法 live-verify**，

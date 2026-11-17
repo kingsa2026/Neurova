@@ -27,6 +27,7 @@ ROUTES = frozenset(
         "xdotool",           # X11 定窗合成事件投递（Wayland 下不可用）
         "shell",             # CLI 命令通道（不经任何输入设备，天然无抢占）
         "playwright_role",   # Playwright get_by_role 定位交互
+        "playwright_ref",    # Playwright 快照 [eN] ref 定位交互（click_ref/fill_ref）
         "camofox_ref",       # camofox [eN] ref 定位交互
         "dom",               # DOM 层导航/求值
         "remote",            # 远程会话平面（隔离虚拟屏，RS 批次）
