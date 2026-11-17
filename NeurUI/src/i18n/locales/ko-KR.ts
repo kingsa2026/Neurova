@@ -618,6 +618,7 @@ export default {
     retryExhausted: '{count}개 모델에서 자동 재시도했지만 실패했습니다',
     retryYieldWait: '동시 실행 한도로 양보 중 - {seconds}초 후 재시도({retry}/{max})',
     upstreamSilence: '업스트림이 {seconds}초 무응답입니다. 계속 대기 중…',
+    contextCompactedNotice: '자동 압축: 메시지 {folded}개를 접었으며, 컨텍스트 {before} → {after} 토큰',
     turnParked: '이 응답이 보류되었습니다. 수동 재개가 필요합니다',
     turnStillRunning: '이 응답은 계속 생성 중입니다',
     parkedPinnedModel: '고정 모델 {pinned}, 이번 요청 {requested}',

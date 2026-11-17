@@ -618,6 +618,7 @@ export default {
     retryExhausted: '{count} 個のモデルで自動再試行しましたが成功しませんでした',
     retryYieldWait: '並行上限により待機中。{seconds} 秒後に再試行（{retry}/{max} 回目）',
     upstreamSilence: '上流が {seconds} 秒無応答です。引き続き待機中…',
+    contextCompactedNotice: '自動圧縮：{folded} 件のメッセージを折りたたみ、コンテキスト {before} → {after} トークン',
     turnParked: 'この応答は保留中です。手動で再開できます',
     turnStillRunning: 'この応答はまだ生成中です',
     parkedPinnedModel: '固定モデル {pinned}、今回のリクエスト {requested}',

@@ -618,6 +618,7 @@ export default {
     retryExhausted: 'أُعيدت المحاولة تلقائيًا عبر {count} نماذج دون نجاح',
     retryYieldWait: 'تنزيل بسبب حيص التنفيذ المتوازي - إعادة المحاولة بعد {seconds} ثانية (المحاولة {retry}/{max})',
     upstreamSilence: 'لا بيانات من المصدر منذ {seconds} ثانية، ما زلنا ننتظر…',
+    contextCompactedNotice: 'ضغط تلقائي: طي {folded} رسالة، السياق {before} → {after} رمز',
     turnParked: 'هذا الدور متوقف - يلزم استئناف يدوي',
     turnStillRunning: 'لا يزال هذا الرد قيد الإنشاء',
     parkedPinnedModel: 'النموذج المثبت {pinned}؛ هذا الطلب {requested}',

@@ -90,6 +90,20 @@ export interface ChatMessage {
     pinnedModel?: string
     requestedModel?: string
   }
+  /**
+   * S6 自动压缩轻提示：SSE `upstream_status` 且 phase=context_compacted 时写入
+   * （后端压缩纪律的 cutoff 摘要载荷）。原始消息永不删除——这只是"这段已折叠"
+   * 的展示事实，随该条气泡保留。
+   */
+  compactNotice?: {
+    /** 被折叠前缀的消息条数 */
+    foldedCount: number
+    /** 压缩前后上下文 token 读数（后端实测） */
+    tokensBefore: number
+    tokensAfter: number
+    /** 触发原因：threshold（水位）| overflow_retry（溢出兜底） */
+    reason?: string
+  }
 }
 
 export interface Session {
