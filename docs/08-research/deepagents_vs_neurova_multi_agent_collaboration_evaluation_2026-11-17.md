@@ -147,6 +147,8 @@ LangChain 官方"opinionated agent harness"：三层栈 = LangGraph（运行时�
 | I-4 | **压缩纪律再获旁证**：非破坏性摘要事件 + offload + "重试必须严格变小" | summarization.py | 即 H-6（已登记待独立方案） |
 | I-5 | **checkpoint 增长 O(N)**：DeltaChannel reducer | `_messages_reducer.py` | 远期（依赖运行时状态底座改造） |
 
+**执行记录（2026-11-17，同日）**：五管理工具（派活/查岗/改需求/叫停/点名）对照发现的两个真差距已补齐——**父侧叫停**（新增 `cancel_subagent` 工具 + `SwarmManager.cancelRun`：运行中 run 取消其 asyncio 任务，CancelledError 既有收尾——failed/subagent_cancelled 落账、释放槽位、部分报告交接、依赖结算——照常生效；blocked 等待件直接判失败落账、不再被依赖结算拉起；取消早于成员任务首步时协程体不运行，挂 done 回调兜底落账）与**运行中改需求**（`continue_subagent` 放宽到 running/in_review，经 `SwarmManager.updateSubagent` 统一入口：mode=steer 注入成员会话插话队列尽力而为 / mode=restart 先叫停再按续跑链重派并保留溯源；终态件行为不变）。成员工具面剔除 cancel_subagent（成员不得叫停自己/兄弟）；事件账本补 cancelled/update_injected 两类事件。验证：新增判据 10 例 + 续跑/窄化/事件账本/审批链回归 68 passed；三目录终跑 35 failed=基线、2570 passed。
+
 **不可照搬项**：LangGraph/LangChain 运行时依赖（本仓自研运行时与产品面不同源）；recursion_limit=9999 + 无并发上限（治理三明治是本仓正确取舍）；审批无审计持久化（本仓台账/审计方向更对）；巨文件与三处散布的权限逻辑是反面教材。
 
 ---
