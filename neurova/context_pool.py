@@ -299,6 +299,31 @@ def persistCompressionEvent(
         return False
 
 
+#: QwenPaw 对照批 C4：recall 族工具名单——这些工具自身的调用/结果条目
+#: 不参与召回（防"上次 recall 的结果"污染本次检索）。
+_RECALL_FAMILY_TOOLS = frozenset({
+    "recall_history", "recall_query", "recall_context_span",
+    "pool_search", "memory_search", "voice_memory_search", "graph_search",
+})
+
+
+def _isRecallSelfRow(metadata: Any) -> bool:
+    """条目 metadata 是否属于 recall 族工具自身（row 或 metadata 均可）。"""
+    if not metadata:
+        return False
+    tool_name = metadata.get("tool_name") if hasattr(metadata, "get") else None
+    if not tool_name:
+        raw = metadata.get("metadata") if hasattr(metadata, "get") else None
+        if isinstance(raw, str) and '"tool_name"' in raw:
+            try:
+                import json as _json
+
+                tool_name = (_json.loads(raw) or {}).get("tool_name")
+            except Exception:  # noqa: BLE001 - 解析失败按非 recall 处理
+                tool_name = None
+    return str(tool_name or "") in _RECALL_FAMILY_TOOLS
+
+
 class ContextPool:
     """
     上下文池 - 核心组件
@@ -1286,6 +1311,10 @@ class ContextPool:
         （`_allowedRecallItems` → `filter_by_tag`，判据单源 `allowed_scopes_for_tag`）。改前这条路径
         按 session 精确等值过滤——单聊池恒空、无会话池全放行，两个方向都不对。
 
+        QwenPaw 对照批 C4（recall 防自污染）：recall 族工具自身的调用与结果
+        条目（`metadata.tool_name` 命中 `_RECALL_FAMILY_TOOLS`）不参与召回——
+        否则查 "X" 会命中"上次 recall X 的结果"，检索被自己的输出污染。
+
         Args:
             query: 内容子串过滤（不区分大小写）；None 返回最近驱逐的条目
             limit: 最多返回条数
@@ -1314,6 +1343,8 @@ class ContextPool:
                     # 可见性由作用域闸口判定，不由 session 等值判定。
                     for row in self._ledger_db.search(query, session_id=None, limit=limit):
                         row = dict(row)  # sqlite3.Row 无 .get
+                        if _isRecallSelfRow(row):
+                            continue
                         h = ContextInput.compute_hash(ContextSource.CONVERSATION, row["content"])
                         if h in seen_hashes:
                             continue
@@ -1341,6 +1372,8 @@ class ContextPool:
                 needle = query.lower()
                 snapshot = [c for c in snapshot if needle in str(c.content).lower()]
             for c in snapshot:
+                if _isRecallSelfRow(getattr(c, "metadata", None) or {}):
+                    continue
                 h = getattr(c, "hash", None)
                 if h and h in seen_hashes:
                     continue
