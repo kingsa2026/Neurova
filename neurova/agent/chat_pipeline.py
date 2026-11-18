@@ -3201,6 +3201,19 @@ class ChatPipeline:
                 raise
             if isinstance(ctx.metadata, dict) and ctx.metadata.get("context_overflow_retried"):
                 raise  # 重试仍溢出：诚实上抛（防循环）
+            # C3（overflow 恢复纪律）：已有可见输出（流式半截已让出）则不静默
+            # 重放——先发 reset 语义的 retry 事件让消费方清空半截（与流内切换
+            # 同一协议），再压缩重试；非流式产出未出管线，无需该信号。
+            if str(getattr(ctx, "partial_reply", "") or "").strip():
+                _emitter = self._resolveEventEmitter(ctx)
+                if _emitter is not None:
+                    try:
+                        _emitter("retry", {
+                            "phase": "overflow_retry", "reset": True,
+                            "reason": "context_overflow",
+                        })
+                    except Exception as e:  # noqa: BLE001 - 信号失败不阻断恢复
+                        logger.debug("overflow retry reset 事件发射失败: %s", e)
             logger.warning("[CTX_COMPACT] 管线级溢出兜底: %s", exc)
             ctx.metadata = dict(ctx.metadata or {})
             ctx.metadata["context_overflow_retried"] = True
