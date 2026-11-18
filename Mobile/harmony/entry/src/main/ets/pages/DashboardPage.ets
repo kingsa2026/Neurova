@@ -17,6 +17,7 @@
  */
 
 import { GlassStatCard } from '../components/glass';
+import { AppIcon } from '../components/common/AppIcon';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { AuthStore } from '../libs/state/stores/AuthStore';
 import { StateManager } from '../libs/state/StateManager';
@@ -35,8 +36,8 @@ interface DashboardStats {
   memories: number;          // 记忆条数（stats.memory_count）
   tokens: number;            // Token 消耗（stats.token_consumption）
   agents: number;            // Agent 数（stats.agent_count）
-  onlineAgents: number;      // 在线 Agent 数（agents 列表加载后填充）
-  healthStatus: string;      // 系统健康状态：healthy / unhealthy
+  onlineAgents: number;      // 在线 Agent 数（agents 列表 status=active 计数）
+  backendOk: boolean;        // /home/data 是否成功（健康条唯一事实源，不写死）
 }
 
 @Component
@@ -48,7 +49,7 @@ export struct DashboardPage {
     tokens: 0,
     agents: 0,
     onlineAgents: 0,
-    healthStatus: 'healthy'
+    backendOk: false
   };
   @State welcomeMessage: string = '';
   // 加载态（控制是否显示"加载中..."占位）
@@ -57,6 +58,8 @@ export struct DashboardPage {
   @State agents: Agent[] = [];
   // 最近会话（/console/chat/sessions 前 3 条，同源 PC）
   @State recentSessions: ChatSession[] = [];
+  // 未读通知数（GET /notifications/unread-count；0 或失败不展示通知条）
+  @State unreadCount: number = 0;
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -84,6 +87,7 @@ export struct DashboardPage {
     //    token_consumption,agent_count}；quick_stats 为逐调用者口径）
     try {
       const home = await this.api.home.data();
+      this.stats.backendOk = true;
       this.welcomeMessage = home.welcome_message;
       const st = home.stats;
       if (st['conversation_count']) {
@@ -97,19 +101,25 @@ export struct DashboardPage {
       }
       if (st['agent_count']) {
         this.stats.agents = Number(st['agent_count']);
-        this.stats.onlineAgents = Number(st['agent_count']);
       }
     } catch (e) {
       this.logger.warn('DashboardPage', '工作台统计加载失败，保持 0 值', e as Error);
     }
 
-    // 3. 尝试拉取最新 agent 列表（失败时降级使用缓存）
+    // 3. 尝试拉取最新 agent 列表（失败时降级使用缓存）；在线数按 status 真实计数
     try {
       this.agents = await this.api.agents.list();
       this.agentsStore.setAgents(this.agents);
     } catch (e) {
       this.logger.warn('DashboardPage', '加载 agent 列表失败，使用缓存', e as Error);
     }
+    let online = 0;
+    for (const a of this.agents) {
+      if (a.status === 'active') {
+        online += 1;
+      }
+    }
+    this.stats.onlineAgents = online;
 
     // 4. 最近会话（同源 PC：/console/chat/sessions 前 3 条）
     try {
@@ -119,6 +129,16 @@ export struct DashboardPage {
       }
     } catch (e) {
       this.logger.warn('DashboardPage', '最近会话加载失败', e as Error);
+    }
+
+    // 5. 未读通知数（fail-soft，>0 才展示通知条）
+    try {
+      const nres = await this.api.monitor.getUnreadCount();
+      if (nres.code === 0 && nres.data !== undefined && nres.data !== null) {
+        this.unreadCount = Number(nres.data);
+      }
+    } catch (e) {
+      this.logger.warn('DashboardPage', '未读通知数加载失败', e as Error);
     }
 
     this.loading = false;
@@ -152,9 +172,14 @@ export struct DashboardPage {
     return this.authStore.user?.username ?? '用户';
   }
 
-  /** 健康状态文案映射：healthy → 健康，其他 → 异常 */
+  /** 健康状态文案：/home/data 成功 → 良好（后端可达），失败 → 未知（不写死） */
   private getHealthLabel(): string {
-    return this.stats.healthStatus === 'healthy' ? '健康' : '异常';
+    return this.stats.backendOk ? '良好' : '未知';
+  }
+
+  /** 切到对话 Tab（最近会话「全部」入口，经 AppStorage 与 ShellPage 同步） */
+  private gotoSessionsTab(): void {
+    AppStorage.setOrCreate('shellTab', 0);
   }
 
   build() {
@@ -189,24 +214,38 @@ export struct DashboardPage {
         // 内容滚动区
         Scroll() {
           Column() {
-            // 0. 健康条（原型 F3 hbar）
+            // 0. 健康条（原型 F3 hbar：盾牌图标 + 系统健康 + 在线数）
             Row() {
-              Circle()
-                .width(7)
-                .height(7)
-                .fill(this.sm.getColor('success'))
-              Text('系统健康 ' + this.getHealthLabel() + ' · ' + this.stats.agents.toString() + ' 个 Agent 在线')
-                .fontSize(12)
+              AppIcon({ name: 'shield', iconSize: 14, color: this.sm.getColor('success') })
+              Text('系统健康 ' + this.getHealthLabel() + ' · ' + this.stats.onlineAgents.toString() + ' 个 Agent 在线')
+                .fontSize(this.sm.getFontSize('caption'))
                 .fontColor(this.sm.getColor('text_secondary'))
                 .margin({ left: 8 })
             }
             .width('100%')
             .padding({ left: 14, right: 14, top: 9, bottom: 9 })
             .borderRadius(12)
-            .backgroundColor(this.sm.getColor('surface_strong'))
-            .border({ width: 1, color: this.sm.getColor('border') })
+            .backgroundColor('rgba(52,211,153,0.07)')
+            .border({ width: 1, color: 'rgba(52,211,153,0.25)' })
 
-            // 2. 统计卡片网格（2x2，Flex wrap 自适应窄屏）
+            // 0.5 通知条（未读 >0 才展示；铃铛 + N 条未读）
+            if (this.unreadCount > 0) {
+              Row() {
+                AppIcon({ name: 'bell', iconSize: 15, color: this.sm.getColor('accent') })
+                Text(this.unreadCount.toString() + ' 条未读通知')
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('text_secondary'))
+                  .margin({ left: 8 })
+              }
+              .width('100%')
+              .padding({ left: 13, right: 13, top: 10, bottom: 10 })
+              .borderRadius(12)
+              .backgroundColor('rgba(34,211,238,0.06)')
+              .border({ width: 1, color: 'rgba(34,211,238,0.22)' })
+              .margin({ top: 10 })
+            }
+
+            // 1. 统计卡 2×2（真实统计：总对话/记忆条数/Token 消耗/在线 Agent）
             Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
               GlassStatCard({ label: '总对话', value: String(this.stats.conversations) })
                 .width('48%')
@@ -216,22 +255,21 @@ export struct DashboardPage {
                 .width('48%')
                 .margin({ bottom: this.sm.getSpacing('md') })
 
-              GlassStatCard({ label: '在线Agent', value: String(this.stats.onlineAgents) })
-              GlassStatCard({ label: 'Agent 总数', value: String(this.stats.agents) })
+              GlassStatCard({ label: 'Token 消耗', value: String(this.stats.tokens) })
                 .width('48%')
                 .margin({ bottom: this.sm.getSpacing('md') })
 
-              GlassStatCard({ label: '系统状态', value: this.getHealthLabel() })
+              GlassStatCard({ label: '在线 Agent', value: String(this.stats.onlineAgents), trend: '共 ' + this.stats.agents.toString() + ' 个', trendNeutral: true })
                 .width('48%')
                 .margin({ bottom: this.sm.getSpacing('md') })
             }
             .width('100%')
             .margin({ bottom: this.sm.getSpacing('md') })
 
-            // 2. 快捷操作（原型 F3：标题 + 横排 tile）
+            // 2. 快捷操作（原型 F3 qa：四宫格带单线图标）
             Row() {
               Text('快捷操作')
-                .fontSize(13)
+                .fontSize(this.sm.getFontSize('caption'))
                 .fontWeight(FontWeight.Medium)
                 .fontColor(this.sm.getColor('text_primary'))
             }
@@ -240,18 +278,16 @@ export struct DashboardPage {
 
             Row() {
               Column() {
-                Text('＋')
-                  .fontSize(19)
-                  .fontColor(this.sm.getColor('primary'))
+                AppIcon({ name: 'chat', iconSize: 19, color: this.sm.getColor('primary') })
                 Text('新建对话')
-                  .fontSize(10.5)
+                  .fontSize(this.sm.getFontSize('badge'))
                   .fontColor(this.sm.getColor('text_secondary'))
                   .margin({ top: 6 })
               }
               .layoutWeight(1)
               .padding({ top: 12, bottom: 12 })
               .borderRadius(14)
-              .backgroundColor(this.sm.getColor('surface_strong'))
+              .backgroundColor(this.sm.getColor('glass'))
               .border({ width: 1, color: this.sm.getColor('border') })
               .onClick(() => {
                 StateManager.getInstance().set('chat:active_session_id', '');
@@ -259,37 +295,50 @@ export struct DashboardPage {
               })
 
               Column() {
-                Text('智能体')
-                  .fontSize(19)
-                  .fontColor(this.sm.getColor('primary'))
-                Text('管理 Agent')
-                  .fontSize(10.5)
+                AppIcon({ name: 'agent', iconSize: 19, color: this.sm.getColor('primary') })
+                Text('创建智能体')
+                  .fontSize(this.sm.getFontSize('badge'))
                   .fontColor(this.sm.getColor('text_secondary'))
                   .margin({ top: 6 })
               }
               .layoutWeight(1)
               .padding({ top: 12, bottom: 12 })
               .borderRadius(14)
-              .backgroundColor(this.sm.getColor('surface_strong'))
+              .backgroundColor(this.sm.getColor('glass'))
               .border({ width: 1, color: this.sm.getColor('border') })
               .margin({ left: 10 })
               .onClick(() => {
-                this.router.push(RouteNames.AGENT_LIST);
+                this.router.push(RouteNames.AGENT_FORM);
               })
 
               Column() {
-                Text('配对')
-                  .fontSize(19)
-                  .fontColor(this.sm.getColor('primary'))
-                Text('扫码配对')
-                  .fontSize(10.5)
+                AppIcon({ name: 'clip', iconSize: 19, color: this.sm.getColor('primary') })
+                Text('上传文件')
+                  .fontSize(this.sm.getFontSize('badge'))
                   .fontColor(this.sm.getColor('text_secondary'))
                   .margin({ top: 6 })
               }
               .layoutWeight(1)
               .padding({ top: 12, bottom: 12 })
               .borderRadius(14)
-              .backgroundColor(this.sm.getColor('surface_strong'))
+              .backgroundColor(this.sm.getColor('glass'))
+              .border({ width: 1, color: this.sm.getColor('border') })
+              .margin({ left: 10 })
+              .onClick(() => {
+                this.router.push(RouteNames.KNOWLEDGE_IMPORT);
+              })
+
+              Column() {
+                AppIcon({ name: 'scan', iconSize: 19, color: this.sm.getColor('primary') })
+                Text('扫码配对')
+                  .fontSize(this.sm.getFontSize('badge'))
+                  .fontColor(this.sm.getColor('text_secondary'))
+                  .margin({ top: 6 })
+              }
+              .layoutWeight(1)
+              .padding({ top: 12, bottom: 12 })
+              .borderRadius(14)
+              .backgroundColor(this.sm.getColor('glass'))
               .border({ width: 1, color: this.sm.getColor('border') })
               .margin({ left: 10 })
               .onClick(() => {
@@ -298,12 +347,21 @@ export struct DashboardPage {
             }
             .width('100%')
 
-            // 3. 最近会话（原型 F3 mini-sess，前 3 条）
+            // 3. 最近会话（原型 F3 mini-sess：标题 + 「全部›」入对话 Tab）
             Row() {
               Text('最近会话')
-                .fontSize(13)
+                .fontSize(this.sm.getFontSize('caption'))
                 .fontWeight(FontWeight.Medium)
                 .fontColor(this.sm.getColor('text_primary'))
+              Row() {
+                Text('全部')
+                  .fontSize(this.sm.getFontSize('badge'))
+                  .fontColor(this.sm.getColor('primary'))
+                AppIcon({ name: 'chev', iconSize: 12, color: this.sm.getColor('primary') })
+              }
+              .alignItems(VerticalAlign.Center)
+              .margin({ left: 'auto' })
+              .onClick(() => { this.gotoSessionsTab(); })
             }
             .width('100%')
             .padding({ left: 4, bottom: 8 })
@@ -311,7 +369,7 @@ export struct DashboardPage {
             Column() {
               if (this.recentSessions.length === 0) {
                 Text('暂无会话')
-                  .fontSize(12)
+                  .fontSize(this.sm.getFontSize('caption'))
                   .fontColor(this.sm.getColor('text_tertiary'))
                   .padding(14)
               }
@@ -327,34 +385,36 @@ export struct DashboardPage {
                     .textAlign(TextAlign.Center)
                     .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
                   Column() {
-                    Text(s.title)
-                      .fontSize(13)
-                      .fontWeight(FontWeight.Medium)
-                      .fontColor(this.sm.getColor('text_primary'))
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Row() {
+                      Text(s.title)
+                        .fontSize(this.sm.getFontSize('body_sm'))
+                        .fontWeight(FontWeight.Medium)
+                        .fontColor(this.sm.getColor('text_primary'))
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      if (s.pinned) {
+                        AppIcon({ name: 'pin', iconSize: 12, color: this.sm.getColor('primary') })
+                          .margin({ left: 5 })
+                      }
+                    }
+                    .alignItems(VerticalAlign.Center)
                     Text((s.updated_at.length >= 10 ? s.updated_at.slice(5, 10) : s.updated_at) + ' · ' + s.agent_id)
-                      .fontSize(10.5)
+                      .fontSize(this.sm.getFontSize('badge'))
                       .fontColor(this.sm.getColor('text_tertiary'))
                       .margin({ top: 2 })
                   }
                   .layoutWeight(1)
                   .alignItems(HorizontalAlign.Start)
                   .margin({ left: 10 })
-                  if (s.pinned) {
-                    Text('置顶')
-                      .fontSize(9)
-                      .fontColor(this.sm.getColor('primary'))
-                      .border({ width: 1, color: this.sm.getColor('primary') })
-                      .borderRadius(5)
-                      .padding({ left: 5, right: 5, top: 1, bottom: 1 })
-                  }
+                  Text(s.updated_at.length >= 10 ? s.updated_at.slice(11, 16) : '')
+                    .fontSize(this.sm.getFontSize('badge'))
+                    .fontColor(this.sm.getColor('text_tertiary'))
                 }
                 .width('100%')
                 .padding(11)
                 .borderRadius(13)
-                .backgroundColor(this.sm.getColor('surface_strong'))
-                .border({ width: 1, color: this.sm.getColor('border') })
+                .backgroundColor(this.sm.getColor('glass'))
+                .border({ width: 1, color: s.pinned ? this.sm.getColor('primary') : this.sm.getColor('border') })
                 .margin({ bottom: 8 })
                 .onClick(() => {
                   this.openRecent(s);

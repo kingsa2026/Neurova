@@ -24,7 +24,9 @@
  *   由 Router.push(RouteNames.CHAT) 跳转进入；离开页面自动断开 WS 并取消事件订阅
  */
 
-import { TopNavMenu, AgentSwitcher, GlassInput, GlassButton, GlassPanel } from '../components/glass';
+import { AgentSwitcher, GlassInput } from '../components/glass';
+import { AppIcon } from '../components/common/AppIcon';
+import { IconBtn } from '../components/common/IconBtn';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { AuthStore } from '../libs/state/stores/AuthStore';
 import { AgentsStore } from '../libs/state/stores/AgentsStore';
@@ -68,6 +70,10 @@ export struct ChatPage {
   @State currentAgentId: string = '';
   // Agent 列表（供 AgentSwitcher 渲染）
   @State agents: Agent[] = [];
+  // 排队态（chat:queued 事件置位，done/error 清除；设计 F5 .queued 卡）
+  @State queued: boolean = false;
+  // 会话是否来自列表（可置顶/归档；新会话未落库，操作会 404）
+  private fromList: boolean = false;
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -87,6 +93,7 @@ export struct ChatPage {
   private chunkHandler: EventHandler = () => {};
   private doneHandler: EventHandler = () => {};
   private errorHandler: EventHandler = () => {};
+  private queuedHandler: EventHandler = () => {};
   // M5.2.1 WS 流式 chunk 批量节流器：60ms 窗口累积 chunk 减少 UI 重渲染次数
   private batcher: ChunkBatcher = new ChunkBatcher({ interval: 60 });
   // M5.2.2 消息列表 LazyForEach 数据源（与 messages 数组双写同步）
@@ -104,6 +111,7 @@ export struct ChatPage {
     if (activeId.length > 0) {
       this.sessionId = activeId;
       this.sessionTitle = state.get<string>('chat:active_session_title', '会话');
+      this.fromList = true;
       this.loadHistory();
     }
     // 清键：下次直接进对话页回到新会话
@@ -120,6 +128,7 @@ export struct ChatPage {
     this.bus.off('chat:chunk', this.chunkHandler);
     this.bus.off('chat:done', this.doneHandler);
     this.bus.off('chat:error', this.errorHandler);
+    this.bus.off('chat:queued', this.queuedHandler);
     // 断开 WS（adapter 内部会清理心跳与重连定时器）
     this.ws.disconnect();
     // M5.2.1 清理 chunk 缓冲，避免下次进入页面残留旧数据
@@ -242,6 +251,7 @@ export struct ChatPage {
         this.messagesDs.setData(this.messages);
       }
       this.isGenerating = false;
+      this.queued = false;
       // 清理 batcher 以备下次会话
       this.batcher.reset();
     };
@@ -249,6 +259,7 @@ export struct ChatPage {
 
     this.errorHandler = (data: Object) => {
       this.isGenerating = false;
+      this.queued = false;
       // M5.2.1 错误时丢弃缓冲（避免显示半截内容）
       this.batcher.reset();
       const last = this.messages[this.messages.length - 1];
@@ -261,6 +272,12 @@ export struct ChatPage {
       this.logger.error(TAG, '聊天错误', undefined, data);
     };
     this.bus.on('chat:error', this.errorHandler);
+
+    // 排队事件（后端 chat:queued）：展示排队卡（设计 F5 .queued）
+    this.queuedHandler = () => {
+      this.queued = true;
+    };
+    this.bus.on('chat:queued', this.queuedHandler);
   }
 
   /**
@@ -362,17 +379,57 @@ export struct ChatPage {
     return agent?.name ?? '助手';
   }
 
+  /** 会话操作（设计 F5 顶栏 ⋯→菜单）：置顶/归档，仅列表进入的已落库会话可操作 */
+  private showSessionActions(): void {
+    if (!this.fromList) {
+      this.msg.info('新会话尚未保存，暂无可执行操作');
+      return;
+    }
+    AlertDialog.show({
+      title: this.sessionTitle.length > 0 ? this.sessionTitle : '会话操作',
+      message: '选择会话操作',
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      buttons: [
+        {
+          value: '置顶会话',
+          action: () => {
+            this.pinSession();
+          }
+        },
+        {
+          value: '归档会话',
+          action: () => {
+            this.archiveSession();
+          }
+        }
+      ]
+    });
+  }
+
+  private async pinSession(): Promise<void> {
+    try {
+      await this.api.sessions.pin(this.sessionId);
+      this.msg.success('已置顶');
+    } catch (e) {
+      this.msg.error('置顶失败：' + (e as Error).message);
+    }
+  }
+
+  private async archiveSession(): Promise<void> {
+    try {
+      await this.api.sessions.archive(this.sessionId);
+      this.msg.success('已归档');
+    } catch (e) {
+      this.msg.error('归档失败：' + (e as Error).message);
+    }
+  }
+
   build() {
     Column() {
-      // 顶部玻璃头（原型 F5：返回 + Agent 头像 + 会话名/状态 + ⋯）
+      // 顶部玻璃头（原型 F5：返回 + Agent 头像 + 会话名/状态 + 更多）
       Row() {
-        Text('‹')
-          .fontSize(22)
-          .fontColor(this.sm.getColor('text_secondary'))
-          .padding(8)
-          .onClick(() => {
-            this.router.back();
-          })
+        IconBtn({ name: 'back', onTap: () => { this.router.back(); } })
         Text(this.getAgentName().slice(0, 1))
           .fontSize(13)
           .fontWeight(FontWeight.Bold)
@@ -382,31 +439,30 @@ export struct ChatPage {
           .borderRadius(11)
           .textAlign(TextAlign.Center)
           .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
+          .margin({ left: 8 })
         Column() {
           Text(this.sessionTitle.length > 0 ? this.sessionTitle : '新对话')
-            .fontSize(15)
+            .fontSize(this.sm.getFontSize('card_title'))
             .fontWeight(FontWeight.Medium)
             .fontColor(this.sm.getColor('text_primary'))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(this.getAgentName() + ' · ' + (this.isGenerating ? '生成中…' : '就绪'))
-            .fontSize(10.5)
+          Text(this.getAgentName() + ' · ' + (this.isGenerating ? '生成中' : '就绪'))
+            .fontSize(this.sm.getFontSize('badge'))
             .fontColor(this.isGenerating ? this.sm.getColor('success') : this.sm.getColor('text_tertiary'))
             .margin({ top: 1 })
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
         .margin({ left: 8 })
-        Text('⋯')
-          .fontSize(16)
-          .fontColor(this.sm.getColor('text_secondary'))
-          .padding(8)
+        IconBtn({ name: 'more', onTap: () => { this.showSessionActions(); } })
       }
       .width('100%')
       .padding({ left: 12, right: 12, top: 6, bottom: 8 })
       .backgroundBlurStyle(BlurStyle.Thin)
       .backgroundColor(this.sm.getColor('surface_strong'))
       .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
+      .alignItems(VerticalAlign.Center)
 
       // Agent 切换器：横向滚动胶囊列表
       AgentSwitcher({
@@ -457,36 +513,100 @@ export struct ChatPage {
         })
       }
 
-      // 输入区：GlassInput 占满剩余空间 + 发送/停止按钮
+      // 会话进度卡（设计 F5 .prog：流式生成中展示；步骤数后端未下发，不做假进度）
+      if (this.isGenerating) {
+        Row() {
+          AppIcon({ name: 'history', iconSize: 13, color: this.sm.getColor('accent') })
+          Text('会话进行中 · 正在生成回复')
+            .fontSize(this.sm.getFontSize('badge'))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.sm.getColor('text_primary'))
+            .margin({ left: 7 })
+          LoadingProgress()
+            .width(14)
+            .height(14)
+            .color(this.sm.getColor('accent'))
+            .margin({ left: 6 })
+        }
+        .width('100%')
+        .padding({ left: 13, right: 13, top: 10, bottom: 10 })
+        .borderRadius(12)
+        .backgroundColor(this.sm.getColor('glass'))
+        .border({ width: 1, color: this.sm.getColor('border') })
+        .margin({
+          left: this.sm.getSpacing('md'),
+          right: this.sm.getSpacing('md'),
+          bottom: this.sm.getSpacing('sm'),
+        })
+      }
+
+      // 排队卡（设计 F5 .queued：后端 chat:queued 事件驱动，黄色虚线框）
+      if (this.queued) {
+        Row() {
+          AppIcon({ name: 'pause', iconSize: 14, color: this.sm.getColor('warning') })
+          Text('消息已排队，等待 Agent 空闲…')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .margin({ left: 8 })
+        }
+        .width('100%')
+        .padding({ left: 13, right: 13, top: 9, bottom: 9 })
+        .borderRadius(14)
+        .border({ width: 1, color: 'rgba(251,191,36,0.40)', style: BorderStyle.Dashed })
+        .backgroundColor('rgba(251,191,36,0.08)')
+        .margin({
+          left: this.sm.getSpacing('md'),
+          right: this.sm.getSpacing('md'),
+          bottom: this.sm.getSpacing('sm'),
+        })
+      }
+
+      // 输入区（设计 F5 .inputbar：附件/语音 + 胶囊输入框 + 圆形发送/停止）
       Row() {
+        IconBtn({ name: 'clip', onTap: () => { this.msg.info('附件发送即将开放'); } })
+        IconBtn({ name: 'mic', onTap: () => { this.msg.info('语音输入即将开放'); } })
+          .margin({ left: 8 })
+
         GlassInput({
           placeholder: '输入消息...',
           value: this.inputText,
           type: 'text',
+          cornerRadius: 999,
           onChange: (v: string) => { this.inputText = v; },
           onSubmit: () => { this.sendMessage(); }
         })
           .layoutWeight(1)
+          .margin({ left: 8 })
 
         if (this.isGenerating) {
-          // 生成中：显示停止按钮
-          GlassButton({
-            text: '停止',
-            type: 'danger',
-            btnSize: 'medium',
-            onTap: () => { this.stopGeneration(); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
+          // 生成中：红色圆形停止钮（设计 .sendbtn.stop）
+          Column() {
+            AppIcon({ name: 'stop', iconSize: 18, color: this.sm.getColor('error') })
+          }
+          .width(42)
+          .height(42)
+          .borderRadius(21)
+          .backgroundColor('rgba(248,113,113,0.18)')
+          .border({ width: 1, color: 'rgba(248,113,113,0.50)' })
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+          .margin({ left: 8 })
+          .onClick(() => { this.stopGeneration(); })
         } else {
-          // 空闲：显示发送按钮
-          GlassButton({
-            text: '发送',
-            type: 'primary',
-            btnSize: 'medium',
-            disabled: this.inputText.trim().length === 0,
-            onTap: () => { this.sendMessage(); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
+          // 空闲：品牌渐变圆形发送钮（设计 .sendbtn）
+          Column() {
+            AppIcon({ name: 'send', iconSize: 18, color: '#FFFFFF' })
+          }
+          .width(42)
+          .height(42)
+          .borderRadius(21)
+          .linearGradient({ angle: 135, colors: this.sm.getBrandGradient() })
+          .shadow({ radius: 18, color: 'rgba(99,102,241,0.45)', offsetY: 6 })
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+          .margin({ left: 8 })
+          .opacity(this.inputText.trim().length === 0 ? 0.5 : 1)
+          .onClick(() => { this.sendMessage(); })
         }
       }
       .width('100%')
@@ -506,16 +626,17 @@ export struct ChatPage {
   @Builder
   buildMessage(msg: ChatMessageView) {
     if (msg.role === 'user') {
-      // 用户消息：右对齐，primary 色背景，白色文字
+      // 用户消息：右对齐，品牌渐变背景，右下直角（设计 .bub.me）
       Row() {
         Column() {
           Text(msg.content)
-            .fontSize(this.sm.getFontSize('body'))
-            .fontColor('#ffffff')
+            .fontSize(this.sm.getFontSize('body_sm'))
+            .fontColor(this.sm.getColor('text_on_primary'))
           // 时间戳
           Text(this.formatTime(msg.timestamp))
             .fontSize(this.sm.getFontSize('caption'))
-            .fontColor('rgba(255,255,255,0.8)')
+            .fontColor(this.sm.getColor('text_on_primary'))
+            .opacity(0.8)
             .margin({ top: 4 })
             .alignSelf(ItemAlign.End)
         }
@@ -525,8 +646,13 @@ export struct ChatPage {
           top: this.sm.getSpacing('sm'),
           bottom: this.sm.getSpacing('sm'),
         })
-        .borderRadius(this.sm.getRadius('lg'))
-        .backgroundColor(this.sm.getColor('primary'))
+        .borderRadius({
+          topLeft: 16,
+          topRight: 16,
+          bottomLeft: 16,
+          bottomRight: 6
+        })
+        .linearGradient({ angle: 135, colors: this.sm.getBrandGradient() })
         // 限制气泡最大宽度，避免占满整行
         .constraintSize({ maxWidth: '75%' })
         .alignItems(HorizontalAlign.Start)
@@ -534,12 +660,11 @@ export struct ChatPage {
       .width('100%')
       .justifyContent(FlexAlign.End)
     } else {
-      // assistant 消息：左对齐，玻璃色背景
-      // 宽度直接定值 80%（constraintSize 与子 width('100%') 组合存在
+      // assistant 消息：左对齐，玻璃卡，左下直角（设计 .bub.ai）
+      // 宽度直接定值 78%（constraintSize 与子 width('100%') 组合存在
       // 布局歧义——真机实测 GlassPanel 溢出左缘裁切，改定宽消除歧义）
       Row() {
         Column() {
-          GlassPanel({ variant: 'subtle', innerPadding: this.sm.getSpacing('md'), radius: this.sm.getRadius('lg') }) {
           Column() {
             // Agent 署名
             Text(this.sessionTitle.length > 0 ? this.sessionTitle : this.getAgentName())
@@ -549,12 +674,12 @@ export struct ChatPage {
             // 消息内容 + 流式光标
             Row() {
               Text(msg.content.length > 0 ? msg.content : (msg.isStreaming ? '' : '（空回复）'))
-                .fontSize(this.sm.getFontSize('body'))
+                .fontSize(this.sm.getFontSize('body_sm'))
                 .fontColor(this.sm.getColor('text_primary'))
               // 流式生成中显示闪烁光标
               if (msg.isStreaming) {
                 Text('▍')
-                  .fontSize(this.sm.getFontSize('body'))
+                  .fontSize(this.sm.getFontSize('body_sm'))
                   .fontColor(this.sm.getColor('primary'))
                   .margin({ left: 2 })
               }
@@ -568,9 +693,18 @@ export struct ChatPage {
               .alignSelf(ItemAlign.End)
           }
           .alignItems(HorizontalAlign.Start)
-          }
+          .width('100%')
+          .padding(this.sm.getSpacing('md'))
+          .borderRadius({
+            topLeft: 16,
+            topRight: 16,
+            bottomLeft: 6,
+            bottomRight: 16
+          })
+          .backgroundColor(this.sm.getColor('surface_strong'))
+          .border({ width: 1, color: this.sm.getColor('border') })
         }
-        .width('80%')
+        .width('78%')
       }
       .width('100%')
       .justifyContent(FlexAlign.Start)

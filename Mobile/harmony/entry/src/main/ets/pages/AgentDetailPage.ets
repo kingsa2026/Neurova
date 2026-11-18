@@ -17,6 +17,14 @@ import { StyleManager } from '../libs/style/StyleManager';
 import { MessageManager } from '../libs/message/MessageManager';
 import { SleepStatusDto } from '../libs/api/modules/RuntimeApi';
 import { Agent } from '../libs/types';
+import { AppIcon } from '../components/common/AppIcon';
+import { IconBtn } from '../components/common/IconBtn';
+
+/** 详情分节胶囊（设计 F8 .chiprow；情绪域无移动端页面，不设假入口） */
+interface DetailChip {
+  label: string;
+  route: string;
+}
 
 @Component
 export struct AgentDetailPage {
@@ -31,6 +39,16 @@ export struct AgentDetailPage {
   private router = Router.getInstance();
   private sm = StyleManager.getInstance();
   private msg = MessageManager.getInstance();
+  // 分节胶囊清单（概览为当前页；其余路由跳转）
+  private chips: DetailChip[] = [
+    { label: '概览', route: '' },
+    { label: '记忆', route: 'MEMORY' },
+    { label: '技能', route: 'SKILL_POOL' },
+    { label: '成长', route: 'GROWTH' },
+    { label: '睡眠', route: 'SLEEP_STATUS' },
+    { label: '文件', route: 'AGENT_FILE' },
+    { label: '渠道', route: 'AGENT_CHANNEL' },
+  ];
 
   aboutToAppear(): void {
     // 路由参数优先（AgentListPage 传入），回退到 store 的当前 Agent
@@ -82,8 +100,64 @@ export struct AgentDetailPage {
     this.router.push(RouteNames.AGENT_FORM, { 'mode': 'edit', 'agentId': this.agentId });
   }
 
+  /** 顶栏齿轮 → 操作菜单：编辑 / 删除（F7 卡片操作收敛至此） */
+  private showActions(): void {
+    AlertDialog.show({
+      title: this.agent ? this.agent.name : '智能体操作',
+      message: '选择操作',
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      buttons: [
+        {
+          value: '编辑',
+          action: () => {
+            this.openEdit();
+          }
+        },
+        {
+          value: '删除',
+          fontColor: this.sm.getColor('error'),
+          action: () => {
+            this.confirmDelete();
+          }
+        }
+      ]
+    });
+  }
+
+  private async confirmDelete(): Promise<void> {
+    try {
+      await this.api.agents.remove(this.agentId);
+      this.msg.success('已删除');
+      this.router.back();
+    } catch (e) {
+      this.msg.error('删除失败：' + (e as Error).message);
+    }
+  }
+
+  /** 分节胶囊点击：概览停留本页，其余先切当前 Agent 再跳路由 */
+  private openChip(chip: DetailChip): void {
+    if (chip.route === '') {
+      return;
+    }
+    if (this.agent) {
+      this.agentsStore.switchAgent(this.agent.id);
+    }
+    this.router.push(chip.route);
+  }
+
   private statusLabel(): string {
     if (this.agent && this.agent.status.length > 0) {
+      // 后端状态归一值 → 中文（与列表页状态口径一致）
+      if (this.agent.status === 'active') {
+        return '在线';
+      }
+      if (this.agent.status === 'sleeping') {
+        return '休眠中';
+      }
+      if (this.agent.status === 'error') {
+        return '异常';
+      }
       return this.agent.status;
     }
     if (this.sleep && this.sleep.is_sleeping) {
@@ -94,142 +168,190 @@ export struct AgentDetailPage {
 
   build() {
     Column() {
-      // 头部：返回 + 标题 + 设置位
+      // 头部：返回 + 标题 + 齿轮（操作菜单：编辑/删除）
       Row() {
-        Text('‹')
-          .fontSize(22)
-          .fontColor(this.sm.getColor('text_secondary'))
-          .padding(8)
-          .onClick(() => {
-            this.router.back();
-          })
+        IconBtn({ name: 'back', onTap: () => { this.router.back(); } })
         Text('智能体详情')
           .fontSize(17)
           .fontWeight(FontWeight.Medium)
           .fontColor(this.sm.getColor('text_primary'))
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
-        Text('编辑')
-          .fontSize(14)
-          .fontColor(this.sm.getColor('primary'))
-          .padding(8)
-          .onClick(() => {
-            this.openEdit();
-          })
+        IconBtn({ name: 'gear', onTap: () => { this.showActions(); } })
       }
       .width('100%')
       .padding({ left: 12, right: 12, top: 6, bottom: 8 })
+      .alignItems(VerticalAlign.Center)
 
       Scroll() {
         Column() {
-          // 头像 + 名称 + 状态
+          // 居中头部（设计 F8 .deth：64px 渐变头像 + 名称 + 状态行 + 操作行）
           Column() {
             Text(this.agent ? this.agent.name.slice(0, 1) : 'A')
-              .fontSize(22)
+              .fontSize(24)
               .fontWeight(FontWeight.Bold)
               .fontColor(this.sm.getColor('text_on_primary'))
-              .width(62)
-              .height(62)
+              .width(64)
+              .height(64)
               .borderRadius(20)
               .textAlign(TextAlign.Center)
-              .backgroundColor(this.sm.getColor('primary'))
+              .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
             Text(this.agent ? this.agent.name : '…')
-              .fontSize(18)
+              .fontSize(19)
               .fontWeight(FontWeight.Bold)
               .fontColor(this.sm.getColor('text_primary'))
               .margin({ top: 10 })
             Row() {
-              Circle()
+              Row()
                 .width(6)
                 .height(6)
-                .fill(this.sleep && this.sleep.is_sleeping ? this.sm.getColor('warning') : this.sm.getColor('success'))
-              Text(this.statusLabel())
+                .borderRadius(3)
+                .backgroundColor(this.sleep && this.sleep.is_sleeping ? this.sm.getColor('warning') : this.sm.getColor('success'))
+                .shadow({ radius: 8, color: 'rgba(52,211,153,0.80)' })
+              Text(this.statusLabel() + (this.agent && this.agent.model ? ' · ' + this.agent.model : '') + (this.agent && this.agent.toolsCount ? ' · 工具 ' + this.agent.toolsCount.toString() : ''))
                 .fontSize(12)
                 .fontColor(this.sm.getColor('text_secondary'))
                 .margin({ left: 6 })
             }
             .margin({ top: 4 })
 
+            // 操作行：渐变发消息（flex）+ 玻璃编辑方钮（设计 .deth .btns）
             Row() {
-              Button() {
+              Row() {
+                AppIcon({ name: 'chat', iconSize: 15, color: this.sm.getColor('text_on_primary') })
                 Text('发消息')
-                  .fontSize(13.5)
+                  .fontSize(13)
+                  .fontWeight(FontWeight.Medium)
                   .fontColor(this.sm.getColor('text_on_primary'))
+                  .margin({ left: 7 })
               }
-              .backgroundColor(this.sm.getColor('primary'))
-              .height(38)
+              .height(40)
+              .borderRadius(12)
+              .linearGradient({ angle: 135, colors: this.sm.getBrandGradient() })
               .layoutWeight(1)
+              .justifyContent(FlexAlign.Center)
               .onClick(() => {
                 this.openChat();
+              })
+
+              Column() {
+                AppIcon({ name: 'edit', iconSize: 16, color: this.sm.getColor('text_secondary') })
+              }
+              .width(40)
+              .height(40)
+              .borderRadius(12)
+              .backgroundColor(this.sm.getColor('glass'))
+              .border({ width: 1, color: this.sm.getColor('border') })
+              .justifyContent(FlexAlign.Center)
+              .margin({ left: 9 })
+              .onClick(() => {
+                this.openEdit();
               })
             }
             .margin({ top: 14 })
             .width('100%')
+            .alignItems(VerticalAlign.Center)
           }
           .width('100%')
           .alignItems(HorizontalAlign.Center)
           .padding({ top: 8, bottom: 14 })
 
+          // 分节胶囊（设计 F8 .chiprow：横滑；概览=当前，其余路由）
+          Scroll() {
+            Row() {
+              ForEach(this.chips, (chip: DetailChip) => {
+                Text(chip.label)
+                  .fontSize(12)
+                  .fontColor(chip.route === '' ? this.sm.getColor('text_on_primary') : this.sm.getColor('text_secondary'))
+                  .padding({ left: 14, right: 14, top: 7, bottom: 7 })
+                  .borderRadius(999)
+                  .backgroundColor(chip.route === '' ? 'rgba(99,102,241,0.28)' : this.sm.getColor('glass'))
+                  .border({ width: 1, color: chip.route === '' ? this.sm.getColor('primary') : this.sm.getColor('border') })
+                  .margin({ right: 7 })
+                  .onClick(() => {
+                    this.openChip(chip);
+                  })
+              }, (chip: DetailChip) => chip.label)
+            }
+          }
+          .width('100%')
+          .scrollBar(BarState.Off)
+          .padding({ bottom: 10 })
+
           // 概览分节
           Column() {
-            Text('概览')
-              .fontSize(12.5)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.sm.getColor('text_secondary'))
-              .margin({ bottom: 8 })
+            Row() {
+              AppIcon({ name: 'spark', iconSize: 14, color: this.sm.getColor('primary') })
+              Text('概览')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.sm.getColor('text_primary'))
+                .margin({ left: 7 })
+            }
+            .margin({ bottom: 8 })
+            .alignItems(VerticalAlign.Center)
             this.kvRow('描述', this.agent && this.agent.description && this.agent.description.length > 0 ? this.agent.description : '—')
             this.kvRow('模型', this.agent && this.agent.model && this.agent.model.length > 0 ? this.agent.model : '默认')
+            this.kvRow('已挂载工具', this.agent && this.agent.toolsCount ? this.agent.toolsCount.toString() : '0')
           }
           .width('100%')
           .padding(14)
           .borderRadius(16)
-          .backgroundColor(this.sm.getColor('surface'))
+          .backgroundColor(this.sm.getColor('glass'))
           .border({ width: 1, color: this.sm.getColor('border') })
 
-          // 记忆分节
+          // 记忆分节（含「查看全部 N 条 ›」）
           Column() {
             Row() {
+              AppIcon({ name: 'book', iconSize: 14, color: this.sm.getColor('primary') })
               Text('记忆')
-                .fontSize(12.5)
+                .fontSize(this.sm.getFontSize('caption'))
                 .fontWeight(FontWeight.Medium)
-                .fontColor(this.sm.getColor('text_secondary'))
+                .fontColor(this.sm.getColor('text_primary'))
+                .margin({ left: 7 })
                 .layoutWeight(1)
               Text('查看全部 ' + this.memoryCount.toString() + ' 条 ›')
-                .fontSize(11)
+                .fontSize(this.sm.getFontSize('badge'))
                 .fontColor(this.sm.getColor('primary'))
                 .onClick(() => {
                   this.openMemories();
                 })
             }
             .width('100%')
+            .alignItems(VerticalAlign.Center)
             Text(this.memoryCount > 0
               ? '该智能体已有 ' + this.memoryCount.toString() + ' 条长期记忆，点击右上角查看全部'
               : '暂无长期记忆；对话中的稳定事实会自动沉淀')
-              .fontSize(12)
+              .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_secondary'))
               .margin({ top: 8 })
           }
           .width('100%')
           .padding(14)
           .borderRadius(16)
-          .backgroundColor(this.sm.getColor('surface'))
+          .backgroundColor(this.sm.getColor('glass'))
           .border({ width: 1, color: this.sm.getColor('border') })
           .margin({ top: 10 })
 
           // 睡眠分节
           Column() {
-            Text('睡眠')
-              .fontSize(12.5)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.sm.getColor('text_secondary'))
-              .margin({ bottom: 8 })
+            Row() {
+              AppIcon({ name: 'moon', iconSize: 14, color: this.sm.getColor('primary') })
+              Text('睡眠')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.sm.getColor('text_primary'))
+                .margin({ left: 7 })
+            }
+            .margin({ bottom: 8 })
+            .alignItems(VerticalAlign.Center)
             this.kvRow('当前阶段', this.sleep ? this.sleep.sleep_phase : '—')
             this.kvRow('休眠周期', this.sleep ? this.sleep.sleep_cycles.toString() : '0')
           }
           .width('100%')
           .padding(14)
           .borderRadius(16)
-          .backgroundColor(this.sm.getColor('surface'))
+          .backgroundColor(this.sm.getColor('glass'))
           .border({ width: 1, color: this.sm.getColor('border') })
           .margin({ top: 10 })
         }
@@ -249,11 +371,11 @@ export struct AgentDetailPage {
   kvRow(k: string, v: string) {
     Row() {
       Text(k)
-        .fontSize(12.5)
+        .fontSize(this.sm.getFontSize('caption'))
         .fontColor(this.sm.getColor('text_secondary'))
       Blank()
       Text(v)
-        .fontSize(12.5)
+        .fontSize(this.sm.getFontSize('caption'))
         .fontColor(this.sm.getColor('text_primary'))
         .textAlign(TextAlign.End)
         .constraintSize({ maxWidth: '62%' })

@@ -21,7 +21,7 @@ const sm = StyleManager.getInstance();
 export struct GlassButton {
   // 按钮文本（当未提供 content 时使用）
   @Prop text: string = '';
-  // 按钮类型：primary | default | danger | ghost
+  // 按钮类型：primary | default | danger | ghost | gradient（品牌渐变，设计 .btn-pri）
   @Prop type: string = 'default';
   // 按钮尺寸：small | medium | large
   @Prop btnSize: string = 'medium';
@@ -47,18 +47,20 @@ export struct GlassButton {
     }
   }
 
-  // 根据 type 获取文字颜色：primary/danger 白字，其余 text_primary
+  // 根据 type 获取文字颜色：primary/danger/gradient 白字，其余 text_primary
   private getTextColor(): string {
     switch (this.type) {
       case 'primary':
       case 'danger':
+      case 'gradient':
         return '#ffffff';
       default:
         return sm.getColor('text_primary');
     }
   }
 
-  // 根据 type 获取背景色：primary→主色，danger→错误色，其余透明（交由 GlassComponent 呈现玻璃）
+  // 根据 type 获取背景色：primary→主色，danger→错误色，gradient→透明（渐变在渐变层叠加），
+  // 其余透明（交由 GlassComponent 呈现玻璃）
   private getBackgroundColor(): ResourceColor {
     switch (this.type) {
       case 'primary':
@@ -70,27 +72,52 @@ export struct GlassButton {
     }
   }
 
+  // 是否为品牌渐变型（.btn-pri：135° 三停渐变 + 品牌投影）
+  private isGradient(): boolean {
+    return this.type === 'gradient';
+  }
+
   // 是否为 ghost 类型（仅边框无背景）
   private isGhost(): boolean {
     return this.type === 'ghost';
   }
 
-  // 按钮内部内容（抽取为 Builder 以在 block/非 block 两个分支复用）
+  // 按钮文案/自定义内容（两分支共用）
+  @Builder
+  btnContent() {
+    if (this.content) {
+      this.content();
+    } else {
+      Text(this.text)
+        .fontSize(16)
+        .fontColor(this.getTextColor())
+    }
+  }
+
+  // 按钮内部内容（抽取为 Builder 以在 block/非 block 两个分支复用）；
+  // gradient 型走品牌渐变+投影（.btn-pri），其余走纯色/玻璃
   @Builder
   buildInner() {
-    Row() {
-      if (this.content) {
-        this.content();
-      } else {
-        Text(this.text)
-          .fontSize(16)
-          .fontColor(this.getTextColor())
+    if (this.isGradient()) {
+      Row() {
+        this.btnContent()
       }
+      .padding(this.getSizePadding())
+      .justifyContent(FlexAlign.Center)
+      .linearGradient({
+        angle: 135,
+        colors: sm.getBrandGradient()
+      })
+      .shadow({ radius: 24, color: 'rgba(99,102,241,0.40)', offsetY: 8 })
+    } else {
+      Row() {
+        this.btnContent()
+      }
+      .padding(this.getSizePadding())
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor(this.getBackgroundColor())
+      .border(this.isGhost() ? { width: 1, color: sm.getColor('border') } : { width: 0, color: Color.Transparent })
     }
-    .padding(this.getSizePadding())
-    .justifyContent(FlexAlign.Center)
-    .backgroundColor(this.getBackgroundColor())
-    .border(this.isGhost() ? { width: 1, color: sm.getColor('border') } : { width: 0, color: Color.Transparent })
   }
 
   build() {

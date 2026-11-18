@@ -29,11 +29,16 @@ export struct GlassStatCard {
   @Prop trend: string = '';
   // 是否上升趋势：true → success 色；false → error 色
   @Prop trendUp: boolean = false;
+  // 中性趋势（如「共 N 个」）：用第三级文字色，不红不绿
+  @Prop trendNeutral: boolean = false;
   // 图标资源（可选，渲染在左侧）
   icon: Resource | undefined = undefined;
 
-  // 趋势文字色：trendUp → success；否则 error
+  // 趋势文字色：neutral → text_tertiary；trendUp → success；否则 error
   private getTrendColor(): string {
+    if (this.trendNeutral) {
+      return sm.getColor('text_tertiary');
+    }
     return this.trendUp ? sm.getColor('success') : sm.getColor('error');
   }
 
@@ -59,7 +64,8 @@ export struct GlassStatCard {
 
           Row() {
             Text(this.value)
-              .fontSize(24)
+              .fontSize(26)
+              .fontWeight(FontWeight.Bold)
               .fontColor(sm.getColor('text_primary'))
             if (this.unit) {
               Text(this.unit)
@@ -89,7 +95,9 @@ export struct GlassStatCard {
     .padding(sm.getSpacing('md'))
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .borderRadius(sm.getRadius('lg'))
+    .borderRadius(sm.getRadius('xl'))
+    .backgroundColor(sm.getColor('glass'))
+    .border({ width: 1, color: sm.getColor('border') })
     .backgroundBlurStyle(BlurStyle.Thin)
   }
 }

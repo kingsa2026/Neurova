@@ -15,6 +15,8 @@ import { StyleManager } from '../libs/style/StyleManager';
 import { MessageManager } from '../libs/message/MessageManager';
 import { ChatSession } from '../libs/api/modules/SessionsApi';
 import { Agent } from '../libs/types';
+import { AppIcon } from '../components/common/AppIcon';
+import { IconBtn } from '../components/common/IconBtn';
 
 /** 筛选 Tab：全部 / 置顶 */
 const FILTER_ALL = 0;
@@ -162,43 +164,20 @@ export struct SessionListPage {
   build() {
     Stack() {
       Column() {
-        // 头部：标题 + 新建
+        // 头部：标题（页题 21/700）+ 会话数副标 + 搜索 + 新建（设计 F4 .phead）
         Row() {
           Text('对话')
-            .fontSize(21)
+            .fontSize(this.sm.getFontSize('page_title'))
             .fontWeight(FontWeight.Bold)
             .fontColor(this.sm.getColor('text_primary'))
-          Text('与 PC 同源')
-            .fontSize(11)
+          Text(this.sessions.length.toString() + ' 个会话 · 与 PC 同源')
+            .fontSize(this.sm.getFontSize('badge'))
             .fontColor(this.sm.getColor('text_tertiary'))
             .margin({ left: 8 })
 
           Blank()
 
-          Stack() {
-            Circle()
-              .width(13)
-              .height(13)
-              .fillOpacity(0)
-              .stroke(this.sm.getColor('text_secondary'))
-              .strokeWidth(1.7)
-            Path()
-              .commands('M14.2 14.2 L18.2 18.2')
-              .fillOpacity(0)
-              .stroke(this.sm.getColor('text_secondary'))
-              .strokeWidth(1.7)
-              .strokeLineCap(LineCapStyle.Round)
-              .width(20)
-              .height(20)
-          }
-          .width(36)
-          .height(36)
-          .borderRadius(12)
-          .backgroundColor(this.sm.getColor('surface_strong'))
-          .border({ width: 1, color: this.sm.getColor('border') })
-          .onClick(() => {
-            this.showSearch = !this.showSearch;
-          })
+          IconBtn({ name: 'search', onTap: () => { this.showSearch = !this.showSearch; } })
 
           Button() {
             Text('＋ 新对话')
@@ -215,6 +194,7 @@ export struct SessionListPage {
         }
         .width('100%')
         .padding({ left: 20, right: 20, top: 8, bottom: 10 })
+        .alignItems(VerticalAlign.Center)
 
         // 搜索行（展开时显示，按标题本地过滤）
         if (this.showSearch) {
@@ -232,15 +212,15 @@ export struct SessionListPage {
           .padding({ left: 20, right: 20, bottom: 10 })
         }
 
-        // 筛选：全部 / 置顶
+        // 筛选：全部 N / 置顶 N（真实计数；归档会话不在列表接口返回中，不设假分段）
         Row() {
-          ForEach(['全部', '置顶'], (label: string, idx: number) => {
+          ForEach(['全部 ' + this.sessions.length.toString(), '置顶 ' + this.sessions.filter((s: ChatSession) => s.pinned).length.toString()], (label: string, idx: number) => {
             Text(label)
-              .fontSize(12)
+              .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.filter === idx ? this.sm.getColor('text_on_primary') : this.sm.getColor('text_secondary'))
-              .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+              .padding({ left: 14, right: 14, top: 7, bottom: 7 })
               .borderRadius(999)
-              .backgroundColor(this.filter === idx ? this.sm.getColor('primary_soft') : this.sm.getColor('surface'))
+              .backgroundColor(this.filter === idx ? 'rgba(99,102,241,0.28)' : this.sm.getColor('glass'))
               .border({ width: 1, color: this.filter === idx ? this.sm.getColor('primary') : this.sm.getColor('border') })
               .margin({ right: 8 })
               .onClick(() => {
@@ -270,7 +250,7 @@ export struct SessionListPage {
             }
             ForEach(this.visible(), (s: ChatSession) => {
               Row() {
-                // Agent 头像（首字）
+                // Agent 头像（首字，渐变）
                 Text(this.agentName(s.agent_id).slice(0, 1))
                   .fontSize(15)
                   .fontWeight(FontWeight.Bold)
@@ -284,75 +264,86 @@ export struct SessionListPage {
                 Column() {
                   Row() {
                     Text(s.title)
-                      .fontSize(14.5)
+                      .fontSize(this.sm.getFontSize('body_sm'))
                       .fontWeight(FontWeight.Medium)
                       .fontColor(this.sm.getColor('text_primary'))
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
                       .layoutWeight(1)
                     if (s.pinned) {
-                      Text('置顶')
-                        .fontSize(9)
-                        .fontColor(this.sm.getColor('primary'))
-                        .padding({ left: 5, right: 5, top: 1, bottom: 1 })
-                        .borderRadius(5)
-                        .border({ width: 1, color: this.sm.getColor('primary') })
+                      AppIcon({ name: 'pin', iconSize: 12, color: this.sm.getColor('primary') })
                         .margin({ left: 6 })
                     }
                   }
                   .width('100%')
 
-                  Text(this.fmtTime(s.updated_at) + ' · ' + this.agentName(s.agent_id))
-                    .fontSize(11)
+                  Text(this.agentName(s.agent_id) + (s.channel_name !== '' ? ' · ' + s.channel_name : ''))
+                    .fontSize(this.sm.getFontSize('caption'))
                     .fontColor(this.sm.getColor('text_tertiary'))
                     .margin({ top: 3 })
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
                 }
                 .layoutWeight(1)
                 .alignItems(HorizontalAlign.Start)
                 .margin({ left: 11 })
 
-                Text('⋯')
-                  .fontSize(15)
-                  .fontColor(this.sm.getColor('text_tertiary'))
-                  .padding(6)
-                  .onClick(() => {
-                    // 操作菜单：重命名 / 置顶 / 删除（同 PC 侧栏操作集，AlertDialogParamWithOptions）
-                    this.renameTarget = s;
-                    this.renameText = s.title;
-                    AlertDialog.show({
-                      title: s.title,
-                      message: '选择会话操作',
-                      autoCancel: true,
-                      alignment: DialogAlignment.Center,
-                      buttons: [
-                        {
-                          value: '重命名',
-                          action: () => {
-                            // 保持 renameTarget，转重命名输入层
+                // 右列：时间 + 操作（设计 F4 .rt）
+                Column() {
+                  Text(this.fmtTime(s.updated_at))
+                    .fontSize(this.sm.getFontSize('badge'))
+                    .fontColor(this.sm.getColor('text_tertiary'))
+                  Text('⋯')
+                    .fontSize(15)
+                    .fontColor(this.sm.getColor('text_tertiary'))
+                    .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                    .margin({ top: 3 })
+                    .onClick(() => {
+                      // 操作菜单：重命名 / 置顶 / 归档 / 删除（同 PC 侧栏操作集）
+                      this.renameTarget = s;
+                      this.renameText = s.title;
+                      AlertDialog.show({
+                        title: s.title,
+                        message: '选择会话操作',
+                        autoCancel: true,
+                        alignment: DialogAlignment.Center,
+                        buttons: [
+                          {
+                            value: '重命名',
+                            action: () => {
+                              // 保持 renameTarget，转重命名输入层
+                            }
+                          },
+                          {
+                            value: s.pinned ? '取消置顶' : '置顶',
+                            action: () => {
+                              this.togglePin(s);
+                            }
+                          },
+                          {
+                            value: '归档',
+                            action: () => {
+                              this.archive(s);
+                            }
+                          },
+                          {
+                            value: '删除',
+                            fontColor: this.sm.getColor('error'),
+                            action: () => {
+                              this.remove(s);
+                            }
                           }
-                        },
-                        {
-                          value: s.pinned ? '取消置顶' : '置顶',
-                          action: () => {
-                            this.togglePin(s);
-                          }
-                        },
-                        {
-                          value: '删除',
-                          fontColor: this.sm.getColor('error'),
-                          action: () => {
-                            this.remove(s);
-                          }
-                        }
-                      ]
-                    });
-                  })
+                        ]
+                      });
+                    })
+                }
+                .alignItems(HorizontalAlign.End)
               }
               .width('100%')
               .padding(13)
-              .borderRadius(15)
+              .borderRadius(16)
               .backgroundBlurStyle(BlurStyle.COMPONENT_THIN)
-              .backgroundColor(this.sm.getColor('surface_strong'))
+              .backgroundColor(this.sm.getColor('glass'))
               .border({
                 width: 1,
                 color: s.pinned ? this.sm.getColor('primary') : this.sm.getColor('border')

@@ -64,6 +64,7 @@ export class AgentsApi {
       createdAt: dto.created_at ?? '',
       updatedAt: '',
     };
+    agent.toolsCount = dto.tools_count;
     return agent;
   }
 

@@ -26,6 +26,7 @@
  */
 
 import { TopNavMenu, GlassCard, GlassButton, StarBackground } from '../components/glass';
+import { AppIcon } from '../components/common/AppIcon';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { AuthStore } from '../libs/state/stores/AuthStore';
 import { PlatformAdapter, DeviceInfo } from '../libs/adapters/PlatformAdapter';
@@ -86,6 +87,10 @@ export struct PairingPage {
     brand: 'unknown', model: 'unknown', osVersion: 'unknown',
     osName: 'harmony', apiVersion: 0, screenW: 0, screenH: 0,
   };
+  // 取景框扫描线相位（F2 .scanline：上下往复）
+  @State scanPhase: boolean = false;
+  // 扫描线动画定时器句柄
+  private scanTimer: number = -1;
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -105,6 +110,17 @@ export struct PairingPage {
     } catch (e) {
       // getDeviceInfo 内部已有兜底，此处仅记录，不阻塞页面
       this.logger.warn(TAG, '获取设备信息失败，使用默认设备名', e as Error);
+    }
+    // 扫描线往复动画（2.6s 一循环，与原型 @keyframes scan 同周期）
+    this.scanTimer = setInterval(() => {
+      this.scanPhase = !this.scanPhase;
+    }, 1300);
+  }
+
+  aboutToDisappear() {
+    if (this.scanTimer !== -1) {
+      clearInterval(this.scanTimer);
+      this.scanTimer = -1;
     }
   }
 
@@ -381,20 +397,71 @@ export struct PairingPage {
       GlassCard({ title: '扫码配对' }) {
         Column() {
           if (this.status === 'idle') {
-            // 待操作：大按钮触发扫码
-            Text('使用系统扫码识别 Neurova 配对二维码')
+            // 取景框：暗底 + 品牌渐变中央框 + 扫描线（点击即调起系统扫码）
+            Stack() {
+              // 中央取景框（品牌渐变描边）
+              Column()
+                .width(180)
+                .height(180)
+                .borderRadius(16)
+                .border({ width: 1.5, color: this.sm.getColor('border') })
+                .linearGradient({
+                  angle: 135,
+                  colors: this.sm.getBrandGradient()
+                })
+                .opacity(0.9)
+                .markAnchor({ x: '50%', y: '50%' })
+                .position({ x: '50%', y: '50%' })
+
+              // 扫描线（青色，上下往复）
+              Column()
+                .width('72%')
+                .height(2)
+                .borderRadius(2)
+                .backgroundColor(this.sm.getColor('accent'))
+                .shadow({ radius: 14, color: 'rgba(34,211,238,0.80)' })
+                .markAnchor({ x: '50%', y: '50%' })
+                .position({ x: '50%', y: this.scanPhase ? '62%' : '38%' })
+                .animation({ duration: 1300, curve: Curve.EaseInOut })
+            }
+            .width('100%')
+            .height(280)
+            .borderRadius(22)
+            .clip(true)
+            .backgroundColor('rgba(19,26,46,0.9)')
+            .onClick(() => { this.handleScan(); })
+
+            // 提示文案（设计 F2 .pair-tip 三句）
+            Text('对准 PC 端「配对设备」二维码')
+              .fontSize(this.sm.getFontSize('card_title'))
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.sm.getColor('text_primary'))
+              .textAlign(TextAlign.Center)
+              .margin({ top: 20 })
+
+            Text('扫码即完成 服务器建档 + 设备配对，无需手动录入地址\n配对后本机获得长期设备身份，重连免扫码')
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_secondary'))
               .textAlign(TextAlign.Center)
-              .margin({ bottom: this.sm.getSpacing('md') })
+              .lineHeight(20)
+              .margin({ top: 6 })
 
-            GlassButton({
-              text: '扫码配对',
-              type: 'primary',
-              block: true,
-              btnSize: 'large',
-              onTap: () => { this.handleScan(); }
-            })
+            // 回退入口（设计 .code-fallback）
+            Row() {
+              AppIcon({ name: 'edit', iconSize: 15, color: this.sm.getColor('primary') })
+              Text('二维码不可用？手动输入 6 位配对码')
+                .fontSize(this.sm.getFontSize('body_sm'))
+                .fontColor(this.sm.getColor('primary'))
+                  .margin({ left: 8 })
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.Center)
+            .padding({ top: 12, bottom: 12 })
+            .borderRadius(14)
+            .backgroundColor(this.sm.getColor('primary_soft'))
+            .border({ width: 1, color: this.sm.getColor('primary') })
+            .margin({ top: 16 })
+            .onClick(() => { this.mode = 'input'; this.resetToIdle(); })
           } else if (this.status === 'waiting') {
             // 配对中：旋转动画 + 文案，回显识别到的配对码
             LoadingProgress()

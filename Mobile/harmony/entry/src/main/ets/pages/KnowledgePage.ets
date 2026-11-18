@@ -17,6 +17,7 @@ import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
 import { GlassCard, GlassButton, GlassPanel } from '../components/glass';
+import { IconBtn } from '../components/common/IconBtn';
 import { KnowledgeItem, KnowledgeStatus } from '../libs/types';
 
 /** 日志标签 */
@@ -236,27 +237,26 @@ export struct KnowledgePage {
 
   build() {
     Column() {
-      // 内联头（原型 F9：21/700 标题 + 图谱/数据源/导入）
+      // 内联头（原型 F9：21/700 标题 + 数量副标 + 图谱/数据源图标钮 + 导入渐变钮）
       Row() {
         Text('知识')
           .fontSize(21)
           .fontWeight(FontWeight.Bold)
           .fontColor(this.sm.getColor('text_primary'))
+        Text(this.knowledgeList.length.toString() + ' 条 · 与 PC 同源')
+          .fontSize(this.sm.getFontSize('badge'))
+          .fontColor(this.sm.getColor('text_tertiary'))
+          .margin({ left: 8 })
+          .alignSelf(ItemAlign.End)
+          .padding({ bottom: 3 })
           .layoutWeight(1)
-        Text('图谱')
-          .fontSize(12)
-          .fontColor(this.sm.getColor('primary'))
-          .padding(8)
-          .onClick(() => {
-            this.router.push(RouteNames.GRAPH_PREVIEW);
-          })
-        Text('数据源')
-          .fontSize(12)
-          .fontColor(this.sm.getColor('primary'))
-          .padding(8)
-          .onClick(() => {
-            this.router.push(RouteNames.ENTERPRISE_SOURCES);
-          })
+        IconBtn({ name: 'graph', onTap: () => {
+          this.router.push(RouteNames.GRAPH_PREVIEW);
+        } })
+        IconBtn({ name: 'server', onTap: () => {
+          this.router.push(RouteNames.ENTERPRISE_SOURCES);
+        } })
+          .margin({ left: 8 })
         Button() {
           Text('＋ 导入')
             .fontSize(13)
@@ -264,13 +264,14 @@ export struct KnowledgePage {
         }
         .height(34)
         .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
-        .margin({ left: 4 })
+        .margin({ left: 8 })
         .onClick(() => {
           this.handleImport();
         })
       }
       .width('100%')
       .padding({ left: 20, right: 20, top: 8, bottom: 10 })
+      .alignItems(VerticalAlign.Center)
 
       // 搜索栏
       Row() {

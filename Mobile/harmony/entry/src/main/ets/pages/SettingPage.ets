@@ -43,6 +43,7 @@
  */
 
 import { TopNavMenu, GlassCard, GlassButton, GlassInput } from '../components/glass';
+import { AppIcon } from '../components/common/AppIcon';
 import { mediaquery } from '@kit.ArkUI';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { AppStore } from '../libs/state/stores/AppStore';
@@ -279,8 +280,30 @@ export struct SettingPage {
   private logger = Logger.getInstance();
   private msg = MessageManager.getInstance();
 
+  // F10 入口行徽标数据（真实计数，fail-soft）
+  @State private serverCount: number = 0;
+  @State private unreadCount: number = 0;
+
   aboutToAppear() {
     this.loadSettings();
+    this.loadEntryCounts();
+  }
+
+  /** F10 分组一徽标：服务器档案数 + 未读通知数（真端点，失败置 0 不阻塞页面） */
+  private async loadEntryCounts(): Promise<void> {
+    try {
+      this.serverCount = ServerProfiles.getInstance().getList().length;
+    } catch (e) {
+      this.serverCount = 0;
+    }
+    try {
+      const res = await this.api.monitor.getUnreadCount();
+      if (res.code === 0 && res.data !== undefined && res.data !== null) {
+        this.unreadCount = Number(res.data);
+      }
+    } catch (e) {
+      this.unreadCount = 0;
+    }
   }
 
   /** 工作区地址（档案地址去 /api/v1 尾缀） */
@@ -579,7 +602,7 @@ export struct SettingPage {
       .width('100%')
       .padding({ left: 20, right: 20, top: 8, bottom: 10 })
 
-      // 个人卡（原型 F10：渐变头像 + 用户名 + 工作区/配对态）
+      // 个人卡（原型 F10：渐变头像 + 用户名 + 工作区/配对态 + 箭头）
       Row() {
         Text((this.authStore.user?.username ?? 'U').slice(0, 1))
           .fontSize(20)
@@ -595,99 +618,77 @@ export struct SettingPage {
             .fontSize(16)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.sm.getColor('text_primary'))
-          Text('工作区 ' + this.workspaceHost() + (this.authStore.isPaired ? ' · 已配对' : ' · 未配对'))
-            .fontSize(11.5)
-            .fontColor(this.sm.getColor('text_secondary'))
-            .margin({ top: 3 })
+          Row() {
+            Row()
+              .width(5)
+              .height(5)
+              .borderRadius(3)
+              .backgroundColor(this.authStore.isPaired ? this.sm.getColor('success') : this.sm.getColor('warning'))
+            Text('工作区 ' + this.workspaceHost() + (this.authStore.isPaired ? ' · 已配对' : ' · 未配对'))
+              .fontSize(this.sm.getFontSize('badge'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .margin({ left: 6 })
+          }
+          .margin({ top: 3 })
+          .alignItems(VerticalAlign.Center)
         }
         .alignItems(HorizontalAlign.Start)
         .margin({ left: 12 })
         .layoutWeight(1)
+        AppIcon({ name: 'chev', iconSize: 16, color: this.sm.getColor('text_tertiary') })
       }
       .width('calc(100% - 32vp)')
       .margin({ left: 16, right: 16, bottom: 10 })
       .padding(14)
       .borderRadius(16)
-      .backgroundColor(this.sm.getColor('surface'))
+      .backgroundColor(this.sm.getColor('glass'))
       .border({ width: 1, color: this.sm.getColor('border') })
+      .alignItems(VerticalAlign.Center)
 
-      // 管理员分组：仅 role=admin 渲染（原型 F10；role 取自 /auth/me）
+      // 分组一（原型 F10：功能入口行 = 圆角图标 + 标题(+徽标) + 数值 + 箭头）
+      Column() {
+        this.entryRow('server', '服务器与配对', this.serverCount > 0 ? this.serverCount.toString() + ' 台档案' : '', '', RouteNames.CONNECTION)
+        this.entryRow('model', '模型管理', '', '', RouteNames.MODEL)
+        this.entryRow('bell', '通知中心', this.unreadCount > 0 ? this.unreadCount.toString() : '', '', RouteNames.NOTIFICATION)
+        this.entryRow('task', '任务看板', '', '', RouteNames.TASK)
+        this.entryRow('folder', '文件', '', '', RouteNames.FILE)
+      }
+      .width('calc(100% - 32vp)')
+      .margin({ left: 16, right: 16, bottom: 10 })
+      .borderRadius(16)
+      .backgroundColor(this.sm.getColor('glass'))
+      .border({ width: 1, color: this.sm.getColor('border') })
+      .clip(true)
+
+      // 管理员分组：仅 role=admin 渲染（原型 F10；紫边框 + 组标完整语义）
       if (this.isAdmin()) {
         Column() {
-          Text('管理员')
-            .fontSize(12)
-            .fontColor(this.sm.getColor('text_tertiary'))
-            .margin({ left: 20, top: 4, bottom: 8 })
           Row() {
-            Text('用户管理')
-              .fontSize(14)
-              .fontColor(this.sm.getColor('text_primary'))
-              .layoutWeight(1)
-            Text('›')
-              .fontSize(14)
-              .fontColor(this.sm.getColor('text_tertiary'))
+            AppIcon({ name: 'shield', iconSize: 11, color: this.sm.getColor('primary') })
+            Text('管理员 · 仅 role=admin 时渲染')
+              .fontSize(10)
+              .fontColor(this.sm.getColor('primary'))
+              .letterSpacing(0.6)
+              .margin({ left: 6 })
           }
-          .padding(14)
-          .borderRadius(14)
-          .backgroundColor(this.sm.getColor('surface'))
-          .border({ width: 1, color: this.sm.getColor('border') })
-          .margin({ left: 16, right: 16, bottom: 8 })
-          .onClick(() => {
-            this.router.push(RouteNames.ADMIN_USERS);
-          })
-          Row() {
-            Text('用户组管理')
-              .fontSize(14)
-              .fontColor(this.sm.getColor('text_primary'))
-              .layoutWeight(1)
-            Text('›')
-              .fontSize(14)
-              .fontColor(this.sm.getColor('text_tertiary'))
+          .margin({ left: 20, top: 4, bottom: 8 })
+          .alignItems(VerticalAlign.Center)
+
+          Column() {
+            this.entryRow('user', '用户管理', '', '', RouteNames.ADMIN_USERS)
+            this.entryRow('task', '用户组管理', '', '', RouteNames.ADMIN_GROUPS)
+            this.entryRow('book', '市场管理', '', '', RouteNames.ADMIN_MARKET)
+            this.entryRow('gear', '系统设置（治理）', '', '', RouteNames.ADMIN_SETTINGS)
           }
-          .padding(14)
-          .borderRadius(14)
-          .backgroundColor(this.sm.getColor('surface'))
-          .border({ width: 1, color: this.sm.getColor('border') })
-          .margin({ left: 16, right: 16, bottom: 8 })
-          .onClick(() => {
-            this.router.push(RouteNames.ADMIN_GROUPS);
-          })
-          Row() {
-            Text('市场管理')
-              .fontSize(14)
-              .fontColor(this.sm.getColor('text_primary'))
-              .layoutWeight(1)
-            Text('›')
-              .fontSize(14)
-              .fontColor(this.sm.getColor('text_tertiary'))
-          }
-          .padding(14)
-          .borderRadius(14)
-          .backgroundColor(this.sm.getColor('surface'))
-          .border({ width: 1, color: this.sm.getColor('border') })
-          .margin({ left: 16, right: 16, bottom: 8 })
-          .onClick(() => {
-            this.router.push(RouteNames.ADMIN_MARKET);
-          })
-          Row() {
-            Text('系统设置（治理）')
-              .fontSize(14)
-              .fontColor(this.sm.getColor('text_primary'))
-              .layoutWeight(1)
-            Text('›')
-              .fontSize(14)
-              .fontColor(this.sm.getColor('text_tertiary'))
-          }
-          .padding(14)
-          .borderRadius(14)
-          .backgroundColor(this.sm.getColor('surface'))
-          .border({ width: 1, color: this.sm.getColor('border') })
-          .margin({ left: 16, right: 16, bottom: 8 })
-          .onClick(() => {
-            this.router.push(RouteNames.ADMIN_SETTINGS);
-          })
+          .width('calc(100% - 32vp)')
+          .margin({ left: 16 })
+          .borderRadius(16)
+          .backgroundColor(this.sm.getColor('glass'))
+          .border({ width: 1, color: this.sm.getColor('primary') })
+          .clip(true)
         }
         .width('100%')
+        .margin({ bottom: 10 })
       }
 
       if (this.loading) {
@@ -720,10 +721,79 @@ export struct SettingPage {
           bottom: this.sm.getSpacing('sm'),
         })
       }
+
+      // 退出登录（设计 F10 .me-out：独立红色卡；与隐私组内 logout 动作同一处理单源）
+      Row() {
+        AppIcon({ name: 'logout', iconSize: 15, color: this.sm.getColor('error') })
+        Text('退出登录')
+          .fontSize(this.sm.getFontSize('body_sm'))
+          .fontColor(this.sm.getColor('error'))
+          .margin({ left: 8 })
+      }
+      .width('calc(100% - 32vp)')
+      .justifyContent(FlexAlign.Center)
+      .padding(14)
+      .borderRadius(16)
+      .backgroundColor('rgba(248,113,113,0.06)')
+      .border({ width: 1, color: 'rgba(248,113,113,0.25)' })
+      .margin({ left: 16, right: 16, bottom: 16 })
+      .alignItems(VerticalAlign.Center)
+      .onClick(() => {
+        this.logout();
+      })
     }
     .width('100%')
     .height('100%')
-    
+
+  }
+
+  // ===========================================================================
+  // F10 功能入口行构建器（圆角图标 + 标题(+徽标) + 数值 + 箭头）
+  // ===========================================================================
+
+  @Builder
+  entryRow(icon: string, title: string, badge: string, value: string, route: string) {
+    Row() {
+      Column() {
+        AppIcon({ name: icon, iconSize: 15, color: this.sm.getColor('primary') })
+      }
+      .width(30)
+      .height(30)
+      .borderRadius(10)
+      .backgroundColor(this.sm.getColor('primary_soft'))
+      .justifyContent(FlexAlign.Center)
+      .alignItems(HorizontalAlign.Center)
+
+      Text(title)
+        .fontSize(this.sm.getFontSize('body_sm'))
+        .fontColor(this.sm.getColor('text_primary'))
+        .margin({ left: 12 })
+      if (badge !== '') {
+        Text(badge)
+          .fontSize(9.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.sm.getColor('text_on_primary'))
+          .backgroundColor('rgba(99,102,241,0.85)')
+          .borderRadius(999)
+          .padding({ left: 7, right: 7, top: 1, bottom: 1 })
+          .margin({ left: 8 })
+      }
+      Blank()
+      if (value !== '') {
+        Text(value)
+          .fontSize(this.sm.getFontSize('badge'))
+          .fontColor(this.sm.getColor('text_tertiary'))
+      }
+      AppIcon({ name: 'chev', iconSize: 14, color: this.sm.getColor('text_tertiary') })
+        .margin({ left: 6 })
+    }
+    .width('100%')
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      this.router.push(route);
+    })
   }
 
   // ===========================================================================

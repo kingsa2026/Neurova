@@ -14,6 +14,11 @@ import { Router, RouteNames } from '../routing/Router';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
 import { StyleManager } from '../libs/style/StyleManager';
+import { StarBackground } from '../components/glass';
+import { AppIcon } from '../components/common/AppIcon';
+import { IconBtn } from '../components/common/IconBtn';
+import { GlassInput } from '../components/glass';
+import { GlassButton } from '../components/glass';
 
 const TAG = 'ConnectionPage';
 
@@ -94,51 +99,115 @@ export struct ConnectionPage {
   }
 
   build() {
-    Column() {
-      Row() {
-        Text('<').fontSize(20).onClick(() => this.router.back()).margin({ right: 12 })
-        Text('服务器档案').fontSize(20).fontWeight(FontWeight.Bold)
-      }.width('100%').padding(16)
+    Stack() {
+      StarBackground({ starCount: 60, twinkle: true })
 
-      Scroll() {
-        Column() {
-          ForEach(this.profiles, (p: ServerProfile) => {
-            Column() {
+      Column() {
+        // 页头：返回 + 标题（21/700，设计 .phead）
+        Row() {
+          IconBtn({ name: 'back', onTap: () => { this.router.back(); } })
+          Text('服务器档案')
+            .fontSize(this.sm.getFontSize('page_title'))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+            .margin({ left: 12 })
+        }
+        .width('100%')
+        .padding(16)
+        .alignItems(VerticalAlign.Center)
+
+        Scroll() {
+          Column() {
+            ForEach(this.profiles, (p: ServerProfile) => {
               Row() {
                 Column() {
-                  Text(p.name).fontSize(16).fontWeight(FontWeight.Medium)
-                  Text(p.baseUrl).fontSize(12).opacity(0.7).margin({ top: 2 })
+                  Text(p.name)
+                    .fontSize(this.sm.getFontSize('card_title'))
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor(this.sm.getColor('text_primary'))
+                  Text(p.baseUrl)
+                    .fontSize(this.sm.getFontSize('caption'))
+                    .fontFamily(this.sm.getMonoFont())
+                    .fontColor(this.sm.getColor('text_secondary'))
+                    .margin({ top: 2 })
                   Text(`${p.entryMode === 'relay' ? '经中继' : '直连'}${p.lastAccount ? ' · ' + p.lastAccount : ''}`)
-                    .fontSize(11).opacity(0.6).margin({ top: 2 })
-                }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+                    .fontSize(this.sm.getFontSize('badge'))
+                    .fontColor(this.sm.getColor('text_tertiary'))
+                    .margin({ top: 2 })
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
 
-                Button(p.id === this.activeId ? '当前' : '使用')
-                  .fontSize(12)
-                  .backgroundColor(p.id === this.activeId ? this.sm.getColor('success') : this.sm.getColor('primary'))
-                  .onClick(() => this.useProfile(p))
-                Button('删')
-                  .fontSize(12)
-                  .backgroundColor(this.sm.getColor('error'))
-                  .margin({ left: 6 })
-                  .onClick(() => this.removeProfile(p.id))
-              }.width('100%')
-            }.padding(12).borderRadius(12).margin({ bottom: 10 }).backgroundColor(this.sm.getColor('surface'))
-          }, (p: ServerProfile) => p.id)
+                GlassButton({
+                  text: p.id === this.activeId ? '当前' : '使用',
+                  type: p.id === this.activeId ? 'primary' : 'default',
+                  btnSize: 'small',
+                  disabled: this.busy,
+                  onTap: () => { this.useProfile(p); }
+                })
+                GlassButton({
+                  text: '删除',
+                  type: 'danger',
+                  btnSize: 'small',
+                  disabled: this.busy,
+                  onTap: () => { this.removeProfile(p.id); }
+                })
+              }
+              .width('100%')
+              .padding(14)
+              .borderRadius(16)
+              .margin({ bottom: 10 })
+              .backgroundColor(this.sm.getColor('glass'))
+              .border({ width: 1, color: this.sm.getColor('border') })
+              .alignItems(VerticalAlign.Center)
+            }, (p: ServerProfile) => p.id)
 
-          Column() {
-            TextInput({ placeholder: '名称（如：家里 / VPS）' })
-              .onChange((v: string) => { this.newName = v; })
-              .margin({ bottom: 8 })
-            TextInput({ placeholder: 'http://192.168.x.x:9527 或 https://中继/t/routeId' })
-              .onChange((v: string) => { this.newUrl = v; })
-              .margin({ bottom: 8 })
-            Button('添加服务器档案').width('100%').onClick(() => this.addProfile())
-          }.padding(12).borderRadius(12).backgroundColor(this.sm.getColor('surface'))
+            // 新增档案表单（玻璃输入 + 品牌渐变主按钮）
+            Column() {
+              GlassInput({
+                placeholder: '名称（如：家里 / VPS）',
+                value: this.newName,
+                iconName: 'server',
+                onChange: (v: string) => { this.newName = v; }
+              })
+                .margin({ bottom: 8 })
+              GlassInput({
+                placeholder: 'http://192.168.x.x:9527 或 https://中继/t/routeId',
+                value: this.newUrl,
+                iconName: 'link',
+                onChange: (v: string) => { this.newUrl = v; }
+              })
+                .margin({ bottom: 8 })
+              GlassButton({
+                text: '添加服务器档案',
+                type: 'gradient',
+                block: true,
+                disabled: this.busy,
+                onTap: () => { this.addProfile(); }
+              })
+            }
+            .width('100%')
+            .padding(14)
+            .borderRadius(16)
+            .backgroundColor(this.sm.getColor('glass'))
+            .border({ width: 1, color: this.sm.getColor('border') })
 
-          Text('切换档案后需用该服务器的账号重新登录（账号与令牌不跨服务器共享）。')
-            .fontSize(11).opacity(0.6).padding(8)
-        }.width('100%').padding(12)
-      }.layoutWeight(1).scrollBar(BarState.Off)
-    }.width('100%').height('100%').backgroundColor(this.sm.getColor('background'))
+            Text('切换档案后需用该服务器的账号重新登录（账号与令牌不跨服务器共享）。')
+              .fontSize(this.sm.getFontSize('badge'))
+              .fontColor(this.sm.getColor('text_tertiary'))
+              .padding(8)
+          }
+          .width('100%')
+          .padding(12)
+          .alignItems(HorizontalAlign.Start)
+        }
+        .layoutWeight(1)
+        .scrollBar(BarState.Off)
+      }
+      .width('100%')
+      .height('100%')
+    }
+    .width('100%')
+    .height('100%')
   }
 }

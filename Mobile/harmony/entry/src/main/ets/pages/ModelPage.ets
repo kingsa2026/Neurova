@@ -131,10 +131,6 @@ export struct ModelPage {
     return this.models.filter((m: ModelInfoDto) => m.provider === providerId);
   }
 
-  private capabilityChips(m: ModelInfoDto): string {
-    return m.capabilities.length > 0 ? m.capabilities.join(' / ') : '未探测';
-  }
-
   build() {
     Stack() {
       Column() {
@@ -225,6 +221,7 @@ export struct ModelPage {
                           .fontColor(this.sm.getColor('text_primary'))
                         Text(m.model_id)
                           .fontSize(9.5)
+                          .fontFamily(this.sm.getMonoFont())
                           .fontColor(this.sm.getColor('text_tertiary'))
                           .margin({ left: 6 })
                         if (m.is_active || (this.activeModel && this.activeModel.model === m.model_id)) {
@@ -236,10 +233,25 @@ export struct ModelPage {
                             .borderRadius(5)
                         }
                       }
-                      Text(this.capabilityChips(m))
-                        .fontSize(10)
-                        .fontColor(this.sm.getColor('text_secondary'))
-                        .margin({ top: 4 })
+                      // 能力胶囊（设计 F11 .cap：对话/视觉/工具调用/长文本）
+                      Row() {
+                        ForEach(m.capabilities, (c: string) => {
+                          Text(c)
+                            .fontSize(9)
+                            .fontColor(this.sm.getColor('primary'))
+                            .backgroundColor(this.sm.getColor('primary_soft'))
+                            .border({ width: 1, color: this.sm.getColor('primary') })
+                            .borderRadius(5)
+                            .padding({ left: 7, right: 7, top: 2, bottom: 2 })
+                            .margin({ right: 5, bottom: 3 })
+                        }, (c: string) => c)
+                        if (m.capabilities.length === 0) {
+                          Text('未探测')
+                            .fontSize(10)
+                            .fontColor(this.sm.getColor('text_tertiary'))
+                        }
+                      }
+                      .margin({ top: 4 })
                     }
                     .alignItems(HorizontalAlign.Start)
                     .layoutWeight(1)
@@ -260,7 +272,7 @@ export struct ModelPage {
               .width('calc(100% - 40vp)')
               .padding(14)
               .borderRadius(16)
-              .backgroundColor(this.sm.getColor('surface'))
+              .backgroundColor(this.sm.getColor('glass'))
               .border({ width: 1, color: this.sm.getColor('border') })
               .margin({ bottom: 10, left: 20, right: 20 })
             }, (p: ProviderInfoDto) => p.provider_id)

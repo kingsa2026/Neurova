@@ -28,8 +28,9 @@ export type ColorToken =
 /** 间距 token 名 */
 export type SpacingToken = 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'xxl';
 
-/** 字号 token 名 */
-export type FontSizeToken = 'caption' | 'body' | 'subtitle' | 'title' | 'headline' | 'display';
+/** 字号 token 名（含界面布局规划 01 设计系统字阶：页题 21 / 卡题 15.5 / 正文 14 / 徽标 11） */
+export type FontSizeToken = 'caption' | 'body' | 'subtitle' | 'title' | 'headline' | 'display'
+  | 'page_title' | 'card_title' | 'body_sm' | 'badge';
 
 /** 圆角 token 名 */
 export type RadiusToken = 'none' | 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'full';
@@ -60,6 +61,8 @@ LIGHT_COLORS['divider'] = 'rgba(21,28,58,0.07)';
 LIGHT_COLORS['status_success'] = LIGHT_COLORS['success'];
 LIGHT_COLORS['status_error'] = LIGHT_COLORS['error'];
 LIGHT_COLORS['status_warning'] = LIGHT_COLORS['warning'];
+// 玻璃卡面（设计令牌 --glass：亮色 rgba(21,28,58,.045)）
+LIGHT_COLORS['glass'] = 'rgba(21,28,58,0.045)';
 
 /** 暗色主题颜色表（同上，空表逐键赋值） */
 const DARK_COLORS: Record<string, string> = {};
@@ -86,6 +89,8 @@ DARK_COLORS['divider'] = 'rgba(255,255,255,0.07)';
 DARK_COLORS['status_success'] = DARK_COLORS['success'];
 DARK_COLORS['status_error'] = DARK_COLORS['error'];
 DARK_COLORS['status_warning'] = DARK_COLORS['warning'];
+// 玻璃卡面（设计令牌 --glass：暗色 rgba(255,255,255,.055)）
+DARK_COLORS['glass'] = 'rgba(255,255,255,0.055)';
 
 /** 间距表（fp，空表逐键赋值） */
 const SPACING: Record<string, number> = {};
@@ -96,7 +101,7 @@ SPACING['lg'] = 24;
 SPACING['xl'] = 32;
 SPACING['xxl'] = 48;
 
-/** 字号表（fp，空表逐键赋值） */
+/** 字号表（fp，空表逐键赋值；后四档为设计系统字阶） */
 const FONT_SIZE: Record<string, number> = {};
 FONT_SIZE['caption'] = 12;
 FONT_SIZE['body'] = 16;
@@ -104,6 +109,10 @@ FONT_SIZE['subtitle'] = 18;
 FONT_SIZE['title'] = 20;
 FONT_SIZE['headline'] = 24;
 FONT_SIZE['display'] = 32;
+FONT_SIZE['page_title'] = 21;
+FONT_SIZE['card_title'] = 15.5;
+FONT_SIZE['body_sm'] = 14;
+FONT_SIZE['badge'] = 11;
 
 /** 圆角表（vp，空表逐键赋值） */
 const RADIUS: Record<string, number> = {};
@@ -122,6 +131,17 @@ export class StyleManager {
   private spacing: Record<string, number> = {};
   private fontSize: Record<string, number> = {};
   private radius: Record<string, number> = {};
+
+  /** 等宽字体栈（设计令牌 --mono：KB 编号/地址/SQL/模型 ID 用） */
+  getMonoFont(): string {
+    return 'Cascadia Mono, JetBrains Mono, Consolas, monospace';
+  }
+
+  /** 品牌渐变三停（设计令牌 --grad-brand：135° #6366f1→#8b5cf6 55%→#a78bfa，深浅色同值） */
+  getBrandGradient(): Array<[string, number]> {
+    const stops: Array<[string, number]> = [['#6366f1', 0], ['#8b5cf6', 0.55], ['#a78bfa', 1]];
+    return stops;
+  }
 
   private constructor() {
     this.resetToDefaults();
