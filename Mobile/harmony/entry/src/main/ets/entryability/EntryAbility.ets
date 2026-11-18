@@ -1,4 +1,4 @@
-import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { HttpAdapter } from '../libs/adapters';
@@ -24,6 +24,20 @@ export default class EntryAbility extends UIAbility {
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
     hilog.info(EntryAbility.DOMAIN, EntryAbility.TAG, '窗口创建');
+    // 应用色彩模式对齐主题（默认暗色 cosmic）：模糊材质/状态栏/页签栏材质都跟随它——
+    // 不设置的话系统按浅色渲染，玻璃卡与状态栏全发白
+    try {
+      this.context.getApplicationContext()
+        .setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
+      const mainWindow = windowStage.getMainWindowSync();
+      mainWindow.setWindowBackgroundColor('#0a0e1d');
+      mainWindow.setWindowSystemBarProperties({
+        statusBarColor: '#0a0e1d',
+        navigationBarColor: '#0a0e1d',
+      });
+    } catch (e) {
+      hilog.error(EntryAbility.DOMAIN, EntryAbility.TAG, '窗口主题设置失败: %{public}s', (e as Error).message);
+    }
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
         hilog.error(

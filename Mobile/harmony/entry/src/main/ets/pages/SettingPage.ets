@@ -44,7 +44,8 @@
 
 import { TopNavMenu, GlassCard, GlassButton, GlassInput } from '../components/glass';
 import { AppIcon } from '../components/common/AppIcon';
-import { mediaquery } from '@kit.ArkUI';
+import { mediaquery, window } from '@kit.ArkUI';
+import { ConfigurationConstant } from '@kit.AbilityKit';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { AppStore } from '../libs/state/stores/AppStore';
 import { AuthStore } from '../libs/state/stores/AuthStore';
@@ -394,19 +395,37 @@ export struct SettingPage {
     }
   }
 
-  /** 应用主题：light/dark/auto → StyleManager + AppStore */
+  /** 应用主题：light/dark/auto → StyleManager + AppStore + 窗口色彩模式 */
   private applyTheme(theme: string): void {
+    let mode: ThemeMode;
     if (theme === 'auto') {
       // 跟随系统：实时探测系统深色模式（此前恒落 light，auto 名不副实——审计 3.8-4）
       const dark = this.systemPrefersDark();
-      this.sm.setThemeMode(dark ? ThemeMode.DARK : ThemeMode.LIGHT);
-      this.appStore.setTheme(dark ? 'dark' : 'light');
+      mode = dark ? ThemeMode.DARK : ThemeMode.LIGHT;
     } else if (theme === 'dark') {
-      this.sm.setThemeMode(ThemeMode.DARK);
-      this.appStore.setTheme('dark');
+      mode = ThemeMode.DARK;
     } else {
-      this.sm.setThemeMode(ThemeMode.LIGHT);
-      this.appStore.setTheme('light');
+      mode = ThemeMode.LIGHT;
+    }
+    this.sm.setThemeMode(mode);
+    this.appStore.setTheme(mode === ThemeMode.DARK ? 'dark' : 'light');
+    // 应用色彩模式与系统条同步（模糊材质/状态栏/页签栏材质都跟随应用色彩模式）
+    try {
+      getContext(this).getApplicationContext()
+        .setColorMode(mode === ThemeMode.DARK
+          ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
+          : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
+      window.getLastWindow(getContext(this)).then((win: window.Window) => {
+        win.setWindowBackgroundColor(mode === ThemeMode.DARK ? '#0a0e1d' : '#f5f6fb');
+        win.setWindowSystemBarProperties({
+          statusBarColor: mode === ThemeMode.DARK ? '#0a0e1d' : '#f5f6fb',
+          navigationBarColor: mode === ThemeMode.DARK ? '#0a0e1d' : '#f5f6fb',
+        });
+      }).catch((e: Error) => {
+        this.logger.warn(TAG, '系统条同步失败', e);
+      });
+    } catch (e) {
+      this.logger.warn(TAG, '窗口主题同步失败', e as Error);
     }
   }
 

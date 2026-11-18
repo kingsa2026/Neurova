@@ -1,8 +1,10 @@
 /**
  * GlassPanel - 通用玻璃面板容器
  *
- * 职责：提供通用玻璃效果容器（玻璃质感由 backgroundBlurStyle 实现）
- * 设计：通过 variant 切换模糊材质实现不同质感；支持自定义圆角、内边距、模糊半径
+ * 职责：提供原型 --glass 卡面容器（半透明填充 + 描边，不用系统模糊材质——
+ *       其色泽跟随窗口色彩模式，暗色主题下会渲染成浅色磨砂，与设计稿不符）
+ * 设计：通过 variant 区分用途（elevated/subtle 仅保留语义，视觉统一走设计令牌）；
+ *       支持自定义圆角、内边距
  *
  * 用法：
  *   GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
@@ -10,32 +12,21 @@
  *   }
  */
 
+import { StyleManager } from '../../libs/style/StyleManager';
+
+// 样式单例
+const sm = StyleManager.getInstance();
+
 @Component
 export struct GlassPanel {
-  // 玻璃面板变体：default | elevated | subtle | prominent
+  // 玻璃面板变体：default | elevated | subtle | prominent（语义保留，视觉统一走令牌）
   @Prop variant: string = 'default';
   // 内边距
   @Prop innerPadding: number = 16;
   // 圆角
   @Prop radius: number = 12;
-  // 模糊半径
-  @Prop blurRadius: number = 20;
   // 默认插槽内容
   @BuilderParam content: () => void;
-
-  // 根据 variant 获取对应的模糊材质
-  // elevated / prominent 使用 Thick 呈现更强模糊；其余使用 Thin
-  private getGlassStyle(): BlurStyle {
-    switch (this.variant) {
-      case 'elevated':
-      case 'prominent':
-        return BlurStyle.Thick;
-      case 'subtle':
-      case 'default':
-      default:
-        return BlurStyle.Thin;
-    }
-  }
 
   build() {
     Column() {
@@ -44,6 +35,8 @@ export struct GlassPanel {
     .padding(this.innerPadding)
     .width('100%')
     .borderRadius(this.radius)
-    .backgroundBlurStyle(this.getGlassStyle())
+    // 原型卡面：--glass 填充 + --glass-border 描边
+    .backgroundColor(sm.getColor('glass'))
+    .border({ width: 1, color: sm.getColor('border') })
   }
 }

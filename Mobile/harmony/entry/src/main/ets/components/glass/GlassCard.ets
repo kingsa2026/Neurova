@@ -61,6 +61,9 @@ export struct GlassCard {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .borderRadius(this.radius)
-    .backgroundBlurStyle(BlurStyle.Thin)
+    // 原型卡片面：--glass 半透明填充 + --glass-border 描边（不用系统模糊材质——
+    // 其色泽跟随窗口色彩模式，暗色主题下会渲染成浅色磨砂，与设计稿的暗玻璃不符）
+    .backgroundColor(sm.getColor('glass'))
+    .border({ width: 1, color: sm.getColor('border') })
   }
 }

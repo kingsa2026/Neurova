@@ -696,7 +696,6 @@ export struct ChatPage {
         }
         .width('100%')
         .padding({ left: 12, right: 12, top: 6, bottom: 8 })
-        .backgroundBlurStyle(BlurStyle.Thin)
         .backgroundColor(this.sm.getColor('surface_strong'))
         .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
         .alignItems(VerticalAlign.Center)
@@ -993,7 +992,6 @@ export struct ChatPage {
       .constraintSize({ maxWidth: 340 })
       .height('100%')
       .backgroundColor(this.sm.getColor('surface_strong'))
-      .backgroundBlurStyle(BlurStyle.Thin)
       .border({ width: { left: 1 }, color: this.sm.getColor('border') })
       .padding({ left: 14, right: 14, top: 52, bottom: 14 })
     }
@@ -1097,7 +1095,6 @@ export struct ChatPage {
       .padding(16)
       .borderRadius(16)
       .backgroundColor(this.sm.getColor('surface_strong'))
-      .backgroundBlurStyle(BlurStyle.Thin)
       .border({ width: 1, color: this.sm.getColor('border') })
       .alignItems(HorizontalAlign.Start)
     }

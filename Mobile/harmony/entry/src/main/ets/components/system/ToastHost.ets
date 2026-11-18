@@ -73,7 +73,6 @@ export struct ToastHost {
         }
         .padding({ left: 14, right: 16, top: 10, bottom: 10 })
         .borderRadius(16)
-        .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
         .backgroundColor(this.sm.getColor('surface'))
         .border({ width: 1, color: this.sm.getColor('border') })
         .margin({ bottom: 8 })

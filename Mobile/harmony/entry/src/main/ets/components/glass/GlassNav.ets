@@ -56,6 +56,7 @@ export struct GlassNav {
     .height('100%')
     .alignItems(HorizontalAlign.Start)
     .borderRadius(sm.getRadius('lg'))
-    .backgroundBlurStyle(BlurStyle.Thin)
+    .backgroundColor(sm.getColor('glass'))
+    .border({ width: 1, color: sm.getColor('border') })
   }
 }

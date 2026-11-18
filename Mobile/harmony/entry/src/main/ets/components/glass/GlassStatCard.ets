@@ -98,6 +98,5 @@ export struct GlassStatCard {
     .borderRadius(sm.getRadius('xl'))
     .backgroundColor(sm.getColor('glass'))
     .border({ width: 1, color: sm.getColor('border') })
-    .backgroundBlurStyle(BlurStyle.Thin)
   }
 }

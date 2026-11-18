@@ -399,7 +399,6 @@ export struct AgentListPage {
     .borderRadius(16)
     .backgroundColor(this.sm.getColor('glass'))
     .border({ width: 1, color: this.sm.getColor('border') })
-    .backgroundBlurStyle(BlurStyle.Thin)
     .opacity(agent.status === 'sleeping' ? 0.6 : 1)
     .onClick(() => { this.openDetail(agent); })
   }

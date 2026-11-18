@@ -342,7 +342,6 @@ export struct SessionListPage {
               .width('100%')
               .padding(13)
               .borderRadius(16)
-              .backgroundBlurStyle(BlurStyle.COMPONENT_THIN)
               .backgroundColor(this.sm.getColor('glass'))
               .border({
                 width: 1,

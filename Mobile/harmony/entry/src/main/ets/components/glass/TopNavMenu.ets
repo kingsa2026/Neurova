@@ -71,6 +71,7 @@ export struct TopNavMenu {
     .height(56)
     .padding({ left: 12, right: 12 })
     .alignItems(VerticalAlign.Center)
-    .backgroundBlurStyle(BlurStyle.Thin)
+    .backgroundColor(sm.getColor('glass'))
+    .border({ width: { bottom: 1 }, color: sm.getColor('divider') })
   }
 }
