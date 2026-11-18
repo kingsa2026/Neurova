@@ -555,6 +555,7 @@ class ToolExecutor:
         "memory_search": "_execute_memory_search",
         "graph_search": "_execute_graph_search",
         "recall_history": "_execute_recall_history",
+        "recall_query": "_execute_recall_query",
         "recall_context_span": "_execute_recall_context_span",
         "context_compress": "_execute_context_compress",
         "context_status": "_execute_context_status",
@@ -5981,6 +5982,48 @@ class ToolExecutor:
         except Exception as e:
             logger.warning("recall_history 执行失败: %s", e)
             return {"error": f"召回失败: {e}"}
+
+    async def _execute_recall_query(self, params: Dict) -> Dict:
+        """受限 Python 表达式查询（QwenPaw 对照批 B3）。
+
+        取数与 `recall_history` 同源（context_pool.recall_evicted，本进程台账
+        + SQLite 持久台账），条目投影成只读 dict 列表后交给白名单 AST 校验的
+        表达式引擎做组合/统计/过滤——模型获得确定性回溯的表达力，而可达面
+        限于这批只读条目的纯计算（无 import/无 I/O/无下划线属性）。
+        """
+        expression = str(params.get("expression") or "")
+        if not expression.strip():
+            return {"error": "expression 不能为空"}
+
+        query = (params.get("query") or "").strip() or None
+        try:
+            limit = int(params.get("limit", 200))
+        except (TypeError, ValueError):
+            limit = 200
+        limit = max(1, min(limit, 500))
+
+        orchestrator = getattr(self._agent, "context_orchestrator", None)
+        pool = getattr(orchestrator, "context_pool", None) if orchestrator else None
+        if pool is None:
+            return {"error": "上下文池不可用，无法召回历史"}
+
+        recalled = await asyncio.to_thread(pool.recall_evicted, query=query, limit=limit)
+        items = [
+            {
+                "content": getattr(c, "content", ""),
+                "turn_id": (getattr(c, "metadata", None) or {}).get("turn_id"),
+                "recalled_from": (getattr(c, "metadata", None) or {}).get(
+                    "recalled_from", "memory_ledger"),
+            }
+            for c in recalled
+        ]
+        try:
+            from neurova.tools.recall_expression import runRecallExpression
+
+            result = runRecallExpression(expression, items)
+        except Exception as e:  # noqa: BLE001 - 校验/求值错误如实回传给模型自纠
+            return {"error": str(e)}
+        return {"success": True, "count": len(items), "result": result}
 
     # 审计 P1-E1：降级 MemoryManager 模块级缓存（原每次失败新建重对象，
     # 全表加载+建索引代价在每次工具调用重复支付）
