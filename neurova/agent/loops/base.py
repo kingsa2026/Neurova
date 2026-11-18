@@ -510,6 +510,21 @@ class BaseAgentLoop(ABC):
         from neurova.agent.loops.turn_run_state import resolveToolRoundBudget
 
         limits = self._load_agent_limits()
+        # QwenPaw 对照批 B1：声明式停止门编译——advanced.loop_gates_spec 声明了
+        # 就**完全按声明**装配（不与默认并集）；未声明返回 None 走既有默认装配
+        # （默认行为零变化）。GoalGate 仍走下方既有 goal 装配路径（非纯参数门）。
+        try:
+            from neurova.core.app_settings import get_advanced_settings
+
+            _declared_gates = get_advanced_settings().get("loop_gates_spec")
+        except Exception:  # noqa: BLE001 - 设置故障按未声明处理，回落默认装配
+            _declared_gates = None
+        if _declared_gates:
+            from neurova.agent.loop_gates_compiler import compileLoopGates
+
+            _compiled = compileLoopGates(_declared_gates, limits)
+            if _compiled is not None:
+                return _compiled
         # G2：GoalGate 默认进装配；`set_goal_gate` 只登记**规格**，不再持有第二份
         # 装配路径——规格与默认装配同在这一个构造点成型。
         # 轮次预算一律走 `_goalRoundBudget()`（配置单源 `goal_round_budget`）：
