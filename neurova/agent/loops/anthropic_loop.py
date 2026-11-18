@@ -243,6 +243,18 @@ class AnthropicLoop(BaseAgentLoop):
                     # "Loop 实现错误"回退 legacy，再撞同一个坏模型（时有时无的形态）
                     if chunk.get("error"):
                         raise self._raise_for_error_dict(chunk)
+                    if chunk.get("retry_status"):
+                        # 429 重试/切换过程事件：转成 typed 事件供管线/前端倒计时；
+                        # reset=半截回复作废，本轮已累积的 content/reasoning/未执行
+                        # tool_calls 全部清空后重来（与 OpenAI 环同一契约，防两个
+                        # 候选模型的输出拼成一句）
+                        payload = chunk["retry_status"]
+                        if payload.get("reset"):
+                            reply_parts.clear()
+                            reasoningGuard.reset()
+                            pending_tool_calls.clear()
+                        yield {"type": "retry_status", "data": payload}
+                        continue
                     if chunk.get("stream_status"):
                         # 上游静默事件与 OpenAI 环同一形态转出（管道决定是否透传）
                         yield {"type": "stream_status", "data": chunk["stream_status"]}
