@@ -54,6 +54,18 @@ from neurova.llm.providers.rate_limiter import (
 
 logger = get_logger(__name__)
 
+
+def _usageAgentId() -> str:
+    """usage 行的 agent 归因：读 cost_tracking 既有调用上下文（ChatPipeline
+    每轮 set_llm_cost_context 写入），无上下文留空串——不新造第二条身份
+    ContextVar，也不在无归属时臆造（fullrepo 审计 2026-11-18：
+    usage_history.agent_id 写侧归因）。
+    """
+    from neurova.models.cost_tracking import get_llm_cost_context
+
+    return str(get_llm_cost_context().get("agent_id") or "")
+
+
 # 已知模型版本后缀（L-20）：匹配请求模型时剥掉任一方的这类后缀再比较，
 # 使 "qwen-plus" 能命中客户端名 "qwen-plus-latest"，反之亦然。
 _KNOWN_MODEL_VERSION_SUFFIXES = ("-latest", "-preview")
@@ -941,6 +953,7 @@ class MultiModelLLMClient:
                     completion_tokens=_completion or 0,
                     estimated=_estimated,
                     user_id=get_request_user_id() or "anonymous",
+                    agent_id=_usageAgentId(),
                     duration_ms=int(duration * 1000),
                     cache_read_tokens=_cache_read,
                     cache_write_tokens=_cache_write,
@@ -1357,6 +1370,7 @@ class MultiModelLLMClient:
                         completion_tokens=_completion or 0,
                         estimated=_estimated,
                         user_id=get_request_user_id() or "anonymous",
+                        agent_id=_usageAgentId(),
                         first_token_ms=first_token_ms,
                         duration_ms=int(duration * 1000),
                         cache_read_tokens=_cache_read,
