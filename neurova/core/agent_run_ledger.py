@@ -410,3 +410,36 @@ def closeSubagentRun(run_id: Optional[str], runStatus: str, cause: str = "") -> 
         store.finish(run_id, _ars.OWNER_IDENTITY, status, errorType)
     except Exception as e:  # noqa: BLE001 - 终态写不回时由启动收敛兜，不在这里炸子任务
         logger.warning("子任务台账终态写入失败(%s): %s", run_id, e)
+
+
+def activeRunPhaseSignal(sessionId: str) -> Dict[str, Any]:
+    """会话的 run 生命周期相位信号（SC-1 任务相位抑制的读数源，**只读**）。
+
+    判据（`deriveRunStage` 由心跳/租约事实反推，不猜写者意图）：本会话派出的
+    子任务行（parent_session_id=本会话）处于 running/queued ⇒ "子任务进行中"。
+    parked（等人续跑）、stalled（租约过期）与终态不计入——执行体已不在推进。
+
+    返回 `{"active": bool, "subtaskRuns": int}`。fail-open：台账不可读按无相位
+    处理（抑制信号缺席 = 折叠行为与改前一致）。只 SELECT，不写任何行——
+    折叠侧对台账只读（两条账纪律）。
+    """
+    signal: Dict[str, Any] = {"active": False, "subtaskRuns": 0}
+    sid = str(sessionId or "").strip()
+    if not sid:
+        return signal
+    try:
+        from neurova.core import agent_run_store as _ars
+
+        if not _ars.run_gate_enabled():
+            return signal
+        store = _ars.get_agent_run_store()
+        now = time.time()
+        activeStages = ("running", "queued")
+        for row in store.list_subagent_runs(sid, limit=20):
+            if _ars.deriveRunStage(row, now) in activeStages:
+                signal["subtaskRuns"] = int(signal["subtaskRuns"]) + 1
+                signal["active"] = True
+        return signal
+    except Exception as e:  # noqa: BLE001 - 台账故障不阻断折叠（与回合面同口径）
+        logger.debug("相位信号读取失败（按无相位处理）: %s", e)
+        return signal

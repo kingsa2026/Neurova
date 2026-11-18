@@ -402,6 +402,28 @@ class SelfModelEngine:
             return meta
         return None
 
+    def active_tool_advisories(self) -> Dict[str, Dict[str, Any]]:
+        """全部活跃 avoid_tool 教训（工具名 → 教训元数据；SC-2 卡住抑制读数源）。
+
+        与 `check_tool_advisory` 同一活跃性判据（同 TTL、同 recommendation
+        过滤），只是不限定单一工具——会话级"卡住"信号要看全部活跃教训。
+        只读：不写台账、不产生事件。
+        """
+        records = self.ledger.list_records(agent_id=self._agent_id, page=1, size=50, kind="lesson")
+        now = datetime.datetime.now(datetime.timezone.utc)
+        out: Dict[str, Dict[str, Any]] = {}
+        for it in records["items"]:
+            if it["kind"] != "lesson":
+                continue
+            meta = it["metadata"] or {}
+            if meta.get("recommendation") != "avoid_tool":
+                continue
+            expires_at = meta.get("expires_at")
+            if expires_at and expires_at < now.isoformat():
+                continue
+            out[str(meta.get("subject") or "")] = meta
+        return out
+
     # ────── 算子实现 ──────
 
     def _tool_events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

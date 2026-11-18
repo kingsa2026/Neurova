@@ -37,7 +37,8 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Sequence, Tuple
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 
 #: 触发原因（封闭集合；读数面按此归因，不写自由文本当键）。
@@ -47,6 +48,11 @@ REASON_GATE_DISABLED = "gate_disabled"
 REASON_BELOW_FLOOR = "below_floor"
 REASON_INSUFFICIENT_GROWTH = "insufficient_growth"
 REASON_INSUFFICIENT_MASS = "insufficient_mass"
+#: SC-2 卡住抑制的归因：增长门想折、被卡住信号改判不折（诚实归因，不谎报"门没触发"）。
+REASON_STUCK_SUPPRESSED = "stuck_suppressed"
+
+#: SC-2：工具失败率阈值（失败率 = 1 - 成功率，**严格大于**该值判卡住）。
+STUCK_FAILURE_RATE_THRESHOLD = 0.5
 
 #: 折叠尾保护下限（keep_min_messages）——本模块内判定/切点共用此单源。
 #: （`window_compactor.compact_window` 的同名默认值是既有另一处，本卡不动
@@ -304,3 +310,140 @@ def reflectionAlignedFoldBudget(
     ratio = min(max(float(target_ratio), 0.05), 1.0)
     aligned = max(1000, int(math.ceil(max(0, int(kept_tokens)) / ratio)))
     return min(plain, aligned)
+
+
+# ════════════════════════════════════════════════════════════════
+# SC-1 / SC-2 / SC-8 / S6'：软抑制、边界保护与基线重放（对照文档 §9.4/§9.5）
+# ════════════════════════════════════════════════════════════════
+
+def stuckFailureRateThreshold() -> float:
+    """SC-2：工具失败率阈值（env `NEUROVA_FOLD_STUCK_FAILURE_RATE` 可覆盖）。"""
+    try:
+        value = float(
+            os.environ.get("NEUROVA_FOLD_STUCK_FAILURE_RATE", str(STUCK_FAILURE_RATE_THRESHOLD))
+        )
+    except (TypeError, ValueError):
+        value = STUCK_FAILURE_RATE_THRESHOLD
+    return min(max(value, 0.05), 1.0)
+
+
+def suppressProactiveFold(decision: FoldTriggerDecision, reason: str) -> FoldTriggerDecision:
+    """把一次增长门主动折叠判定**改判**为抑制（现场量原样保留，归因换抑制原因）。
+
+    软抑制不改写触发算术：occupancy/growth 现场量照旧，只把"该不该折"翻成否
+    并如实归因——读数面看到的是"门想折、被某某信号按住"，不是"门没触发"。
+    """
+    return FoldTriggerDecision(
+        False, reason, decision.occupancy, decision.growth_tokens, decision.growth_msgs
+    )
+
+
+def stuckSuppressionHit(
+    *,
+    avoidToolActive: bool,
+    toolSuccessRates: Dict[str, float],
+    failureRateThreshold: float = None,
+) -> bool:
+    """SC-2 卡住抑制命中判定（纯判据；信号是现成读数，本函数不检测卡住）。
+
+    命中 = 活跃 avoid_tool 教训 ∨ 任一工具失败率超阈（失败率 = 1 - 成功率，
+    严格大于阈值）。工具成功率由 MetaLedger.tool_success_rates 给出（已按
+    最小样本过滤），这里只做判定，不另造第二套卡住检测器。
+    """
+    if avoidToolActive:
+        return True
+    threshold = (
+        stuckFailureRateThreshold() if failureRateThreshold is None else failureRateThreshold
+    )
+    for rate in (toolSuccessRates or {}).values():
+        try:
+            failureRate = 1.0 - float(rate)
+        except (TypeError, ValueError):
+            continue
+        if failureRate > threshold:
+            return True
+    return False
+
+
+def derivationAnchorCount(msgs: Sequence[dict]) -> int:
+    """SC-1 边界锚点条数：最后一条消息 + 当前未闭合工具调用对（纯判据）。
+
+    锚点是**推导链的当前端点**：尾部为 `role="tool"` 结果行时，连续结果行与
+    声明这些调用的 `assistant.tool_calls` 行一并计入（一次并行多工具调用是
+    一个调用对整体，拆开折叠会把寻址指针与结果分离）；尾部为已发出但未拿到
+    结果的调用行时，该行本身是锚点。
+    """
+    rows = list(msgs or [])
+    n = len(rows)
+    if n == 0:
+        return 0
+    end = n - 2  # 最后一个非锚点下标；最后一条消息恒为锚点（锚点从 end+1 起）
+    last = rows[-1] or {}
+    if str(last.get("role") or "") == "tool":
+        # 尾部是结果行：连续结果行 + 声明这些调用的 assistant.tool_calls 行
+        while end >= 0 and str((rows[end] or {}).get("role") or "") == "tool":
+            end -= 1
+        if end >= 0:
+            head = rows[end] or {}
+            if str(head.get("role") or "") == "assistant" and head.get("tool_calls"):
+                end -= 1
+    return n - (end + 1)
+
+
+def lessonIsActive(lesson: Mapping) -> bool:
+    """活跃教训判据（与 check_tool_advisory 同一 TTL 口径）。
+
+    未过期（expires_at 缺省视为活跃）且状态非失效。status 缺省视为活跃
+    （本仓 lesson 无强制状态列；growth-log 的 PENDING/VALIDATED 均属活跃态，
+    EXPIRED/REJECTED 类值不豁免）。
+    """
+    meta = lesson or {}
+    expiresAt = str(meta.get("expires_at") or "").strip()
+    if expiresAt:
+        now = datetime.now(timezone.utc).isoformat()
+        if expiresAt < now:
+            return False
+    status = str(meta.get("status") or "").strip().lower()
+    if status and status not in ("pending", "validated"):
+        return False
+    return True
+
+
+def _messageReferencesLessonSubject(message: dict, subject: str) -> bool:
+    """结构匹配：tool 行的 name 或 assistant.tool_calls 的 function.name 命中 subject。
+
+    不做正文子串匹配——正文提到工具名不等于该消息是教训的证据原文。
+    """
+    if not subject:
+        return False
+    row = message or {}
+    if str(row.get("role") or "") == "tool" and str(row.get("name") or "") == subject:
+        return True
+    for call in row.get("tool_calls") or []:
+        function = (call or {}).get("function") or {}
+        if str(function.get("name") or "") == subject:
+            return True
+    return False
+
+
+def lessonProtectedStart(msgs: Sequence[dict], lessons: Iterable[dict]) -> int:
+    """SC-8：活跃教训引用的**最早**原文消息下标（无命中返回 len(msgs)）。
+
+    "折叠时豁免"的切分口径：从最早被引用消息起整段保留在视图（与冻结头/
+    反思对齐的切点语义同形——保留区是尾段，时序不打乱）。只有活跃教训
+    （lessonIsActive）参与；过期教训不豁免。
+    """
+    rows = list(msgs or [])
+    subjects = {
+        str((lesson or {}).get("subject") or "")
+        for lesson in (lessons or [])
+        if lessonIsActive(lesson)
+    }
+    subjects.discard("")
+    if not subjects or not rows:
+        return len(rows)
+    for index, row in enumerate(rows):
+        for subject in subjects:
+            if _messageReferencesLessonSubject(row, subject):
+                return index
+    return len(rows)

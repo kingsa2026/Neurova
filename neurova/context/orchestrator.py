@@ -338,6 +338,17 @@ class ContextOrchestrator:
                 "last_growth_msgs": 0,
                 "proactive_folds": 0,
             },
+            # SC-1/SC-2/SC-8（对照改进项）：软抑制与保护读数。相位/卡住命中
+            # 各自计数（抑制必须可见，不留静默）；`lesson_protected_last` 是
+            # 最近一次折叠因活跃教训豁免的消息条数；`last_stuck_reason` 取
+            # avoid_tool / tool_failure（封闭词表），无命中为 None。
+            "fold_suppression": {
+                "phase_hits": 0,
+                "stuck_hits": 0,
+                "protected_all_hits": 0,
+                "lesson_protected_last": 0,
+                "last_stuck_reason": None,
+            },
             # A1（对照改进项）：尺子校准读数——当前模型实测偏差因子与校准后
             # 预算（因子中性 1.0 = 未应用）。
             "token_calibration": {
@@ -2783,8 +2794,11 @@ class ContextOrchestrator:
         # 关闭时只有击穿才折，
         # 与改前行为一致。
         from neurova.context.fold_trigger import (
+            REASON_GROWTH_GATE,
+            REASON_STUCK_SUPPRESSED,
             assessFoldTrigger,
             splitFrozenCoveredPrefix,
+            suppressProactiveFold,
         )
 
         # SC-3：判定经 assessFoldTrigger 取得（内部即 decideFoldTrigger 单源，
@@ -2796,6 +2810,16 @@ class ContextOrchestrator:
             last_fold_msgs=int(cache.get("last_fold_msgs") or 0),
             total_msgs=len(msgs),
         ).decision
+
+        # ── SC-2：卡住抑制（接现成元认知读数，不新造卡住检测器）——命中时
+        # 该轮不主动折叠。只作用于增长门主动路径；预算击穿（被动兜底）不受理
+        # （对照文档 §9.5 第 1 条：容量优先，顺序不可倒置）。
+        if decision.should_fold and decision.reason == REASON_GROWTH_GATE:
+            stuckSignal = self._stuckSuppressionSignal()
+            if stuckSignal.get("hit"):
+                self._recordFoldSuppression("stuck", stuckSignal)
+                decision = suppressProactiveFold(decision, REASON_STUCK_SUPPRESSED)
+
         self._recordFoldTriggerReadout(decision)
         if not decision.should_fold:
             # B2：零折叠轮也走冻结头——视图 = 冻结摘要行 + 未覆盖尾部，
@@ -2836,6 +2860,33 @@ class ContextOrchestrator:
                 # split_window_by_budget 的 target_ratio=0.5），即"收走已消费的
                 # 老一半增量，保留近期区"。
                 fold_budget = max(1000, int(total_tokens * 0.5))
+
+        # ── SC-1/SC-8：软保护切分（相位边界锚点 + 活跃教训引用原文）——
+        # 折叠只取保护边界之前的区间，锚点/被引用原文整段保留在视图，其余
+        # 照常入池。只作用于增长门主动路径；击穿路径容量优先，不做机械豁免
+        # （KEEP 面教义仍会指导摘要器保留教训证据——"降档"路径）。
+        carry_msgs: List[dict] = []
+        if decision.reason == REASON_GROWTH_GATE:
+            phaseSignal = self._phaseSuppressionSignal(
+                cache_key or self._resolve_window_cache_key()
+            )
+            if phaseSignal.get("active"):
+                self._recordFoldSuppression("phase", phaseSignal)
+            fold_source, carry_msgs = self._softProtectFoldSource(
+                fold_source,
+                phaseActive=bool(phaseSignal.get("active")),
+                lessons=self._activeLessonMetas(),
+            )
+            if carry_msgs:
+                self._contextHealthSlot("fold_suppression")["lesson_protected_last"] = len(
+                    carry_msgs
+                )
+            if not fold_source:
+                # 保护边界吞掉了全部可折区：本轮零折叠（软抑制，不硬造折叠）
+                self._recordFoldSuppression(
+                    "protected_all", {"carried": len(carry_msgs)}
+                )
+                return self._frozenView(msgs, cache)
 
         # 增量防抖（两条路径同判据）：距上次成功摘要新追加的消息数 ≤ 阈值时
         # 复用缓存摘要/免调摘要（省一轮摘要 LLM——实测摘要链路 30s+）。
@@ -3003,6 +3054,11 @@ class ContextOrchestrator:
             # B2：整窗折叠后也缓存冻结头（下次零折叠轮直接复用）
             cache["frozen_head_rows"] = self._renderFrozenHead(cache, budget_tokens)
 
+        # SC-1/SC-8：保护尾段（边界锚点/活跃教训引用原文）原样保留在视图尾部
+        # ——它们从未进折叠区（fold_source 已切除），此处只接回视图，不重复入池。
+        if carry_msgs:
+            window = window + carry_msgs
+
         logger.info(
             "[WINDOW_COMPACT] 窗口折叠: %d msgs → %d（%s，reason=%s，折叠 %d 条, token %d → %d, LLM摘要=%s）",
             len(msgs),
@@ -3015,6 +3071,114 @@ class ContextOrchestrator:
             bool(compaction.summary),
         )
         return window
+
+    # ── SC-1/SC-2/SC-8：软抑制与保护（信号源 run 台账 / MetaLedger，**只读**） ──
+
+    def _phaseSuppressionSignal(self, sessionKey: Optional[str]) -> Dict[str, Any]:
+        """SC-1 相位信号：run 生命周期只读（"子任务进行中"的权威源 = agent_run_ledger）。
+
+        任何失败按无相位处理（抑制信号缺席 = 行为与改前一致）。
+        """
+        try:
+            from neurova.core.agent_run_ledger import activeRunPhaseSignal
+
+            return activeRunPhaseSignal(sessionKey) or {}
+        except Exception:  # noqa: BLE001 - 信号不可得按无相位处理（保守回退）
+            return {}
+
+    def _stuckSuppressionSignal(self) -> Dict[str, Any]:
+        """SC-2 卡住信号：只读现成元认知读数，不新造卡住检测器。
+
+        命中条件（对照文档 §9.4 SC-2）= 活跃 avoid_tool 教训
+        （SelfModelEngine，check_tool_advisory 同源）∨ 工具失败率超阈
+        （MetaLedger.tool_success_rates）。两条账纪律（§9.5 第 2 条）：
+        折叠侧对台账只读，不写任何事件。
+        """
+        signal: Dict[str, Any] = {"hit": False, "reason": None, "avoid_tools": [], "low_tools": []}
+        agentId = getattr(getattr(getattr(self, "_agent", None), "config", None), "agent_id", None)
+        if not isinstance(agentId, str) or not agentId:
+            return signal
+        advisories: Dict[str, Any] = {}
+        try:
+            from neurova.cognitive_layers.meta_cognition_layer.self_model import (
+                get_self_model_engine,
+            )
+
+            advisories = get_self_model_engine(agentId).active_tool_advisories() or {}
+        except Exception:  # noqa: BLE001 - 教训读数不可得按无教训处理
+            advisories = {}
+        rates: Dict[str, float] = {}
+        try:
+            from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
+
+            rates = get_meta_ledger().tool_success_rates(agentId) or {}
+        except Exception:  # noqa: BLE001 - 失败率读数不可得按健康处理
+            rates = {}
+        from neurova.context.fold_trigger import stuckSuppressionHit
+
+        hit = stuckSuppressionHit(
+            avoidToolActive=bool(advisories), toolSuccessRates=rates
+        )
+        lowTools = sorted(
+            tool for tool, rate in (rates or {}).items() if isinstance(rate, (int, float)) and (1.0 - float(rate)) > 0.5
+        )
+        signal.update(
+            {
+                "hit": bool(hit),
+                "reason": "avoid_tool" if advisories else ("tool_failure" if hit else None),
+                "avoid_tools": sorted(str(t) for t in advisories),
+                "low_tools": lowTools,
+            }
+        )
+        return signal
+
+    def _activeLessonMetas(self) -> List[dict]:
+        """SC-8：活跃教训元数据快照（MetaLedger 只读；任何失败按无教训处理）。"""
+        try:
+            agentId = getattr(getattr(getattr(self, "_agent", None), "config", None), "agent_id", None)
+            if not isinstance(agentId, str) or not agentId:
+                return []
+            from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
+
+            records = get_meta_ledger().list_records(agent_id=agentId, page=1, size=20, kind="lesson")
+            return [
+                dict(it.get("metadata") or {})
+                for it in (records.get("items") or [])
+                if it.get("kind") == "lesson"
+            ]
+        except Exception:  # noqa: BLE001 - 教训读数不可得按无教训处理（不豁免）
+            return []
+
+    def _softProtectFoldSource(
+        self, foldSource: list, *, phaseActive: bool, lessons: List[dict]
+    ) -> tuple:
+        """SC-1/SC-8 软保护切分：折叠只取保护边界之前的区间（纯切分，不改判定）。
+
+        - SC-1 相位命中：推导边界锚点（最后一条消息/当前工具调用对）不入折叠区；
+        - SC-8 活跃教训：被引用原文从最早命中处起整段不入折叠区（保留区是
+          尾段，时序不打乱）。
+        返回 (可折前缀, 保护尾段)；保护尾段由调用方接回视图尾部。
+        """
+        from neurova.context.fold_trigger import derivationAnchorCount, lessonProtectedStart
+
+        source = list(foldSource or [])
+        n = len(source)
+        keepFrom = n
+        if phaseActive:
+            keepFrom = min(keepFrom, n - derivationAnchorCount(source))
+        keepFrom = min(keepFrom, lessonProtectedStart(source, lessons))
+        if keepFrom <= 0:
+            return [], source
+        return source[:keepFrom], source[keepFrom:]
+
+    def _recordFoldSuppression(self, kind: str, detail: Dict[str, Any]) -> None:
+        """软抑制/保护命中读数（fold_suppression 槽）——抑制必须可见，不留静默。"""
+        slot = self._contextHealthSlot("fold_suppression")
+        slot[f"{kind}_hits"] = int(slot.get(f"{kind}_hits") or 0) + 1
+        if kind == "stuck":
+            slot["last_stuck_reason"] = str((detail or {}).get("reason") or "unknown")
+        if kind == "protected_all":
+            slot["lesson_protected_last"] = int((detail or {}).get("carried") or 0)
 
     # ── SC-7：反思节律对齐折叠（信号源 MetaLedger，**只读**） ──
 
