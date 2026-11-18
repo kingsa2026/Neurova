@@ -124,13 +124,38 @@ export class WebSocketAdapter {
   /**
    * 建立 WebSocket 连接
    * @param url    WebSocket 服务地址
-   * @param token  可选鉴权 token，作为 query 参数附加到 URL
+   * @param token  可选鉴权 token，作为 header 凭证
+   *
+   * 根因修复（2026-11-18 模拟器实测）：配对下发的 connect_ticket 是**一次性且
+   * 短时效（60s）**的凭证——ChatPage 进入时距配对/上次续签往往已超过时效，
+   * 直接拿存量 ticket 握手必吃 403（服务端拒绝在 accept 之前），表现为
+   * 「未配对或凭证已失效/空回复」。因此只要持有长期设备身份
+   * （pairingId + deviceSecret），连接前**先续签换新 ticket** 再握手；
+   * 续签失败不阻断（回落传入 ticket，由握手结果自然暴露）。
    */
-  async connect(url: string, token?: string): Promise<void> {
+  async connect(url: string, token?: string, skipRefresh: boolean = false): Promise<void> {
     // 记录连接参数以便重连复用
     this.lastUrl = url;
     if (token !== undefined) {
       this.lastToken = token;
+    }
+    let effectiveToken = token;
+    if (!skipRefresh && this.authStore.pairingId !== '' && this.authStore.deviceSecret !== '') {
+      try {
+        const res = await this.apiFacade.mobilePairing.refresh({
+          pairingId: this.authStore.pairingId,
+          deviceSecret: this.authStore.deviceSecret,
+          challenge: `${Date.now()}`,
+        });
+        if (res.code === 0 && res.data && res.data.connectTicket) {
+          effectiveToken = res.data.connectTicket;
+          this.lastToken = effectiveToken;
+        } else {
+          this.logger.warn(TAG, '连接前续签未通过，回落存量凭证握手');
+        }
+      } catch (e) {
+        this.logger.warn(TAG, '连接前续签失败，回落存量凭证握手', e as Error);
+      }
     }
     // 每次连接重置主动关闭标记
     this.manualClose = false;
@@ -142,15 +167,15 @@ export class WebSocketAdapter {
     this.ws = webSocket.createWebSocket();
     this.registerEvents();
 
-    // 构造完整 URL（含 token query 参数）
-    const fullUrl = this.buildUrl(url, token);
+    // 构造完整 URL（凭证走 header，不进 URL）
+    const fullUrl = this.buildUrl(url);
     this.logger.info(TAG, `正在连接 WebSocket: ${fullUrl}`);
 
     try {
       // 发起握手，header 中携带 Authorization
       await this.ws.connect(fullUrl, {
         header: {
-          'Authorization': token ? `Bearer ${token}` : '',
+          'Authorization': effectiveToken ? `Bearer ${effectiveToken}` : '',
         },
       });
       // 连接成功的状态由 on('open') 回调统一处理
@@ -285,6 +310,9 @@ export class WebSocketAdapter {
 
     // 错误
     this.ws.on('error', (value: Object) => {
+      // 全量打出事件原值：ErrorEventData 只有可选 message，漏掉 code/stack 会把
+      // 真因（如 TLS/握手细节）吞成「未知错误」，真机排查无从下手
+      this.logger.error(TAG, `WebSocket 错误原值: ${JSON.stringify(value)}`);
       const ev = value as ErrorEventData;
       const message: string = ev.message ?? '未知错误';
       this.logger.error(TAG, `WebSocket 错误: ${message}`);
@@ -295,6 +323,11 @@ export class WebSocketAdapter {
       );
       const payload: WsErrorPayload = { message };
       this.bus.emit('ws:error', payload);
+      // 握手期失败（如 ticket 过期 403）不一定伴随 close 事件：不触发自愈，
+      // 连接就停在死态，后续 send 全部抛「未连接」（12:10 实测的空回复根因之一）
+      if (!this.connected) {
+        this.reauthAndReconnect();
+      }
     });
   }
 
@@ -346,6 +379,16 @@ export class WebSocketAdapter {
     switch (type) {
       case 'chat:chunk':
         return 'chat:chunk';
+      case 'chat:reasoning':
+        // 思考流：服务端在 content 之前推送；UI 侧暂未消费，但必须按契约分发
+        // （此前落 default 被当「未识别」丢弃，11:41 实测每帧都打未识别日志）
+        return 'chat:reasoning';
+      case 'chat:queued':
+        return 'chat:queued';
+      case 'chat:retry':
+        return 'chat:retry';
+      case 'chat:cancelled':
+        return 'chat:cancelled';
       case 'chat:done':
         return 'chat:done';
       case 'chat:error':
@@ -450,7 +493,8 @@ export class WebSocketAdapter {
       ticket = res.data.connectTicket;
       this.lastToken = ticket;
     }
-    await this.connect(this.lastUrl, ticket);
+    // 已在此处续签过：skipRefresh 避免连接前重复续签
+    await this.connect(this.lastUrl, ticket, true);
   }
 
   /** 停止重连定时器 */

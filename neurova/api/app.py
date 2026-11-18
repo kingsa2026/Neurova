@@ -1837,13 +1837,8 @@ def run_server(
         reload: 自动重载
         workers: 工作进程数
     """
-    # 加载环境变量
-    try:
-        from dotenv import load_dotenv
-
-        load_dotenv()
-    except ImportError:
-        pass
+    # 加载环境变量（.env 装配单源在 config.loadEnvFile，start_server.py 同源调用）
+    config.loadEnvFile()
 
     # 从环境变量读取配置
     host = config.get("NEUROVA_HOST", host)

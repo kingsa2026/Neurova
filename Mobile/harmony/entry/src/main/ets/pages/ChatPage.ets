@@ -436,12 +436,15 @@ export struct ChatPage {
       } else {
         // 消息列表：纵向滚动，关闭滚动条
         // M5.2.2 改用 LazyForEach 惰性渲染，仅渲染可见区域 + 缓存项
+        // key 必须带上内容长度：流式回复是**原地改写同一对象**（content 追加），
+        // id 不变时 LazyForEach 按键复用组件、不重渲染该条目——这正是
+        // 「流式回复只显示光标、文本永不出现」（空回复）的根因
         List({ space: this.sm.getSpacing('sm'), scroller: this.scroller }) {
           LazyForEach(this.messagesDs, (msg: ChatMessageView) => {
             ListItem() {
               this.buildMessage(msg)
             }
-          }, (msg: ChatMessageView) => msg.id)
+          }, (msg: ChatMessageView) => msg.id + '#' + msg.content.length.toString())
         }
         .layoutWeight(1)
         .width('100%')

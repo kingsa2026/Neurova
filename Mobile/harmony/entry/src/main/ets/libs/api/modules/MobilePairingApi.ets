@@ -24,6 +24,13 @@ export interface PairingResolveRequest {
   ref: string;
 }
 
+/** 接入凭证续签请求体（后端 RefreshPairingRequest 为 snake_case） */
+export interface PairingRefreshRequest {
+  pairing_id: string;
+  device_secret: string;
+  challenge: string;
+}
+
 /** 配对状态查询响应 */
 export interface PairingStatus {
   status: string;
@@ -135,7 +142,14 @@ export class MobilePairingApi {
 
   /** 接入凭证续签（POST /mobile/pairing/refresh，免回屏重扫）：裸响应在边界归一 */
   async refresh(form: PairingRefresh): Promise<ApiResponse<PairingRefreshed>> {
-    const res = await this.client.post<Object>('/mobile/pairing/refresh', form);
+    // 后端 RefreshPairingRequest 只认 snake_case（pairing_id/device_secret）；
+    // 2026-11-18 模拟器实测：camelCase 直传 422，续签恒被拒（误报「设备已解除」）
+    const body: PairingRefreshRequest = {
+      pairing_id: form.pairingId,
+      device_secret: form.deviceSecret,
+      challenge: form.challenge,
+    };
+    const res = await this.client.post<Object>('/mobile/pairing/refresh', body);
     return asRefreshed(res);
   }
 
