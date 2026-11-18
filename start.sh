@@ -19,26 +19,29 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# 查找 Python 3.10+
+# 查找 Python 3.10+。解释器取向与 AGENTS.md §0 对齐：项目 .venv 优先
+# （与 Windows 侧"只用项目 .venv"同一纪律），系统 Python 仅在无 .venv 时兜底。
 PYTHON_CMD=""
-for cmd in python3.10 python3 python; do
-    if command -v "$cmd" &>/dev/null; then
-        version=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
-        major=$("$cmd" -c "import sys; print(sys.version_info.major)" 2>/dev/null)
-        minor=$("$cmd" -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
-        if [ "$major" -ge 3 ] && [ "$minor" -ge 10 ] 2>/dev/null; then
-            PYTHON_CMD="$cmd"
-            break
-        fi
-    fi
-done
-
-# 如果没找到合适的 Python，尝试使用 venv 中的
-if [ -z "$PYTHON_CMD" ] && [ -x ".venv/bin/python" ]; then
-    version=$(".venv/bin/python" -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
-    if [ "$version" -ge 10 ] 2>/dev/null; then
+if [ -x ".venv/bin/python" ]; then
+    major=$(".venv/bin/python" -c "import sys; print(sys.version_info.major)" 2>/dev/null)
+    minor=$(".venv/bin/python" -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
+    if [ "$major" -ge 3 ] && [ "$minor" -ge 10 ] 2>/dev/null; then
         PYTHON_CMD=".venv/bin/python"
     fi
+fi
+
+if [ -z "$PYTHON_CMD" ]; then
+    for cmd in python3.10 python3 python; do
+        if command -v "$cmd" &>/dev/null; then
+            version=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
+            major=$("$cmd" -c "import sys; print(sys.version_info.major)" 2>/dev/null)
+            minor=$("$cmd" -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
+            if [ "$major" -ge 3 ] && [ "$minor" -ge 10 ] 2>/dev/null; then
+                PYTHON_CMD="$cmd"
+                break
+            fi
+        fi
+    done
 fi
 
 if [ -z "$PYTHON_CMD" ]; then
