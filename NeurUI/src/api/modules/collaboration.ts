@@ -646,6 +646,33 @@ export interface DossierSummary {
   key_events: Array<{ subagent_id: string; type: string; occurred_at?: string | null }>
 }
 
+/** S17 请求归档单条错误投影（provider/model/错误种类与摘要） */
+export interface RequestArchiveErrorEntry {
+  ts?: number | string | null
+  provider: string
+  model: string
+  errorKind: string
+  errorSummary: string
+}
+
+/**
+ * S17 请求归档摘要：本项目 run 归属会话的 JSONL 归档读时聚合
+ * （后端单源 request_archive.summarizeSessionArchives，前端只读不另记账）。
+ * entryWindowComplete=false 表示各会话只统计了尾部最近窗口，非全量。
+ */
+export interface RequestArchiveSummary {
+  sessions: string[]
+  requestCount: number
+  successCount: number
+  failureCount: number
+  promptTokens: number
+  completionTokens: number
+  estimatedCalls: number
+  latencyMs: { avgMs: number; maxMs: number; buckets: Record<string, number> }
+  recentErrors: RequestArchiveErrorEntry[]
+  entryWindowComplete: boolean
+}
+
 /** 项目协作档案聚合（五类记录读时 join，未建第二本账） */
 export interface ProjectCollaboration {
   project_id: string
@@ -661,8 +688,12 @@ export interface ProjectCollaboration {
     candidates: number
     approvals: number
     room_messages: number
+    /** S17：请求归档条数（request_archive.requestCount 投影） */
+    request_archive?: number
   }
   summary?: DossierSummary | null
+  /** S17：请求归档摘要（本项目 run 归属会话的归档聚合；读失败时缺省） */
+  request_archive?: RequestArchiveSummary | null
 }
 
 /** 项目协作档案：按项目聚合房间消息 / run 台账 / 事件时间线 / 候选 / 审批审计。 */

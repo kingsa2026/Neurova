@@ -1920,6 +1920,14 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
   },
   collab: {
     // S12 プロジェクト協働アーカイブ
+    dossierRequestArchive: 'リクエストアーカイブ',
+    dossierArchiveRequests: 'リクエスト数',
+    dossierArchiveSuccess: '成功',
+    dossierArchiveFailures: '失敗',
+    dossierArchiveTokens: 'トークン',
+    dossierArchiveLatency: 'レイテンシ（平均/最大）',
+    dossierArchiveRecentErrors: '最近のエラー',
+    dossierArchiveWindowIncomplete: '集計ウィンドウは切り詰められています（各セッションの直近分のみ）',
     dossierTitle: 'プロジェクト協働アーカイブ',
     dossierSelectProject: 'プロジェクトを選択',
     dossierEmpty: 'このプロジェクトにはまだ協働記録がありません',

@@ -90,6 +90,30 @@
           </div>
           <div v-else class="dossier-dim">{{ t('collab.dossierSummaryPending') }}</div>
 
+          <!-- S17 请求归档摘要：本项目 run 归属会话的 JSONL 归档聚合（只读），
+               次数/成功失败/token/时延/最近错误；窗口截断时显式声明非全量 -->
+          <div v-if="dossier.request_archive && dossier.request_archive.requestCount !== undefined" class="dossier-summary">
+            <div class="dossier-sub-title">{{ t('collab.dossierRequestArchive') }}</div>
+            <div class="dossier-counts">
+              <a-tag color="blue">{{ t('collab.dossierArchiveRequests') }}: {{ dossier.request_archive.requestCount }}</a-tag>
+              <a-tag color="green">{{ t('collab.dossierArchiveSuccess') }}: {{ dossier.request_archive.successCount }}</a-tag>
+              <a-tag color="red">{{ t('collab.dossierArchiveFailures') }}: {{ dossier.request_archive.failureCount }}</a-tag>
+              <a-tag color="purple">{{ t('collab.dossierArchiveTokens') }}: {{ dossier.request_archive.promptTokens + dossier.request_archive.completionTokens }}</a-tag>
+              <a-tag color="cyan">{{ t('collab.dossierArchiveLatency') }}: {{ dossier.request_archive.latencyMs.avgMs }}ms / {{ dossier.request_archive.latencyMs.maxMs }}ms</a-tag>
+            </div>
+            <template v-if="dossier.request_archive.recentErrors.length">
+              <div class="dossier-dim">{{ t('collab.dossierArchiveRecentErrors') }}</div>
+              <div class="dossier-list">
+                <div v-for="(err, idx) in dossier.request_archive.recentErrors" :key="idx" class="dossier-item">
+                  <a-tag color="red">{{ err.errorKind || 'error' }}</a-tag>
+                  <span class="dossier-mono">{{ err.provider }}/{{ err.model }}</span>
+                  <span class="dossier-dim">{{ err.errorSummary }}</span>
+                </div>
+              </div>
+            </template>
+            <div v-if="!dossier.request_archive.entryWindowComplete" class="dossier-dim">{{ t('collab.dossierArchiveWindowIncomplete') }}</div>
+          </div>
+
           <!-- 协作 Run 台账 -->
           <div class="dossier-sub-title">{{ t('collab.dossierRuns') }}</div>
           <GlassTable
