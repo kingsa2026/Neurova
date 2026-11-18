@@ -244,3 +244,14 @@ failureLanding/goal_gate 等无关项）；live-verify = 9681 真后端 boot
 含 `_secret` 子串的正当测试文件名（`test_secret_store_*` 被 git add 拒收）——
 测试文件命名避开该子串（改名 `test_keyring_account_derivation.py`），
 不得用 `git add -f` 兜底（AGENTS.md §4）。
+
+**前端适配面结论（2026-11-18 排查）**：本批改动几乎全在后端/测试/CI；
+唯一必要适配 = C3 新 retry 相位 `overflow_retry` 的前端文案（缺失时落
+「重试耗尽」兜底文案造成误标）——已补 `retryNoticeText` 分支 +
+`retryNotice.phase` 联合 + 11 locale 文案 + 契约测试
+（ChatPage.overflowRetry.test.ts，红 13→绿，全量 vitest 2679 绿 +
+vue-tsc 0 错，17d49137f）。reset 清空语义前端本就支持（case 'retry'
+既有分支），C2 流内切换（phase=switched）走既有文案，均零改动。
+可选增强（端点就绪、暂无 UI 消费方，待拍板另批）：B2 人机共编 MEMORY.md
+（console GET/PUT memory_md 端点）可挂 MemorySettingsPage 编辑卡片；
+B7 工具完成缓存查询（GET /chat/tools/{task_id}/result）可做结果查看面板。
