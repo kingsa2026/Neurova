@@ -153,7 +153,9 @@ Issue #68 明确要求写进"项目配置"的通用准则。与修复教义同�
   （HTTP `/v1/chat` 与 `/v1/chat/stream`、`console` REST/WS、`mobile_pairing`、渠道路由、工具与 MCP
   侧各自的边界）。**会话记录的可见性不走这条通道**：由 `meta["session_owner_id"]` 显式带上
   （渠道路径＝agent 属主，Issue #290 Wave H-W0），取法单点是 `post_chat_pipeline.resolveSessionOwner()`，
-  `MemCore.save_to_session` 只收参数、不从环境猜。缺省兜底属于各消费方（属主＝空即共享、用量＝anonymous、
+  `MemCore.save_to_session` 只收参数、不从环境猜。缺省兜底属于各消费方（属主＝空判给管理员
+  〔2026-11-18 用户拍板，改旧「空即共享」——无身份会话归 role=admin 中 id 最小者，见
+  `post_chat_pipeline._adminOwnerId`〕、用量＝anonymous、
   profile 池＝default、配额＝无身份即不判），门面里兜一层就是第二个事实源。
   **渠道回合有两个记账主体**：模型额度与 usage 按发送者计，运行台账（`core/agent_run_ledger`）的行
   `user_id` 与续跑权威仍按 agent 属主——这是裁定的结果，不是漂移。新增第二条装 `user_id` 的

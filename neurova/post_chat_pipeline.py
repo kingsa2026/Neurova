@@ -156,17 +156,57 @@ def resolveSessionOwner(metadata: Optional[Dict[str, Any]]) -> str:
       由同一条通道同时表达。
     · 其余入口（控制台 / `/v1/chat` / 流式 / 移动端 / 工具与 MCP）：说话人即属主，
       读那条唯一通道。
-    · 都没有 ⇒ 空串＝共享会话，与 `session_manager` 「空属主不过滤」的既有口径一致。
+    · 都没有 ⇒ 判给管理员（用户拍板 2026-11-18）。旧口径「空串＝共享会话」让无身份
+      写入产出对全员可见的无主会话（存量 682 个），此后一律归到主管理员名下。
+      用户库不可用时诚实回落空串（= 旧共享语义），不让查库故障改写可见性。
 
     这条函数之外，谁都不许再从环境里猜属主（`MemCore.save_to_session` 已改成只收参数）。
     测试要复用它，而不是自己拼一遍同样的式子——否则被测的那一行就换成了测试的复制品。
     """
     if metadata is not None and "session_owner_id" in metadata:
-        return str(metadata.get("session_owner_id") or "")
+        # 显式键最强：非空即属主；空＝如实声明「没有属主」——不回落到说话人
+        # （否则后台任务会把触发者写成会话属主），按新口径判给管理员。
+        owner = str(metadata.get("session_owner_id") or "")
+        return owner if owner else _adminOwnerId()
 
     from neurova.core.identity_context import get_request_user_id
 
-    return str(get_request_user_id() or "")
+    uid = str(get_request_user_id() or "")
+    if uid:
+        return uid
+    return _adminOwnerId()
+
+
+# 无身份会话属主（管理员）查询缓存：会话写入是高频路径，不逐条查库。
+_adminOwnerCache: Dict[str, Any] = {"id": "", "at": 0.0}
+_ADMIN_OWNER_TTL_SECONDS = 300.0
+
+
+def _adminOwnerId() -> str:
+    """主管理员用户 id（role=admin 中 id 最小者），供无身份会话判属主。
+
+    结果带 TTL 缓存；用户库不可用或暂无管理员时返回空串（调用方按旧
+    「共享」语义处理），不让一次查库故障阻断会话落盘。
+    """
+    import time
+
+    now = time.monotonic()
+    cached_id = str(_adminOwnerCache.get("id") or "")
+    if cached_id and now - float(_adminOwnerCache.get("at") or 0.0) < _ADMIN_OWNER_TTL_SECONDS:
+        return cached_id
+    admin_id = ""
+    try:
+        from neurova.auth.user_model import UserModel
+
+        admins = UserModel().list_users(role="admin", limit=100)
+        ids = [int(u.id) for u in admins if getattr(u, "id", None) is not None]
+        if ids:
+            admin_id = str(min(ids))
+    except Exception as e:
+        logger.warning("管理员属主查询失败，本会话按空属主处理：%s", e)
+    _adminOwnerCache["id"] = admin_id
+    _adminOwnerCache["at"] = now
+    return admin_id
 
 
 class StepStatus(str, Enum):

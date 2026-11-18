@@ -282,20 +282,29 @@ class TestTheOwnerResolverIsTheOnlyPlaceAmbientStillCounts:
 
             set_request_user_id(previous)
 
-    def test_absentKeyFallsBackToTheSpeakerAndEmptyMeansShared(self):
+    def test_absentKeyFallsBackToTheSpeakerThenAdmin(self, monkeypatch):
+        """无身份的兜底已按 2026-11-18 拍板改为「判给管理员」。
+
+        旧口径「空串＝共享会话」让无身份写入（WS 腿丢上下文、CLI、工具侧）产出
+        对全员可见的无主会话（存量 682 个）；此后空属主一律归主管理员名下。
+        显式空键仍不许回落到通道说话人——但落点从「保持空」改为「管理员」。
+        """
+        import neurova.post_chat_pipeline as pcp
         from neurova.core.identity_context import set_request_user_id
         from neurova.post_chat_pipeline import resolveSessionOwner
 
+        monkeypatch.setattr(pcp, "_adminOwnerId", lambda: "admin-1")
         previous = self._withChannel("u-alice")
         try:
             # 网页/移动端：说话人即属主
             assert resolveSessionOwner({"user_id": "u-alice"}) == "u-alice"
             # 显式带键但为空＝如实声明"没有属主"，不许回落到通道（否则后台任务
-            # 会把触发它的那个人的名字写进一条本该共享的会话）
-            assert resolveSessionOwner({"session_owner_id": ""}) == ""
+            # 会把触发它的那个人的名字写进会话）；判给管理员
+            assert resolveSessionOwner({"session_owner_id": ""}) == "admin-1"
             assert resolveSessionOwner(None) == "u-alice"
             set_request_user_id(None)
-            assert resolveSessionOwner({}) == "", "无身份时该落共享口径，而不是凭空造一个用户"
+            assert resolveSessionOwner({}) == "admin-1", (
+                "无身份时会话判给管理员（2026-11-18 拍板），不再落对全员可见的空属主")
         finally:
             set_request_user_id(previous)
 
