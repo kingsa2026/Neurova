@@ -221,4 +221,28 @@
 
 | 卡 | commit | 结果 | 偏差/移交 |
 |---|---|---|---|
-| （待补） | | | |
+| E1 宪法死端点 | `982daf5b0` | 退役 `agents/{id}/constitution` 谎报成功端点（生产池 +0/−58）+ 退役守卫 3 用例；live-verify 旧路由 404、/v1/growth 规则 CRUD 闭环 | 前端 grep 证实零旧调用，未动 |
+| M1 记账单源 | `8be5db4a1` | 删 `_record_muscle_memory_outcome` 双重记账，`on_tool_executed` 唯一记账点；一次自动执行连击恰 +1、两次独立成功才升 L2（+10/−27） | — |
+| M2 Skill 失败入账 | `8b5099036` | `_on_skill_post_execute` 失败分支补调 `on_tool_executed(success=False)` 接通降级/权重链（+21/−0） | — |
+| M3 死面退役 | `7e7361a01` | 删 `mem_core.muscle_memory` 死属性、`builder._merge_tool_memory` 空转支路、`execute_from_memory_async`（grep 证零生产调用）+ 守卫（+11/−101） | — |
+| M4 集成去 mock | `ab6f984f0` | 新增肌肉记忆三层全真链路集成用例（写入→命中→auto_execute→回流→固化→重载） | 既有 mock 用例保留 |
+| M5 矩阵更新 | `e601c6024` | 功能矩阵肌肉记忆 🟡→✅，落点修正为实际实现文件 | — |
+| K2 启动接线 | `299c2430c` | `reconcileSwarmRunsAtStartup` 接启动链（账本末态校正、只收敛不复活）+ ShutdownGuard 真装配 + 优雅关停刷缓冲（+131/−6）；live-verify 强杀→二次启动识别异常关停并恢复 | — |
+| K1 检查点恢复面 | `7d76c93ca` | `GET .../checkpoints` + `POST .../checkpoints/{ref}/restore`（事务化恢复+确认门+属主门+审计）+ 快照内容补全（messages 全量，kb_files 悬空参数删除）（+298/−6）；live-verify 16/16 | 前端检查点面板移交（挂点/鉴权就绪） |
+| K3 记忆回滚接线 | `999ed1a42` | `GET /v1/memory/{id}/versions` + `POST .../rollback`（沿用 rollback_to_version 语义+审计单源）；附带修 version_id 毫秒撞号（+220/−2）；live-verify 14 项 | 前端版本时间轴移交；拍板=接线 |
+| K4 就地回滚 | — | 决策卡：**不建**——fork-by-copy 与检查点恢复已覆盖，避免历史改写破坏审计链 | 如需再议，走 CheckpointService 通道 |
+| K5 蜂群 run 续跑 | — | 另立项（本方案不含）：从 TaskUnit+台账+事件账本重建执行上下文，只重驱 queued/blocked | 开工前须独立方案 |
+| SC-3 时机判读 | `c28092f8c` | `context_status` 回执增 `fold_timing` 判读块（内部直调 `decideFoldTrigger` 零第二套判据）+ 元认知六字段（+259/−16）；live-verify 9787 | — |
+| SC-7 反思对齐折叠 | `190e43479` | MetaLedger 只读游标 + 反思水印 + 对齐预算帽（只加深不放宽）（+183/−2）；live-verify 真管线水印咬合 | — |
+| SC-5 回执召回指引 | `feb4ffd83` | `context_compress` 回执附 covers_ref 三路径指引，live-verify 往返逐字取回（+75/−2） | 甄别出 P3-9 去重×T-11b 索引交互（既有，另记） |
+| SC-1/2/8 软抑制 | `20112ffc1` | 相位锚点软抑制（run 生命周期只读信号）/卡住抑制（活跃教训∨失败率，阈值具名可调）/活跃教训 KEEP 保护（doctrine 1.0.0→1.1.0）（+365/−2）；live-verify 卡住命中不折、对照立即折 | — |
+| S6' 基线跨重启 | `4947d129b` | 折叠基线随 `fold_baseline` 时间线事件持久化、建槽即重放、手动 /compact 同批落盘、fail-open（+131/−0）；live-verify 重启后不重复折叠、挪走时间线对照立即折叠 | — |
+| SC-6 召回率读数 | `89c6f2967` | 折叠事件×召回命中单源关联账本 + `/metrics` `fold_recall` 只读面 + 跨重启时间线重放恢复分母（+375/−1）；live-verify 比率 0→0.1429 | 直取类召回不经抽屉，比率为下界（已注明） |
+| SC-4 四臂基准 | `f52ce3eaf` | 四臂对照框架+读数（臂3 相位抑制召回率 0.38 最高、臂4 前移峰值最低 5142；+106/−35）；**激进臂仅实验臂，转正须另行拍板** | — |
+| E3 动机最小闭环 | `7a8d239c2` + `23a6e3a8b` | 强度调制接出队点（具名间隔表，读 MotivationLedger.snapshot 单源）+ `generate_actions` 等行为生成死码退役 −496 行+守卫；live-verify 高/低强度出队频率差 | 收割点接线由 E5 件2 清偿 |
+| E5 反思/动机/门三件 | `1141765d7` + `209de667e` + `5f4e2da5e` | lessons 补池分支（复用唯一选取入口）+ 动机调制补接收割点（import 复用纯函数）+ avoid_tool 门两态验证与本卡灰度指引（生产默认保持关） | — |
+| E2 宪法规则接行为 | `e6edef924` | `compileConstitutionRulesSection()` 编译口（上界 20 条/500 字符诚实截断）经 session_snapshot 与三件套同点冻结、组装点与字符串轨合流（+102/−2）；live-verify budget 读数字节级吻合 | 期间分支被 rebase，哈希随之更新、内容已核验 |
+| E4 人格特质接行为 | `07c3e751b` | `compilePersonalityTraitsSection()` 同形态进人格段（上界 12 条/2000 字符）（+91/−3）；live-verify 同法实证 | `/personality/evolve` 501 诚实桩保留 |
+| S8 池→记忆蒸馏 | — | 另立项：按 [2026-11-18-memory-distillation-plan.md](2026-11-18-memory-distillation-plan.md) 推进；红线=不复活已退役的 MEMORY.md 通道 | — |
+
+**总收口**：四域方案可执行卡全部完成，共 23 笔提交落地本地 main（未 push）；每笔先红后绿、相关套件 A/B 零新增失败、live-verify 真链路自证；共享工作树多会话并行以文件域互斥 + `--only` 点名 + 必要时过滤 patch 精确暂存共处，全程零撞车事故。
