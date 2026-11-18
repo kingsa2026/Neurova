@@ -1,6 +1,6 @@
 """睡眠归纳相位（T2）——深睡/休眠窗口内的 LLM schema 归纳。
 
-DCPM（arXiv:2606.09483）System2 的启发：夜间引擎在"整理"之外还要做"归纳"——
+记忆双过程研究（arXiv:2606.09483）System2 的启发：夜间引擎在"整理"之外还要做"归纳"——
 从尚未被上层结构引用的事实里，按主题聚簇并归纳出行为规律（schema），供
 后续检索浮出。本模块把这一相位装进本仓既有的睡眠窗口（IdleTimeTracker 的
 deep_sleep/hibernate 触发点），不新增后台链路。
@@ -67,10 +67,10 @@ SCHEMA_ENTITY_TYPE = "schema"
 #: core schema 实体类型（T3 跨域碰撞归纳产物）
 CORE_SCHEMA_ENTITY_TYPE = "core_schema"
 
-#: 行为相似阈值（DCPM θ_beh=0.72）：行为描述嵌入余弦须超过
+#: 行为相似阈值（θ_beh=0.72）：行为描述嵌入余弦须超过
 BEHAVIOR_COSINE_THRESHOLD = 0.72
 
-#: 语义遥远阈值（DCPM θ_sem=0.40 的本仓标定值）：证据话题嵌入余弦须低于
+#: 语义遥远阈值（θ_sem 本仓标定值 0.40）：证据话题嵌入余弦须低于
 #: （行为像、话题远）。0.65 经真嵌入（bge-small-zh-v1.5，512 维）实测标定：
 #: 无关话题句对 ≈0.52，同话题句对 ≈0.84+——0.40 在该嵌入空间会把所有对
 #: 都判成"话题不远"而恒空扫。
@@ -503,7 +503,7 @@ def _evidenceCentroid(manager: Any, evidence_ids: List[str]) -> Optional[List[fl
 
 
 def _unionFind(pairs: List[Tuple[str, str]]) -> Dict[str, List[str]]:
-    """经典并查集：把碰撞对聚成连通簇（DCPM Phase 3b 同构）。"""
+    """经典并查集：把碰撞对聚成连通簇（对照批同构）。"""
     parent: Dict[str, str] = {}
 
     def _find(x: str) -> str:
@@ -554,7 +554,7 @@ def runCrossDomainSweep(
     经 union-find 聚簇后，每簇一次 LLM 归纳出 core schema 节点。
 
     - 只在**同作用域**内扫（跨作用域永不碰撞——隔离纪律）；
-    - 两个空间都高的是平凡冗余对，过滤掉（DCPM 同款）；
+    - 两个空间都高的是平凡冗余对，过滤掉（对照批同款）；
     - 行为嵌入 = schema pattern 的嵌入（T2 归纳提示词本就要求"行为规律"，
       它就是行为描述，不再多花一次 LLM）；话题嵌入 = 证据事实嵌入的质心；
     - fail-soft：LLM/图写失败只计数跳过，绝不抛出阻断睡眠链。

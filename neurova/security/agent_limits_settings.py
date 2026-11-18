@@ -59,7 +59,7 @@ DEFAULTS: Dict[str, Any] = {
     # 此前它是 `agent/gates.py` 的类字面量 4，而唯一装配点 `_buildGateRunner` 写的是
     # `DoomLoopGate()` 无参构造 ⇒ 这一档阈值**不受任何配置键管辖**。同文件
     # `loops/base.py:366-368` 已把这种形态点名为忌讳（GoalGate 轮次预算收口时写下的原话），
-    # 而三把同族门都从本单源取数，只它例外（ModularRSI 对照 §4 M-A 第①步）。
+    # 而三把同族门都从本单源取数，只它例外（对照批 §4 M-A 第①步）。
     #
     # 同类的第三个构造参数 `similarity_threshold` 当时**不在本表**，理由是它存进实例后
     # 全仓零读取（`check()` 判的是签名逐字相等，近似比较从未实装）——给死旋钮挂配置键就是
@@ -120,7 +120,7 @@ MAX_DOOM_LOOP_INTERRUPTS = 8
 MIN_DOOM_LOOP_SIMILARITY = 0.5
 MAX_DOOM_LOOP_SIMILARITY = 1.0
 
-# ── 执行档位（HN3+HN4/HC3，HarnessPro 对照 2026-11-13）──────────────
+# ── 执行档位（HN3+HN4/HC3，对照批 2026-11-13）──────────────
 # 部署档位 = 一组命名预算（lite/standard/heavy）：standard 即内置默认
 #（不覆盖任何键），lite/heavy 是运营按部署预算选档的入口。单源在本表；
 # env NEUROVA_EXEC_PROFILE 选择档位。

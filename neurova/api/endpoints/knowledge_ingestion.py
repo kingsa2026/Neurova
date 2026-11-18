@@ -39,7 +39,7 @@ from neurova.api.endpoints.knowledge_common import (  # noqa: E402,F401
     extract_after_update, extract_event_summary,
 )
 
-#: 条目更新后 facts 重抽的门控（SAG 对比候选 C2）：LLM 成本随更新量走，
+#: 条目更新后 facts 重抽的门控（对比候选 C2）：LLM 成本随更新量走，
 #: 默认 off＝旧行为；开闸时复用导入抽取同一条管线，增量 admit 不删旧 facts。
 
 def _build_item_dict(item: Dict[str, Any]) -> Dict[str, Any]:

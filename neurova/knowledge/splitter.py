@@ -61,7 +61,7 @@ def build_index_content(
 
     rebuild/增量索引、chunk 级 preview、向量索引拼接必须全部走本函数，
  否则重索引无法字节级复现索引输入。
-    event_summary（SAG 对比候选 C5，2026-11-05）：条目事件摘要（LLM 生成，
+    event_summary（对比候选 C5，2026-11-05）：条目事件摘要（LLM 生成，
     缺省空＝逐位等于旧三参行为），插在标题之后作索引文本的语义锚。
     """
     parts = [

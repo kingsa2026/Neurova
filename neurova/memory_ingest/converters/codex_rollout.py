@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Codex rollout 族（rollout-<ts>-<id>.jsonl）→ Ingest Bundle：只读源、只产包。
+"""外部 CLI rollout 族（rollout-<ts>-<id>.jsonl）→ Ingest Bundle：只读源、只产包。
 
 格式取证自本机的该平台上游源码（写入侧就是这个枚举，不是靠样例猜）：
 ``RolloutItem`` 的落盘线形是 ``{\"type\": <变体>, \"payload\": {...}}``

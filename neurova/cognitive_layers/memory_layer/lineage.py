@@ -1,6 +1,6 @@
 """记忆世代链读取（T1 supersedes 链读路径化）。
 
-DCPM（arXiv:2606.09483）的 supersedes 双向链证明：隐式个性化查询大量依赖
+记忆双过程研究（arXiv:2606.09483）的 supersedes 双向链证明：隐式个性化查询大量依赖
 "沿链恢复信念演化弧线"（其 LongMemEval 知识更新子集上，答对查询 78% 触碰
 supersedes 指针，答错仅 31%）。本仓的取代语义此前**只写不读**——三处写点
 各自落了指针，但 recall 排除 FORGOTTEN 行后，链永远沉在 metadata 审计里：

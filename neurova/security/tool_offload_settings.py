@@ -29,7 +29,7 @@ MAX_THRESHOLD_KB = 512  # 上限拍板 2026-09-13（512KB 之上的单结果实�
 
 DEFAULTS: Dict[str, Any] = {"threshold_kb": DEFAULT_THRESHOLD_KB}
 
-# ── 执行档位缩放（HN5/HC7，HarnessPro 对照 2026-11-13）──────────────
+# ── 执行档位缩放（HN5/HC7，对照批 2026-11-13）──────────────
 # 无显式设置时，溢出阈值随执行档位缩放：lite 更激进落盘（阈值减半）、
 # heavy 更宽容（翻倍）。显式设置（文件/env）优先于档位——管理员微调不被
 # 选档悄悄覆盖。standard = 1.0（内置默认逐字不变）。

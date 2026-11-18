@@ -25,7 +25,7 @@ class ComputerEngine(str, Enum):
 
     MANAGED = "managed"       # Neurova managed (OpenAI Responses API)
     CLAUDE_CODE = "claude"    # Claude Code CLI
-    CODEX = "codex"           # GitHub Codex CLI
+    CODEX = "codex"           # 外部编码 CLI 引擎
     GROK_BUILD = "grok"       # Grok Build
     CURSOR = "cursor"         # Cursor Agent
     OPENCODE = "opencode"     # OpenCode
@@ -33,7 +33,7 @@ class ComputerEngine(str, Enum):
     GEMINI = "gemini"         # Gemini CLI
     QWEN = "qwen"             # Qwen Code
     ANTIGRAVITY = "antigravity"  # Antigravity
-    ZCODE = "zcode"           # ZCode (via ACP bridge)
+    ZCODE = "zcode"           # 宿主引擎（经 ACP 桥接入）
 
 class ComputerStatus(str, Enum):
     """Computer 状态"""

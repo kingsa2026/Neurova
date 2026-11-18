@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""recall_query 的受限表达式引擎（QwenPaw 对照批 B3）。
+"""recall_query 的受限表达式引擎（对照批 B3）。
 
 价值：recall_history 是模糊匹配、recall_context_span 是确定性下钻——
 「对召回条目做组合/统计/过滤」（如"数一数上周提到过哪些文件"）没有

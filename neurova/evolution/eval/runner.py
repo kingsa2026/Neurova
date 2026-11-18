@@ -161,7 +161,7 @@ class EvolutionRunResult:
     # N2 候选集并行递归：非劣幸存者（text/score），供递归演化推进下轮多谱系。
     # 默认关时恒为空表。
     pareto_variants: list = field(default_factory=list)
-    # V1 near-miss 有界修复（VideoEvolve 对照 2026-11-14）：每轮修复尝试的
+    # V1 near-miss 有界修复（对照批 2026-11-14）：每轮修复尝试的
     # 审计记录（round/gate/improved/blocked/evidence_tasks/tune_score）。
     # 空表 = 未启用或未触发——「修过没修成」与「压根没修」都看得见。
     repair_attempts: list = field(default_factory=list)
@@ -300,7 +300,7 @@ def _caseRegressionReadout(caseScores: dict) -> tuple[list[str], list[str]]:
     return regressions, unevidenced
 
 
-# V1 可修复门（VideoEvolve 对照 2026-11-14）：只修**回归型**拒绝——它们有
+# V1 可修复门（对照批 2026-11-14）：只修**回归型**拒绝——它们有
 # 「哪条任务被改坏」的具体证据，修复可以定向；no_improvement（无增益）、
 # anchor_unreached（地板）、cost_*（成本）、bench_regression（基准）没有
 # 定向证据，修复只是盲目重试，不进修复通道。
@@ -1186,7 +1186,7 @@ class SkillEvolutionRunner:
                 best_seq = seq
 
         result.train_best = best_score
-        # ── V1 near-miss 有界修复（VideoEvolve 对照 2026-11-14）──
+        # ── V1 near-miss 有界修复（对照批 2026-11-14）──
         # 被验证侧门拒绝、但开发增益为正的候选（near miss）不直接弃置：带门别
         # 诊断进入 ≤repairBudget 次修复轮（以当前最优为起点再变异，同款闸同款账）。
         # 生效额度 = max(代码级配置, 治理设置项)；0 = 关闭（拒绝即弃置，逐字旧行为）。
@@ -1369,7 +1369,7 @@ class SkillEvolutionRunner:
                     continue  # 新最优重新过全链门
             return await rejectRun(rejectReason)
 
-        # ── 判定 2.2:锚定地板(P2-4,SkillGLoW 对比 2026-10-07)──
+        # ── 判定 2.2:锚定地板(P2-4,对比批 2026-10-07)──
         # A = max(历史最优留出, 无技能基线)。只赢过**正在退化的现役基线**不算
         # 真增益——候选必须达到 A − accept_threshold 才可部署,信用不归因于
         # 退化。无技能留出只在候选过基线门后评(成本有界:每通过轮 +1 次留出

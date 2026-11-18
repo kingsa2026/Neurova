@@ -132,8 +132,8 @@ def normalizeKeyName(part: str) -> str:
     return KEY_ALIASES.get(raw, raw)
 
 
-# P2-4（ZCode 电脑操控对照评测）：前台输入注入族——会动用户真实鼠标/键盘的
-# 桌面动作。子代理工具面收窄时整族剔除（对齐 ZCode「CUA 仅主代理」）：
+# P2-4（电脑操控对照评测）：前台输入注入族——会动用户真实鼠标/键盘的
+# 桌面动作。子代理工具面收窄时整族剔除（「CUA 仅主代理」）：
 # 多代理并发抢全局输入设备 = 互踩用户桌面。观察面（截图/快照/窗口枚举）与
 # 命令面（shell/ssh）不受限。单一事实源：swarm 收窄与本表对账（判据测试钉住）。
 FOREGROUND_DESKTOP_TOOLS = frozenset(
@@ -520,7 +520,7 @@ class ComputerUseManager:
         """粘贴（P2-7）：文本写入系统剪贴板 → 派发 ctrl+v 到当前焦点控件。
 
         Windows 剪贴板通道（CF_UNICODETEXT）；目标控件需已聚焦（聚焦语义见
-        computer_type 的语义路径）。粘贴后不恢复剪贴板原值（与 ZCode paste 的
+        computer_type 的语义路径）。粘贴后不恢复剪贴板原值（与既有 paste 的
         差异如实声明于工具描述）。
         """
         if os.name != "nt":

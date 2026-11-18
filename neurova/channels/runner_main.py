@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""渠道 Runner 子进程入口（QwenPaw 对照批 A1）。
+"""渠道 Runner 子进程入口（对照批 A1）。
 
-职责边界（对齐 QwenPaw "渠道 worker 只做平台 I/O" 的切法）：
+职责边界（"渠道 worker 只做平台 I/O" 的切法）：
 - 依赖审计 → hello 握手 → 等宿主 ready；
 - 加载入口适配器（`module:qualname`）并驱动其 connect/send_message；
 - 入站事件回传宿主（event 帧），宿主侧仍走既有 manager/router/台账全链路；

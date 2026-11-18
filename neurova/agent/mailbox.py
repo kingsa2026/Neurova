@@ -6,14 +6,14 @@
 正文不在此重复——主 Agent 要详情就凭指针经 `recall_history` 下钻到 member 会话。
 前台模式下它是增强可见性，后台模式下它是唯一回传通道。
 
-两阶段确认（CoworkOS 对照评测 H-1，"Queuing is not acknowledgement"）：
+两阶段确认（对照评测 H-1，"Queuing is not acknowledgement"）：
 - `lease()` 把消息交给消费方并标记 leased——未 ack 前再次 lease 仍取得到
   （至少一次投递：排空后、落盘前失败不再丢终态）；
 - `acknowledge()` 只在消息确实进入持久上下文后调用，才真正删除；对已 ack 的
   id 重复调用幂等（返回 0，计数不重复扣减）；
 - 破坏性一次性排空（旧 `drain()`）已退役：与两阶段并存即第二套投递语义。
 
-S2 可靠性语义补全（CoworkOS 对照 C1/C3）：
+S2 可靠性语义补全（对照批 C1/C3）：
 - 幂等：消息带 `messageId`（投递点生成，缺省由本层补 uuid）；同 id 重复投递
   直接去重（只生效一次）。端到端"不重复生效"由消费侧配合：重投件（确认前
   中断/死主回收）携同一 messageId，消费方判重后只补确认（见 loops/base.py）；

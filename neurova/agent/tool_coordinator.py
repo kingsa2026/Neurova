@@ -393,7 +393,7 @@ class ToolCoordinator:
 
     def getCompletedEntry(self, task_id: str,
                           session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """完成后结果的**只读查询面**（QwenPaw 对照批 B7）。
+        """完成后结果的**只读查询面**（对照批 B7）。
 
         `_completed` 是纯内存有界留存（`_MAX_COMPLETED`），此前没有查询口。
         归属 fail-closed：`session_id` 给出时必须与盖章归属**精确相等**才返回；

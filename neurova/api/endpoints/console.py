@@ -1573,7 +1573,7 @@ async def get_console_tool_result(
     agent_id: str = Query(default=""),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """后台工具完成结果的限时查询面（QwenPaw 对照批 B7）。
+    """后台工具完成结果的限时查询面（对照批 B7）。
 
     ToolCoordinator 的 `_completed` 是内存有界留存，转后台工具的完成通知走
     一次性 SSE——刷新/重启后就只能在这里查。归属双层 fail-closed：entry 的

@@ -1,7 +1,6 @@
 """每任务成本账 + Cost-of-Pass 读数 + 进化成本软门（HN1/HC1，2026-11-13）。
 
-来历：HarnessPro 对照（docs/08-research/harnesspro_vs_neurova_cost_aware_
-harness_rsi_comparison_2026-11-13.md）断点 HN1——本仓成本只记账不进目标：
+来历：成本感知评测对照批断点 HN1——本仓成本只记账不进目标：
 `usage_accounting` 记到「调用/模型/用户」粒度，`runner.cost_*` 是文本长度
 代理（P1-5），执行/判分的真实 token/费用没有按任务落账，提案面没有成本门。
 
@@ -170,7 +169,7 @@ def costSoftGateVerdict(cost_summary: Optional[Dict[str, Any]], *,
 
 
 def deploymentCostDelta(cost_summary: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """V6 部署形态成本差（VideoEvolve 对照 2026-11-14）：胜者相对基线臂的
+    """V6 部署形态成本差（对照批 2026-11-14）：胜者相对基线臂的
     **每任务执行成本差**（tokens/费用），给审批人看「采纳后每任务多花多少」——
     开发搜索的花费（成本账自身）与部署形态的花费（本读数）分开计量，对应
     论文「进化后调用数 0.996→1.963」的披露纪律。

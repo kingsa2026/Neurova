@@ -20,13 +20,13 @@ from neurova.knowledge.repository import get_knowledge_repository
 
 logger = get_logger(__name__)
 
-#: 异步摄取抽取补偿的门控（SAG 对比候选 C2）：此前异步路径恒 skipped_async；
+#: 异步摄取抽取补偿的门控（对比候选 C2）：此前异步路径恒 skipped_async；
 #: 默认 off＝旧行为（结果仍如实标 skipped），开闸后 ack 补跑抽取。
 ENV_EXTRACT_ASYNC = "NEUROVA_KB_EXTRACT_ASYNC"
 
 
 def extract_after_ingest(event: Dict[str, Any], item_ids: List[str]) -> str:
-    """异步摄取完成后的图谱抽取补偿（SAG 对比候选 C2，2026-11-05）。
+    """异步摄取完成后的图谱抽取补偿（对比候选 C2，2026-11-05）。
 
     此前异步路径恒 `skipped_async`（_try_extract_to_graph 依赖 Request/app
     state）——实际上 `_default_llm_call` 经 `get_app_state()` 生产可解析，

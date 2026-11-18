@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""前端 bundle 体积预算的核心计量与判定（QwenPaw 对照批 C6）。
+"""前端 bundle 体积预算的核心计量与判定（对照批 C6）。
 
 可单测的纯逻辑在此；`scripts/ci/bundle_budget.py` 只是薄壳。
 """

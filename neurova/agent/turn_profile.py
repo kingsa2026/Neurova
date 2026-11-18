@@ -1,8 +1,7 @@
 """任务级执行档位（R3+R6，2026-11-13）。
 
-来历：HarnessPro 对照（docs/08-research/harnesspro_vs_neurova_cost_aware_
-harness_rsi_comparison_2026-11-13.md）§10.2——档位此前是**部署级**静态
-env（NEUROVA_EXEC_PROFILE），对所有任务一视同仁；HarnessPro 是**每任务**
+来历：成本感知评测对照批 §10.2——档位此前是**部署级**静态
+env（NEUROVA_EXEC_PROFILE），对所有任务一视同仁；对照系是**每任务**
 一次分类调用选 profile 并联动预算。
 
 本模块提供 turn 级档位通道与 rubric 分类器：

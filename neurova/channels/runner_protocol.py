@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""渠道 Runner 帧协议与握手（QwenPaw 对照批 A1）。
+"""渠道 Runner 帧协议与握手（对照批 A1）。
 
 - 帧：4 字节大端长度前缀 + UTF-8 JSON。1MB 帧上限防畸形长度打爆内存。
 - 握手：子进程先做**依赖审计**（required_deps 逐个 import 实测），把结果
@@ -16,7 +16,7 @@ import struct
 from typing import Any, Dict, IO
 
 HANDSHAKE_PROTOCOL_VERSION = "1"
-#: 单帧上限（与 QwenPaw 同量级）：超长即协议错误，防畸形长度前缀打爆内存。
+#: 单帧上限：超长即协议错误，防畸形长度前缀打爆内存。
 MAX_FRAME_BYTES = 1 * 1024 * 1024
 
 FRAME_HEADER_SIZE = 4

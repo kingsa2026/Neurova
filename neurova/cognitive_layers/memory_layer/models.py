@@ -290,7 +290,7 @@ class Memory:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_accessed_at: Optional[datetime] = None
-    #: C6（graphiti 对照批）：fact 级有效期窗口。None＝永远有效（旧行为零
+    #: C6（对照批）：fact 级有效期窗口。None＝永远有效（旧行为零
     #: 变化）；判活谓词单点在 `isVisibleAt`，与 knowledge_facts/temporal_facts
     #: 的「生效窗口外不可见」同语义，不在检索面各写一份时间判断。
     valid_from: Optional[datetime] = None

@@ -23,7 +23,7 @@ class SkillManifestEntry:
     author: str = ""
     tags: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    # QwenPaw 对照批 B11：治理性披露字段（全部可选，缺省=行为与既往一致）
+    # 对照批 B11：治理性披露字段（全部可选，缺省=行为与既往一致）
     #: 渠道限定：非空时仅这些渠道的轮次注入该技能（读侧信号=turn_context 渠道）
     channels: List[str] = field(default_factory=list)
     #: 环境依赖：声明的环境变量缺失时本轮不注入（点名记录，不静默）

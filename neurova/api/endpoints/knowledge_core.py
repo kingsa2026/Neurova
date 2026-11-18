@@ -1302,7 +1302,7 @@ async def update_knowledge(
     if not repo.update_knowledge(agent_id, knowledge_id, updatedBody):
         raise HTTPException(status_code=404, detail="Knowledge '%s' not found" % knowledge_id)
 
-    # C2（SAG 对比候选）：正文变更后触发 facts 重抽——旧 facts 与新正文漂移
+    # C2（对比候选）：正文变更后触发 facts 重抽——旧 facts 与新正文漂移
     # 不再只靠 drift 读数被动发现。NEUROVA_KB_EXTRACT_ON_UPDATE 门控默认 off；
     # 重抽失败 fail-soft（extract_after_update 内部吞），更新照常返回。
     if "content" in updatedBody:

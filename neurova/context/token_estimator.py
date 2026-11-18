@@ -142,7 +142,7 @@ def estimate_tokens(text: str, strategy: EstimationStrategy = EstimationStrategy
     return int(math.ceil(base * margin))
 
 
-#: 溢出保证金参数（QwenPaw 对照批 B4）：单次溢出的抬高档、封顶与下界。
+#: 溢出保证金参数（对照批 B4）：单次溢出的抬高档、封顶与下界。
 MARGIN_STEP = 1.25
 MARGIN_CAP = 2.0
 MARGIN_FLOOR = 1.0
@@ -150,7 +150,7 @@ _MARGIN_CAPABILITY = "token_safety_margin"
 
 
 def recordModelOverflow(model_id: str) -> float:
-    """provider 溢出拒收后抬高该模型的估算基线（QwenPaw"拒收保证金"的对偶实现）。
+    """provider 溢出拒收后抬高该模型的估算基线（"拒收保证金"的对偶实现）。
 
     保证金存模型能力缓存单例（进程级记忆）；步进 ×1.25、封顶 ×2.0——封顶防
     "一次坏估算把可用窗口砍半"。返回抬高后的系数。

@@ -1,12 +1,11 @@
 """可执行测试判据层（HN2/HC2，2026-11-13）。
 
-来历：HarnessPro 对照（docs/08-research/harnesspro_vs_neurova_cost_aware_
-harness_rsi_comparison_2026-11-13.md）断点 HN2——合成评测集
+来历：成本感知评测对照批断点 HN2——合成评测集
 （`eval/synthetic.py`）产出的是 rubric 文本，判分靠 LLM judge；judge 的
-系统性漏判（HarnessPro 实测 41.7% 召回）会直接进采纳决策。
+系统性漏判（对照批实测 41.7% 召回）会直接进采纳决策。
 
-本模块补一层**确定性可执行判据**（借鉴 HarnessPro 的 Test Synthesizer
-形态，独立实现，不搬其文本）：
+本模块补一层**确定性可执行判据**（测试合成器形态，
+独立实现）：
 
 1. `TestSynthesizer`：LLM 从**技能公共契约**（当前基线正文）＋若干参考
    任务生成带断言的评测用例；只收七种确定性断言 op，非法 op/空任务剔除，

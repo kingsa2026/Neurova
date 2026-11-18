@@ -299,7 +299,7 @@ def persistCompressionEvent(
         return False
 
 
-#: QwenPaw 对照批 C4：recall 族工具名单——这些工具自身的调用/结果条目
+#: 对照批 C4：recall 族工具名单——这些工具自身的调用/结果条目
 #: 不参与召回（防"上次 recall 的结果"污染本次检索）。
 _RECALL_FAMILY_TOOLS = frozenset({
     "recall_history", "recall_query", "recall_context_span",
@@ -1311,7 +1311,7 @@ class ContextPool:
         （`_allowedRecallItems` → `filter_by_tag`，判据单源 `allowed_scopes_for_tag`）。改前这条路径
         按 session 精确等值过滤——单聊池恒空、无会话池全放行，两个方向都不对。
 
-        QwenPaw 对照批 C4（recall 防自污染）：recall 族工具自身的调用与结果
+        对照批 C4（recall 防自污染）：recall 族工具自身的调用与结果
         条目（`metadata.tool_name` 命中 `_RECALL_FAMILY_TOOLS`）不参与召回——
         否则查 "X" 会命中"上次 recall X 的结果"，检索被自己的输出污染。
 

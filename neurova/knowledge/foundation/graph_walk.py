@@ -124,7 +124,7 @@ class GraphFactWalker:
             except Exception:  # noqa: BLE001 - 标注失败只丢标注，走查照旧返回
                 derivedIds = set()
         if seeded:
-            # 收益记账：种子驱动的走查实际返回行数（SAG 对比 C1 观测项）。
+            # 收益记账：种子驱动的走查实际返回行数（对比批 C1 观测项）。
             try:
                 from ..retrieval_metrics import get_retrieval_metrics
 
@@ -233,14 +233,14 @@ class GraphFactWalker:
         return keys[:_EXPANSION_ANCHOR_CAP]
 
     def _seedAnchors(self, query: str, tenantId: Optional[str]) -> List[str]:
-        """零子串锚点时的 BM25 事实种子兜底（SAG 对比 N3 接线，2026-11-05）。
+        """零子串锚点时的 BM25 事实种子兜底（对比批 N3 接线，2026-11-05）。
 
         subjectsMentionedIn 是「这条查询在问谁」的强判据（时效读面与走查共用，
         不动）；但换说法/未登记别名的查询会零锚点，多跳走查整路空转。事实池
         BM25（FactSurface.search）在词法不精确时仍能召回相关事实行，其主体即
         种子锚点。受 NEUROVA_KB_FACT_SURFACE 闸门控：闸关返回空列表，行为逐位
         等于旧行为；仅在强判据零命中时调用，强判据优先地位不变。
-        观测跟闸走（SAG 对比 C1 观测项）：闸关零记录；扫描只记
+        观测跟闸走（对比批 C1 观测项）：闸关零记录；扫描只记
         latency/pool/anchors，收益（walk_hits）由 walkFromQuery 种子路径记账。
         """
         try:

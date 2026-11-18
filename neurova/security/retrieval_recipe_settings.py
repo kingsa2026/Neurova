@@ -1,4 +1,4 @@
-"""检索配方设置（C3，graphiti 对照批）。
+"""检索配方设置（C3，对照批）。
 
 active_recipe：命名检索配方（default/balanced/precise/graph_expanded），
 参数定义单源在 `neurova/knowledge/search_recipes.py`。优先级与

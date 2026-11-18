@@ -1578,7 +1578,7 @@ class SwarmManager:
         self._logRunEvent(run, "terminal", {"status": run.status, "cause": run.cause,
                                             "error": (run.error or "")[:EVENT_ERROR_SUMMARY_CHARS]})
 
-    # ── H 批补差（对照 deepagents update_async_task / cancel_async_task）──────
+    # ── H 批补差（异步任务更新/叫停对照批）──────
 
     def cancelRun(self, subagent_id: str, reason: str = "") -> Dict[str, Any]:
         """父侧叫停一个子代理运行。
@@ -1667,7 +1667,7 @@ class SwarmManager:
         session_id: Optional[str] = None,
         initiator_agent: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """改需求（对照 deepagents update_async_task 的 interrupt|enqueue 双策略）。
+        """改需求（interrupt|enqueue 双策略，对照批）。
 
         - 终态 run → 走既有续跑链（resumeFinishedRun：member 会话复用 + 溯源）；
         - 运行中 run：

@@ -33,7 +33,7 @@ class RetrievalMetrics:
                 "top5_reach": 0,
                 "top1_reach": 0,
             }
-            # 种子锚点观测（SAG 对比 C1 后续观测项，2026-11-05）：观测跟闸走
+            # 种子锚点观测（对比批 C1 后续观测项，2026-11-05）：观测跟闸走
             # （NEUROVA_KB_FACT_SURFACE 关闸零记录）。转正判定读这些数：
             # 延迟 avg/max 达压测基线且 anchors/walk_hits 非零 → 闸默认开；
             # 超限 → 池上限或保持关闸。
@@ -90,7 +90,7 @@ class RetrievalMetrics:
                         self._graphShadow["top1_reach"] += 1
 
     def recordSeedScan(self, *, latencyMs: float, poolSize: int, anchors: int) -> None:
-        """种子锚点扫描读数（SAG 对比 C1 观测项）：只在种子闸实际执行扫描时被调。"""
+        """种子锚点扫描读数（对比批 C1 观测项）：只在种子闸实际执行扫描时被调。"""
         with self._lock:
             self._seedAnchors["triggers"] += 1
             elapsed = max(0.0, float(latencyMs))

@@ -1,4 +1,4 @@
-"""冲突裁决的 LLM 参考意见（C2，graphiti 对照批）。
+"""冲突裁决的 LLM 参考意见（C2，对照批）。
 
 规则阶梯（源钟/断言数/置信）三项均无差异时，`KnowledgeConflictJudge.decide`
 只能落 manual 待人工。本模块给审批面提供**语义参考意见**：管理员在审批面板

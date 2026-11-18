@@ -345,7 +345,7 @@ register_migration(6, _migrateBodyShareGroups, domain=MEMORY_BODY_DOMAIN)
 
 
 def _migrateBodyValidityWindow(conn) -> None:
-    """memory 域 v7：`memories.valid_from/valid_until` 列（C6，graphiti 对照批）。
+    """memory 域 v7：`memories.valid_from/valid_until` 列（C6，对照批）。
 
     fact 级有效期窗口（可空 TEXT ISO 串）：NULL＝永远有效，旧行为零变化。
     判活谓词单点在 `Memory.isVisibleAt`——检索面（recall/全文）共用同一

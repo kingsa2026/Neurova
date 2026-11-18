@@ -361,7 +361,7 @@ class PromptInjectionAnalyzer(BaseAnalyzer):
 
 
 class SecretsContentAnalyzer(BaseAnalyzer):
-    """硬编码密钥内容签名分析器（QwenPaw 对照批 A2）。
+    """硬编码密钥内容签名分析器（对照批 A2）。
 
     名称级 `credential_artifact_name` 只认文件名；本分析器补**内容级**：
     真实形状的密钥/令牌落在普通文档、配置、脚本里同样是泄漏——与名称级
@@ -413,7 +413,7 @@ class SecretsContentAnalyzer(BaseAnalyzer):
 
 
 class SocialEngineeringAnalyzer(BaseAnalyzer):
-    """社会工程话术签名分析器（QwenPaw 对照批 A2）。
+    """社会工程话术签名分析器（对照批 A2）。
 
     攻击话术的组合特征是「紧迫性 + 保密性」共现——单看"紧急"或单看
     "不要告诉用户"都会误伤正常文档，故每条签名用双前瞻把两个条件
@@ -471,7 +471,7 @@ class SocialEngineeringAnalyzer(BaseAnalyzer):
 
 
 class UnauthorizedToolUseAnalyzer(BaseAnalyzer):
-    """越权工具使用诱导签名分析器（QwenPaw 对照批 A2）。
+    """越权工具使用诱导签名分析器（对照批 A2）。
 
     检测「绕过审批/无需用户确认/静默调用工具」类话术——它诱导模型
     走出人在环闸门，与 prompt_injection 同为纯文本攻击面。
@@ -686,7 +686,7 @@ class PatternAnalyzer(BaseAnalyzer):
                 message="检测到疑似数据外泄/远程代码执行",
                 category="malware",
             ),
-            # —— QwenPaw 对照批 A2（2026-11-18）：supply_chain / JS 混淆执行补签 ——
+            # —— 对照批 A2（2026-11-18）：supply_chain / JS 混淆执行补签 ——
             # supply_chain 不进 CODE_SHAPE_CATEGORIES：安装钩子后门的主载体就是
             # package.json 这类清单文件（.json 在 DOC_ASSET_SUFFIXES 里），若按
             # "文档降级"会被降成报告项——那正好放走这类攻击。
@@ -884,7 +884,7 @@ class SkillScanner:
         self._custom_rules: Dict[str, ScanRule] = {}
 
         # 添加默认模式分析器 + 提示注入分析器（P1-6：中英双语注入签名）
-        # + QwenPaw 对照批 A2 三件（密钥内容/社会工程/越权工具诱导）
+        # + 对照批 A2 三件（密钥内容/社会工程/越权工具诱导）
         self.analyzers.append(PatternAnalyzer())
         self.analyzers.append(PromptInjectionAnalyzer())
         self.analyzers.append(SecretsContentAnalyzer())

@@ -395,7 +395,7 @@ async def graph_search(
     max_hops: int = 2,
     limit: int = 8,
 ) -> dict:
-    """知识图谱检索（graphiti 对照批 C4，只读）：mode=walk（从查询主体沿
+    """知识图谱检索（对照批 C4，只读）：mode=walk（从查询主体沿
     事实边多跳走查，答实体间关系链）、global（社区摘要匹配）、drift（实体
     邻域＋所属社区摘要）。与内置工具 graph_search 同语义、同租户/agent 域
     过滤；max_hops 钳位 2-4，limit 钳位 1-50。"""

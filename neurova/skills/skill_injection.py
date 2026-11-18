@@ -277,7 +277,7 @@ def select_skills_for_turn(
     """
     active: List[str] = []
     unpacked: Dict[str, Any] = {}
-    # QwenPaw 对照批 B11：本轮来源渠道（manifest.channels 过滤的读侧信号）
+    # 对照批 B11：本轮来源渠道（manifest.channels 过滤的读侧信号）
     turn_channel = turn_context.get_turn_channel()
     for name, raw in skills.items():
         skill = raw[0] if isinstance(raw, tuple) and raw else raw

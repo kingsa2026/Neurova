@@ -1,9 +1,8 @@
 """轨迹联合诊断消费层（R4，2026-11-13）。
 
-来历：HarnessPro 对照（docs/08-research/harnesspro_vs_neurova_cost_aware_
-harness_rsi_comparison_2026-11-13.md）§10.2 R4——tool_trace/环节证据/判分
-反馈都已采集，但缺一层「聚合成结构化诊断 → 喂变异器」的消费者（HarnessPro
-Trajectory Analyzer 的形态；采集与消费之间断链）。
+来历：成本感知评测对照批 §10.2 R4——tool_trace/环节证据/判分
+反馈都已采集，但缺一层「聚合成结构化诊断 → 喂变异器」的消费者
+（轨迹分析器的形态；采集与消费之间断链）。
 
 本模块把一轮评测的失败证据聚合为**结构化诊断条目**：
 

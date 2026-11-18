@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""CI 门禁核心逻辑（QwenPaw 对照批 C6）：覆盖率棘轮的判定与计量。
+"""CI 门禁核心逻辑（对照批 C6）：覆盖率棘轮的判定与计量。
 
 可单测的纯逻辑在此；`scripts/ci/coverage_ratchet.py` 只是薄壳。
 """

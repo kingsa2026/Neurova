@@ -112,7 +112,7 @@ def parent_context_text(item: Dict[str, Any], parent_index: int) -> str:
     - 只叠加 revision>0 的子块——未编辑子块原文天然含于父底，拼接反造成
       子块 overlap 窗口的重复；
     - 互叠的编辑区间并成冲突组：组内最高 revision 为 winner 区间替换生效，
-      loser 文本尾部追加（信息不静默丢，对齐 WeKnora latest-wins/loser-appended）；
+      loser 文本尾部追加（信息不静默丢，latest-wins/loser-appended 语义）；
     - 无任何编辑 → 与旧版逐字节一致（零回归）。
     """
     parent = next(

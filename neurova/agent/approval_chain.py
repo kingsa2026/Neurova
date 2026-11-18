@@ -390,7 +390,7 @@ def decideSwarmApproval(
     共同判定单源）。
 
     只认 ``metadata.source == "swarm"`` 的审批单——通用治理审批仍走 governance API；
-    两条入口共享同一存储，职责分开。幂等：非 pending 一律失败返回（AutoSwarm 式
+    两条入口共享同一存储，职责分开。幂等：非 pending 一律失败返回（
     request/decision 幂等，防重复裁决）。S9：``decidedBy`` 传决策人房间身份（用户 id），
     审批单 approved_by 与审计的 decided_by 均记它；``decidedByChannel`` 标记裁决通道。
     """

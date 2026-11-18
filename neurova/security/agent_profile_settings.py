@@ -1,6 +1,6 @@
 """per-agent 执行档位存储（R6，2026-11-13）。
 
-HarnessPro 对照 §10.2 R6：档位此前只有部署级 env（全体 agent 一档）；
+成本感知评测对照批 §10.2 R6：档位此前只有部署级 env（全体 agent 一档）；
 本模块给**单个 agent** 一格档位覆盖（lite/standard/heavy），管理员经
 governance 面派发。单文件 JSON 持久化（agent_limits_settings 同模式：
 原子写 + env 路径覆盖），合法域 = `agent_limits_settings.EXEC_PROFILES`

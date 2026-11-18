@@ -436,7 +436,7 @@ def planRealArmTurns(dataset: EvalDataset, config: EvolutionConfig,
     # 本轮会生成套件时计入（默认 False＝既有调用方的逐字旧行为）。
     if include_exec_suite and config.exec_suite_enabled and int(config.exec_suite_size) > 0:
         breakdown["execSuite"] = 2 * int(config.exec_suite_size)
-    # V1 near-miss 修复轮（VideoEvolve 对照 2026-11-14）：每轮修复最多追加
+    # V1 near-miss 修复轮（对照批 2026-11-14）：每轮修复最多追加
     # 一次 tune 评测 + 一次留出终审。生效额度 = max(配置, 治理设置)——与
     # runner 修复环同一把尺，计划上界才不漏算修复轮的花费。
     try:
@@ -538,11 +538,11 @@ class EvolutionProposal:
     cost_gate: dict = field(default_factory=dict)
     # HN2/HC2 可执行断言面读数（紧凑出街；逐案明细在 run 审计文件里）。
     exec_suite: dict = field(default_factory=dict)
-    # V6 部署形态成本差（VideoEvolve 对照 2026-11-14）：胜者相对基线臂的每任务
+    # V6 部署形态成本差（对照批 2026-11-14）：胜者相对基线臂的每任务
     # 执行成本差（tokens/费用/CoP 两列）。审批人看「采纳后每任务多花多少」，
     # 与开发搜索花费（cost_gate）分格。未量到 ⇒ state=unmeasured（不冒充 0）。
     deployment_cost: dict = field(default_factory=dict)
-    # V4 增益-代价归因（VideoEvolve 对照 2026-11-14）：增益（留出）、体积代价、
+    # V4 增益-代价归因（对照批 2026-11-14）：增益（留出）、体积代价、
     # 修复通道贡献（V1 是否参与最终胜者）与可进化面标注。数值全部取自运行
     # 读数（不另算第二份）；策略/代码面接入后按面分解。
     gain_attribution: dict = field(default_factory=dict)
@@ -1055,11 +1055,11 @@ class SkillEvolutionService:
         """R5 递归多轮演化（§10.2，2026-11-13）＋ V2 分支一等化（2026-11-14）。
 
         与单轮 `evolve` 的关系：单轮是本方法的每个 epoch（同一评测集固定，
-        与 HarnessPro 的「合成测试一次生成、全程固定」同纪律）；本方法负责
+        「合成测试一次生成、全程固定」同纪律）；本方法负责
         **跨轮递归**——上轮过门胜者成为下轮基线，逐轮把 rejected/reason/
         holdout 前后/改善/成本态/提案 id 记进轨迹，遇拒绝或无改善早停。
 
-        V2 分支引导进化（VideoEvolve 对照）：池内基线升级为**保留分支**一等
+        V2 分支引导进化（对照批）：池内基线升级为**保留分支**一等
         对象（branch_pool.BranchPool）——晋升（后代成为新 champion）或重试
         额度耗尽即退役；`branch_retries>0` 时颗粒无收的分支保留到下轮继续
         精炼（「别急着砍第二名」）。`branch_retries=0`（默认）＝颗粒无收即弃，

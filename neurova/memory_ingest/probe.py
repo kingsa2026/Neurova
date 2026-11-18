@@ -6,8 +6,8 @@
 三态：唯一命中 / 多指纹冲突 / 未识别。后两态都不写库，未识别还要回结构摘要，
 让"再加一家"变成填一条指纹而不是考古。
 
-私有方言（qwenpaw_memory* 一族：_relations/_archive/humanthinking_* 等）在公开 QwenPaw
-全仓与各 wheel 中零命中，属本机私有工程产物，有意不在指纹表内。
+私有方言（qwenpaw_memory* 一族：_relations/_archive/humanthinking_* 等）在公开上游
+仓与各 wheel 中零命中，属本机私有工程产物，有意不在指纹表内。
 """
 from __future__ import annotations
 

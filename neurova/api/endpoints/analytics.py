@@ -489,7 +489,7 @@ async def get_cost_readout(
       估算（同一张定价目录、同一个口径——`estimate_cost_for` 单点；未知模型
       计 0，不伪造）。
     成本均为**定价目录估算值**，非账单（provider 折扣/长上下文乘数不可得，
-    与 HarnessPro pricing 口径同限，如实声明）。
+    与外部 pricing 口径同限，如实声明）。
     """
     from neurova.core.usage_accounting import get_usage_accounting
     from neurova.core.usage_history import get_usage_history

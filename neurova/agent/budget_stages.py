@@ -1,11 +1,10 @@
 """分段预算提醒（HN4/HC4，2026-11-13）。
 
-来历：HarnessPro 对照（docs/08-research/harnesspro_vs_neurova_cost_aware_
-harness_rsi_comparison_2026-11-13.md）断点 HN4——本仓门控预算是全局单一
+来历：成本感知评测对照批断点 HN4——本仓门控预算是全局单一
 配置（token_budget/max_loop_rounds 对所有任务一视同仁），只有「到点 TERMINATE」
 的硬悬崖，没有「分段劝、最后拦」的梯度。
 
-本模块提供**纯文本分段提醒**（借鉴 HarnessPro 的 economy/strict/finalize
+本模块提供**纯文本分段提醒**（economy/strict/finalize
 三段形态，文案与阈值独立实现）：
 
 - economy：到收敛段——批量合并独立检查、停止复述；
@@ -103,7 +102,7 @@ def budgetStageGuidance(tool_rounds: int, max_rounds: int, profile: str = "") ->
     """按当前轮次返回分段提醒文本（不发声返回空串）。
 
     触发规则：economy 段在到达那一轮提醒一次；strict/finalize 段在到达时
-    与之后每 reminder 轮复提醒（与 HarnessPro 的「到达＋周期复提醒」同形态，
+    与之后每 reminder 轮复提醒（「到达＋周期复提醒」同形态，
     参数与文案独立）。
     """
     if not stagesEnabled():

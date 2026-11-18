@@ -61,7 +61,7 @@ CREATE INDEX IF NOT EXISTS idx_ingress_status ON channel_ingress_events(status, 
 # 表结构纳入版本域（v1=现行 schema，幂等可重放）；
 # 后续 schema 变更加 v2/3 注册，禁止再直接改 _SCHEMA 而无迁移条目
 register_migration(1, _SCHEMA, domain="channel_ingress")
-# v2（QwenPaw 对照批 B9）：入站优先级列——claim 按 priority DESC, id ASC；
+# v2（对照批 B9）：入站优先级列——claim 按 priority DESC, id ASC；
 # 存量行默认 0（=既有 FIFO 语义不变），消息 metadata.priority 为默认来源
 register_migration(
     2,

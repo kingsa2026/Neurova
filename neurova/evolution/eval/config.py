@@ -50,7 +50,7 @@ class EvolutionConfig:
     # 判分失败的单例不计入退化（落 unevidencedCases），也不因此放行。
     case_regression_allowance: int = 1
 
-    # ── 锚定地板（P2-4，SkillGLoW 对比 2026-10-07）──
+    # ── 锚定地板（P2-4，对比批 2026-10-07）──
     # A = max(历史最优留出, 无技能基线)：候选只赢过**正在退化的现役基线**不算
     # 真增益，必须达到 A − accept_threshold 才可部署（信用不归因于退化）。
     # 无技能留出只在候选过基线门后评测（成本有界）。关 = 沿用旧语义
@@ -113,7 +113,7 @@ class EvolutionConfig:
     # ── 优化期间快速打分(省钱):judge 只对 val 集跑,训练集用重叠代理 ──
     fast_proxy: bool = True
 
-    # ── 每任务成本账 + CoP + 成本软门（HN1/HC1，HarnessPro 对照 2026-11-13）──
+    # ── 每任务成本账 + CoP + 成本软门（HN1/HC1，对照批 2026-11-13）──
     # CoP（Cost-of-Pass）的"通过"判分线：单例 composite ≥ cop_pass_score 记
     # 通过（judge 0..1 分制）。零通过 ⇒ CoP=None（无定义），不是 0。
     cop_pass_score: float = 0.5
@@ -123,14 +123,14 @@ class EvolutionConfig:
     cost_soft_gate_enabled: bool = True
     cost_soft_gate_ratio: float = 0.2
 
-    # ── 可执行测试判据层（HN2/HC2，HarnessPro 对照 2026-11-13）──
+    # ── 可执行测试判据层（HN2/HC2，对照批 2026-11-13）──
     # 对 skill 类工件在 judge 之外建一层确定性断言判据（eval/exec_suite.py）：
     # 合成一次、全程冻结，基线与胜者各跑一遍；候选断言通过率低于基线 ⇒
     # exec_suite_regression 拒绝。size 是套件用例数（真臂预算按 2×size 计上）。
     exec_suite_enabled: bool = True
     exec_suite_size: int = 4
 
-    # ── 评测集核选（HN6/HC6，HarnessPro 对照 2026-11-13）──
+    # ── 评测集核选（HN6/HC6，对照批 2026-11-13）──
     # 评测集超过该容量时，按「难度加权多样性」贪心（eval/coreset.py）收缩到
     # K 个再走既有 split——判据集变小、评测成本不随语料线性走。0 = 不核选
     #（逐字旧行为）。
@@ -159,7 +159,7 @@ class EvolutionConfig:
     # 「全挂=stable / 部分挂=flaky」归因——区分稳定缺陷与偶发噪声。1 = 旧形态。
     diagnosis_rollouts: int = 1
 
-    # ── V1 near-miss 有界修复通道（VideoEvolve 对照 2026-11-14）──
+    # ── V1 near-miss 有界修复通道（对照批 2026-11-14）──
     # 被验证侧门（holdout_regression/coreset_recheck_failed/case_regression/
     # exec_suite_regression）拒绝、但开发增益为正的候选，带门别诊断进入修复轮
     # 的次数上限。0 = 关闭（拒绝即弃置，逐字旧行为）。生效值 = max(本配置,

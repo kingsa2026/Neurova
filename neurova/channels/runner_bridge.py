@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""渠道 Runner 宿主桥（QwenPaw 对照批 A1）。
+"""渠道 Runner 宿主桥（对照批 A1）。
 
 把"渠道跑在独立子进程"包成本仓既有 `ChannelAdapter` 契约：
 - `RunnerHost`：拉起子进程、握手核对（协议版本/源码版本/依赖审计，

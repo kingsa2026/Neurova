@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""H-4 蜂群 run 级事件归档（JSONL 追加账本）+ 因果链（CoworkOS 对照评测改进项）。
+"""H-4 蜂群 run 级事件归档（JSONL 追加账本）+ 因果链（对照评测改进项）。
 
 每个子代理 run 一份追加式事件账本，落 `<数据根>/swarm_runs/<subagentId>.events.jsonl`；
 事件带 `event_id` 与 `causation_id`（指向同 run 内紧邻前一事，链头为空）——排查时

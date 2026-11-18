@@ -820,7 +820,7 @@ async def update_agent_limits(body: AgentLimitsUpdate, admin=Depends(_governance
     return {"code": 0, "data": get_effective_limits(), "domains": get_limit_domains()}
 
 
-# ── per-agent 执行档位（R6，HarnessPro 对照 §10.2，2026-11-13）──────
+# ── per-agent 执行档位（R6，对照批 §10.2，2026-11-13）──────
 
 
 @router.get("/agent-exec-profiles")
@@ -978,7 +978,7 @@ async def update_eval_experiment_settings(body: EvalExperimentsUpdate,
     return {"code": 0, "data": load_settings()}
 
 
-# ── 检索配方（C3，graphiti 对照批）────────────────────────────────────
+# ── 检索配方（C3，对照批）────────────────────────────────────
 
 
 @router.get("/retrieval-recipe")

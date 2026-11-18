@@ -43,7 +43,7 @@ logger = get_logger(__name__)
 DEFAULT_STORAGE_DIR = PRODUCTION_STORAGE_DIR
 _SENTINEL_DEFAULT = "__default__"
 
-#: 双向量索引门控（SAG 对比候选 C4，2026-11-05）：默认 off＝旧行为逐位。
+#: 双向量索引门控（对比候选 C4，2026-11-05）：默认 off＝旧行为逐位。
 #: on 时记录附加 heading_vector（encode(title)）与 content_vector（encode(content)），
 #: 检索融合分 = max(1.0·cos_heading, 0.95·cos_content)——标题命中的精确实体名
 #: 不被正文长文本稀释；ANN 旁路（融合分与单向量 ANN 空间不相容）。

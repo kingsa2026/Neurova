@@ -275,7 +275,7 @@ def guard(exc: Exception) -> HTTPException:
 # 本地绑定，测试按属性 patch 依然咬得到它自己那条调用。
 ENV_EXTRACT_ON_UPDATE = "NEUROVA_KB_EXTRACT_ON_UPDATE"
 
-#: 事件摘要索引增强的门控（SAG 对比候选 C5）：LLM 成本 per 条目，默认 off＝
+#: 事件摘要索引增强的门控（对比候选 C5）：LLM 成本 per 条目，默认 off＝
 #: 旧行为（索引输入不含摘要）；开闸后摘要写回条目并登记 reindex。
 ENV_EVENT_SUMMARY = "NEUROVA_KB_EVENT_SUMMARY"
 
@@ -300,7 +300,7 @@ def extract_event_summary(
     tenant_id: str = "default",
     llm_call: Optional[Callable[[str], str]] = None,
 ) -> str:
-    """条目事件摘要生成并写回（SAG 对比候选 C5，2026-11-05）。
+    """条目事件摘要生成并写回（对比候选 C5，2026-11-05）。
 
     摘要写回 `event_summary` 字段（update 白名单）并登记索引重排——摘要随后
     进入全部索引输入单点（build_index_content 词法三路 + embeddingText 向量），
@@ -338,10 +338,10 @@ def extract_after_update(
     item: Dict[str, Any], request: Optional[Request], agent_id: str,
     tenant_id: str = "default",
 ) -> str:
-    """条目内容更新后的 facts 重抽（SAG 对比候选 C2，2026-11-05）。
+    """条目内容更新后的 facts 重抽（对比候选 C2，2026-11-05）。
 
     更新路径此前不重抽实体关系——旧 facts 与新正文漂移只能靠 drift 读数
-    被动发现（SAG 对比 §4 实测的增量更新缺口）。本函数复用导入抽取同一条
+    被动发现（对比批 §4 实测的增量更新缺口）。本函数复用导入抽取同一条
     管线（_try_extract_to_graph → extract_knowledge_to_graph →
     admitExtractedFacts），增量 admit；漂移治理仍走既有 supersede/conflict
     机制，不在本函数职责内。
@@ -478,7 +478,7 @@ def _try_extract_to_graph(
     )
     for entry in items:
         try:
-            # C3（SAG 对比候选）：待抽条目先过认知安全门——复用既有三态配置
+            # C3（对比候选）：待抽条目先过认知安全门——复用既有三态配置
             # （observe 默认只记读数；enforce 且不安全才跳过该条目，其余照常）。
             # 门故障 fail-open：读不到读数就按安全处理，不阻断导入。
             try:

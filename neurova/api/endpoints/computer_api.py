@@ -74,7 +74,7 @@ async def create_computer(
 
     - **name**: Computer 名称
     - **kind**: 类型 (cloud/local/vps)
-    - **engine**: 引擎类型 (managed/claude/codex/etc)
+    - **engine**: 引擎类型 (managed/claude/etc)
     - **company_id**: 所属公司 ID (可选)
     """
     try:

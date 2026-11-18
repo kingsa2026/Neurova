@@ -163,7 +163,7 @@ class CommunityGraphBuilder:
     def rebuildIfDrifted(self, summarizer: Optional[Callable[[List[str]], str]] = None,
                          level: int = 0,
                          driftThreshold: float = 0.3) -> Dict[str, Any]:
-        """增量维护入口（C5，graphiti 对照批）：漂移超阈值才全量替换。
+        """增量维护入口（C5，对照批）：漂移超阈值才全量替换。
 
         与 detect 的差别：detect 每次全新 community_id 落行、旧行不清
         （重复调用累积重复社区）；本方法把「新检测结果 vs 既有行」的成员

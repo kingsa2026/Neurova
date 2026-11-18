@@ -1,8 +1,8 @@
-"""检索配方（C3，graphiti 对照批，docs/08-research/graphiti_vs_neurova_* §7-C3）。
+"""检索配方（C3，对照批 §7-C3）。
 
 把散在各读取点上的检索可调面收敛成**命名配方**：图路权重、主路精排方法、
 精排候选池、recency 权重/半衰期。配方是可命名、可测试、可设置项化的资产
-（graphiti 的 search recipes 启发），默认档 = 现网行为逐位不变。
+（search recipes 配方化启发），默认档 = 现网行为逐位不变。
 
 优先级纪律：env 显式设置 > 设置文件（active_recipe）> default 配方。
 三个 resolve* 收口函数是各读取点（knowledge_retriever_adapter /

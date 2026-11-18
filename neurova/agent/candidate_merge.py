@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """S4 结果候选制：member 产出先落候选，主侧 CAS 合入，冲突保留升级（B5 机制）。
 
-对照 CoworkOS 的"Subagent 私有 candidate → Main CAS 合入，人工可拦截，冲突保留
+机制形态："Subagent 私有 candidate → Main CAS 合入，人工可拦截，冲突保留
 重议"：改前本仓的成员报告直传即成结果、integrationReport 只做核对——缺"候选→
 合并"这道闸。现在：
 

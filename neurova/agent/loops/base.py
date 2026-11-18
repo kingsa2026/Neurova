@@ -232,7 +232,7 @@ async def evaluateLoopExit(
 
 
 def _recordHarnessGapFromExit(gateName: str, *, achieved: bool, reason: str = "") -> None:
-    """把"这一环走不动"投成 harness 族缺口证据（ModularRSI 对照 §7.1-Q4 甲案）。
+    """把"这一环走不动"投成 harness 族缺口证据（对照批 §7.1-Q4 甲案）。
 
     用途在 `agent/capability_gap.py::_GAP_PURPOSE` 单源登记，本函数**不**判断该不该驱动
     自主创建——那是消费方按族取用的事。门控自身保持纯判定（无副作用、同步、可单测），
@@ -510,7 +510,7 @@ class BaseAgentLoop(ABC):
         from neurova.agent.loops.turn_run_state import resolveToolRoundBudget
 
         limits = self._load_agent_limits()
-        # QwenPaw 对照批 B1：声明式停止门编译——advanced.loop_gates_spec 声明了
+        # 对照批 B1：声明式停止门编译——advanced.loop_gates_spec 声明了
         # 就**完全按声明**装配（不与默认并集）；未声明返回 None 走既有默认装配
         # （默认行为零变化）。GoalGate 仍走下方既有 goal 装配路径（非纯参数门）。
         try:
