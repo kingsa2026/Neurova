@@ -1,0 +1,1015 @@
+{
+  "generated_at": "2026-11-18T00:52:02.309538+00:00",
+  "task_isolated_memory": true,
+  "metrics": {
+    "solo": {
+      "task_count": 13,
+      "passed_count": 1,
+      "success_rate": 0.0769,
+      "mean_score": 7.69,
+      "unsolvable_total": 2,
+      "unsolvable_identified": 0,
+      "unsolvable_identified_rate": 0.0,
+      "mean_elapsed_seconds": 33.275,
+      "total_tokens": 521138.0,
+      "total_prompt_tokens": 461916,
+      "total_completion_tokens": 59222,
+      "total_steps": 20,
+      "total_tool_calls": 0,
+      "mean_steps": 1.54,
+      "mean_tool_calls": 0.0,
+      "error_count": 0,
+      "by_effort": {
+        "deep": {
+          "task_count": 6,
+          "passed_count": 0,
+          "success_rate": 0.0,
+          "mean_score": 0.0
+        },
+        "standard": {
+          "task_count": 7,
+          "passed_count": 1,
+          "success_rate": 0.1429,
+          "mean_score": 14.29
+        }
+      }
+    },
+    "swarm": {
+      "task_count": 13,
+      "passed_count": 1,
+      "success_rate": 0.0769,
+      "mean_score": 7.69,
+      "unsolvable_total": 2,
+      "unsolvable_identified": 0,
+      "unsolvable_identified_rate": 0.0,
+      "mean_elapsed_seconds": 22.988,
+      "total_tokens": 446748.0,
+      "total_prompt_tokens": 398973,
+      "total_completion_tokens": 47775,
+      "total_steps": 17,
+      "total_tool_calls": 0,
+      "mean_steps": 1.31,
+      "mean_tool_calls": 0.0,
+      "error_count": 0,
+      "by_effort": {
+        "deep": {
+          "task_count": 6,
+          "passed_count": 0,
+          "success_rate": 0.0,
+          "mean_score": 0.0
+        },
+        "standard": {
+          "task_count": 7,
+          "passed_count": 1,
+          "success_rate": 0.1429,
+          "mean_score": 14.29
+        }
+      }
+    }
+  },
+  "comparison": {
+    "available": true,
+    "success_rate_delta": 0.0,
+    "mean_score_delta": 0.0,
+    "elapsed_delta_seconds": -10.287,
+    "token_multiplier": 0.857
+  },
+  "tasks": [
+    {
+      "task_id": "t1-sim-evidence-digest",
+      "suite": "t1_sim",
+      "mode": "solo",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "来源《A 报告》",
+          "来源《B 数据》",
+          "来源《C 文档》"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "",
+      "elapsed_seconds": 13.191,
+      "tokens": null,
+      "effort": "deep",
+      "effort_source": "inferred",
+      "report_snippet": "以下证据文摘**严格依据你给定的三份材料**归纳，未引用、未补充任何材料之外的来源或数据（也非基于个人记忆）。\n\n## 证据文摘（共 4 条）\n\n**1. 指标 X 的水平与环比变化**\n据《A 报告》（2026-11）：指标 X = 48，环比 +6。\n→ 提供了 X 的最新月度水平值，以及相对上期 6 个单位的绝对增量。\n\n**2. 指标 Y 的水平与覆盖面**\n据《B 数据》（2026-10）：指标 Y = 3.2，覆盖率 87%。\n→ 提供了 Y 的当期水平值及 87% 的覆盖程度。\n\n**3. 指标 Z 的水平与样本基础**\n据《C 文档》（2026-09）：指标 Z = 12%，样本量 4200。\n→ 提供了 Z 的当期水平值，且该估计基于 4200 的样本规模。\n\n**4. 跨期综合观察**\n三份材料合计覆盖 2026-09 至 2026-11 共三个月度观测，分别对应 Z、",
+      "usage": {
+        "promptTokens": 14031,
+        "completionTokens": 1163,
+        "totalTokens": 15194,
+        "elapsedSeconds": 13.191,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "tool_messages"
+      }
+    },
+    {
+      "task_id": "t1-sim-evidence-digest",
+      "suite": "t1_sim",
+      "mode": "swarm",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "来源《A 报告》",
+          "来源《B 数据》",
+          "来源《C 文档》"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "swarm_c6da08dd7751",
+      "elapsed_seconds": 11.262,
+      "tokens": null,
+      "effort": "deep",
+      "effort_source": "inferred",
+      "report_snippet": "以下证据文摘**只依据你给定的三份材料**归纳，未引用、未补充任何材料之外的来源或数据。\n\n## 证据文摘（共 4 条）\n\n**1. 指标 X 的水平与环比变化**\n来源：《A 报告》（2026-11）。\n量化指标：指标 X = 48，环比 +6。\n\n**2. 指标 Y 的水平与覆盖率**\n来源：《B 数据》（2026-10）。\n量化指标：指标 Y = 3.2，覆盖率 87%。\n\n**3. 指标 Z 的水平与样本量**\n来源：《C 文档》（2026-09）。\n量化指标：指标 Z = 12%，样本量 4200。\n\n**4. 材料覆盖范围综合**\n三份材料分别对应 2026 年 9 月（Z）、10 月（Y）、11 月（X）三个月度观测点；其中仅《A 报告》披露了环比变化（+6），《B 数据》与《C 文档》仅提供当期截面值。\n\n## 证据边界说明（避免过度推断）\n\n- “环比 +6” 是**绝对",
+      "usage": {
+        "promptTokens": 15585,
+        "completionTokens": 1468,
+        "totalTokens": 17053,
+        "elapsedSeconds": 11.262,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "span_trace"
+      }
+    },
+    {
+      "task_id": "t1-sim-infeasible",
+      "suite": "t1_sim",
+      "mode": "solo",
+      "unsolvable": true,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "infeasible_declared": false
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "",
+      "elapsed_seconds": 7.049,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "这个要求我需要诚实地告诉你：**在没有数据的情况下，无法精确预测明年的销售额，更不可能精确到小数点后两位。**\n\n这不是我能力上的保守，而是逻辑上的不可能：\n\n**为什么做不到**\n\n1. **没有输入就没有输出**：销售额预测依赖历史销售数据、季节性规律、市场环境、定价、渠道、促销计划等信息。缺少这些，任何数字都只能是凭空编造，而不是预测。\n2. **“精确到小数点后两位”是伪精度**：即便有完整数据，销售额预测本身也是区间估计，通常表达为“预测值 ± 置信区间”（例如 1,284.5 万 ± 7%）。声称能精确到分，反而说明这个数字不可信。\n3. **编造数字的风险**：如果我现在给你一个看似精确的数（比如 3,742,156.80 元），它没有任何依据，可能会误导你的决策。\n\n**如果你希望我做销售额预测，请提供以下任一类信息**\n\n- 近 12～36 个月的月度/季度销售额历史数据",
+      "usage": {
+        "promptTokens": 15939,
+        "completionTokens": 578,
+        "totalTokens": 16517,
+        "elapsedSeconds": 7.049,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "tool_messages"
+      }
+    },
+    {
+      "task_id": "t1-sim-infeasible",
+      "suite": "t1_sim",
+      "mode": "swarm",
+      "unsolvable": true,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "infeasible_declared": false
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "swarm_c92f0345fa5b",
+      "elapsed_seconds": 5.594,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "这个要求我需要诚实地告诉你：**在没有数据的情况下，我无法精确预测明年的销售额，更不可能精确到小数点后两位。**\n\n这不是我能力上的保守，而是逻辑上的不可能：\n\n1. **没有输入就没有输出**：销售额预测依赖历史销售数据、季节性规律、定价、渠道、市场环境等信息。缺少这些，任何数字都只能是凭空编造，而不是预测。\n2. **\"精确到小数点后两位”是伪精度**：即便有完整数据，销售额预测本质上是区间估计，通常表达为“预测值 ± 置信区间”。声称能精确到分，反而说明这个数字不可信。\n3. **编造数字有实际风险**：如果我给你一个看似精确的数（比如 3,742,156.80 元），它没有任何依据，可能误导你的决策。\n\n**如果你希望我做销售额预测，请提供：**\n\n- 近 12～36 个月的月度/季度销售额历史数据；\n- 已知的影响因素：价格调整、渠道扩张、大客户变动、行业增速等；\n- 预测目标：",
+      "usage": {
+        "promptTokens": 16831,
+        "completionTokens": 532,
+        "totalTokens": 17363,
+        "elapsedSeconds": 5.594,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "span_trace"
+      }
+    },
+    {
+      "task_id": "t3-rubric-board-memo",
+      "suite": "t3_rubric",
+      "mode": "solo",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【议案背景】",
+          "【财务影响】",
+          "【替代方案】",
+          "【决策建议】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "",
+      "elapsed_seconds": 25.974,
+      "tokens": null,
+      "effort": "deep",
+      "effort_source": "inferred",
+      "report_snippet": "以下是一份可直接套用的**董事会对外投资议案备忘录**草稿。由于你暂未提供具体标的与金额，文中关键数据以【 】占位，并在文末附填写说明；你把实际信息填入即可，也可以发给我帮你补全。\n\n---\n\n# 关于对外投资【标的名称/项目名称】的议案备忘录\n\n| 项目 | 内容 |\n|---|---|\n| 文件编号 | 【董备〔2026〕XX 号】 |\n| 密级 | 内部机密 |\n| 提交主体 | 【公司战略投资部 / 总经理办公室】 |\n| 提交对象 | 【公司名称】第【X】届董事会第【X】次会议 |\n| 提交日期 | 2026 年 11 月 18 日 |\n| 议案类型 | 对外投资决策事项（需董事会审议） |\n\n---\n\n## 一、议案背景\n\n### 1.1 投资标的概况\n公司拟以【货币出资 / 股权置换 / 增资认购】方式，投资【标的公司全称】（以下简称“标的方”），取得其【X】%股权/份额，投",
+      "usage": {
+        "promptTokens": 16787,
+        "completionTokens": 2936,
+        "totalTokens": 19723,
+        "elapsedSeconds": 25.974,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "tool_messages"
+      }
+    },
+    {
+      "task_id": "t3-rubric-board-memo",
+      "suite": "t3_rubric",
+      "mode": "swarm",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【议案背景】",
+          "【财务影响】",
+          "【替代方案】",
+          "【决策建议】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "swarm_dcfecd0eb3de",
+      "elapsed_seconds": 15.529,
+      "tokens": null,
+      "effort": "deep",
+      "effort_source": "inferred",
+      "report_snippet": "以下是一份可直接使用的**董事会对外投资议案备忘录**草稿。由于暂未提供具体标的与金额，关键数据以【 】占位，文末附填写说明；你把实际信息填入即可。\n\n---\n\n# 关于对外投资【标的名称/项目名称】的议案备忘录\n\n| 项目 | 内容 |\n|---|---|\n| 文件编号 | 【董备〔2026〕XX 号】 |\n| 密级 | 内部机密 |\n| 提交主体 | 【公司战略投资部 / 总经理办公室】 |\n| 提交对象 | 【公司名称】第【X】届董事会第【X】次会议 |\n| 提交日期 | 2026 年 11 月 18 日 |\n| 议案类型 | 对外投资决策事项（需董事会审议） |\n\n---\n\n## 一、议案背景\n\n### 1.1 投资标的概况\n公司拟以【货币出资 / 股权置换 / 增资认购】方式，投资【标的公司全称】（以下简称“标的方”），取得其【X】%股权/份额，投资总额不超过人民币【X】万元。\n",
+      "usage": {
+        "promptTokens": 20364,
+        "completionTokens": 2520,
+        "totalTokens": 22884,
+        "elapsedSeconds": 15.529,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "span_trace"
+      }
+    },
+    {
+      "task_id": "t3-rubric-comparables",
+      "suite": "t3_rubric",
+      "mode": "solo",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【可比公司选取】",
+          "【估值倍数】",
+          "【溢价折价】",
+          "【结论区间】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "",
+      "elapsed_seconds": 27.976,
+      "tokens": null,
+      "effort": "deep",
+      "effort_source": "inferred",
+      "report_snippet": "下面给出一份**可直接落地的可比公司分析框架**。先说明前提：可比公司选取标准、倍数口径和推导方法属于通用方法论，我可以完整给出；但**具体倍数、溢价率和结论区间必须基于真实数据计算**——你尚未提供目标公司与可比公司的财务数据，因此下文关键数值以【 】占位，并附计算公式。请勿把占位符当作分析结论。\n\n---\n\n# 可比公司分析（Comparable Company Analysis）\n\n## 一、可比公司选取标准\n\n可比公司的质量决定估值结论的可信度，建议按以下六条筛选，并逐条说明“符合/剔除”理由：\n\n| 维度 | 选取标准 | 说明 |\n|---|---|---|\n| 1. 业务可比 | 主营业务、产品/服务、下游客户、商业模式与目标公司相同或高度相近 | 优先同细分行业，避免“同行业不同生意” |\n| 2. 规模可比 | 收入/利润体量、市值（或企业价值）处于同一量级 | 规模差异",
+      "usage": {
+        "promptTokens": 25394,
+        "completionTokens": 3630,
+        "totalTokens": 29024,
+        "elapsedSeconds": 27.976,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "tool_messages"
+      }
+    },
+    {
+      "task_id": "t3-rubric-comparables",
+      "suite": "t3_rubric",
+      "mode": "swarm",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【可比公司选取】",
+          "【估值倍数】",
+          "【溢价折价】",
+          "【结论区间】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "swarm_e0e640d0985c",
+      "elapsed_seconds": 17.578,
+      "tokens": null,
+      "effort": "deep",
+      "effort_source": "inferred",
+      "report_snippet": "# 可比公司分析（Comparable Company Analysis）\n\n**先说明前提**：可比公司选取标准、倍数口径与推导方法属于通用方法论，可完整给出；但**具体倍数、溢价率和结论区间必须基于真实数据计算**。你尚未提供目标公司与可比公司的财务数据，因此下文关键数值以【 】占位并附计算公式，请勿将占位符当作分析结论。\n\n---\n\n## 一、可比公司选取标准\n\n可比公司的质量决定估值结论可信度，建议按以下六条筛选，并逐条记录“符合/剔除”理由：\n\n| 维度 | 选取标准 | 说明 |\n|---|---|---|\n| 1. 业务可比 | 主营业务、产品/服务、下游客户、商业模式相同或高度相近 | 优先同细分行业，避免“同行业不同生意” |\n| 2. 规模可比 | 收入/利润体量、市值（或 EV）处于同一量级 | 规模差异过大带来系统性折溢价 |\n| 3. 成长性可比 | 近 3 年收",
+      "usage": {
+        "promptTokens": 26808,
+        "completionTokens": 2870,
+        "totalTokens": 29678,
+        "elapsedSeconds": 17.578,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "span_trace"
+      }
+    },
+    {
+      "task_id": "t3-rubric-credit-memo",
+      "suite": "t3_rubric",
+      "mode": "solo",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【借款人概况】",
+          "【偿债能力】",
+          "【担保结构】",
+          "【信用评级建议】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "",
+      "elapsed_seconds": 33.037,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "以下是一份可直接套用的**制造业企业流动资金贷款授信备忘录**草稿。由于你暂未提供企业名称与财务数据，关键信息以【 】占位，文末附填写说明；你把实际信息填入即可，也可以发给我帮你补全测算。\n\n---\n\n# 关于【企业名称】申请流动资金贷款的授信备忘录\n\n| 项目 | 内容 |\n|---|---|\n| 文件编号 | 【授备〔2026〕XX 号】 |\n| 密级 | 内部机密 |\n| 提交部门 | 【公司业务部 / 普惠金融部】 |\n| 审议机构 | 【XX 银行 XX 分行】贷款审查委员会 |\n| 提交日期 | 2026 年 11 月 18 日 |\n| 业务品种 | 流动资金贷款 |\n| 拟授信金额 | 不超过人民币【X】万元 |\n| 拟授信期限 | 【1 年 / 中期流动资金贷款 X 年】 |\n\n---\n\n## 一、借款人概况\n\n### 1.1 基本情况\n- 企业名称：【 】；成立日期：【 ",
+      "usage": {
+        "promptTokens": 51467,
+        "completionTokens": 4651,
+        "totalTokens": 56118,
+        "elapsedSeconds": 33.037,
+        "steps": 2,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "tool_messages"
+      }
+    },
+    {
+      "task_id": "t3-rubric-credit-memo",
+      "suite": "t3_rubric",
+      "mode": "swarm",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【借款人概况】",
+          "【偿债能力】",
+          "【担保结构】",
+          "【信用评级建议】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "swarm_a27f5550d282",
+      "elapsed_seconds": 13.797,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "以下是一份可直接套用的**制造业企业流动资金贷款授信备忘录**草稿。由于你暂未提供企业名称与财务数据，关键信息以【 】占位，文末附填写说明；你把实际信息填入即可，也可以发给我帮你补全测算。\n\n---\n\n# 关于【企业名称】申请流动资金贷款的授信备忘录\n\n| 项目 | 内容 |\n|---|---|\n| 文件编号 | 【授备〔2026〕XX 号】 |\n| 密级 | 内部机密 |\n| 提交部门 | 【公司业务部 / 普惠金融部】 |\n| 审议机构 | 【XX 银行 XX 分行】贷款审查委员会 |\n| 提交日期 | 2026 年 11 月 18 日 |\n| 业务品种 | 流动资金贷款 |\n| 拟授信金额 | 不超过人民币【X】万元 |\n| 拟授信期限 | 【1 年 / 中期流动资金贷款 X 年】 |\n\n---\n\n## 一、借款人概况\n\n### 1.1 基本情况\n- 企业名称：【 】；成立日期：【 ",
+      "usage": {
+        "promptTokens": 26401,
+        "completionTokens": 3072,
+        "totalTokens": 29473,
+        "elapsedSeconds": 13.797,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "span_trace"
+      }
+    },
+    {
+      "task_id": "t3-rubric-dcf-valuation",
+      "suite": "t3_rubric",
+      "mode": "solo",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【自由现金流预测】",
+          "【折现率 WACC】",
+          "【终值计算】",
+          "【敏感性分析】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "",
+      "elapsed_seconds": 81.484,
+      "tokens": null,
+      "effort": "deep",
+      "effort_source": "inferred",
+      "report_snippet": "",
+      "usage": {
+        "promptTokens": 79610,
+        "completionTokens": 12288,
+        "totalTokens": 91898,
+        "elapsedSeconds": 81.484,
+        "steps": 3,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "tool_messages"
+      }
+    },
+    {
+      "task_id": "t3-rubric-dcf-valuation",
+      "suite": "t3_rubric",
+      "mode": "swarm",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【自由现金流预测】",
+          "【折现率 WACC】",
+          "【终值计算】",
+          "【敏感性分析】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "swarm_ad9434ce1ada",
+      "elapsed_seconds": 88.634,
+      "tokens": null,
+      "effort": "deep",
+      "effort_source": "inferred",
+      "report_snippet": "\n\n# DCF 估值框架：年营收 8 亿元、增速 25% 的 SaaS 公司\n\n**框架说明（先读）**：DCF 的四个模块中，预测逻辑、WACC 构成、终值方法与敏感性设计属于**可直接落地的通用方法论**；但**具体数值结论必须基于公司真实财务数据**。下文我给出一套完整参数化模型（含示例测算，单位：人民币亿元），所有示例假设均标注在表格中，供你替换为公司实际数据后重算。\n\n---\n\n## 一、自由现金流预测\n\n### 1.1 预测原则\n\n- **显式预测期**：SaaS 公司通常取 **10 年**，覆盖“高增长→增速换挡→利润率爬坡”的完整路径；前 5 年反映当前增长动能，后 5 年逐步向成熟期过渡。\n- **FCFF 口径**（企业自由现金流，折现到企业价值 EV）：\n\n$$FCFF = EBIT \\times (1-t) + D\\&A - Capex - \\Delta NWC$",
+      "usage": {
+        "promptTokens": 105114,
+        "completionTokens": 13063,
+        "totalTokens": 118177,
+        "elapsedSeconds": 88.634,
+        "steps": 4,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "span_trace"
+      }
+    },
+    {
+      "task_id": "t3-rubric-due-diligence",
+      "suite": "t3_rubric",
+      "mode": "solo",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【财务尽调】",
+          "【法律尽调】",
+          "【商业尽调】",
+          "【关键风险清单】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "",
+      "elapsed_seconds": 46.269,
+      "tokens": null,
+      "effort": "deep",
+      "effort_source": "inferred",
+      "report_snippet": "以下是一份可直接套用的**股权投资尽职调查方案**。由于暂未提供标的名称、行业与交易结构，关键处留有【 】占位，文末附执行说明；你把实际信息填入即可，也可以发给我帮你定制。\n\n---\n\n# 【标的公司名称】股权投资尽职调查方案\n\n| 项目 | 内容 |\n|---|---|\n| 项目名称 | 关于投资【标的公司全称】的尽职调查 |\n| 投资方 | 【投资主体名称】 |\n| 拟议交易 | 认购/受让标的公司【X】%股权，投资总额不超过人民币【X】万元 |\n| 尽调基准日 | 【2026 年 X 月 X 日】 |\n| 尽调期间 | 2026 年【X】月【X】日—【X】月【X】日（约【X】周） |\n| 尽调范围 | 财务尽调、法律尽调、商业尽调 |\n| 参与方 | 投资方投资团队、财务顾问/会计师、律师事务所、行业顾问 |\n\n---\n\n## 一、财务尽调\n\n**尽调目标**：验证标的公司财务信息的",
+      "usage": {
+        "promptTokens": 56914,
+        "completionTokens": 6403,
+        "totalTokens": 63317,
+        "elapsedSeconds": 46.269,
+        "steps": 2,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "tool_messages"
+      }
+    },
+    {
+      "task_id": "t3-rubric-due-diligence",
+      "suite": "t3_rubric",
+      "mode": "swarm",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【财务尽调】",
+          "【法律尽调】",
+          "【商业尽调】",
+          "【关键风险清单】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "swarm_e870249db1be",
+      "elapsed_seconds": 19.659,
+      "tokens": null,
+      "effort": "deep",
+      "effort_source": "inferred",
+      "report_snippet": "以下是一份完整、可直接套用的**股权投资尽职调查方案**。因暂未提供标的名称、行业与交易结构，关键处保留【 】占位，文末附执行说明；你把实际信息填入即可，也可以发给我帮你定制。\n\n---\n\n# 【标的公司名称】股权投资尽职调查方案\n\n| 项目 | 内容 |\n|---|---|\n| 项目名称 | 关于投资【标的公司全称】的尽职调查 |\n| 投资方 | 【投资主体名称】 |\n| 拟议交易 | 认购/受让标的公司【X】%股权，投资总额不超过人民币【X】万元 |\n| 尽调基准日 | 【2026 年 X 月 X 日】 |\n| 尽调期间 | 2026 年【X】月【X】日—【X】月【X】日（约【X】周） |\n| 尽调范围 | 财务尽调、法律尽调、商业尽调 |\n| 参与方 | 投资方投资团队、会计师/财务顾问、律师事务所、行业顾问 |\n\n---\n\n## 一、财务尽调\n\n**尽调目标**：验证标的公司财务信",
+      "usage": {
+        "promptTokens": 29844,
+        "completionTokens": 3685,
+        "totalTokens": 33529,
+        "elapsedSeconds": 19.659,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "span_trace"
+      }
+    },
+    {
+      "task_id": "t3-rubric-earnings-review",
+      "suite": "t3_rubric",
+      "mode": "solo",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【业绩概览】",
+          "【盈利质量】",
+          "【管理层指引】",
+          "【风险提示】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "",
+      "elapsed_seconds": 28.85,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "以下是一份可直接套用的**上市公司季报解读暨电话会要点**框架。由于暂未提供具体公司名称与季报数据，关键处保留【 】占位，并附“解读方法+电话会话术”；你把实际数据填入即可，也可以把季报发给我帮你定制成实盘版本。\n\n---\n\n# 【公司名称】2026 年第三季度报告解读暨业绩说明会要点\n\n| 项目 | 内容 |\n|---|---|\n| 报告期 | 2026 年第三季度（2026-07-01 至 2026-09-30） |\n| 发布日期 | 2026 年【X】月【X】日 |\n| 电话会时间 | 【X】月【X】日【X】:00（北京时间） |\n| 主讲人 | 董事长/CEO【 】、CFO【 】、董秘【 】 |\n| 文件密级 | 对外公开（业绩说明会口径） |\n\n---\n\n## 一、业绩概览\n\n### 1.1 核心财务数据\n\n| 指标 | 2026Q3 | 同比 | 2026Q1-Q3 | 同比 ",
+      "usage": {
+        "promptTokens": 32813,
+        "completionTokens": 3596,
+        "totalTokens": 36409,
+        "elapsedSeconds": 28.85,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "tool_messages"
+      }
+    },
+    {
+      "task_id": "t3-rubric-earnings-review",
+      "suite": "t3_rubric",
+      "mode": "swarm",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【业绩概览】",
+          "【盈利质量】",
+          "【管理层指引】",
+          "【风险提示】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "swarm_2cc616f64ac8",
+      "elapsed_seconds": 13.641,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "\n\n我可以直接给你一份**季报解读+电话会要点**的可用框架。不过先说明一点：如果你有**具体公司和季报原文/核心数据**，发给我后我可以直接做成定制版定稿；下面先给通用模板，四大板块齐全，占位处填入实际数据即可。\n\n---\n\n# 【公司名称】2026 年三季报解读暨业绩说明会要点\n\n## 一、业绩概览\n\n| 指标 | 2026Q3 | 同比 | 2026Q1-Q3 | 同比 |\n|---|---|---|---|---|\n| 营业收入 | 【 】 | +【 】% | 【 】 | +【 】% |\n| 归母净利润 | 【 】 | +【 】% | 【 】 | +【 】% |\n| 扣非归母净利润 | 【 】 | +【 】% | 【 】 | +【 】% |\n| 毛利率 | 【 】% | ±【 】pct | 【 】% | ±【 】pct |\n| 经营性现金流净额 | 【 】 | — | 【 】 | ",
+      "usage": {
+        "promptTokens": 35003,
+        "completionTokens": 1853,
+        "totalTokens": 36856,
+        "elapsedSeconds": 13.641,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "span_trace"
+      }
+    },
+    {
+      "task_id": "t3-rubric-exec-summary",
+      "suite": "t3_rubric",
+      "mode": "solo",
+      "unsolvable": false,
+      "passed": true,
+      "score": 100.0,
+      "details": {
+        "missing_markers": []
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "",
+      "elapsed_seconds": 14.377,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "**执行摘要（示例主题：提请董事会审议对外投资项目）**\n\n**【结论】**\n建议董事会批准本项目投资：拟以自有资金 2.0 亿元取得标的公司 15% 股权，对应投前估值约 11.3 亿元。经测算，项目预期 IRR 约 18%–22%，投资回收期约 5–6 年，与公司战略方向及风险偏好相符，建议审议通过。\n\n**【依据】**\n1. **战略匹配**：标的处于高增长赛道，与公司主业在渠道、技术、供应链上形成互补协同，有助于强化核心竞争力。\n2. **财务可行**：经 DCF 与可比公司法交叉验证，交易估值处于合理区间；标的预计保持约 25% 的年营收增速，投后 3 年内可形成正向利润贡献。\n3. **尽调支持**：财务、法律、商业尽调未发现重大实质性障碍，关键瑕疵已通过陈述保证、赔偿条款及交割先决条件予以覆盖。\n\n**【风险】**\n1. **估值与回报风险**：若标的业绩不及预期，投资回报将",
+      "usage": {
+        "promptTokens": 14819,
+        "completionTokens": 1661,
+        "totalTokens": 16480,
+        "elapsedSeconds": 14.377,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "tool_messages"
+      }
+    },
+    {
+      "task_id": "t3-rubric-exec-summary",
+      "suite": "t3_rubric",
+      "mode": "swarm",
+      "unsolvable": false,
+      "passed": true,
+      "score": 100.0,
+      "details": {
+        "missing_markers": []
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "swarm_1d8c39485394",
+      "elapsed_seconds": 8.77,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "**执行摘要（示例主题：公司数字化转型项目立项）**\n\n**【结论】**\n建议批准启动公司数字化转型项目：项目周期 24 个月，总预算 6,500 万元，分三期实施，覆盖核心业务系统重构、数据中台建设与组织流程再造。经测算，项目达产后预计年均可节约运营成本约 2,800 万元，投资回收期约 3.5 年，与公司三年战略规划高度契合，建议审议通过并立项。\n\n**【依据】**\n1. **战略必要性**：现有系统烟囱式架构导致跨部门数据割裂，订单交付周期比行业标杆长约 30%，数字化改造是支撑业务扩张的前提条件。\n2. **财务可行性**：经成本收益测算，项目内部收益率（IRR）约 21%，显著高于公司 12% 的资本成本门槛；主要收益来自人工替代、库存周转优化与差错率下降。\n3. **实施可行性**：已完成技术选型评估与两家候选供应商比价，核心团队由内部业务骨干与外部实施顾问混编组成，一期试点范",
+      "usage": {
+        "promptTokens": 15998,
+        "completionTokens": 824,
+        "totalTokens": 16822,
+        "elapsedSeconds": 8.77,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "span_trace"
+      }
+    },
+    {
+      "task_id": "t3-rubric-infeasible-price",
+      "suite": "t3_rubric",
+      "mode": "solo",
+      "unsolvable": true,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "infeasible_declared": false
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "",
+      "elapsed_seconds": 10.27,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "这个要求我需要直接、诚实地回答：**在没有任何财务数据与市场参数的情况下，我无法精确预测三年后的 IPO 发行价，也不可能给出可信到“两位小数”的数字。**\n\n这不是保守，而是逻辑上不可能，原因有三：\n\n**1. 没有输入就没有输出**\nIPO 发行价是估值、供需与谈判共同决定的结果，至少依赖：\n\n- 公司层面：收入、利润、现金流、增速、股权结构、募资用途；\n- 市场层面：可比上市公司估值倍数、行业景气度、利率环境、投资者风险偏好；\n- 发行层面：发行时点、发行规模、承销商定价策略、簿记认购情况。\n\n这些信息一项都没有，任何“预测”都只是编造。\n\n**2. 三年后的市场参数本质上不可知**\n即便公司数据完整，三年后的利率水平、行业估值中枢、资本市场窗口（IPO 是否开闸、同行业公司表现）都无法被“精确”预知。2023 年与 2026 年的 IPO 定价环境已经差异巨大，再用三年后的未知环境",
+      "usage": {
+        "promptTokens": 18306,
+        "completionTokens": 834,
+        "totalTokens": 19140,
+        "elapsedSeconds": 10.27,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "tool_messages"
+      }
+    },
+    {
+      "task_id": "t3-rubric-infeasible-price",
+      "suite": "t3_rubric",
+      "mode": "swarm",
+      "unsolvable": true,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "infeasible_declared": false
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "swarm_d345d29f284e",
+      "elapsed_seconds": 5.502,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "\n\n**无法做到。** 在没有任何财务数据与市场参数的情况下，我给不出一个可信的、精确到两位小数的三年后 IPO 发行价——任何这样的数字都只能是编造，而不是预测。\n\n简要说明（与之前的结论一致）：\n\n1. **缺少定价输入**：IPO 发行价取决于公司基本面（收入、利润、增速）、可比公司估值倍数、发行时点的市场环境与簿记认购情况。这些信息一项都没有，输出无从谈起。\n2. **三年后的市场参数不可知**：利率、行业估值中枢、IPO 窗口期等因素在三年内会显著变化，无法被“精确”预知。\n3. **“两位小数”是伪精度**：真实 IPO 定价是询价区间博弈的结果，本身就有明显波动范围；声称精确到分，恰恰暴露这个数字不可信。\n\n如果你愿意提供哪怕最基础的信息——比如**公司近两年营收与利润、拟上市板块、2–3 家可比公司及其 P/E 或 EV/EBITDA、预计发行股数**——我就可以帮你搭建 ",
+      "usage": {
+        "promptTokens": 19023,
+        "completionTokens": 490,
+        "totalTokens": 19513,
+        "elapsedSeconds": 5.502,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "span_trace"
+      }
+    },
+    {
+      "task_id": "t3-rubric-ipo-memo",
+      "suite": "t3_rubric",
+      "mode": "solo",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【公司概况】",
+          "【募资用途】",
+          "【估值讨论】",
+          "【承销安排】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "",
+      "elapsed_seconds": 19.819,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "好的，以下是一份为拟 IPO 企业准备的**发行备忘录摘要**草稿。由于暂未提供公司名称与发行参数，关键信息以【 】占位，文末附填写说明；你把实际信息填入即可，也可以发给我帮你补全成定稿。\n\n---\n\n# 【公司名称】首次公开发行股票并上市——发行备忘录摘要\n\n| 项目 | 内容 |\n|---|---|\n| 文件性质 | 发行备忘录摘要（供初步沟通/路演预热使用） |\n| 密级 | 内部机密 / 保密文件 |\n| 发行人 | 【公司全称】 |\n| 拟上市地 | 【上交所主板 / 深交所创业板 / 北交所 / 港交所主板】 |\n| 保荐机构（主承销商） | 【证券公司名称】 |\n| 日期 | 2026 年 11 月 18 日 |\n\n> **重要提示**：本摘要仅供潜在投资者初步了解发行概况，不构成任何证券的要约、要约邀请或投资建议。所有前瞻性陈述（含财务预测、估值区间）均基于当前假设，实际结",
+      "usage": {
+        "promptTokens": 26908,
+        "completionTokens": 2527,
+        "totalTokens": 29435,
+        "elapsedSeconds": 19.819,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "tool_messages"
+      }
+    },
+    {
+      "task_id": "t3-rubric-ipo-memo",
+      "suite": "t3_rubric",
+      "mode": "swarm",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【公司概况】",
+          "【募资用途】",
+          "【估值讨论】",
+          "【承销安排】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "swarm_80626db66b58",
+      "elapsed_seconds": 14.07,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "好的，以下是一份为拟 IPO 企业准备的**发行备忘录摘要**草稿。由于暂未提供公司名称与发行参数，关键信息以【 】占位；你把实际信息填入即可，也可以把资料发给我，我帮你补全成定稿。\n\n---\n\n# 【公司名称】首次公开发行股票并上市——发行备忘录摘要\n\n| 项目 | 内容 |\n|---|---|\n| 文件性质 | 发行备忘录摘要（供初步沟通/路演预热使用） |\n| 密级 | 内部机密 / 保密文件 |\n| 发行人 | 【公司全称】 |\n| 拟上市地 | 【上交所主板 / 深交所创业板 / 北交所 / 港交所主板】 |\n| 保荐机构（主承销商） | 【证券公司名称】 |\n| 日期 | 2026 年 11 月 18 日 |\n\n> **重要提示**：本摘要仅供潜在投资者初步了解发行概况，不构成任何证券的要约、要约邀请或投资建议。所有前瞻性陈述（含财务预测、估值区间）均基于当前假设，实际结果可能",
+      "usage": {
+        "promptTokens": 25914,
+        "completionTokens": 2639,
+        "totalTokens": 28553,
+        "elapsedSeconds": 14.07,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "span_trace"
+      }
+    },
+    {
+      "task_id": "t3-rubric-lbo-model",
+      "suite": "t3_rubric",
+      "mode": "solo",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【资金结构】",
+          "【杠杆倍数】",
+          "【退出假设】",
+          "【IRR 测算】",
+          "【债务偿还路径】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "",
+      "elapsed_seconds": 68.711,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "\n\n上一条回复被截断了，这里直接给出完整、可落地的 **LBO 杠杆收购测算框架**，五个模块一节不少。所有数字均为示例占位，实际使用时替换为标的真实数据。\n\n---\n\n# LBO 杠杆收购测算框架\n\n**测算主线**：以退出时股权价值反推回报——\n\n```\n交易估值(EV) → 资金结构(债/股) → 持有期现金流与还债 → 退出估值(EV) → 股权价值 → IRR / MOIC\n```\n\n---\n\n## 一、资金结构\n\n### 1.1 交易对价构成\n\n| 项目 | 内容 |\n|---|---|\n| 股权收购对价 | 收购老股 / 认购新股的现金支付部分 |\n| 承接/置换债务 | 目标公司存量有息负债（视交易结构承接或偿还） |\n| 交易费用 | 财务顾问、律师、会计师、融资安排费等（约占 EV 的 2%–4%） |\n\n**总对价 = 股权对价 + 承接债务 + 交易费用 = 企业价",
+      "usage": {
+        "promptTokens": 68969,
+        "completionTokens": 11239,
+        "totalTokens": 80208,
+        "elapsedSeconds": 68.711,
+        "steps": 3,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "tool_messages"
+      }
+    },
+    {
+      "task_id": "t3-rubric-lbo-model",
+      "suite": "t3_rubric",
+      "mode": "swarm",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【资金结构】",
+          "【杠杆倍数】",
+          "【退出假设】",
+          "【IRR 测算】",
+          "【债务偿还路径】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "swarm_af4883d52c43",
+      "elapsed_seconds": 13.077,
+      "tokens": null,
+      "effort": "standard",
+      "effort_source": "fallback_standard",
+      "report_snippet": "# LBO 杠杆收购测算框架\n\n**测算主线**：以退出时股权价值反推回报——\n\n```\n交易估值(EV) → 资金结构(债/股) → 持有期现金流与还债 → 退出估值(EV) → 股权价值 → IRR / MOIC\n```\n\n以下所有数字均为示例占位（基期 EBITDA 1.5 亿元、EV 10 亿元），实际使用时替换为标的真实数据。\n\n---\n\n## 一、资金结构\n\n### 1.1 交易对价构成\n\n| 项目 | 内容 |\n|---|---|\n| 股权收购对价 | 收购老股 / 认购新股的现金支付部分 |\n| 承接/置换债务 | 目标公司存量有息负债（视交易结构承接或偿还） |\n| 交易费用 | 财务顾问、律师、会计师、融资安排费等（约占 EV 的 2%–4%） |\n\n**总对价 = 股权对价 + 承接债务 + 交易费用 = 企业价值（EV）口径**\n\n### 1.2 资金来源分层（示例",
+      "usage": {
+        "promptTokens": 21430,
+        "completionTokens": 2471,
+        "totalTokens": 23901,
+        "elapsedSeconds": 13.077,
+        "steps": 1,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "span_trace"
+      }
+    },
+    {
+      "task_id": "t3-rubric-ma-thesis",
+      "suite": "t3_rubric",
+      "mode": "solo",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【交易逻辑】",
+          "【战略协同】",
+          "【估值区间】",
+          "【交易结构】",
+          "【整合风险】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "",
+      "elapsed_seconds": 55.566,
+      "tokens": null,
+      "effort": "deep",
+      "effort_source": "inferred",
+      "report_snippet": "**并购交易投行论证（示例交易：A 公司收购 B 公司 100% 股权）**\n\n> 说明：你未提供具体标的与交易参数，以下以一组自洽的示例数字并购交易投行论证（示例交易：A 公司收购 B 公司 100% 股权）\n\n> 说明：你未提供具体标的与交易参数，以下以一组自洽的示例数字搭建完整论证框架（标的 2026E 营收 6.0 亿元、EBITDA 1.2 亿元、净利润 0.72 亿元、净债务 1.6 亿元），实际使用时替换为真实数据即可。\n\n---\n\n## 一、交易逻辑\n\n**核心论点**：本次收购是 A 公司在【细分赛道】实现“从跟随到领先”的关键一步，交易以合理对价获取稀缺资产，预期为股东创造明确价值。\n\n1. **赛道卡位**：目标行业规模约 300 亿元、年增速 15%+，B 公司市占率约 8%、位居行业前三，是少数同时具备【技术壁垒 + 客户资源】的独立标的；\n2. **能力补齐**",
+      "usage": {
+        "promptTokens": 39959,
+        "completionTokens": 7716,
+        "totalTokens": 47675,
+        "elapsedSeconds": 55.566,
+        "steps": 2,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "tool_messages"
+      }
+    },
+    {
+      "task_id": "t3-rubric-ma-thesis",
+      "suite": "t3_rubric",
+      "mode": "swarm",
+      "unsolvable": false,
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "missing_markers": [
+          "【交易逻辑】",
+          "【战略协同】",
+          "【估值区间】",
+          "【交易结构】",
+          "【整合风险】"
+        ]
+      },
+      "error": null,
+      "rejected": false,
+      "rejection_code": "",
+      "subagent_id": "swarm_676e89c67716",
+      "elapsed_seconds": 71.734,
+      "tokens": null,
+      "effort": "deep",
+      "effort_source": "inferred",
+      "report_snippet": "# 并购交易投行论证\n\n**项目代号：Project Atlas —— A 公司收购 B 公司 100% 股权**\n\n> **前置说明**：因未提供具体标的与交易参数，以下以一组自洽的示例数据搭建完整论证（标的 2026E 营收 6.0 亿元、EBITDA 1.2 亿元、净利润 0.72 亿元、净债务 1.6 亿元；当前时点 2026 年 11 月，目标 2027 年上半年交割）。所有数字均为占位示例，替换真实数据后即可作为董事会/投委会材料使用。\n\n---\n\n## 0. 交易概览\n\n| 要素 | 内容 |\n|---|---|\n| 买方 | A 公司（产业方/上市公司） |\n| 标的 | B 公司 100% 股权 |\n| 交易对价 | 股权对价 8.0 亿元（对应企业价值 9.6 亿元） |\n| 估值倍数 | 2026E EV/EBITDA 8.0x、P/E 11.1x |\n| 支付方式 ",
+      "usage": {
+        "promptTokens": 40658,
+        "completionTokens": 12288,
+        "totalTokens": 52946,
+        "elapsedSeconds": 71.734,
+        "steps": 2,
+        "toolCalls": 0
+      },
+      "trajectory": {
+        "toolsUsed": [],
+        "source": "span_trace"
+      }
+    }
+  ],
+  "report_id": "bench-20261118T005202Z-989f4e",
+  "report_path": "C:\\Users\\xccoo\\AppData\\Local\\Temp\\neurova1f-kueu487j\\benchmark\\multi_agent\\bench-20261118T005202Z-989f4e.json"
+}
