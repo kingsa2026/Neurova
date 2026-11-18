@@ -2721,6 +2721,9 @@ class ContextOrchestrator:
         cache = self._window_cache_slot(cache_key or self._resolve_window_cache_key())
         total_tokens = estimate_window_tokens(msgs)
 
+        # ── SC-7：反思游标水印刷新（MetaLedger 只读；每轮建图一次 SELECT）。
+        self._refreshReflectionWatermark(cache, len(msgs))
+
         # ── B5：触发判据（预算击穿 ∨ 增长门），单源 fold_trigger.decideFoldTrigger。
         # 门默认开（2026-11-15 跑数据转正；NEUROVA_FOLD_GROWTH_GATE=0 关闭）：
         # 关闭时只有击穿才折，
@@ -2801,6 +2804,17 @@ class ContextOrchestrator:
             "sufficient": cacheProfile.get("sufficient"),
             "fold_target_ratio": fold_target_ratio,
         })
+
+        # ── SC-7：反思节律对齐（候选排序信号，非触发门）——已编译事件对应的
+        # 更早消息提前进入本轮折叠候选：保留区压到反思边界之后。触发判定
+        # （decideFoldTrigger）、keep_min 尾保护与池归档均不受影响。
+        fold_budget = self._capFoldBudgetByReflection(
+            fold_budget,
+            fold_source,
+            startOffset=len(frozen) if incremental else 0,
+            cache=cache,
+            targetRatio=fold_target_ratio,
+        )
 
         compaction = await compact_window(
             fold_source,
@@ -2947,6 +2961,93 @@ class ContextOrchestrator:
             bool(compaction.summary),
         )
         return window
+
+    # ── SC-7：反思节律对齐折叠（信号源 MetaLedger，**只读**） ──
+
+    def _latestReflectionCursor(self) -> Optional[dict]:
+        """最近一次反思编译游标（MetaLedger **只读**；任何失败返回 None）。
+
+        两条账纪律（对照文档 §9.5 第 2 条）：折叠侧对台账只读——只 SELECT
+        游标，不写任何事件/记录；折叠状态不进反思输入。身份只取真串
+        （测试替身的 agent_id 不是真串，不得拿去查台账，与 metacog 注入同纪律）。
+        """
+        try:
+            agent = getattr(self, "_agent", None)
+            agentId = getattr(getattr(agent, "config", None), "agent_id", None)
+            if not isinstance(agentId, str) or not agentId:
+                return None
+            from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
+
+            return get_meta_ledger().lastReflectionCursor(agentId)
+        except Exception:  # noqa: BLE001 - 游标不可得按无反思处理（保守回退）
+            return None
+
+    def _refreshReflectionWatermark(self, cache: dict, msgCount: int) -> None:
+        """记录「最近一次反思编译时窗口已有多少条消息」（SC-7 水印）。
+
+        编译覆盖的消息区间台账不可得，取**保守近似**：反思只在轮间跑
+        （post_chat_pipeline 轮末触发），反思后首轮建图的 conversation_context
+        尚未混入反思之后的新消息——该轮窗口长度即「最近反思时刻之前的更早
+        消息」条数。游标不变不重记；游标消失（记录被裁剪/台账不可读）即撤销
+        水印——对齐信号缺席时行为与改前逐字一致。
+        """
+        cursor = self._latestReflectionCursor()
+        cursorAt = (cursor or {}).get("created_at")
+        if cursorAt:
+            if cursorAt != cache.get("reflect_cursor_at"):
+                cache["reflect_cursor_at"] = cursorAt
+                cache["reflect_watermark_msgs"] = max(0, int(msgCount))
+                logger.info(
+                    "[WINDOW_COMPACT] SC-7 反思游标更新：水印 %d 条（compiled_at=%s，last_event_id=%s）",
+                    max(0, int(msgCount)), cursorAt, (cursor or {}).get("last_event_id"),
+                )
+        elif cache.get("reflect_cursor_at"):
+            cache.pop("reflect_cursor_at", None)
+            cache.pop("reflect_watermark_msgs", None)
+
+    def _capFoldBudgetByReflection(
+        self,
+        foldBudget: int,
+        foldSource: list,
+        *,
+        startOffset: int,
+        cache: dict,
+        targetRatio: float,
+    ) -> int:
+        """SC-7：把折叠预算压到「保留区 = 反思边界之后」——候选排序信号。
+
+        已编译事件对应的更早消息（水印之内、未覆盖尾段头部的部分）本轮直接
+        进折叠候选。切点与预算算术单源在 fold_trigger（`reflectionFoldCutIndex`
+        / `reflectionAlignedFoldBudget`），本层不另写同义条件（教义第 6 条）。
+        触发判定（decideFoldTrigger）不受影响；无水印或切点为 0 时原预算
+        原样返回（行为与改前一致）。
+        """
+        watermark = cache.get("reflect_watermark_msgs")
+        if not watermark:
+            return foldBudget
+        from neurova.context.fold_trigger import (
+            reflectionAlignedFoldBudget,
+            reflectionFoldCutIndex,
+        )
+
+        sourceLen = len(foldSource or [])
+        offset = max(0, int(startOffset))
+        distilled = max(0, min(int(watermark), offset + sourceLen) - offset)
+        cut = reflectionFoldCutIndex(rest_len=sourceLen, distilled_len=distilled)
+        if cut <= 0:
+            return foldBudget
+        from neurova.context.window_compactor import estimate_window_tokens
+
+        keptTokens = estimate_window_tokens(foldSource[cut:])
+        capped = reflectionAlignedFoldBudget(
+            plain_fold_budget=foldBudget, kept_tokens=keptTokens, target_ratio=targetRatio
+        )
+        if capped < foldBudget:
+            logger.info(
+                "[WINDOW_COMPACT] SC-7 反思对齐：已提炼区 %d 条提前入折叠候选（水印 %d，保留区 %d token，预算 %d→%d）",
+                cut, int(watermark), keptTokens, int(foldBudget), capped,
+            )
+        return capped
 
     def _renderFrozenHead(self, cache: dict, budget_tokens: int) -> list:
         """B2：把已覆盖前缀渲染成冻结头（代际阶梯，region=整预算）。

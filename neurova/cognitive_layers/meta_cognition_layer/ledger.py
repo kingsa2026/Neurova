@@ -350,6 +350,39 @@ class MetaLedger:
             if it["kind"] == "reflection"
         ]
 
+    def lastReflectionCursor(self, agent_id: str) -> Optional[dict]:
+        """最近一次反思编译游标（**只读**，SC-7 折叠对齐的信号源）。
+
+        返回 {"created_at", "last_event_id", "lesson_count"}；该 agent 无反思
+        记录时返回 None。
+
+        - created_at：编译落账时刻——"系统级确认这段经历已提炼完毕"的点
+          （对照文档 §9.4 SC-7：反思节律对齐折叠的时间锚）。
+        - last_event_id：该轮编译覆盖的事件 id 上界（reflect() 落账时写入；
+          None = 该轮无事件可编译）。编译覆盖的**消息区间**台账不给——
+          消费方按"最近反思时刻之前的更早消息"作保守近似（口径见
+          `fold_trigger.reflectionFoldCutIndex`）。
+
+        两条账纪律（对照文档 §9.5 第 2 条）：折叠侧对台账**只读**——本方法
+        只 SELECT，不写任何表；折叠状态不进反思输入。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT created_at, metadata FROM meta_records"
+                " WHERE agent_id = ? AND kind = 'reflection'"
+                " ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                (agent_id,),
+            ).fetchone()
+        if not row:
+            return None
+        metadata = json.loads(row[1] or "{}")
+        lastEventId = metadata.get("last_event_id")
+        return {
+            "created_at": row[0],
+            "last_event_id": int(lastEventId) if lastEventId is not None else None,
+            "lesson_count": int(metadata.get("lesson_count") or 0),
+        }
+
     # ────── states（B 语义：认知负荷快照） ──────
 
     def write_state(

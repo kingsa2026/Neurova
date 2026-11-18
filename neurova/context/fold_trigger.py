@@ -34,6 +34,7 @@ docs/08-research 对照报告 §B6）。冻结分区把「已被摘要覆盖的�
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, List, Sequence, Tuple
@@ -46,6 +47,11 @@ REASON_GATE_DISABLED = "gate_disabled"
 REASON_BELOW_FLOOR = "below_floor"
 REASON_INSUFFICIENT_GROWTH = "insufficient_growth"
 REASON_INSUFFICIENT_MASS = "insufficient_mass"
+
+#: 折叠尾保护下限（keep_min_messages）——本模块内判定/切点共用此单源。
+#: （`window_compactor.compact_window` 的同名默认值是既有另一处，本卡不动
+#: window_compactor；收口留待后续批。）
+FOLD_KEEP_MIN_MESSAGES = 6
 
 
 @dataclass(frozen=True)
@@ -120,7 +126,7 @@ def decideFoldTrigger(
     last_fold_msgs: int,
     total_msgs: int,
     foldable_msgs: int,
-    keep_min_messages: int = 6,
+    keep_min_messages: int = FOLD_KEEP_MIN_MESSAGES,
     enabled: bool = None,
 ) -> FoldTriggerDecision:
     """判一轮该不该折叠（B5）。次序：
@@ -196,7 +202,7 @@ def assessFoldTrigger(
     last_fold_msgs: int,
     total_msgs: int,
     enabled: bool = None,
-    keep_min_messages: int = 6,
+    keep_min_messages: int = FOLD_KEEP_MIN_MESSAGES,
 ) -> FoldTriggerReadout:
     """只读判定辅助（SC-3）：折叠时机判读 = 单源判定 + 四判据各自读数。
 
@@ -257,3 +263,44 @@ def splitFrozenCoveredPrefix(
         else:
             break
     return frozen, list((msgs or [])[len(frozen):])
+
+
+def reflectionFoldCutIndex(
+    *,
+    rest_len: int,
+    distilled_len: int,
+    keep_min_messages: int = FOLD_KEEP_MIN_MESSAGES,
+) -> int:
+    """SC-7 反思节律对齐：已提炼区在未覆盖尾段内的折叠终点（不含；0 = 无延伸）。
+
+    口径（保守近似，对照文档 §9.4 SC-7）：MetaLedger 游标只给"最近一次反思
+    编译的时刻与事件上界"，编译覆盖的**消息区间**不可直接得——按「最近反思
+    时刻之前的更早消息」计（编排层以水印落位：反思后首轮建图时的窗口长度，
+    该长度内的消息即编译发生前的更早消息）。
+
+    切点不越过 keep_min 尾保护：推导链最后一条消息/当前工具调用对由既有
+    尾保护管辖（与冻结头/前缀保护合流，不重复造保护）。
+    """
+    restLen = max(0, int(rest_len))
+    distilled = max(0, int(distilled_len))
+    keepMin = max(0, int(keep_min_messages))
+    return max(0, min(distilled, restLen - keepMin))
+
+
+def reflectionAlignedFoldBudget(
+    *,
+    plain_fold_budget: int,
+    kept_tokens: int,
+    target_ratio: float,
+) -> int:
+    """SC-7 反思节律对齐：把折叠预算压到「保留区 = 反思边界之后」的水平。
+
+    对齐只是**候选排序信号**（对照文档 §9.5 第 1 条：元认知信号是优先级
+    建议，不是替代门）：只让更早的已提炼消息提前进折叠区，绝不放宽折叠——
+    结果预算取 min(原预算, 对齐预算)。保留区目标 = kept_tokens（反思边界
+    之后的尾段 token），按 split 的 target_ratio 口径反推预算。
+    """
+    plain = max(1000, int(plain_fold_budget))
+    ratio = min(max(float(target_ratio), 0.05), 1.0)
+    aligned = max(1000, int(math.ceil(max(0, int(kept_tokens)) / ratio)))
+    return min(plain, aligned)
