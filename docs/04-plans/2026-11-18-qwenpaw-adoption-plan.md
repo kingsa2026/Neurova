@@ -221,3 +221,26 @@
 | C5 secret_store 增强 | ⚠️ **读码改判：基本已对齐**——`enc:v1:` 前缀灰度迁移（存量明文透传、保存自动迁移）与 keyring 链（env→keyring→文件）均已实装；「按安装路径哈希派生 account」不立项（本仓单实例部署形态无多安装互覆盖面，动密钥链兼容面不值） | — |
 | C6 覆盖率棘轮+bundle 预算 | ✅ 落地：`scripts/ci/coverage_ratchet.py`+`neurova/ci/ci_ratchet_core.py`（实际<记录值即红、超越上调写回 `coverage_ratchet.json`，绝对下限 60 独立生效）+ `scripts/ci/bundle_budget.py`+`neurova/ci/bundle_budget_core.py`（JS/CSS gzip 合计 vs `NeurUI/bundle-budget.json`，首跑标定写回实测 4372.4KB 后只降不升）+ ci.yml 两处接线；12 用例绿，live-verify 真文件往返/真 dist 标定实测 | afe723b08 |
 | C12 e2e 双档+page object | ✅ 落地：conftest 注册 `e2e_mock`/`e2e_real` 双档 marker（真后端档 NEUROVA_E2E_REAL=1 才跑，否则诚实跳过）+ `tests/e2e/pages/`（BasePage/BootPage）+ 三测试打标 + `_e2e.py` 临时脚本退役；harness 7 用例绿，e2e 默认档 mock 5 passed/real 诚实 skip，NEUROVA_E2E_REAL=1 真后端档 5 passed | 39cbfad3b |
+
+### P2 二轮严格化（2026-11-18，复核指令后按教义第 5 条全命中点扫荡，推翻两条初判并落地）
+
+首轮对 C2/C3/C5 的「已对齐」判读经二轮深查发现**三处真实缺口**（初判只看了
+主链路，未扫全消费方/全兜底层），全部先红后绿补齐：
+
+| 条目 | 二轮发现 | 修复 | 提交 |
+|---|---|---|---|
+| C2 Fallback 切换时序 | 初判只验了 multi_model_client 请求级状态与 OpenAI 环；扫荡全部 `chat_stream` 消费方后发现 **Anthropic 环不认 retry_status/reset**——模型 A 的半截正文与模型 B 的续写拼成缝合回复，typed 事件不出、前端无倒计时 | `anthropic_loop._predict_stream` dict 分支补 retry_status 处理：reset 时清空 reply_parts/reasoningGuard/pending_tool_calls 并让出 typed 事件，与 OpenAI 环同契约 | 1cf51a6c8 |
+| C3 溢出不重放 | 初判只看了 loop 层 gotContent 门（`openai_loop.py:754`）；**管线层兜底会 Undo 该纪律**——`_callAgentLoopWithOverflowGuard` 压缩重试时，流式已让出的半截正文（ctx.partial_reply）会与新回复拼接/重复 | 守卫重试前判 partial_reply 非空则先发 `("retry", {reset: true})` 事件（消费方按既有协议清空半截）再压缩重试；非流式产出未出管线，保持静默恢复 | 25707f5b8 |
+| C5 secret_store | 初判 declined「account 派生」（单实例无互覆盖面）；按指令补齐——固定条目名下同机多部署确实互覆盖密钥且无迁移路径 | `_keyringEntry()` = `config-secret-key-<sha256(数据根)[:12]>` + 旧条目灰度迁移（旧条目命中回填派生条目，双读期不弃钥）；链序 env 最优先不变；keyring 仍为可选依赖 fail-soft | 52e3a10d0 |
+
+**二轮验证**：新测试 9 用例红 6→绿 9；agent/llm/security 三域 A/B（patch 法）
+失败集合逐行比对**零新增**（预存 9 失败两轮一致，均为 tkg_retriever/
+failureLanding/goal_gate 等无关项）；live-verify = 9681 真后端 boot
+（/health 200、Registered router: /v1/providers 在册、改动模块随真实装配
+链加载无异常）+ 真实 Fernet seal/unseal 回环与迁移语义实测（临时数据根，
+真实密钥状态零波及）。
+
+**执行期坑（新增）**：`.gitignore` 的 `tests/**/*_secret*` 反泄密规则会误杀
+含 `_secret` 子串的正当测试文件名（`test_secret_store_*` 被 git add 拒收）——
+测试文件命名避开该子串（改名 `test_keyring_account_derivation.py`），
+不得用 `git add -f` 兜底（AGENTS.md §4）。
