@@ -617,6 +617,7 @@ export default {
     retrySwitched: 'Límites repetidos — cambiado a {model} para continuar (modelo {count}/{total})',
     retryExhausted: 'Reintentos automáticos en {count} modelos sin éxito',
     retryYieldWait: 'Cediendo por cuota de concurrencia - reintento en {seconds} s (intento {retry}/{max})',
+    retryOverflowRetry: 'Desbordamiento de contexto: comprimido automáticamente, reintentando',
     upstreamSilence: 'Sin datos del upstream durante {seconds}s, se sigue esperando…',
     contextCompactedNotice: 'Compactado automático: {folded} mensajes plegados, contexto {before} → {after} tokens',
     contextCompactCooldownNotice: 'Compresión de contexto en enfriamiento: {failures} fallos consecutivos, compresión automática en pausa durante {seconds}s',

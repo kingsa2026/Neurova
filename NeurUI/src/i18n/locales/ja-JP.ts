@@ -617,6 +617,7 @@ export default {
     retrySwitched: 'レート制限が続いたため、モデル {model} に切り替えて継続します（{count}/{total} 個目）',
     retryExhausted: '{count} 個のモデルで自動再試行しましたが成功しませんでした',
     retryYieldWait: '並行上限により待機中。{seconds} 秒後に再試行（{retry}/{max} 回目）',
+    retryOverflowRetry: 'コンテキスト超過——自動圧縮して再試行中',
     upstreamSilence: '上流が {seconds} 秒無応答です。引き続き待機中…',
     contextCompactedNotice: '自動圧縮：{folded} 件のメッセージを折りたたみ、コンテキスト {before} → {after} トークン',
     contextCompactCooldownNotice: 'コンテキスト圧縮クールダウン中：連続 {failures} 回の失敗、{seconds} 秒間自動圧縮を停止',

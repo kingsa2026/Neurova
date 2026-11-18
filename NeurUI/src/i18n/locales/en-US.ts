@@ -618,6 +618,7 @@ export default {
     retrySwitched: 'Repeated rate limiting — switched to {model} to continue (model {count}/{total})',
     retryExhausted: 'Auto-retried across {count} models without success',
     retryYieldWait: 'Yielding for concurrency quota - retrying in {seconds}s (attempt {retry}/{max})',
+    retryOverflowRetry: 'Context overflow — compacted automatically and retrying',
     upstreamSilence: 'No data from upstream for {seconds}s, still waiting…',
     contextCompactedNotice: 'Auto-compacted: folded {folded} messages, context {before} → {after} tokens',
     contextCompactCooldownNotice: 'Context compaction cooling down: {failures} consecutive failures, auto-compaction paused for {seconds}s',
