@@ -74,3 +74,24 @@
 - 依据机制：`memory_admission.py`、`memory/pending_memory.py`、
   `memory_discipline.py`（S16）、`cognitive_layers/memory_layer/temperature.py`、
   `sleep_writeback.py`。
+
+## 7. 执行记录（2026-11-18，严格按教义）
+
+| 批 | 结果 | 提交 |
+|---|---|---|
+| D1–D3 | ✅ 落地：`neurova/memory/distiller.py`（开关 NEUROVA_MEMORY_DISTILL 默认 off/取材窗口 6000 字符有界/LLM 非流式归纳 30s 超时/admission enforce 筛查/propose 候选/连续失败 3 次熔断 300s 冷却/fail-soft）+ PostChatPipeline 注册 `memory_distill` 后台步骤（开关关=不注册零步）；12 契约用例红 12→绿 12（开关关零行为/双候选入队/重复幂等/confirm 转正 remember_fn 三元组/敏感跳过/熔断/超时/坏 JSON/错误信封/接线源码断言） | cb5252226 |
+| D4 | ✅ 落地：`neurova_memory_distill_candidates_total`（outcome=turn/submitted/duplicate/sensitive/failed）进 /metrics 指标读面 + distillCounters 进程内快照；红 1→绿，13/13 | b7b927cf6 |
+
+**A/B**：agent+api+memory 三域（约 6500 用例）前后各一遍——失败集合**逐行
+完全一致**（29 个预存失败两侧相同：webhooks/tkg/goal_gate/storage 等），
+通过数差恰为新增 13 用例，零新增失败。
+
+**live-verify**：9683 真后端（NEUROVA_MEMORY_DISTILL=1）+ 桩 LLM 驱动真
+治理链——蒸馏器在真实数据根产出候选 → GET /api/v1/memory/pending 可见
+（proposed_by=distiller）→ POST confirm 200 → GET /api/v1/memory 检索命中
+（temperature=75、lifecycle=active、origin=agent）；种子数据已清偿
+（memories/pending 零残留）。
+
+**执行期坑**：①多笔提交的 git revert 会因"后笔改过前笔新增的文件"产生
+modify/delete 冲突——基线还原改用 checkout 父版文件+删新增文件；
+②模块级熔断计数按 agent 维度跨用例存续，测试须用独立 agent_id 隔离。
