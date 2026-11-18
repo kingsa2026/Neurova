@@ -57,6 +57,21 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["covers_ref"],
         },
     },
+    "recall_query": {
+        # QwenPaw 对照批 B3：受限 Python 表达式查询（只读、白名单 AST 校验）。
+        # 并行能力声明：只读召回条目的纯计算，无写作用域，保守不并行。
+        "capability": {"readOnly": True, "concurrentSafe": False, "writeScopes": ("none",)},
+        "description": "【受限 Python 查询】对当前会话的召回条目做组合/统计/过滤等纯计算。可用变量：items（召回条目列表，每条含 content/turn_id/recalled_from）。仅支持单个表达式；禁止 import、赋值、下划线属性、I/O。【何时用】recall_history 的模糊匹配不够、需要对召回内容做再加工时。【何时不用】精确指针直取 recall_history；语义检索 memory_search。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "expression": {"type": "string", "description": "单个 Python 表达式，如 [i['content'][:30] for i in items if '报错' in i['content']]"},
+                "query": {"type": "string", "description": "预取召回条目的关键词（同 recall_history 的 query）"},
+                "limit": {"type": "integer", "description": "预取召回条数上限", "default": 200},
+            },
+            "required": ["expression"],
+        },
+    },
     "context_compress": {
         # B1（对照改进项）：模型自决触发折叠。折叠只影响视图，原文在归档池
         # （零丢失），与 /compact 命令同一折叠机构。
