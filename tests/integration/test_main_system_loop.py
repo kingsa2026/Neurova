@@ -11,6 +11,12 @@ import pytest
 import asyncio
 from unittest.mock import MagicMock, AsyncMock, patch, call
 
+from neurova.cognitive_layers.memory_layer.muscle_memory import MuscleMemory
+from neurova.cognitive_layers.memory_layer.tool_memory_integration import (
+    ToolMemoryIntegration,
+)
+from neurova.tool_executor import ToolExecutor
+
 
 class TestMainSystemClosedLoop:
     """主系统闭环实际连接验证"""
@@ -269,3 +275,85 @@ class TestMainSystemClosedLoop:
         # evolution_triggered 目前为 False（需要改进）
         # 这是一个已知的gap
         assert "evolution_triggered" in result
+
+
+class TestFullRealMuscleMemoryLoop(TestMainSystemClosedLoop):
+    """M4：肌肉记忆三层全真链路（不 mock check_tool_memory）。
+
+    真实 ToolMemoryIntegration + 真实 MuscleMemory（落盘临时目录）+
+    真实 ToolExecutor 钩子链（on_tool_executed 单一记账咽喉）+
+    真实 ChatPipeline 自动执行：
+    写入使用记录 → check_tool_memory 命中 → auto_execute 决策 → 结果回流
+    → 固化状态（L3→L2）→ 落盘可重载。
+    """
+
+    QUERY = "帮我读取 /tmp/config.json 文件"
+    TOOL = "file_read"
+
+    def _make_real_stack(self, tmp_path):
+        """既有 mock 骨架 + 真实肌肉记忆/执行器链（只桩核心执行与治理裁决）。"""
+        muscle = MuscleMemory(storage_dir=str(tmp_path / "muscle"))
+        tmi = ToolMemoryIntegration(muscle_memory=muscle, muscle_memory_threshold=0.5)
+
+        agent = self._make_agent_with_evolution()
+        agent.tool_memory = tmi
+        # on_tool_executed 的 user_input 取 agent._current_user_input（咽喉口径）
+        agent._current_user_input = self.QUERY
+        agent.tool_lifecycle = None
+
+        executor = ToolExecutor(agent)
+
+        async def _no_governance(tool_name, params):
+            return None
+
+        async def _fake_core(tool_name, params):
+            # 成败判据单源：result["success"]
+            return ({"success": True, "output": "ok"}, True, "skill_system")
+
+        executor._governance_precheck = _no_governance
+        executor._execute_tool_core = _fake_core
+        agent.tool_executor = executor
+
+        from neurova.agent.chat_pipeline import ChatPipeline
+        pipeline = ChatPipeline(agent)
+        return muscle, tmi, executor, pipeline
+
+    @pytest.mark.asyncio
+    async def test_write_read_decide_feedback_consolidate(self, tmp_path):
+        """写入 → 命中 → 决策 → 回流 → 固化 → 落盘，全链不 mock。"""
+        muscle, tmi, executor, pipeline = self._make_real_stack(tmp_path)
+        storage_dir = str(tmp_path / "muscle")
+
+        # 1. 写入使用记录：一次真实 execute_tool（finally 钩子落账肌肉记忆）
+        result = await executor.execute_tool(
+            self.TOOL, {"file_path": "/tmp/config.json"}
+        )
+        assert result.get("success") is True
+        stats = muscle.get_stats()
+        assert stats["total"] == 1 and stats["l3_count"] == 1, (
+            f"一次真实执行应建一个 L3 条目，实际: {stats}"
+        )
+
+        # 2. 读取 + 决策：check_tool_memory 命中并给出 auto_execute
+        hit, decision = tmi.check_tool_memory(self.QUERY)
+        assert hit is not None, "记录后同查询应命中肌肉记忆"
+        assert hit.get("tool_name") == self.TOOL
+        assert decision == "auto_execute", f"应裁定自动执行，实际: {decision}"
+
+        # 3. 管线自动执行 + 结果回流（连击恰 +1，第二次成功才固化）
+        from neurova.agent.chat_pipeline import ChatContext
+        ctx = ChatContext(user_input=self.QUERY)
+        await pipeline._check_tool_memory(ctx)
+        assert ctx.tool_decision == "auto_executed", (
+            f"自动执行应成功，实际: {ctx.tool_decision}"
+        )
+        assert (ctx.auto_execute_result or {}).get("success") is True
+        stats = muscle.get_stats()
+        assert stats["total"] == 1, f"同一指纹不产生第二条款目，实际: {stats}"
+        assert stats["l2_count"] == 1 and stats["l3_count"] == 0, (
+            f"两次独立成功后应固化到 L2，实际: {stats}"
+        )
+
+        # 4. 固化状态落盘可重载
+        reloaded = MuscleMemory(storage_dir=storage_dir)
+        assert reloaded.get_stats()["l2_count"] == 1, "固化状态应已持久化"
