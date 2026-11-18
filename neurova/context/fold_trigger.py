@@ -54,6 +54,9 @@ REASON_STUCK_SUPPRESSED = "stuck_suppressed"
 #: SC-2：工具失败率阈值（失败率 = 1 - 成功率，**严格大于**该值判卡住）。
 STUCK_FAILURE_RATE_THRESHOLD = 0.5
 
+#: S6'：折叠基线时间线事件种类（与 CompressionEvent / 冷却事件同一落盘面）。
+FOLD_BASELINE_TIMELINE_KIND = "fold_baseline"
+
 #: 折叠尾保护下限（keep_min_messages）——本模块内判定/切点共用此单源。
 #: （`window_compactor.compact_window` 的同名默认值是既有另一处，本卡不动
 #: window_compactor；收口留待后续批。）
@@ -447,3 +450,40 @@ def lessonProtectedStart(msgs: Sequence[dict], lessons: Iterable[dict]) -> int:
             if _messageReferencesLessonSubject(row, subject):
                 return index
     return len(rows)
+
+
+def rebuildFoldBaseline(timelineEvents: Iterable) -> Dict[str, Any]:
+    """从会话时间线重放折叠基线（S6'；时间线是事实源，复用冷却重建模式）。
+
+    顺序重放 fold_baseline 事件：covered 集取**并集**（增量式落账），计数器/
+    摘要取**最新一条**。其余种类与基线无关，跳过。返回折叠槽形状的基线
+    （last_fold_tokens/last_fold_msgs/last_count/fold_seq/summary/covered）；
+    无基线事件时返回空 dict（调用方按"无基线"处理，行为与改前一致）。
+    """
+    baseline: Dict[str, Any] = {}
+    covered: set = set()
+    for row in timelineEvents or []:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("kind") or "") != FOLD_BASELINE_TIMELINE_KIND:
+            continue
+        payload = row.get("event")
+        payload = payload if isinstance(payload, dict) else {}
+        covered |= {str(h) for h in (payload.get("covered") or []) if h}
+        for key, payloadKey in (
+            ("last_fold_tokens", "lastFoldTokens"),
+            ("last_fold_msgs", "lastFoldMsgs"),
+            ("last_count", "lastCount"),
+            ("fold_seq", "foldSeq"),
+        ):
+            if payloadKey in payload:
+                try:
+                    baseline[key] = int(payload.get(payloadKey) or 0)
+                except (TypeError, ValueError):
+                    pass
+        if "summary" in payload:
+            baseline["summary"] = str(payload.get("summary") or "")
+    if not baseline and not covered:
+        return {}
+    baseline["covered"] = covered
+    return baseline

@@ -1026,6 +1026,8 @@ class ContextOrchestrator:
         cache[key] = slot
         while len(cache) > self._WINDOW_CACHE_SLOTS:
             cache.pop(next(iter(cache)), None)
+        # S6'：新建槽即从会话时间线重放折叠基线（进程重启不丢基线）
+        self._restoreFoldBaseline(slot, key)
         return slot
 
     # ---- 属性代理（方便内部访问） ----
@@ -2957,6 +2959,7 @@ class ContextOrchestrator:
 
         # 更新跨轮缓存（摘要失败时保留旧摘要，下次重试增量）。
         # P1-2：只有**新**摘要才能推进覆盖记账（防把新增消息谎报为已覆盖）。
+        coveredDelta: List[str] = []
         if compaction.summary and compaction.summary_is_fresh:
             cache["last_count"] = len(msgs)
             from neurova.context_pool import ContextInput, ContextSource
@@ -2974,6 +2977,7 @@ class ContextOrchestrator:
                 cache["covered"].add(fingerprint)
                 coveredNow.append(fingerprint)
                 turnIdsNow.append(turnId)
+            coveredDelta = coveredNow
             # T-11a/T-11b：新摘要推进代际栈（旧摘要降一层）并写进池带 covers。
             self._advanceFoldGeneration(
                 cache, compaction.summary, covers=coveredNow, turnIds=turnIdsNow
@@ -3005,6 +3009,10 @@ class ContextOrchestrator:
         # B5：折叠落地即记增长基线（下次增长门以此次为准）
         cache["last_fold_tokens"] = total_tokens
         cache["last_fold_msgs"] = len(msgs)
+        # S6'：基线随会话时间线持久化（重启后重放恢复，冷却重建同模式）
+        self._persistFoldBaseline(
+            cache, cache_key or self._resolve_window_cache_key(), coveredDelta
+        )
 
         if incremental:
             # B2 视图 = 冻结头（重渲染：新代已入阶梯）+ 尾部保留原文。
@@ -3179,6 +3187,87 @@ class ContextOrchestrator:
             slot["last_stuck_reason"] = str((detail or {}).get("reason") or "unknown")
         if kind == "protected_all":
             slot["lesson_protected_last"] = int((detail or {}).get("carried") or 0)
+
+    # ── S6'：折叠基线跨重启持久化（时间线是事实源，复用冷却事件落盘面） ──
+
+    def _persistFoldBaseline(self, cache: dict, sessionKey: Optional[str], coveredNow: list) -> None:
+        """折叠基线落会话时间线（append-only；与 CompressionEvent 同一落盘面）。
+
+        covered 取**增量**（本轮新覆盖），重放侧取并集——事件不随会话变长膨胀。
+        fail-open：落盘失败不阻断折叠主链路（与 persistCompressionEvent 同纪律）。
+        """
+        try:
+            agent = getattr(self, "_agent", None)
+            manager = getattr(agent, "session_manager", None)
+            append = getattr(manager, "append_timeline_event", None)
+            agentId = getattr(getattr(agent, "config", None), "agent_id", None)
+            if not callable(append) or not isinstance(agentId, str) or not agentId:
+                return
+            if not sessionKey:
+                return
+            from neurova.context.fold_trigger import FOLD_BASELINE_TIMELINE_KIND
+
+            event = {
+                "kind": FOLD_BASELINE_TIMELINE_KIND,
+                "ts": datetime.datetime.now().isoformat(),
+                "event": {
+                    "lastFoldTokens": int(cache.get("last_fold_tokens") or 0),
+                    "lastFoldMsgs": int(cache.get("last_fold_msgs") or 0),
+                    "lastCount": int(cache.get("last_count") or 0),
+                    "foldSeq": int(cache.get("fold_seq") or 0),
+                    "summary": str(cache.get("summary") or ""),
+                    "covered": [str(h) for h in (coveredNow or []) if h],
+                },
+            }
+            append(str(agentId), str(sessionKey), event)
+        except Exception:  # noqa: BLE001 - 基线落盘失败不阻断折叠
+            logger.debug("折叠基线落盘失败（忽略）", exc_info=True)
+
+    def _restoreFoldBaseline(self, slot: dict, sessionKey: Optional[str]) -> None:
+        """新建折叠槽时从会话时间线重放基线（冷却重建同模式，S6'）。
+
+        重启后 last_fold_tokens/msgs 与 covered 集从时间线恢复，增长门不因
+        基线丢失而立即重复折叠；摘要文本随基线恢复（冻结头可重渲染）。
+        fail-open：时间线不可读按无基线处理。
+        """
+        try:
+            agent = getattr(self, "_agent", None)
+            manager = getattr(agent, "session_manager", None)
+            read = getattr(manager, "read_timeline", None)
+            agentId = getattr(getattr(agent, "config", None), "agent_id", None)
+            if not callable(read) or not isinstance(agentId, str) or not agentId:
+                return
+            if not sessionKey:
+                return
+            from neurova.context.fold_trigger import rebuildFoldBaseline
+
+            baseline = rebuildFoldBaseline(read(str(agentId), str(sessionKey)) or [])
+            if not baseline:
+                return
+            if baseline.get("last_fold_tokens"):
+                slot["last_fold_tokens"] = int(baseline["last_fold_tokens"])
+            if baseline.get("last_fold_msgs"):
+                slot["last_fold_msgs"] = int(baseline["last_fold_msgs"])
+            if baseline.get("last_count"):
+                slot["last_count"] = int(baseline["last_count"])
+            if baseline.get("fold_seq"):
+                slot["fold_seq"] = int(baseline["fold_seq"])
+            covered = baseline.get("covered") or set()
+            if covered:
+                slot["covered"] = set(covered)
+            summary = str(baseline.get("summary") or "")
+            if summary:
+                # 摘要随基线恢复为单代栈：冻结头可重渲染，增长门读数连续。
+                # 代际阶梯的更深层级仍在池索引（foldSeq 不回退），随后续折叠重建。
+                slot["summary"] = summary
+                slot["level"] = 1
+                slot["generations"] = [{"summary": summary, "level": 1}]
+            logger.info(
+                "[WINDOW_COMPACT] S6' 折叠基线重放：session=%s last_fold_tokens=%s covered=%d fold_seq=%s",
+                sessionKey, slot.get("last_fold_tokens"), len(covered), slot.get("fold_seq"),
+            )
+        except Exception:  # noqa: BLE001 - 重放失败按无基线处理，不阻断建槽
+            logger.debug("折叠基线重放失败（按无基线处理）", exc_info=True)
 
     # ── SC-7：反思节律对齐折叠（信号源 MetaLedger，**只读**） ──
 
@@ -3450,6 +3539,8 @@ class ContextOrchestrator:
             self._advanceFoldGeneration(
                 cache, compaction.summary, covers=coveredNow, turnIds=turnIdsNow
             )
+            # S6'：手动压缩推进的覆盖账/代际同样落时间线（与自动折叠同一事实源）
+            self._persistFoldBaseline(cache, self._resolve_window_cache_key(), coveredNow)
             if int(cache.get("fold_seq") or 0) > prevFoldSeq:
                 # SC-5：仅当这一代真的归档进了池索引（层序推进了），才把寻址
                 # 信息透传给回执——没归档就编不出可下钻的引用。
