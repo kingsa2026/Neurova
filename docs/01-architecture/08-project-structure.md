@@ -96,7 +96,7 @@ Neurova/
 ├── neurova/security/                 # 安全模块
 ├── neurova/admin/                    # 管理模块
 ├── neurova/auth/                     # 认证授权
-├── neurova/api/                      # RESTful API (82 端点模块)
+├── neurova/api/                      # RESTful API (115 个路由模块，2026-11-19 现读)
 │   ├── app.py                        # FastAPI 应用
 │   └── endpoints/                    # API 端点实现
 │       ├── agent.py                  # Agent 管理

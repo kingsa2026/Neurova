@@ -79,7 +79,7 @@
 
 #### Application Layer (应用层)
 - **CLI**: 命令行接口，支持交互式对话
-- **REST API**: 82 端点模块，FastAPI 框架
+- **REST API**: FastAPI 框架，`neurova/api/endpoints/` 115 个路由模块 / 136 个 .py 文件（2026-11-19 现读）
 - **WebSocket**: 实时通信，支持流式响应
 - **通信渠道**: 飞书/钉钉/企业微信/Telegram/Discord/QQ/MQTT/SIP 等
 
@@ -583,7 +583,7 @@ services:
 - **自定义进化策略**: 实现 EvolutionStrategy 接口
 
 ### 11.2 API 扩展
-- **RESTful API**: 82 端点模块，FastAPI 框架
+- **RESTful API**: FastAPI 框架，115 个路由模块（2026-11-19 现读）
 - **WebSocket API**: 实时通信，流式响应
 - **gRPC API**: 高性能 RPC (未来)
 - **GraphQL API**: 灵活查询 (未来)
