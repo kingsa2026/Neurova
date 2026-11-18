@@ -78,7 +78,7 @@ class TestHardcodedSecretsContent:
         analyzer = SecretsContentAnalyzer()
         findings = analyzer.analyze(_file(
             "skills/demo/config.json",
-            '{"slack_token": "xoxb-123456789012-123456789012-abcdefghijabcdefghij"}',
+            '{"slack_token": "xoxb-not-a-real-token-not-a-real-token"}',
         ))
         assert "hardcoded_secrets" in _categories(findings)
         assert _blockingRuleIds(findings)
