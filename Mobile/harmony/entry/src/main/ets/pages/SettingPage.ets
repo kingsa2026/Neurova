@@ -890,6 +890,10 @@ export struct SettingPage {
 
       Toggle({ type: ToggleType.Switch, isOn: Boolean(item.value) })
         .onChange((isOn: boolean) => {
+          // 与 GlassInput 同理：属性同步回声（isOn 等于受控值）不外抛，防渲染驱动写状态
+          if (isOn === Boolean(item.value)) {
+            return;
+          }
           this.updateValue(item.key, isOn);
         })
     }
@@ -974,7 +978,13 @@ export struct SettingPage {
       })
         .width('100%')
         .margin({ top: this.sm.getSpacing('xs') })
-        .onChange((v: number) => { this.updateValue(item.key, v); })
+        .onChange((v: number) => {
+          // 同上：初挂/属性同步的回声值不外抛
+          if (v === Number(item.value)) {
+            return;
+          }
+          this.updateValue(item.key, v);
+        })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)

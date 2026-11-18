@@ -88,6 +88,12 @@ export struct GlassInput {
           .layoutWeight(1)
           .enabled(!this.disabled)
           .onChange((v: string) => {
+            // 属性同步回声不外抛：父层重渲染把 text 属性重设为受控值时 TextInput
+            // 也会触发 onChange——照抛就把「渲染」变成「写状态」（设置页曾因此在
+            // 进页瞬间把服务端主题值回写并应用，整窗翻白）。只放行真实编辑。
+            if (v === this.value) {
+              return;
+            }
             this.onChange(v);
           })
           .onSubmit((_enterKey: EnterKeyType, event: SubmitEvent) => {

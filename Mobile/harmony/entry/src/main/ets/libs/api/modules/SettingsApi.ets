@@ -71,6 +71,16 @@ function toSettingItem(key: string, value: Object): SettingItem {
     defaultValue: value,
     group: group,
   };
+  if (key === 'theme') {
+    // 主题是三选一（light/dark/auto），不能落成自由文本输入框——
+    // 输入框会把加载值经 onChange 回路回写并应用（实测进页即翻白）
+    item.type = 'select';
+    item.options = [
+      { label: '浅色', value: 'light' },
+      { label: '深色', value: 'dark' },
+      { label: '跟随系统', value: 'auto' },
+    ];
+  }
   return item;
 }
 
