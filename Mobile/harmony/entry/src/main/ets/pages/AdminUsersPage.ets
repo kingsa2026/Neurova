@@ -95,6 +95,65 @@ export struct AdminUsersPage {
 
       Scroll() {
         Column() {
+          // 统计卡三联（设计 F14 .adm-stat：用户总数/管理员/成员，均由列表真实派生）
+          Row() {
+            Column() {
+              Text(this.users.length.toString())
+                .fontSize(18)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(this.sm.getColor('text_primary'))
+              Text('用户总数')
+                .fontSize(10)
+                .fontColor(this.sm.getColor('text_tertiary'))
+                .margin({ top: 1 })
+            }
+            .layoutWeight(1)
+            .padding({ left: 13, right: 13, top: 10, bottom: 10 })
+            .borderRadius(12)
+            .backgroundColor(this.sm.getColor('glass'))
+            .border({ width: 1, color: this.sm.getColor('border') })
+            .alignItems(HorizontalAlign.Start)
+
+            Column() {
+              Text(this.users.filter((u: AdminUserDto) => u.role === 'admin').length.toString())
+                .fontSize(18)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(this.sm.getColor('text_primary'))
+              Text('管理员')
+                .fontSize(10)
+                .fontColor(this.sm.getColor('text_tertiary'))
+                .margin({ top: 1 })
+            }
+            .layoutWeight(1)
+            .padding({ left: 13, right: 13, top: 10, bottom: 10 })
+            .borderRadius(12)
+            .backgroundColor(this.sm.getColor('glass'))
+            .border({ width: 1, color: this.sm.getColor('border') })
+            .margin({ left: 10 })
+            .alignItems(HorizontalAlign.Start)
+
+            Column() {
+              Text(this.users.filter((u: AdminUserDto) => u.role !== 'admin').length.toString())
+                .fontSize(18)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(this.sm.getColor('text_primary'))
+              Text('成员')
+                .fontSize(10)
+                .fontColor(this.sm.getColor('text_tertiary'))
+                .margin({ top: 1 })
+            }
+            .layoutWeight(1)
+            .padding({ left: 13, right: 13, top: 10, bottom: 10 })
+            .borderRadius(12)
+            .backgroundColor(this.sm.getColor('glass'))
+            .border({ width: 1, color: this.sm.getColor('border') })
+            .margin({ left: 10 })
+            .alignItems(HorizontalAlign.Start)
+          }
+          .width('calc(100% - 40vp)')
+          .margin({ left: 20, right: 20, bottom: 12 })
+          .alignItems(VerticalAlign.Center)
+
           if (this.users.length === 0 && !this.loading) {
             Text(this.loading ? '加载中…' : '暂无用户或无权访问')
               .fontSize(13)
@@ -127,10 +186,12 @@ export struct AdminUsersPage {
                     .borderRadius(5)
                     .margin({ left: 7 })
                 }
-                Text(u.last_login.length > 0 ? '最近登录 ' + u.last_login : '邮箱 ' + (u.email.length > 0 ? u.email : '—'))
+                Text((u.email.length > 0 ? u.email + ' · ' : '') + (u.last_login.length > 0 ? '最近登录 ' + u.last_login : '未登录'))
                   .fontSize(10.5)
                   .fontColor(this.sm.getColor('text_tertiary'))
                   .margin({ top: 3 })
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
               }
               .alignItems(HorizontalAlign.Start)
               .layoutWeight(1)
@@ -151,9 +212,10 @@ export struct AdminUsersPage {
             .width('calc(100% - 40vp)')
             .padding(12)
             .borderRadius(13)
-            .backgroundColor(this.sm.getColor('surface'))
+            .backgroundColor(this.sm.getColor('glass'))
             .border({ width: 1, color: this.sm.getColor('border') })
             .margin({ bottom: 8, left: 20, right: 20 })
+            .opacity(u.active ? 1 : 0.62)
           }, (u: AdminUserDto) => u.id.toString())
         }
         .width('100%')

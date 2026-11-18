@@ -113,6 +113,8 @@ export interface Agent {
   updatedAt: string;
   config?: AgentConfig;
   stats?: AgentStats;
+  /** 已挂载工具数（后端 AgentInfo.tools_count，F7 卡片标签用） */
+  toolsCount?: number;
 }
 
 export interface Session {

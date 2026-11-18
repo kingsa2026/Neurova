@@ -21,7 +21,8 @@ import { SettingPage } from './SettingPage';
 
 @Component
 export struct ShellPage {
-  @State private activeTab: number = 0;
+  // 当前 Tab（AppStorage 双向同步：工作台「最近会话·全部」可切到对话 Tab）
+  @StorageLink('shellTab') activeTab: number = 0;
   @State private isWide: boolean = false;
   private sm: StyleManager = StyleManager.getInstance();
   private mqListener: mediaquery.MediaQueryListener | undefined = undefined;

@@ -116,26 +116,39 @@ export struct AdminGroupsPage {
                     .fontColor(this.sm.getColor('text_secondary'))
                     .margin({ top: 5 })
                 }
+                // 成员头像叠放（设计 F15 .grp-card .mem：负边距叠放 + 溢出 +N）
                 Row() {
-                  ForEach(g.members.slice(0, 5), (m: string) => {
+                  ForEach(g.members.slice(0, 4), (m: string, idx: number) => {
                     Text(m.slice(0, 1))
                       .fontSize(10)
                       .fontColor(this.sm.getColor('text_on_primary'))
-                      .width(24)
-                      .height(24)
-                      .borderRadius(12)
+                      .width(26)
+                      .height(26)
+                      .borderRadius(13)
                       .textAlign(TextAlign.Center)
                       .backgroundColor(this.sm.getColor('primary'))
-                      .margin({ right: 4 })
                       .border({ width: 2, color: this.sm.getColor('surface') })
+                      .margin({ left: idx === 0 ? 0 : -7 })
                   }, (m: string) => m)
+                  if (g.members.length > 4) {
+                    Text('+' + (g.members.length - 4).toString())
+                      .fontSize(9)
+                      .fontColor(this.sm.getColor('text_secondary'))
+                      .width(26)
+                      .height(26)
+                      .borderRadius(13)
+                      .textAlign(TextAlign.Center)
+                      .backgroundColor(this.sm.getColor('surface_strong'))
+                      .border({ width: 2, color: this.sm.getColor('surface') })
+                      .margin({ left: -7 })
+                  }
                 }
                 .margin({ top: 10 })
               }
               .width('calc(100% - 40vp)')
               .padding(14)
               .borderRadius(16)
-              .backgroundColor(this.sm.getColor('surface'))
+              .backgroundColor(this.sm.getColor('glass'))
               .border({ width: 1, color: this.sm.getColor('border') })
               .margin({ bottom: 10, left: 20, right: 20 })
             }, (g: AdminGroupDto) => g.group_id)

@@ -24,7 +24,8 @@
  *   点击"删除"弹出 AlertDialog 二次确认后调用 API 删除并刷新列表
  */
 
-import { TopNavMenu, GlassCard, GlassButton } from '../components/glass';
+import { GlassButton } from '../components/glass';
+import { AppIcon } from '../components/common/AppIcon';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { AgentsStore } from '../libs/state/stores/AgentsStore';
 import { Router, RouteNames } from '../routing/Router';
@@ -43,6 +44,9 @@ export struct AgentListPage {
   private agentsDs: SimpleDataSource<Agent> = new SimpleDataSource<Agent>();
   // 加载态（控制"加载中..."占位与列表的切换）
   @State loading: boolean = true;
+  // 头部计数（@State 驱动：agentsDs 非 @State，直接读它页头不会刷新）
+  @State agentTotal: number = 0;
+  @State agentOnline: number = 0;
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -67,6 +71,14 @@ export struct AgentListPage {
       const agents = await this.api.agents.list();
       this.agentsDs.setData(agents);
       this.agentsStore.setAgents(agents);
+      this.agentTotal = agents.length;
+      let online = 0;
+      for (const a of agents) {
+        if (a.status === 'active') {
+          online += 1;
+        }
+      }
+      this.agentOnline = online;
     } catch (e) {
       this.logger.error(TAG, '加载失败', e as Error);
       this.msg.error('加载智能体失败');
@@ -199,34 +211,25 @@ export struct AgentListPage {
   }
 
   build() {
-    Column() {
-      // 顶部导航栏：标题"智能体" + 返回按钮 + 创建按钮（右侧插槽）
-      // 内联头（原型 F7：21/700 标题 + 数量 + 创建渐变胶囊）
-      Row() {
-        Text('智能体')
-          .fontSize(21)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.sm.getColor('text_primary'))
-        Text(this.agentsDs.totalCount().toString() + ' 个')
-          .fontSize(11)
-          .fontColor(this.sm.getColor('text_tertiary'))
-          .margin({ left: 8 })
-          .alignSelf(ItemAlign.End)
-          .padding({ bottom: 3 })
-          .layoutWeight(1)
-        Button() {
-          Text('＋ 创建')
-            .fontSize(13)
-            .fontColor(this.sm.getColor('text_on_primary'))
+    Stack() {
+      Column() {
+        // 顶部导航栏：标题"智能体"（21/700）+ 数量/在线副标（右侧插槽）
+        // 内联头（原型 F7：标题 + 「N 个 · M 在线」；创建入口收敛为右下 FAB）
+        Row() {
+          Text('智能体')
+            .fontSize(this.sm.getFontSize('page_title'))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+          Text(this.agentTotal.toString() + ' 个 · ' + this.agentOnline.toString() + ' 在线')
+            .fontSize(this.sm.getFontSize('badge'))
+            .fontColor(this.sm.getColor('text_tertiary'))
+            .margin({ left: 8 })
+            .alignSelf(ItemAlign.End)
+            .padding({ bottom: 3 })
+          Blank()
         }
-        .height(34)
-        .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
-        .onClick(() => {
-          this.handleCreate();
-        })
-      }
-      .width('100%')
-      .padding({ left: 20, right: 20, top: 8, bottom: 10 })
+        .width('100%')
+        .padding({ left: 20, right: 20, top: 8, bottom: 10 })
 
       if (this.loading) {
         // 加载态：居中显示"加载中..."
@@ -239,7 +242,7 @@ export struct AgentListPage {
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
-      } else if (this.agentsDs.totalCount() === 0) {
+      } else if (this.agentTotal === 0) {
         // 空列表：居中显示"暂无智能体"+ 创建按钮
         Column() {
           Text('暂无智能体')
@@ -248,7 +251,7 @@ export struct AgentListPage {
             .margin({ bottom: this.sm.getSpacing('md') })
           GlassButton({
             text: '创建智能体',
-            type: 'primary',
+            type: 'gradient',
             btnSize: 'medium',
             onTap: () => { this.handleCreate(); }
           })
@@ -278,122 +281,126 @@ export struct AgentListPage {
           bottom: this.sm.getSpacing('sm'),
         })
       }
+      }
+      .width('100%')
+      .height('100%')
+
+      // 右下角 FAB（设计 F7 .fab：54px 品牌渐变圆钮 → 创建智能体）
+      Column() {
+        AppIcon({ name: 'plus', iconSize: 22, color: '#FFFFFF' })
+      }
+      .width(54)
+      .height(54)
+      .borderRadius(27)
+      .linearGradient({ angle: 135, colors: this.sm.getBrandGradient() })
+      .shadow({ radius: 30, color: 'rgba(99,102,241,0.50)', offsetY: 10 })
+      .position({ x: '80%', y: '85%' })
+      .onClick(() => { this.handleCreate(); })
     }
     .width('100%')
     .height('100%')
-    
   }
 
   // ===========================================================================
   // 智能体卡片构建器
   // ===========================================================================
 
-  /** 单个智能体卡片：头像 + 信息列 + 状态行 + 操作按钮 */
+  /** 单个智能体卡片（设计 F7 .ag-card）：头像 + 名称/在线点 + 一行描述 + 标签行 + 右侧箭头；整卡进详情 */
   @Builder
   buildAgentCard(agent: Agent) {
     // ArkTS 解析器不允许尾随闭包组件调用后再链属性修饰，外包 Column 承接 .width
     Column() {
-    GlassCard() {
-      Column() {
-        // 上部：头像 + 名称/描述/状态
-        Row() {
-          // 头像：首字母圆形，40x40，品牌渐变白字
-          Text(this.getAvatarChar(agent.name))
-            .fontSize(20)
-            .fontColor('#ffffff')
-            .fontWeight(FontWeight.Bold)
-            .width(40)
-            .height(40)
-            .borderRadius(14)
-            .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
-            .textAlign(TextAlign.Center)
+      Row() {
+        // 头像：首字母 40x40，品牌渐变白字（休眠置灰）
+        Text(this.getAvatarChar(agent.name))
+          .fontSize(20)
+          .fontColor(this.sm.getColor('text_on_primary'))
+          .fontWeight(FontWeight.Bold)
+          .width(40)
+          .height(40)
+          .borderRadius(14)
+          .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
+          .textAlign(TextAlign.Center)
+          .opacity(agent.status === 'sleeping' ? 0.5 : 1)
 
-          // 信息列：名称、描述、状态行
-          Column() {
-            // 名称
+        // 信息列：名称(+状态点) / 描述 / 标签行
+        Column() {
+          Row() {
             Text(agent.name)
-              .fontSize(this.sm.getFontSize('subtitle'))
-              .fontWeight(FontWeight.Bold)
+              .fontSize(this.sm.getFontSize('card_title'))
+              .fontWeight(FontWeight.Medium)
               .fontColor(this.sm.getColor('text_primary'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-            // 描述（空值回退"暂无描述"）
-            Text(agent.description ?? '暂无描述')
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .maxLines(2)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .margin({ top: 4 })
-
-            // 状态行：圆点 + 状态文案 + 分隔符 + 最后活跃时间
-            Row() {
-              // 状态圆点 8x8（Row + borderRadius 实现圆形）
+            if (agent.status === 'active') {
+              // 在线绿点（设计 .ag-card .nm .st）
               Row()
-                .width(8)
-                .height(8)
-                .borderRadius(4)
-                .backgroundColor(this.getStatusColor(agent.status))
-              Text(this.getStatusLabel(agent.status))
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.sm.getColor('text_secondary'))
-                .margin({ left: 4 })
-              Text('·')
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.sm.getColor('text_disabled'))
-                .margin({ left: 4, right: 4 })
-              Text(this.formatLastActive(agent.stats?.lastActiveAt))
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.sm.getColor('text_disabled'))
+                .width(6)
+                .height(6)
+                .borderRadius(3)
+                .backgroundColor(this.sm.getColor('success'))
+                .shadow({ radius: 8, color: 'rgba(52,211,153,0.80)' })
+                .margin({ left: 7 })
+            } else if (agent.status === 'sleeping') {
+              Text('休眠中')
+                .fontSize(this.sm.getFontSize('badge'))
+                .fontColor(this.sm.getColor('text_tertiary'))
+                .margin({ left: 7 })
             }
-            .margin({ top: 8 })
-            .alignItems(VerticalAlign.Center)
           }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-          .margin({ left: this.sm.getSpacing('sm') })
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Top)
+          .alignItems(VerticalAlign.Center)
 
-        // 下部：操作按钮（右对齐）
-        Row() {
-          GlassButton({
-            text: '详情',
-            type: 'default',
-            btnSize: 'small',
-            onTap: () => { this.openDetail(agent); }
-          })
-          GlassButton({
-            text: '对话',
-            type: 'primary',
-            btnSize: 'small',
-            onTap: () => { this.switchAgent(agent.id); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
-          GlassButton({
-            text: '编辑',
-            type: 'default',
-            btnSize: 'small',
-            onTap: () => { this.handleEdit(agent); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
-          GlassButton({
-            text: '删除',
-            type: 'danger',
-            btnSize: 'small',
-            onTap: () => { this.confirmDelete(agent); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
+          Text(agent.description !== '' ? agent.description : '暂无描述')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 3 })
+
+          // 标签行：模型名 + 工具数（真实字段，等宽字体紫胶囊）
+          Row() {
+            if (agent.model !== undefined && agent.model !== '') {
+              Text(agent.model)
+                .fontSize(9)
+                .fontFamily(this.sm.getMonoFont())
+                .fontColor(this.sm.getColor('primary'))
+                .backgroundColor(this.sm.getColor('primary_soft'))
+                .border({ width: 1, color: this.sm.getColor('primary') })
+                .borderRadius(5)
+                .padding({ left: 7, right: 7, top: 2, bottom: 2 })
+                .margin({ right: 6 })
+            }
+            if (agent.toolsCount !== undefined && agent.toolsCount > 0) {
+              Text('工具 ' + agent.toolsCount.toString())
+                .fontSize(9)
+                .fontFamily(this.sm.getMonoFont())
+                .fontColor(this.sm.getColor('primary'))
+                .backgroundColor(this.sm.getColor('primary_soft'))
+                .border({ width: 1, color: this.sm.getColor('primary') })
+                .borderRadius(5)
+                .padding({ left: 7, right: 7, top: 2, bottom: 2 })
+            }
+          }
+          .margin({ top: 8 })
+          .alignItems(VerticalAlign.Center)
         }
-        .width('100%')
-        .justifyContent(FlexAlign.End)
-        .margin({ top: this.sm.getSpacing('md') })
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 13 })
+
+        // 右侧：箭头（设计 .ag-card .rt2 → 简化为 chev）
+        AppIcon({ name: 'chev', iconSize: 14, color: this.sm.getColor('text_tertiary') })
       }
       .width('100%')
-      .alignItems(HorizontalAlign.Start)
-    }
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
+    .padding(15)
+    .borderRadius(16)
+    .backgroundColor(this.sm.getColor('glass'))
+    .border({ width: 1, color: this.sm.getColor('border') })
+    .backgroundBlurStyle(BlurStyle.Thin)
+    .opacity(agent.status === 'sleeping' ? 0.6 : 1)
+    .onClick(() => { this.openDetail(agent); })
   }
 }
