@@ -29,6 +29,27 @@ struct Index {
   private authStore = new AuthStore();
   private logger = Logger.getInstance();
 
+  /**
+   * 分发并确认落位。冷启动的 replace 可能早于 Navigation 装配完成而被静默丢弃
+   * （栈仍空、页面停在品牌占位页——真机实测偶发，快慢取决于首帧装配节奏）。
+   * 以「路由栈非空」为落位判据短轮询补发（写入→读取→反馈闭环），2s 上限后
+   * 诚实报错，不无限重试。
+   */
+  private async dispatch(route: string): Promise<void> {
+    this.router.replace(route);
+    let tries = 0;
+    while (!this.router.hasNavStack() && tries < 40) {
+      await new Promise<void>((resolve: () => void) => {
+        setTimeout(() => resolve(), 50);
+      });
+      this.router.replace(route);
+      tries += 1;
+    }
+    if (!this.router.hasNavStack()) {
+      this.logger.error('Index', `路由栈装配超时，未能分发到 ${route}`);
+    }
+  }
+
   async aboutToAppear() {
     // 冷启动先恢复服务器档案并把地址落到 HTTP 装配点（设计方案 §4.5，S0 接线）
     await ServerProfiles.getInstance().load(getContext(this) as Context);
@@ -36,7 +57,7 @@ struct Index {
     if (!apiBase) {
       // 无可用服务器档案：先去连接页录入，否则登录无从发起（登录按钮空转的根因）
       this.logger.info('Index', '冷启动：无服务器档案，跳转连接页');
-      this.router.replace(RouteNames.CONNECTION);
+      await this.dispatch(RouteNames.CONNECTION);
       return;
     }
     // await：applyServerProfile 是 async（baseUrl 同步落 + preferences 异步落盘），
@@ -54,10 +75,10 @@ struct Index {
     // 档案就绪后再分发，避免异步竞争导致带空地址登录
     if (this.authStore.isAuthenticated) {
       this.logger.info('Index', '冷启动：已登录，进入导航壳');
-      this.router.replace(RouteNames.SHELL);
+      await this.dispatch(RouteNames.SHELL);
     } else {
       this.logger.info('Index', '冷启动：未登录，跳转登录页');
-      this.router.replace(RouteNames.LOGIN);
+      await this.dispatch(RouteNames.LOGIN);
     }
     // C7：扫码配对深链优先——用户扫 PC 端二维码进入本机，直达配对页
     //（配对是鉴权前的引导流程，压在 LOGIN/SHELL 之上；配对成功后由
