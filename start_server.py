@@ -50,6 +50,11 @@ logging.basicConfig(
 try:
     from neurova.core.port_guard import PortUnavailableError
 except Exception:  # noqa: BLE001 - 判据缺席时退化为"无此类"，不阻断入口
+    logging.getLogger(__name__).warning(
+        "neurova.core.port_guard 不可导入——端口预检退化为占位"
+        "（预检判据缺席，端口占用要到绑定期才暴露）"
+    )
+
     class PortUnavailableError(RuntimeError):  # type: ignore[no-redef]
         """占位：port_guard 不可导入时不该让入口本身炸在 import 期。"""
 
