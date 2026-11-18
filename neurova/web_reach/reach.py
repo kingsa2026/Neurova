@@ -182,8 +182,18 @@ def rss_read(url: str, limit: int = 10, timeout: float = _DEFAULT_TIMEOUT) -> Di
 
 
 def _is_youtube_url(url: str) -> bool:
-    lowered = url.lower()
-    return "youtube.com/watch" in lowered or "youtu.be/" in lowered
+    """host+path 边界判定；语义与调用面自述一致（youtube.com/watch 或
+    youtu.be 短链）。原子串匹配会把 evil.com/youtube.com/watch、
+    notyoutube.com/watch 这类任意主机误判成 YouTube（审计 2026-11-18）。"""
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    if host == "youtu.be":
+        return True
+    return (host in ("youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com")
+            and parsed.path.startswith("/watch"))
 
 
 def youtube_transcript(url: str, timeout: float = _YTDLP_TIMEOUT) -> Dict[str, Any]:
