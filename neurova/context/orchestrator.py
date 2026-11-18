@@ -2135,16 +2135,29 @@ class ContextOrchestrator:
         from neurova.context_pool import ContextInput, ContextSource
 
         archived_hashes: set = set()
+        # QwenPaw 对照批 C4：tool_call_id → 工具名反查表（recall 防自污染的打标依据）
+        tool_name_by_call_id: Dict[str, str] = {}
+        for msg, _tid in assign_turn_ids(conversation_context):
+            for call in (msg or {}).get("tool_calls") or []:
+                call_id = (call or {}).get("id")
+                call_name = ((call or {}).get("function") or {}).get("name") or ""
+                if call_id and call_name:
+                    tool_name_by_call_id[str(call_id)] = str(call_name)
         for msg, turn_id in assign_turn_ids(conversation_context):
             role = (msg or {}).get("role", "user")
             source, content = self._windowChunkIdentity(msg)
             archived_hashes.add(ContextInput.compute_hash(source, content))
             if source == ContextSource.TOOL_CALL:
+                tool_call_id = msg.get("tool_call_id")
                 metadata = {
                     "role": "tool",
                     "turn_id": turn_id,
                     "pairs_with": turn_id,
-                    "tool_call_id": msg.get("tool_call_id"),
+                    "tool_call_id": tool_call_id,
+                    # C4：工具名随条目落池——recall 族工具的结果在召回读侧被排除
+                    # （防"上次 recall 的结果"污染本次检索）。
+                    "tool_name": tool_name_by_call_id.get(str(tool_call_id))
+                    or msg.get("name") or "",
                 }
             else:
                 metadata = {"role": role, "turn_id": turn_id}
