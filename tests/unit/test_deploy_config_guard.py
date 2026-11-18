@@ -279,6 +279,27 @@ class TestEnvReadFaceResolvesConstantAlias:
         wrongShape = gate.collectEnvKeys(['TIMEOUT = "30"\n', 'VALUE = getenv(TIMEOUT, "")\n'])
         assert wrongShape == set(), "常量值不是环境变量名形态却被收进读取面"
 
+    def test_aliasResolutionAcceptsUnderscorePrefixedModuleConstant(self):
+        """`_PRIVATE_ENV_KEY = "NEUROVA_X"`（下划线前缀模块私有常量）也须被认领。
+
+        auth.py 把恢复口令键名收成 `_MASTER_RECOVERY_PASSWORD_ENV`（下划线开头），
+        门禁别名声明正则原先只认 `[A-Z]` 开头 ⇒ compose/helm 里真被读取的
+        NEUROVA_MASTER_RECOVERY_PASSWORD 被误报成 R5-env 死配置。
+        """
+        gate = _load_gate_module()
+        keys = gate.collectEnvKeys([
+            '_MASTER_KEY = "NEUROVA_MASTER_RECOVERY_PASSWORD"\n',
+            'VALUE = os.environ.get(_MASTER_KEY) or ""\n',
+        ])
+        assert keys == {"NEUROVA_MASTER_RECOVERY_PASSWORD"}, keys
+
+    def test_production_underscoreAliasReadIsInFace(self):
+        keys = _load_gate_module().parse_app_read_env_keys()
+        assert "NEUROVA_MASTER_RECOVERY_PASSWORD" in keys, (
+            "auth.py 经 _MASTER_RECOVERY_PASSWORD_ENV 常量真读的键没进读取面"
+            " ⇒ R5-env 把活配置报成死配置"
+        )
+
 
 class TestCiWiring:
     def test_cnb_push_pipeline_runs_gate(self):

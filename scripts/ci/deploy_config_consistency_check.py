@@ -271,15 +271,17 @@ def parse_helm() -> Dict[str, Any]:
     }
 
 
-# 后端直读面（os.environ / config.get）。键名有两种写法：调用处直接写字符串字面量，
-# 或收成模块级常量再传进去（`ORIGINS_ENV_KEY = "NEUROVA_CORS_ORIGINS"` → `config.get(ORIGINS_ENV_KEY)`）。
+# 后端直读面（os.environ / config.get）。键名有三种写法：调用处直接写字符串字面量，
+# 或收成模块级常量再传进去（`ORIGINS_ENV_KEY = "NEUROVA_CORS_ORIGINS"` → `config.get(ORIGINS_ENV_KEY)`）；
+# 常量名也有模块私有惯例的下划线前缀形（`_MASTER_RECOVERY_PASSWORD_ENV = "NEUROVA_MASTER_RECOVERY_PASSWORD"`
+# → `os.environ.get(_MASTER_RECOVERY_PASSWORD_ENV)`，auth.py）。
 # 只认前一种会把**真被读取**的声明报成 R5-env 死配置——报的方向正好相反。
 _ENV_READ_CALL = (r"(?:os\.environ\.get|os\.getenv|getenv|config\.get|config\.get_int"
                   r"|config\.get_bool|config\.get_list)\(")
 BACKEND_ENV_READ = re.compile(_ENV_READ_CALL + r"\s*[\"']([A-Z][A-Z0-9_]+)[\"']")
 BACKEND_ENV_ALIAS_READ = re.compile(_ENV_READ_CALL + r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*[,)]")
 ENV_KEY_ALIAS_DEF = re.compile(
-    r"^([A-Z][A-Z0-9_]+)\s*=\s*[\"']([A-Z][A-Z0-9_]+)[\"']\s*(?:#.*)?$", re.M)
+    r"^([A-Z_][A-Z0-9_]+)\s*=\s*[\"']([A-Z][A-Z0-9_]+)[\"']\s*(?:#.*)?$", re.M)
 # 前端编译期注入面（Vite：import.meta.env.VITE_*）
 FRONTEND_ENV_READ = re.compile(r"import\.meta\.env\.([A-Z][A-Z0-9_]+)")
 
