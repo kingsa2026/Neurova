@@ -948,6 +948,21 @@ class PostChatPipeline:
             ("rsi_iteration", lambda: self._step_rsi_iteration(save_memory), None),
         ]
 
+        # 记忆蒸馏回写（2026-11-18 立项）：开关开且本轮允许落记忆时才注册——
+        # 开关关=不注册零步（严格零行为变化）；依赖 save_memory 已落库的
+        # 事实语境，而 save_memory 在响应路径先行完成，此处派发即在其后。
+        try:
+            from neurova.memory.distiller import distillEnabled
+
+            if save_memory and distillEnabled():
+                _background_steps.append((
+                    "memory_distill",
+                    lambda: self._step_memory_distill(user_input, reply, actual_session_id),
+                    None,
+                ))
+        except Exception:  # noqa: BLE001 - 蒸馏装配失败不影响既有管线
+            logger.debug("memory_distill 步骤装配跳过", exc_info=True)
+
         if self.background_enabled():
             _spawned: Dict[str, Any] = {}
             for _name, _factory, _after_name in _background_steps:
@@ -3026,6 +3041,18 @@ class PostChatPipeline:
                     duration_ms=(time.time() - start_time) * 1000,
                 )
             )
+
+    async def _step_memory_distill(self, user_input: str, reply: str, session_id: str) -> None:
+        """记忆蒸馏回写（2026-11-18 立项）：轮末异步归纳"值得长期记住的事实"
+        进 pending_memories 候选队列，人工审阅后落 memories 温度体系。
+
+        开关 NEUROVA_MEMORY_DISTILL（默认 off）；fail-soft——蒸馏故障不阻断
+        主对话，失败计连续熔断。"""
+        from neurova.memory.distiller import distillTurnMemory
+
+        await distillTurnMemory(
+            self._agt(), user_input=user_input, reply=reply, session_id=session_id
+        )
 
     async def _step_rsi_iteration(self, save_memory: bool = True) -> Optional[Dict[str, Any]]:
         """Step 11: RSI 迭代（递归自我改进）
