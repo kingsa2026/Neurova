@@ -2140,6 +2140,17 @@ class SwarmManager:
         except Exception as e:  # noqa: BLE001 - 轨迹收尾故障不阻断子任务
             logger.debug("Swarm: member 轨迹收尾失败（不阻断）: %s", e)
 
+    @staticmethod
+    def _subagentAccountingUserId(initiator_agent: Any) -> str:
+        """子代理记账身份：**agent 属主优先**（§3 裁定——运行台账行 user_id
+        与续跑权威按属主，可见性同口径）；属主缺省才退发送者直读转发，再退
+        空串。旧形发送者优先会在 admin/他人代跑时把台账行记到点击者名下，
+        属主反而看不见自己的 run（台账自家注释：跟着点击者走＝接线顺手造
+        出来的越权面）。fullrepo 审计 2026-11-18 B2/G3 收口。
+        """
+        return str(getattr(initiator_agent, "owner_user_id", "")
+                   or getattr(initiator_agent, "current_user_id", "") or "")
+
     async def _run_member(
         self,
         run: SubAgentRun,
@@ -2153,8 +2164,7 @@ class SwarmManager:
         transitionRun(run, SUBAGENT_RUNNING, cause="member_started")
         # P3-2（评测报告 G-12）：member 轨迹 trace——spawn→member→回流共一条可查询
         # 的 span 树；fail-open（轨迹故障/开关关闭不阻断子任务，与台账同口径）。
-        userId = str(getattr(initiator_agent, "current_user_id", "")
-                     or getattr(initiator_agent, "owner_user_id", "") or "")
+        userId = self._subagentAccountingUserId(initiator_agent)
         recorder, memberSpanId = self._startMemberTrace(run, userId)
         # 台账记账（§6-78 L 条）：写侧仍只在 `agent_run_ledger` 那一处，这里只调用。
         from neurova.core.agent_run_ledger import closeSubagentRun, openSubagentRun
