@@ -54,7 +54,7 @@
 | Skill 系统（注册表/版本/热插拔） | ✅ | `skills/` `skill_system/` | [05-skill-system](../01-architecture/05-skill-system.md) |
 | Skill 协议兼容 | ✅ | `skills/adapters/` | [05-skill-system](../01-architecture/05-skill-system.md) |
 | Skill 归档与回滚（治理面 + 技能页入口） | ✅ | `api/endpoints/governance.py` `evolution/skill_experience.py` `NeurUI/src/pages/AgentSkillPage.vue` | [05-skill-system](../01-architecture/05-skill-system.md) |
-| 肌肉记忆（ToolMemory 三层） | 🟡 | `evolution/tool_weights.py` `tool_lifecycle.py`（L1/L2/L3 部分） | [tool-memory-muscle-analysis](../01-architecture/tool-memory-muscle-analysis.md) |
+| 肌肉记忆（ToolMemory 三层） | ✅ | `cognitive_layers/memory_layer/muscle_memory.py`（L1/L2/L3 三层存取+固化/遗忘）+ `tool_memory_integration.py`（裁定门面）——写（on_tool_executed 统一记账，2026-11-18 M1 收口单源）→存（JSON 原子落盘）→读（check_tool_memory 跨层检索→auto_execute/suggest）→反馈（失败降级/权重联动/RSI 调参）全链闭环，NeuHebb 空转支路已退役 | [tool-memory-muscle-analysis](../01-architecture/tool-memory-muscle-analysis.md) |
 | MCP 集成 | ✅ | `tool_layers/mcp_client.py` `mcp_config.py` | [25-mcp-governance](../01-architecture/25-mcp-governance.md) |
 | MCP 治理安全加固（P0 六项） | ✅ | `tool_layers/mcp_bootstrap.py` `security/url_guard.py` | [25-mcp-governance](../01-architecture/25-mcp-governance.md) |
 | LLM Provider 管理（元数据/智能路由） | ✅ | `llm/provider_manager.py` `multi_model_client.py` | [23-llm-provider-management](../01-architecture/23-llm-provider-management.md) |
