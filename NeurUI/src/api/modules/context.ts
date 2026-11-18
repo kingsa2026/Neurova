@@ -31,6 +31,15 @@ export interface ContextStats {
   archived_total: number
   ledger_rows: number
   indexed_entries: number
+  /** S6/S15 压缩纪律参数（后端具名常量直读，设置页展示数据源） */
+  compression?: ContextCompressionSettings | null
+}
+
+/** S6/S15 压缩纪律参数（/context/stats.compression；数值单源在后端常量） */
+export interface ContextCompressionSettings {
+  triggerRatio: number
+  softTargetTokens: number
+  cooldownSteps: number[]
 }
 
 // ---------------------------------------------------------------------------

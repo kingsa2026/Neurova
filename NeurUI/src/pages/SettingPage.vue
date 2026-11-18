@@ -508,6 +508,23 @@
             <GlassButton variant="primary" size="sm" :loading="savingGovernance" @click="saveGovernance">{{ t('common.save') }}</GlassButton>
           </template>
         </GlassCard>
+
+        <!-- S6/S15 上下文压缩参数（只读展示）：数据源 /context/stats.compression，
+             数值单源在后端具名常量，前端不写死第二份 -->
+        <GlassCard :title="t('settings.contextCompressionTitle')">
+          <p class="governance-hint">{{ t('settings.contextCompressionHint') }}</p>
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.contextCompressionTriggerRatio')">
+              <span class="compression-value">{{ compressionTriggerRatioLabel }}</span>
+            </a-form-item>
+            <a-form-item :label="t('settings.contextCompressionSoftTarget')">
+              <span class="compression-value">{{ compressionSoftTargetLabel }}</span>
+            </a-form-item>
+            <a-form-item :label="t('settings.contextCompressionCooldownSteps')">
+              <span class="compression-value">{{ compressionCooldownLabel }}</span>
+            </a-form-item>
+          </a-form>
+        </GlassCard>
         </div>
       </a-tab-pane>
       <a-tab-pane key="quota" :tab="t('settings.quotaTab')">
@@ -551,6 +568,8 @@ import { extractApiDetail } from '@/utils/error'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import CredentialManager from '@/components/settings/CredentialManager.vue'
+import { getContextStats } from '@/api/modules/context'
+import type { ContextCompressionSettings } from '@/api/modules/context'
 import { message } from 'ant-design-vue'
 
 const { t } = useI18n()
@@ -580,12 +599,41 @@ const quota = ref({ max_llm_calls_per_day: 100, max_llm_tokens_per_day: 100000 }
 const savingRecall = ref(false)
 const savingSwarmGate = ref(false)
 
+/** S6/S15 上下文压缩参数（只读）：后端具名常量经 /context/stats 下发，
+ *  前端只展示不保存——这里没有第二份可写的默认值。 */
+const compressionStats = ref<ContextCompressionSettings | null>(null)
+const compressionTriggerRatioLabel = computed(() => {
+  const ratio = compressionStats.value?.triggerRatio
+  return ratio === null || ratio === undefined ? '—' : `${Math.round(ratio * 100)}%`
+})
+const compressionSoftTargetLabel = computed(() => {
+  const tokens = compressionStats.value?.softTargetTokens
+  return tokens === null || tokens === undefined ? '—' : `${tokens} tokens`
+})
+const compressionCooldownLabel = computed(() => {
+  const steps = compressionStats.value?.cooldownSteps ?? []
+  return steps.length ? steps.map((s) => `${s}s`).join(' / ') : '—'
+})
+
+async function fetchCompressionSettings(): Promise<void> {
+  try {
+    const res: any = await getContextStats()
+    const data = res?.data ?? res
+    compressionStats.value = data?.compression ?? null
+  } catch {
+    // 只读展示面：拉不到按"—"显示，不弹错打断设置页加载
+    compressionStats.value = null
+  }
+}
+
 /** LLM 路由设置：actionability 门控 + 群领导选举（均默认关，仅机器源/群聊生效） */
 const routing = ref({ actionability_enabled: false, actionability_lookback: 20, group_leadership_enabled: false, group_lease_ttl_seconds: 90 })
 
 // 进化治理设置（独立于扁平 settings 的治理面）
 const governance = ref({
   conversation_rules_enabled: false,
+  // T2/T3 睡眠归纳相位门控（schema 归纳 + 跨域碰撞，LLM 成本闸，默认关）
+  sleep_induction_enabled: false,
   rsi_phase: 0,
   /** G2 覆写编辑态：textarea 逐行 `agent_id=phase`，保存时解析（后端 422 兜底值域）。 */
   rsi_phase_overrides: {} as Record<string, number>,
@@ -1227,6 +1275,7 @@ onMounted(() => {
   fetchEvalExperiments()
   fetchRetrievalRecipe()
   fetchAgentProfiles()
+  fetchCompressionSettings()
 })
 </script>
 
@@ -1256,6 +1305,7 @@ onMounted(() => {
 :deep(.settings-tabs .ant-tabs-tab-active .ant-tabs-tab-btn) { color: var(--nr-text-primary) !important; }
 .storage-actions { display: flex; gap: 8px; }
 .advanced-stack { display: flex; flex-direction: column; gap: 16px; }
+.compression-value { font-size: 14px; font-weight: 600; color: var(--nr-text-primary); font-variant-numeric: tabular-nums; }
 .governance-hint { font-size: 12px; color: var(--nr-text-secondary, #8a8a92); margin: 0 0 12px; }
 .quota-hint { font-size: 12px; color: var(--nr-text-secondary, #8a8a92); margin: 0; }
 </style>
