@@ -391,6 +391,29 @@ class ToolCoordinator:
             while len(self._completed) > self._MAX_COMPLETED:
                 self._completed.pop(next(iter(self._completed)), None)
 
+    def getCompletedEntry(self, task_id: str,
+                          session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """完成后结果的**只读查询面**（QwenPaw 对照批 B7）。
+
+        `_completed` 是纯内存有界留存（`_MAX_COMPLETED`），此前没有查询口。
+        归属 fail-closed：`session_id` 给出时必须与盖章归属**精确相等**才返回；
+        不存在/不匹配一律 None（调用方转 404，不泄露他席任务存在性）。
+        返回投影不含 task/observer 等运行期引用。
+        """
+        entry = self._completed.get(task_id)
+        if not entry:
+            return None
+        if session_id is not None and str(entry.get("session_id") or "") != str(session_id):
+            return None
+        return {
+            "task_id": task_id,
+            "tool_name": entry.get("tool_name"),
+            "session_id": entry.get("session_id"),
+            "success": entry.get("success"),
+            "error": entry.get("error"),
+            "result": entry.get("result"),
+        }
+
     def recordApprovalOutcome(self, tool_name: str, call_id: Optional[str], *,
                               success: bool, session_id: Optional[str] = None,
                               result: Any = None, error: Optional[str] = None) -> None:
