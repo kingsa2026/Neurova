@@ -619,6 +619,7 @@ export default {
     retryYieldWait: 'Ausweichen wegen Kontingent - erneuter Versuch in {seconds} s (Versuch {retry}/{max})',
     upstreamSilence: 'Keine Daten vom Upstream seit {seconds}s – es wird weiterhin gewartet…',
     contextCompactedNotice: 'Automatisch komprimiert: {folded} Nachrichten eingeklappt, Kontext {before} → {after} Token',
+    contextCompactCooldownNotice: 'Kontextkomprimierung im Cooldown: {failures} Fehlschläge in Folge, automatische Komprimierung für {seconds}s pausiert',
     turnParked: 'Diese Antwort ist geparkt - manuelle Fortsetzung erforderlich',
     turnStillRunning: 'Diese Antwort wird noch erstellt',
     parkedPinnedModel: 'Gepinntes Modell {pinned}; diese Anfrage {requested}',

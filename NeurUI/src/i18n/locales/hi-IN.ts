@@ -619,6 +619,7 @@ export default {
     retryYieldWait: 'समानांतर कोटा के कारण रुके हैं - {seconds} सेकंड में पुनःप्रयास ({retry}/{max})',
     upstreamSilence: 'अपस्ट्रीम {seconds} सेकंड से मौन, प्रतीक्षा जारी है…',
     contextCompactedNotice: 'स्वतः कॉम्पैक्ट: {folded} संदेश फोल्ड किए, संदर्भ {before} → {after} टोकन',
+    contextCompactCooldownNotice: 'संदर्भ संपीड़न कूलडाउन में: लगातार {failures} विफलताएँ, {seconds}s के लिए स्वतः संपीड़न रोका गया',
     turnParked: 'यह टर्न रुका हुआ है - मैनुअल पुनःआरंभ आवश्यक',
     turnStillRunning: 'यह उत्तर अभी भी बनाया जा रहा है',
     parkedPinnedModel: 'पिन किया गया मॉडल {pinned}; यह अनुरोध {requested}',

@@ -84,3 +84,42 @@ describe('S6 轻提示渲染与类型面', () => {
     expect(line).toContain('{after}')
   })
 })
+
+describe('S15 upstream_status 冷却分支', () => {
+  const statusCase = blockAfter("case 'upstream_status': {")
+
+  it('分支认领 phase=context_compact_cooldown（冷却不再误入静默提示条）', () => {
+    expect(statusCase).toContain("event.phase === 'context_compact_cooldown'")
+  })
+
+  it('冷却分支复用 compactNotice 轻提示条（kind=cooldown），不落 silence', () => {
+    const idx = statusCase.indexOf("event.phase === 'context_compact_cooldown'")
+    const branch = statusCase.slice(idx, idx + 400)
+    expect(branch).toContain('msg.compactNotice = {')
+    expect(branch).toContain("kind: 'cooldown'")
+    expect(branch).not.toContain("phase: 'silence'")
+  })
+
+  it('冷却载荷取后端读数（cooldownSeconds/consecutiveFailures），不自造', () => {
+    expect(statusCase).toContain('event.cooldownSeconds')
+    expect(statusCase).toContain('event.consecutiveFailures')
+  })
+
+  it('类型面 compactNotice 含 kind/cooldownSeconds/consecutiveFailures', () => {
+    expect(types).toContain("kind?: 'compacted' | 'cooldown'")
+    expect(types).toContain('cooldownSeconds')
+    expect(types).toContain('consecutiveFailures')
+  })
+
+  it('模板按 kind 切冷却文案（contextCompactCooldownNotice）', () => {
+    expect(source).toContain('contextCompactCooldownNotice')
+  })
+
+  it.each(LOCALES)('%s 有 chat.contextCompactCooldownNotice 且带 {failures}/{seconds} 插值', (locale) => {
+    const file = readFileSync(resolve(process.cwd(), `src/i18n/locales/${locale}.ts`), 'utf-8')
+    const line = file.split('\n').find((ln) => ln.includes('contextCompactCooldownNotice:')) ?? ''
+    expect(line).not.toBe('')
+    expect(line).toContain('{failures}')
+    expect(line).toContain('{seconds}')
+  })
+})

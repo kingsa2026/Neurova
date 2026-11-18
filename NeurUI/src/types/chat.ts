@@ -94,15 +94,24 @@ export interface ChatMessage {
    * S6 自动压缩轻提示：SSE `upstream_status` 且 phase=context_compacted 时写入
    * （后端压缩纪律的 cutoff 摘要载荷）。原始消息永不删除——这只是"这段已折叠"
    * 的展示事实，随该条气泡保留。
+   *
+   * S15 扩展：phase=context_compact_cooldown（压缩失败冷却）复用同一条轻提示
+   * 条，kind=cooldown 区分数义——载荷换冷却读数（步长秒数/连续失败次数）。
    */
   compactNotice?: {
-    /** 被折叠前缀的消息条数 */
-    foldedCount: number
-    /** 压缩前后上下文 token 读数（后端实测） */
-    tokensBefore: number
-    tokensAfter: number
+    /** 提示种类：compacted=已压缩摘要（缺省，兼容旧数据）；cooldown=压缩失败冷却中 */
+    kind?: 'compacted' | 'cooldown'
+    /** 被折叠前缀的消息条数（kind=compacted） */
+    foldedCount?: number
+    /** 压缩前后上下文 token 读数（后端实测；kind=compacted） */
+    tokensBefore?: number
+    tokensAfter?: number
     /** 触发原因：threshold（水位）| overflow_retry（溢出兜底） */
     reason?: string
+    /** 本次冷却步长秒数（kind=cooldown，后端读数） */
+    cooldownSeconds?: number
+    /** 连续失败次数（kind=cooldown，后端读数） */
+    consecutiveFailures?: number
   }
 }
 

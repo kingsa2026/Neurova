@@ -619,6 +619,7 @@ export default {
     retryYieldWait: 'Cession pour quota de concurrence - nouvelle tentative dans {seconds} s (essai {retry}/{max})',
     upstreamSilence: 'Amont silencieux depuis {seconds}s, attente en cours…',
     contextCompactedNotice: 'Compression automatique : {folded} messages repliés, contexte {before} → {after} tokens',
+    contextCompactCooldownNotice: 'Compression du contexte en refroidissement : {failures} échecs consécutifs, compression automatique en pause pendant {seconds}s',
     turnParked: 'Ce tour est suspendu - reprise manuelle requise',
     turnStillRunning: 'Cette réponse est encore en cours de génération',
     parkedPinnedModel: 'Modèle épinglé {pinned} ; cette requête {requested}',

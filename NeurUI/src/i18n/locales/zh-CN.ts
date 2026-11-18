@@ -626,6 +626,7 @@ export default {
     upstreamSilence: '上游已静默 {seconds} 秒，仍在等待…',
     // S6 自动压缩轻提示（cutoff 摘要：折叠条数 + tokens 前→后）
     contextCompactedNotice: '已自动压缩：折叠 {folded} 条消息，上下文 {before} → {after} tokens',
+    contextCompactCooldownNotice: '上下文压缩冷却中：连续第 {failures} 次失败，{seconds}s 内暂缓自动压缩',
     turnParked: '本轮已挂起，等待人工续跑',
     turnStillRunning: '本轮仍在生成中',
     parkedPinnedModel: '模型钉住 {pinned}，本次请求 {requested}',
