@@ -93,10 +93,15 @@ _TRUTHY = ("1", "true", "on", "yes")
 
 
 def sleepInductionEnabled() -> bool:
-    """门控读取（调用时解析，测试/运维可实时翻转）。"""
-    import os
+    """门控读取——治理开关单一优先级口径（resolve_flag）：
 
-    return str(os.environ.get(INDUCTION_ENV, "")).strip().lower() in _TRUTHY
+    env ``NEUROVA_SLEEP_INDUCTION`` 显式 "0"/"1" 强制覆盖 > 治理设置页
+    ``sleep_induction_enabled`` > 默认关。治理页开关即本键（前端
+    /governance/settings 读写），环境变量保留作运维强制通道。
+    """
+    from neurova.security.governance_settings import resolve_flag
+
+    return resolve_flag("sleep_induction_enabled", INDUCTION_ENV)
 
 
 def get_dependency_graph_safe():

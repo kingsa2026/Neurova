@@ -167,6 +167,21 @@ class ResolveConflictRequest(BaseModel):
     apply_to_store: bool = False
 
 
+class InductionLogItem(BaseModel):
+    """归纳/碰撞周期记录（T2/T3 睡眠归纳相位的如实计数）"""
+
+    timestamp: float
+    enabled: bool = False
+    candidates: int = 0
+    clusters: int = 0
+    schemas: int = 0
+    collisions: int = 0
+    core_schemas: int = 0
+    failed: int = 0
+    identity_tagged: int = 0
+    intentions: int = 0
+
+
 def _get_request_id(request: Request) -> str:
     """获取请求ID"""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
@@ -578,6 +593,30 @@ async def resolve_conflict(
         "data": updated,
         "request_id": request_id,
     }
+
+
+@router.get("/{agent_id}/inductions", response_model=List[InductionLogItem])
+async def get_induction_logs(
+    request: Request,
+    agent_id: str = Path(..., description="Agent ID"),
+    limit: int = Query(default=10, ge=1, le=100, description="数量限制"),
+    offset: int = Query(default=0, ge=0, description="偏移量"),
+):
+    """获取归纳/碰撞周期记录（T2/T3 睡眠归纳相位，最新在前）"""
+    _get_request_id(request)
+
+    agent = _get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    sleep_manager = _get_sleep_manager(agent_id)
+    logs = []
+    if sleep_manager and hasattr(sleep_manager, "get_induction_logs"):
+        try:
+            logs = sleep_manager.get_induction_logs(limit=limit, offset=offset)
+        except Exception as e:
+            logger.warning("Failed to get induction logs: %s", e)
+    return logs
 
 
 @router.post("/{agent_id}/wake")

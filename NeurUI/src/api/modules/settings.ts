@@ -150,6 +150,8 @@ export function deleteRdpCredential() {
 
 export interface GovernanceSettings {
   conversation_rules_enabled: boolean
+  /** T2/T3 睡眠归纳相位门控（schema 归纳 + 跨域碰撞，LLM 成本闸，默认关）。 */
+  sleep_induction_enabled?: boolean
   rsi_phase: number
   /** G2 agent 级相位覆写：命中条目的 agent 按覆写值读相位（最小灰度维度）。 */
   rsi_phase_overrides: Record<string, number>

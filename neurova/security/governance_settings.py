@@ -38,6 +38,9 @@ _LOCK = threading.RLock()
 
 DEFAULTS: Dict[str, Any] = {
     "conversation_rules_enabled": False,  # Step9.96 LLM 成本门控，默认关
+    # T2/T3 睡眠归纳相位门控（schema 归纳 + 跨域碰撞，LLM 成本闸，默认关；
+    # env NEUROVA_SLEEP_INDUCTION 仍可显式 0/1 强制覆盖）
+    "sleep_induction_enabled": False,
     "rsi_phase": 0,  # RSI 部署阶段 0..4（0=观察）
     "metacog_gate_enabled": False,  # V3 调控门（教训拦截工具），默认关
     # 工单 015 收口的两个裸 env。默认值＝收口前的现网默认，不顺手改口径

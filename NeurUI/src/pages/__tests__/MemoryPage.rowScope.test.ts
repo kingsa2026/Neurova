@@ -146,10 +146,11 @@ describe('MemoryPage 行作用域闸门', () => {
     }
   })
 
-  it('动作列的四处禁用都只问 rowIsActionable（绑定钉成源码形状）', () => {
+  it('动作列的五处禁用都只问 rowIsActionable（绑定钉成源码形状）', () => {
     const bound = pageSource.match(/:disabled="!rowIsActionable\(record\)"/g) ?? []
 
-    expect(bound.length).toBe(4)
+    // 打开/世代链（T1）/强化/遗忘/删除——新增动作必须同问 rowIsActionable
+    expect(bound.length).toBe(5)
     // 反向：页面不得另起一份归属猜测（三元组只该留在后端）
     expect(pageSource).not.toContain('neuser_id')
   })

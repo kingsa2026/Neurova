@@ -1376,12 +1376,9 @@ class Agent:
                 # P2-6: 注入真实记忆平均温度，替代此前硬编码的 25.0
                 if self.memory_manager is not None:
                     self.idle_tracker.set_temperature_provider(self.memory_manager.get_average_temperature)
-                # T2 睡眠归纳相位：LLM 客户端提供者（门控 NEUROVA_SLEEP_INDUCTION
-                # 默认 off；客户端缺席时归纳自动跳过，不阻断睡眠链）。自动周期
-                # 与手动深睡会话两条触发路径都注入。
-                self.idle_tracker.set_induction_llm_provider(
-                    lambda: getattr(self, "llm_client", None)
-                )
+                # T2/T3 睡眠归纳相位：LLM 客户端提供者注入 consolidation 单点
+                # （门控 sleep_induction_enabled 治理页/环境变量，默认 off；
+                # 自动周期与手动深睡会话两条触发线都汇到这里）
                 if self.sleep_consolidation is not None:
                     self.sleep_consolidation.set_induction_llm_provider(
                         lambda: getattr(self, "llm_client", None)
