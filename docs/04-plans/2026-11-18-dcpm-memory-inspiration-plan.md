@@ -152,6 +152,15 @@ T6 intention 层（差异化，与 question_queue 合流；最后做）
 
 **验收判据**：同一偏好多轮/多任务出现 → identity 行转正 → 检索常驻可见；单次偶发不转正。
 
+**执行记录（2026-11-18，会话内实施——拍板"归纳打标+晋升接通"）**：
+- 归纳提示词扩 `kind` 字段（identity=在说用户是谁/稳定偏好；behavior=一般行为规律；非法值回落 behavior）；identity 簇的 schema 落图时 metadata.kind="identity"，并对其证据行打 `metadata.is_identity=true`（写入单点 `_tagEvidenceAsIdentity`，fail-soft）。
+- 读侧不动召回热路径：`run_promotion_cycle` 的确定性硬信号增加 identity 一条（is_identity 行即使温度/召回未达标也晋升 → CONSOLIDATED → 按既有结晶闭环累计固化）——复用既有晋升/结晶机制。
+- T6 同批落地（拍板"图节点+现有读面"）：归纳提示词扩可选 `intention` 字段；有则额外落 entity_type="intention" 图节点（metadata 带 evidence/related_schema/scope），经既有 /neuron API 可查；不强行注入问题队列（其 generate_question 是另一套好奇驱动语义，硬合会造第二套语义）。
+- 验证：红灯 7 用例 → 绿 7/7（identity 打标/behavior 默认不打/非法 kind 回落/intention 节点带证据与关联 schema/无 intention 不产节点/晋升门 identity 硬信号/无信号冷行不误晋升）；memory 套件 1195 过仅 2 预存。
+- live-verify：隔离真后端 5/5 PASS——identity 行经真实**自动**睡眠周期（time 模式、闲置阈值 1 分钟、活跃门关闭）被晋升（服务端日志 "Promotion cycle: 1 memories promoted"，持久库 stage=consolidated/is_important=true/is_identity=true）。
+- 坑：自动周期联调三处门槛——默认 sleep_mode="temperature" 下新记忆温度 65 永远高于阶段阈值（须显式 time 模式）；`sleep_threshold_minutes` 默认 30 拦截 active 首迁（置 0 关门）；`/memory/{id}` 走 success_response 包络（真身在 data）。
+- 净 LOC：生产池 +81/−0（sleep_induction +75、manager +6）；测试 +185 不计入。
+
 ---
 
 ## T6 · intention 层（主动关怀，差异化不做照抄）
@@ -165,6 +174,10 @@ T6 intention 层（差异化，与 question_queue 合流；最后做）
 **边界**：无证据不推断、不展示；不做未经用户同意的主动打扰（频控挂既有渠道纪律）。
 
 **验收判据**：归纳产出的 intention 落问题队列且带来源；用户关闭后同源 intention 不再复现。
+
+**执行记录（2026-11-18，会话内实施——拍板"图节点+现有读面"）**：
+- 与 T5 同批落地：归纳提示词扩可选 `intention` 字段；非空即额外落 entity_type="intention" 图节点（metadata 带 evidence 回指/related_schema 关联 schema/scope），经既有 `/neuron` API（entity_type 过滤）可查。未注入问题队列——其 generate_question 是另一套好奇驱动语义，硬合会造第二套语义；人在环关停 = 删除该图节点（/neuron 既有删除面）。
+- 验证与坑详见 T5 执行记录（同批同笔提交）。
 
 ---
 

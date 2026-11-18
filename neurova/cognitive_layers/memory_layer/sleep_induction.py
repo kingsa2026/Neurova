@@ -49,11 +49,15 @@ INDUCTION_COSINE_THRESHOLD = 0.75
 #: 单周期选材上限（超出按温度优先取舍，余量如实计入 deferred）
 INDUCTION_MAX_CANDIDATES = 400
 
-#: 归纳 LLM 调用提示词（要求严格 JSON，便于确定性解析）
+#: 归纳 LLM 调用提示词（要求严格 JSON，便于确定性解析）。kind 供 T5 identity
+#: 打标；intention 供 T6 意图节点（可选，没有则空串）。
 INDUCTION_PROMPT = (
     "以下是从同一用户记忆中聚出的一组事实。请归纳它们共同体现的行为规律或"
     "稳定偏好，输出严格 JSON（不要多余文字）：\n"
-    '{"name": "<4-12 字的模式名>", "pattern": "<一句话规律描述>"}\n'
+    '{"name": "<4-12 字的模式名>", "pattern": "<一句话规律描述>", '
+    '"kind": "identity 或 behavior（这组事实在说用户是谁/其稳定偏好=identity；'
+    "一般行为规律=behavior）\", "
+    '"intention": "<可选：这组事实提示的、值得主动跟进的未来事项；没有则空串>"}\n'
     "事实清单：\n"
 )
 
@@ -212,7 +216,11 @@ def clusterRecords(rows: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
 
 
 def _parseSchemaResponse(text: str) -> Optional[Dict[str, str]]:
-    """从模型回复里取严格 JSON 的 name/pattern（容忍前后杂质）。"""
+    """从模型回复里取严格 JSON 的 name/pattern/kind/intention（容忍前后杂质）。
+
+    kind 非法/缺省回落 "behavior"（T5：只有明确判为 identity 才打身份标）；
+    intention 为可选字段（T6：空串/缺失=无意图节点）。
+    """
     if not text:
         return None
     match = _JSON_RE.search(str(text))
@@ -226,7 +234,11 @@ def _parseSchemaResponse(text: str) -> Optional[Dict[str, str]]:
     pattern = str(data.get("pattern") or "").strip()
     if not name or not pattern:
         return None
-    return {"name": name, "pattern": pattern}
+    kind = str(data.get("kind") or "").strip().lower()
+    if kind not in ("behavior", "identity"):
+        kind = "behavior"
+    intention = str(data.get("intention") or "").strip()
+    return {"name": name, "pattern": pattern, "kind": kind, "intention": intention}
 
 
 def induceSchemaForCluster(
@@ -268,6 +280,8 @@ def runSleepInduction(
         "deferred": 0,
         "dedup_skipped": 0,
         "failed": 0,
+        "identity_tagged": 0,
+        "intentions": 0,
         "max_schemas": int(max_schemas),
         "entities": [],
     }
@@ -315,6 +329,15 @@ def runSleepInduction(
             stats["entities"].append(stored)
             written += 1
             stats["schemas"] = written
+            # T5：identity 簇的证据行打标（晋升门的身份硬信号来源）
+            if stored.metadata.get("kind") == "identity":
+                stats["identity_tagged"] += _tagEvidenceAsIdentity(manager, cluster)
+            # T6：可选 intention → 独立图节点（证据回指 + 关联 schema）
+            intention = parsed.get("intention") or ""
+            if intention:
+                node = _writeIntentionNode(graph, intention, cluster, scope, stored.id)
+                if node is not None:
+                    stats["intentions"] += 1
 
     stats["candidates"] = sum(len(rows) for rows in buckets.values())
     logger.info(
@@ -328,7 +351,7 @@ def runSleepInduction(
 
 
 def _makeSchemaEntity(entity_id, parsed, cluster, scope):
-    """构造 schema 实体（证据回指 + 作用域 + 归纳元信息）。"""
+    """构造 schema 实体（证据回指 + 作用域 + kind + 归纳元信息）。"""
     from neurova.cognitive_layers.memory_layer.dependency_graph import EntityNode
 
     agent_id, neuser_id, user_id = scope
@@ -338,6 +361,7 @@ def _makeSchemaEntity(entity_id, parsed, cluster, scope):
         entity_type=SCHEMA_ENTITY_TYPE,
         metadata={
             "pattern": parsed["pattern"],
+            "kind": parsed.get("kind") or "behavior",
             "evidence": [str(row.get("id") or "") for row in cluster],
             "scope": [agent_id, neuser_id, user_id],
             "induced_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -345,6 +369,52 @@ def _makeSchemaEntity(entity_id, parsed, cluster, scope):
             "cluster_size": len(cluster),
         },
     )
+
+
+def _tagEvidenceAsIdentity(manager: Any, cluster: List[Dict[str, Any]]) -> int:
+    """T5：identity 簇的证据行打 ``metadata.is_identity=true``（写入单点）。
+
+    晋升门据此把身份事实优先常驻（复用既有晋升/结晶机制，不动召回热路径）。
+    fail-soft：单条打标失败只留日志。
+    """
+    tagged = 0
+    for row in cluster:
+        eid = str(row.get("id") or "")
+        if not eid or manager is None or not hasattr(manager, "update_memory"):
+            continue
+        try:
+            if manager.update_memory(eid, metadata={"is_identity": True}):
+                tagged += 1
+        except Exception as e:  # noqa: BLE001 - 打标失败不阻断归纳
+            logger.debug("identity 打标失败（%s）: %s", eid, e)
+    return tagged
+
+
+def _writeIntentionNode(
+    graph: Any, intention: str, cluster: List[Dict[str, Any]], scope, schema_id: str
+) -> Optional[Any]:
+    """T6：把归纳出的 intention 落成图节点（证据回指 + 关联 schema）。"""
+    if graph is None or not intention:
+        return None
+    from neurova.cognitive_layers.memory_layer.dependency_graph import EntityNode
+
+    agent_id, neuser_id, user_id = scope
+    node_id = f"intention:{agent_id}:{uuid.uuid4().hex[:12]}"
+    if not graph.add_entity(EntityNode(
+        id=node_id,
+        name=intention[:24],
+        entity_type="intention",
+        metadata={
+            "pattern": intention,
+            "evidence": [str(row.get("id") or "") for row in cluster],
+            "related_schema": schema_id,
+            "scope": [agent_id, neuser_id, user_id],
+            "induced_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "source": "sleep_induction",
+        },
+    )):
+        return None
+    return graph.get_entity(node_id)
 
 
 def buildSyncLlmFn(client: Any) -> Optional[Callable[[str], str]]:
