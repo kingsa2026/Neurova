@@ -58,6 +58,36 @@ from neurova.cognitive_layers.meta_cognition_layer.growth_log import ReflectionT
 logger = get_logger(__name__)
 
 
+# ── 动机调制主动提问出队（E3 最小闭环，2026-11-18）────────────────────
+# 动机账本（MotivationLedger）的 purpose/autonomy 强度等权混合后，按档位给出
+# 主动提问的**最小全局出队间隔**：强度低 → 频率上限收紧；强度高 → 不额外限流
+# （维持既有行为，每问冷却仍由 QuestionQueueManager 自己管）。
+# 只调出队频率，不新造行为通道、不改提问内容生成。档位阈值/间隔均为具名常量，
+# 可测可注入；强度经 ledger.snapshot() 既有口径读取，不另起第二套算法。
+MOTIVATION_QUESTION_INTENSITY_HIGH = 0.45  # purpose/autonomy 均值 ≥ 此值视为高动机
+MOTIVATION_QUESTION_INTENSITY_LOW = 0.3  # 均值 < 此值视为低动机
+# 阈值依据：生产信号面下 purpose 上限 0.4（values/goals 暂无写入路径，仅贡献回流）、
+# autonomy 上限 0.58（freedom 恒 0.5，提问满意度 0.7），均值天花板 0.49——
+# HIGH 取 0.45 保证档位在生产可达，不造"永不命中"的死档。
+MOTIVATION_QUESTION_MIN_INTERVAL_HIGH_S = 0.0  # 高动机：不额外限流
+MOTIVATION_QUESTION_MIN_INTERVAL_MID_S = 900.0  # 中动机：15 分钟至多一问
+MOTIVATION_QUESTION_MIN_INTERVAL_LOW_S = 1800.0  # 低动机：30 分钟至多一问
+MOTIVATION_QUESTION_INTERVAL_TABLE = (
+    # (强度下限, 最小出队间隔秒) —— 自高到低首档命中即返回
+    (MOTIVATION_QUESTION_INTENSITY_HIGH, MOTIVATION_QUESTION_MIN_INTERVAL_HIGH_S),
+    (MOTIVATION_QUESTION_INTENSITY_LOW, MOTIVATION_QUESTION_MIN_INTERVAL_MID_S),
+    (0.0, MOTIVATION_QUESTION_MIN_INTERVAL_LOW_S),
+)
+
+
+def resolveMotivationQuestionInterval(intensity: float) -> float:
+    """按动机强度查主动提问最小出队间隔（秒）：强度越低间隔越长。"""
+    for threshold, interval in MOTIVATION_QUESTION_INTERVAL_TABLE:
+        if intensity >= threshold:
+            return interval
+    return MOTIVATION_QUESTION_MIN_INTERVAL_LOW_S
+
+
 def _isMetaRetrievalTool(tool_name: str) -> bool:
     """元检索工具判定（**单一 import 点**，名单本体在 `tool_layers/capability_graph`）。
 
@@ -450,6 +480,10 @@ class PostChatPipeline:
         # （如 _safe_step 单元测试）。process() 调用时通过 contextvar 隔离。
         self._step_results_store: List[StepResult] = []
         self._dependencies: Dict[str, Any] = {}
+        # E3 动机调制：上次主动提问出队时刻（单调闸门基准；0=从未提问）。
+        # pipeline 为 Agent 单例长驻，跨轮记账；并发轮次下的毫秒级竞态
+        # 最坏只是同刻双问，语义可接受（队列侧仍有逐问冷却兜底）。
+        self._lastProactiveAskAt: float = 0.0
 
         # 显式声明所有依赖组件
         self._conversation_buffer = None
@@ -2953,6 +2987,14 @@ class PostChatPipeline:
         步骤恒 SKIPPED 死路）。统一接入 mem_core 构造的 QuestionQueueManager：
         弹出最高优先级待提问问题并标记已提问（进入冷却期）。
 
+        E3 动机调制：出队前按 purpose/autonomy 强度查最小全局出队间隔
+        （resolveMotivationQuestionInterval），距上次提问不足间隔则本轮不出队
+        （SKIPPED，动机强度低 → 主动提问频率上限收紧）。强度经
+        MotivationLedger.snapshot() 既有口径读取（与 /growth/motivation 端点
+        同一事实源）；无账本不调制（保持原行为，不凭空造 0.5）。主动提问是
+        "主动帮助/贡献"（purpose）与"自发行动"（autonomy）的表达，故取这两驱
+        等权混合；competence/growth 描述任务与知识状态，不参与出队调制。
+
         Returns:
             主动提问内容（如果没有则返回 None）
         """
@@ -2972,8 +3014,43 @@ class PostChatPipeline:
             return None
 
         try:
+            # 动机调制闸门：低强度 → 拉长最小出队间隔（不改变提问内容与队列本身）
+            now = time.time()
+            intensity: Optional[float] = None
+            ledger = self._get_dependency("intrinsic_motivation")
+            if ledger:
+                try:
+                    drives = ledger.snapshot().get("drives", {})
+                    intensity = (
+                        float(drives.get("purpose", {}).get("intensity", 0.5))
+                        + float(drives.get("autonomy", {}).get("intensity", 0.5))
+                    ) / 2.0
+                except Exception as e:  # noqa: BLE001 - 取数失败不阻断提问主链
+                    logger.debug("动机强度读取失败，本轮跳过出队调制: %s", e)
+                    intensity = None
+            min_interval = (
+                resolveMotivationQuestionInterval(intensity) if intensity is not None else 0.0
+            )
+            if now - getattr(self, "_lastProactiveAskAt", 0.0) < min_interval:
+                message = (
+                    f"motivation-gated: 强度 {intensity:.3f}，"
+                    f"最小出队间隔 {min_interval:.0f}s 未到，本轮不出队"
+                )
+                logger.debug("动机调制: %s", message)
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.SKIPPED,
+                        message=message,
+                        duration_ms=(time.time() - start_time) * 1000,
+                        data={"motivation_intensity": round(intensity, 4), "min_interval_s": min_interval},
+                    )
+                )
+                return None
+
             entry = question_manager.get_next_question()
             if entry:
+                self._lastProactiveAskAt = now
                 question_manager.mark_asked(entry.id)
                 # 主动行为账本：提问是真实发生的主动行为（2026-09-15 真实化接线）
                 engine = self._get_dependency("proactive_behavior_engine")

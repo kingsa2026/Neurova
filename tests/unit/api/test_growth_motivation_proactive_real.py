@@ -8,6 +8,7 @@
 """
 
 import os
+import shutil
 import tempfile
 import types
 import unittest
@@ -132,6 +133,96 @@ class MotivationProactiveEndpointsTest(unittest.TestCase):
         action = self.engine.get_recent_actions(limit=10)[0]
         self.assertTrue(action["response_received"])
         self.assertGreater(self.ledger.snapshot()["drives"]["purpose"]["intensity"], p_before)
+
+
+class MotivationQuestionGatingTest(unittest.TestCase):
+    """E3 动机调制出队闭环：purpose/autonomy 强度接入 QuestionQueue 出队。
+
+    判据（卡面红线）：同一问题队列，低强度配置下出队间隔 ≥ 高强度配置；
+    具名常量可测、强度可注入。低强度 → 第二问在间隔窗口内被挡下；
+    高强度 → 连续出队不受额外限流。
+    """
+
+    def _make(self, agent_id: str):
+        tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
+        ledger = MotivationLedger(agent_id=agent_id, persistence_path=os.path.join(tmpdir, "m.json"))
+        qqm = QuestionQueueManager(memory_manager=None, default_cooldown=0.0)
+        from neurova.post_chat_pipeline import PostChatPipeline
+
+        agent = types.SimpleNamespace(intrinsic_motivation=ledger, question_queue_manager=qqm)
+        return PostChatPipeline(agent), ledger, qqm
+
+    def _prime_high(self, ledger: MotivationLedger) -> None:
+        """经既有 observe 口把 purpose/autonomy 推到高band（均值 ≥ 0.5）。"""
+        for i in range(5):
+            ledger.observe_purpose(contribution=f"贡献{i}", impact=0.8)
+        for i in range(3):
+            ledger.observe_autonomy(choice=f"选择{i}", satisfaction=1.0)
+
+    def test_intervalMonotonicByIntensity(self):
+        """间隔表单调：低强度间隔 ≥ 中 ≥ 高；查表两端命中具名常量"""
+        from neurova.post_chat_pipeline import (
+            MOTIVATION_QUESTION_MIN_INTERVAL_HIGH_S,
+            MOTIVATION_QUESTION_MIN_INTERVAL_LOW_S,
+            MOTIVATION_QUESTION_MIN_INTERVAL_MID_S,
+            resolveMotivationQuestionInterval,
+        )
+
+        assert resolveMotivationQuestionInterval(0.9) == MOTIVATION_QUESTION_MIN_INTERVAL_HIGH_S
+        assert resolveMotivationQuestionInterval(0.25) == MOTIVATION_QUESTION_MIN_INTERVAL_LOW_S
+        assert (
+            MOTIVATION_QUESTION_MIN_INTERVAL_LOW_S
+            >= MOTIVATION_QUESTION_MIN_INTERVAL_MID_S
+            >= MOTIVATION_QUESTION_MIN_INTERVAL_HIGH_S
+        )
+
+    def test_lowIntensityGatesSecondDequeWithinInterval(self):
+        """低强度（新鲜账本 purpose=0/autonomy=0.5 → 均值 0.25 落低档）：
+        第一问照常出队，紧随的第二问被出队间隔挡下"""
+        import asyncio
+
+        pipeline, ledger, qqm = self._make("gate-lo")
+        qqm.generate_question(content="问题一")
+        qqm.generate_question(content="问题二")
+
+        first = asyncio.run(pipeline._step_proactive_question("输入1", "回复1"))
+        assert first == "问题一"
+
+        second = asyncio.run(pipeline._step_proactive_question("输入2", "回复2"))
+        assert second is None
+        assert any("动机" in r.message or "motivation" in r.message.lower() for r in pipeline._step_results)
+
+    def test_highIntensityKeepsDequeuing(self):
+        """高强度（purpose/autonomy 均值 ≥ 0.5）：连续两问均出队，不受额外限流"""
+        import asyncio
+
+        pipeline, ledger, qqm = self._make("gate-hi")
+        self._prime_high(ledger)
+        assert ledger.snapshot()["drives"]["purpose"]["intensity"] > 0
+        qqm.generate_question(content="问题一")
+        qqm.generate_question(content="问题二")
+
+        first = asyncio.run(pipeline._step_proactive_question("输入1", "回复1"))
+        second = asyncio.run(pipeline._step_proactive_question("输入2", "回复2"))
+        assert first == "问题一"
+        assert second == "问题二"
+
+    def test_missingLedgerKeepsLegacyBehavior(self):
+        """无动机账本 → 不调制（保持原行为，不凭空造 0.5 强度）"""
+        import asyncio
+
+        from neurova.post_chat_pipeline import PostChatPipeline
+
+        qqm = QuestionQueueManager(memory_manager=None, default_cooldown=0.0)
+        qqm.generate_question(content="问题一")
+        qqm.generate_question(content="问题二")
+        pipeline = PostChatPipeline(types.SimpleNamespace(question_queue_manager=qqm))
+
+        first = asyncio.run(pipeline._step_proactive_question("输入1", "回复1"))
+        second = asyncio.run(pipeline._step_proactive_question("输入2", "回复2"))
+        assert first == "问题一"
+        assert second == "问题二"
 
 
 class PostChatMotivationWiringTest(unittest.TestCase):
