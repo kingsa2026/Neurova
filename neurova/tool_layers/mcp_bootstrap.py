@@ -106,6 +106,70 @@ def attach_bootstrapped_clients(router: typing.Any) -> int:
     return count
 
 
+def register_client(server_id: str, client: typing.Any) -> None:
+    """把运行期连接的客户端登记进 bootstrap 同一张注册表（发现口单源）。
+
+    运行期经 API 注册的 server 与启动期 bootstrap 的 server 共用这张表：
+    attach 的全部消费方（新建 agent、_get_client_for、shutdown）只认这里。
+    """
+    _clients[server_id] = client
+
+
+def unregister_client(server_id: str) -> None:
+    """从注册表摘除（删除 server 时同步，防 zombie 被后续 attach 误挂）。"""
+    _clients.pop(server_id, None)
+
+
+def _iter_agent_routers(app_state: typing.Any):
+    """遍历运行中 agent 的 ToolRouter（缺 router 的 agent 跳过）"""
+    agents = getattr(app_state, "agents", None) or {}
+    for agent_id, agent in list(agents.items()):
+        router = getattr(agent, "tool_router", None)
+        if router is not None:
+            yield agent_id, router
+
+
+def attach_server_to_running_agents(server_id: str, client: typing.Any, app_state: typing.Any = None) -> int:
+    """把某 server 的客户端挂到运行中所有 agent 的 ToolRouter，返回挂载数量。
+
+    运行期注册即接入的落点：不等重启 bootstrap。单个 agent 挂载失败不拖垮其余。
+    """
+    count = 0
+    for agent_id, router in _iter_agent_routers(app_state):
+        try:
+            router.register_mcp_client(server_id, client)
+            count += 1
+        except Exception as e:  # noqa: BLE001 - 单个 agent 挂载失败不拖垮整体
+            logger.debug("MCP attach to agent '%s' skipped: %s", agent_id, e)
+    if count:
+        logger.info("MCP server %s 已挂载到 %d 个运行中 agent 的 ToolRouter", server_id, count)
+    return count
+
+
+def detach_server_from_running_agents(server_id: str, app_state: typing.Any = None) -> int:
+    """从运行中所有 agent 的 ToolRouter 摘除某 server，返回摘除数量。
+
+    删除 server 的同步面：不摘则 agent 决策面残留已删 server 的工具（zombie）。
+    """
+    count = 0
+    for agent_id, router in _iter_agent_routers(app_state):
+        try:
+            # 钩子优先（测试桩/特殊 router 只暴露 detach_mcp_client），
+            # 真 ToolRouter 走 _mcp_clients 字典摘除
+            hook = getattr(router, "detach_mcp_client", None)
+            clients = getattr(router, "_mcp_clients", None)
+            if not callable(hook) and not isinstance(clients, dict):
+                continue
+            if callable(hook):
+                hook(server_id)
+            if isinstance(clients, dict):
+                clients.pop(server_id, None)
+            count += 1
+        except Exception as e:  # noqa: BLE001 - 单个 agent 摘除失败不拖垮整体
+            logger.debug("MCP detach from agent '%s' skipped: %s", agent_id, e)
+    return count
+
+
 def reset_bootstrap() -> None:
     """清空 bootstrap 状态（测试用）"""
     global _bootstrapped

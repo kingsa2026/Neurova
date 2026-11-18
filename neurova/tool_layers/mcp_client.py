@@ -104,10 +104,12 @@ class MCPToolClient:
             elif transport == "http":
                 import httpx
 
+                # 2.x：http_client 为关键字参数，上下文 yield (read, write) 二元组；
+                # headers（Bearer 等）经注入的 http_client 携带
                 http_client = httpx.AsyncClient(headers=config.get("headers") or {})
                 await stack.enter_async_context(http_client)
-                read_stream, write_stream, _ = await stack.enter_async_context(
-                    streamable_http_client(config["url"], http_client)
+                read_stream, write_stream = await stack.enter_async_context(
+                    streamable_http_client(config["url"], http_client=http_client)
                 )
             else:
                 raise ValueError(f"不支持的 transport: {transport}")
@@ -247,15 +249,27 @@ class MCPToolClient:
 
     @staticmethod
     def _tool_to_dict(tool: typing.Any) -> typing.Dict[str, typing.Any]:
-        """SDK 工具对象 → 可序列化 dict（inputSchema 映射为 parameters）"""
+        """SDK 工具对象 → 可序列化 dict（inputSchema 映射为 parameters）
+
+        SDK 1.x 工具对象的 schema 字段是 `inputSchema`；2.x（pydantic 化后）
+        改为 `input_schema`——两个名字都取，缺一即参数 schema 恒空。
+        """
         if isinstance(tool, dict):
-            return tool
+            out = dict(tool)
+            if not out.get("parameters"):
+                out["parameters"] = (
+                    out.get("inputSchema") or out.get("input_schema") or {}
+                )
+            return out
         return {
             "name": getattr(tool, "name", None) or str(tool),
             "description": getattr(tool, "description", "") or "",
-            "parameters": getattr(tool, "inputSchema", None)
-            or getattr(tool, "parameters", None)
-            or {},
+            "parameters": (
+                getattr(tool, "inputSchema", None)
+                or getattr(tool, "input_schema", None)
+                or getattr(tool, "parameters", None)
+                or {}
+            ),
         }
 
     async def _fetch_tools(self, server_id: str) -> typing.List[typing.Dict[str, typing.Any]]:
@@ -699,6 +713,69 @@ class MCPToolClient:
         except RuntimeError as e:
             # 无运行中事件循环（同步上下文）→ 记录，退化为不自动重连
             logger.debug("MCP server %s 重连调度失败（无事件循环）: %s", server_id, e)
+
+
+class ServerScopedClientView:
+    """注册表里的单 server 视图：把多 server 共享的进程单例收敛成一表项。
+
+    ToolRouter 的 MCP 注册表语义是「一表项一 server」：发现时对每个表项调
+    list_tools() 并以表键冠名，执行时以表键回查客户端。把多 server 单例直接
+    塞进表会把全部 server 的工具重复冠到同一表键下。视图按绑定 server 过滤
+    发现、固定 server 执行；连接/状态/关停全部转发底层单例（连接池不复制）。
+    """
+
+    def __init__(self, client: "MCPToolClient", server_id: str) -> None:
+        self._client = client
+        self._server_id = server_id
+
+    @property
+    def server_id(self) -> str:
+        return self._server_id
+
+    def list_tools(self) -> typing.List[typing.Dict[str, typing.Any]]:
+        """只返回绑定 server 的已缓存工具（发现不串台）"""
+        return [
+            t
+            for t in (self._client.list_tools() or [])
+            if isinstance(t, dict) and t.get("server_id") == self._server_id
+        ]
+
+    async def call_tool(
+        self,
+        server_id: str,
+        tool_name: str,
+        params: typing.Dict[str, typing.Any],
+        user_id: typing.Optional[str] = None,
+    ) -> typing.Any:
+        # ToolRouter 以表键作第一参调用；视图固定用绑定的 server，防串台
+        return await self._client.call_tool(self._server_id, tool_name, params, user_id=user_id)
+
+    async def execute_tool(
+        self,
+        server_id: str,
+        tool_name: str,
+        params: typing.Dict[str, typing.Any],
+        user_id: typing.Optional[str] = None,
+    ) -> typing.Any:
+        return await self._client.execute_tool(self._server_id, tool_name, params, user_id=user_id)
+
+    def get_server_status(self, server_id: str = "") -> typing.Dict[str, typing.Any]:
+        return self._client.get_server_status(self._server_id)
+
+    async def get_available_tools(self, server_id: str = "") -> typing.List[typing.Dict[str, typing.Any]]:
+        return await self._client.get_available_tools(self._server_id)
+
+    async def get_server_tools(self, server_id: str = "") -> typing.List[typing.Dict[str, typing.Any]]:
+        return await self._client.get_available_tools(self._server_id)
+
+    async def connect_server(self, server_id: str, config: typing.Dict[str, typing.Any]) -> bool:
+        return await self._client.connect_server(self._server_id, config)
+
+    async def disconnect_server(self, server_id: str = "") -> bool:
+        return await self._client.disconnect_server(self._server_id)
+
+    async def disconnect_all(self) -> None:
+        await self._client.disconnect_server(self._server_id)
 
 
 _mcp_client_instance: typing.Optional[MCPToolClient] = None

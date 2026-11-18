@@ -45,6 +45,23 @@ class _MCPToolProxy:
     description: str = ""
     parameters: typing.Dict[str, typing.Any] = field(default_factory=dict)
 
+    def to_openai_format(self) -> typing.Dict[str, typing.Any]:
+        """OpenAI function schema：parameters 即 server 声明的 inputSchema。
+
+        决策面（_build_tools_for_llm）对本对象走 to_openai_format 分支；
+        缺该方法会落入 builtin 兜底（get_builtin_tool_params 对 mcp.* 恒空），
+        把 server 声明的参数 schema 丢成空对象，模型只能盲猜参数。
+        """
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description or f"工具: {self.name}",
+                "parameters": self.parameters
+                or {"type": "object", "properties": {}, "required": []},
+            },
+        }
+
 
 @dataclass
 class ToolResult:

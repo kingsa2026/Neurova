@@ -140,6 +140,16 @@ def _get_client_for(server_id: str):
     return get_bootstrapped_clients().get(server_id) or get_mcp_client()
 
 
+def _running_app_state():
+    """当前运行中的 AppState（attach/detach 运行中 agent 的接缝，测试可替换）"""
+    try:
+        from neurova.api.app import get_app_state
+
+        return get_app_state()
+    except Exception:  # noqa: BLE001 - 非 app 上下文（脚本/测试）无运行态
+        return None
+
+
 def _server_info_from_config(entry: Dict[str, Any], status: Dict[str, Any]) -> MCPServerInfo:
     """SharedConfigManager 配置项 + 客户端实时状态 → MCPServerInfo"""
     connected = bool(status.get("connected"))
@@ -265,6 +275,20 @@ async def _register_mcp_server(config_raw: Dict[str, Any], role: str) -> Dict[st
     if not ok:
         logger.warning("MCP Server %s 连接失败: %s", sid, status.get("last_error"))
 
+    # 注册即接入：单 server 视图登记进 bootstrap 注册表（attach 的唯一发现口，
+    # 与启动期 bootstrap 同一张表）；连接成功才挂进运行中 agent 的 ToolRouter
+    # （失败态仅登记供状态查询，不进决策面）。此后无需重启即可用。
+    from neurova.tool_layers.mcp_bootstrap import (
+        attach_server_to_running_agents,
+        register_client,
+    )
+    from neurova.tool_layers.mcp_client import ServerScopedClientView
+
+    view = ServerScopedClientView(client, sid)
+    register_client(sid, view)
+    if ok:
+        attach_server_to_running_agents(sid, view, _running_app_state())
+
     return {"config": config, "connected": ok, "status": status}
 
 
@@ -366,12 +390,19 @@ async def authorize_mcp_oauth(server_id: str, body: Optional[MCPOAuthAuthorizeRe
 async def disconnect_mcp_server(server_id: str):
     """断开 MCP Server 并移除持久化配置"""
     from neurova.shared_config import get_shared_config_manager
+    from neurova.tool_layers.mcp_bootstrap import (
+        detach_server_from_running_agents,
+        unregister_client,
+    )
 
     client = _get_client_for(server_id)
     removed = await client.disconnect_server(server_id)
     get_shared_config_manager().remove_mcp_server(server_id)
     if not removed:
         raise HTTPException(status_code=404, detail="MCP Server not found")
+    # 删除即摘除：注册表与运行中 agent 的 ToolRouter 同步清出，防 zombie 残留
+    unregister_client(server_id)
+    detach_server_from_running_agents(server_id, _running_app_state())
     return {"code": 0, "message": "MCP Server disconnected"}
 
 

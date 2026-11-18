@@ -171,6 +171,27 @@ class TestToolDiscovery:
         assert client._servers["srv"]["tools"] == tools
 
     @pytest.mark.asyncio
+    async def test_tool_to_dict_maps_sdk2_input_schema_field(self):
+        """SDK 2.x 工具对象的 schema 字段是 input_schema（1.x 为 inputSchema）——
+        两个名字都必须映射到 parameters，否则决策面/工具清单的参数 schema 恒空"""
+        client = MCPToolClient()
+        sdk2_tool = SimpleNamespace(
+            name="t2", description="sdk2",
+            input_schema={"type": "object", "properties": {"ref": {"type": "integer"}}},
+        )
+        session = _make_session([sdk2_tool])
+        client._servers["srv"] = {"config": {}, "connected": True, "tools": [], "last_error": None}
+        client._sessions["srv"] = session
+
+        tools = await client.get_available_tools("srv")
+
+        assert tools[0]["parameters"] == {"type": "object", "properties": {"ref": {"type": "integer"}}}
+        # 1.x 形态同口径
+        assert client._tool_to_dict(_make_tool("t1", "d", {"type": "object"}))["parameters"] == {"type": "object"}
+        # dict 形态（2.x 某些路径直接产出）同口径
+        assert client._tool_to_dict({"name": "t3", "input_schema": {"type": "object"}})["parameters"] == {"type": "object"}
+
+    @pytest.mark.asyncio
     async def test_get_available_tools_not_connected_returns_empty(self):
         client = MCPToolClient()
         client._servers["srv"] = {"config": {}, "connected": False, "tools": [], "last_error": "x"}
