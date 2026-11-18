@@ -24,8 +24,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.e2e.pages.boot_page import BootPage
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_PORT = 9527
+
+# QwenPaw 对照批 C12：真后端档标记（NEUROVA_E2E_REAL=1 才跑，否则诚实跳过）
+pytestmark = pytest.mark.e2e_real
 
 #: 后端就绪等待与关停收尸的预算唯一出处（§6-402 批 K 口径：父墙由它 ＋余量导出）。
 #: 常驻闸 `test_nestedPytestBudgetWallsAreOrdered.py` **看不见这一处**——它的词汇只有
@@ -34,6 +39,9 @@ BACKEND_PORT = 9527
 #: 即终止整个跑测进程。故把两处等待收成常量，并给消费该 fixture 的那组用例声明父墙。
 BACKEND_READY_WALL_S = 90
 BACKEND_REAP_WALL_S = 15
+
+#: 页面对象（C12）：探活/文档面断言的执行体收拢于此
+_PAGE = BootPage(port=BACKEND_PORT)
 
 
 def _port_open(port: int, timeout: float = 1.0) -> bool:
@@ -106,6 +114,9 @@ class TestBackendBoot:
     def test_health_endpoint(self, backend_port):
         status, _ = _http_get(f"http://127.0.0.1:{backend_port}/health")
         assert status == 200
+        # C12 示范：同一断言走 page object（新测试建议直接用 pages/ 封装）
+        page_status, _ = _PAGE.getHealth()
+        assert page_status == 200
 
     def test_docs_surface_removed(self, backend_port):
         """API 文档面已移除（2026-09-16）：/docs /redoc /openapi.json 必须 404。

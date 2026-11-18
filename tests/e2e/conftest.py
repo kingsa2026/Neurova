@@ -2,7 +2,14 @@
 """端到端测试配置
 
 提供E2E测试所需的fixtures和基础设施
+
+QwenPaw 对照批 C12：双档 marker——
+- `e2e_mock`：in-process mock LLM 档（不依赖真后端进程，恒跑）；
+- `e2e_real`：真后端子进程档（`NEUROVA_E2E_REAL=1` 才跑，否则诚实跳过）。
+页面对象封装见 `tests/e2e/pages/`。
 """
+
+import os
 
 import pytest
 import tempfile
@@ -16,6 +23,23 @@ from neurova.core.config import ConfigManager
 from neurova.core.logger import LogManager
 from neurova.security.rbac import RBACManager
 from neurova.auth.password_hasher import PasswordHasher
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "e2e_mock: mock 档（in-process mock LLM，恒跑）")
+    config.addinivalue_line("markers", "e2e_real: 真后端档（NEUROVA_E2E_REAL=1 才跑）")
+
+
+def pytest_collection_modifyitems(config, items):
+    """真后端档默认跳过（诚实跳过原因随用例可见），显式开启才跑。"""
+    real_enabled = os.environ.get("NEUROVA_E2E_REAL", "").strip() == "1"
+    if real_enabled:
+        return
+    skip_real = pytest.mark.skip(
+        reason="真后端档未开启：设置 NEUROVA_E2E_REAL=1 后运行（避免无后端时的假失败）")
+    for item in items:
+        if "e2e_real" in item.keywords:
+            item.add_marker(skip_real)
 
 
 @pytest.fixture
