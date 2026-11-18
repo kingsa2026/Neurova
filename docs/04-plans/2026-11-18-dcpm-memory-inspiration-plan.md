@@ -80,6 +80,14 @@ T6 intention 层（差异化，与 question_queue 合流；最后做）
 
 **验收判据**：门控关=整理行为与现状逐字节一致；开+桩 LLM=深睡后产 schema 节点且 evidence 回指可查、跨重启可读；同一簇重复归纳幂等。
 
+**执行记录（2026-11-18，会话内实施）**：
+- 落地 `sleep_induction.py`：门控（`NEUROVA_SLEEP_INDUCTION`，默认 off）→ 选材（活跃+有嵌入+未被既有 schema 证据引用，系统面全量后按隔离三元组分桶，温度优先取舍，上限 400）→ 贪心语义聚类（阈值 0.75，真嵌入实测标定：同主题句对 ≈0.84-0.86、无关句 <0.5；区别于去重的 0.98 近等价）→ 每簇一次 LLM（严格 JSON name/pattern）→ schema 实体落统一依赖图（entity_type="schema"，metadata 带 evidence/scope/induced_at，每周期上限 8、同作用域同 pattern 去重、fail-soft 逐簇跳过）。
+- 触发接线两条：自动周期（`idle_tracker._trigger_consolidation` 深睡/休眠写回后）与手动深睡会话（`SleepConsolidation.start_sleep` 写回后）；LLM 客户端经 `set_induction_llm_provider` 注入、`buildSyncLlmFn` 桥接成同步调用（睡眠线程无事件循环）。
+- 读面：schema 经既有 `/neuron` API（entity_type 过滤）可查；检索浮出随 T3 的行为嵌入匹配一并落地（本批诚实边界：归纳产物已可查、尚未进召回加分面）。
+- 验证：红灯 12 用例（门控直通/选材排除/分桶不串域/证据回指/LLM 失败跳过/上限顺延/幂等去重）→ 绿 12/12；A/B 零新增（memory 套件 1179 过仅 2 预存；integration+execution_engine 失败集合与 T4 批逐项相同）；live-verify 隔离真后端 6/6 PASS——门控开+无 LLM 时相位真实运行（日志：候选 3/簇 1/失败 1 如实计数）、诚实不产 schema。
+- 坑：真嵌入的同类句对余弦（0.84-0.86）低于拍脑袋阈值 0.86 导致簇恒空——阈值必须经真实嵌入标定；`/sleep/{id}/status` 返回裸 Pydantic 模型（无 data 包络）。
+- 净 LOC：生产池 +438/−1（sleep_induction.py +343、idle_tracker +43、sleep.py +42、agent_core +10）；测试 +271 不计入。
+
 ---
 
 ## T3 · 跨域碰撞 sweeper（core schema）
