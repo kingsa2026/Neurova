@@ -285,7 +285,14 @@ class ScraplingSpiderTool:
         return dict(spider) if spider else None
 
     async def _fetchPage(self, url: str) -> str:
-        """取一页正文。独立成方法是为了让判据能替身"外部世界"而不绕过编排逻辑。"""
+        """取一页正文。独立成方法是为了让判据能替身"外部世界"而不绕过编排逻辑。
+
+        SSRF 闸豁免（fullrepo 审计 2026-11-18 D 组，2026-11-19 裁定）：本类是
+        **浏览器自动化工具面**，职能就是访问用户指定的任意 URL（含本地/内网
+        调试页），与 web_reach 那类**服务端取数面**不同——后者才要求
+        validate_public_http_url。故此处不套 url_guard；滥用边界由工具调用层
+        的权限与审计面承担。
+        """
         page = await asyncio.to_thread(scrapling.fetchers.Fetcher().get, url)
         return (getattr(page, "text", None) or "")[:1000]
 

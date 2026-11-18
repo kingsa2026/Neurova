@@ -100,7 +100,9 @@ class VolumeRenderer:
         "voice": 0.4,  # 语音通道：较低
     }
 
-    # 意图 → 通道权重映射
+    # 意图 → 通道权重映射（**渲染层**口径：字符串意图键）。与
+    # neurova_recall.IntentAwareRecallStrategy.INTENT_CHANNEL_WEIGHTS 的
+    # 检索通道权重是不同层的两份表——数值不同、勿合并（2026-11-19 复核注记）。
     INTENT_CHANNEL_WEIGHTS = {
         "factual": {"text": 1.0, "category": 0.8, "temperature": 0.3, "graph": 0.5, "emotion": 0.1, "voice": 0.2},
         "temporal": {"temperature": 1.0, "text": 0.6, "category": 0.3, "graph": 0.4, "emotion": 0.3, "voice": 0.5},

@@ -376,7 +376,10 @@ class IntentAwareRecallStrategy:
     使检索引擎能根据意图自适应调整检索行为。
     """
 
-    # 意图 → 通道权重（总和 = 1.0）
+    # 意图 → 通道权重（总和 = 1.0）。
+    # 注意：volume_renderer.VolumeRenderer 另有一份字符串键的 INTENT_CHANNEL_WEIGHTS，
+    # 那是**渲染层**的通道权重——数值不同、语义不同层（2026-11-19 逐值比对确证），
+    # 两表不是重复实现，勿按"第二份定义"合并（fullrepo 审计 2026-11-18 复核注记）。
     INTENT_CHANNEL_WEIGHTS: Dict[QueryIntent, Dict[RecallChannel, float]] = {
         QueryIntent.FACTUAL: {
             RecallChannel.TEMPERATURE: 0.20,
