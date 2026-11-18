@@ -1128,15 +1128,54 @@ class ContextOrchestrator:
         """收集待探索问题注入上下文（注入即 mark_asked 进入冷却，防止重复打扰）
 
         根因修复: QuestionQueueManager 此前零调用——生成的永无出口。
+
+        E3 移交清偿（教义第 5 条）：本收割点是问题队列的**真消费方**（每轮
+        构建上下文时先于管线出队点得手），动机调制必须接在这里才约束真实
+        提问频率。与 `post_chat_pipeline._step_proactive_question` 同一口径：
+        复用同一个 `resolveMotivationQuestionInterval` 纯函数与常量表（严禁
+        第二套逻辑），强度经 `MotivationLedger.snapshot()` 既有口径读取；
+        无账本不调制。跨轮记账 `_lastProactiveAskAt` 挂本实例——orchestrator
+        由 Agent 构造并随其长驻，与管线侧记账互不覆盖（两处闸门各管各的
+        消费点，队列冷却仍由 QuestionQueueManager 统一管）。
         """
+        import time as _time
+
         qm = getattr(self._agent, "question_queue_manager", None)
         if not qm:
+            return []
+        now = _time.time()
+        # 动机调制闸门（与出队点同口径）：低强度 → 拉长最小收割间隔
+        intensity: Optional[float] = None
+        ledger = getattr(self._agent, "intrinsic_motivation", None)
+        if ledger:
+            try:
+                drives = ledger.snapshot().get("drives", {})
+                intensity = (
+                    float(drives.get("purpose", {}).get("intensity", 0.5))
+                    + float(drives.get("autonomy", {}).get("intensity", 0.5))
+                ) / 2.0
+            except Exception as e:  # noqa: BLE001 - 取数失败不阻断收割主链
+                logger.debug("动机强度读取失败，本轮跳过收割调制: %s", e)
+                intensity = None
+        from neurova.post_chat_pipeline import resolveMotivationQuestionInterval
+
+        min_interval = (
+            resolveMotivationQuestionInterval(intensity) if intensity is not None else 0.0
+        )
+        if now - getattr(self, "_lastProactiveAskAt", 0.0) < min_interval:
+            logger.debug(
+                "动机调制: 收割点强度 %.3f，最小收割间隔 %.0fs 未到，本轮不收割待探索问题",
+                intensity if intensity is not None else -1.0,
+                min_interval,
+            )
             return []
         items = []
         try:
             for q in qm.get_pending_questions()[:limit]:
                 items.append({"id": q.id, "content": q.content})
                 qm.mark_asked(q.id)
+            if items:
+                self._lastProactiveAskAt = now
         except Exception as e:
             logger.debug("收集待探索问题跳过: %s", e)
         return items
