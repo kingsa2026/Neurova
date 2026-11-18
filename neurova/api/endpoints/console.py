@@ -1565,6 +1565,39 @@ async def get_console_chat_runs(
     }
 
 
+@router.get("/chat/tools/{task_id}/result")
+async def get_console_tool_result(
+    task_id: str,
+    request: Request,
+    session_id: str = Query(default=""),
+    agent_id: str = Query(default=""),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """后台工具完成结果的限时查询面（QwenPaw 对照批 B7）。
+
+    ToolCoordinator 的 `_completed` 是内存有界留存，转后台工具的完成通知走
+    一次性 SSE——刷新/重启后就只能在这里查。归属双层 fail-closed：entry 的
+    盖章 session_id 必须与查询 session_id 精确一致（coordinator 层判）；
+    会话 owner 非空时还须与调用者一致（空=共享，与 /chat/runs 同一谓词）。
+    """
+    user_id = _get_user_id(request, current_user)
+    agent = get_agent_instance(agent_id)
+    if agent is None or not hasattr(agent, "tool_executor"):
+        raise HTTPException(status_code=404, detail="agent 不存在")
+    coordinator = agent.tool_executor.tool_coordinator
+    entry = coordinator.getCompletedEntry(task_id, session_id=session_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="无此任务结果或已过期")
+    sess = get_session_repository().get_session(agent_id or defaultAgentId(), session_id)
+    # SessionRecord 对象与 dict 两种返回形态都兼容（教义：一处口径，不按调用方分叉）
+    if isinstance(sess, dict):
+        owner = str(sess.get("user_id") or "")
+    else:
+        owner = str(getattr(sess, "user_id", "") or "")
+    _check_session_ownership({"user_id": owner}, user_id)
+    return {"code": 0, "message": "success", "data": entry}
+
+
 @router.get("/chat/subagents/{subagent_id}/events")
 async def get_console_subagent_events(
     subagent_id: str,
