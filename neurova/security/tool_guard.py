@@ -597,9 +597,13 @@ class FilePathGuardian(BaseGuardian):
 
     # 方案 P0-1.3: 用户敏感目录（按目录名匹配，跨平台）
     _USER_SENSITIVE_DIRS = {".ssh", ".aws", ".gnupg", ".kube", ".docker"}
-    # 方案 P0-1.3: 敏感凭据文件（按文件名/后缀匹配）
+    # 方案 P0-1.3: 敏感凭据文件（按文件名/后缀匹配）。
+    # QwenPaw 对照批 B5：后缀族与 skill_scanner 的 CREDENTIAL_SUFFIXES 对齐——
+    # 「正当目录下的凭据后缀文件」（keys/server.pem、backups/db.kdbx）同样是凭据。
     _SENSITIVE_FILES = {".env", ".netrc", "id_rsa", "id_ed25519", "id_ecdsa",
                         "credentials", "credentials.json"}
+    _SENSITIVE_SUFFIXES = {".pem", ".key", ".ppk", ".p12", ".pfx", ".kdbx",
+                           ".git-credentials", ".htpasswd"}
 
     def __init__(self):
         self._protected_paths = {
@@ -632,6 +636,11 @@ class FilePathGuardian(BaseGuardian):
         for stem in (basename, os.path.splitext(basename)[0]):
             if stem in self._SENSITIVE_FILES:
                 return f"敏感凭据文件 {stem}"
+        # QwenPaw 对照批 B5：凭据**后缀**（server.pem/db.kdbx 这类正当目录下的
+        # 凭据文件，文件名本身不在清单里，按后缀判）
+        dot = basename.rfind(".")
+        if dot >= 0 and basename[dot:] in self._SENSITIVE_SUFFIXES:
+            return f"敏感凭据后缀 {basename[dot:]}"
         return None
 
 
@@ -725,6 +734,25 @@ class FilePathGuardian(BaseGuardian):
             findings.extend(self._scan_protected_paths_in_text(command_text))
         return findings
 
+    @staticmethod
+    def _expandPathVars(path: str) -> str:
+        """路径展开：~ 与 Windows %VAR% / POSIX $VAR（按当前环境实值）。
+
+        只服务于敏感判定——展开后的真实路径与原路径**都**判，任一命中即报。
+        """
+        if not path:
+            return path
+        expanded = os.path.expanduser(path)
+        if "%" in expanded:
+            expanded = re.sub(
+                r"%(\w+)%",
+                lambda m: os.environ.get(m.group(1), m.group(0)),
+                expanded,
+            )
+        if "$" in expanded:
+            expanded = os.path.expandvars(expanded)
+        return expanded
+
     def _checkOnePath(self, path: str) -> List[GuardFinding]:
         """对**一个**路径值跑完整判定——规则顺序与 rule_id 与改前逐字一致（单路径读数不许变）。"""
         findings: List[GuardFinding] = []
@@ -785,7 +813,11 @@ class FilePathGuardian(BaseGuardian):
             )
 
         # 方案 P0-1.3: 用户敏感目录 / 凭据文件（~/.ssh、~/.aws、.env 等）
-        sensitive_hit = self._match_sensitive_component(path)
+        # QwenPaw 对照批 B5：%VAR%/$VAR 展开后的真实路径一并过敏感判定——
+        # 变量名不遮蔽内容（展开前后都判，任一命中即报）。
+        expanded_path = self._expandPathVars(path)
+        sensitive_hit = (self._match_sensitive_component(path)
+                         or self._match_sensitive_component(expanded_path))
         if sensitive_hit:
             findings.append(
                 GuardFinding(
