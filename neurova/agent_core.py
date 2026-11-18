@@ -1587,6 +1587,27 @@ class Agent:
         # 断点⑥修复（闭环审计 2026-09-04）：reuse 反馈移到 success 判定之后——
         # 失败执行累加 reuse_count 会把 fitness 正反馈推向错误方向（信号污染）。
         if result is None or not result.success:
+            # M2（肌肉记忆收尾）：失败也入账——走 on_tool_executed 同一条
+            # 失败降级与自适应权重反馈链（常规工具失败经 execute_tool 的
+            # finally 统一进该咽喉）。原先失败提前 return，Skill 失败不进
+            # 肌肉记忆降级链，失败信号只进进化侧三本账、不进工具记忆。
+            if self.tool_memory and self.tool_executor:
+                try:
+                    self.tool_executor.on_tool_executed(
+                        tool_name=skill.name,
+                        params=(getattr(result, "metadata", None) or {}).get("skill_kwargs", {}),
+                        user_input=self._current_user_input or f"执行 {skill.name}",
+                        success=False,
+                        tool_source="skill_system",
+                        execution_time=float(getattr(result, "execution_time", 0.0) or 0.0),
+                        result={
+                            "success": False,
+                            "error": str(getattr(result, "error", "") or "技能执行失败"),
+                        },
+                    )
+                    logger.info("ToolMemory 记录失败技能执行: %s", skill.name)
+                except Exception as e:
+                    logger.warning("ToolMemory 失败记录失败: %s", e)
             return
 
         try:
