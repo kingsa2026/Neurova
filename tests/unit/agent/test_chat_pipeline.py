@@ -43,7 +43,6 @@ def mock_agent():
     # 工具执行
     agent.tool_executor = MagicMock()
     agent.tool_executor.execute_text_tool_calls = AsyncMock(side_effect=lambda r, u: r)
-    agent.tool_executor.execute_from_memory_async = AsyncMock(return_value={"status": "success"})
 
     # 后处理管线
     agent.post_chat_pipeline = MagicMock()

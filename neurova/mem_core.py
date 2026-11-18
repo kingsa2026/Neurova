@@ -564,13 +564,8 @@ class MemCore:
     def tool_memory(self, value):
         self._agent.tool_memory = value
 
-    @property
-    def muscle_memory(self):
-        return getattr(self._agent, "muscle_memory", None)
-
-    @muscle_memory.setter
-    def muscle_memory(self, value):
-        self._agent.muscle_memory = value
+    # muscle_memory 死读取面已退役（M3）：生产从未对 agent.muscle_memory 赋值，
+    # 真实句柄是 agent.tool_memory.muscle_memory（agent_core 装配点单源）。
 
     @property
     def attachment_manager(self):

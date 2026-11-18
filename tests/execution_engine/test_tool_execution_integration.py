@@ -39,12 +39,6 @@ class MockToolExecutor:
             "tool_name": tool_name,
         }
 
-    async def execute_from_memory_async(self, memory_result, user_input):
-        """模拟从内存执行工具"""
-        tool_name = memory_result.get('tool_name')
-        params = memory_result.get('params', {})
-        return await self.execute_tool(tool_name, params, user_input)
-
 
 @pytest.mark.asyncio
 async def test_tool_execution_manager_integration():
@@ -99,11 +93,6 @@ async def test_tool_execution_manager_integration():
         async def execute_tool(self, tool_name, params, user_input):
             await asyncio.sleep(10.0)  # 模拟慢速执行
             return {"status": "success"}
-
-        async def execute_from_memory_async(self, memory_result, user_input):
-            tool_name = memory_result.get('tool_name')
-            params = memory_result.get('params', {})
-            return await self.execute_tool(tool_name, params, user_input)
 
     mock_agent.tool_executor = SlowToolExecutor()
 
@@ -178,10 +167,40 @@ async def _run_auto_execute(payload, executor_cls=_ShapeJudgingExecutor):
     class _ToolMemory:
         muscle_memory = _Muscle()
 
+        def record_tool_usage(self, tool_name, success, problem_text=None,
+                              tool_source=None, tool_params=None, **kwargs):
+            # 与生产 ToolMemoryIntegration.record_tool_usage 同口径：传播到肌肉记忆
+            self.muscle_memory.record_usage(
+                tool_name=tool_name,
+                query=problem_text or tool_name or "unknown",
+                parameters=tool_params or {},
+                success=success,
+            )
+
     # 生产装配点：agent.tool_memory 就是肌肉记忆的持有者
     # （`ChatPipeline.tool_memory` 走 `getattr(self._agent, "tool_memory", None)`）。
     agent.tool_memory = _ToolMemory()
     pipeline._record_tool_failure = _AsyncRecorder(recorded)
+
+    # 生产咽喉模拟：真实 ToolExecutor.execute_tool 的 finally 统一触发
+    # on_tool_executed → tool_memory.record_tool_usage → muscle_memory.record_usage。
+    # M1 收口后成败记账单源在此——chat_pipeline 成功侧不再记第二笔。
+    # 判据与生产同规：判据由执行器给出，缺席按失败处置（不默认成功）。
+    _raw_execute_tool = executor.execute_tool
+
+    async def _execute_tool_with_hook(tool_name, params, user_input):
+        result = await _raw_execute_tool(tool_name, params, user_input)
+        judge = getattr(executor, "_result_is_success", None)
+        success = bool(judge(result)) if callable(judge) else False
+        agent.tool_memory.record_tool_usage(
+            tool_name=tool_name,
+            success=success,
+            problem_text=user_input,
+            tool_params=params,
+        )
+        return result
+
+    executor.execute_tool = _execute_tool_with_hook
 
     ctx = ChatContext(
         user_input="再来一次",
@@ -232,6 +251,8 @@ class TestAutoExecuteJudgesToolOutcomeAtTheExecutor:
         assert recorded and recorded[0]["success"] is True, (
             f"成功结果没有回流到肌肉记忆：{recorded}"
         )
+        # M1 单源：同一成功只应经 on_tool_executed 咽喉记一笔
+        assert len(recorded) == 1, f"同一成功只应记一笔，实际: {recorded}"
 
     @pytest.mark.asyncio
     async def test_executor_without_verdict_is_a_named_failure(self):

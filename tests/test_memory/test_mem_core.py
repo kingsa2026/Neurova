@@ -272,11 +272,12 @@ class TestMemCoreIntegration:
         mem_core = MemCore(mock_agent)
         
         # 验证 - MemCore 应该有所有必要的属性
+        # （muscle_memory 死读取面已退役：真实句柄是 agent.tool_memory.muscle_memory）
         required_attrs = [
             'memory_manager', 'storage', 'temperature_engine',
             'recall_engine', 'conversation_buffer',
             'buffer_module', 'growth_log_manager', 'question_queue_manager',
-            'tool_memory', 'muscle_memory', 'attachment_manager'
+            'tool_memory', 'attachment_manager'
         ]
         
         for attr in required_attrs:

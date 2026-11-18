@@ -4,16 +4,14 @@
 数据流:
   用户输入 → check_tool_memory → 匹配? → auto_execute → record_tool_usage → 肌肉记忆 → 下次检索
 
-测试 3 个断裂点修复:
+覆盖点:
 1. muscle_memory.match() 接口对齐（tool_memory_integration 调用方式 vs MuscleMemory 实际签名）
 2. record_tool_usage() 传播到 muscle_memory
-3. execute_from_memory_async() 存在于根级 ToolExecutor
+3. execute_from_memory_async 已退役（守卫见 test_muscle_memory_dead_faces_retired.py）；
+   自动执行链由 ChatPipeline._auto_execute_tool 统一承担
 """
 
-import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 
 # ============================================================
@@ -174,58 +172,9 @@ class TestRecordToolUsagePropagation:
 
 
 # ============================================================
-# 断裂点 #3: execute_from_memory_async 存在于根级 ToolExecutor
+# 断裂点 #3（已收口）: execute_from_memory_async 已整体退役，
+# 守卫断言见 test_muscle_memory_dead_faces_retired.py
 # ============================================================
-
-class TestToolExecutorFromMemoryAsync:
-    """测试根级 ToolExecutor 的 execute_from_memory_async"""
-
-    def test_root_tool_executor_has_execute_from_memory_async(self):
-        """根级 ToolExecutor 应该有 execute_from_memory_async 方法"""
-        from neurova.tool_executor import ToolExecutor
-
-        # 检查方法存在
-        assert hasattr(ToolExecutor, 'execute_from_memory_async'), \
-            "根级 ToolExecutor 缺少 execute_from_memory_async 方法"
-
-    @pytest.mark.asyncio
-    async def test_execute_from_memory_async_returns_dict(self):
-        """execute_from_memory_async 应该返回 {"status": ..., "result": ...} 字典"""
-        from neurova.tool_executor import ToolExecutor
-
-        mock_agent = MagicMock()
-        mock_agent._skill_registry = None
-        mock_agent.tool_router = None
-        mock_agent.tool_memory = None
-        mock_agent.tool_lifecycle = None
-        mock_agent.skill_packer = None
-        mock_agent.config = None
-
-        executor = ToolExecutor(mock_agent)
-
-        result = await executor.execute_from_memory_async(
-            tool_memory_result={"tool_name": "test_tool", "tool_source": "skill_system", "tool_params": {}},
-            user_input="测试",
-        )
-
-        assert isinstance(result, dict)
-        assert "status" in result
-        assert result["status"] in ("success", "failure")
-
-    @pytest.mark.asyncio
-    async def test_execute_from_memory_async_with_empty_result(self):
-        """空的 tool_memory_result 应返回 failure"""
-        from neurova.tool_executor import ToolExecutor
-
-        mock_agent = MagicMock()
-        executor = ToolExecutor(mock_agent)
-
-        result = await executor.execute_from_memory_async(
-            tool_memory_result={},
-            user_input="测试",
-        )
-
-        assert result["status"] == "failure"
 
 
 # ============================================================

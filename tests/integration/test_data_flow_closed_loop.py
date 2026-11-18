@@ -61,8 +61,9 @@ class TestAgentLifecycleFlow:
         # context_orchestrator 有核心方法
         assert hasattr(agent.context_orchestrator, 'init_context_system')
         assert hasattr(agent.context_orchestrator, 'build_context')
-        # tool_executor 有核心方法
-        assert hasattr(agent.tool_executor, 'execute_from_memory_async')
+        # tool_executor 有核心方法（execute_from_memory_async 已退役，
+        # 自动执行链由 ChatPipeline._auto_execute_tool 承担）
+        assert hasattr(agent.tool_executor, 'execute_tool')
         # chat_pipeline 有核心方法
         assert hasattr(agent.chat_pipeline, 'execute')
 

@@ -1224,74 +1224,10 @@ class ToolExecutor:
 
         return results
 
-    # P-E 修复：原 execute_from_memory
-    # 同步版已删除——它把工具名当用户输入做语义匹配，且 confidence > 0.8 时
-    # 直接返回 memory_result.get("result", {})（MuscleMemoryItem 无 result 字段，
-    # 恒为空 dict）冒充工具执行结果；该方法无调用方，实际使用的是下方的
-    # execute_from_memory_async（真实执行 + 反馈）。
-
-    async def execute_from_memory_async(
-        self,
-        tool_memory_result: Dict[str, Any],
-        user_input: str,
-    ) -> Dict[str, Any]:
-        """从肌肉记忆结果自动执行工具（异步版本，支持超时控制）
-
-        Args:
-            tool_memory_result: 肌肉记忆匹配结果（来自 check_tool_memory）
-            user_input: 用户原始输入
-
-        Returns:
-            {"status": "success"|"failure", "result": ..., "tool_name": ..., "error": ...}
-        """
-        if not tool_memory_result:
-            return {"status": "failure", "error": "空的 tool_memory_result", "tool_name": ""}
-
-        tool_name = tool_memory_result.get("tool_name")
-        tool_source = tool_memory_result.get("tool_source")
-        tool_params = tool_memory_result.get("tool_params", tool_memory_result.get("tool_params_template", {}))
-
-        if not tool_name:
-            return {"status": "failure", "error": "ToolMemory 结果缺少 tool_name", "tool_name": ""}
-
-        logger.info("自动执行工具（异步）: %s (来源: %s)", tool_name, tool_source)
-
-        self._messages_list.append(
-            {
-                "type": "tool_call",
-                "tool_name": tool_name,
-                "tool_source": tool_source,
-                "params": tool_params,
-                "timestamp": datetime.now().isoformat(),
-            }
-        )
-
-        try:
-            result = await self._execute_single_tool(tool_name, tool_params)
-            success = result is not None and "error" not in result
-
-            # 记录工具使用
-            if self.tool_memory:
-                try:
-                    self.tool_memory.record_tool_usage(
-                        tool_name=tool_name,
-                        success=success,
-                        problem_text=user_input,
-                        tool_source=tool_source,
-                        tool_params=tool_params,
-                    )
-                except Exception as e:
-                    logger.debug("工具记忆记录失败: %s", e)
-
-            if success:
-                return {"status": "success", "result": result, "tool_name": tool_name}
-            else:
-                error_msg = result.get("error", "未知错误") if isinstance(result, dict) else "执行失败"
-                return {"status": "failure", "error": error_msg, "tool_name": tool_name, "result": result}
-
-        except Exception as e:
-            logger.error("工具自动执行异常: %s, %s", tool_name, e)
-            return {"status": "failure", "error": str(e), "tool_name": tool_name}
+    # execute_from_memory / execute_from_memory_async 均已退役（M3 收尾）：
+    # 同步版把工具名当用户输入做语义匹配、用不存在的 result 字段冒充执行结果；
+    # 异步版全仓无生产调用方——自动执行链由 ChatPipeline._auto_execute_tool
+    # 经 ToolExecutionManager 统一承担（成败回流单源在 on_tool_executed 咽喉）。
 
     async def execute_skill_tool(self, skill_name: str, params: Dict, context: Optional[Dict] = None) -> Dict:
         """

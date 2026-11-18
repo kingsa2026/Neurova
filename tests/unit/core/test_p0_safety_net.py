@@ -54,8 +54,10 @@ class TestP0SafetyNet:
         
         # 验证核心方法存在
         assert hasattr(executor, "execute_text_tool_calls")
-        # 同步版 execute_from_memory 已移除，只保留 async 版
-        assert hasattr(executor, "execute_from_memory_async")
+        # 同步版 execute_from_memory 与异步版 execute_from_memory_async 均已退役
+        # （自动执行链由 ChatPipeline._auto_execute_tool 统一承担）
+        assert not hasattr(executor, "execute_from_memory")
+        assert not hasattr(executor, "execute_from_memory_async")
         assert hasattr(executor, "execute_skill_tool")
         assert hasattr(executor, "execute_cli_tool")
         # 注意：活跃版本的方法名是 on_tool_executed（无下划线前缀）

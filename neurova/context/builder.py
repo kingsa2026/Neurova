@@ -368,7 +368,6 @@ class ContextBuilder:
                 - include_reflection_log: 是否包含反思日志（默认True）
                 - include_question_queue: 是否包含问题队列（默认False）
                 - max_tokens: 最大token数
-                - tool_memory_result: 工具记忆结果
                 - experience_items: 经验项目
                 - system_prompt: 自定义系统提示
 
@@ -393,7 +392,6 @@ class ContextBuilder:
         include_reflection_log = options.get("include_reflection_log", True)
         include_question_queue = options.get("include_question_queue", False)
         max_tokens = options.get("max_tokens")
-        tool_memory_result = options.get("tool_memory_result")
         experience_items = options.get("experience_items")
         system_prompt = options.get("system_prompt", self._get_default_system_prompt())
 
@@ -402,10 +400,6 @@ class ContextBuilder:
 
         # 自动分析情感
         agent_emotion = self._analyze_emotion(user_input, metadata)
-
-        # 合并工具记忆
-        if tool_memory_result:
-            memories = self._merge_tool_memory(memories, tool_memory_result)
 
         # 调用内部实现
         if self._unified_injector:
@@ -472,21 +466,6 @@ class ContextBuilder:
 
         return None
 
-    def _merge_tool_memory(self, memories: List[Dict], tool_memory_result: Dict) -> List[Dict]:
-        """合并工具记忆到记忆列表"""
-        if not tool_memory_result:
-            return memories
-
-        # 提取工具记忆
-        tool_memories = tool_memory_result.get("memories", [])
-        if not tool_memories:
-            return memories
-
-        # 合并并去重
-        merged = memories.copy()
-        for tool_mem in tool_memories:
-            # 检查是否已存在
-            if not any(m.get("content") == tool_mem.get("content") for m in merged):
-                merged.append(tool_mem)
-
-        return merged
+    # _merge_tool_memory 已退役（M3）：它消费 check_tool_memory 返回中
+    # 不存在的 memories 键，是永不满置的空转支路；工具记忆的注入由
+    # context_orchestrator 的 tool_memory_result 消费面单源承担。
