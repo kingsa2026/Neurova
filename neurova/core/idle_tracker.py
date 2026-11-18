@@ -340,7 +340,8 @@ class IdleTimeTracker(BaseModule):
         """
         try:
             from neurova.cognitive_layers.memory_layer.sleep_induction import (
-                runSleepInduction,
+                buildSyncLlmFn,
+                runInductionPhase,
                 sleepInductionEnabled,
             )
 
@@ -348,17 +349,15 @@ class IdleTimeTracker(BaseModule):
                 return
             provider = self._induction_llm_provider
             client = provider() if callable(provider) else None
-            from neurova.cognitive_layers.memory_layer.sleep_induction import (
-                buildSyncLlmFn,
-            )
-
             llm_fn = buildSyncLlmFn(client)
-            stats = runSleepInduction(self._memory_manager, llm_fn)
-            if stats.get("clusters"):
+            stats = runInductionPhase(self._memory_manager, llm_fn)
+            if stats.get("induction", {}).get("clusters") or stats.get("sweep", {}).get("collisions"):
                 self.log_info(
-                    f"Sleep induction: clusters={stats['clusters']}, "
-                    f"schemas={stats['schemas']}, deferred={stats['deferred']}, "
-                    f"failed={stats['failed']}"
+                    f"Sleep induction: clusters={stats['induction']['clusters']}, "
+                    f"schemas={stats['induction']['schemas']}, "
+                    f"collisions={stats['sweep']['collisions']}, "
+                    f"core_schemas={stats['sweep']['core_schemas']}, "
+                    f"failed={stats['induction']['failed'] + stats['sweep']['failed']}"
                 )
         except Exception as e:  # noqa: BLE001 - 归纳故障不阻断睡眠链
             self.log_warning(f"Sleep induction skipped: {e}")

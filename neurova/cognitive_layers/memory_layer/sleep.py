@@ -1004,7 +1004,7 @@ class SleepConsolidation(StateValuesStore):
         try:
             from neurova.cognitive_layers.memory_layer.sleep_induction import (
                 buildSyncLlmFn,
-                runSleepInduction,
+                runInductionPhase,
                 sleepInductionEnabled,
             )
 
@@ -1012,14 +1012,15 @@ class SleepConsolidation(StateValuesStore):
                 return
             provider = self._induction_llm_provider
             client = provider() if callable(provider) else None
-            stats = runSleepInduction(
+            stats = runInductionPhase(
                 self.memory_manager, buildSyncLlmFn(client)
             )
-            if stats.get("clusters"):
+            if stats.get("induction", {}).get("clusters") or stats.get("sweep", {}).get("collisions"):
                 logger.info(
-                    "睡眠归纳（手动会话）: 簇 %s, schema %s, 顺延 %s, 失败 %s",
-                    stats["clusters"], stats["schemas"], stats["deferred"],
-                    stats["failed"],
+                    "睡眠归纳（手动会话）: 簇 %s, schema %s, 碰撞 %s, core %s, 失败 %s",
+                    stats["induction"]["clusters"], stats["induction"]["schemas"],
+                    stats["sweep"]["collisions"], stats["sweep"]["core_schemas"],
+                    stats["induction"]["failed"] + stats["sweep"]["failed"],
                 )
         except Exception as e:  # noqa: BLE001 - 归纳故障不阻断睡眠链
             logger.warning("睡眠归纳跳过: %s", e)

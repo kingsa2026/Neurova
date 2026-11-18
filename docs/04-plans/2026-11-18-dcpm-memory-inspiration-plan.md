@@ -110,6 +110,14 @@ T6 intention 层（差异化，与 question_queue 合流；最后做）
 
 **验收判据**：构造两个语义远、行为像的 PATTERN → sweeper 判碰撞 → 产 core pattern 且 evidence 含两成员 id；两空间都高的平凡冗余对不被误并。
 
+**执行记录（2026-11-18，会话内实施）**：
+- 落地 `runCrossDomainSweep`（sleep_induction.py 内，与 T2 同门控）：行为嵌入 = schema pattern 嵌入（T2 提示词本就要求行为规律，不另花 LLM）；话题嵌入 = 证据事实嵌入质心（系统面逐条取，维度不齐跳过）；双空间判据 `cos_beh>0.72 且 cos_sem<0.65`，union-find 聚簇，每簇一次 LLM 归纳 core schema（entity_type="core_schema"，metadata 带 member_schemas/evidence 并集/scope，HIERARCHICAL 边连每个成员，每周期上限 8、fail-soft）。
+- 两触发点（自动周期 idle_tracker / 手动深睡会话）统一改走 `runInductionPhase`（T2 归纳 + T3 扫描一次入口）；embed_fn 缺省从 manager 行嵌入入口解析。
+- 阈值经真嵌入标定（bge-small-zh-v1.5，512 维）：行为相似句对 0.878 / 无关 0.386（θ_beh=0.72 合理）；**无关话题句对 0.519**——DCPM 的 θ_sem=0.40 在本嵌入空间会把所有对判成"话题不远"而恒空扫，标定为 0.65（同话题 0.84+）。
+- 读面：core schema 经既有 `/neuron` API 可查；检索浮出（行为匹配加分）留待检索面批次。
+- 验证：红灯 9 用例 → 绿 9/9（双空间判据/平凡冗余不碰/行为不像不碰/跨作用域永不碰/LLM 失败 fail-soft/门控直通/三簇并一/桥接降级/组合入口）；memory 套件 1188 过仅 2 预存；live-verify 隔离真后端 6/6 PASS——真实睡眠周期内检出碰撞对 1（日志：schema 2/碰撞对 1/新 core 0/失败 1，LLM 缺席诚实不编造 core）。
+- 净 LOC：生产池 +262/−2（sleep_induction +229、idle_tracker +19、sleep.py +14/−2）；测试 +280 不计入。
+
 ---
 
 ## T4 · 断链清偿（地基，先于 T2/T3）
