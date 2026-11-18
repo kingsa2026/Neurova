@@ -3626,11 +3626,14 @@ class ChatPipeline:
     # ══════════════════════════════════════════════════════════════
 
     async def _auto_checkpoint(self, ctx: ChatContext):
-        """P1-5 自动检查点：会话 JSON → git 裸仓库（auto ref，防抖内建）。
+        """P1-5 自动检查点：会话完整状态 → git 裸仓库（auto ref，防抖内建）。
 
-        service 惰性建（agent_id 维度）并缓存到 agent；知识库文件快照
-        （kb_files 参数）由知识库子系统注入后启用。任何异常只 debug
-        日志，绝不阻断主对话流程。
+        service 惰性建（agent_id 维度）并缓存到 agent。快照内容 =
+        session_manager 的完整消息历史（get_history，与回合末落盘同一事实源）
+        叠加本轮回执四字段——此前只存四字段的"缩水快照"撑不起恢复面。
+        kb_files 不传：知识库文件快照等知识库子系统提供注入口后再接
+        （service 参数保留给该未来接点，此处不传空字典装作已接线）。
+        任何异常只 debug 日志，绝不阻断主对话流程。
         """
         try:
             if not getattr(self._agent, "checkpoints_enabled", True):
@@ -3643,13 +3646,20 @@ class ChatPipeline:
                 self._agent._checkpoint_service = service
 
             session_key = ctx.session_id or "default"
+            messages: list = []
+            session_manager = self.session_manager
+            if session_manager is not None:
+                messages = session_manager.get_history(
+                    self.config.agent_id, session_key
+                )
             session_data = {
                 "user_input": ctx.user_input,
                 "reply": ctx.reply,
                 "trace_id": ctx.trace_id,
                 "turn": getattr(self._agent, "turn_count", 0),
+                "messages": messages or [],
             }
-            service.snapshot_auto(session_key, session_data, kb_files={})
+            service.snapshot_auto(session_key, session_data)
         except Exception as e:
             logger.debug("自动检查点跳过: %s", e)
 

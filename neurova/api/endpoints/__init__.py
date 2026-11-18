@@ -217,6 +217,9 @@ ENDPOINT_MODULES = [
     ("neurova.api.endpoints.agent", "/v1/agents", "Agent API"),
     ("neurova.api.endpoints.agent_package", "/v1/agents", "Agent Package API"),
     ("neurova.api.endpoints.agent_migration", "/v1/agents", "Agent Migration API"),
+    # K1：检查点恢复面（列表 + 事务化恢复）。与 agent 面同前缀、以子路径
+    # /{agent_id}/checkpoints* 区分；恢复是敏感操作（归属门 + confirm + 审计）。
+    ("neurova.api.endpoints.agent_checkpoints_api", "/v1/agents", "Checkpoints API"),
     ("neurova.api.endpoints.auth", "/v1/auth", "Auth API"),
     ("neurova.api.endpoints.memory", "/v1/memory", "Memory API"),
     ("neurova.api.endpoints.model", "/v1/models", "Model API"),
