@@ -556,6 +556,10 @@ class ShellEvasionGuardian(BaseGuardian):
              GuardThreatCategory.SHELL_EVASION, "管道到 shell 执行"),
             (r"\|\s*(ba|z|k)?sh\s*$", GuardSeverity.HIGH, GuardThreatCategory.SHELL_EVASION,
              "管道到 shell 执行"),
+            # heredoc 体交由 shell 解释（QwenPaw 对照批 B8）：命令藏进 `sh <<EOF`
+            # 的体里、逐行不带管道时，旧表抓不到"这个 heredoc 将被当脚本执行"的形态
+            (r"\b(?:ba|z|da|k)?sh\b\s*<<-?\s*[\"']?[A-Za-z_]\w*", GuardSeverity.HIGH,
+             GuardThreatCategory.SHELL_EVASION, "heredoc 体交由 shell 执行"),
             (r"\\x00", GuardSeverity.HIGH, GuardThreatCategory.SHELL_EVASION,
              "Null 字节注入"),
             (r"\$\{[^}]*\}", GuardSeverity.HIGH, GuardThreatCategory.SHELL_EVASION,
