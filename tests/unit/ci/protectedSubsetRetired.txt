@@ -36,3 +36,5 @@ tests/unit/api/test_mcpFaceCallerTierIsScopedByOwner.py | 改名链末跳署名�
 tests/unit/memory_ingest/test_converter_codex.py | 改名迁移署名（**不是撤判据**）：`8003eb949` 把 codex 参照系转换器按实际覆盖范围更名 `test_converter_rollout_jsonl.py`，内容随名走、覆盖不缩水；清单条目同批改指现名，现由 tests/unit/memory_ingest/test_converter_rollout_jsonl.py 持有
 tests/unit/memory_ingest/test_converter_qwenpaw.py | 改名迁移署名（**不是撤判据**）：`8003eb949` 把 qwenpaw 参照系转换器按实际覆盖范围更名 `test_converter_session_history.py`，内容随名走、覆盖不缩水；清单条目同批改指现名，现由 tests/unit/memory_ingest/test_converter_session_history.py 持有
 
+tests/unit/api/test_recoverPasswordFromSourceConstant.py | 随 a7962ad5c（S2 安全批：主恢复密码注入化）退役——恢复口令改构建/部署期环境注入后，"源码常量恢复形态"连同其判据一并下架；现口径见 neurova/api/endpoints/auth.py 的 _masterRecoveryPassword
+tests/unit/cognitive/test_workingMemoryAugmenterBehaviour.py | 随 898b1d0b2（教义第 7 条收口：五簇同功能双实现退役）删净——其与保留侧 test_unified_retriever 等判据是同一行为的两份实现，收口后由保留侧承载

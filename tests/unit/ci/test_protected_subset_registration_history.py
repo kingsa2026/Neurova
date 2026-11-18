@@ -108,6 +108,22 @@ def _requireCompleteHistory(repo) -> None:
 _HISTORY_BATCH = 40
 
 
+def _expandSnapshotLine(line: str) -> list:
+    """单行清单快照 → 条目列表。
+
+    历史里存在被写成**单行**、以字面 `\\n`（反斜杠+n 两字符）连接多路径的
+    坏行（编辑事故形态）：整行当一条登记会造出一个不存在的"路径"，其真实
+    成分反而被挤出「曾登记」集合。按成分拆开是保守扩面——合法路径不含该
+    两字符序列，拆分无副作用；`#` 注释仍按行级规则剥离。
+    """
+    entries = []
+    for piece in line.split("\\n"):
+        entry = piece.split("#", 1)[0].strip()
+        if entry.startswith(("tests/", "scripts/")):
+            entries.append(entry)
+    return entries
+
+
 def _listedEver() -> set:
     """清单**历史上**出现过的全部条目（按提交逐个读清单全文，不解析 patch）。
 
@@ -151,9 +167,7 @@ def _listedEver() -> set:
             cwd=str(PROJECT_ROOT), timeout=180,
         ).stdout
         for line in batch.splitlines():
-            entry = line.split("#", 1)[0].strip()
-            if entry.startswith(("tests/", "scripts/")):
-                found.add(entry)
+            found.update(_expandSnapshotLine(line))
     return found
 
 
@@ -262,6 +276,26 @@ def test_retired_ledger_has_no_stale_rows():
         elif path not in ever:
             stale.append(f"{path}（历史上从未登记过，台账该行无对应）")
     assert not stale, "退役台账里有无效应行：\n  " + "\n  ".join(stale)
+
+
+def test_snapshotLineExpansionSplitsLiteralNewlineBlob():
+    """历史清单里存在被写成**单行**、用字面 `\\n`（反斜杠+n 两字符）连接
+    多路径的坏行（编辑事故形态，实测曾被本守卫当成一条"不存在的路径"，
+    挤掉其真实成分的「曾登记」判定）。按成分拆开是保守扩面：合法路径
+    不含该两字符序列，拆分无副作用；`#` 注释仍按行级规则剥离。
+    """
+    line = ("tests/unit/ci/test_mainBaselineRefIsMaterialized.py\\n"
+            "tests/unit/knowledge/enterprise/test_sqlErpUpgrade.py\\n"
+            "tests/unit/knowledge/ontology/test_artifactAttribution.py")
+    assert _expandSnapshotLine(line + "  # 尾注") == [
+        "tests/unit/ci/test_mainBaselineRefIsMaterialized.py",
+        "tests/unit/knowledge/enterprise/test_sqlErpUpgrade.py",
+        "tests/unit/knowledge/ontology/test_artifactAttribution.py",
+    ]
+    assert _expandSnapshotLine("tests/unit/ci/test_guard_itself.py # hello") == [
+        "tests/unit/ci/test_guard_itself.py",
+    ]
+    assert _expandSnapshotLine("# 纯注释行") == []
 
 
 def test_guard_itself_is_registered():
