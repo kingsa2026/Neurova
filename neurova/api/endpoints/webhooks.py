@@ -100,15 +100,38 @@ def _ensurePublicUrl(url: str) -> None:
         raise HTTPException(status_code=400, detail="Webhook URL 不合规：仅允许公网 http/https 地址")
 
 
+def _canManage(wh: Dict[str, Any], current_user: Dict[str, Any]) -> bool:
+    """属主栅栏：admin 全量；属主本人放行。
+
+    存量无主行（user_id 空或历史硬编码的 "default"）按 2026-11-18
+    「空属主判给管理员」裁定只归 admin。webhook 是配置面 REST，属主取
+    请求身份字典的 user_id（§3 身份通道 ContextVar 在这些路由无写点）。
+    """
+    if str(current_user.get("role") or "user") == "admin":
+        return True
+    owner = str(wh.get("user_id") or "")
+    if owner in ("", "default"):
+        return False
+    return owner == str(current_user.get("user_id") or "")
+
+
+def _ownedWebhookOr404(webhook_id: str, current_user: Dict[str, Any]) -> Dict[str, Any]:
+    """取行 + 属主判一起做；不存在或不属当前用户一律 404（不泄露存在性）。"""
+    wh = _webhooks.get(webhook_id)
+    if not wh or not _canManage(wh, current_user):
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    return wh
+
+
 @router.get("", response_model=List[WebhookInfo])
-async def list_webhooks():
-    """获取 Webhook 列表"""
-    return [WebhookInfo(**w) for w in _webhooks.values()]
+async def list_webhooks(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取 Webhook 列表（仅本人；admin 全量）"""
+    return [WebhookInfo(**w) for w in _webhooks.values() if _canManage(w, current_user)]
 
 
 @router.post("", response_model=WebhookInfo)
-async def create_webhook(body: WebhookCreate):
-    """创建 Webhook"""
+async def create_webhook(body: WebhookCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """创建 Webhook（属主=发起者本人）"""
     _ensurePublicUrl(body.url)
     wh_id = str(uuid.uuid4())
     now = time.time()
@@ -118,7 +141,7 @@ async def create_webhook(body: WebhookCreate):
         "url": body.url,
         "events": body.events,
         "enabled": True,
-        "user_id": "default",
+        "user_id": str(current_user.get("user_id") or ""),
         "created_at": now,
         "updated_at": now,
     }
@@ -128,20 +151,17 @@ async def create_webhook(body: WebhookCreate):
 
 
 @router.get("/{webhook_id}", response_model=WebhookInfo)
-async def get_webhook(webhook_id: str):
-    """获取 Webhook 详情"""
-    wh = _webhooks.get(webhook_id)
-    if not wh:
-        raise HTTPException(status_code=404, detail="Webhook not found")
+async def get_webhook(webhook_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取 Webhook 详情（属主或 admin）"""
+    wh = _ownedWebhookOr404(webhook_id, current_user)
     return WebhookInfo(**wh)
 
 
 @router.put("/{webhook_id}", response_model=WebhookInfo)
-async def update_webhook(webhook_id: str, body: WebhookUpdate):
-    """更新 Webhook"""
-    wh = _webhooks.get(webhook_id)
-    if not wh:
-        raise HTTPException(status_code=404, detail="Webhook not found")
+async def update_webhook(webhook_id: str, body: WebhookUpdate,
+                         current_user: Dict[str, Any] = Depends(get_current_user)):
+    """更新 Webhook（属主或 admin）"""
+    wh = _ownedWebhookOr404(webhook_id, current_user)
     updates = safe_model_dump(body, exclude_none=True)  # s9: pydantic v1 兼容
     if "url" in updates:
         _ensurePublicUrl(updates["url"])
@@ -153,10 +173,9 @@ async def update_webhook(webhook_id: str, body: WebhookUpdate):
 
 
 @router.delete("/{webhook_id}")
-async def delete_webhook(webhook_id: str):
-    """删除 Webhook"""
-    if webhook_id not in _webhooks:
-        raise HTTPException(status_code=404, detail="Webhook not found")
+async def delete_webhook(webhook_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """删除 Webhook（属主或 admin）"""
+    _ownedWebhookOr404(webhook_id, current_user)
     del _webhooks[webhook_id]
     for did in [d for d, v in _deliveries.items() if v.get("webhook_id") == webhook_id]:
         del _deliveries[did]
@@ -165,11 +184,14 @@ async def delete_webhook(webhook_id: str):
 
 
 @router.post("/{webhook_id}/test")
-async def test_webhook(webhook_id: str, body: WebhookTestRequest):
-    """发送测试事件：真实 POST 到 webhook.url，投递结果如实记录（不得谎报 delivered）。"""
-    wh = _webhooks.get(webhook_id)
-    if not wh:
-        raise HTTPException(status_code=404, detail="Webhook not found")
+async def test_webhook(webhook_id: str, body: WebhookTestRequest,
+                       current_user: Dict[str, Any] = Depends(get_current_user)):
+    """发送测试事件：真实 POST 到 webhook.url，投递结果如实记录（不得谎报 delivered）。
+
+    属主或 admin 才可触发——本端点会向 webhook.url 发起服务端 POST，
+    不设属主门等于开放"借服务器外送"面。
+    """
+    wh = _ownedWebhookOr404(webhook_id, current_user)
     # P1-5：存量行（闸上线前入库）在发起服务端 POST 前同样复核
     _ensurePublicUrl(wh.get("url") or "")
     delivery_id = str(uuid.uuid4())
@@ -209,7 +231,9 @@ async def test_webhook(webhook_id: str, body: WebhookTestRequest):
 
 
 @router.get("/{webhook_id}/deliveries", response_model=List[DeliveryInfo])
-async def list_deliveries(webhook_id: str, limit: int = 50):
-    """获取投递记录"""
+async def list_deliveries(webhook_id: str, limit: int = 50,
+                          current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取投递记录（随 webhook 属主门）"""
+    _ownedWebhookOr404(webhook_id, current_user)
     items = [d for d in _deliveries.values() if d.get("webhook_id") == webhook_id]
     return [DeliveryInfo(**{k: v for k, v in d.items() if k != "error"}) for d in items[-limit:]]
