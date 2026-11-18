@@ -211,6 +211,59 @@ def replayRunTailStatus(subagentId: str) -> str:
     return tail
 
 
+def reconcileSwarmRunsAtStartup() -> Dict[str, Any]:
+    """启动收敛（S3 事件账本侧接线，K2）：对「台账仍 running 的 swarm run」与
+    「内存仍活跃的 run」用事件账本末态校正内存 run 状态，末态如实落台账
+    （口径与 ``agent_run_store.reconcile_at_startup`` 一致：running→failed
+    (process_died)——台账终态由该收敛主收口，本入口不重写台账）。
+
+    只做状态收敛，**不做 run 复活续跑**：内存无此 run 时如实报告
+    （not_in_memory），不凭账本重建对象。账本侧「cancelled」末态在蜂群域落
+    failed（迁移表无 cancelled，取消成因记 cause，与 cancelRun 同口径）。
+    fail-open：台账/单条 run 校正故障不阻断启动。
+    """
+    swarm = get_swarm_manager()
+    candidates: List[str] = []
+
+    # ① 台账侧候选：启动瞬间仍 running、已由台账启动收敛翻牌留档的子任务行
+    try:
+        from neurova.core import agent_run_store as _ars
+
+        if _ars.run_gate_enabled():
+            for row in _ars.get_agent_run_store().startupReconcileRowsSnapshot():
+                sid = str((row or {}).get("subagent_id") or "").strip()
+                if sid:
+                    candidates.append(sid)
+    except Exception as e:  # noqa: BLE001 - 台账不可用不阻断启动收敛
+        logger.warning("Swarm 启动收敛：台账候选读取失败（忽略）: %s", e)
+
+    # ② 内存侧候选：仍活跃的 run（同进程残留/漂移，例如单例跨 lifespan）
+    with swarm._lock:
+        for run in swarm._runs.values():
+            if run.status in SUBAGENT_ACTIVE_STATUSES:
+                candidates.append(run.subagent_id)
+
+    results: List[Dict[str, Any]] = []
+    for sid in dict.fromkeys(candidates):  # 去重保序
+        try:
+            tail = replayRunTailStatus(sid)
+            if tail == "cancelled":
+                tail = SUBAGENT_FAILED
+            results.append(swarm.reconcileRunFromEvents(sid, tailOverride=tail))
+        except Exception as e:  # noqa: BLE001 - 单 run 校正失败不拖垮整体
+            logger.warning("Swarm 启动收敛：run %s 校正失败（忽略）: %s", sid, e)
+            results.append({"subagent_id": sid, "corrected": False,
+                            "reason": f"error: {e}"})
+
+    corrected = [r for r in results if r.get("corrected")]
+    if corrected:
+        logger.warning(
+            "Swarm 启动收敛：按事件账本末态校正 %d 条内存 run 状态（只收敛，不复活续跑）",
+            len(corrected),
+        )
+    return {"checked": len(results), "corrected": len(corrected), "results": results}
+
+
 def mcpBorrowedToolNames() -> frozenset:
     """P3（蜂群对照 #8）：父上下文当前可用的 MCP 工具名快照（借用面）。
 
@@ -1093,16 +1146,20 @@ class SwarmManager:
         events = readRunEvents(sid) if sid else []
         return {"subagent_id": sid, "count": len(events), "events": events}
 
-    def reconcileRunFromEvents(self, subagent_id: str) -> Dict[str, Any]:
+    def reconcileRunFromEvents(self, subagent_id: str,
+                               tailOverride: str = "") -> Dict[str, Any]:
         """S3 启动收敛增强：用事件账本末态校正内存 run 的漂移（补强，不替代台账）。
 
         内存无此 run → 如实报告（重启后常态，不凭账本复活对象）；一致 → noop；
         漂移 → 按账本末态直改并落一条 status_corrected 事件留痕。校正不是生命
         周期迁移（重启期间账本可能推进到迁移表不可达的跳变，如 running→completed
         的跨相位补账），故不走 transitionRun，但必须留痕可查。
+
+        `tailOverride`：调用方已重放/归一化好的末态（启动收敛入口
+        reconcileSwarmRunsAtStartup 传入，免二次读账本）；缺省现场重放。
         """
         sid = str(subagent_id or "").strip()
-        tail = replayRunTailStatus(sid)
+        tail = str(tailOverride or "").strip() or replayRunTailStatus(sid)
         with self._lock:
             run = self._runs.get(sid)
             if run is None:
@@ -2614,6 +2671,7 @@ __all__ = [
     "SwarmManager",
     "current_subagent_depth",
     "get_swarm_manager",
+    "reconcileSwarmRunsAtStartup",
     "reset_subagent_depth",
     "reset_swarm_manager",
     "set_subagent_depth",

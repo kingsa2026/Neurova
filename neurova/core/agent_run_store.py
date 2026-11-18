@@ -216,7 +216,9 @@ class AgentRunStore:
             apply_migrations(self._conn, "agent_runs")
         # 进程启动语义：store 每进程恰好构造一次（单例 + app.py workers=1），
         # init 时仍为 running 的行必来自已死的前进程 → 收敛不留幽灵。
-        self.reconcile_at_startup()
+        # 收敛清单留档（K2 启动接线）：蜂群事件账本侧校正内存 run 时以此为
+        # 候选（哪些行在启动瞬间仍是 running），见 startupReconcileRowsSnapshot。
+        self.startupReconcileRows: List[Dict[str, Any]] = self.reconcile_at_startup()
 
     def close(self) -> None:
         with self._lock:
@@ -542,7 +544,7 @@ class AgentRunStore:
         now = time.time()
         with self._lock, self._conn:
             dead = self._conn.execute(
-                "SELECT run_id, session_id FROM agent_runs WHERE status='running'"
+                "SELECT run_id, session_id, subagent_id FROM agent_runs WHERE status='running'"
             ).fetchall()
             queued = self._conn.execute(
                 "SELECT run_id, session_id FROM agent_runs WHERE status='queued'"
@@ -571,12 +573,22 @@ class AgentRunStore:
                 len(queued),
             )
         return [
-            {"run_id": r, "session_id": s, "status": "failed", "error_type": "process_died"}
-            for r, s in dead
+            {"run_id": r, "session_id": s, "subagent_id": sub,
+             "status": "failed", "error_type": "process_died"}
+            for r, s, sub in dead
         ] + [
             {"run_id": r, "session_id": s, "status": "cancelled", "error_type": "server_restart"}
             for r, s in queued
         ]
+
+    def startupReconcileRowsSnapshot(self) -> List[Dict[str, Any]]:
+        """启动收敛清单快照（K2 接线：蜂群事件账本侧校正内存 run 的候选来源）。
+
+        只读不消费：行集仅在 __init__ 的 reconcile_at_startup 产出一次，
+        进程生命周期内不变，重复读取返回同一批行的拷贝。
+        """
+        with self._lock:
+            return [dict(row) for row in self.startupReconcileRows]
 
     def reconcile_stale(self, now: Optional[float] = None) -> List[Dict[str, Any]]:
         """租约过期收敛（进程内可周期调用）：仅 lease 已过期的 running →

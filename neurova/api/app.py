@@ -915,6 +915,27 @@ async def _on_startup(app_state: AppState) -> None:
     # 阻塞事件循环 → 移入工作线程执行）
     await asyncio.to_thread(_initialize_components, app_state)
 
+    # ShutdownGuard 装配（K2 启动接线：机制早已有单测、生产启动链此前零调用）。
+    # 启动时检测上次是否异常关闭（sentinel），异常则从 session 恢复丢失记忆，
+    # 再写新 sentinel；关停侧 graceful_shutdown 刷缓冲 + 摘 sentinel（见
+    # _on_shutdown）。sentinel/恢复目录都落在数据根（get_shutdown_guard 单源）。
+    # fail-open：兜底器故障不阻断启动。
+    try:
+        from neurova.recovery.shutdown_guard import get_shutdown_guard
+
+        app_state.shutdown_guard = get_shutdown_guard()
+        _guardReport = await asyncio.to_thread(
+            app_state.shutdown_guard.prepare_startup, app_state.agents
+        )
+        logger.info(
+            "ShutdownGuard 已装配: abnormal=%s recovered_memories=%s sentinel_written=%s",
+            _guardReport.get("abnormal"),
+            _guardReport.get("recovered_memories"),
+            _guardReport.get("sentinel_written"),
+        )
+    except Exception as _guardErr:  # noqa: BLE001 - 兜底器故障不阻断启动
+        logger.warning("ShutdownGuard 装配失败（记忆崩溃恢复将不可用）: %s", _guardErr)
+
     # 健康检查周期调度：`interval` 参数此前只存不用（检查只在请求时现场跑）。
     # 启停成对——关停侧显式 stop，否则常驻 task 会拖住退出路径。
     if app_state.health_checker is not None:
@@ -942,6 +963,26 @@ async def _on_startup(app_state: AppState) -> None:
             await asyncio.to_thread(_ars.get_agent_run_store)
     except Exception as _ledger_err:  # noqa: BLE001 - 台账故障不阻断启动
         logger.warning("AgentRun 台账启动收敛失败（忽略）: %s", _ledger_err)
+
+    # Swarm run 启动收敛（K2：事件账本侧接线——replayRunTailStatus /
+    # reconcileRunFromEvents 机制早已有单测、生产启动链此前零调用）。
+    # 台账级收敛（上面 get_agent_run_store 触发的 reconcile_at_startup）仍是
+    # 事实源主收口；这里只对「台账仍 running 的 swarm run」与「内存仍活跃的
+    # run」用事件账本末态校正内存 run 状态。只做状态收敛，不做复活续跑。
+    # fail-open：蜂群收敛故障不阻断启动。
+    try:
+        from neurova.agent.swarm import reconcileSwarmRunsAtStartup
+
+        _swarmReconcile = await asyncio.to_thread(reconcileSwarmRunsAtStartup)
+        if _swarmReconcile.get("corrected"):
+            logger.warning("Swarm 启动收敛结果: %s", _swarmReconcile)
+        else:
+            logger.info(
+                "Swarm 启动收敛：无需校正（checked=%s）",
+                _swarmReconcile.get("checked"),
+            )
+    except Exception as _swarmErr:  # noqa: BLE001 - 蜂群收敛故障不阻断启动
+        logger.warning("Swarm 启动收敛失败（忽略）: %s", _swarmErr)
 
 # 知识摄取队列排水循环（sync=false 入队任务的后台执行；
 # NEUROVA_KNOWLEDGE_ASYNC=off 显式停用）。fail-open 不阻断启动
@@ -1458,6 +1499,20 @@ async def _on_shutdown(app_state: AppState) -> None:
             logger.warning("Channel manager stop timed out after %.1fs; skipping", AGENT_SHUTDOWN_TIMEOUT)
         except Exception as e:
             logger.warning("Channel manager stop error: %s", e)
+
+    # ShutdownGuard 优雅关停（K2 启动接线，与启动侧 prepare_startup 成对）：
+    # 刷新全部 Agent 对话缓冲到持久存储 + 摘除 sentinel（下次启动视为干净
+    # 退出，不触发崩溃恢复）。必须先于 agent.shutdown()——缓冲还活着才刷得出。
+    # fail-open：关停路径不互相牵连。
+    try:
+        _guard = app_state.shutdown_guard
+        if _guard is not None:
+            await asyncio.to_thread(
+                _guard.graceful_shutdown, app_state.agents, AGENT_SHUTDOWN_TIMEOUT
+            )
+            logger.info("ShutdownGuard 优雅关停完成（缓冲已刷新，sentinel 已摘除）")
+    except Exception as _guardStopErr:  # noqa: BLE001 - 兜底器关停失败不阻断关停
+        logger.warning("ShutdownGuard 优雅关停异常: %s", _guardStopErr)
 
     # 关闭所有 Agent（加超时：单个 agent 的睡眠整理挂起不能阻塞整个进程退出）
     for agent_id, agent in app_state.agents.items():
