@@ -68,16 +68,54 @@ export class ProvidersApi {
     this.client = client;
   }
 
-  /** 服务商列表（裸数组：HttpClient 对数组 JSON 原样返回，经 Object 二次转换取回） */
+  /** 服务商列表（裸数组；逐项归一——缺字段会让我方渲染期 undefined.length 崩溃） */
   async list(): Promise<ProviderInfoDto[]> {
     const res = await this.client.get<ProviderInfoDto[]>('/providers');
-    return res as Object as ProviderInfoDto[];
+    const arr = res as Object as ProviderInfoDto[];
+    const out: ProviderInfoDto[] = [];
+    for (const raw of arr) {
+      const p = raw as Object as Record<string, Object>;
+      const item: ProviderInfoDto = {
+        provider_id: String(p['provider_id'] ?? ''),
+        name: String(p['name'] ?? ''),
+        provider_type: String(p['provider_type'] ?? ''),
+        base_url: String(p['base_url'] ?? ''),
+        is_active: p['is_active'] === true,
+        status: String(p['status'] ?? ''),
+        models_count: Number(p['models_count'] ?? 0),
+        health: String(p['health'] ?? ''),
+        api_key_configured: p['api_key_configured'] === true,
+      };
+      out.push(item);
+    }
+    return out;
   }
 
-  /** 模型清单（裸数组） */
+  /** 模型清单（裸数组；逐项归一，capabilities 缺省空数组） */
   async listModels(): Promise<ModelInfoDto[]> {
     const res = await this.client.get<ModelInfoDto[]>('/models');
-    return res as Object as ModelInfoDto[];
+    const arr = res as Object as ModelInfoDto[];
+    const out: ModelInfoDto[] = [];
+    for (const raw of arr) {
+      const m = raw as Object as Record<string, Object>;
+      const capsRaw = (m['capabilities'] ?? []) as Object[];
+      const caps: string[] = [];
+      for (const c of capsRaw) {
+        caps.push(String(c));
+      }
+      const item: ModelInfoDto = {
+        model_id: String(m['model_id'] ?? ''),
+        name: String(m['name'] ?? ''),
+        provider: String(m['provider'] ?? ''),
+        capabilities: caps,
+        context_window: Number(m['context_window'] ?? 0),
+        max_tokens: Number(m['max_tokens'] ?? 0),
+        is_active: m['is_active'] === true,
+        status: String(m['status'] ?? ''),
+      };
+      out.push(item);
+    }
+    return out;
   }
 
   /** 当前活跃模型 */
