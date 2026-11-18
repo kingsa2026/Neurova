@@ -226,78 +226,6 @@
           </GlassButton>
         </template>
       </GlassCard>
-
-      <!-- Merge Conflicts -->
-      <GlassCard :title="t('sleep.conflicts')" style="margin-top: 16px">
-        <template #extra>
-          <GlassButton variant="ghost" size="sm" :loading="conflictsLoading" @click="fetchConflicts">
-            {{ t('common.refresh') }}
-          </GlassButton>
-        </template>
-        <a-spin :spinning="conflictsLoading">
-          <div v-if="conflicts.length > 0" class="conflicts-list">
-            <div v-for="conflict in conflicts" :key="conflict.id" class="conflict-card">
-              <div class="conflict-header">
-                <span class="conflict-field">{{ conflict.field }}</span>
-                <a-tag :color="conflict.resolved ? 'green' : 'red'" size="small">
-                  {{ conflict.resolved ? t('sleep.resolved') : t('sleep.pending') }}
-                </a-tag>
-              </div>
-              <div class="conflict-body">
-                <div class="conflict-value-row">
-                  <div class="conflict-value">
-                    <span class="value-label">{{ t('sleep.localValue') }}</span>
-                    <code class="value-code">{{ conflict.local_value }}</code>
-                  </div>
-                  <div class="conflict-value">
-                    <span class="value-label">{{ t('sleep.remoteValue') }}</span>
-                    <code class="value-code">{{ conflict.remote_value }}</code>
-                  </div>
-                </div>
-              </div>
-              <!-- 合法策略集 = 引擎 (keep_longest/keep_newest/merge)。
-                   此前 local/remote/自定义文本均为后端必拒的非法值（404）；
-                   引擎自动审计恒 resolved，动作区旧 v-if="!resolved" 永不可见 -->
-              <div class="conflict-actions">
-                <a-space>
-                  <GlassButton
-                    variant="ghost"
-                    size="sm"
-                    :loading="resolvingId === conflict.id + ':keep_longest'"
-                    @click="handleResolveStrategy(conflict.id, 'keep_longest')"
-                  >
-                    {{ t('sleep.keepStrongest') }}
-                  </GlassButton>
-                  <GlassButton
-                    variant="ghost"
-                    size="sm"
-                    :loading="resolvingId === conflict.id + ':keep_newest'"
-                    @click="handleResolveStrategy(conflict.id, 'keep_newest')"
-                  >
-                    {{ t('sleep.keepNewest') }}
-                  </GlassButton>
-                  <GlassButton
-                    variant="ghost"
-                    size="sm"
-                    :loading="resolvingId === conflict.id + ':merge'"
-                    @click="handleResolveStrategy(conflict.id, 'merge')"
-                  >
-                    {{ t('sleep.mergeOption') }}
-                  </GlassButton>
-                </a-space>
-              </div>
-              <div class="conflict-store-toggle">
-                <a-checkbox v-model:checked="conflictApplyToStore">{{ t('sleep.applyToStore') }}</a-checkbox>
-              </div>
-              <div v-if="conflict.resolution" class="conflict-resolution">
-                <a-tag color="green">{{ strategyLabel(conflict.resolution) }}</a-tag>
-                <span class="resolution-time">{{ formatTimestampText(conflict.created_at) }}</span>
-              </div>
-            </div>
-          </div>
-          <a-empty v-else :description="t('common.noData')" />
-        </a-spin>
-      </GlassCard>
     </a-spin>
   </div>
 </template>
@@ -306,20 +234,18 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { formatTimestampText } from '@/utils/displayText'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useMutation } from '@/composables/useAPI'
 import * as sleepApi from '@/api/modules/sleep'
-import type { SleepSettings, MergeConflict } from '@/api/modules/sleep'
+import type { SleepSettings } from '@/api/modules/sleep'
 
 const { t } = useI18n()
 const { agentId } = useAgentPage({
   onAgentChange: () => {
     fetchSettings()
-    fetchConflicts()
   },
 })
 
@@ -330,10 +256,6 @@ const sleepTabs = computed(() => [
 
 // --- State ---
 const loading = ref(false)
-const conflictsLoading = ref(false)
-const resolvingId = ref<string | null>(null)
-const conflictApplyToStore = ref(false)
-const conflicts = ref<MergeConflict[]>([])
 
 // --- API-backed settings form（键位与后端 sleep.py::SleepSettings 一致） ---
 const settingsForm = reactive<{
@@ -435,20 +357,6 @@ const fetchSettings = async () => {
   }
 }
 
-const fetchConflicts = async () => {
-  conflictsLoading.value = true
-  try {
-    const res = await sleepApi.getMergeConflicts(agentId.value)
-    // /conflicts 返回裸数组；此前 res?.data 读裸数组恒 undefined → 冲突卡恒空白
-    const data = sleepApi.unwrapSleep<MergeConflict[]>(res)
-    conflicts.value = Array.isArray(data) ? data : []
-  } catch {
-    conflicts.value = []
-  } finally {
-    conflictsLoading.value = false
-  }
-}
-
 // --- Actions ---
 const handleSave = async () => {
   // Validation
@@ -494,34 +402,8 @@ const handleSave = async () => {
   }
 }
 
-// 合法策略集 = 后端引擎 (keep_longest/keep_newest/merge)。
-// 此前 handleResolve('local'/'remote') 与自定义文本 modal 发送的值必被 404 拒绝，
-// 且引擎审计恒 resolved → 旧动作区 v-if="!resolved" 永不可见，属双重假功能。
-const handleResolveStrategy = async (conflictId: string, strategy: string) => {
-  resolvingId.value = conflictId + ':' + strategy
-  try {
-    await sleepApi.resolveConflict(agentId.value, conflictId, strategy, conflictApplyToStore.value)
-    message.success(t('common.success'))
-    await fetchConflicts()
-  } catch (e: any) {
-    message.error(e?.message || t('common.error'))
-  } finally {
-    resolvingId.value = null
-  }
-}
-
-const strategyLabel = (resolution: string) => {
-  const map: Record<string, string> = {
-    keep_longest: t('sleep.keepStrongest'),
-    keep_newest: t('sleep.keepNewest'),
-    merge: t('sleep.mergeOption'),
-  }
-  return map[resolution] || resolution
-}
-
 onMounted(() => {
   fetchSettings()
-  fetchConflicts()
 })
 </script>
 
@@ -535,90 +417,5 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   align-items: center;
-}
-
-/* Conflicts */
-.conflicts-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.conflict-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--nr-border-secondary, rgba(255, 255, 255, 0.06));
-  border-radius: 8px;
-  background: var(--nr-bg-elevated, rgba(255, 255, 255, 0.02));
-}
-
-.conflict-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.conflict-field {
-  font-weight: 600;
-  color: var(--nr-text-primary);
-  font-size: 13px;
-}
-
-.conflict-body {
-  padding: 4px 0;
-}
-
-.conflict-value-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.conflict-value {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.value-label {
-  font-size: 10px;
-  color: var(--nr-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.value-code {
-  font-family: var(--nr-font-mono);
-  font-size: 12px;
-  color: var(--nr-text-secondary);
-  background: rgba(255, 255, 255, 0.04);
-  padding: 4px 8px;
-  border-radius: 4px;
-  word-break: break-all;
-}
-
-.conflict-actions {
-  padding-top: 4px;
-}
-
-.conflict-resolution {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-top: 4px;
-}
-
-.resolution-time {
-  font-size: 11px;
-  color: var(--nr-text-muted);
-  font-family: var(--nr-font-mono);
-}
-
-.resolve-modal-info {
-  font-size: 13px;
-  color: var(--nr-text-secondary);
-  margin-bottom: 12px;
 }
 </style>
