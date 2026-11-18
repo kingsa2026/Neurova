@@ -2151,6 +2151,30 @@ class SwarmManager:
         return str(getattr(initiator_agent, "owner_user_id", "")
                    or getattr(initiator_agent, "current_user_id", "") or "")
 
+    @staticmethod
+    def _bindMemberCostContext(agentId: str, memberSessionId: str, traceId: str) -> dict:
+        """member 成本上下文绑定：把 cost_tracking 的调用上下文覆写为 member
+        归属（agent_id=member），返回**前值**供 finally 还原——member 结束后
+        父代同任务内的后续 LLM 调用不被误记到 member 名下。读取侧见
+        multi_model_client._usageAgentId（fullrepo 审计 2026-11-18 C1 收尾）。
+        """
+        from neurova.models.cost_tracking import get_llm_cost_context, set_llm_cost_context
+
+        prev = get_llm_cost_context()
+        set_llm_cost_context(agent_id=agentId, session_id=memberSessionId, turn_id=traceId)
+        return prev
+
+    @staticmethod
+    def _restoreCostContext(prev: dict) -> None:
+        """按 `_bindMemberCostContext` 返回的前值还原成本上下文。"""
+        from neurova.models.cost_tracking import set_llm_cost_context
+
+        set_llm_cost_context(
+            agent_id=prev.get("agent_id"),
+            session_id=prev.get("session_id"),
+            turn_id=prev.get("turn_id"),
+        )
+
     async def _run_member(
         self,
         run: SubAgentRun,
@@ -2165,6 +2189,10 @@ class SwarmManager:
         # P3-2（评测报告 G-12）：member 轨迹 trace——spawn→member→回流共一条可查询
         # 的 span 树；fail-open（轨迹故障/开关关闭不阻断子任务，与台账同口径）。
         userId = self._subagentAccountingUserId(initiator_agent)
+        # C1 收尾：member 的 LLM 用量归因到 member agent（覆写父轮上下文，
+        # finally 按前值还原）——读取侧 multi_model_client._usageAgentId。
+        prevCostCtx = self._bindMemberCostContext(
+            run.agent_id, run.member_session_id, run.trace_id)
         recorder, memberSpanId = self._startMemberTrace(run, userId)
         # 台账记账（§6-78 L 条）：写侧仍只在 `agent_run_ledger` 那一处，这里只调用。
         from neurova.core.agent_run_ledger import closeSubagentRun, openSubagentRun
@@ -2366,6 +2394,7 @@ class SwarmManager:
             self._endMemberTrace(recorder, memberSpanId, run)
             reset_subagent_depth(depth_token)
             set_subagent_tool_allowlist(None)
+            self._restoreCostContext(prevCostCtx)
 
         await self._broadcast(
             run,
