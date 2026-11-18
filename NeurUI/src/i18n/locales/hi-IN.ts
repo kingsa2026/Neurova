@@ -1920,6 +1920,14 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
   },
   collab: {
     // S12 परियोजना सहयोग दस्तावेज़
+    dossierRequestArchive: 'अनुरोध संग्रह',
+    dossierArchiveRequests: 'अनुरोध',
+    dossierArchiveSuccess: 'सफलताएँ',
+    dossierArchiveFailures: 'विफलताएँ',
+    dossierArchiveTokens: 'टोकन',
+    dossierArchiveLatency: 'विलंबता (औसत/अधिकतम)',
+    dossierArchiveRecentErrors: 'हाल की त्रुटियाँ',
+    dossierArchiveWindowIncomplete: 'विंडो संक्षिप्त (केवल हाल की प्रविष्टियाँ)',
     dossierTitle: 'परियोजना सहयोग दस्तावेज़',
     dossierSelectProject: 'परियोजना चुनें',
     dossierEmpty: 'इस परियोजना के लिए अभी कोई सहयोग रिकॉर्ड नहीं है',

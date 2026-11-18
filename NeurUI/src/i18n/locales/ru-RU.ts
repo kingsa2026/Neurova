@@ -1920,6 +1920,14 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
   },
   collab: {
     // S12 сводка сотрудничества по проекту
+    dossierRequestArchive: 'Архив запросов',
+    dossierArchiveRequests: 'Запросы',
+    dossierArchiveSuccess: 'Успехи',
+    dossierArchiveFailures: 'Сбои',
+    dossierArchiveTokens: 'Токены',
+    dossierArchiveLatency: 'Задержка (средняя/макс.)',
+    dossierArchiveRecentErrors: 'Недавние ошибки',
+    dossierArchiveWindowIncomplete: 'Окно усечено (только последние записи)',
     dossierTitle: 'Сводка сотрудничества по проекту',
     dossierSelectProject: 'Выберите проект',
     dossierEmpty: 'Для этого проекта пока нет записей о сотрудничестве',

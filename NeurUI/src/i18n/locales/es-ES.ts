@@ -1920,6 +1920,14 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
   },
   collab: {
     // S12 expediente de colaboración del proyecto
+    dossierRequestArchive: 'Archivo de solicitudes',
+    dossierArchiveRequests: 'Solicitudes',
+    dossierArchiveSuccess: 'Éxitos',
+    dossierArchiveFailures: 'Fallos',
+    dossierArchiveTokens: 'Tokens',
+    dossierArchiveLatency: 'Latencia (media/máx.)',
+    dossierArchiveRecentErrors: 'Errores recientes',
+    dossierArchiveWindowIncomplete: 'Ventana truncada (solo entradas recientes)',
     dossierTitle: 'Expediente de colaboración del proyecto',
     dossierSelectProject: 'Seleccionar proyecto',
     dossierEmpty: 'Aún no hay registros de colaboración para este proyecto',

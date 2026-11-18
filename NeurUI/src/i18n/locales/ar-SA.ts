@@ -1920,6 +1920,14 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
   },
   collab: {
     // S12 سجل التعاون للمشروع
+    dossierRequestArchive: 'أرشيف الطلبات',
+    dossierArchiveRequests: 'الطلبات',
+    dossierArchiveSuccess: 'النجاحات',
+    dossierArchiveFailures: 'الإخفاقات',
+    dossierArchiveTokens: 'الرموز',
+    dossierArchiveLatency: 'زمن الاستجابة (متوسط/أقصى)',
+    dossierArchiveRecentErrors: 'الأخطاء الأخيرة',
+    dossierArchiveWindowIncomplete: 'النافذة مقتطعة (الإدخالات الأخيرة فقط)',
     dossierTitle: 'سجل التعاون للمشروع',
     dossierSelectProject: 'اختر مشروعًا',
     dossierEmpty: 'لا توجد سجلات تعاون لهذا المشروع بعد',
