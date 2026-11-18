@@ -71,17 +71,29 @@ export default class EntryAbility extends UIAbility {
       }
       // 窗口背景/系统栏属性必须在首页装载、窗口进入就绪态后再设——同步期调用
       // 会报「This window state is abnormal」，且异常会吞掉系统栏设置，
-      // 把窗口留在未绘制态（实测表现为登录后整屏黑）
-      try {
+      // 把窗口留在未绘制态（实测表现为登录后整屏黑）。
+      // 三个设置都是异步 Promise：拒绝不进同步 catch，统一走 setupWindow 的 catch 记日志。
+      const setupWindow = async (): Promise<void> => {
         const mainWindow = windowStage.getMainWindowSync();
+        // 边到边：窗口铺满全屏（含状态栏/导航栏带），星野上下连贯不留白带；
+        // 系统栏透明显出应用背景，内容经根容器按避让高度下探/上收
+        await mainWindow.setWindowLayoutFullScreen(true);
         mainWindow.setWindowBackgroundColor('#0a0e1d');
-        mainWindow.setWindowSystemBarProperties({
-          statusBarColor: '#0a0e1d',
-          navigationBarColor: '#0a0e1d',
+        await mainWindow.setWindowSystemBarProperties({
+          statusBarColor: '#00000000',
+          navigationBarColor: '#00000000',
+          statusBarContentColor: '#ffffff',
+          navigationBarContentColor: '#ffffff',
         });
-      } catch (e) {
+        // 避让高度按设备实况读取（不同分辨率/挖孔/导航栏形态自适应），存全局供根容器取用
+        const sysArea = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+        const navArea = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM_GESTURE);
+        AppStorage.setOrCreate('appTopInsetPx', sysArea.topRect.height);
+        AppStorage.setOrCreate('appBottomInsetPx', navArea.bottomRect.height);
+      };
+      setupWindow().catch((e: Error) => {
         hilog.error(EntryAbility.DOMAIN, EntryAbility.TAG, '窗口主题设置失败: %{public}s', (e as Error).message);
-      }
+      });
       hilog.info(EntryAbility.DOMAIN, EntryAbility.TAG, '首页加载完成');
     });
   }

@@ -417,9 +417,12 @@ export struct SettingPage {
           : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
       window.getLastWindow(getContext(this)).then((win: window.Window) => {
         win.setWindowBackgroundColor(mode === ThemeMode.DARK ? '#0a0e1d' : '#f5f6fb');
+        // 系统栏透明（边到边）：底色由窗口/页面星野承担，只按模式切换栏内容色
         win.setWindowSystemBarProperties({
-          statusBarColor: mode === ThemeMode.DARK ? '#0a0e1d' : '#f5f6fb',
-          navigationBarColor: mode === ThemeMode.DARK ? '#0a0e1d' : '#f5f6fb',
+          statusBarColor: '#00000000',
+          navigationBarColor: '#00000000',
+          statusBarContentColor: mode === ThemeMode.DARK ? '#ffffff' : '#0a0e1d',
+          navigationBarContentColor: mode === ThemeMode.DARK ? '#ffffff' : '#0a0e1d',
         });
       }).catch((e: Error) => {
         this.logger.warn(TAG, '系统条同步失败', e);

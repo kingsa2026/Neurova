@@ -21,6 +21,7 @@ import { ServerProfiles } from '../libs/config/ServerProfiles';
 import { ConfigManager } from '../libs/config/ConfigManager';
 import { pageMap } from '../routing/PageMap';
 import { ToastHost } from '../components/system/ToastHost';
+import { StarBackground } from '../components/glass';
 
 @Entry
 @Component
@@ -28,6 +29,9 @@ struct Index {
   private router = Router.getInstance();
   private authStore = new AuthStore();
   private logger = Logger.getInstance();
+  // 系统栏避让高度（EntryAbility 按设备实况写入 px；不同分辨率/挖孔/导航栏形态自适应）
+  @StorageProp('appTopInsetPx') private topInsetPx: number = 0;
+  @StorageProp('appBottomInsetPx') private bottomInsetPx: number = 0;
 
   /**
    * 分发并确认落位。冷启动的 replace 可能早于 Navigation 装配完成而被静默丢弃
@@ -97,24 +101,31 @@ struct Index {
   }
 
   build() {
-    // 根容器：Navigation + 顶层 ToastHost（修复 toast 全盲——MessageManager 分发此前无 UI 订阅）
+    // 根容器：全屏星野 + Navigation + 顶层 ToastHost（修复 toast 全盲——MessageManager 分发此前无 UI 订阅）
     Stack() {
-    Navigation(this.router.getNavStack()) {
-      Column() {
-        Text('Neurova')
-          .fontSize(18)
-          .opacity(0.6)
+      // 星野铺满全窗（含状态栏/导航栏带）——边到边，上下不留白带
+      StarBackground({ starCount: 80, twinkle: true })
+      Navigation(this.router.getNavStack()) {
+        Column() {
+          Text('Neurova')
+            .fontSize(18)
+            .opacity(0.6)
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
       }
+      .navDestination(this.destBuilder)
+      .hideTitleBar(true)
+      .mode(NavigationMode.Stack)
       .width('100%')
       .height('100%')
-      .justifyContent(FlexAlign.Center)
-    }
-    .navDestination(this.destBuilder)
-    .hideTitleBar(true)
-    .mode(NavigationMode.Stack)
-    .width('100%')
-    .height('100%')
-    ToastHost()
+      // 内容避让系统栏：状态栏下探、导航栏上收（高度来自系统实况，分辨率自适应）
+      .padding({
+        top: px2vp(this.topInsetPx),
+        bottom: px2vp(this.bottomInsetPx),
+      })
+      ToastHost()
     }
     .width('100%')
     .height('100%')
