@@ -100,6 +100,18 @@ def growthBudgetShare() -> float:
     return min(max(share, 0.0), 1.0)
 
 
+def growthFloorTokens(budget_tokens: int) -> int:
+    """增量 token 门槛（窗口自适应）：静态下限与预算份额取大。
+
+    单源：`decideFoldTrigger` 与只读判读面 `assessFoldTrigger` 都从这里取，
+    消费方不得另写 max(静态下限, 预算×份额) 的第二份（教义第 6 条）。
+    """
+    return max(
+        growthGateParams()["growth_min_tokens"],
+        int(max(1, int(budget_tokens)) * growthBudgetShare()),
+    )
+
+
 def decideFoldTrigger(
     *,
     total_tokens: int,
@@ -147,15 +159,82 @@ def decideFoldTrigger(
         return FoldTriggerDecision(False, REASON_BELOW_FLOOR, occupancy, growth_tokens, growth_msgs)
     # 窗口自适应（B5 追加批）：增量门槛随预算缩放——大窗口模型要积累更多
     # 增量才主动折，小窗口模型更早折；静态下限兜住小预算场景。
-    growth_floor_tokens = max(
-        params["growth_min_tokens"],
-        int(budget_tokens * growthBudgetShare()),
-    )
+    growth_floor_tokens = growthFloorTokens(budget_tokens)
     if growth_tokens < growth_floor_tokens or growth_msgs < params["growth_min_msgs"]:
         return FoldTriggerDecision(False, REASON_INSUFFICIENT_GROWTH, occupancy, growth_tokens, growth_msgs)
     if max(0, int(foldable_msgs)) < max(0, int(keep_min_messages)):
         return FoldTriggerDecision(False, REASON_INSUFFICIENT_MASS, occupancy, growth_tokens, growth_msgs)
     return FoldTriggerDecision(True, REASON_GROWTH_GATE, occupancy, growth_tokens, growth_msgs)
+
+
+@dataclass(frozen=True)
+class FoldTriggerReadout:
+    """折叠时机判读（只读盘点面）：单源判定 + 四判据各自的现场读数。
+
+    `decision` 即 `decideFoldTrigger` 的原判定（不复制不改装）；其余字段是
+    判据阈值与逐项达标位，供 `context_status` 等盘点面拼装回执，不参与控制流。
+    """
+
+    decision: FoldTriggerDecision
+    gate_enabled: bool
+    floor: float
+    growth_floor_tokens: int
+    growth_min_msgs: int
+    keep_min_messages: int
+    foldable_msgs: int
+    occupancy_met: bool
+    growth_tokens_met: bool
+    growth_msgs_met: bool
+    mass_met: bool
+
+
+def assessFoldTrigger(
+    *,
+    total_tokens: int,
+    budget_tokens: int,
+    last_fold_tokens: int,
+    last_fold_msgs: int,
+    total_msgs: int,
+    enabled: bool = None,
+    keep_min_messages: int = 6,
+) -> FoldTriggerReadout:
+    """只读判定辅助（SC-3）：折叠时机判读 = 单源判定 + 四判据各自读数。
+
+    判定**直接复用** `decideFoldTrigger`（本函数不写第二套判据）；阈值一律取
+    自本模块既有单源（`growthGateParams` / `growthFloorTokens`）。`foldable_msgs`
+    由 `total_msgs - keep_min_messages` 就地推导（与编排层调用点同口径），
+    调用方无需自带。
+    """
+    keep_min = max(0, int(keep_min_messages))
+    foldable_msgs = max(0, int(total_msgs) - keep_min)
+    decision = decideFoldTrigger(
+        total_tokens=total_tokens,
+        budget_tokens=budget_tokens,
+        last_fold_tokens=last_fold_tokens,
+        last_fold_msgs=last_fold_msgs,
+        total_msgs=total_msgs,
+        foldable_msgs=foldable_msgs,
+        keep_min_messages=keep_min,
+        enabled=enabled,
+    )
+    params = growthGateParams()
+    gate_enabled = growthGateEnabled() if enabled is None else bool(enabled)
+    budget = max(1, int(budget_tokens))
+    floor_tokens = growthFloorTokens(budget)
+    occupancy = min(1.0, max(0, int(total_tokens)) / budget)
+    return FoldTriggerReadout(
+        decision=decision,
+        gate_enabled=gate_enabled,
+        floor=params["floor"],
+        growth_floor_tokens=floor_tokens,
+        growth_min_msgs=int(params["growth_min_msgs"]),
+        keep_min_messages=keep_min,
+        foldable_msgs=foldable_msgs,
+        occupancy_met=occupancy >= params["floor"],
+        growth_tokens_met=int(decision.growth_tokens) >= floor_tokens,
+        growth_msgs_met=int(decision.growth_msgs) >= int(params["growth_min_msgs"]),
+        mass_met=foldable_msgs >= keep_min,
+    )
 
 
 def splitFrozenCoveredPrefix(

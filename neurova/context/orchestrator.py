@@ -2726,18 +2726,19 @@ class ContextOrchestrator:
         # 关闭时只有击穿才折，
         # 与改前行为一致。
         from neurova.context.fold_trigger import (
-            decideFoldTrigger,
+            assessFoldTrigger,
             splitFrozenCoveredPrefix,
         )
 
-        decision = decideFoldTrigger(
+        # SC-3：判定经 assessFoldTrigger 取得（内部即 decideFoldTrigger 单源，
+        # foldable 推导收口到判据层，本层不再另写 len-6 一份）。
+        decision = assessFoldTrigger(
             total_tokens=total_tokens,
             budget_tokens=budget_tokens,
             last_fold_tokens=int(cache.get("last_fold_tokens") or 0),
             last_fold_msgs=int(cache.get("last_fold_msgs") or 0),
             total_msgs=len(msgs),
-            foldable_msgs=max(0, len(msgs) - 6),
-        )
+        ).decision
         self._recordFoldTriggerReadout(decision)
         if not decision.should_fold:
             # B2：零折叠轮也走冻结头——视图 = 冻结摘要行 + 未覆盖尾部，
@@ -3006,6 +3007,23 @@ class ContextOrchestrator:
         )
         if decision.should_fold and decision.reason == "growth_gate":
             readout["proactive_folds"] = int(readout.get("proactive_folds") or 0) + 1
+
+    def foldTriggerBaseline(self) -> Dict[str, int]:
+        """SC-3：当前会话的折叠基线只读读数（盘点面专用，**不建槽**）。
+
+        返回 `last_fold_tokens` / `last_fold_msgs`——`decideFoldTrigger` 的增量
+        基线，与 `_apply_window_budget` 判定点同槽同源；无槽（该会话尚未折叠过）
+        时为 0。只读路径不得走 `_window_cache_slot`（那会创建槽并可能挤掉
+        其他会话的 LRU 槽位——盘点工具不能有写副作用）。
+        """
+        try:
+            slot = self._window_compaction_cache.get(self._resolve_window_cache_key()) or {}
+        except Exception:  # noqa: BLE001 - 身份解析失败按无基线处理（读数不为幻觉）
+            slot = {}
+        return {
+            "last_fold_tokens": int(slot.get("last_fold_tokens") or 0),
+            "last_fold_msgs": int(slot.get("last_fold_msgs") or 0),
+        }
 
     @staticmethod
     def _buildRecentTurnsAnchor(window_msgs) -> str:

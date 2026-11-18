@@ -87,9 +87,11 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     },
     "context_status": {
         # B1（对照改进项）：上下文盘点（只读）。
+        # SC-3：回执附折叠时机判读块（判定单源复用 decideFoldTrigger + 元认知读数），
+        # 只走模型主动查询面，不进上下文信封恒定注入。
         # 并行能力声明：只读健康/预算读数，但走同步 SQLite/内存读，保守不并行。
         "capability": {"readOnly": True, "concurrentSafe": False, "writeScopes": ("none",)},
-        "description": "【上下文盘点】返回窗口 token 估算/预算、折叠代际与最近触发原因、池归档规模、取水读数。【何时用】决定是否 context_compress 前。",
+        "description": "【上下文盘点】返回窗口 token 估算/预算、折叠代际与最近触发原因、池归档规模、取水读数，并附折叠时机判读 fold_timing：增长门四判据读数与当前该不该折叠的判定、元认知状态（未编译事件/距上次反思/活跃教训）。【何时用】决定是否 context_compress 前。",
         "parameters": {"type": "object", "properties": {}},
     },
     "pool_search": {

@@ -36,12 +36,25 @@ from collections import OrderedDict
 import time
 
 import sys
-from datetime import datetime
 from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
 from neurova.core.data_root import dataPath
 from neurova.core.ast_scan import parseSource
 
 logger = get_logger(__name__)
+
+
+# ════════════════════════════════════════════════════════════════
+# SC-3 折叠时机判读块（context_status 回执）——长度纪律：判读块有界，
+# 文本字段截断与整块上限均具名；只走模型主动查询面，不进上下文信封恒定注入。
+# ════════════════════════════════════════════════════════════════
+
+#: 判读块内文本字段（ISO 时间戳、归因串等）的截断上限。
+FOLD_TIMING_TEXT_BOUND = 96
+#: 活跃教训计数的扫描窗（台账 kind=lesson 取最新 N 条判活跃，防无界扫描）。
+FOLD_TIMING_LESSON_SCAN_LIMIT = 100
+#: 判读块整块序列化长度上限——超出即降级为「判定 + 截断标记」，不塞大段状态。
+FOLD_TIMING_BLOCK_MAX_CHARS = 4000
 
 
 # ════════════════════════════════════════════════════════════════
@@ -5818,7 +5831,12 @@ class ToolExecutor:
             return {"error": f"主动折叠失败: {e}"}
 
     async def _execute_context_status(self, params: Dict) -> Dict:
-        """B1（对照改进项）：上下文盘点（只读）——预算/折叠/池三面读数。"""
+        """B1（对照改进项）：上下文盘点（只读）——预算/折叠/池三面读数。
+
+        SC-3：回执附「折叠时机判读」块（fold_timing）——增长门当前判定
+        （单源复用 decideFoldTrigger）+ 元认知读数。只走模型主动查询面，
+        不进上下文信封恒定注入（防元认知信息变常驻噪声）。
+        """
         try:
             orchestrator = getattr(self._agent, "context_orchestrator", None)
             if orchestrator is None:
@@ -5838,13 +5856,15 @@ class ToolExecutor:
                     pool_face = pool.get_retention_stats()
                 except Exception:  # noqa: BLE001
                     pool_face = {}
-            return {
+            total_tokens = estimate_window_tokens(history)
+            budget_tokens = orchestrator._effectiveWindowBudget(
+                orchestrator._resolve_window_token_budget()
+            )
+            receipt = {
                 "window": {
                     "messages": len(history),
-                    "tokens": estimate_window_tokens(history),
-                    "budget_tokens": orchestrator._effectiveWindowBudget(
-                        orchestrator._resolve_window_token_budget()
-                    ),
+                    "tokens": total_tokens,
+                    "budget_tokens": budget_tokens,
                 },
                 "fold": {
                     "generations": (health.get("fold_layers") or {}).get("levels", 0)
@@ -5861,9 +5881,133 @@ class ToolExecutor:
                     "drawer": pool_face.get("drawer"),
                 },
             }
+            # SC-3：折叠时机判读（失败诚实点名，不阻断盘点其余读数）。
+            try:
+                receipt["fold_timing"] = self._foldTimingBlock(
+                    orchestrator, history, total_tokens, budget_tokens
+                )
+            except Exception as e:  # noqa: BLE001 - 判读失败不阻断盘点
+                logger.warning("fold_timing 判读失败: %s", e)
+                receipt["fold_timing"] = {"error": f"折叠时机判读失败: {e}"}
+            return receipt
         except Exception as e:
             logger.warning("context_status 执行失败: %s", e)
             return {"error": f"上下文盘点失败: {e}"}
+
+    def _foldTimingBlock(
+        self, orchestrator, history: List[Dict], total_tokens: int, budget_tokens: int
+    ) -> Dict:
+        """SC-3：折叠时机判读块——单源判定 + 四判据读数 + 元认知状态。
+
+        判定直接复用 `fold_trigger.assessFoldTrigger`（内部即
+        `decideFoldTrigger`，不写第二套判据）；增量基线取编排器当前会话槽
+        （`foldTriggerBaseline`，与 `_apply_window_budget` 判定点同源）。
+        """
+        from neurova.context.fold_trigger import assessFoldTrigger
+
+        baseline = orchestrator.foldTriggerBaseline()
+        readout = assessFoldTrigger(
+            total_tokens=total_tokens,
+            budget_tokens=budget_tokens,
+            last_fold_tokens=int(baseline.get("last_fold_tokens") or 0),
+            last_fold_msgs=int(baseline.get("last_fold_msgs") or 0),
+            total_msgs=len(history),
+        )
+        decision = readout.decision
+        block = {
+            "should_fold": bool(decision.should_fold),
+            "reason": str(decision.reason)[:FOLD_TIMING_TEXT_BOUND],
+            "gate_enabled": bool(readout.gate_enabled),
+            "criteria": {
+                "occupancy": {
+                    "value": round(float(decision.occupancy), 4),
+                    "threshold": readout.floor,
+                    "met": bool(readout.occupancy_met),
+                },
+                "growth_tokens": {
+                    "value": int(decision.growth_tokens),
+                    "threshold": int(readout.growth_floor_tokens),
+                    "met": bool(readout.growth_tokens_met),
+                },
+                "growth_msgs": {
+                    "value": int(decision.growth_msgs),
+                    "threshold": int(readout.growth_min_msgs),
+                    "met": bool(readout.growth_msgs_met),
+                },
+                "foldable_msgs": {
+                    "value": int(readout.foldable_msgs),
+                    "threshold": int(readout.keep_min_messages),
+                    "met": bool(readout.mass_met),
+                },
+            },
+            "metacognition": self._metacognitionBlock(),
+        }
+        # 长度纪律（具名常量上限）：超限即降级为判定 + 截断标记，不塞大段状态。
+        try:
+            serialized = len(json.dumps(block, ensure_ascii=False))
+        except (TypeError, ValueError):
+            serialized = FOLD_TIMING_BLOCK_MAX_CHARS + 1
+        if serialized > FOLD_TIMING_BLOCK_MAX_CHARS:
+            return {
+                "should_fold": bool(decision.should_fold),
+                "reason": str(decision.reason)[:FOLD_TIMING_TEXT_BOUND],
+                "truncated": True,
+            }
+        return block
+
+    def _metacognitionBlock(self) -> Dict:
+        """SC-3：元认知读数块——全部取自既有读数面（MetaLedger/SelfModelEngine）。
+
+        - 未编译事件数：`events_since_last_reflect`（台账持久判定，重启不丢）；
+        - 距上次反思：台账 `reflection_history` 最近一条的时间差（时间面）；
+          轮数面透出当前轮次计数与引擎的到点判定 `reflect_due`（轮次门输入
+          原样透出，不另造"距上次反思轮数"的第二套推算——台账未记反思时刻
+          的轮次游标，推算必是猜）；
+        - 活跃 lesson 计数：台账 kind=lesson 未过期计数（与
+          `check_tool_advisory` / metacognition_api._lesson_active 同口径：
+          expires_at 缺省视为活跃，过期不计）。
+        """
+        from neurova.cognitive_layers.meta_cognition_layer.self_model import (
+            get_self_model_engine,
+        )
+
+        _user_id, agent_id = self._agent_identity()
+        resolved_id = str(agent_id or "default")
+        engine = get_self_model_engine(resolved_id)
+        ledger = engine.ledger
+        uncompiled_events = int(engine.events_since_last_reflect())
+        last_reflect = (ledger.reflection_history(resolved_id, limit=1) or [None])[0]
+        last_reflect_at = None
+        seconds_since = None
+        if isinstance(last_reflect, dict) and last_reflect.get("created_at"):
+            created_at = str(last_reflect["created_at"])
+            last_reflect_at = created_at[:FOLD_TIMING_TEXT_BOUND]
+            try:
+                delta = datetime.now(timezone.utc) - datetime.fromisoformat(created_at)
+                seconds_since = round(max(0.0, float(delta.total_seconds())), 3)
+            except (TypeError, ValueError):
+                seconds_since = None
+        turn_count = getattr(self._agent, "turn_count", 0)
+        if not isinstance(turn_count, int):
+            turn_count = 0
+        active_lessons = 0
+        records = ledger.list_records(
+            agent_id=resolved_id, page=1, size=FOLD_TIMING_LESSON_SCAN_LIMIT, kind="lesson"
+        )
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for item in records.get("items", []):
+            expires_at = (item.get("metadata") or {}).get("expires_at")
+            if expires_at and str(expires_at) < now_iso:
+                continue
+            active_lessons += 1
+        return {
+            "uncompiled_events": uncompiled_events,
+            "last_reflect_at": last_reflect_at,
+            "seconds_since_last_reflect": seconds_since,
+            "turn_count": turn_count,
+            "reflect_due": bool(engine.reflect_due(turn_count)),
+            "active_lessons": active_lessons,
+        }
 
     async def _execute_pool_search(self, params: Dict) -> Dict:
         """B9（对照改进项）：归档池语义检索——与视图抽屉同一打分面。"""
