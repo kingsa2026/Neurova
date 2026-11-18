@@ -246,4 +246,4 @@ V4 ＞ V3 ＞ V5。V3 是扩面前置，若近期不打算扩可进化面可暂�
 - 触发文章：BuddyMe 公众号《别再手动调 Harness 了：让框架自己进化自己》。
 - 本仓事实：`neurova/evolution/` 代码与 `tests/unit/evolution/` 守卫现读
   （runner.py/service.py/mutator.py/cost_ledger.py/failure_analysis.py 等，行号绑定 2026-11-14 工作树）；
-  既有对照档 `harnesspro_vs_neurova_cost_aware_harness_rsi_comparison_2026-11-13.md`。
+  既有对照档 `reference_k_vs_neurova_cost_aware_harness_rsi_comparison_2026-11-13.md`。

@@ -3,7 +3,7 @@
 - 日期：2026-11-15
 - 对象：zai-org/ZCode v3.18.2（克隆件 `E:/项目/_external_repos/zai-org-ZCode`，只读）vs 本仓当前代码
 - 方法：ZCode 侧逐项读取工具注册表（`apps/zcode-cli/packages/core/src/tool/handlers/index.ts` 与 `session-control/index.ts`）；Neurova 侧枚举 `neurova/builtin_tools.py::_BUILTIN_SCHEMAS` 全部键。只陈述两边代码里核实到的事实。
-- 关联：[ZCode 对照评测主报告](zcode_vs_neurova_harness_code_comparison_2026-11-14.md)（维度 B 工具系统与执行治理的深化）。
+- 关联：[ZCode 对照评测主报告](reference_w_vs_neurova_harness_code_comparison_2026-11-14.md)（维度 B 工具系统与执行治理的深化）。
 
 ---
 

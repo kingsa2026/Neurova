@@ -3,9 +3,9 @@
 - 日期：2026-11-17
 - 对象：zai-org/ZCode（克隆件 `E:/Projects/_external_repos/zai-org-ZCode`，只读参照）
 - 方法：代码级逐文件阅读（桌面 CUA 侧与 Neurova computer_use 侧各一个独立深读通道交叉验证），行号均为当日实测
-- 关联：`zcode_vs_neurova_harness_code_comparison_2026-11-14.md`（总评）、
-  `zcode_tool_inventory_comparison_2026-11-15.md`（工具清单）、
-  `zcode_agent_loop_comparison_2026-11-15.md`（loop 机制）
+- 关联：`reference_w_vs_neurova_harness_code_comparison_2026-11-14.md`（总评）、
+  `reference_w_tool_inventory_comparison_2026-11-15.md`（工具清单）、
+  `reference_w_agent_loop_comparison_2026-11-15.md`（loop 机制）
 
 ## 0. 评测口径与结论速览
 

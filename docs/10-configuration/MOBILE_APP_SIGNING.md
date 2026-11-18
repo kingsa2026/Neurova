@@ -3,7 +3,7 @@
 > 归属：`docs/10-configuration/`（部署/配置事实源）。配合
 > [`docs/04-plans/2026-11-15-Neurova手机客户端设计方案.md`](../04-plans/2026-11-15-Neurova手机客户端设计方案.md)
 > 的 D1 裁定（两端：鸿蒙 + 安卓，构建物统一 `Mobile/`）。
-> 本地材料清单（含指纹，无机密）：[`Mobile/signing/INFO.md`](../../../Mobile/signing/INFO.md)。
+> 本地材料清单（含指纹，无机密）：[`Mobile/signing/INFO.md`](../../Mobile/signing/INFO.md)。
 
 ## 0. 现状速览（2026-11-15 已备）
 

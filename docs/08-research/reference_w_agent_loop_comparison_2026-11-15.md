@@ -3,9 +3,9 @@
 - 日期：2026-11-15
 - 对象：zai-org/ZCode v3.18.2（克隆件 `E:/项目/_external_repos/zai-org-ZCode`，只读参照）
 - 方法：代码级逐文件阅读（未依据任何文档），行号均为当日实测
-- 关联：`zcode_vs_neurova_harness_code_comparison_2026-11-14.md`（总评）、
-  `zcode_swarm_orchestration_comparison_2026-11-15.md`（子代理编排）、
-  `zcode_tool_inventory_comparison_2026-11-15.md`（工具清单）
+- 关联：`reference_w_vs_neurova_harness_code_comparison_2026-11-14.md`（总评）、
+  `reference_w_swarm_orchestration_comparison_2026-11-15.md`（子代理编排）、
+  `reference_w_tool_inventory_comparison_2026-11-15.md`（工具清单）
 
 ## 1. 总览
 

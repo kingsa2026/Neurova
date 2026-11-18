@@ -25,11 +25,11 @@
 > 治理 HTTP 面因严格 Bearer JWT 而本机无凭据，**未端到端验证**（诚实声明）。
 >
 > **同主题事实源链（本文的文档定位，先于内容）**：本仓「外部 RSI 对标」已有三份前作——
-> [`rsiagent_vs_neurova_rsi_comparison_2026-10-06.md`](rsiagent_vs_neurova_rsi_comparison_2026-10-06.md)
+> [`reference_q_vs_neurova_rsi_comparison_2026-10-06.md`](reference_q_vs_neurova_rsi_comparison_2026-10-06.md)
 > （外部框架代码级，十维 7.9 vs 6.7）、
 > [`designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md`](designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md)
 > （程序性记忆论文，P1-A/B/C 与 §8 前置 1–4 的唯一出处）、
-> [`modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)
+> [`reference_m_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](reference_m_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)
 > （harness 层增量 M-A..M-E）。本文是链上第四档，**对象性质不同**：前三篇对照的是
 > **具体机制**（一个框架 / 一篇方法论文），本篇对照的是**评测协议本身**——综述不提出新机制，
 > 它提出"什么样的证据才算递归自我改进"的判据框架。因此本文的增量是**证据机器覆盖面**

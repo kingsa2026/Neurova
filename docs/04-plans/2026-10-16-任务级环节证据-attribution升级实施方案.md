@@ -2,7 +2,7 @@
 
 > **性质**：实施票面 —— **已按裁定乙落地**（e15a129d 生产+判据 / c0b76a9f 子集 602→603，
 > 台账 §6-262；落地回执与本票面的两处偏差见下方 §7）。上游对照报告
-> [`modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](../08-research/modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)
+> [`reference_m_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](../08-research/reference_m_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)
 > §4 M-E / §7.1-Q4；第一刀已落地（821a7a29，台账 §6-251）：环节轴已扩进
 > `agent/capability_gap.py` 单源（`false_completion` / `loop_stalled`，用途表 `_GAP_PURPOSE`）。
 > 本票面记的是**第二刀**，其前提条件与落点均为 2026-10-16 工作树实测。

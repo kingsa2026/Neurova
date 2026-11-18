@@ -5,7 +5,7 @@
 > **对比对象**:AetherLabsAI/RSIAgent(Apache-2.0,shallow clone @ commit `4d7ef43`,2026-10-06 抓取)。
 > **方法**:两侧独立代码细读,证据一律 `文件:行号`;Neurova 侧引用仓库相对路径,RSIAgent 侧引用其 clone 相对路径。评分为加权主观评定,依据逐条附后。
 > **阅读对象**:`neurova/evolution/`(rsi、eval、closed_loop)的维护者。
-> **后续**:本主题另有两篇——[`designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md`](designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md)(程序性记忆论文,其 §4 P1-A/B/C 为那三件事的唯一出处)与 [`modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)(harness 层演化增量,只记前作未覆盖的 M-A..M-E)。三档按日期成链、各表其纸,不合并成总档——本文与前作均有入站票面引用,合并即制造悬空引用。
+> **后续**:本主题另有两篇——[`designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md`](designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md)(程序性记忆论文,其 §4 P1-A/B/C 为那三件事的唯一出处)与 [`reference_m_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](reference_m_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)(harness 层演化增量,只记前作未覆盖的 M-A..M-E)。三档按日期成链、各表其纸,不合并成总档——本文与前作均有入站票面引用,合并即制造悬空引用。
 
 ---
 
@@ -240,7 +240,7 @@
 
 ## 附录 B. 自我更正与落地记录(2026-10-06,首轮升级/修复)
 
-> 沿用 [`zcode_vs_neurova_tool_loop_comparison_2026-09-26.md`](zcode_vs_neurova_tool_loop_comparison_2026-09-26.md) 的先例:对比文档交付后按实施结果自我更正,更正不回写原文,就地留痕。
+> 沿用 [`reference_w_vs_neurova_tool_loop_comparison_2026-09-26.md`](reference_w_vs_neurova_tool_loop_comparison_2026-09-26.md) 的先例:对比文档交付后按实施结果自我更正,更正不回写原文,就地留痕。
 
 ### B.1 §5 P1-1 的更正:确定性前置闸并非缺口,真实缺陷在标记契约
 

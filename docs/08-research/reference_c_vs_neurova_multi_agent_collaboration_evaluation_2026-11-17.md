@@ -2,7 +2,7 @@
 
 > 参照系：deepagents（LangChain 官方开源 agent harness，github.com/langchain-ai/deepagents，克隆件 `~/.zcode/tmp/deepagents-src` @ 7725f7b，核心包约 3.2 万行 Python，另有约 6.8 万行测试）。
 > 被评方：Neurova 本仓**当前态**（P1–P3 升级批 + H 批改进落地后）。
-> 维度体系与评分锚点与前两轮**完全同框**（[AutoSwarm 轮](reference_b_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)、[CoworkOS 轮](coworkos_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)），分数可直接对比。
+> 维度体系与评分锚点与前两轮**完全同框**（[AutoSwarm 轮](reference_b_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)、[CoworkOS 轮](reference_a_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)），分数可直接对比。
 
 ---
 

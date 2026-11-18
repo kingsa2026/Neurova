@@ -322,7 +322,7 @@ python -m pytest neurova/tests/ --cov=neurova --cov-report=html
 - [test_settings_manager.py](neurova/tests/test_settings_manager.py)
 
 ### 报告文件
-- [COMPREHENSIVE_AUDIT_TEST_REPORT_20260523.md](COMPREHENSIVE_AUDIT_TEST_REPORT_20260523.md)
+- [COMPREHENSIVE_TEST_REPORT.md](COMPREHENSIVE_TEST_REPORT.md)
 - [TEST_COVERAGE_REPORT_20260523.md](TEST_COVERAGE_REPORT_20260523.md)
 - [TEST_COVERAGE_EXPANSION_REPORT.md](TEST_COVERAGE_EXPANSION_REPORT.md) (本文件)
 

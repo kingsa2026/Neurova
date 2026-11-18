@@ -2,7 +2,7 @@
 
 > 状态：已立项待实施。来源：QwenPaw 对照批 B2 的后续裁定——蒸馏回写
 > **进记忆温度体系，不进 markdown**（MEMORY.md 已随之退役，见
-> `2026-11-18-qwenpaw-adoption-plan.md` 二轮记录）。本文档为实施依据。
+> `2026-11-18-assistant-harness-adoption-plan.md` 二轮记录）。本文档为实施依据。
 
 ## 1. 目标与非目标
 

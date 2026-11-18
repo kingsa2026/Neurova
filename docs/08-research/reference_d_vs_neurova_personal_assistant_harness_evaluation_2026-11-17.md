@@ -1,6 +1,6 @@
 # QwenPaw vs Neurova 个人助理 Harness 对照评测（2026-11-17）
 
-> **状态（2026-11-18）**：本报告 v1–v5 采用"按 QwenPaw 个人助理形态定制"的八维标尺，对 Neurova 的规划/自我演化/可靠性等纵深能力覆盖不足。**中立结论以 [qwenpaw_vs_neurova_standard_harness_framework_evaluation_2026-11-18.md](qwenpaw_vs_neurova_standard_harness_framework_evaluation_2026-11-18.md)（主流 harness 十维框架，QwenPaw 81.5 vs Neurova 80.5）为准**；本报告保留作为"个人助理形态标尺"的专项视角，其中对 QwenPaw 的六路代码分析结论仍然有效。
+> **状态（2026-11-18）**：本报告 v1–v5 采用"按 QwenPaw 个人助理形态定制"的八维标尺，对 Neurova 的规划/自我演化/可靠性等纵深能力覆盖不足。**中立结论以 [reference_d_vs_neurova_standard_harness_framework_evaluation_2026-11-18.md](reference_d_vs_neurova_standard_harness_framework_evaluation_2026-11-18.md)（主流 harness 十维框架，QwenPaw 81.5 vs Neurova 80.5）为准**；本报告保留作为"个人助理形态标尺"的专项视角，其中对 QwenPaw 的六路代码分析结论仍然有效。
 
 > 评测对象：[agentscope-ai/QwenPaw](https://github.com/agentscope-ai/QwenPaw)（HEAD `8ac8efb8`，v2.3.0，2026-11-11 发布，37.9k stars，Apache-2.0）
 > 对照基准：本仓 Neurova（main，含 S9–S13 批次后状态）

@@ -17,7 +17,7 @@
 > 正文每条 `文件:行号` 由主代理 `grep`/`Read` 亲验，承重断言的复验方式记 §7.1。
 >
 > **同主题事实源链（本文的文档定位，先于内容）**：本仓「外部 harness RSI 对标」已有两份前作——
-> [`rsiagent_vs_neurova_rsi_comparison_2026-10-06.md`](rsiagent_vs_neurova_rsi_comparison_2026-10-06.md)
+> [`reference_q_vs_neurova_rsi_comparison_2026-10-06.md`](reference_q_vs_neurova_rsi_comparison_2026-10-06.md)
 > （外部框架代码级）、
 > [`designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md`](designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md)
 > （程序性记忆论文）。本文**只记前作未覆盖的增量**，三条规则：

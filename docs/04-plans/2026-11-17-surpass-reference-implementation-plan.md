@@ -2,8 +2,8 @@
 
 - 日期：2026-11-17（v4 修订：附录 D 四项可选前端适配**转必改**，并把它需要的后端支撑设计进对应批次——S1 报告读面端点、S2 邮箱运维计数入系统状态读面、S6 压缩事件随会话事件流下发+参数读面暴露、S10 团队来源字段与 run/WS 载荷增 team_id。v3 曾纳入项目管理整合与 agent 发起面，v2 统一 S1–S12，初版 S1–S9）
 - 依据：
-  - [CoworkOS 与 Neurova 多 Agent 协作对照评测](../08-research/coworkos_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)（下称"COS 评测"；§6 逐维评分、§6.x 总分表、§7 H 系清单是本方案直接输入）
-  - [deepagents 与 Neurova 对照评测](../08-research/deepagents_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)（下称"DA 评测"；其 §8「按本仓代码现状逐条对照的学习落点」是 S5/S6/S7 的规格来源）
+  - [CoworkOS 与 Neurova 多 Agent 协作对照评测](../08-research/reference_a_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)（下称"COS 评测"；§6 逐维评分、§6.x 总分表、§7 H 系清单是本方案直接输入）
+  - [deepagents 与 Neurova 对照评测](../08-research/reference_c_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)（下称"DA 评测"；其 §8「按本仓代码现状逐条对照的学习落点」是 S5/S6/S7 的规格来源）
   - 真模型基线报告 [multi_agent_bench_baseline_2026-11-17.md](../08-research/multi_agent_bench_baseline_2026-11-17.md)（S1 的输入：T1 不可用、记忆串扰、usage 缺失三条实证）
 - 目标：同框评测总分从当前 **84/110** 越过 CoworkOS 的 **95/110**（判定线 ≥96），且不损失既有领先维（A 协作形成 14、E 治理安全 13）。
 - 范围：`neurova/agent/`（swarm.py、mailbox.py、swarm_event_log.py、team.py、candidate_merge.py 新增、memory_admission.py 新增、loops/base.py、chat_pipeline.py、goal_verifier.py）、`neurova/builtin_tools.py`、`neurova/tool_executor.py`、`neurova/session_manager.py`、`neurova/context_pool.py`、`neurova/mem_core.py`、`neurova/collaboration/`（room_*、memory_scope）、`neurova/api/endpoints/`（teams_api.py、collaboration_room_api.py）、`neurova/benchmark/multi_agent/`、`tests/unit/`、`docs/08-research/`。

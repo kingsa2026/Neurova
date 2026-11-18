@@ -2,7 +2,7 @@
 
 > **来源**：2026-11-18 四域代码级审计（四路并行只读审计 + 关键强断言现场复核，审计证据附录见 §5）。
 > **性质**：修复方案（任务卡制），非准则文档。行号均为 2026-11-18 现场读数，**每张卡开工前须按当时代码现场复核行号与接线状态**；执行一律遵循 AGENTS.md 修复教义：先红后绿、A/B 零新增失败、live-verify 真链路自证、`git commit --only` 逐文件点名。
-> **命名约定**：E=进化域（Evolution），K=检查点域（che**K**point/rollback），M=肌肉记忆域（Muscle），SC=活水池增强（沿用 [selfcompact 对照批](../08-research/selfcompact_vs_neurova_context_compression_comparison_2026-11-17.md) §9.4 既有编号，避免双套编号）。
+> **命名约定**：E=进化域（Evolution），K=检查点域（che**K**point/rollback），M=肌肉记忆域（Muscle），SC=活水池增强（沿用 [selfcompact 对照批](../08-research/reference_f_vs_neurova_context_compression_comparison_2026-11-17.md) §9.4 既有编号，避免双套编号）。
 
 ---
 

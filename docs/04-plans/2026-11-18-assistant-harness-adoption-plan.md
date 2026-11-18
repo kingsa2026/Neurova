@@ -1,6 +1,6 @@
 # QwenPaw 借鉴点适配落地方案（2026-11-18）
 
-> 来源：[十维中立框架对照评测](../08-research/qwenpaw_vs_neurova_standard_harness_framework_evaluation_2026-11-18.md)（QwenPaw 81.5 vs Neurova 80.5）与 [形态标尺版](../08-research/qwenpaw_vs_neurova_personal_assistant_harness_evaluation_2026-11-17.md) 的六路代码分析。
+> 来源：[十维中立框架对照评测](../08-research/reference_d_vs_neurova_standard_harness_framework_evaluation_2026-11-18.md)（QwenPaw 81.5 vs Neurova 80.5）与 [形态标尺版](../08-research/reference_d_vs_neurova_personal_assistant_harness_evaluation_2026-11-17.md) 的六路代码分析。
 > 原则：**只吸收机制形制，不搬运实现与措辞**；每条先对照本仓现状（已逐文件核实），标明落点与验收判据；一律走先红后绿 + live-verify。
 > 状态：待拍板。P0=建议下一批优先，P1=高价值中成本，P2=按需/产品化。
 

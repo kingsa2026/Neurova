@@ -10,9 +10,9 @@
 > Christian Flores、Asim Kadav；机构未见于 arXiv 摘要页，二手报道称 Adobe 与布朗大学，未证实）。
 > **阅读对象**：`neurova/evolution/`（rsi、eval、closed_loop）、`neurova/skills/`、
 > `neurova/cognitive_layers/memory_layer/` 的维护者。
-> **前作**：[`rsiagent_vs_neurova_rsi_comparison_2026-10-06.md`](rsiagent_vs_neurova_rsi_comparison_2026-10-06.md)
+> **前作**：[`reference_q_vs_neurova_rsi_comparison_2026-10-06.md`](reference_q_vs_neurova_rsi_comparison_2026-10-06.md)
 > 的方法（问题域先钉、逐维取证、习得点分 P 级、附"明确不学"清单）本文沿用。
-> **后续**：[`modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)
+> **后续**：[`reference_m_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](reference_m_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)
 > 只记 ModularRSI 那篇相对本文的增量（其 M-A..M-E），与本文 §4 P1-B 重叠处指回本文、不复述。
 > **同主题三档按日期成链**（RSIAgent 10-06 → Designer-RSI 10-08 → ModularRSI 10-15），
 > 各表其纸；本文 §4 与其派生票面是那三件事的唯一出处，主题级现状的事实源是代码本身而非文档聚合。
@@ -409,7 +409,7 @@ tool schema 与技能目录同时缺席——这一手比论文的对照更干�
    票面曾设想"改调 `pending_rebuild()` 打日志"——复算发现那**仍是两次扫描**（compose 一遍、
    pending_rebuild 一遍），没消掉重复；实作为组合只算一次、日志改报"较基线是否真的扩展了"，
    条数仍归 `pending_rebuild` 单源。与第 4 条同函数族，按教义第 5 条同批处理。
-6. **索引漏登（本次已补）**：`docs/08-research/` 的 `rsiagent_vs_neurova_rsi_comparison_2026-10-06.md`
+6. **索引漏登（本次已补）**：`docs/08-research/` 的 `reference_q_vs_neurova_rsi_comparison_2026-10-06.md`
    此前未在 `docs/0-index/README.md` 的 08-research 小节登记（原 `:240-244` 只列三篇）。
    本次交付时把两份对比文档一并登记，索引已与之对齐。
 7. **无人读的声明常量**（低优先，登记即可）：`skill_improver.failure_threshold`（`:163, :174` 只赋不读）、
@@ -717,7 +717,7 @@ failClosedOnMissingEvidence=True` ⇒ 聚合 `failed`，点名前置 2。也就�
 
 ## 附录 B. 本报告首轮的三处自我更正（2026-10-08，交付前实探）
 
-> 沿用 [`rsiagent_vs_neurova_rsi_comparison_2026-10-06.md`](rsiagent_vs_neurova_rsi_comparison_2026-10-06.md)
+> 沿用 [`reference_q_vs_neurova_rsi_comparison_2026-10-06.md`](reference_q_vs_neurova_rsi_comparison_2026-10-06.md)
 > 附录 B 的先例：对比结论经实探/实施后自我更正并留痕。三处在**入库前**已就地改正文，
 > 此处记录改了哪、为什么，供后续读者核对首轮口头表述与现文的差异。
 

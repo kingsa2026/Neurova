@@ -1,7 +1,7 @@
 # 电脑操控（Computer Use）面修正工单集
 
 > 立项时间：2026-09-30 · 取证基线：008a3e2a · 归类：施工工单（非研究参考）
-> 上游取证：对标文档 [`../08-research/zcode_vs_neurova_tool_loop_comparison_2026-09-26.md`](../08-research/zcode_vs_neurova_tool_loop_comparison_2026-09-26.md)
+> 上游取证：对标文档 [`../08-research/reference_w_vs_neurova_tool_loop_comparison_2026-09-26.md`](../08-research/reference_w_vs_neurova_tool_loop_comparison_2026-09-26.md)
 > 关联工单集：G1 [`2026-09-26-tool-loop-iteration-repair-plan.md`](2026-09-26-tool-loop-iteration-repair-plan.md)、
 > G3 [`2026-09-26-tool-batch-parallelism-repair-plan.md`](2026-09-26-tool-batch-parallelism-repair-plan.md)、
 > G4 [`2026-09-26-tool-cancellation-repair-plan.md`](2026-09-26-tool-cancellation-repair-plan.md)

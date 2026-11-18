@@ -89,7 +89,7 @@ Neurova 深度占优；QwenPaw 胜在自演化产品化入口（人机共编）�
 
 ## 4. 与旧版（QwenPaw 形态标尺）结论的差异
 
-- 旧版（v1–v5，`qwenpaw_vs_neurova_personal_assistant_harness_evaluation_2026-11-17.md`）维度按 QwenPaw 形态定制，渠道/生态/部署合计权重 35%，且未纳入规划、自我演化、可靠性恢复三项——对 Neurova 系统性不利。该报告保留作为"个人助理形态标尺"的视角，但**结论以本报告为准**。
+- 旧版（v1–v5，`reference_d_vs_neurova_personal_assistant_harness_evaluation_2026-11-17.md`）维度按 QwenPaw 形态定制，渠道/生态/部署合计权重 35%，且未纳入规划、自我演化、可靠性恢复三项——对 Neurova 系统性不利。该报告保留作为"个人助理形态标尺"的视角，但**结论以本报告为准**。
 - 中立框架下的新结论：综合实力 QwenPaw 81.5 ≈ Neurova 80.5；QwenPaw 的领先集中在"产品化完成度"（渠道/生态/部署/安全纵深/HITL 触达），Neurova 的领先集中在"harness 纵深能力"（规划、记忆、自我演化、编排、可靠性恢复）。
 
 ## 5. 双方改进清单（按性价比）

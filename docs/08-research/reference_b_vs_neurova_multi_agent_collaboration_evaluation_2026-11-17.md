@@ -9,7 +9,7 @@
   - [3] HKUDS/AutoSwarm 开源仓库（GitHub，MIT；本评测克隆件 commit `96f0b026`，2026-11-10，版本 2.0.0.dev0，含 `autoswarm-v1.0.0/` 归档）
   - [4] lizhouai/multi-agent-practice 开源仓库（GitHub，MIT；2026-11-17 二次补充研究，克隆件当日 main 快照，42 个 Python 文件 4886 行）——工程实践教学仓，作为多个改进点的"最小可行实现"参照（见 §6）
 - 方法：论文全文逐节提取 + 参照系代码逐文件精读（v2 核心 37 文件 7617 行；v1 归档 245 文件约 20.6 万行抽样）+ 本仓代码级盘点（全链路 file:line 证据，承重结论均经二次亲验）。
-- 关联：[ZCode 蜂群对照](zcode_swarm_orchestration_comparison_2026-11-15.md)（其差距清单 #1–#5 已在本仓落地，本文按当前代码复核）、[多 Agent 协作机制设计](../01-architecture/04-multi-agent-collaboration.md)、[蜂群编排实施文档](../01-architecture/agent-swarm-orchestration.md)。
+- 关联：[ZCode 蜂群对照](reference_w_swarm_orchestration_comparison_2026-11-15.md)（其差距清单 #1–#5 已在本仓落地，本文按当前代码复核）、[多 Agent 协作机制设计](../01-architecture/04-multi-agent-collaboration.md)、[蜂群编排实施文档](../01-architecture/agent-swarm-orchestration.md)。
 
 ---
 

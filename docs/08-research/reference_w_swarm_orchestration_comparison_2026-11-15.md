@@ -3,7 +3,7 @@
 - 日期：2026-11-15
 - 对象：zai-org/ZCode v3.18.2（克隆件 `E:/项目/_external_repos/zai-org-ZCode`，只读）vs 本仓当前代码
 - 方法：ZCode 侧逐文件读取 `apps/zcode-cli/packages/core/src/subagent/*`（23 文件）、`runtime/methods/subagent.ts`（1085 行）、`runtime/helpers/tool-allowlist.ts` 等；Neurova 侧读取 `neurova/agent/swarm.py`、`subagent.py`、`sub_session.py` 及规划/工作流面。只陈述两边代码核实到的事实。
-- 关联：[ZCode 对照主报告](zcode_vs_neurova_harness_code_comparison_2026-11-14.md)、[工具清单对照](zcode_tool_inventory_comparison_2026-11-15.md)。
+- 关联：[ZCode 对照主报告](reference_w_vs_neurova_harness_code_comparison_2026-11-14.md)、[工具清单对照](reference_w_tool_inventory_comparison_2026-11-15.md)。
 
 ---
 

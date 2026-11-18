@@ -22,11 +22,11 @@
 > 全部命中；四批对照落地与两项追补均先红后绿并有活体/真模型实证（见 §9–§10）。
 >
 > **同主题事实源链（本文的文档定位，先于内容）**：本仓「外部 harness/RSI 对标」已有五份前作——
-> [`rsiagent_vs_neurova_rsi_comparison_2026-10-06.md`](rsiagent_vs_neurova_rsi_comparison_2026-10-06.md)（外部框架）、
+> [`reference_q_vs_neurova_rsi_comparison_2026-10-06.md`](reference_q_vs_neurova_rsi_comparison_2026-10-06.md)（外部框架）、
 > [`designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md`](designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md)（程序性记忆，P1-A..C）、
-> [`modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)（harness 模块化演化，M-A..E）、
-> [`harness2_vs_neurova_recursive_harness_comparison_2026-10-21.md`](harness2_vs_neurova_recursive_harness_comparison_2026-10-21.md)（google-research/harness²，N1–N8/C1–C8）、
-> [`rsi_survey_vs_neurova_rsi_evaluation_2026-11-10.md`](rsi_survey_vs_neurova_rsi_evaluation_2026-11-10.md)（RSI 综述评测协议，S1–S6）。
+> [`reference_m_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](reference_m_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)（harness 模块化演化，M-A..E）、
+> [`reference_j_vs_neurova_recursive_harness_comparison_2026-10-21.md`](reference_j_vs_neurova_recursive_harness_comparison_2026-10-21.md)（google-research/harness²，N1–N8/C1–C8）、
+> [`reference_p_survey_vs_neurova_rsi_evaluation_2026-11-10.md`](reference_p_survey_vs_neurova_rsi_evaluation_2026-11-10.md)（RSI 综述评测协议，S1–S6）。
 > 本文是链上第六档。**与前作的增量**：harness² 重「证据制度与盲选」，ModularRSI 重「模块化演化面」,
 > 综述重「实证判据」；**HarnessPro 独有的三件事前作均未覆盖**——① 执行成本入目标函数＋
 > 性能-成本 Pareto 多档交付（lite/medium/heavy）；② label-free **可执行测试合成**替代 LLM 判分；
