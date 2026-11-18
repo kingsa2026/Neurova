@@ -437,6 +437,25 @@ class SemanticMatchDrawer:
         # B13：实际注入面计数（截断副本按其视图 token 计）
         self._bumpReadout("injected_total", len(selected))
         self._bumpReadout("injected_tokens_total", sum(d.tokens or 0 for d in selected))
+        # SC-6：召回命中指纹记账——被选中注入的条目 hash 与折叠事件侧的
+        # covers 指纹（同源 `ContextInput.compute_hash`）在 budget_report
+        # 单源账本上关联，聚合出"折叠后 N 轮召回率"。覆盖面：本抽屉的全部
+        # 取水路径（被动注入 pool.draw / 主动检索 pool.search / 近轮通道）；
+        # recall_history 与 recall_context_span 直取台账不经抽屉，不在本埋点内
+        # （比率因此是下界，见 budget_report 模块说明）。fail-open：记账失败
+        # 不影响取水。
+        try:
+            hitHashes = [d.hash for d in selected if getattr(d, "hash", None)]
+            if hitHashes:
+                from neurova.core.turn_context import get_turn_session_id
+
+                from neurova.context.budget_report import recordRecallHits
+
+                recordRecallHits(
+                    str(get_turn_session_id() or "direct"), hitHashes
+                )
+        except Exception:  # noqa: BLE001 - 命中记账失败不影响取水
+            pass
         return selected
 
     def _calculate_score(self, drop: ContextInput, need: str = None, scoring=None) -> float:

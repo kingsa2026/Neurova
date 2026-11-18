@@ -34,6 +34,19 @@ SKILL_CATALOG_HINT = "可用 $技能名 显式调用完整内容。"
 #: 不随折叠规模膨胀——全量 hash 在池索引里，可经 recall_context_span 下钻取回）。
 FOLDED_REF_HASH_SAMPLES = 8
 
+
+def _foldRecallWindowTurnsForShape() -> int:
+    """SC-6 读数空形状的 N 值（取 budget_report 具名常量；不可达时回退 8）。
+
+    空形状与真实读数必须同刻度——这里只读常量本身，不另写一份默认值。
+    """
+    try:
+        from neurova.context.budget_report import FOLD_RECALL_WINDOW_TURNS
+
+        return int(FOLD_RECALL_WINDOW_TURNS)
+    except Exception:  # noqa: BLE001 - 账本模块不可达时给中性形状
+        return 8
+
 # Wave E 语义档向量缓存（按 agent 隔离的进程内注册表；SkillVectorCache 自带
 # 磁盘持久化，这里只避免每轮重建对象）
 _VECTOR_CACHES: dict = {}
@@ -349,6 +362,20 @@ class ContextOrchestrator:
                 "lesson_protected_last": 0,
                 "last_stuck_reason": None,
             },
+            # SC-6（对照改进项）：折叠后 N 轮召回率读数（折叠时机质量的量化
+            # 指标，池形态独有）。分母 = 被折叠区间 hash 数（去重），分子 =
+            # 折叠后 N 轮内被召回的区间数；`recall_rate` = 分子/分母（分母 0
+            # → 0.0）。账本单源在 budget_report（折叠事件 × 抽屉命中），
+            # 这里是只读聚合面；N 取具名常量（env 可覆盖）。
+            "fold_recall": {
+                "window_turns": _foldRecallWindowTurnsForShape(),
+                "fold_events": 0,
+                "denominator": 0,
+                "numerator": 0,
+                "unrecalled": 0,
+                "recall_rate": 0.0,
+                "last_error": None,
+            },
             # A1（对照改进项）：尺子校准读数——当前模型实测偏差因子与校准后
             # 预算（因子中性 1.0 = 未应用）。
             "token_calibration": {
@@ -562,6 +589,17 @@ class ContextOrchestrator:
                 snapshot["fold_rollup"] = {**empty["fold_rollup"], **reader()}
             except Exception as exc:  # noqa: BLE001 - 读数失败不影响其余读数
                 snapshot["fold_rollup"]["last_error"] = f"{type(exc).__name__}: {exc}"
+        # SC-6：折叠后 N 轮召回率读数（budget_report 单源账本聚合，进程级口径；
+        # /metrics 的 observe_context_health 逐字段搬数值，无需另造端点）。
+        try:
+            from neurova.context.budget_report import foldRecallReadout
+
+            snapshot["fold_recall"] = {**empty["fold_recall"], **foldRecallReadout()}
+        except Exception as exc:  # noqa: BLE001 - 读数失败不影响其余读数
+            snapshot["fold_recall"] = {
+                **empty["fold_recall"],
+                "last_error": f"{type(exc).__name__}: {exc}",
+            }
         # Issue #289 002：池分支压缩经济性读数并进**既有**观测面。写进私有字段
         # 等于写进日志 —— 事后既查不到"这轮该不该压"，也查不到"整封是不是被丢了"，
         # 与"净损失路径不可归因"是同一形态换个位置（本仓对只写不读的处置一贯如此：
@@ -991,6 +1029,8 @@ class ContextOrchestrator:
         for fingerprint in covers:
             cache["covered"].add(fingerprint)
         self._advanceFoldGeneration(cache, summary, covers=covers, turnIds=turnIds)
+        # SC-6：后台补做提交的覆盖账同样进折叠后召回率账本（与热路径同源）
+        self._noteFoldRecallEvent(sessionKey, covers, cache)
 
     def _window_cache_slot(self, key: str) -> dict:
         """取（或建）折叠摘要缓存槽；超上限时淘汰**最久未使用**的槽。
@@ -1366,6 +1406,16 @@ class ContextOrchestrator:
         """
 
         from neurova.context_pool import ContextInput, ContextSource
+
+        # SC-6：折叠后召回率读数的回合轴——每轮 build_context 推进一次；
+        # 折叠事件（_noteFoldRecallEvent）与抽屉命中（semantic_drawer 埋点）
+        # 都以本回合序记账，聚合面据此判"N 轮内"。fail-open：账本故障不阻断建图。
+        try:
+            from neurova.context.budget_report import noteContextTurn
+
+            noteContextTurn(self._resolve_window_cache_key())
+        except Exception:  # noqa: BLE001 - 读数账本故障不阻断建图
+            pass
 
         # 构建工具描述
         tools_desc = await self.get_tools_description()
@@ -3234,12 +3284,36 @@ class ContextOrchestrator:
 
     # ── S6'：折叠基线跨重启持久化（时间线是事实源，复用冷却事件落盘面） ──
 
+    def _noteFoldRecallEvent(self, sessionKey: Optional[str], covers: list, cache: Optional[dict] = None) -> None:
+        """SC-6：折叠事件侧记区间指纹（budget_report 单源账本，fail-open）。
+
+        与抽屉命中埋点（semantic_drawer.draw → recordRecallHits）写在**同一本**
+        关联账上，聚合面 `foldRecallReadout` 出"折叠后 N 轮召回率"——
+        不另造第二套事件账（修复教义第 6 条）。指纹与归档侧同源
+        （`_windowChunkHash` = `ContextInput.compute_hash`），两侧才能按 hash 关联。
+        """
+        cleaned = [str(h) for h in (covers or []) if h]
+        if not cleaned or not sessionKey:
+            return
+        try:
+            from neurova.context.budget_report import recordFoldIntervals
+
+            recordFoldIntervals(
+                str(sessionKey),
+                cleaned,
+                foldSeq=int((cache or {}).get("fold_seq") or 0) or None,
+            )
+        except Exception:  # noqa: BLE001 - 读数账本故障不阻断折叠主链路
+            logger.debug("折叠事件记账失败（忽略）", exc_info=True)
+
     def _persistFoldBaseline(self, cache: dict, sessionKey: Optional[str], coveredNow: list) -> None:
         """折叠基线落会话时间线（append-only；与 CompressionEvent 同一落盘面）。
 
         covered 取**增量**（本轮新覆盖），重放侧取并集——事件不随会话变长膨胀。
         fail-open：落盘失败不阻断折叠主链路（与 persistCompressionEvent 同纪律）。
         """
+        # SC-6：覆盖账推进即记折叠事件（热路径：自动折叠与 /compact 共用本入口）
+        self._noteFoldRecallEvent(sessionKey, coveredNow, cache)
         try:
             agent = getattr(self, "_agent", None)
             manager = getattr(agent, "session_manager", None)
@@ -3299,6 +3373,13 @@ class ContextOrchestrator:
             covered = baseline.get("covered") or set()
             if covered:
                 slot["covered"] = set(covered)
+                # SC-6：重放恢复折叠分母（回合未知记 0；重启后的召回尽力计入）
+                try:
+                    from neurova.context.budget_report import restoreFoldIntervals
+
+                    restoreFoldIntervals(sessionKey, covered)
+                except Exception:  # noqa: BLE001 - 读数账本故障不阻断建槽
+                    logger.debug("折叠区间重放记账失败（忽略）", exc_info=True)
             summary = str(baseline.get("summary") or "")
             if summary:
                 # 摘要随基线恢复为单代栈：冻结头可重渲染，增长门读数连续。
