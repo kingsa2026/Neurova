@@ -8,8 +8,10 @@ auth:
 backend:
   # 注意：当前默认持久化为嵌入式 SQLite + ReadWriteOnce 卷，多副本无法共享
   # （多进程同写会损坏库）。replicaCount>1 时请改用外部数据库，或改走
-  # 单副本 + 垂直扩容；本值保留 2 是为了 HPA 面演示，勿直接用于生产数据面。
-  replicaCount: 2
+  # 单副本 + 垂直扩容。2026-11-19 拍板：生产默认收回单副本（对齐嵌入式
+  # SQLite 现实形态，R7 警告随之消除）；HPA/多副本需求出现时，先接外部
+  # 数据库再把本值调回去。
+  replicaCount: 1
   
   resources:
     requests:
