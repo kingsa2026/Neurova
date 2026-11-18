@@ -360,6 +360,172 @@ class PromptInjectionAnalyzer(BaseAnalyzer):
         return findings
 
 
+class SecretsContentAnalyzer(BaseAnalyzer):
+    """硬编码密钥内容签名分析器（QwenPaw 对照批 A2）。
+
+    名称级 `credential_artifact_name` 只认文件名；本分析器补**内容级**：
+    真实形状的密钥/令牌落在普通文档、配置、脚本里同样是泄漏——与名称级
+    同待遇（category 不进 CODE_SHAPE_CATEGORIES ⇒ 任何文件命中都参与 DENY）。
+    签名取高置信形态（AKIA 前缀、私钥块头、xoxb/AIza 令牌形状、16+ 字符的
+    凭据字段赋值），避免把 `design_tokens.json` 这类正当资产误伤。
+    """
+
+    SECRET_PATTERNS = [
+        ("secret_aws_key", r"\bAKIA[0-9A-Z]{16}\b", "移除硬编码的 AWS 访问密钥"),
+        ("secret_private_key_block", r"-----BEGIN\s+[A-Z ]*PRIVATE KEY-----", "移除内嵌私钥块"),
+        ("secret_slack_token", r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b", "移除硬编码的 Slack 令牌"),
+        ("secret_google_api_key", r"\bAIza[0-9A-Za-z_-]{35}\b", "移除硬编码的 Google API 密钥"),
+        ("secret_generic_assignment", r"(?i)[\"']?(api[_-]?key|secret|token|password)[\"']?\s*[:=]\s*[\"'][^\"']{16,}[\"']", "移除硬编码的凭据字段"),
+    ]
+
+    def __init__(self):
+        import re as _re
+
+        self._compiled = [
+            (rid, _re.compile(pattern, _re.IGNORECASE), suggestion)
+            for rid, pattern, suggestion in self.SECRET_PATTERNS
+        ]
+
+    @property
+    def name(self) -> str:
+        return "secrets_content"
+
+    def analyze(self, skill_file: SkillFile) -> List[Finding]:
+        findings: List[Finding] = []
+        lines = skill_file.content.splitlines()
+        for rid, pattern, suggestion in self._compiled:
+            for lineno, line in enumerate(lines, start=1):
+                if not pattern.search(line):
+                    continue
+                findings.append(
+                    Finding(
+                        rule_id=rid,
+                        severity="critical",
+                        category="hardcoded_secrets",
+                        message=f"检测到疑似硬编码密钥/凭据（{rid}）",
+                        file_path=skill_file.path,
+                        line_number=lineno,
+                        evidence=line.strip()[:200],
+                        suggestion=suggestion,
+                    )
+                )
+        return findings
+
+
+class SocialEngineeringAnalyzer(BaseAnalyzer):
+    """社会工程话术签名分析器（QwenPaw 对照批 A2）。
+
+    攻击话术的组合特征是「紧迫性 + 保密性」共现——单看"紧急"或单看
+    "不要告诉用户"都会误伤正常文档，故每条签名用双前瞻把两个条件
+    锚在同一行。与 prompt_injection 同族：纯文本即可生效，任何文件
+    命中都参与 DENY。
+    """
+
+    MANIPULATION_PATTERNS = [
+        ("social_urgency_secrecy_zh",
+         r"(?=.*(紧急|立即|马上|限时|尽快))(?=.*(不要|切勿|禁止|不得)(告知|告诉|透露|让.{0,6}知道))",
+         "删除「紧迫+对用户保密」的胁迫话术"),
+        ("social_urgency_secrecy_en",
+         r"(?i)(?=.*(urgent|immediately|within \d+ (minutes|seconds|hours)))(?=.*(do not|don't|never)\s+(tell|inform|disclose))",
+         "删除「紧迫+对用户保密」的胁迫话术"),
+        ("social_destructive_pressure_zh",
+         r"(?i)(?=.*(不要|切勿|禁止|不得)\s*(停止|中断|暂停))(?=.*(损坏|失效|事故|灾难|不可逆))",
+         "删除「不许中断+夸大后果」的胁迫话术"),
+        ("social_destructive_pressure_en",
+         r"(?i)(?=.*(do not|don't|never)\s+(stop|interrupt|pause))(?=.*(permanent(ly)?\s+)?(damage|corrupt|destroy|data loss))",
+         "删除「不许中断+夸大后果」的胁迫话术"),
+    ]
+
+    def __init__(self):
+        import re as _re
+
+        self._compiled = [
+            (rid, _re.compile(pattern, _re.IGNORECASE), suggestion)
+            for rid, pattern, suggestion in self.MANIPULATION_PATTERNS
+        ]
+
+    @property
+    def name(self) -> str:
+        return "social_engineering"
+
+    def analyze(self, skill_file: SkillFile) -> List[Finding]:
+        findings: List[Finding] = []
+        lines = skill_file.content.splitlines()
+        for rid, pattern, suggestion in self._compiled:
+            for lineno, line in enumerate(lines, start=1):
+                if not pattern.search(line):
+                    continue
+                findings.append(
+                    Finding(
+                        rule_id=rid,
+                        severity="high",
+                        category="social_engineering",
+                        message=f"检测到社会工程胁迫话术（{rid}）",
+                        file_path=skill_file.path,
+                        line_number=lineno,
+                        evidence=line.strip()[:200],
+                        suggestion=suggestion,
+                    )
+                )
+        return findings
+
+
+class UnauthorizedToolUseAnalyzer(BaseAnalyzer):
+    """越权工具使用诱导签名分析器（QwenPaw 对照批 A2）。
+
+    检测「绕过审批/无需用户确认/静默调用工具」类话术——它诱导模型
+    走出人在环闸门，与 prompt_injection 同为纯文本攻击面。
+    """
+
+    BYPASS_PATTERNS = [
+        ("unauth_bypass_approval_zh",
+         r"(无需|不需要|不用|跳过|绕过)[^。]{0,10}(用户)?(批准|审批|确认|授权)",
+         "删除绕过审批的话术"),
+        ("unauth_bypass_approval_en",
+         r"\b(without|no|skip|bypass)\s+(the\s+)?(user\s+)?(approval|confirmation|authorization)|\b(bypass|skip)\s+(the\s+)?(approval|permission)\s+(check|gate)",
+         "删除绕过审批的话术"),
+        ("unauth_silent_call_zh",
+         r"(静默|秘密|悄悄|直接)(调用|执行|使用)[^。]{0,12}(工具|命令|shell)",
+         "删除静默调用工具的话术"),
+        ("unauth_silent_call_en",
+         r"(?i)(silently|secretly|directly)\s+(call|invoke|use|run)\s+(the\s+)?(shell|tool|command)",
+         "删除静默调用工具的话术"),
+    ]
+
+    def __init__(self):
+        import re as _re
+
+        self._compiled = [
+            (rid, _re.compile(pattern, _re.IGNORECASE), suggestion)
+            for rid, pattern, suggestion in self.BYPASS_PATTERNS
+        ]
+
+    @property
+    def name(self) -> str:
+        return "unauthorized_tool_use"
+
+    def analyze(self, skill_file: SkillFile) -> List[Finding]:
+        findings: List[Finding] = []
+        lines = skill_file.content.splitlines()
+        for rid, pattern, suggestion in self._compiled:
+            for lineno, line in enumerate(lines, start=1):
+                if not pattern.search(line):
+                    continue
+                findings.append(
+                    Finding(
+                        rule_id=rid,
+                        severity="high",
+                        category="unauthorized_tool_use",
+                        message=f"检测到越权调用工具的诱导内容（{rid}）",
+                        file_path=skill_file.path,
+                        line_number=lineno,
+                        evidence=line.strip()[:200],
+                        suggestion=suggestion,
+                    )
+                )
+        return findings
+
+
 class PatternAnalyzer(BaseAnalyzer):
     """模式分析器：基于正则表达式检测危险模式"""
 
@@ -519,6 +685,37 @@ class PatternAnalyzer(BaseAnalyzer):
                 severity="critical",
                 message="检测到疑似数据外泄/远程代码执行",
                 category="malware",
+            ),
+            # —— QwenPaw 对照批 A2（2026-11-18）：supply_chain / JS 混淆执行补签 ——
+            # supply_chain 不进 CODE_SHAPE_CATEGORIES：安装钩子后门的主载体就是
+            # package.json 这类清单文件（.json 在 DOC_ASSET_SUFFIXES 里），若按
+            # "文档降级"会被降成报告项——那正好放走这类攻击。
+            ScanRule(
+                rule_id="supply_chain_postinstall",
+                name="安装钩子远程执行",
+                pattern=r"[\"'](postinstall|preinstall|prepare)[\"']\s*:\s*\".{0,200}?(require\s*\(|https?://|curl|wget|child_process)",
+                severity="high",
+                message="检测到安装钩子中拉取/执行远程代码",
+                category="supply_chain",
+                suggestion="安装钩子不应访问网络或执行远程内容；移除该钩子",
+            ),
+            ScanRule(
+                rule_id="supply_chain_install_fetch",
+                name="安装脚本下载后立即执行",
+                pattern=r"(curl|wget)\b[^\n]{0,120}(&&|\|\|)\s*(ba|z)?sh\b|curl\b[^\n]{0,120}-o\s+[^\n]{0,40}\.(sh|bash)\b",
+                severity="high",
+                message="检测到安装脚本下载远端脚本并立即执行",
+                category="supply_chain",
+                suggestion="不要在安装期下载并执行远程脚本；改为审阅后的固定依赖",
+            ),
+            ScanRule(
+                rule_id="js_atob_exec",
+                name="JS atob 混淆执行",
+                pattern=r"\b(eval|Function|setTimeout|setInterval)\s*\(\s*atob\s*\(",
+                severity="high",
+                message="检测到 base64 解码后立即执行的 JS 混淆形态",
+                category="obfuscation",
+                suggestion="不要解码未经验证的字符串并立即执行",
             ),
         ]
 
@@ -687,8 +884,12 @@ class SkillScanner:
         self._custom_rules: Dict[str, ScanRule] = {}
 
         # 添加默认模式分析器 + 提示注入分析器（P1-6：中英双语注入签名）
+        # + QwenPaw 对照批 A2 三件（密钥内容/社会工程/越权工具诱导）
         self.analyzers.append(PatternAnalyzer())
         self.analyzers.append(PromptInjectionAnalyzer())
+        self.analyzers.append(SecretsContentAnalyzer())
+        self.analyzers.append(SocialEngineeringAnalyzer())
+        self.analyzers.append(UnauthorizedToolUseAnalyzer())
 
         logger.info("技能扫描器初始化完成")
 
