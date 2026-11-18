@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 from typing import Any, Dict
@@ -27,15 +28,40 @@ _KEYRING_SERVICE = "Neurova"
 _KEYRING_ENTRY = "config-secret-key"
 
 
+def _keyringEntry() -> str:
+    """keyring 条目名按**数据根**哈希派生。
+
+    同机多部署（不同 data 根）互不覆盖彼此的 keyring 条目；锚是数据根
+    （部署身份）而非进程安装路径——key 跟数据走，不跟代码目录走。
+    旧固定条目 `_KEYRING_ENTRY` 保留为灰度迁移源（见 `_load_or_create_key`）。
+    """
+    try:
+        root = str(Path(_KEY_FILE).resolve().parent)
+    except Exception:  # noqa: BLE001 - 解析失败退回旧固定条目
+        return _KEYRING_ENTRY
+    digest = hashlib.sha256(root.encode("utf-8")).hexdigest()[:12]
+    return f"{_KEYRING_ENTRY}-{digest}"
+
+
 def _load_or_create_key() -> bytes:
-    """密钥获取链：env → keyring → 文件（自动生成）。"""
+    """密钥获取链：env → keyring（按数据根派生条目，旧条目灰度迁移）→ 文件（自动生成）。"""
     env_key = os.environ.get("NEUROVA_SECRET_KEY", "")
     if env_key:
         return env_key.encode("utf-8")
     try:
         import keyring
 
-        stored = keyring.get_password(_KEYRING_SERVICE, _KEYRING_ENTRY)
+        entry = _keyringEntry()
+        stored = keyring.get_password(_KEYRING_SERVICE, entry)
+        if not stored and entry != _KEYRING_ENTRY:
+            # 灰度迁移：旧固定条目仍命中则回填派生条目（旧值保留，双读期安全）
+            legacy = keyring.get_password(_KEYRING_SERVICE, _KEYRING_ENTRY)
+            if legacy:
+                stored = legacy
+                try:
+                    keyring.set_password(_KEYRING_SERVICE, entry, legacy)
+                except Exception:  # noqa: BLE001 - 回填失败不影响本次读取
+                    pass
         if stored:
             return stored.encode("utf-8")
     except Exception:  # noqa: BLE001 - keyring 不可用走文件
