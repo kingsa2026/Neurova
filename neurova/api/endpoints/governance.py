@@ -1136,6 +1136,8 @@ class GovernanceSettingsUpdate(BaseModel):
     进晚到队列等下一轮；C3 批次 1，默认关＝现网语义）"""
 
     conversation_rules_enabled: Optional[bool] = None
+    # T2/T3 睡眠归纳相位门控（schema 归纳 + 跨域碰撞，LLM 成本闸，默认关）
+    sleep_induction_enabled: Optional[bool] = None
     rsi_phase: Optional[int] = Field(None, ge=0, le=4)
     # G2 agent 级相位覆写：{agent_id: phase(0..4)}。命中条目的 agent 按覆写值
     # 读相位（最小灰度维度），未命中读全局。条目值域在端点显式校验（422 点名

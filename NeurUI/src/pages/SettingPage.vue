@@ -477,6 +477,10 @@
             <a-form-item :label="t('settings.governanceConversationRules')">
               <a-switch v-model:checked="governance.conversation_rules_enabled" />
             </a-form-item>
+            <a-form-item :label="t('settings.governanceSleepInduction')">
+              <p class="governance-hint">{{ t('settings.governanceSleepInductionHint') }}</p>
+              <a-switch v-model:checked="governance.sleep_induction_enabled" />
+            </a-form-item>
             <a-form-item :label="t('settings.governanceOverridesLabel')">
               <p class="governance-hint">{{ t('settings.governanceOverridesHint') }}</p>
               <a-textarea
@@ -1117,6 +1121,7 @@ const saveGovernance = async () => {
   try {
     await updateGovernanceSettings({
       conversation_rules_enabled: governance.value.conversation_rules_enabled,
+      sleep_induction_enabled: governance.value.sleep_induction_enabled,
       rsi_phase: governance.value.rsi_phase,
       rsi_phase_overrides: overrides,
       guarded_syntax_gate_enabled: governance.value.guarded_syntax_gate_enabled,

@@ -234,6 +234,9 @@ class SleepConsolidation(StateValuesStore):
         # T2 睡眠归纳相位：LLM 客户端提供者（agent 装配注入；门控
         # NEUROVA_SLEEP_INDUCTION 默认 off，客户端缺席时归纳如实跳过）
         self._induction_llm_provider: Optional[Callable[[], Any]] = None
+        # T2/T3 归纳/碰撞周期记录（有界，随睡眠日志落盘；/inductions 端点数据源）
+        self._induction_logs: List[Dict[str, Any]] = []
+        self._MAX_INDUCTION_LOGS = 200
         # 深睡/休眠周期的真实统计留存 —— REM 洞察的唯一来源（本周期无则取上一周期/
         # 手动会话的真实统计，无来源如实为空，不编造）
         self._last_cycle_stats: Optional[Dict[str, Any]] = None
@@ -920,9 +923,9 @@ class SleepConsolidation(StateValuesStore):
                     )
 
                     write_stats = write_back_consolidation_result(self.memory_manager, cycle)
-                    # T2 归纳相位：整理落定后归纳 schema（门控
-                    # NEUROVA_SLEEP_INDUCTION，默认 off；fail-soft）
-                    self._run_induction()
+                    # T2/T3 归纳相位：整理落定后归纳 schema + 跨域扫碰撞
+                    # （门控 sleep_induction_enabled，默认 off；fail-soft）
+                    self.run_induction_cycle()
 
                     result = {
                         "duration_minutes": duration_minutes,
@@ -994,13 +997,19 @@ class SleepConsolidation(StateValuesStore):
         """设置睡眠归纳相位的 LLM 客户端提供者（agent 装配注入；None=归纳跳过）"""
         self._induction_llm_provider = provider
 
-    def _run_induction(self) -> None:
-        """T2 归纳相位入口（手动深睡会话与自动周期共用）。
+    def run_induction_cycle(self) -> Dict[str, Any]:
+        """T2/T3 归纳相位入口（自动周期与手动深睡会话共用）。
 
-        门控 ``NEUROVA_SLEEP_INDUCTION``（默认 off）；LLM 经 provider 取
-        客户端、``buildSyncLlmFn`` 桥接成同步调用；整个相位 fail-soft——
-        任何异常只留日志，绝不阻断睡眠整理主流程。
+        门控 ``sleep_induction_enabled``（治理设置页/环境变量，默认 off）；
+        LLM 经 provider 取客户端、``buildSyncLlmFn`` 桥接成同步调用；整相位
+        fail-soft——任何异常只留日志，绝不阻断睡眠整理主流程。每周期产出
+        如实记入 ``_induction_logs``（/inductions 端点数据源）并随睡眠日志落盘。
         """
+        stats: Dict[str, Any] = {
+            "enabled": False, "candidates": 0, "clusters": 0, "schemas": 0,
+            "collisions": 0, "core_schemas": 0, "failed": 0, "identity_tagged": 0,
+            "intentions": 0,
+        }
         try:
             from neurova.cognitive_layers.memory_layer.sleep_induction import (
                 buildSyncLlmFn,
@@ -1009,21 +1018,57 @@ class SleepConsolidation(StateValuesStore):
             )
 
             if not sleepInductionEnabled():
-                return
+                return stats
             provider = self._induction_llm_provider
             client = provider() if callable(provider) else None
-            stats = runInductionPhase(
+            combined = runInductionPhase(
                 self.memory_manager, buildSyncLlmFn(client)
             )
-            if stats.get("induction", {}).get("clusters") or stats.get("sweep", {}).get("collisions"):
+            induction = combined.get("induction", {})
+            sweep = combined.get("sweep", {})
+            stats.update({
+                "enabled": True,
+                "candidates": induction.get("candidates", 0),
+                "clusters": induction.get("clusters", 0),
+                "schemas": induction.get("schemas", 0),
+                "collisions": sweep.get("collisions", 0),
+                "core_schemas": sweep.get("core_schemas", 0),
+                "failed": induction.get("failed", 0) + sweep.get("failed", 0),
+                "identity_tagged": induction.get("identity_tagged", 0),
+                "intentions": induction.get("intentions", 0),
+            })
+            if stats["clusters"] or stats["collisions"]:
                 logger.info(
-                    "睡眠归纳（手动会话）: 簇 %s, schema %s, 碰撞 %s, core %s, 失败 %s",
-                    stats["induction"]["clusters"], stats["induction"]["schemas"],
-                    stats["sweep"]["collisions"], stats["sweep"]["core_schemas"],
-                    stats["induction"]["failed"] + stats["sweep"]["failed"],
+                    "睡眠归纳（%s）: 簇 %s, schema %s, 碰撞 %s, core %s, 失败 %s",
+                    "手动会话", stats["clusters"], stats["schemas"],
+                    stats["collisions"], stats["core_schemas"], stats["failed"],
                 )
+            self._record_induction_log(stats)
+            self.persist_logs()
         except Exception as e:  # noqa: BLE001 - 归纳故障不阻断睡眠链
             logger.warning("睡眠归纳跳过: %s", e)
+        return stats
+
+    def _record_induction_log(self, stats: Dict[str, Any]) -> None:
+        """归纳/碰撞周期如实入账（有界，最新在前）。"""
+        self._induction_logs.insert(0, {
+            "timestamp": time.time(),
+            "enabled": stats.get("enabled", False),
+            "candidates": stats.get("candidates", 0),
+            "clusters": stats.get("clusters", 0),
+            "schemas": stats.get("schemas", 0),
+            "collisions": stats.get("collisions", 0),
+            "core_schemas": stats.get("core_schemas", 0),
+            "failed": stats.get("failed", 0),
+            "identity_tagged": stats.get("identity_tagged", 0),
+            "intentions": stats.get("intentions", 0),
+        })
+        if len(self._induction_logs) > self._MAX_INDUCTION_LOGS:
+            self._induction_logs = self._induction_logs[: self._MAX_INDUCTION_LOGS]
+
+    def get_induction_logs(self, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
+        """获取归纳/碰撞周期记录，最新在前（/inductions 端点数据源）"""
+        return self._induction_logs[offset : offset + limit]
 
     def _load_logs(self) -> None:
         """从磁盘加载梦境/合并/冲突审计（logs_store_path 未配置则跳过）。"""
@@ -1042,6 +1087,7 @@ class SleepConsolidation(StateValuesStore):
                 self._merge_history = list(raw.get("merge_history", []))
                 self._insights = list(raw.get("insight_logs", []))
                 self._conflict_resolutions = list(raw.get("conflict_resolutions", []))
+                self._induction_logs = list(raw.get("induction_logs", []))
                 _lcc = raw.get("last_cycle_completed_at")
                 self._last_cycle_completed_at = float(_lcc) if isinstance(_lcc, (int, float)) else None
         except Exception as e:  # noqa: BLE001
@@ -1063,6 +1109,7 @@ class SleepConsolidation(StateValuesStore):
                 "merge_history": self._merge_history[-self._MAX_MERGE_HISTORY:],
                 "insight_logs": self._insights[: self._MAX_INSIGHTS],
                 "conflict_resolutions": self._conflict_resolutions[: 2 * self._MAX_MERGE_HISTORY],
+                "induction_logs": self._induction_logs[: self._MAX_INDUCTION_LOGS],
                 "last_cycle_completed_at": self._last_cycle_completed_at,
             }
             tmp = p.with_name(p.name + ".tmp")

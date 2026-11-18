@@ -105,6 +105,20 @@ export interface MergeConflict {
   created_at: string
 }
 
+// 与后端 InductionLogItem 对齐（/sleep/{id}/inductions 裸数组；T2/T3 归纳相位如实计数）
+export interface InductionLog {
+  timestamp: number
+  enabled: boolean
+  candidates: number
+  clusters: number
+  schemas: number
+  collisions: number
+  core_schemas: number
+  failed: number
+  identity_tagged: number
+  intentions: number
+}
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -170,6 +184,11 @@ export function getMemoryMerges(agentId: string, params?: { limit?: number; offs
 /** Get merge conflicts from sleep consolidation. */
 export function getMergeConflicts(agentId: string, params?: { limit?: number; offset?: number; resolved?: boolean }) {
   return api.get<ApiResponse<MergeConflict[]>>(`${BASE}/${agentId}/conflicts`, { params })
+}
+
+/** Get induction/collision cycle logs（T2/T3 睡眠归纳相位，最新在前）. */
+export function getInductionLogs(agentId: string, params?: { limit?: number; offset?: number }) {
+  return api.get<ApiResponse<InductionLog[]>>(`${BASE}/${agentId}/inductions`, { params })
 }
 
 /**

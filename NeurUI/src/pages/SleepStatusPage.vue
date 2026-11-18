@@ -192,6 +192,40 @@
           </a-spin>
         </GlassCard>
       </div>
+
+      <!-- T2/T3 归纳/碰撞周期（治理门控 sleep_induction_enabled 开启后才有数据） -->
+      <div class="two-col" style="margin-top: 16px">
+        <GlassCard :title="t('sleep.inductions')">
+          <a-spin :spinning="inductionsLoading">
+            <a-list v-if="inductions.length > 0" :data-source="inductions" size="small">
+              <template #renderItem="{ item }">
+                <a-list-item>
+                  <div class="induction-item">
+                    <div class="induction-header">
+                      <a-tag color="purple" size="small">{{ t('sleep.inductions') }}</a-tag>
+                      <span class="induction-time">{{ formatTime(item.timestamp) }}</span>
+                    </div>
+                    <p class="induction-summary">
+                      {{ t('sleep.inductionSummary', {
+                        candidates: item.candidates,
+                        clusters: item.clusters,
+                        schemas: item.schemas,
+                        collisions: item.collisions,
+                        cores: item.core_schemas,
+                        failed: item.failed,
+                      }) }}
+                    </p>
+                    <p class="induction-extra">
+                      {{ t('sleep.inductionExtra', { identity: item.identity_tagged, intentions: item.intentions }) }}
+                    </p>
+                  </div>
+                </a-list-item>
+              </template>
+            </a-list>
+            <a-empty v-else :description="t('common.noData')" />
+          </a-spin>
+        </GlassCard>
+      </div>
     </a-spin>
   </div>
 </template>
@@ -207,7 +241,7 @@ import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { usePolling } from '@/composables/usePolling'
 import * as sleepApi from '@/api/modules/sleep'
-import type { SleepStatus, Dream, SleepInsight, MemoryMerge, MergeConflict } from '@/api/modules/sleep'
+import type { SleepStatus, Dream, SleepInsight, MemoryMerge, MergeConflict, InductionLog } from '@/api/modules/sleep'
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage({
@@ -228,6 +262,7 @@ const dreamsLoading = ref(false)
 const insightsLoading = ref(false)
 const mergesLoading = ref(false)
 const conflictsLoading = ref(false)
+const inductionsLoading = ref(false)
 const resolvingId = ref<string | null>(null)
 const conflictApplyToStore = ref(false)
 
@@ -236,6 +271,7 @@ const dreams = ref<Dream[]>([])
 const insights = ref<SleepInsight[]>([])
 const merges = ref<MemoryMerge[]>([])
 const conflicts = ref<MergeConflict[]>([])
+const inductions = ref<InductionLog[]>([])
 const dreamTypeFilter = ref<string | undefined>(undefined)
 
 // --- Sleep phases for visualization ---
@@ -341,7 +377,7 @@ const dreamTypeColor = (type: string) => {
 const fetchAll = async () => {
   initialLoading.value = true
   try {
-    await Promise.all([fetchStatus(), fetchDreams(), fetchInsights(), fetchMerges(), fetchConflicts()])
+    await Promise.all([fetchStatus(), fetchDreams(), fetchInsights(), fetchMerges(), fetchConflicts(), fetchInductions()])
   } finally {
     initialLoading.value = false
   }
@@ -413,6 +449,20 @@ const fetchConflicts = async () => {
   }
 }
 
+// T2/T3 归纳/碰撞周期（门控关闭或无周期时如实为空）
+const fetchInductions = async () => {
+  inductionsLoading.value = true
+  try {
+    const res = await sleepApi.getInductionLogs(agentId.value, { limit: 20, offset: 0 })
+    const data = sleepApi.unwrapSleep<InductionLog[]>(res)
+    inductions.value = Array.isArray(data) ? data : []
+  } catch {
+    inductions.value = []
+  } finally {
+    inductionsLoading.value = false
+  }
+}
+
 // --- Actions ---
 const wakeUpAgent = async () => {
   actionLoading.value = true
@@ -460,7 +510,7 @@ const onDreamFilterChange = () => {
 }
 
 const manualRefresh = async () => {
-  await Promise.all([pollStatus(), fetchDreams(), fetchInsights(), fetchMerges(), fetchConflicts()])
+  await Promise.all([pollStatus(), fetchDreams(), fetchInsights(), fetchMerges(), fetchConflicts(), fetchInductions()])
 }
 
 onMounted(() => {
@@ -572,4 +622,11 @@ onUnmounted(() => {
 .conflict-local, .conflict-remote { font-size: 11px; color: var(--nr-text-secondary); font-family: var(--nr-font-mono); }
 .conflict-actions { margin-top: 4px; }
 .conflict-resolution { margin-top: 4px; }
+
+/* Induction items（T2/T3 归纳/碰撞周期） */
+.induction-item { display: flex; flex-direction: column; gap: 6px; }
+.induction-header { display: flex; justify-content: space-between; align-items: center; }
+.induction-time { font-size: 11px; color: var(--nr-text-muted); font-family: var(--nr-font-mono); }
+.induction-summary { font-size: 13px; color: var(--nr-text-secondary); margin: 0; }
+.induction-extra { font-size: 11px; color: var(--nr-text-muted); margin: 0; }
 </style>

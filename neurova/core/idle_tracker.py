@@ -141,17 +141,10 @@ class IdleTimeTracker(BaseModule):
         self._memory_manager = None
         # P2-6: 真实记忆温度来源（由 agent 注入 memory_manager.get_average_temperature）
         self._temperature_provider: Optional[Callable[[], float]] = None
-        # T2 睡眠归纳相位：LLM 客户端提供者（返回 agent.llm_client 或 None），
-        # 由 agent 装配注入；门控 NEUROVA_SLEEP_INDUCTION 默认 off
-        self._induction_llm_provider: Optional[Callable[[], Any]] = None
 
     def set_temperature_provider(self, provider: Callable[[], float]) -> None:
         """设置真实记忆温度提供者（无注入时退回 25.0 中性默认值）"""
         self._temperature_provider = provider
-
-    def set_induction_llm_provider(self, provider: Optional[Callable[[], Any]]) -> None:
-        """设置睡眠归纳相位的 LLM 客户端提供者（无注入/返回 None = 只能跳过归纳）"""
-        self._induction_llm_provider = provider
 
     def _current_memory_temperature(self) -> float:
         """获取当前真实平均记忆温度"""
@@ -332,33 +325,17 @@ class IdleTimeTracker(BaseModule):
             self.log_error(f"Error during write-back: {e}")
 
     def _run_sleep_induction(self) -> None:
-        """T2 睡眠归纳相位：对未被上层结构引用的事实做 LLM schema 归纳。
+        """T2/T3 归纳相位触发：委托 SleepConsolidation 单点执行。
 
-        门控 ``NEUROVA_SLEEP_INDUCTION``（默认 off）；LLM 客户端经
-        ``set_induction_llm_provider`` 注入（缺省/缺席只跳过，不报错）。
-        整个相位 fail-soft——任何异常只留日志，绝不阻断睡眠整理主流程。
+        门控（治理设置页 sleep_induction_enabled / 环境变量）、LLM 桥接、
+        产物落图与周期记账都在 consolidation 内；这里只负责在深睡/休眠
+        整理落定后拉起该相位，故障不阻断睡眠链。
         """
+        consolidation = self._sleep_consolidation
+        if consolidation is None or not hasattr(consolidation, "run_induction_cycle"):
+            return
         try:
-            from neurova.cognitive_layers.memory_layer.sleep_induction import (
-                buildSyncLlmFn,
-                runInductionPhase,
-                sleepInductionEnabled,
-            )
-
-            if not sleepInductionEnabled():
-                return
-            provider = self._induction_llm_provider
-            client = provider() if callable(provider) else None
-            llm_fn = buildSyncLlmFn(client)
-            stats = runInductionPhase(self._memory_manager, llm_fn)
-            if stats.get("induction", {}).get("clusters") or stats.get("sweep", {}).get("collisions"):
-                self.log_info(
-                    f"Sleep induction: clusters={stats['induction']['clusters']}, "
-                    f"schemas={stats['induction']['schemas']}, "
-                    f"collisions={stats['sweep']['collisions']}, "
-                    f"core_schemas={stats['sweep']['core_schemas']}, "
-                    f"failed={stats['induction']['failed'] + stats['sweep']['failed']}"
-                )
+            consolidation.run_induction_cycle()
         except Exception as e:  # noqa: BLE001 - 归纳故障不阻断睡眠链
             self.log_warning(f"Sleep induction skipped: {e}")
 

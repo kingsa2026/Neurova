@@ -278,6 +278,16 @@
               >
                 {{ t('common.open') }}
               </GlassButton>
+              <a-tooltip :title="t('memory.lineageButton')">
+                <GlassButton
+                  size="sm"
+                  variant="ghost"
+                  :disabled="!rowIsActionable(record)"
+                  @click="showLineage(record)"
+                >
+                  {{ t('memory.lineageButton') }}
+                </GlassButton>
+              </a-tooltip>
               <a-tooltip :title="t('memory.strengthen')">
                 <GlassButton
                   size="sm"
@@ -502,6 +512,13 @@
         {{ t('ui.mdLastSave', { updated: mdModal.lastStats.updated, unchanged: mdModal.lastStats.unchanged, missing: mdModal.lastStats.missing, conflicts: mdModal.lastStats.conflicts ?? 0 }) }}
       </div>
     </a-modal>
+
+    <!-- T1 世代链抽屉：这条记忆从哪来、被谁依据什么修订/合并 -->
+    <MemoryLineageDrawer
+      v-model:open="lineageDrawer.open"
+      :agent-id="agentId || 'default'"
+      :memory-id="lineageDrawer.memoryId"
+    />
   </div>
 </template>
 
@@ -516,6 +533,7 @@ import { identityFailureOf, type IdentityFailure } from '@/utils/authIdentity'
 import { loginHref } from '@/utils/authRedirect'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import MemoryLineageDrawer from '@/components/MemoryLineageDrawer.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useAgentStore } from '@/stores/agents'
 import { useAuthStore } from '@/stores/auth'
@@ -528,6 +546,12 @@ import { listGroups } from '@/api/modules/groups'
 // 测试里被部分 mock 的模块会因此炸在 __v_isRef 上；在脚本里取一次即可。
 const MEMORY_TYPES = memoryApi.MEMORY_TYPES
 const rowIsActionable = memoryApi.rowIsActionable
+
+// T1 世代链抽屉：行动作"世代链"打开，展示该记忆的修订/合并演化弧线
+const lineageDrawer = ref<{ open: boolean; memoryId: string }>({ open: false, memoryId: '' })
+const showLineage = (record: MemoryEntry) => {
+  lineageDrawer.value = { open: true, memoryId: String(record.id) }
+}
 
 const { t } = useI18n()
 const authStore = useAuthStore()

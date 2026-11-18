@@ -1111,3 +1111,40 @@ export function listPendingMemoryDecisions(status: 'confirmed' | 'rejected' = 'c
     params: { status },
   })
 }
+
+// ---------------------------------------------------------------------------
+// 世代链（T1：supersedes/merged_from 链的读路径）
+// ---------------------------------------------------------------------------
+
+/** 世代链上的一个节点（content 为后端截断的预览） */
+export interface MemoryLineageNode {
+  id: string
+  content: string
+  lifecycle_stage: string
+  created_at: string
+  is_root: boolean
+}
+
+/** 世代链边：方向一律旧代 → 新代（superseded_by 带 basis/at 依据；merged_into 为多源合并） */
+export interface MemoryLineageEdge {
+  from: string
+  to: string
+  relation: 'superseded_by' | 'merged_into'
+  basis?: string
+  at?: string
+}
+
+/** 一条记忆的世代演化弧线（DAG：合并产物有多源，故非严格链表） */
+export interface MemoryLineage {
+  root_id: string
+  max_depth: number
+  nodes: MemoryLineageNode[]
+  edges: MemoryLineageEdge[]
+}
+
+/** 获取一条记忆的世代演化弧线（404 = 不存在或越出作用域）。 */
+export function getMemoryLineage(agentId: string, memoryId: string) {
+  return api.get<ApiResponse<MemoryLineage>>(`${BASE}/${memoryId}/lineage`, {
+    params: { agent_id: agentId },
+  })
+}
