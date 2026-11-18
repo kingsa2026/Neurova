@@ -238,3 +238,35 @@ class TestPostChatWiring:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestDistillMetrics:
+    """D4 观测面：蒸馏计数进既有 /metrics 指标读面。"""
+
+    def test_metrics_counter_declared_and_recorded(self, freshStore, monkeypatch):
+        monkeypatch.setenv("NEUROVA_MEMORY_DISTILL", "1")
+        from neurova.core.metrics import get_metrics
+        from neurova.memory.distiller import distillTurnMemory
+
+        metrics = get_metrics()
+        counter = getattr(metrics, "memory_distill_candidates_total", None)
+        # 独立 agent_id：熔断计数按 agent 隔离，避免吃到前面用例的失败状态
+        agent_id = "agent-metrics"
+        assert counter is not None, "metrics 缺 memory_distill_candidates_total 计数器"
+
+        def value(outcome: str) -> float:
+            return counter.labels(outcome=outcome)._value.get()
+
+        before_submitted = value("submitted")
+        before_failed = value("failed")
+        run(distillTurnMemory(
+            makeAgent(StubLLM(candidatesJson(
+                {"content": "用户偏好先给结论再展开", "category": "preference"})),
+                agent_id=agent_id),
+            user_input=WINDOW_INPUT, reply=WINDOW_REPLY, session_id="s1"))
+        assert value("submitted") >= before_submitted + 1, "提交候选未计数"
+
+        run(distillTurnMemory(
+            makeAgent(StubLLM("这不是 JSON"), agent_id=agent_id),
+            user_input=WINDOW_INPUT, reply=WINDOW_REPLY, session_id="s1"))
+        assert value("failed") >= before_failed + 1, "失败轮未计数"

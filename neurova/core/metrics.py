@@ -207,6 +207,13 @@ class _Metrics:
             ["outcome"],
         )
 
+        # ── 记忆蒸馏回写（2026-11-18 立项）──
+        self.memory_distill_candidates_total = Counter(
+            "neurova_memory_distill_candidates_total",
+            "Memory distillation outcomes (turn/submitted/duplicate/sensitive/failed)",
+            ["outcome"],
+        )
+
         # ── 能力缺口（T-03）──
         # "自主造能力的入口"由用户措辞改挂到能力缺口之后，缺口本身必须可测：
         # 没有这个计数，"入口没被触发"与"入口根本没接电"在观测上同形。
@@ -375,6 +382,13 @@ class _Metrics:
             self.goal_verification_total.labels(outcome=str(outcome)).inc()
         except Exception:  # noqa: BLE001 - 观测失败不得影响对话主链
             logger.debug("goal verification metric failed", exc_info=True)
+
+    def record_memory_distill(self, outcome: str) -> None:
+        """记忆蒸馏回写计数（turn/submitted/duplicate/sensitive/failed）。"""
+        try:
+            self.memory_distill_candidates_total.labels(outcome=str(outcome)).inc()
+        except Exception:  # noqa: BLE001 - 观测失败不得影响对话主链
+            logger.debug("memory distill metric failed", exc_info=True)
 
     def observe_capability_gap(self, kinds) -> None:
         """能力缺口命中埋点（按类别累加）。"""
