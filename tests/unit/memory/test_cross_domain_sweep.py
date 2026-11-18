@@ -1,9 +1,9 @@
 """T3 跨域碰撞 sweeper——行为/语义双空间判据与 core schema 归纳
 
-DCPM 启发 T3（docs/04-plans/2026-11-18-dcpm-memory-inspiration-plan.md）：
+记忆模型论文启发 T3（docs/04-plans/2026-11-18-memory-model-inspiration-plan.md）：
 对 schema 节点做双空间扫描——行为描述嵌入相似（cos>θ_beh）**且**语义嵌入
 遥远（cos<θ_sem）判为碰撞（行为像、话题远），union-find 聚合后由 LLM 归纳
-更高层 core schema。DCPM 消融中该机制贡献最大单项（4.1 分）。
+更高层 core schema。论文消融实验中该机制贡献最大单项（4.1 分）。
 
 钉住的契约：
 - 判据是**双空间同时成立**：行为像但话题也近（平凡冗余）不碰撞；

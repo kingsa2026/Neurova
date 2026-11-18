@@ -1,6 +1,6 @@
 """记忆世代链接口 — supersedes 链读路径化（T1）
 
-DCPM 启发（docs/04-plans/2026-11-18-dcpm-memory-inspiration-plan.md T1）：
+DCPM 启发（docs/04-plans/2026-11-18-memory-model-inspiration-plan.md T1）：
 世代链三处写点（S16 世代失效/导入取代/睡眠合并）此前只写不读。本端点是
 链的**唯一读面出口**：给定链上任意一代，返回完整演化弧线（旧值是什么、
 被谁依据什么修订、合并吸收了哪些源）。

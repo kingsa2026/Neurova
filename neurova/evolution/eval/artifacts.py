@@ -1,6 +1,6 @@
 """V5 可部署工件 —— 冠军与非劣变体的版本化打包（2026-11-14）。
 
-对照档：docs/08-research/videoevolve_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V5。
+对照档：docs/08-research/reference_v_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V5。
 论文（arXiv 2610.01766）：开发期搜索结束，**部署的是固定 harness**——冠军与
 非劣变体（Pareto 多档）是可交付物，不是散落在运行审计里的中间读数。
 HarnessPro 对照档登记的残差（N5 工件化）：本仓的 pareto_variants 此前只是

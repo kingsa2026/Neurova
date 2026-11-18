@@ -240,9 +240,9 @@ SC-4（基准复跑贯穿）。
   `neurova/tool_executor.py`。
 - 本仓活水池：`neurova/context_pool.py`、`neurova/context/semantic_drawer.py`。
 - swarm 压缩纪律（S6）：`neurova/agent/swarm.py` 会话压缩链路、`CompressionEvent` 时间线。
-- 既有对照：`docs/08-research/billioncontext_vs_neurova_context_compression_comparison_2026-11-14.md`
+- 既有对照：`docs/08-research/reference_e_vs_neurova_context_compression_comparison_2026-11-14.md`
   （B1/B3/B5 改进项的出处与本仓压缩面全貌）、
-  `docs/08-research/coworkos_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md`（压缩纪律对照）。
+  `docs/08-research/reference_a_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md`（压缩纪律对照）。
 
 ---
 

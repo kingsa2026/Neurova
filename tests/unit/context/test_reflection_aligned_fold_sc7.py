@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """SC-7 反思节律对齐折叠 —— 候选排序信号（不绕触发门）。
 
-契约（docs/08-research/selfcompact_vs_neurova_context_compression_comparison_2026-11-17.md §9.4 SC-7、§9.5）：
+契约（docs/08-research/reference_f_vs_neurova_context_compression_comparison_2026-11-17.md §9.4 SC-7、§9.5）：
 1. 反思编译完成后（MetaLedger 有 reflection 游标），下一轮折叠的候选区
    延伸到「最近反思时刻之前的更早消息」——未被反思时，这些消息按既有
    预算规则保留在尾区（同一场景逐字对比）；

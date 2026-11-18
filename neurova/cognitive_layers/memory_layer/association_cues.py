@@ -2,7 +2,7 @@
 
 一句话：给一条记忆挂若干「只参与检索、永不进提示」的短语，让它们进同一份关键词倒排，
 于是与记忆本身无共同词面、却语义相关的提问有第二条访问路。根因读数见
-`docs/08-research/tmem_paper_vs_neurova_associative_memory_comparison_2026-10-21.md`
+`docs/08-research/reference_u_paper_vs_neurova_associative_memory_comparison_2026-10-21.md`
 与判据集 `tests/performance/memory/test_associativeRecallGate.py`（§6-381）。
 
 本模块刻意**不含任何模型调用面**（批 A 的立身之处是零成本；常驻判据

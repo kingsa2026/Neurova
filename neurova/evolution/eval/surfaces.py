@@ -1,6 +1,6 @@
 """V3 可进化面 schema —— 「填空式结构表示」的本仓工程化（2026-11-14）。
 
-对照档：docs/08-research/videoevolve_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V3。
+对照档：docs/08-research/reference_v_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V3。
 论文（arXiv 2610.01766）Cloze-Structured Harness Representation：阶段接口固定、
 每份提案只编辑一个被允许的「面」、候选先过接口检查。本仓此前「哪些面可进化」
 是隐式的——尺寸预算映射在 mutator/runner/constraints 三处各抄一份（runner 那份

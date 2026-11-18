@@ -1,6 +1,6 @@
 """T4b 依赖图收口单源——全仓只有一份 DependencyGraph
 
-DCPM 启发 T4（docs/04-plans/2026-11-18-dcpm-memory-inspiration-plan.md T4）：
+记忆模型论文启发 T4（docs/04-plans/2026-11-18-memory-model-inspiration-plan.md T4）：
 此前三套互不相通的图实例——conversation_rule_extractor 用的模块单例
 （agent.dependency_graph = get_dependency_graph()）、neuron.py 的
 ``_shared_graph`` DCL 单例、neurova_recall 的 ``DependencyGraph()`` 自建——

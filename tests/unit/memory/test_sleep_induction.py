@@ -1,7 +1,7 @@
 """T2 睡眠归纳相位——sleep_induction 模块契约
 
-DCPM 启发 T2（docs/04-plans/2026-11-18-dcpm-memory-inspiration-plan.md）：
-把 DCPM System2 的"归纳"装进本仓深睡/休眠窗口——对未被任何上层结构引用的
+记忆模型论文启发 T2（docs/04-plans/2026-11-18-memory-model-inspiration-plan.md）：
+把 论文中的 System2 的"归纳"装进本仓深睡/休眠窗口——对未被任何上层结构引用的
 事实按隔离三元组分桶、语义聚类，每簇一次 LLM 归纳出 schema 节点，落统一
 依赖图（T4b 收口后的那份）并带证据回指。
 

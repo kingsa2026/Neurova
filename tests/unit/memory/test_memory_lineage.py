@@ -1,6 +1,6 @@
 """T1 supersedes 链读路径化——memoryLineage 统一链读取函数
 
-DCPM 启发 T1（docs/04-plans/2026-11-18-dcpm-memory-inspiration-plan.md）：
+记忆模型论文启发 T1（docs/04-plans/2026-11-18-memory-model-inspiration-plan.md）：
 世代链三处写点（S16 世代失效 ``memoryDiscipline.supersededBy``、导入取代
 ``superseded_by_ingest``、睡眠合并 ``merged_from``）此前**只写不读**——
 recall 排除 FORGOTTEN 行后，"这条结论以前是什么、被谁修订"无法回答。

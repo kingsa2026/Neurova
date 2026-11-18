@@ -2,7 +2,7 @@
 + 吸收账本迁移 + 计划仓溢出留痕。
 
 治理决策(用户指令 2026-10-07;规则修订登记于
-docs/08-research/skillglow_vs_neurova_skill_consolidation_2026-10-07.md §0):
+docs/08-research/reference_t_vs_neurova_skill_consolidation_2026-10-07.md §0):
 整合审批引入全自动 commit gate 替代人工审批——确定性多检 fail-closed
 (任一检不过仍留人工),治理开关 consolidation_auto_commit_enabled(默认开,
 env NEUROVA_CONSOLIDATION_AUTO_COMMIT 逃生门),动作=归档可逆+账本迁移+全程留痕。

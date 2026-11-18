@@ -2,7 +2,7 @@
 
 > 参照系：CoworkOS（arXiv:2611.03178，RUC-NLPIR，代码 github.com/RUC-NLPIR/CoworkOS，克隆件 `~/.zcode/tmp/coworkos-src` @ baf03c3）。
 > 被评方：Neurova 本仓**当前态**（P1–P3 升级批全部落地后，含 3d018e601/f05e88b3c/c8bbde9b9）。
-> 上轮同框评测见 [autoswarm_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md](autoswarm_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)——维度体系与评分锚点**原样复用**，两轮分数可直接对比。
+> 上轮同框评测见 [reference_b_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md](reference_b_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)——维度体系与评分锚点**原样复用**，两轮分数可直接对比。
 
 ---
 
@@ -16,7 +16,7 @@
 >
 > **【2026-11-18 1F 真模型复跑·终评】** v2 基线已实测归档（新判据+记忆隔离下 26 任务，[报告](multi_agent_bench_baseline_v2_2026-11-18.md)）——F2 4→5，**Neurova 101/110（91.8%）**，领先 CoworkOS（95）6 分；F 观测评测追平（10 vs 10），七维全部 ≥ 参照系。
 >
-> **【终评指向】** 本报告保留为第 2/3 轮过程记录；**独立终评终稿**（22 项全表现场复核 + 执行记录）见 [coworkos_vs_neurova_final_evaluation_2026-11-18.md](coworkos_vs_neurova_final_evaluation_2026-11-18.md)。
+> **【终评指向】** 本报告保留为第 2/3 轮过程记录；**独立终评终稿**（22 项全表现场复核 + 执行记录）见 [reference_a_vs_neurova_final_evaluation_2026-11-18.md](reference_a_vs_neurova_final_evaluation_2026-11-18.md)。
 
 双方形态不同：CoworkOS 是"**本机单用户长程工作 harness**"（Electron/CLI 双入口，任务策略与执行管理分离，Main/Coordinator/Subagent 三层，共享应用层人机共编，RSI 后训练闭环）；Neurova 是"**产品化的多渠道多 Agent 平台**"（蜂群派生 + ACP 团队 + 协作房间 + 工作流 + 定时任务）。
 

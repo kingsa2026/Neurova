@@ -1,7 +1,7 @@
 # 多 Agent 协作升级实施方案（依据 AutoSwarm 对照评测）
 
 - 日期：2026-11-17
-- 依据：[AutoSwarm 与 Neurova 多 Agent 协作综合评测](../08-research/autoswarm_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)（下称"评测报告"；其 §9 改进点 G-1…G-13 与 §10 评测方案是本方案直接输入；2026-11-17 二次补充的参照系 D——lizhouai/multi-agent-practice 代码级研究（评测报告 §6）为多个 P 项提供了最小可行实现参照，下文以"参照 MAP"标注）
+- 依据：[AutoSwarm 与 Neurova 多 Agent 协作综合评测](../08-research/reference_b_vs_neurova_multi_agent_collaboration_evaluation_2026-11-17.md)（下称"评测报告"；其 §9 改进点 G-1…G-13 与 §10 评测方案是本方案直接输入；2026-11-17 二次补充的参照系 D——lizhouai/multi-agent-practice 代码级研究（评测报告 §6）为多个 P 项提供了最小可行实现参照，下文以"参照 MAP"标注）
 - 范围：`neurova/agent/swarm.py`、`neurova/agent/goal_verifier.py`、`neurova/agent/review.py`、`neurova/agent/mailbox.py`、`neurova/builtin_tools.py`、`neurova/tool_executor.py`、`neurova/benchmark/`、`tests/unit/agent/`、`tests/unit/benchmark/`
 - 纪律：每项先红后绿（红灯测试实证缺陷/期望行为）、净新增 LOC 尽量为负或列明去向、live-verify 真链路自证、同根因全命中点扫荡、不建第二套平行体系（复用 goal_verifier/review/台账/邮箱/治理闸，不另起炉灶）。
 

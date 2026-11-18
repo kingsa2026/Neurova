@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """S15 D3 收尾——压缩失败冷却 + 子代理软目标 契约测试（先红）。
 
-覆盖（方案 docs/04-plans/2026-11-17-surpass-coworkos-implementation-plan.md §S15）：
+覆盖（方案 docs/04-plans/2026-11-17-surpass-reference-implementation-plan.md §S15）：
 1. 失败冷却：压缩失败后进入递增冷却（COMPACTION_FAILURE_COOLDOWN_STEPS=(5,15,30)
    具名常量），冷却期内跳过自动触发（手动 /compact 不受限）；冷却状态随会话
    持久（复用 S5/S6 事件面落时间线），进程重启不丢；

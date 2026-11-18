@@ -1,6 +1,6 @@
 """rebuildParentContent 移植（下批①）：编辑过的子块叠加进父块上下文。
 
-契约（docs/Neurova_WeKnora代码级对比_2026-09-15.md §8 遗留项）：
+契约（docs/Neurova_外部项目代码级对比_2026-09-15.md §8 遗留项）：
 - parent_context_text(item, pi) 以父块原文为底，把该父下 revision>0 的
   子块编辑按其绝对偏移替换（未编辑子块不参与——子块 overlap 窗口的原文
   本就含于父底，重复拼接反而制造重复）；

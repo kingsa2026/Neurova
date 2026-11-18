@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """V3 可进化面 schema —— 红灯测试。
 
-对照档：docs/08-research/videoevolve_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V3。
+对照档：docs/08-research/reference_v_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V3。
 论文（arXiv 2610.01766）「填空式结构表示」：阶段接口固定、每份提案只编辑一个
 被允许的「面」、候选先过接口检查。本仓的可进化面此前是**隐式**的——尺寸预算
 映射在 mutator/runner/constraints 三处各抄一份，且 runner 那份已漂移（丢了

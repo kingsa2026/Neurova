@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """S1 评测地基补全（1A usage 回传 + 1B 轨迹效率判据）红灯档。
 
-红→绿契约（方案 docs/04-plans/2026-11-17-surpass-coworkos-implementation-plan.md §S1）：
+红→绿契约（方案 docs/04-plans/2026-11-17-surpass-reference-implementation-plan.md §S1）：
 - TaskOutcome 含 usage（promptTokens/completionTokens/totalTokens/elapsedSeconds/
   steps/toolCalls）与 trajectory（toolsUsed 等轨迹事实）字段；
 - 判据 DSL expect_trajectory(maxSteps/maxToolCalls/allowedTools) 可约束超步数任务；

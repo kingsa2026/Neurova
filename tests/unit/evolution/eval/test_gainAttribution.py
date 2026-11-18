@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """V4 增益-代价归因读数 —— 红灯测试。
 
-对照档：docs/08-research/videoevolve_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V4。
+对照档：docs/08-research/reference_v_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V4。
 论文（arXiv 2610.01766）成分交换实验把「增益来自哪一层、花什么代价」摆在桌面
 上（指令稳定增益/代码收益不稳且调用翻倍）。本仓文本-only 阶段的诚实形态：
 提案带 `gain_attribution` 面板——增益（留出/密封）、体积代价、修复通道贡献

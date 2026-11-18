@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """V5 Pareto 可部署工件打包 —— 红灯测试。
 
-对照档：docs/08-research/videoevolve_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V5。
+对照档：docs/08-research/reference_v_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V5。
 论文（arXiv 2610.01766）：开发期搜索结束，**部署的是固定 harness**——冠军与
 非劣变体是可交付物。HarnessPro 对照档登记的残差（N5 工件化）：本仓的
 pareto_variants 此前只是结果面读数＋adopt-variant 单点采纳，没有版本化工件。

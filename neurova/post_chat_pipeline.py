@@ -3325,7 +3325,7 @@ class PostChatPipeline:
 
         # 重复技能合并计划（P1-2 接线）：结构身份簇 + umbrella 质量选取。
         # 治理模式（2026-10-07 规则修订，见
-        # docs/08-research/skillglow_vs_neurova_skill_consolidation_2026-10-07.md §0）：
+        # docs/08-research/reference_t_vs_neurova_skill_consolidation_2026-10-07.md §0）：
         # 计划落仓后过**全自动 commit gate**（确定性召回预检+结构身份门槛，
         # fail-closed：任一检不过仍留人工审批面）；开关
         # consolidation_auto_commit_enabled 默认开，关=回退纯人工审批。

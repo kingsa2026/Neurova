@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """V1 near-miss 有界修复通道 —— 红灯测试。
 
-对照档：docs/08-research/videoevolve_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V1。
+对照档：docs/08-research/reference_v_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V1。
 论文（arXiv 2610.01766）机制：被验证侧门拒绝、但开发集增益为正的候选（near miss）
 带门别诊断进入**有界**修复轮，而不是整轮弃置。本文件钉：
 

@@ -530,7 +530,7 @@ class PatternCrystallizer:
             "去实例化判据（2026-10-07）：可复用的结晶只承载「适用条件 + 核心过程 + "
             "常见失败模式」这类过程知识；凡绑定具体文件路径、测试常数、验证器输出或"
             "一次性环境细节的，一律判不可复用——那是任务记忆，不是可复用过程"
-            "（外部对比研究 P1-3，docs/08-research/skillglow_vs_neurova_skill_consolidation_2026-10-07.md）。\n\n"
+            "（外部对比研究 P1-3，docs/08-research/reference_t_vs_neurova_skill_consolidation_2026-10-07.md）。\n\n"
             f"{listing}\n\n"
             '只输出 JSON：{"verdicts": [{"key": "<原模式键>", "reusable": true/false, "reason": "<一句话>"}]}'
         )

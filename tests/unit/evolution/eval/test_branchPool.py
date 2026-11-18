@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """V2 保留分支一等对象（分支引导进化）—— 红灯测试。
 
-对照档：docs/08-research/videoevolve_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V2。
+对照档：docs/08-research/reference_v_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V2。
 论文（arXiv 2610.01766）机制：有希望的非冠军分支保留为后续精炼的父代，晋升或重试
 额度耗尽后重置——「别急着砍第二名」。本文件钉：
 

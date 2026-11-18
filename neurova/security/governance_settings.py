@@ -60,7 +60,7 @@ DEFAULTS: Dict[str, Any] = {
     # 整合全自动 commit gate（2026-10-07 规则修订：用户指令"全自动替代人工审批"）。
     # gate 为确定性多检 fail-closed（召回预检+结构身份门槛，任一检不过仍留人工），
     # 动作=归档可逆+账本迁移+留痕；关=回退人工审批面。规则修订登记：
-    # docs/08-research/skillglow_vs_neurova_skill_consolidation_2026-10-07.md §0
+    # docs/08-research/reference_t_vs_neurova_skill_consolidation_2026-10-07.md §0
     "consolidation_auto_commit_enabled": True,
     # 语义族第二计划源（P3，2026-10-07）：按名述嵌入聚"同目的、异序列"族，
     # 只产计划进人工审批面（basis=semantic 永不自动提交）。关 = 只跑结构族源。

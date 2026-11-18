@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """S6 压缩纪律（D3）——红→绿 TDD 契约测试。
 
-覆盖（方案 docs/04-plans/2026-11-17-surpass-coworkos-implementation-plan.md §S6）：
+覆盖（方案 docs/04-plans/2026-11-17-surpass-reference-implementation-plan.md §S6）：
 1. 超阈值自动触发：CONTEXT_COMPACT_TRIGGER_RATIO（具名常量 0.85）× 上下文预算；
 2. provider 溢出异常兜底：识别溢出错误族 → 压缩 → 重试一次；
 3. 严格变小守卫：重试内容不严格变小时显式报错拒绝重发（防越压越大循环）；

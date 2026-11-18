@@ -1,7 +1,7 @@
 """技能库巩固(umbrella)— 识别可合并技能簇,产出合并计划并按治理模式执行。
 
 治理模式(2026-10-07 规则修订,登记于
-docs/08-research/skillglow_vs_neurova_skill_consolidation_2026-10-07.md §0):
+docs/08-research/reference_t_vs_neurova_skill_consolidation_2026-10-07.md §0):
   - 默认(consolidation_auto_commit_enabled=false):**纯计划段**——本模块
     零 LLM 产出计划,执行走审批面(skill_pool_api /consolidation/*),由人拍板;
   - 全自动(开关=true,2026-10-07 用户指令):计划过**确定性 commit gate**

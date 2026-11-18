@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """V6 部署形态成本差进提案 —— 红灯测试。
 
-对照档：docs/08-research/videoevolve_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V6。
+对照档：docs/08-research/reference_v_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V6。
 论文（arXiv 2610.01766）披露纪律：进化后 harness 的**部署形态**调用数/token
 （ReXTime 0.996→1.963）必须与开发搜索成本分开计量、向采纳者明示。本仓提案面
 此前只有开发侧 cost_gate（软门），没有「采纳后每任务多花多少」的读数。

@@ -1,6 +1,6 @@
 """V2 保留分支一等对象 —— 分支引导进化的池管理（2026-11-14）。
 
-对照档：docs/08-research/videoevolve_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V2。
+对照档：docs/08-research/reference_v_vs_neurova_harness_evolution_comparison_2026-11-14.md §3-V2。
 论文（arXiv 2610.01766）Branch-Guided Harness Evolution：champion 之外，有希望的
 非冠军分支**保留为后续精炼的父代**，晋升（promoted）或重试额度耗尽（exhausted）
 后重置——「别急着砍第二名」。
