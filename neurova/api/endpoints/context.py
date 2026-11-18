@@ -52,6 +52,25 @@ class BuildContextResponse(BaseModel):
     build_time: float
 
 
+class ContextCompressionSettings(BaseModel):
+    """S6/S15 压缩纪律参数读数（设置页压缩参数展示的数据源）。
+
+    全部从 context_pool / swarm 的具名常量直读——单一事实源，此处不定义数值。
+    """
+
+    triggerRatio: float = 0.85
+    softTargetTokens: int = 0
+    cooldownSteps: List[int] = Field(default_factory=list)
+
+
+class ContextCompactionCooldown(BaseModel):
+    """会话级压缩冷却运行态（时间线重建，与管线同一事实源）。"""
+
+    cooling: bool = False
+    consecutiveFailures: int = 0
+    remainingSeconds: float = 0
+
+
 class ContextStats(BaseModel):
     """上下文池统计（P2-7 收口：字段全部来自池的真实读数，不再有恒零假位）"""
 
@@ -65,6 +84,10 @@ class ContextStats(BaseModel):
     drawer: Optional[Dict[str, Any]] = None
     # B12（对照改进项）：语义判重读数（各池累计计数求和；台账规模求和）
     dedup: Optional[Dict[str, Any]] = None
+    # S6/S15：压缩纪律参数（具名常量直读，设置页展示数据源）
+    compression: Optional[ContextCompressionSettings] = None
+    # S15：会话级压缩冷却运行态（仅 agent_id+session_id 同供时返回）
+    cooldown: Optional[ContextCompactionCooldown] = None
 
 
 class ContextCompositionResponse(BaseModel):
@@ -395,6 +418,8 @@ async def build_context_v2(
 @router.get("/stats", response_model=ContextStats)
 async def get_context_stats(
     request: Request,
+    agent_id: str = Query(default="", description="Agent ID（与 session_id 同供时附带该会话压缩冷却态）"),
+    session_id: str = Query(default="", description="Session ID（与 agent_id 同供时附带该会话压缩冷却态）"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取上下文池真实统计（P2-7 收口：此前恒回全零 stub）。
@@ -402,8 +427,24 @@ async def get_context_stats(
     聚合 context pool 注册表中全部已登记池的保留读数
     （`ContextPool.get_retention_stats`，Issue #65 可观测面）。无池时
     `pools=0`、各计数 0——那是"当前确实没有池"的真值，不是伪造的零。
+
+    S6/S15：响应恒带 `compression` 压缩纪律参数（具名常量直读，设置页
+    展示数据源）；`agent_id`+`session_id` 同供时附带该会话 `cooldown`
+    冷却运行态（时间线重建，与管线同一事实源，不另记账）。
     """
+    from neurova.context_pool import (
+        COMPACTION_FAILURE_COOLDOWN_STEPS,
+        CONTEXT_COMPACT_TRIGGER_RATIO,
+        rebuildCompactionCooldown,
+    )
     from neurova.context_pool_registry import get_registry
+
+    compression_settings = ContextCompressionSettings(
+        triggerRatio=float(CONTEXT_COMPACT_TRIGGER_RATIO),
+        softTargetTokens=_subagentSoftTargetTokens(),
+        cooldownSteps=[int(s) for s in COMPACTION_FAILURE_COOLDOWN_STEPS],
+    )
+    cooldown_state = _sessionCooldownState(agent_id, session_id)
 
     pools = get_registry().allPools()
     stats = []
@@ -451,7 +492,47 @@ async def get_context_stats(
         indexed_entries=indexed_entries,
         drawer=drawer_totals,
         dedup=dedup_totals,
+        compression=compression_settings,
+        cooldown=cooldown_state,
     )
+
+
+def _subagentSoftTargetTokens() -> int:
+    """S15 子代理上下文软目标（swarm 具名常量直读；惰性 import 防环）。"""
+    try:
+        from neurova.agent.swarm import SUBAGENT_CONTEXT_SOFT_TARGET_TOKENS
+
+        return int(SUBAGENT_CONTEXT_SOFT_TARGET_TOKENS)
+    except Exception:  # noqa: BLE001 - 常量读不到按 0（展示面不因依赖序失败）
+        logger.warning("SUBAGENT_CONTEXT_SOFT_TARGET_TOKENS 读取失败", exc_info=True)
+        return 0
+
+
+def _sessionCooldownState(agent_id: str, session_id: str) -> Optional[ContextCompactionCooldown]:
+    """S15 会话冷却运行态：时间线重建（事实源同管线），双参数齐供才查。
+
+    重放窗口取管线同款 `_COOLDOWN_REPLAY_LIMIT`（单一事实源，不另定 100）；
+    读失败按无冷却处理（fail-open，不拖垮 stats 聚合）。
+    """
+    if not agent_id or not session_id:
+        return None
+    try:
+        from neurova.agent.chat_pipeline import _COOLDOWN_REPLAY_LIMIT
+        from neurova.context_pool import rebuildCompactionCooldown
+        from neurova.session_manager import get_session_manager
+
+        events = get_session_manager().read_timeline(
+            agent_id, session_id, limit=_COOLDOWN_REPLAY_LIMIT,
+        ) or []
+        state = rebuildCompactionCooldown(events)
+        return ContextCompactionCooldown(
+            cooling=state.isCooling(),
+            consecutiveFailures=int(state.consecutiveFailures),
+            remainingSeconds=round(state.remainingSeconds(), 3),
+        )
+    except Exception:  # noqa: BLE001 - 冷却态读失败按无冷却
+        logger.warning("context stats: 冷却态读取失败", exc_info=True)
+        return None
 
 
 @router.get("/composition", response_model=ContextCompositionResponse)
