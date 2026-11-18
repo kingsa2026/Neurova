@@ -113,15 +113,22 @@
               <span class="nr-retry-notice-icon"><UiIcon name="radar" :size="13" /></span>
               <span class="nr-retry-notice-label">{{ retryNoticeText(msg) }}</span>
             </div>
-            <!-- S6 自动压缩轻提示：cutoff 摘要（折叠条数 + tokens 前→后），随气泡保留 -->
+            <!-- S6/S15 自动压缩轻提示：同一条提示条，kind 区分数义——
+                 compacted=cutoff 摘要（折叠条数 + tokens 前→后）；
+                 cooldown=压缩失败冷却中（步长秒数 + 连续失败次数）。随气泡保留 -->
             <div v-if="msg.compactNotice" class="nr-compact-notice">
               <span class="nr-compact-notice-icon"><UiIcon name="archive" :size="13" /></span>
               <span class="nr-compact-notice-label">
-                {{ t('chat.contextCompactedNotice', {
-                  folded: msg.compactNotice.foldedCount,
-                  before: msg.compactNotice.tokensBefore,
-                  after: msg.compactNotice.tokensAfter,
-                }) }}
+                {{ msg.compactNotice.kind === 'cooldown'
+                  ? t('chat.contextCompactCooldownNotice', {
+                    failures: msg.compactNotice.consecutiveFailures ?? 0,
+                    seconds: msg.compactNotice.cooldownSeconds ?? 0,
+                  })
+                  : t('chat.contextCompactedNotice', {
+                    folded: msg.compactNotice.foldedCount ?? 0,
+                    before: msg.compactNotice.tokensBefore ?? 0,
+                    after: msg.compactNotice.tokensAfter ?? 0,
+                  }) }}
               </span>
             </div>
             <!-- P2-8：让位闸等不到额度 → 本轮挂起，run_id 是唯一续跑凭据 -->
@@ -2008,10 +2015,21 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       // 气泡保留——不是静默，不得落 silence 分支占住"上游零字节"语义。
       if (event.phase === 'context_compacted') {
         msg.compactNotice = {
+          kind: 'compacted',
           foldedCount: Number(event.foldedCount || 0),
           tokensBefore: Number(event.tokensBefore || 0),
           tokensAfter: Number(event.tokensAfter || 0),
           reason: event.reason ? String(event.reason) : undefined,
+        }
+        break
+      }
+      // S15 压缩失败冷却通知（phase=context_compact_cooldown）：复用同一条
+      // 轻提示条形态，kind=cooldown 区分数义——载荷是冷却步长与连续失败次数。
+      if (event.phase === 'context_compact_cooldown') {
+        msg.compactNotice = {
+          kind: 'cooldown',
+          cooldownSeconds: Number(event.cooldownSeconds || 0),
+          consecutiveFailures: Number(event.consecutiveFailures || 0),
         }
         break
       }

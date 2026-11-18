@@ -619,6 +619,7 @@ export default {
     retryYieldWait: 'Cediendo por cuota de concurrencia - reintento en {seconds} s (intento {retry}/{max})',
     upstreamSilence: 'Sin datos del upstream durante {seconds}s, se sigue esperando…',
     contextCompactedNotice: 'Compactado automático: {folded} mensajes plegados, contexto {before} → {after} tokens',
+    contextCompactCooldownNotice: 'Compresión de contexto en enfriamiento: {failures} fallos consecutivos, compresión automática en pausa durante {seconds}s',
     turnParked: 'Este turno está en pausa - se requiere reanudación manual',
     turnStillRunning: 'Esta respuesta sigue generándose',
     parkedPinnedModel: 'Modelo fijado {pinned}; esta solicitud {requested}',

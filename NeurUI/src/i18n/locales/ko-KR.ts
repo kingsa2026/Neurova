@@ -619,6 +619,7 @@ export default {
     retryYieldWait: '동시 실행 한도로 양보 중 - {seconds}초 후 재시도({retry}/{max})',
     upstreamSilence: '업스트림이 {seconds}초 무응답입니다. 계속 대기 중…',
     contextCompactedNotice: '자동 압축: 메시지 {folded}개를 접었으며, 컨텍스트 {before} → {after} 토큰',
+    contextCompactCooldownNotice: '컨텍스트 압축 쿨다운 중: 연속 {failures}회 실패, {seconds}초간 자동 압축 중단',
     turnParked: '이 응답이 보류되었습니다. 수동 재개가 필요합니다',
     turnStillRunning: '이 응답은 계속 생성 중입니다',
     parkedPinnedModel: '고정 모델 {pinned}, 이번 요청 {requested}',

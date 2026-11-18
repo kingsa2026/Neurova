@@ -619,6 +619,7 @@ export default {
     retryYieldWait: '並行上限により待機中。{seconds} 秒後に再試行（{retry}/{max} 回目）',
     upstreamSilence: '上流が {seconds} 秒無応答です。引き続き待機中…',
     contextCompactedNotice: '自動圧縮：{folded} 件のメッセージを折りたたみ、コンテキスト {before} → {after} トークン',
+    contextCompactCooldownNotice: 'コンテキスト圧縮クールダウン中：連続 {failures} 回の失敗、{seconds} 秒間自動圧縮を停止',
     turnParked: 'この応答は保留中です。手動で再開できます',
     turnStillRunning: 'この応答はまだ生成中です',
     parkedPinnedModel: '固定モデル {pinned}、今回のリクエスト {requested}',
