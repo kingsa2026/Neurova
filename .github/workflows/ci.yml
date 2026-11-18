@@ -223,6 +223,11 @@ jobs:
       - name: Coverage gate (fail_under=60, judged once over the whole subset)
         run: python scripts/ci/coverage_report.py --fail-under 60
 
+      # QwenPaw 对照批 C6：覆盖率棘轮——实际低于记录值即红；超越则把记录值
+      # 上调写回 scripts/ci/coverage_ratchet.json（只升不降，演进史即提交史）。
+      - name: Coverage ratchet (only ratchets up)
+        run: python scripts/ci/coverage_ratchet.py --data-dir data/coverage --ratchet scripts/ci/coverage_ratchet.json --floor 60
+
   e2e:
     name: E2E backend boot smoke (P1-8)
     runs-on: ubuntu-latest
@@ -277,6 +282,14 @@ jobs:
 
       - name: Unit tests (vitest)
         run: npx vitest run
+
+      # QwenPaw 对照批 C6：构建产物体积预算门——首跑标定（脚本写回实测值），
+      # 此后预算只降不升，超限即红。
+      - name: Build (vite build)
+        run: npm run build
+
+      - name: Bundle budget gate
+        run: python ../scripts/ci/bundle_budget.py --dist dist --budget bundle-budget.json
 
   perf-gate:
     name: Performance regression gate (import budget + microbench)

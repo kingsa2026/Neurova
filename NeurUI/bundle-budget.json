@@ -1,0 +1,4 @@
+{
+  "max_gzip_kb": 4372.4,
+  "note": "JS/CSS gzip 合计上限（KB）；只降不升，超限即红"
+}
