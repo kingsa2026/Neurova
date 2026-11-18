@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-内在动机系统 - 驱动 Agent 自主行动的核心系统
+内在动机系统 - 四驱动状态与强度计算
 
 功能:
 - 能力感驱动 (CompetenceDrive) - 追求技能提升和任务完成
@@ -13,6 +13,12 @@ from __future__ import annotations
 - 能力感 (Competence) - 感到自己有能力完成任务
 - 自主性 (Autonomy) - 感到自己能够自主选择
 - 关联性 (Relatedness) - 感到与他人有联系
+
+2026-11-18 E3 退役裁定：本模块不再承担"行动生成"（原 generate_actions
+四驱动实现及 Action/ActionType 全仓零消费方，属"看起来能驱动行为"的死码，
+按教义第 6/7 条删净）。动机影响行为的真实通道只有一条：驱动强度经
+MotivationLedger.snapshot() 读出，接入 post_chat 主动提问出队调制
+（post_chat_pipeline.resolveMotivationQuestionInterval）。
 """
 
 import enum
@@ -35,19 +41,6 @@ class DriveType(enum.Enum):
     PURPOSE = "purpose"  # 使命感驱动
 
 
-class ActionType(enum.Enum):
-    """行动类型枚举"""
-
-    PRACTICE = "practice"  # 练习/实践
-    EXPLORE = "explore"  # 探索/发现
-    CREATE = "create"  # 创作/构建
-    HELP = "help"  # 帮助/服务
-    LEARN = "learn"  # 学习/研究
-    OPTIMIZE = "optimize"  # 优化/改进
-    COLLABORATE = "collaborate"  # 协作/交流
-    REFLECT = "reflect"  # 反思/总结
-
-
 @dataclass
 class DriveState:
     """驱动状态数据类"""
@@ -66,31 +59,6 @@ class DriveState:
             "satisfaction": self.satisfaction,
             "history": self.history[-10:],  # 最近10个记录
             "last_update": self.last_update,
-        }
-
-
-@dataclass
-class Action:
-    """行动数据类"""
-
-    action_type: ActionType
-    description: str
-    drive_type: DriveType
-    priority: float = 0.5  # 0.0 到 1.0
-    difficulty: float = 0.5  # 0.0 到 1.0
-    expected_satisfaction: float = 0.5
-    created_at: float = field(default_factory=time.time)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
-        return {
-            "action_type": self.action_type.value,
-            "description": self.description,
-            "drive_type": self.drive_type.value,
-            "priority": self.priority,
-            "difficulty": self.difficulty,
-            "expected_satisfaction": self.expected_satisfaction,
-            "created_at": self.created_at,
         }
 
 
@@ -153,76 +121,6 @@ class CompetenceDrive:
                 intensity = (intensity * 0.7) + (recent_completion * 0.3)
 
             return max(0.0, min(1.0, intensity))
-
-    def generate_actions(self) -> List[Action]:
-        """
-        生成能力感相关行动
-
-        Returns:
-            行动列表
-        """
-        with self._lock:
-            actions = []
-
-            # 根据技能水平生成不同难度的任务
-            if self.skill_level < 0.3:
-                # 新手阶段：简单练习
-                actions.append(
-                    Action(
-                        action_type=ActionType.PRACTICE,
-                        description="完成基础练习任务",
-                        drive_type=DriveType.COMPETENCE,
-                        priority=0.8,
-                        difficulty=0.3,
-                        expected_satisfaction=0.6,
-                    )
-                )
-            elif self.skill_level < 0.7:
-                # 中级阶段：适度挑战
-                actions.append(
-                    Action(
-                        action_type=ActionType.PRACTICE,
-                        description="尝试中等难度任务",
-                        drive_type=DriveType.COMPETENCE,
-                        priority=0.7,
-                        difficulty=0.5,
-                        expected_satisfaction=0.7,
-                    )
-                )
-                actions.append(
-                    Action(
-                        action_type=ActionType.OPTIMIZE,
-                        description="优化现有技能",
-                        drive_type=DriveType.COMPETENCE,
-                        priority=0.6,
-                        difficulty=0.6,
-                        expected_satisfaction=0.6,
-                    )
-                )
-            else:
-                # 高级阶段：高难度挑战
-                actions.append(
-                    Action(
-                        action_type=ActionType.PRACTICE,
-                        description="挑战高难度任务",
-                        drive_type=DriveType.COMPETENCE,
-                        priority=0.9,
-                        difficulty=0.8,
-                        expected_satisfaction=0.8,
-                    )
-                )
-                actions.append(
-                    Action(
-                        action_type=ActionType.CREATE,
-                        description="创建新的解决方案",
-                        drive_type=DriveType.COMPETENCE,
-                        priority=0.7,
-                        difficulty=0.7,
-                        expected_satisfaction=0.7,
-                    )
-                )
-
-            return actions
 
     def update_skill_level(self, success: bool, difficulty: float = 0.5) -> None:
         """
@@ -335,55 +233,6 @@ class AutonomyDrive:
 
             return max(0.0, min(1.0, base_intensity))
 
-    def generate_actions(self) -> List[Action]:
-        """
-        生成自主性相关行动
-
-        Returns:
-            行动列表
-        """
-        with self._lock:
-            actions = []
-
-            # 探索新领域
-            actions.append(
-                Action(
-                    action_type=ActionType.EXPLORE,
-                    description="探索未知领域或技能",
-                    drive_type=DriveType.AUTONOMY,
-                    priority=0.7,
-                    difficulty=0.4,
-                    expected_satisfaction=0.6,
-                )
-            )
-
-            # 设定新目标
-            if len(self.self_goals) < 3:
-                actions.append(
-                    Action(
-                        action_type=ActionType.CREATE,
-                        description="设定新的自主目标",
-                        drive_type=DriveType.AUTONOMY,
-                        priority=0.8,
-                        difficulty=0.3,
-                        expected_satisfaction=0.7,
-                    )
-                )
-
-            # 自由创作
-            actions.append(
-                Action(
-                    action_type=ActionType.CREATE,
-                    description="进行自由创作或实验",
-                    drive_type=DriveType.AUTONOMY,
-                    priority=0.6,
-                    difficulty=0.5,
-                    expected_satisfaction=0.5,
-                )
-            )
-
-            return actions
-
     def add_self_goal(self, goal: str) -> None:
         """
         添加自主目标
@@ -476,56 +325,6 @@ class GrowthDrive:
                 intensity = (intensity * 0.7) + (learning_factor * 0.3)
 
             return max(0.0, min(1.0, intensity))
-
-    def generate_actions(self) -> List[Action]:
-        """
-        生成成长感相关行动
-
-        Returns:
-            行动列表
-        """
-        with self._lock:
-            actions = []
-
-            # 学习新知识
-            actions.append(
-                Action(
-                    action_type=ActionType.LEARN,
-                    description="学习新概念或技能",
-                    drive_type=DriveType.GROWTH,
-                    priority=0.8,
-                    difficulty=0.5,
-                    expected_satisfaction=0.7,
-                )
-            )
-
-            # 探索好奇心话题
-            if self.curiosity_topics:
-                topic = self.curiosity_topics[0] if self.curiosity_topics else "未知领域"
-                actions.append(
-                    Action(
-                        action_type=ActionType.EXPLORE,
-                        description=f"探索好奇心话题: {topic}",
-                        drive_type=DriveType.GROWTH,
-                        priority=0.7,
-                        difficulty=0.4,
-                        expected_satisfaction=0.6,
-                    )
-                )
-
-            # 建立知识连接
-            actions.append(
-                Action(
-                    action_type=ActionType.REFLECT,
-                    description="反思和建立知识连接",
-                    drive_type=DriveType.GROWTH,
-                    priority=0.6,
-                    difficulty=0.3,
-                    expected_satisfaction=0.5,
-                )
-            )
-
-            return actions
 
     def add_curiosity_topic(self, topic: str) -> None:
         """
@@ -659,54 +458,6 @@ class PurposeDrive:
 
             return max(0.0, min(1.0, base_intensity))
 
-    def generate_actions(self) -> List[Action]:
-        """
-        生成使命感相关行动
-
-        Returns:
-            行动列表
-        """
-        with self._lock:
-            actions = []
-
-            # 帮助他人
-            actions.append(
-                Action(
-                    action_type=ActionType.HELP,
-                    description="帮助他人解决问题",
-                    drive_type=DriveType.PURPOSE,
-                    priority=0.8,
-                    difficulty=0.4,
-                    expected_satisfaction=0.7,
-                )
-            )
-
-            # 创建有价值的内容
-            actions.append(
-                Action(
-                    action_type=ActionType.CREATE,
-                    description="创建有价值的内容或解决方案",
-                    drive_type=DriveType.PURPOSE,
-                    priority=0.7,
-                    difficulty=0.6,
-                    expected_satisfaction=0.6,
-                )
-            )
-
-            # 协作完成共同目标
-            actions.append(
-                Action(
-                    action_type=ActionType.COLLABORATE,
-                    description="与他人协作完成共同目标",
-                    drive_type=DriveType.PURPOSE,
-                    priority=0.6,
-                    difficulty=0.5,
-                    expected_satisfaction=0.5,
-                )
-            )
-
-            return actions
-
     def add_core_value(self, value: str) -> None:
         """
         添加核心价值观
@@ -776,7 +527,9 @@ class IntrinsicMotivationSystem:
     """
     内在动机系统
 
-    整合四种驱动，提供统一的动机管理和行动生成。
+    整合四种驱动，提供统一的状态维护与强度计算（供 MotivationLedger
+    snapshot 与 post_chat 出队调制消费）。行动生成面已于 2026-11-18 E3
+    退役（零消费方死码，见模块 docstring）。
     """
 
     def __init__(self, config: Dict[str, Any] = None):
@@ -803,9 +556,6 @@ class IntrinsicMotivationSystem:
             DriveType.PURPOSE: 0.25,
         }
 
-        # 行动历史
-        self.action_history: List[Dict[str, Any]] = []
-
         logger.info("IntrinsicMotivationSystem 初始化完成")
 
     def on_initialize(self) -> None:
@@ -819,75 +569,6 @@ class IntrinsicMotivationSystem:
     def on_stop(self) -> None:
         """停止回调"""
         logger.debug("IntrinsicMotivationSystem 停止")
-
-    def calculate_action_tendency(self, action_type: ActionType) -> float:
-        """
-        计算行动倾向
-
-        Args:
-            action_type: 行动类型
-
-        Returns:
-            倾向值 0.0-1.0
-        """
-        with self._lock:
-            # 根据行动类型确定主要驱动
-            drive_mapping = {
-                ActionType.PRACTICE: DriveType.COMPETENCE,
-                ActionType.EXPLORE: DriveType.AUTONOMY,
-                ActionType.CREATE: DriveType.GROWTH,
-                ActionType.HELP: DriveType.PURPOSE,
-                ActionType.LEARN: DriveType.GROWTH,
-                ActionType.OPTIMIZE: DriveType.COMPETENCE,
-                ActionType.COLLABORATE: DriveType.PURPOSE,
-                ActionType.REFLECT: DriveType.GROWTH,
-            }
-
-            primary_drive = drive_mapping.get(action_type, DriveType.COMPETENCE)
-
-            # 计算驱动强度
-            drive_intensities = {
-                DriveType.COMPETENCE: self.competence_drive.calculate_intensity(),
-                DriveType.AUTONOMY: self.autonomy_drive.calculate_intensity(),
-                DriveType.GROWTH: self.growth_drive.calculate_intensity(),
-                DriveType.PURPOSE: self.purpose_drive.calculate_intensity(),
-            }
-
-            # 加权计算倾向
-            tendency = 0.0
-            for drive_type, intensity in drive_intensities.items():
-                if drive_type == primary_drive:
-                    tendency += intensity * self.drive_weights[drive_type] * 2.0
-                else:
-                    tendency += intensity * self.drive_weights[drive_type] * 0.5
-
-            return max(0.0, min(1.0, tendency))
-
-    def generate_and_rank_actions(self) -> List[Action]:
-        """
-        生成并排序行动
-
-        Returns:
-            排序后的行动列表
-        """
-        with self._lock:
-            all_actions = []
-
-            # 从各驱动生成行动
-            all_actions.extend(self.competence_drive.generate_actions())
-            all_actions.extend(self.autonomy_drive.generate_actions())
-            all_actions.extend(self.growth_drive.generate_actions())
-            all_actions.extend(self.purpose_drive.generate_actions())
-
-            # 计算每个行动的最终优先级
-            for action in all_actions:
-                tendency = self.calculate_action_tendency(action.action_type)
-                action.priority = (action.priority * 0.6) + (tendency * 0.4)
-
-            # 按优先级排序
-            all_actions.sort(key=lambda x: x.priority, reverse=True)
-
-            return all_actions
 
     def get_drive_state(self, drive_type: DriveType) -> DriveState:
         """
@@ -968,43 +649,6 @@ class IntrinsicMotivationSystem:
 
             logger.debug("驱动权重更新: %s", self.drive_weights)
 
-    def _on_competence_update(self, success: bool, difficulty: float = 0.5) -> None:
-        """能力感更新回调"""
-        self.competence_drive.update_skill_level(success, difficulty)
-
-    def _on_autonomy_update(self, choice: str, satisfaction: float = 0.5) -> None:
-        """自主性更新回调"""
-        self.autonomy_drive.record_choice(choice, satisfaction)
-
-    def _on_growth_update(self, concept: str, understanding: float = 0.5) -> None:
-        """成长感更新回调"""
-        self.growth_drive.record_learning(concept, understanding)
-
-    def _on_purpose_update(self, contribution: str, impact: float = 0.5) -> None:
-        """使命感更新回调"""
-        self.purpose_drive.record_contribution(contribution, impact)
-
-    def _on_action_executed(self, action: Action, success: bool) -> None:
-        """行动执行回调"""
-        with self._lock:
-            # 记录行动历史
-            action_record = {"action": action.to_dict(), "success": success, "timestamp": time.time()}
-            self.action_history.append(action_record)
-
-            # 保留最近100条记录
-            if len(self.action_history) > 100:
-                self.action_history = self.action_history[-100:]
-
-            # 根据行动类型更新相应驱动
-            if action.action_type == ActionType.PRACTICE:
-                self._on_competence_update(success, action.difficulty)
-            elif action.action_type == ActionType.EXPLORE:
-                self._on_autonomy_update(action.description, 0.7 if success else 0.3)
-            elif action.action_type == ActionType.LEARN:
-                self._on_growth_update(action.description, 0.7 if success else 0.3)
-            elif action.action_type == ActionType.HELP:
-                self._on_purpose_update(action.description, 0.7 if success else 0.3)
-
     def get_status(self) -> Dict[str, Any]:
         """
         获取系统状态
@@ -1021,7 +665,6 @@ class IntrinsicMotivationSystem:
                 "dominant_drive": dominant_drive.value,
                 "dominant_intensity": dominant_intensity,
                 "drive_weights": {dt.value: weight for dt, weight in self.drive_weights.items()},
-                "action_history_count": len(self.action_history),
                 "competence": {
                     "skill_level": self.competence_drive.skill_level,
                     "completion_rate": self.competence_drive.task_completion_rate,
