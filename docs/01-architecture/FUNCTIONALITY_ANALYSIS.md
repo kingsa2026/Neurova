@@ -1,5 +1,11 @@
 # Neurova 后端功能完善度分析报告
 
+> **【沿革档案 · 2026-11-19 复核】** 本报告是 **2026-05-07 时点的历史快照**，不是现役事实源。
+> 分析对象是旧布局代码库（`e:\项目\Neurova\` 时代），表中部分路径已退役或移址——
+> 如 A8 `neurova/core/state_manager.py`、A9 `neurova/core/api_standard.py` 在现行代码中
+> 已不存在，「✅ 已实现」对退役项不再成立。现役能力面以 [`docs/INDEX.md`](../INDEX.md)
+> 与 `neurova/` 现行代码为准。
+
 > **分析日期**: 2026-05-07  
 > **分析范围**: `e:\项目\Neurova\neurova\` 代码库  
 > **参考文档**: `e:\项目\Neurova\docs\` 全部架构文档  

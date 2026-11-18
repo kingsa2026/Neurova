@@ -1,5 +1,11 @@
 # Neurova 完整功能模块文档
 
+> **【沿革档案 · 2026-11-19 复核】** 本文件是 **2026-05-07 时点的历史快照**，不是现役事实源。
+> 表中部分模块已随架构收敛退役或移址——如 `neurova/core/state_manager.py`、
+> `neurova/core/api_standard.py`、`neurova/core/config_manager.py` 在现行代码中已不存在
+> （`git ls-files` 可证），这些行的「✅ 已实现」对现网不再成立。现役模块清单以
+> [`docs/INDEX.md`](../INDEX.md) 与 `neurova/` 现行代码为准。
+
 > **最后更新**: 2026-05-07  
 > **基于**: 实际代码扫描结果  
 > **目的**: 补充文档中缺失的实际已实现功能
