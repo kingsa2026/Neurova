@@ -26,7 +26,6 @@ class MockAgent:
         self.unified_retriever = Mock()
         self.crystallizer = Mock()
         self.trace_manager = Mock()
-        self.neuHebb_manager = Mock()
         self.loop = Mock()
         self.llm_client = Mock()
         self.tool_executor = Mock()

@@ -32,15 +32,6 @@ from neurova.skills.agent_skill_manager import AgentSkillManager  # will be migr
 # 统一走 neurova.skills.events 门面，避免把 skill_system 的反射加载细节扩散到调用方。
 from neurova.skills.events import SkillEvent, SkillRegistry
 
-# Neurova-Evocate: Neurova Hebb 记忆系统
-try:
-    from neurova.cognitive_layers.memory_layer.neuHebb_manager import NeuHebbManager
-    from neurova.cognitive_layers.memory_layer.neurova_hebb import NeuHebbConfig
-
-    NEUHEBB_AVAILABLE = True
-except ImportError:
-    NEUHEBB_AVAILABLE = False
-
 # 温度引擎
 try:
     from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
@@ -450,7 +441,7 @@ class SubSystemContainer:
     - voice: TTS、ASR、语音管线
     - tools: 工具路由、执行器、编排器
     - evolution: 进化引擎、经验总结
-    - cognition: 认知能力、NeuHebb
+    - cognition: 认知能力
     - pipeline: 后处理管线、对话管线
     - loop: 循环管理器
 
@@ -762,17 +753,6 @@ class SubSystemContainer:
                 )
             except Exception as e:
                 logger.warning("认知能力初始化失败: %s", e)
-
-        a.neuHebb_manager = None
-        if NEUHEBB_AVAILABLE and c.enable_memory:
-            try:
-                hebb_config = NeuHebbConfig(
-                    persistence_path=str(c.workspace_path / "data" / "neurova_hebbs"),
-                    enabled=True,
-                )
-                a.neuHebb_manager = NeuHebbManager(config=hebb_config)
-            except Exception as e:
-                logger.warning("Neurova-Evocate 初始化失败: %s", e)
 
     def init_evolution(self):
         """初始化进化引擎"""
@@ -1444,8 +1424,9 @@ class Agent:
         )
 
         # 2. 初始化 UnifiedRetriever（CSE 直查 + MoE/Recall 混合召回）
-        # Hebb 支路已退役（教义第 7 条）：MemCore 本无 hebb_manager 属性，旧装配
-        # getattr 恒得 None，该支路从未生效；Neurova Hebb 走 chat_pipeline 注入步。
+        # NeuHebb/Hebb 支路已整体退役（2026-11-18 拍板，教义第 7 条）：
+        # 该链自装配起断链空转（缺 llm_fn 注入 → 恒 0 产物），且与记忆召回/
+        # 结晶经验同功能——对比后退役前者，本检索器不再保留永不生效的死支路。
         moe_router = getattr(self.memory_agent, "moe_router", None)
         recall_engine = getattr(self.memory_agent, "recall_engine", None)
 

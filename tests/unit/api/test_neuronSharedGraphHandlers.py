@@ -206,7 +206,12 @@ class TestFailureIsNotReportedAsAnEmptySuccess:
             def __getattr__(self, name):
                 raise RuntimeError("graph is gone")
 
-        monkeypatch.setattr(neuronModule, "_shared_graph", Broken())
+        # T4b 收口单源后，共享图的唯一落点是模块单例 `_graph_instance`
+        # （neuron.get_shared_graph() 已委托 get_dependency_graph()）。
+        # 打断缝隙随单源迁移：把单例换成会炸的桩，六条读路必须显式 500。
+        import neurova.cognitive_layers.memory_layer.dependency_graph as graphModule
+
+        monkeypatch.setattr(graphModule, "_graph_instance", Broken())
 
     @pytest.mark.parametrize("path,method,payload", [
         ("/entities", "get", None),

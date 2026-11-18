@@ -401,8 +401,8 @@ class TestEmptyDefaultIsNotACwdLanding:
 
     病灶（本批实测）：`CheckpointService(base_dir="")` 把 `<agent_id>.git` 建在
     进程工作目录下（实测 `/tmp/reg/agentX.git`）；`BackupOrchestrator(work_dir="")`
-    与 `UserCredentialStore(base_dir="")` 同理；`DLQConfig.storage_path = ""` 与
-    `NeuHebbConfig.persistence_path = ""` 的**注释已自陈"空串 = 数据根"**，
+    与 `UserCredentialStore(base_dir="")` 同理；`DLQConfig.storage_path = ""` 的
+    **注释已自陈"空串 = 数据根"**，
     消费端却裸 `Path(...).mkdir()` —— 注释撒了谎，落点跟着 CWD 走。
 
     字面量扫描器看不见这一类：`""` 不是 `"data/..."`。于是纪律在"看起来收口了"的

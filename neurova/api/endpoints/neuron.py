@@ -5,7 +5,6 @@ NEURON 系统 API 端点
 """
 
 from neurova.core.logger import get_logger
-import threading
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -16,27 +15,24 @@ logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Depends(get_current_user)],prefix="/neuron", tags=["neuron"])
 
-# 共享的依赖图谱实例（线程安全）
-_shared_graph = None
-_shared_graph_lock = threading.Lock()
-
 
 def get_shared_graph():
-    """获取共享的依赖图谱实例（线程安全）"""
-    global _shared_graph
-    if _shared_graph is None:
-        with _shared_graph_lock:
-            if _shared_graph is None:
-                from neurova.cognitive_layers.memory_layer.dependency_graph import DependencyGraph
-                _shared_graph = DependencyGraph()
-    return _shared_graph
+    """获取共享的依赖图谱实例——T4b 收口单源：即模块单例 ``get_dependency_graph()``。
+
+    此前本文件自建第二份 DCL 单例，与 agent.dependency_graph（模块单例）、
+    neurova_recall 自建实例三套互不相通，图谱类归纳产物没有统一读面。
+    兼容名保留（既有调用方与测试按此名取图），语义收敛为同一份图。
+    """
+    from neurova.cognitive_layers.memory_layer.dependency_graph import get_dependency_graph
+
+    return get_dependency_graph()
 
 
 def reset_shared_graph():
-    """重置共享图谱（用于测试）"""
-    global _shared_graph
-    with _shared_graph_lock:
-        _shared_graph = None
+    """重置共享图谱（用于测试）——重置的是同一份模块单例。"""
+    from neurova.cognitive_layers.memory_layer.dependency_graph import reset_dependency_graph
+
+    reset_dependency_graph()
 
 
 # ============ 数据模型 ============

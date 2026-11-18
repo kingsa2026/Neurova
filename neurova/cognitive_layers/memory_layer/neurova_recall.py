@@ -1341,12 +1341,14 @@ class NeurovaRecallEngine:
         self._absence_reasoner = None
         self._dependency_extractor = None
         try:
-            from .dependency_graph import DependencyGraph
+            from .dependency_graph import get_dependency_graph
             from .cascade_engine import CascadeEngine
             from .absence_reasoner import AbsenceReasoner
             from .moe_dependency_extractor import MOEDependencyExtractor
 
-            self._dependency_graph = DependencyGraph()
+            # T4b 收口单源：NEURON 组件挂模块单例（与 neuron API、agent.dependency_graph
+            # 同一份图）——此前这里自建 DependencyGraph()，图谱产物互相看不见。
+            self._dependency_graph = get_dependency_graph()
             self._cascade_engine = CascadeEngine(self._dependency_graph)
             self._absence_reasoner = AbsenceReasoner(self._dependency_graph)
             self._dependency_extractor = MOEDependencyExtractor()

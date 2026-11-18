@@ -115,6 +115,13 @@ T6 intention 层（差异化，与 question_queue 合流；最后做）
 
 **验收判据**：每项要么给出生产消费链证据（file:line），要么删除干净（含测试与导出面）；A/B 零新增失败。
 
+**执行记录（2026-11-18，会话内实施）**：
+- 拍板：NeuHebb **退役删净**；依赖图 **收口单源**；规则提取器 **并入 T2**（代码与默认关闸保留，归纳能力由 T2 夜间相位覆盖）；零散死面四项 **逐项再议**（本批不动码，登记待专项清偿：temporal_reasoner 死码 / moe_dependency_extractor 产物即弃 / version_control 只写不读 / meta_cognition 读面死）。
+- T4a 已落地：删除 neuHebb 四模块（manager/forge/curator/neurova_hebb，−914 行）与全部装配/注入/生成步（agent_core、chat_pipeline Step2、post_chat_pipeline 步 9.1、unified_vector_store hebb 索引），清理 20 余处测试引用，新增退役守卫 `tests/unit/memory/test_neuhebb_retired.py`（8 用例钉"不可复活"）。
+- T4b 已落地：`neuron.get_shared_graph()` 委托 `get_dependency_graph()` 模块单例、`neurova_recall` NEURON 组件挂同一份图；新增 `tests/unit/memory/test_dependency_graph_single_source.py`（4 用例钉单源与跨面可见）；`test_neuronSharedGraphHandlers` 的打断缝隙随单源迁移（patch `_graph_instance`）。
+- 验证：先红后绿（守卫 8 红→绿、单源 4 红→绿）；A/B 精确比对（stash 前后 integration/execution_engine/test_memory + 六个静态守卫：基线 73 项失败/错误 vs 实测 72 项，仅基线多出一条 flaky 项，**零新增失败**）；`test_agent_public_contract` 快照按规程移除 `NEUHEBB_AVAILABLE` 与 `neuHebb_manager` 两项（快照中 chat_stream/spawn_subagent 漂移为并行批次预存失败，不属本批）。
+- 净 LOC：生产池 +34/−1149（净 −1115）；测试另计。
+
 ---
 
 ## T5 · identity 层（用户身份项）

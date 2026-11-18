@@ -65,7 +65,6 @@ for _name in (
     "_step_reflection",
     "_step_record_experience",
     "_step_record_workflow_experience",
-    "_step_evocate_generation",
     "_step_p0_post_processing",
     "_step_conflict_detection",
     "_step_version_snapshot",

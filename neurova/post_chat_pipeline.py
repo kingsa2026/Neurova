@@ -19,7 +19,7 @@ PostChatPipeline — 对话后处理管线
 分层执行（P0 尾延迟优化）：
 - **响应路径**（必须 await）：save_session / save_memory / TTS / 认知分析 /
   主动提问——它们的结果随本轮响应返回，或后续步骤依赖它们。
-- **响应无关**（后台并发）：反思、经验记录、经验漏斗回写、Evocate、P0 后处理、
+- **响应无关**（后台并发）：反思、经验记录、经验漏斗回写、P0 后处理、
   冲突检测、版本快照、规则提取、动机观察、RSI 迭代——纯旁路写入，结果不进
   响应。经 _spawn_background() 起 asyncio task，任务登记在
   _background_tasks，可 drain_background() 等待。
@@ -418,7 +418,6 @@ class PostChatPipeline:
         self._growth_analyzer = None
         self._growth_log_manager = None
         self._evolution = None
-        self._neuHebb_manager = None
         self._tool_lifecycle = None
         self._pattern_miner = None
         self._genetic_engine = None
@@ -484,7 +483,6 @@ class PostChatPipeline:
         growth_analyzer: Any = None,
         growth_log_manager: Any = None,
         evolution: Any = None,
-        neuHebb_manager: Any = None,
         tool_lifecycle: Any = None,
         pattern_miner: Any = None,
         genetic_engine: Any = None,
@@ -506,7 +504,6 @@ class PostChatPipeline:
             growth_analyzer: 成长分析器实例
             growth_log_manager: 成长日志管理器实例
             evolution: 进化引擎实例
-            neuHebb_manager: NeuHebb管理器实例
             tool_lifecycle: 工具生命周期实例
             pattern_miner: 模式挖掘器实例
             genetic_engine: 遗传引擎实例
@@ -529,8 +526,6 @@ class PostChatPipeline:
             self._growth_log_manager = growth_log_manager
         if evolution is not None:
             self._evolution = evolution
-        if neuHebb_manager is not None:
-            self._neuHebb_manager = neuHebb_manager
         if tool_lifecycle is not None:
             self._tool_lifecycle = tool_lifecycle
         if pattern_miner is not None:
@@ -558,7 +553,7 @@ class PostChatPipeline:
             "PostChatPipeline dependencies configured: "
             "conversation_buffer=%s, memory_manager=%s, tts_manager=%s, "
             "growth_analyzer=%s, growth_log_manager=%s, evolution=%s, "
-            "neuHebb_manager=%s, tool_lifecycle=%s, pattern_miner=%s, "
+            "tool_lifecycle=%s, pattern_miner=%s, "
             "genetic_engine=%s, tool_marketplace=%s, conflict_detector=%s, "
             "version_control=%s, rsi_orchestrator=%s, "
             "voice_pipeline=%s, neurflow_executor=%s",
@@ -568,7 +563,6 @@ class PostChatPipeline:
             self._growth_analyzer is not None,
             self._growth_log_manager is not None,
             self._evolution is not None,
-            self._neuHebb_manager is not None,
             self._tool_lifecycle is not None,
             self._pattern_miner is not None,
             self._genetic_engine is not None,
@@ -851,7 +845,7 @@ class PostChatPipeline:
           → save_memory / TTS。互不依赖的并发跑（gather），有依赖的串链
           （save_memory、TTS 依赖 save_session 产出的 session_id）。
         - 后台路径（asyncio.create_task）：反思、经验记录、工作流经验、技能
-          漏斗回写、Evocate、P0 后处理、冲突检测、版本快照、规则提取、动机
+          漏斗回写、P0 后处理、冲突检测、版本快照、规则提取、动机
           观察、RSI 迭代。它们只写旁路数据，结果不进响应。需等待时调
           drain_background()。
         """
@@ -923,11 +917,6 @@ class PostChatPipeline:
             (
                 "skill_funnel_flush",
                 lambda: self._step_skill_funnel_flush(reply, actual_session_id, save_memory),
-                None,
-            ),
-            (
-                "evocate_generation",
-                lambda: self._step_evocate_generation(user_input, reply, actual_session_id),
                 None,
             ),
             # P0 后处理组（lifecycle → pattern_mining → genetic → marketplace，
@@ -2269,74 +2258,6 @@ class PostChatPipeline:
                 service.record_skill_funnel(skill_id, **delta)
             for skill_id, outcome in observations.items():
                 service.record_trust_observation(skill_id, outcome, task_id=task_id)
-
-    async def _step_evocate_generation(
-        self,
-        user_input: str,
-        reply: str,
-        session_id: str,
-    ):
-        """Step 9.1: 从对话中生成 NeurovaHebb（Evocate 闭环生成端）
-
-        数据流: 对话 → generate_from_conversation → 存储 NeurovaHebb → 下次检索注入
-        """
-        step_name = "evocate_generation"
-        start_time = time.time()
-
-        neuHebb_manager = self._get_dependency("neuHebb_manager")
-        if not neuHebb_manager:
-            logger.debug("NeuHebbManager 未初始化，跳过 Evocate 生成")
-            self._step_results.append(
-                StepResult(
-                    step_name=step_name,
-                    status=StepStatus.SKIPPED,
-                    message="neuHebb_manager not available",
-                    duration_ms=(time.time() - start_time) * 1000,
-                )
-            )
-            return
-
-        try:
-            hebbs = neuHebb_manager.generate_from_conversation(
-                user_input=user_input,
-                reply=reply,
-                session_id=session_id or "default",
-            )
-            if hebbs:
-                logger.info(
-                    f"🧠 Evocate: 从对话生成 %d 个 NeurovaHebb (session: %s)",
-                    len(hebbs),
-                    session_id,
-                )
-                self._step_results.append(
-                    StepResult(
-                        step_name=step_name,
-                        status=StepStatus.EXECUTED,
-                        message=f"Generated {len(hebbs)} NeurovaHebb",
-                        duration_ms=(time.time() - start_time) * 1000,
-                        data={"hebbs_count": len(hebbs), "session_id": session_id},
-                    )
-                )
-            else:
-                self._step_results.append(
-                    StepResult(
-                        step_name=step_name,
-                        status=StepStatus.EXECUTED,
-                        message="No NeurovaHebb generated",
-                        duration_ms=(time.time() - start_time) * 1000,
-                        data={"hebbs_count": 0},
-                    )
-                )
-        except Exception as e:
-            logger.warning("Evocate 生成失败: %s", e)
-            self._step_results.append(
-                StepResult(
-                    step_name=step_name,
-                    status=StepStatus.FAILED,
-                    message=str(e),
-                    duration_ms=(time.time() - start_time) * 1000,
-                )
-            )
 
     async def _step_p0_post_processing(self, save_memory: bool):
         """P0: 执行所有 P0 接线模块的后处理"""

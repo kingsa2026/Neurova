@@ -20,7 +20,7 @@
 层级:
   L0 Buffer  — 内存缓冲 + 崩溃恢复文件（秒级）
   L1 Hot     — 正文库（`MemoryManager` 的配对持久库，分钟级）
-  L2 Warm    — JSON 温存储（NeurovaHebb 专用，小时级）
+  L2 Warm    — JSON 温存储（小时级；原 NeurovaHebb 专用，其消费链已退役）
   L3 Cold    — 压缩冷存储（天级）
   L4 Crystal — 结晶经验（永久）
 """

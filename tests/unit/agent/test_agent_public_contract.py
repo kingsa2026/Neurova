@@ -98,7 +98,7 @@ class TestModuleConsumerSurface:
         "Agent", "AgentConfig", "AgentLLMClient", "SubSystemContainer",
         "_NullSystem", "debug_log", "get_session_manager", "wire_memory_guards",
         "AGENT_LOOP_AVAILABLE", "COGNITIVE_GRAPH_AVAILABLE",
-        "NEUHEBB_AVAILABLE", "TEMPERATURE_ENGINE_AVAILABLE",
+        "TEMPERATURE_ENGINE_AVAILABLE",
     ])
     def test_consumer_symbol_resolvable(self, agent_module, name):
         """tests/ 实测 import/patch 的模块符号必须始终可解析。"""
