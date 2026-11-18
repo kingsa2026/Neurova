@@ -95,15 +95,18 @@ export struct GlassButton {
   }
 
   // 按钮内部内容（抽取为 Builder 以在 block/非 block 两个分支复用）；
-  // gradient 型走品牌渐变+投影（.btn-pri），其余走纯色/玻璃
+  // gradient 型的渐变层须撑满按钮（.btn-pri 整面渐变）——内容宽渐变在玻璃容器里
+  // 会缩成中央小块（登录页主按钮曾如此）；其余走纯色/玻璃
   @Builder
   buildInner() {
     if (this.isGradient()) {
       Row() {
         this.btnContent()
       }
+      .width(this.block ? '100%' : 'auto')
       .padding(this.getSizePadding())
       .justifyContent(FlexAlign.Center)
+      .borderRadius(sm.getRadius('lg'))
       .linearGradient({
         angle: 135,
         colors: sm.getBrandGradient()
