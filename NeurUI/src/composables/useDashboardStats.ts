@@ -128,8 +128,8 @@ export function useDashboardStats(options?: { agentId?: string | (() => string) 
     // --- 7 天趋势序列 ---
     let agentSeries: number[] = []
     let convSeries: number[] = []
-    let msgSeries: number[] = []
-    let labels: string[] = []
+    let msgSeries: number[]
+    let labels: string[]
     if (trendRes.status === 'fulfilled') {
       const d = unwrapPayload<{
         agent_trend?: { labels?: string[]; data?: number[] }

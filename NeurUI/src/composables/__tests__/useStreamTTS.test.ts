@@ -164,7 +164,7 @@ describe('StreamTTSRunner', () => {
   })
 
   it('abort keeps already-synthesized urls and stops new synthesis', async () => {
-    let releaseFirst: (() => void) | null = null
+    const releaseFirst: (() => void) | null = null
     hooks.synthesize.mockImplementationOnce(
       (_text: string, signal: AbortSignal) =>
         new Promise<string>((resolve) => {

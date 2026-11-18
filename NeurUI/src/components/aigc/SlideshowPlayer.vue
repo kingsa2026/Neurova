@@ -70,7 +70,13 @@ function pause() {
   audioEl.value?.pause?.()
 }
 
-function toggle() { playing.value ? pause() : play() }
+function toggle() {
+  if (playing.value) {
+    pause()
+  } else {
+    play()
+  }
+}
 
 function next() {
   clearTimer()

@@ -11,14 +11,17 @@ import { ref, computed } from 'vue'
 import UiIcon from '@/components/UiIcon.vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import type { ComputerPanelState } from '@/composables/useComputerPanel'
-import { actionBadgeText } from '@/composables/useComputerPanel'
+import { actionBadgeText, useComputerPanel } from '@/composables/useComputerPanel'
 import { screenshot as apiScreenshot, click as apiClick, navigate as apiNavigate, shell as apiShell } from '@/api/modules/computer'
 
 const props = defineProps<{
-  state: ComputerPanelState
   agentId?: string
 }>()
+
+// 审计 2026-11-18 D 组：state 原先经 props 传入又被本组件改写（模板与脚
+// 本各多处），vue/no-mutating-props 正确拦截了这一反模式——改为直接取用
+// useComputerPanel 共享单例，单向数据流语义恢复。
+const { state } = useComputerPanel()
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
@@ -32,7 +35,7 @@ const shotImgEl = ref<HTMLImageElement | null>(null)
 
 /** R2-5 agent 点击标记：截图像素坐标 → 图片容器百分比（跟随 object-fit 缩放） */
 const markerStyle = computed(() => {
-  const m = props.state.clickMarker
+  const m = state.clickMarker
   const img = shotImgEl.value
   if (!m || !img || !img.naturalWidth || !img.naturalHeight) return null
   return {
@@ -41,7 +44,7 @@ const markerStyle = computed(() => {
   }
 })
 
-const statusText = computed(() => (props.state.busy ? t('computerPanel.live') : t('computerPanel.idle')))
+const statusText = computed(() => (state.busy ? t('computerPanel.live') : t('computerPanel.idle')))
 
 function formatTime(ts: string): string {
   const d = new Date(ts)
@@ -68,7 +71,7 @@ async function refreshScreenshot() {
     const data = extractPayload(res)
     const b64 = data?.base64 || data?.image || ''
     if (b64) {
-      props.state.latestScreenshot = `data:image/png;base64,${b64}`
+      state.latestScreenshot = `data:image/png;base64,${b64}`
     } else {
       message.warning(t('computerPanel.screenshotFailed'))
     }

@@ -48,7 +48,7 @@ export function useMermaidRenderer(getDark: () => boolean) {
 
     for (const el of pending) {
       const encoded = el.getAttribute('data-mermaid-code') || ''
-      let code = ''
+      let code: string
       try {
         code = decodeURIComponent(encoded)
       } catch {

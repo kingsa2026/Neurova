@@ -16,7 +16,6 @@ import { createPinia, setActivePinia } from 'pinia'
  */
 
 const routeState = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { reactive } = require('vue')
   return { current: reactive({ params: { agentId: '216fb777' } as Record<string, string> }) }
 })

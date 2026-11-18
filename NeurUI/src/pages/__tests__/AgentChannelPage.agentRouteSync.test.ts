@@ -32,7 +32,6 @@ import { createPinia, setActivePinia } from 'pinia'
  * 咬不住「切换后页面身份是否真的跟着走」，正是本用例要防的那种半截判据。
  */
 const routeState = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { reactive } = require('vue')
   return { current: reactive({ params: { agentId: '216fb777' } as Record<string, string> }) }
 })

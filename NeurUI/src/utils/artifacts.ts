@@ -281,7 +281,7 @@ export function openArtifactTab(payload: ArtifactEventPayload): void {
   const id = payload.name
     ? `doc:p${shortHash(payload.name)}`
     : payload.path
-      ? `doc:p${shortHash(payload.path.split(/[\/]/).pop() || payload.path)}`
+      ? `doc:p${shortHash(payload.path.split(/[/]/).pop() || payload.path)}`
       : `doc:${payload.artifact_id}`
   dock.openTab({
     id,

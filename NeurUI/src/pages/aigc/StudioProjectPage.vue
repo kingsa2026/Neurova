@@ -85,7 +85,7 @@ const runningCount = computed(() => activeRunIds.value.length)
 async function track(kind: string, runId: string): Promise<StudioRun | null> {
   busy.value = { ...busy.value, [kind]: true }
   activeRuns.value = { ...activeRuns.value, [kind]: runId }
-  let run: StudioRun | null = null
+  let run: StudioRun | null
   try {
     run = await waitStudioRun(pid, runId)
     if (!run) message.error(t('studio.runTimeout'))

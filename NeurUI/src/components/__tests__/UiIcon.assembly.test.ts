@@ -26,7 +26,7 @@ function walkVueFiles(dir: string): string[] {
 function iconShapeKeys(): Set<string> {
   const src = readFileSync(join(SRC, 'components', 'UiIcon.vue'), 'utf8')
   const keys = new Set<string>()
-  const re = /^  ([A-Za-z0-9_]+):\s*\{/gm
+  const re = /^ {2}([A-Za-z0-9_]+):\s*\{/gm
   let m: RegExpExecArray | null
   while ((m = re.exec(src))) keys.add(m[1])
   return keys

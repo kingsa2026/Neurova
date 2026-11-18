@@ -50,7 +50,7 @@
 import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import Galaxy from '@/components/Galaxy.vue'
+import Galaxy from '@/components/GalaxyBackground.vue'
 import BrandLogo from '@/components/BrandLogo.vue'
 import GlassSurface from '@/components/GlassSurface.vue'
 

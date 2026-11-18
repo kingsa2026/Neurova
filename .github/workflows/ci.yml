@@ -14,7 +14,7 @@ on:
 #                           + 覆盖率门禁（pyproject [tool.coverage.run]，fail_under=60）
 #                           单腿：跑生产解释器（Issue #301，版本事实源 = Dockerfile
 #                           的 FROM；判据见 tests/unit/ci/test_unit_tests_single_leg.py）
-#   5. frontend             npm audit --audit-level=high（阻塞）+ vue-tsc + vitest
+#   5. frontend             npm audit --audit-level=high（阻塞）+ eslint + vue-tsc + vitest
 #   6. dependency-audit     pip-audit 阻塞审计：CI 精简锁 + 生产全量锁（requirements-full.lock）
 #                           + OSV 扫非 pip 依赖树（Cargo.lock / npx 运行时包锁）
 #   7. perf-gate            import 时长预算 + 关键路径微基准（阻断，
@@ -273,6 +273,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Lint (eslint)
+        run: npm run lint:check
 
       - name: Dependency audit (npm, blocking on high/critical)
         run: npm audit --audit-level=high

@@ -1271,7 +1271,7 @@ const saveMcpSource = async () => {
     message.warning(t('knowledge.mcpNameRequired'))
     return
   }
-  let toolArgs: Record<string, unknown> = {}
+  let toolArgs: Record<string, unknown>
   try {
     toolArgs = JSON.parse(mcpForm.tool_args_json || '{}')
   } catch {

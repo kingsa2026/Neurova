@@ -41,7 +41,7 @@ describe('KnowledgePage 摄取任务可视化接线', () => {
   })
 
   it('api 模块三函数路径与后端路由一致（cancel 为 POST …/cancel）', () => {
-    expect(api).toMatch(/ingress-tasks\`,\s*\{\s*params: \{ limit \}/)
+    expect(api).toMatch(/ingress-tasks`,\s*\{\s*params: \{ limit \}/)
     expect(api).toMatch(/`\$\{BASE\}\/ingress-tasks\/\$\{taskId\}`/)
     expect(api).toMatch(/`\$\{BASE\}\/ingress-tasks\/\$\{taskId\}\/cancel`/)
   })

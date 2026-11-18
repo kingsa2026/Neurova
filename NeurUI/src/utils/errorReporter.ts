@@ -113,12 +113,13 @@ const SENSITIVE_PATTERNS: Array<[RegExp, string]> = [
   [/(Bearer\s+[A-Za-z0-9._-]{8,})/gi, 'Bearer ***'],
   [/((?:access_?token|api_?key|password|secret)\s*[=:])[\w.-]{6,}/gi, '$1***'],
   [/\\?[A-Za-z]:\\Users\\[^\\\s"]+/g, 'C:\\Users\\***'],
-  [/\/home\/[^\/\s"]+/g, '/home/***'],
+  [/\/home\/[^/\s"]+/g, '/home/***'],
 ]
 
 export function sanitizeText(value: string, maxLen = 500): string {
   let out = String(value ?? '')
-  // 控制字符剥除（保留换行便于阅读堆栈）
+  // 控制字符剥除（保留换行便于阅读堆栈）——类中的控制字符是有意枚举的剥除目标
+  // eslint-disable-next-line no-control-regex
   out = out.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
   // 敏感信息打码
   for (const [re, repl] of SENSITIVE_PATTERNS) out = out.replace(re, repl)
@@ -131,7 +132,7 @@ export function sanitizeText(value: string, maxLen = 500): string {
 // 队列（localStorage 持久化，网络失败可重试）
 // ---------------------------------------------------------------------------
 
-interface QueueItem extends ErrorReport {}
+type QueueItem = ErrorReport
 
 function loadQueue(): QueueItem[] {
   try {

@@ -4116,7 +4116,7 @@ conflictTimeReadout: 'Lettura temporale: {basis} (vecchia {old} → nuova {new})
     execAgent: 'Esegui agente',
     selectSubAgent: 'Seleziona sub-agente (vuoto = predefinito)',
     taskDesc: 'Descrizione attività',
-    subAgentTaskDesc: "Descrizione attività sub-agente (autonoma; può riferire l\'output con ${'{'}upstreamNodeID.output{'}'})",
+    subAgentTaskDesc: "Descrizione attività sub-agente (autonoma; può riferire l'output con ${'{'}upstreamNodeID.output{'}'})",
     selectModel: 'Seleziona un modello disponibile (vuoto = predefinito)',
     providerHint: 'Provider (compilato automaticamente dopo la selezione del modello)',
     execResult: 'Risultato esecuzione ({status})',

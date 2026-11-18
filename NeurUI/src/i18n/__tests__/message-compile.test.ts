@@ -60,7 +60,6 @@ function flatten(obj: Messages, prefix = ''): Record<string, string> {
 }
 
 // createI18n 的 messages 泛型是递归 LocaleMessage 结构, 测试用 Record 扁平化值需放宽
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const looseMessages = (v: unknown): any => v
 
 describe('locale messages are compilable by vue-i18n', () => {
@@ -81,7 +80,6 @@ describe('locale messages are compilable by vue-i18n', () => {
           fallbackWarn: false,
           messages: { [code]: looseMessages(messages) },
         })
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const t = (i18n.global as any).t
         for (const key of Object.keys(flatten(messages))) {
           t(key)
@@ -100,7 +98,6 @@ describe('locale messages are compilable by vue-i18n', () => {
       locale: 'zh-CN',
       messages: { 'zh-CN': looseMessages(zhCN) },
     })
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const t = (i18n.global as any).t
     expect(t('debug.mockPlaceholder')).toBe('输入 JSON，例如 {"answer":"mocked"}')
   })

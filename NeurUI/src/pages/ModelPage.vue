@@ -942,7 +942,9 @@ async function ensureProvider(p: { id: string; name: string; base_url: string; p
         }
       } else {
         // Both PUT and POST failed — provider cannot be resolved
-        throw new Error(`Provider "${p.name}" not found and could not be created`)
+        const wrapped = new Error(`Provider "${p.name}" not found and could not be created`)
+        ;(wrapped as Error & { cause?: unknown }).cause = err
+        throw wrapped
       }
     } else {
       throw err

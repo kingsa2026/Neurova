@@ -12,8 +12,8 @@ import { ref, type Ref } from 'vue'
 
 /** ── 纯函数：语音文本清洗 ────────────────────────────────── */
 
-/** 表情符号（含 ZWJ 序列/变体选择器） */
-const EMOJI_RE = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{1F1E6}-\u{1F1FF}]/gu
+/** 表情符号（含 ZWJ 序列/变体选择器）——范围与单点用交替而非字符类，避免误导性拼接 */
+const EMOJI_RE = /(?:\p{Extended_Pictographic}|\u{FE0F}|\u{200D}|[\u{1F1E6}-\u{1F1FF}])/gu
 /** URL：http(s) 与裸 www */
 const URL_RE = /https?:\/\/\S+|www\.\S+/gi
 /** 围栏代码块（含语言标注与内容） */

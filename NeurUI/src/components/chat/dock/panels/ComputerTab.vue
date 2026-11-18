@@ -1,6 +1,6 @@
 <template>
   <div class="nr-dock-computer">
-    <ComputerUsePanel :state="panelState" :agent-id="agentId" @close="onClose" />
+    <ComputerUsePanel :agent-id="agentId" @close="onClose" />
   </div>
 </template>
 
@@ -18,7 +18,7 @@ const props = defineProps<{
   agentId?: string
 }>()
 
-const { state: panelState, close } = useComputerPanel()
+const { close } = useComputerPanel()
 const dock = useRightDockStore()
 
 function onClose(): void {

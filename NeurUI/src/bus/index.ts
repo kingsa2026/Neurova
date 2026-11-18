@@ -28,16 +28,16 @@ export interface Emitter<Events extends EventMap> {
 export function mitt<Events extends EventMap>(events?: Map<keyof Events | '*', EventHandler[]>): Emitter<Events> {
   const handlers = events ?? new Map<keyof Events | '*', EventHandler[]>()
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const emitter: any = {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     on(type: any, handler: any): void {
       const list = handlers.get(type) ?? []
       list.push(handler)
       handlers.set(type, list)
     },
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     off(type: any, handler?: any): void {
       if (handler === undefined) {
         handlers.delete(type)
@@ -51,7 +51,7 @@ export function mitt<Events extends EventMap>(events?: Map<keyof Events | '*', E
       }
     },
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     emit(type: any, event: any): void {
       // 触发特定事件
       const list = handlers.get(type)

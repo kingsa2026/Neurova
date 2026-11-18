@@ -174,7 +174,7 @@ export const useChatStore = defineStore('chat', () => {
   function removeRoundFrom(fromIndex: number): void {
     if (fromIndex < 0 || fromIndex >= messages.value.length) return
     let removedFirst = false
-    let i = fromIndex
+    const i = fromIndex
     while (i < messages.value.length) {
       // 首条（用户消息）必删；其后仅删连续的 assistant，遇下一条 user 停止。
       // splice 后后继元素前移到 i，故索引不自增，用 removedFirst 标记状态。

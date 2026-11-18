@@ -15,7 +15,7 @@
 #                            + 覆盖率门禁 fail_under=60；单腿跑在生产解释器上
 #                            （Issue #301：两腿状态实测恒同，理由见第 4 段注释）
 #   4. e2e                   后端启动冒烟（health/docs/metrics/鉴权）
-#   5. frontend              npm audit --audit-level=high（阻塞）+ vue-tsc + vitest
+#   5. frontend              npm audit --audit-level=high（阻塞）+ eslint + vue-tsc + vitest
 #   6. dependency-audit      pip-audit 阻塞审计：CI 精简锁 + 生产全量锁（requirements-full.lock）
 #                            + OSV 扫非 pip 依赖树（Cargo.lock / npx 运行时包锁）；
 #                            离线漏洞库缓存挂卷跨构建复用（Issue #223 第 1 条）
@@ -368,6 +368,9 @@ main:
         - name: install dependencies
           script: cd NeurUI && npm ci
           timeout: 20m
+        - name: lint (eslint)
+          script: cd NeurUI && npm run lint:check
+          timeout: 15m
         - name: dependency audit (npm, blocking on high/critical)
           script: cd NeurUI && npm audit --audit-level=high
           timeout: 15m

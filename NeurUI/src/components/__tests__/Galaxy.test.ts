@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 /**
- * Galaxy.vue 银河背景组件回归测试。
+ * GalaxyBackground.vue 银河背景组件回归测试。
  *
  * 移植自 Vue Bits Galaxy（ogl WebGL 全屏星流 shader），针对 Neurova 的适配点：
  * 1. 作为页面背景层：容器铺满父级 + pointer-events:none，因此鼠标交互
@@ -55,7 +55,7 @@ vi.mock('ogl', () => {
   return { Renderer, Program, Mesh, Triangle, Color }
 })
 
-import Galaxy from '@/components/Galaxy.vue'
+import Galaxy from '@/components/GalaxyBackground.vue'
 
 /** 手动驱动 rAF 帧：id 登记表模拟 cancel 语义，避免 jsdom 下动画回调无限自续 */
 let pendingRaf = new Map<number, FrameRequestCallback>()
@@ -87,7 +87,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('Galaxy.vue 银河背景', () => {
+describe('GalaxyBackground.vue 银河背景', () => {
   it('渲染背景容器并把 WebGL canvas 挂载到容器内', () => {
     const wrapper = mount(Galaxy)
     expect(wrapper.find('.nr-galaxy').exists()).toBe(true)

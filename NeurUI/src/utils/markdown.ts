@@ -295,7 +295,7 @@ function extractMath(text: string): MathExtractResult {
     segment.replace(mathPattern, (match, ddBlock, ddOpen, inlineDollar, paren, bracket) => {
       if (ddOpen) return match // 未闭合 $$（流式半截）保持原样
       let display = false
-      let latex = ''
+      let latex: string
       if (ddBlock) {
         display = true
         latex = ddBlock.slice(2, -2)

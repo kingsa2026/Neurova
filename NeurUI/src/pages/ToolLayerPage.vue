@@ -108,10 +108,7 @@
       <!-- Public tools tab -->
       <a-tab-pane key="public" :tab="t('tool.public')">
         <a-spin :spinning="loadingTools">
-          <a-table :columns="toolColumns" :data-source="publicTools" row-key="id" :pagination="{ pageSize: 15 }" size="small">
-            <template #bodyCell="{ column, record }">
-            </template>
-          </a-table>
+          <a-table :columns="toolColumns" :data-source="publicTools" row-key="id" :pagination="{ pageSize: 15 }" size="small" />
         </a-spin>
       </a-tab-pane>
     </a-tabs>

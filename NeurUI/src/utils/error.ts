@@ -92,7 +92,6 @@ export function handleError(error: unknown, context?: string): AppError {
  * @param fn 被包装的函数
  * @param context 可选的调用上下文标识
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function withErrorBoundary<T extends (...args: any[]) => any>(
   fn: T,
   context?: string,
