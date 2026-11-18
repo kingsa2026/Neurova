@@ -210,3 +210,14 @@
 3. **并行会话清掉未跟踪新文件**（runner 四文件+测试整体消失）——按上下文重建后立即提交；未跟踪产物要尽早 `--only` 提交缩短暴露窗口；
 4. console 路由实际前缀是 `/api/v1/console`（注册表声明 `/v1/console` 外还有全局 /api 前缀），新端点测试以真 app 探针定前缀；
 5. `get_session_repository().get_session()` 返回 SessionRecord 对象（非 dict）——归属读取要兼容两种形态。
+
+### P2（6 条，2026-11-18）
+
+| 条目 | 结果 | 提交 |
+|---|---|---|
+| C2 Fallback 切换时序+强制复位 | ⚠️ **读码改判：结构性已对齐**——本仓 failover 状态是**请求级局部变量**（`multi_model_client.py:769` failover_excluded 在函数内），无 QwenPaw 式实例级 fallback 态可泄漏；流式路径失败即诚实终止（无重复输出风险），「首字前切换」为可用性增强、不立项 | — |
+| C3 溢出不重放有效输出 | ⚠️ **读码改判：已对齐**——`openai_loop.py:754` `if gotContent or not isOverflow(error): return None`（已有有效输出不重放，注释明说"已产出的正文事件不重复 yield"） | — |
+| C4 recall 防自污染 | ✅ 落地：归档写侧从 assistant.tool_calls 反查落 `tool_name`（orchestrator）+ 读侧 `recall_evicted` 双源排除 recall 族条目（context_pool `_RECALL_FAMILY_TOOLS`）；patch 法红→绿 5 用例，context 全目录 1154 零回归，live-verify 真池过滤实测 | 98ab3816a |
+| C5 secret_store 增强 | ⚠️ **读码改判：基本已对齐**——`enc:v1:` 前缀灰度迁移（存量明文透传、保存自动迁移）与 keyring 链（env→keyring→文件）均已实装；「按安装路径哈希派生 account」不立项（本仓单实例部署形态无多安装互覆盖面，动密钥链兼容面不值） | — |
+| C6 覆盖率棘轮+bundle 预算 | ✅ 落地：`scripts/ci/coverage_ratchet.py`+`neurova/ci/ci_ratchet_core.py`（实际<记录值即红、超越上调写回 `coverage_ratchet.json`，绝对下限 60 独立生效）+ `scripts/ci/bundle_budget.py`+`neurova/ci/bundle_budget_core.py`（JS/CSS gzip 合计 vs `NeurUI/bundle-budget.json`，首跑标定写回实测 4372.4KB 后只降不升）+ ci.yml 两处接线；12 用例绿，live-verify 真文件往返/真 dist 标定实测 | afe723b08 |
+| C12 e2e 双档+page object | ✅ 落地：conftest 注册 `e2e_mock`/`e2e_real` 双档 marker（真后端档 NEUROVA_E2E_REAL=1 才跑，否则诚实跳过）+ `tests/e2e/pages/`（BasePage/BootPage）+ 三测试打标 + `_e2e.py` 临时脚本退役；harness 7 用例绿，e2e 默认档 mock 5 passed/real 诚实 skip，NEUROVA_E2E_REAL=1 真后端档 5 passed | 39cbfad3b |
