@@ -14,6 +14,7 @@ import { Router, RouteNames } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { MessageManager } from '../libs/message/MessageManager';
 import { ChatSession } from '../libs/api/modules/SessionsApi';
+import { EventBus, EventHandler } from '../libs/bus/EventBus';
 import { Agent } from '../libs/types';
 import { AppIcon } from '../components/common/AppIcon';
 import { IconBtn } from '../components/common/IconBtn';
@@ -39,9 +40,20 @@ export struct SessionListPage {
   private router = Router.getInstance();
   private sm = StyleManager.getInstance();
   private msg = MessageManager.getInstance();
+  private bus = EventBus.getInstance();
+  /** 聊天回合结束 → 会话摘要（新会话/最新预览）已变，刷新本列表 */
+  private sessionsRefreshHandler: EventHandler = () => {
+    this.loadSessions();
+  };
 
   aboutToAppear(): void {
     this.loadSessions();
+    // 聊天页回合结束广播：返回本页时列表不再停留在登录时的旧快照
+    this.bus.on('chat:sessions-changed', this.sessionsRefreshHandler);
+  }
+
+  aboutToDisappear(): void {
+    this.bus.off('chat:sessions-changed', this.sessionsRefreshHandler);
   }
 
   private async loadSessions(): Promise<void> {

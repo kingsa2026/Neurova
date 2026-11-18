@@ -37,7 +37,7 @@ import { ConfigManager } from '../libs/config/ConfigManager';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { WSChatChunk, Agent } from '../libs/types';
+import { WSChatChunk, WSChatDone, Agent } from '../libs/types';
 import { Router } from '../routing/Router';
 import { ChunkBatcher } from '../libs/perf/ChunkBatcher';
 import { SimpleDataSource } from '../libs/perf/SimpleDataSource';
@@ -242,6 +242,7 @@ export struct ChatPage {
   private subscribeEvents(): void {
     this.chunkHandler = (data: Object) => {
       const msg = data as WSChatChunk;
+      this.adoptServerSession(msg.session_id);
       // M5.2.1 累积到 batcher
       this.batcher.push(msg.content);
       if (this.batcher.shouldFlush(Date.now())) {
@@ -259,7 +260,9 @@ export struct ChatPage {
     };
     this.bus.on('chat:chunk', this.chunkHandler);
 
-    this.doneHandler = () => {
+    this.doneHandler = (data: Object) => {
+      // 服务端对未知/缺省会话 id 会当场铸真记录——先采纳权威 id 再收尾
+      this.adoptServerSession((data as WSChatDone).session_id);
       // M5.2.1 流结束，强制刷新剩余缓冲
       const rest = this.batcher.forceFlush();
       const last = this.messages[this.messages.length - 1];
@@ -276,6 +279,8 @@ export struct ChatPage {
       this.queued = false;
       // 清理 batcher 以备下次会话
       this.batcher.reset();
+      // 会话摘要已变（新会话落库/最新消息预览）——广播列表页刷新（会话与 PC 同源可见）
+      this.bus.emit('chat:sessions-changed', '');
     };
     this.bus.on('chat:done', this.doneHandler);
 
@@ -399,6 +404,15 @@ export struct ChatPage {
   private getAgentName(): string {
     const agent = this.agents.find(a => a.id === this.currentAgentId);
     return agent?.name ?? '助手';
+  }
+
+  /** 采纳服务端权威会话 id：后端对未知/缺省 id 会当场铸真记录并随事件回传——
+   * 端上旧自铸 id 即刻弃用，后续 chat:send/stop/历史都改用权威 id（会话列表与 PC 同源） */
+  private adoptServerSession(id: string): void {
+    if (id.length > 0 && id !== this.sessionId) {
+      this.sessionId = id;
+      StateManager.getInstance().set('chat:active_session_id', id);
+    }
   }
 
   // ===========================================================================
