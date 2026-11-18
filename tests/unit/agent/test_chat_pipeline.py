@@ -69,7 +69,6 @@ def mock_agent():
     agent.unified_retriever = None
     agent.crystallizer = None
     agent.trace_manager = None
-    agent.neuHebb_manager = None
     agent.idle_tracker = MagicMock()
     agent.session_manager = MagicMock()
     agent.loop = None

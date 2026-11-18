@@ -5,7 +5,7 @@
 
 1. **响应路径收窄**：process() 的 await 链只剩响应必需的步骤
    （save_session / save_memory / TTS / 认知分析 / 主动提问 / 记忆温度衰减），
-   其余 11 个旁路步骤（反思/经验/漏斗/Evocate/P0 后处理/冲突/快照/规则/
+   其余 10 个旁路步骤（反思/经验/漏斗/P0 后处理/冲突/快照/规则/
    动机/RSI）改为后台 asyncio task——否则 20+ 步全串行 await 直接进尾延迟。
 2. **后台任务可控**：强引用不被 GC、完成即摘除（不无界增长）、
    drain_background() 可等待收尾、异常不静默丢失。
@@ -34,13 +34,12 @@ RESPONSE_PATH_STEPS = {
     "update_memory_temperature",
 }
 
-# 必须后台化的响应无关步骤
+# 必须后台化的响应无关步骤（NeuHebb/Evocate 生成步已随该链退役删净）
 BACKGROUND_STEPS = {
     "reflection",
     "record_experience",
     "record_workflow_experience",
     "skill_funnel_flush",
-    "evocate_generation",
     "p0_post_processing",
     "conflict_detection",
     "version_snapshot",
@@ -329,7 +328,7 @@ class TestBackgroundTaskLifecycle:
         async def _boom(*a, **k):
             raise TypeError("programming bug in background step")
 
-        pipe._step_evocate_generation = _boom
+        pipe._step_skill_funnel_flush = _boom
 
         async def _run():
             result = await pipe.process(
@@ -386,7 +385,6 @@ class TestBackgroundTaskLifecycle:
             "_step_record_experience",
             "_step_record_workflow_experience",
             "_step_skill_funnel_flush",
-            "_step_evocate_generation",
         )
         # 在飞计数与高水位（可变容器：闭包内改写，不靠 nonlocal 传递）
         gauge = {"inflight": 0, "peak": 0}
@@ -496,7 +494,6 @@ class TestResponsePathLatencyImprovement:
             "_step_record_experience",
             "_step_record_workflow_experience",
             "_step_skill_funnel_flush",
-            "_step_evocate_generation",
             "_step_p0_post_processing",
             "_step_conflict_detection",
             "_step_version_snapshot",

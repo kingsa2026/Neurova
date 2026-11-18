@@ -309,7 +309,6 @@ async def test_pipeline_interruption_records_failure(tmp_path, monkeypatch, stag
                  "_sync_final_reply"):
         monkeypatch.setattr(pipeline, name, AsyncMock())
     monkeypatch.setattr(pipeline, "_flush_vision_attachments", Mock())
-    monkeypatch.setattr(pipeline, "_step_evocate_injection", Mock())
     error = asyncio.CancelledError if cancelled else RuntimeError
     monkeypatch.setattr(pipeline, stage, AsyncMock(side_effect=error("interrupted")))
     ctx = ChatContext(user_input="report", reply="finished text", execution_completed=True)

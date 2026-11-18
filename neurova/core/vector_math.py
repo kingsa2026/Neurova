@@ -3,7 +3,8 @@
 背景：`cosine` 这件事在仓内被抄了十三遍，跨 `cognitive_layers/memory_layer`、`context`、
 `knowledge`、`skills` 四个包。抄写的代价不是行数，是**分叉**：
 
-- 五份（`muscle_memory`／`neuHebb_curator`／`neuHebb_forge`／`unified_vector_store`／`tool_search`）
+- 五份（`muscle_memory`／`neuHebb_curator`／`neuHebb_forge`／`unified_vector_store`／`tool_search`；
+  其中 neuHebb 两份所属的链已于 2026-11-18 整体退役删净）
   **没有长度检查**，`zip` 会把长的那条截掉，于是两条维度不同的向量（换过嵌入引擎、索引里存的
   旧向量、缓存里没对齐的那一份）算出来的是一个**看着完全正常的相似度**，并按它排序、按它加分——
   比"报错"坏得多的形态：它不喊人。

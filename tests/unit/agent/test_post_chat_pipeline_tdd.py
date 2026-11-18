@@ -67,9 +67,6 @@ def mock_agent():
     agent.experience_recorder = MagicMock()
     agent.experience_recorder.record_conversation = AsyncMock()
 
-    agent.evocate_manager = MagicMock()
-    agent.evocate_manager.generate_from_conversation = AsyncMock()
-
     # 添加 PostChatPipeline 需要的其他属性
     agent._turn_count = 10
     agent.turn_count = 10  # P3-c 收窄：post_chat 经显式 property 读取

@@ -6,9 +6,8 @@ ChatPipeline — 对话流程管线
 将 chat() 的 ~580 行拆分为独立可测试的步骤：
 1. Pre-LLM 检查（ToolMemory、技能获取、NL合成）
 2. 检索与上下文构建（UnifiedRetriever、结晶经验、ContextOrchestrator）
-3. Evocate 注入（Neurova Hebb）
-4. LLM 调用（Agent Loop + 自动续写）
-5. 后处理（文本工具调用、历史更新、轨迹记录）
+3. LLM 调用（Agent Loop + 自动续写）
+4. 后处理（文本工具调用、历史更新、轨迹记录）
 
 设计原则：
 - 深度模块：小接口，深实现
@@ -261,7 +260,7 @@ class ChatPipeline:
     通过 agent_ref 访问 Agent 实例的：
     - config, memory_agent, context_orchestrator
     - tool_memory, skill_manager, tool_synthesizer
-    - unified_retriever, crystallizer, trace_manager, neuHebb_manager
+    - unified_retriever, crystallizer, trace_manager
     - loop, llm_client, tool_executor
     - post_chat_pipeline, _trajectory_recorder, idle_tracker
     - _current_reasoning, _tool_messages_list
@@ -474,10 +473,6 @@ class ChatPipeline:
         return getattr(self._agent, "trace_manager", None)
 
     @property
-    def neuHebb_manager(self):
-        return getattr(self._agent, "neuHebb_manager", None)
-
-    @property
     def loop(self):
         return getattr(self._agent, "loop", None)
 
@@ -622,9 +617,6 @@ class ChatPipeline:
         await self._step_retrieve_and_build_context(ctx)
         # 图像切片在此挂到 context（text 已在注入时并入 user_input）
         self._flush_vision_attachments(ctx)
-
-        # Step 2: Evocate 注入
-        self._step_evocate_injection(ctx)
 
         # Step 3: LLM 调用（含自动续写）
         await self._step_llm_call(ctx)
@@ -2611,31 +2603,6 @@ class ChatPipeline:
         except Exception as e:  # noqa: BLE001 - 经验检索失败不阻断主流程
             set_turn_injected_experiences([])
             logger.debug("EKB 经验检索跳过: %s", e)
-
-    # ══════════════════════════════════════════════════════════════
-    # Step 2: Evocate 注入
-    # ══════════════════════════════════════════════════════════════
-
-    def _step_evocate_injection(self, ctx: ChatContext):
-        """Neurova-Evocate: 检索相关 Neurova Hebb 注入上下文"""
-        if not self.neuHebb_manager:
-            return
-
-        try:
-            neurova_hebbs = self.neuHebb_manager.retrieve_neurova_hebb(ctx.user_input)
-            if neurova_hebbs:
-                hebb_texts = [
-                    f"[Retrieved Knowledge] {h.content} "
-                    f"(source: {h.source}, confidence: {h.verification_score:.2f})"
-                    for h in neurova_hebbs
-                ]
-                hebb_context = "\n".join(hebb_texts)
-                for msg in ctx.context:
-                    if msg.get("role") == "system":
-                        msg["content"] += f"\n\n## Retrieved Knowledge (Neurova Hebb)\n{hebb_context}"
-                        break
-        except Exception as e:
-            logger.warning("Neurova Hebb 检索失败: %s", e)
 
     # ══════════════════════════════════════════════════════════════
     # Step 3: LLM 调用（含自动续写）

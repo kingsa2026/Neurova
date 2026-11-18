@@ -43,8 +43,6 @@ SINGLE_FACE = "core/vector_math.py"
 SITE_MODULES = [
     "cognitive_layers/memory_layer/compression.py",
     "cognitive_layers/memory_layer/muscle_memory.py",
-    "cognitive_layers/memory_layer/neuHebb_curator.py",
-    "cognitive_layers/memory_layer/neuHebb_forge.py",
     "cognitive_layers/memory_layer/semantic_emotion.py",
     "cognitive_layers/memory_layer/semantic_search.py",
     "cognitive_layers/memory_layer/sleep.py",

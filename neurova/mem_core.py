@@ -667,8 +667,8 @@ class MemCore:
 
             # 主动行为引擎 + 动机账本（2026-09-15 真实化：消灭 /growth/proactive
             # 与 motivation 假接口——按 agent 工作区落盘，信号源为 post_chat
-            # 轮次观察与问题回答回流）。可选组件独立容错（同 growth_analyzer/
-            # NeuHebb 惯例）：异常类型 config（如测试 mock 的 workspace_path）
+            # 轮次观察与问题回答回流）。可选组件独立容错（同 growth_analyzer
+            # 惯例）：异常类型 config（如测试 mock 的 workspace_path）
             # 或磁盘故障不得级联中断其后组件装配。
             try:
                 from neurova.cognitive_layers.meta_cognition_layer.proactive_behavior import ProactiveBehaviorEngine

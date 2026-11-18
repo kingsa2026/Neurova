@@ -49,7 +49,6 @@ class MockAgent:
         self.trace_manager.start_trace = MagicMock(return_value="trace_1")
         self.trace_manager.add_step = MagicMock()
         self.trace_manager.finish_trace = MagicMock()
-        self.neuHebb_manager = None
 
         self.loop = MagicMock()
         self.loop.predict_step = AsyncMock(return_value=MagicMock(

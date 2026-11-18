@@ -519,29 +519,6 @@ class TestGrowthIntegration:
     """与其他系统的集成测试"""
 
     @pytest.mark.asyncio
-    async def test_growth_with_evocate(self, pipeline, mock_agent):
-        """测试成长闭环与 Evocate 系统的集成"""
-        # 模拟 neuHebb_manager
-        mock_agent.neuHebb_manager = MagicMock()
-        mock_agent.neuHebb_manager.generate_from_conversation.return_value = []
-
-        # 执行反思 — 使用困惑关键词触发
-        mock_agent.growth_log_manager.generate_log.return_value = ReflectionLogEntry(
-            id="growth-evocate-test",
-            type=ReflectionType.ERROR,
-            title="错误反思",
-            content="发现模式",
-        )
-        await pipeline._step_reflection("这搞错了", "模式回复")
-
-        # 执行 Evocate 生成
-        await pipeline._step_evocate_generation("这搞错了", "模式回复", "test-session")
-
-        # 验证两者都被调用
-        mock_agent.growth_log_manager.generate_log.assert_called_once()
-        mock_agent.neuHebb_manager.generate_from_conversation.assert_called_once()
-
-    @pytest.mark.asyncio
     async def test_growth_with_experience(self, pipeline, mock_agent):
         """测试成长闭环与经验系统的集成"""
         # 模拟 evolution

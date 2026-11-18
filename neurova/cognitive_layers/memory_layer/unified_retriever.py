@@ -2,9 +2,8 @@
 统一检索器 — CognitiveStorageEngine 直查 + MoE/RecallEngine 混合召回的融合位
 
 深度模块设计：小接口（retrieve），深实现（整合多个检索源）。
-Hebb 支路已退役（2026-11-14，教义第 7 条）：生产装配里 hebb_manager 恒为
-None（MemCore 无该属性），Neurova Hebb 的真实消费面是 chat_pipeline 的
-Evocate 注入步——此处不再保留永不生效的死支路。
+NeuHebb/Hebb 支路已整体退役（2026-11-18 拍板，教义第 7 条）：该链断链空转
+（恒 0 产物）且与记忆召回/结晶经验同功能——检索面不再保留死支路。
 """
 
 from __future__ import annotations

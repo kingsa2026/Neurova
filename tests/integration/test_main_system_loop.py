@@ -103,7 +103,6 @@ class TestMainSystemClosedLoop:
         agent.trace_manager.start_trace = MagicMock(return_value="t1")
         agent.trace_manager.add_step = MagicMock()
         agent.trace_manager.finish_trace = MagicMock()
-        agent.neuHebb_manager = None
         agent.unified_retriever = None
         agent.crystallizer_for_chat = agent.crystallizer
         agent._trajectory_recorder = MagicMock()

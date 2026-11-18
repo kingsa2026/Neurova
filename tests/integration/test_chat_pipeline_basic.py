@@ -19,7 +19,6 @@ class MockAgent:
         self.unified_retriever = Mock()
         self.crystallizer = Mock()
         self.trace_manager = Mock()
-        self.neuHebb_manager = Mock()
         self.loop = Mock()
         self.llm_client = Mock()
         self.tool_executor = Mock()
@@ -54,7 +53,6 @@ async def test_chat_pipeline_basic():
     assert pipeline.unified_retriever is mock_agent.unified_retriever
     assert pipeline.crystallizer is mock_agent.crystallizer
     assert pipeline.trace_manager is mock_agent.trace_manager
-    assert pipeline.neuHebb_manager is mock_agent.neuHebb_manager
     assert pipeline.loop is mock_agent.loop
     assert pipeline.llm_client is mock_agent.llm_client
     assert pipeline.tool_executor is mock_agent.tool_executor
