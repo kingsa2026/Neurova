@@ -76,6 +76,8 @@
 - **改动**：①池分支同样经 `injector._build_metacog_lessons`（`injector.py:340-341,515-540`）注入 lessons 块（预算仍 ≤3 条，`orchestrator.py` 既有口径）；②avoid_tool 门先在测试环境灰度开，收集拦截读数后再拍板翻默认。
 - **红灯**：池分支会话的信封含活跃 lesson 文本；lesson 过期后不再出现。
 - **注意**：不把元认知信息变成常驻噪声——注入走既有 lessons 块预算，不新增恒定注入面（对照文档 §9.5 第 3 条）。
+- **灰度指引 · 开启与观察**：灰度环境经治理设置 `metacog_gate_enabled: true`（或 env `NEUROVA_METACOG_GATE=1`）开门；观察读数＝执行日志「🚦 元认知调控门命中」行 + 工具回执 `metacog_advisory` 字段（命中工具名、教训 finding/recommendation），按日统计拦截次数与误拦率作为翻默认拍板依据。
+- **灰度指引 · 回退**：env `NEUROVA_METACOG_GATE=0` 强制关（优先级最高、即时生效），或移除治理设置 `metacog_gate_enabled` 项恢复内置默认关；灰度读数出来前生产默认保持关。
 
 ### K1 · CheckpointService 恢复面接通（P1）
 

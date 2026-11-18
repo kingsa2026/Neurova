@@ -168,5 +168,91 @@ class RegulationGateGovernanceSettingTest(unittest.TestCase):
         self.assertIsNotNone(self._executor()._metacog_gate_check("bad_tool"))
 
 
+class RegulationGateExecutionInterceptionTest(unittest.TestCase):
+    """E5 灰度验证：调控门在执行咽喉（_execute_single_tool_inner）的两态行为。
+
+    补齐卡面要求的两态覆盖（不翻生产默认）：
+    - 门开（env=1）+ 活跃 avoid_tool 教训 → 调用被拦截：success=False、
+      回执带 metacog_advisory 结构化建议（教训 text/recommendation 可读），
+      工具核心链（_execute_tool_core → tool_coordinator）不得执行；
+    - 门关（默认）→ 与现状完全一致：工具照常执行，回执无 metacog_advisory 键。
+    """
+
+    def setUp(self):
+        reset_self_model_engine()
+        reset_meta_ledger()
+        os.environ.pop("NEUROVA_METACOG_GATE", None)
+
+    def tearDown(self):
+        os.environ.pop("NEUROVA_METACOG_GATE", None)
+        reset_self_model_engine()
+        reset_meta_ledger()
+
+    def _executor(self, calls):
+        """可观测执行咽喉：核心链调用记入 `calls`，治理/守卫/沙箱全放行。"""
+        import asyncio
+        from contextlib import nullcontext
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, Mock
+
+        from neurova.tool_executor import ToolExecutor
+
+        executor = ToolExecutor(SimpleNamespace(config=SimpleNamespace(agent_id=AGENT)))
+        executor.on_tool_executed = Mock()
+
+        async def core(name, params):
+            calls.append(name)
+            return {"success": True, "output": "core-executed"}, True, "builtin"
+
+        async def run_with_timeout(name, operation, **kwargs):
+            return await operation
+
+        executor._governance_precheck = AsyncMock(return_value=None)
+        executor._sandbox_scope = lambda *args: nullcontext()
+        executor._execute_tool_core = core
+        executor.tool_coordinator = SimpleNamespace(run_with_timeout=run_with_timeout)
+        return executor
+
+    def _run(self, executor, tool="bad_tool"):
+        import asyncio
+
+        return asyncio.run(executor._execute_single_tool_inner(tool, {}))
+
+    def test_gateOpen_interceptsToolAndCarriesAdvisory(self):
+        """门开 + 活跃 avoid_tool 教训 → 拦截：结构化建议可读，核心链不执行。"""
+        _seed_avoid_lesson()
+        os.environ["NEUROVA_METACOG_GATE"] = "1"
+        calls = []
+        result = self._run(self._executor(calls))
+
+        self.assertFalse(result.get("success"), "命中活跃 avoid_tool 教训必须拦截")
+        self.assertIn("被元认知调控门拦截", result.get("error", ""))
+        advisory = result.get("metacog_advisory")
+        self.assertIsInstance(advisory, dict, "拦截回执必须带结构化建议（读数面）")
+        self.assertEqual(advisory.get("recommendation"), "avoid_tool")
+        self.assertIn("text", advisory)
+        self.assertEqual(calls, [], "拦截后工具核心链不得执行")
+
+    def test_gateClosed_keepsLegacyExecution(self):
+        """门关（默认）→ 与现状完全一致：工具照常执行，无 advisory 键（回归钉死）。"""
+        _seed_avoid_lesson()  # 有活跃教训，但门关不得拦截
+        calls = []
+        result = self._run(self._executor(calls))
+
+        self.assertTrue(result.get("success"), "门关时工具必须照常执行")
+        self.assertNotIn("metacog_advisory", result)
+        self.assertEqual(calls, ["bad_tool"], "门关时核心链必须真实执行")
+
+    def test_gateOpen_unrelatedToolPassesThrough(self):
+        """门开 + 无教训工具 → 放行（拦截面不扩大）。"""
+        _seed_avoid_lesson()
+        os.environ["NEUROVA_METACOG_GATE"] = "1"
+        calls = []
+        result = self._run(self._executor(calls), tool="good_tool")
+
+        self.assertTrue(result.get("success"))
+        self.assertEqual(calls, ["good_tool"])
+
+
 if __name__ == "__main__":
     unittest.main()
