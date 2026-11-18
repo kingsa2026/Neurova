@@ -9,6 +9,7 @@ import json
 from neurova.core.logger import get_logger
 import threading
 import time
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
@@ -287,8 +288,10 @@ class MemoryVersionControl:
             创建的版本
         """
         with self._lock:
-            # 生成版本ID
-            version_id = f"v_{memory_id}_{int(time.time() * 1000)}"
+            # 生成版本ID。同毫秒多快照是管线常态（_step_version_snapshot 每轮
+            # 最多连写 3 条），纯毫秒戳必撞号——_version_index 按后写覆盖，
+            # "按 version_id 回滚"随之歧义。补随机尾保证唯一。
+            version_id = f"v_{memory_id}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
 
             # 获取父版本
             parent_version_id = None
