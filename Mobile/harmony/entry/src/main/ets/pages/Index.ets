@@ -22,6 +22,7 @@ import { ConfigManager } from '../libs/config/ConfigManager';
 import { pageMap } from '../routing/PageMap';
 import { ToastHost } from '../components/system/ToastHost';
 import { StarBackground } from '../components/glass';
+import { KeyboardAvoidMode } from '@kit.ArkUI';
 
 @Entry
 @Component
@@ -55,6 +56,9 @@ struct Index {
   }
 
   async aboutToAppear() {
+    // 键盘避让改 RESIZE：默认 OFFSET 会把整页上移（聊天页键盘弹起时头部/消息被顶出
+    // 屏幕外）；RESIZE 让页面收缩、输入条上浮，头部与消息保持可见
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     // 冷启动先恢复服务器档案并把地址落到 HTTP 装配点（设计方案 §4.5，S0 接线）
     await ServerProfiles.getInstance().load(getContext(this) as Context);
     const apiBase = ServerProfiles.getInstance().getActiveApiBase();

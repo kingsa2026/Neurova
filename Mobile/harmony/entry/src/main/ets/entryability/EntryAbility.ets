@@ -76,15 +76,18 @@ export default class EntryAbility extends UIAbility {
       const setupWindow = async (): Promise<void> => {
         const mainWindow = windowStage.getMainWindowSync();
         // 边到边：窗口铺满全屏（含状态栏/导航栏带），星野上下连贯不留白带；
-        // 系统栏透明显出应用背景，内容经根容器按避让高度下探/上收
-        await mainWindow.setWindowLayoutFullScreen(true);
+        // 系统栏透明显出应用背景，栏内容色按主题亮/暗
         mainWindow.setWindowBackgroundColor('#0a0e1d');
+        await mainWindow.setWindowLayoutFullScreen(true);
         await mainWindow.setWindowSystemBarProperties({
           statusBarColor: '#00000000',
           navigationBarColor: '#00000000',
           statusBarContentColor: '#ffffff',
           navigationBarContentColor: '#ffffff',
         });
+        // 键盘避让改 RESIZE：默认 OFFSET 会把整页上移，聊天页头部/消息被顶出屏幕
+        // （真机实测键盘弹起即"消失"）；RESIZE 让页面收缩、输入条上浮，头部与消息
+        // 保持可见——在 Index.aboutToAppear 里经组件 UIContext 设置（UIAbility 无此接口）
         // 避让高度按设备实况读取（不同分辨率/挖孔/导航栏形态自适应），存全局供根容器取用
         const sysArea = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
         const navArea = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM_GESTURE);
