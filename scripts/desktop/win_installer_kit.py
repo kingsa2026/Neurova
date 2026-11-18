@@ -337,7 +337,10 @@ def cmd_run(args) -> int:
             "-i", PIP_INDEX]) != 0:
         raise RuntimeError("后端依赖安装失败")
 
-    if run(["npm", "ci", "--registry", NPM_REGISTRY], cwd=repo / "NeurUI") != 0:
+    # npm 在 Windows 上是 npm.CMD——CreateProcess 不认 PATHEXT，裸名单进程
+    # 调用必 WinError 2（实机踩到 2026-11-18）。用与探测同一把尺解析真实路径。
+    npm_exe = which("npm") or "npm"
+    if run([str(npm_exe), "ci", "--registry", NPM_REGISTRY], cwd=repo / "NeurUI") != 0:
         raise RuntimeError("前端依赖安装失败（npm ci）")
 
     # 构建链只有一处定义：仓内唯一打包脚本。本脚本不手抄第二份构建命令（教义第 6 条）。
