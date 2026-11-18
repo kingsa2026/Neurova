@@ -77,7 +77,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         # （零丢失），与 /compact 命令同一折叠机构。
         # 并行能力声明：改写当前会话视图（折叠落代际），触碰共享会话态，不可并行。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
-        "description": "【上下文主动折叠】把窗口里较老的消息折叠成摘要（原文仍在归档池，可经 recall_history 找回）。【何时用】任务步骤完成、早期内容短期不再需要时。【何时不用】调试/推理中途；只查历史用 recall_history。",
+        "description": "【上下文主动折叠】把窗口里较老的消息折叠成摘要（原文仍在归档池，可经 recall_history 找回）。折叠成功的回执附 recall_guide：covers_ref 引用与三条找回路径（recall_history / pool_search / recall_context_span）。【何时用】任务步骤完成、早期内容短期不再需要时。【何时不用】调试/推理中途；只查历史用 recall_history。",
         "parameters": {
             "type": "object",
             "properties": {

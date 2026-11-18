@@ -30,6 +30,10 @@ logger = get_logger(__name__)
 SKILL_CATALOG_HEADER = "## 可用技能目录"
 SKILL_CATALOG_HINT = "可用 $技能名 显式调用完整内容。"
 
+#: SC-5：manual_compact 回执透传的被折 hash 样本上限（长度纪律：有界透传，
+#: 不随折叠规模膨胀——全量 hash 在池索引里，可经 recall_context_span 下钻取回）。
+FOLDED_REF_HASH_SAMPLES = 8
+
 # Wave E 语义档向量缓存（按 agent 隔离的进程内注册表；SkillVectorCache 自带
 # 磁盘持久化，这里只避免每轮重建对象）
 _VECTOR_CACHES: dict = {}
@@ -3212,6 +3216,7 @@ class ContextOrchestrator:
                     "tokens_before": tokens_before, "tokens_after": tokens_before,
                     "summary_generated": False}
 
+        foldedRef = None
         if compaction.summary:
             # 与自动折叠**共用同一处**分代推进（教义第 6 条：一个契约一处实现）。
             cache["last_count"] = len(msgs)
@@ -3227,9 +3232,14 @@ class ContextOrchestrator:
                 cache["covered"].add(fingerprint)
                 coveredNow.append(fingerprint)
                 turnIdsNow.append(turnId)
+            prevFoldSeq = int(cache.get("fold_seq") or 0)
             self._advanceFoldGeneration(
                 cache, compaction.summary, covers=coveredNow, turnIds=turnIdsNow
             )
+            if int(cache.get("fold_seq") or 0) > prevFoldSeq:
+                # SC-5：仅当这一代真的归档进了池索引（层序推进了），才把寻址
+                # 信息透传给回执——没归档就编不出可下钻的引用。
+                foldedRef = self._foldedRefReceipt(cache, coveredNow, turnIdsNow)
         elif cache.get("summary"):
             # 无新摘要但旧摘要存在：保留（后续轮次仍携带）
             pass
@@ -3239,13 +3249,37 @@ class ContextOrchestrator:
             compaction.compacted_count, compaction.tokens_before,
             compaction.tokens_after, bool(compaction.summary),
         )
-        return {
+        receipt = {
             "compacted": True,
             "folded": compaction.compacted_count,
             "kept": len(compaction.window),
             "tokens_before": compaction.tokens_before,
             "tokens_after": compaction.tokens_after,
             "summary_generated": bool(compaction.summary),
+        }
+        if foldedRef is not None:
+            receipt["folded_ref"] = foldedRef
+        return receipt
+
+    def _foldedRefReceipt(self, slot: dict, coveredNow: list, turnIds: list) -> dict:
+        """SC-5：把**刚归档这一代**的寻址信息透传给调用方回执（最小透传，不改折叠行为）。
+
+        引用仍由 `fold_index.renderCoversRef` 单点派生（与视图内联
+        `_inlineCoversRef` 同一出处、同一会话身份键 `self._resolve_window_cache_key()`），
+        这里只把它带出来，不另造第二份寻址口径。hash 只带具名常量封顶的样本——
+        全量在池索引里，可经 `recall_context_span` 下钻取回，不把大段内容塞回执。
+        """
+        from neurova.context.fold_index import buildCovers, renderCoversRef
+
+        coversFact = buildCovers(turnIds or (), coveredNow or ())
+        hashes = [str(h) for h in (coversFact.get("hashes") or [])]
+        return {
+            "covers_ref": renderCoversRef(
+                int(slot.get("fold_seq") or 0), self._resolve_window_cache_key()
+            ),
+            "turn_range": list(coversFact.get("turn_range") or []),
+            "covered_count": len(hashes),
+            "hash_samples": hashes[:FOLDED_REF_HASH_SAMPLES],
         }
 
     # ══════════════════════════════════════════════════════════════

@@ -5745,12 +5745,46 @@ class ToolExecutor:
             logger.warning("recall_context_span 执行失败: %s", e)
             return {"error": f"分层下钻失败: {e}"}
 
+    #: SC-5：三条找回路径说明（工具名与 builtin_tools 注册面同域，不新造第二套说法）。
+    _COMPRESS_RECALL_PATHS = (
+        "recall_history(query=被折内容关键词)：按词模糊召回折叠台账原文",
+        "pool_search(query=被折内容关键词)：对归档池语义检索（含被折叠原文）",
+        "recall_context_span(covers_ref=回执引用)：按 covers_ref 确定性下钻，逐条取回被折原文",
+    )
+
+    @staticmethod
+    def _compressRecallGuide(receipt: Dict) -> Dict:
+        """SC-5：把 manual_compact 透传的寻址信息（folded_ref）组装成回执里的
+        结构化召回指引——模型刚折叠完就知道"压掉的去哪了、怎么找回"。
+
+        指引必须**可执行**：covers_ref 由 fold_index 单点派生（与视图摘要行内联
+        引用同一出处），可直接被 recall_context_span 解析下钻（往返闭环），不给
+        不可解析的提示文案。无寻址信息（本轮没推进任何带 covers 的代）时不造
+        指引——编一个引用出来就是伪造寻址能力。指引只在工具回执层加：
+        手动 /compact 的折叠行为与严格变小守卫口径不变。
+        """
+        foldedRef = receipt.get("folded_ref") or {}
+        ref = str(foldedRef.get("covers_ref") or "")
+        if not ref:
+            return {}
+        return {
+            "covers_ref": ref,
+            "turn_range": list(foldedRef.get("turn_range") or []),
+            "covered_count": int(foldedRef.get("covered_count") or 0),
+            # 编排器透传侧已按 FOLDED_REF_HASH_SAMPLES 封顶（单一上限出处）。
+            "hash_samples": [str(h) for h in (foldedRef.get("hash_samples") or [])],
+            "paths": list(ToolExecutor._COMPRESS_RECALL_PATHS),
+        }
+
     async def _execute_context_compress(self, params: Dict) -> Dict:
         """B1（对照改进项）：模型自决触发折叠。
 
         与 `/compact` 命令、自动折叠共用同一折叠机构（`manual_compact` →
         `compact_window` → 分代推进 → 池归档）：折叠只影响视图，原文零丢失。
         回执带 invoked_by=model 与模型给的原因，进读数可归因。
+        SC-5：折叠成功的回执附结构化召回指引（recall_guide：covers_ref +
+        被折区间寻址字段 + 三条找回路径）——元认知支架的第二半，模型刚折完
+        就知道去哪找回。
         """
         try:
             orchestrator = getattr(self._agent, "context_orchestrator", None)
@@ -5761,6 +5795,11 @@ class ToolExecutor:
             receipt = await orchestrator.manual_compact(history)
             receipt["invoked_by"] = "model"
             receipt["reason"] = reason
+            guide = self._compressRecallGuide(receipt)
+            if guide:
+                receipt["recall_guide"] = guide
+            # 寻址信息已组装成 recall_guide，原始透传块不再留在工具回执里（单形）。
+            receipt.pop("folded_ref", None)
             return receipt
         except Exception as e:
             logger.warning("context_compress 执行失败: %s", e)
