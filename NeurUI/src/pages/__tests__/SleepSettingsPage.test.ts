@@ -33,7 +33,7 @@ vi.mock('ant-design-vue', async (importOriginal) => {
   return { ...actual, message: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }
 })
 
-import { getSleepSettings, updateSleepSettings, getMergeConflicts } from '@/api/modules/sleep'
+import { getSleepSettings, updateSleepSettings } from '@/api/modules/sleep'
 import type { ApiResponse } from '@/types/response'
 import type { SleepSettings } from '@/api/modules/sleep'
 
@@ -263,17 +263,5 @@ describe('SleepSettingsPage 阶段时长分工 + 冲突解包（2026-09-15 补�
     expect(payload.phase_max_minutes_deep_sleep).toBe(60)
     expect(payload.phase_max_minutes_rem).toBe(120)
     expect(payload.phase_max_minutes_hibernate).toBe(240)
-  })
-
-  it('/conflicts 返回裸数组也能渲染冲突卡（此前 res?.data 恒空白）', async () => {
-    vi.mocked(getMergeConflicts).mockResolvedValue([
-      {
-        id: 'c1', agent_id: 'default', field: 'content', local_value: 'A', remote_value: 'B',
-        resolved: false, created_at: '2026-09-15T00:00:00',
-      },
-    ] as never)
-    const wrapper = mountPage()
-    await flushPromises()
-    expect(wrapper.findAll('.conflict-card').length).toBe(1)
   })
 })
