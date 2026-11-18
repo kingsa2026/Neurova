@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
 from neurova.core.logger import get_logger
+from neurova.skills.models import OutcomeLiteral
 from neurova.api.endpoints.knowledge_common import (
     KnowledgeCreate,
     KnowledgeItem,
@@ -60,7 +61,7 @@ class ChunkUpdate(BaseModel):
 class FactAdoptionRequest(BaseModel):
     """事实采纳结果显式写回；不接受“猜测的”默认值。"""
 
-    outcome: Literal["success", "failure", "unevidenced"]
+    outcome: OutcomeLiteral
 
 
 class FactRollbackRequest(BaseModel):

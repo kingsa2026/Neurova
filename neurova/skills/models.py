@@ -10,7 +10,7 @@ Skill System 2.0 数据模型
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 
 class SkillSource(str, Enum):
@@ -58,6 +58,11 @@ class SkillSource(str, Enum):
 OUTCOME_SUCCESS = "success"
 OUTCOME_FAILURE = "failure"
 OUTCOME_UNEVIDENCED = "unevidenced"
+
+# 三态契约词的 OpenAPI/Literal 单源（G6 收口）：knowledge_core 等契约面
+# 引用本别名，不再手抄三元组。
+OutcomeLiteral = Literal[OUTCOME_SUCCESS, OUTCOME_FAILURE, OUTCOME_UNEVIDENCED]
+OUTCOME_WORDS: frozenset = frozenset({OUTCOME_SUCCESS, OUTCOME_FAILURE, OUTCOME_UNEVIDENCED})
 
 #: 三态 → 展示记号。未测量刻意**不**复用失败记号：`✗` 对模型说的是
 #: "上次这条做砸了"，而事实是"这轮没测到"。
