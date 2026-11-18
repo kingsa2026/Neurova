@@ -9,6 +9,7 @@
  *   POST   /console/chat/sessions/{id}/archive    → 归档
  *   POST   /console/chat/sessions/{id}/unarchive  → 恢复
  *   POST   /console/chat/sessions/{id}/fork       → 分叉
+ *   GET    /console/chat/sessions/archived        → 归档会话列表
  *   DELETE /console/chat/sessions/{id}            → 删除
  *   GET    /console/chat/history?session_id=      → {code:0,data:{messages:[{role,content}],session_id}}
  */
@@ -69,6 +70,14 @@ export class SessionsApi {
     const path = agentId.length > 0
       ? `/console/chat/sessions?agent_id=${agentId}`
       : '/console/chat/sessions';
+    return this.client.get<ChatSessionList>(path);
+  }
+
+  /** 归档会话列表（console.py get_archived_chat_sessions；agent_id 可选过滤） */
+  async listArchived(agentId: string): Promise<ApiResponse<ChatSessionList>> {
+    const path = agentId.length > 0
+      ? `/console/chat/sessions/archived?agent_id=${agentId}`
+      : '/console/chat/sessions/archived';
     return this.client.get<ChatSessionList>(path);
   }
 

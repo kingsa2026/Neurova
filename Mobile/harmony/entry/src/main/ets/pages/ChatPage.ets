@@ -41,6 +41,7 @@ import { WSChatChunk, Agent } from '../libs/types';
 import { Router } from '../routing/Router';
 import { ChunkBatcher } from '../libs/perf/ChunkBatcher';
 import { SimpleDataSource } from '../libs/perf/SimpleDataSource';
+import { ChatSession } from '../libs/api/modules/SessionsApi';
 
 /** 对话消息视图模型（仅用于本页渲染） */
 interface ChatMessageView {
@@ -53,6 +54,12 @@ interface ChatMessageView {
 
 /** 日志标签 */
 const TAG = 'ChatPage';
+
+/** 会话抽屉分组（设计 F6 .grp：置顶/今天/更早） */
+interface DrawerGroup {
+  label: string;
+  items: ChatSession[];
+}
 
 @Component
 export struct ChatPage {
@@ -74,6 +81,21 @@ export struct ChatPage {
   @State queued: boolean = false;
   // 会话是否来自列表（可置顶/归档；新会话未落库，操作会 404）
   private fromList: boolean = false;
+  // F6 会话抽屉开关（聊天页右上角 ⋯ 呼出，右缘滑出）
+  @State drawerOpen: boolean = false;
+  // 抽屉会话列表（GET /console/chat/sessions 全量摘要）
+  @State drawerSessions: ChatSession[] = [];
+  // 抽屉数据版本号：进 ForEach key 强制重建条目，防对象复用导致的标题滞留渲染
+  @State drawerRev: number = 0;
+  // 归档会话列表（GET /console/chat/sessions/archived）
+  @State archivedSessions: ChatSession[] = [];
+  // 归档区展开态（抽屉底部「查看 N 个归档会话」点击展开）
+  @State archivedOpen: boolean = false;
+  // 跨会话搜索词（已加载摘要的客户端过滤；后端无搜索端点，不设假联查）
+  @State searchKeyword: string = '';
+  // 重命名中的会话（非空时渲染居中重命名弹层）
+  @State renamingSession: ChatSession | null = null;
+  @State renameText: string = '';
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -379,243 +401,711 @@ export struct ChatPage {
     return agent?.name ?? '助手';
   }
 
-  /** 会话操作（设计 F5 顶栏 ⋯→菜单）：置顶/归档，仅列表进入的已落库会话可操作 */
-  private showSessionActions(): void {
-    if (!this.fromList) {
-      this.msg.info('新会话尚未保存，暂无可执行操作');
+  // ===========================================================================
+  // F6 会话抽屉（设计 .drawer-wrap：右缘滑出，与 PC 会话侧栏同端点同操作集）
+  // ===========================================================================
+
+  /** 呼出抽屉并拉取会话/归档两份列表 */
+  private openDrawer(): void {
+    this.drawerOpen = true;
+    this.archivedOpen = false;
+    this.searchKeyword = '';
+    this.loadDrawerSessions();
+  }
+
+  /** 拉取会话摘要 + 归档列表（归档失败仅记日志，不阻塞主列表） */
+  private async loadDrawerSessions(): Promise<void> {
+    try {
+      const res = await this.api.sessions.listAll('');
+      if (res.code === 0 && res.data) {
+        this.drawerSessions = res.data.sessions;
+      }
+    } catch (e) {
+      this.msg.error('会话列表加载失败：' + (e as Error).message);
+    }
+    try {
+      const arch = await this.api.sessions.listArchived('');
+      if (arch.code === 0 && arch.data) {
+        this.archivedSessions = arch.data.sessions;
+      }
+    } catch (e) {
+      this.logger.warn(TAG, '归档会话加载失败', e as Error);
+    }
+    this.drawerRev += 1;
+  }
+
+  /** updated_at 是否为今天（本地时区；解析失败按非今天归入「更早」） */
+  private isToday(dateStr: string): boolean {
+    if (!dateStr || dateStr.length === 0) {
+      return false;
+    }
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) {
+      return false;
+    }
+    const now = new Date();
+    return d.getFullYear() === now.getFullYear()
+      && d.getMonth() === now.getMonth()
+      && d.getDate() === now.getDate();
+  }
+
+  /** 抽屉分组：置顶 → 今天 → 更早，组内按更新时间倒序；带搜索词过滤 */
+  private drawerGroups(): DrawerGroup[] {
+    const kw = this.searchKeyword.trim().toLowerCase();
+    const pinned: ChatSession[] = [];
+    const today: ChatSession[] = [];
+    const earlier: ChatSession[] = [];
+    for (const s of this.drawerSessions) {
+      if (kw.length > 0 && s.title.toLowerCase().indexOf(kw) === -1) {
+        continue;
+      }
+      if (s.pinned) {
+        pinned.push(s);
+      } else if (this.isToday(s.updated_at)) {
+        today.push(s);
+      } else {
+        earlier.push(s);
+      }
+    }
+    const byTime = (a: ChatSession, b: ChatSession): number => {
+      const ta = new Date(a.updated_at).getTime();
+      const tb = new Date(b.updated_at).getTime();
+      return (isNaN(tb) ? 0 : tb) - (isNaN(ta) ? 0 : ta);
+    };
+    pinned.sort(byTime);
+    today.sort(byTime);
+    earlier.sort(byTime);
+    const groups: DrawerGroup[] = [];
+    if (pinned.length > 0) {
+      groups.push({ label: '置顶', items: pinned });
+    }
+    if (today.length > 0) {
+      groups.push({ label: '今天', items: today });
+    }
+    if (earlier.length > 0) {
+      groups.push({ label: '更早', items: earlier });
+    }
+    return groups;
+  }
+
+  /** 抽屉内点击会话：切换当前会话并拉取历史 */
+  private switchToSession(s: ChatSession): void {
+    if (s.id === this.sessionId) {
+      this.drawerOpen = false;
       return;
     }
+    this.sessionId = s.id;
+    this.sessionTitle = s.title;
+    this.fromList = true;
+    this.drawerOpen = false;
+    this.messages = [];
+    this.messagesDs.setData([]);
+    this.loadHistory();
+  }
+
+  /** 新建会话：回到未落库的新会话态（首次发言后由后端建档） */
+  private startNewSession(): void {
+    this.drawerOpen = false;
+    this.sessionId = 'session-' + Date.now().toString();
+    this.sessionTitle = '新对话';
+    this.fromList = false;
+    this.isGenerating = false;
+    this.messages = [];
+    this.messagesDs.setData([]);
+  }
+
+  /** 置顶/取消置顶（后端 PinSessionRequest {pinned}；按翻转当前态提交） */
+  private async togglePin(s: ChatSession): Promise<void> {
+    try {
+      await this.api.sessions.pin(s.id, !s.pinned);
+      this.msg.success(s.pinned ? '已取消置顶' : '已置顶');
+      this.loadDrawerSessions();
+    } catch (e) {
+      this.msg.error('置顶失败：' + (e as Error).message);
+    }
+  }
+
+  private openRename(s: ChatSession): void {
+    this.renamingSession = s;
+    this.renameText = s.title;
+  }
+
+  private async confirmRename(): Promise<void> {
+    const target = this.renamingSession;
+    if (!target) {
+      return;
+    }
+    const title = this.renameText.trim();
+    if (title.length === 0) {
+      this.msg.warning('标题不能为空');
+      return;
+    }
+    try {
+      await this.api.sessions.rename(target.id, title);
+      this.msg.success('已重命名');
+      this.renamingSession = null;
+      if (target.id === this.sessionId) {
+        this.sessionTitle = title;
+      }
+      this.loadDrawerSessions();
+    } catch (e) {
+      this.msg.error('重命名失败：' + (e as Error).message);
+    }
+  }
+
+  /** 单会话操作菜单：分叉 / 归档 / 删除（重命名走条目上的编辑图标） */
+  private showItemActions(s: ChatSession): void {
     AlertDialog.show({
-      title: this.sessionTitle.length > 0 ? this.sessionTitle : '会话操作',
+      title: s.title.length > 0 ? s.title : '会话操作',
       message: '选择会话操作',
       autoCancel: true,
       alignment: DialogAlignment.Center,
       buttons: [
         {
-          value: '置顶会话',
+          value: '分叉',
           action: () => {
-            this.pinSession();
+            this.forkSession(s);
           }
         },
         {
-          value: '归档会话',
+          value: '归档',
           action: () => {
-            this.archiveSession();
+            this.archiveById(s);
+          }
+        },
+        {
+          value: '删除',
+          fontColor: this.sm.getColor('error'),
+          action: () => {
+            this.confirmDeleteSession(s);
           }
         }
       ]
     });
   }
 
-  private async pinSession(): Promise<void> {
+  private async forkSession(s: ChatSession): Promise<void> {
     try {
-      await this.api.sessions.pin(this.sessionId);
-      this.msg.success('已置顶');
+      await this.api.sessions.fork(s.id);
+      this.msg.success('已分叉出新会话');
+      this.loadDrawerSessions();
     } catch (e) {
-      this.msg.error('置顶失败：' + (e as Error).message);
+      this.msg.error('分叉失败：' + (e as Error).message);
     }
   }
 
-  private async archiveSession(): Promise<void> {
+  private async archiveById(s: ChatSession): Promise<void> {
     try {
-      await this.api.sessions.archive(this.sessionId);
+      await this.api.sessions.archive(s.id);
       this.msg.success('已归档');
+      if (s.id === this.sessionId) {
+        // 当前会话被归档：回到新会话态，避免继续往归档会话里发言
+        this.startNewSession();
+      }
+      this.loadDrawerSessions();
     } catch (e) {
       this.msg.error('归档失败：' + (e as Error).message);
     }
   }
 
-  build() {
-    Column() {
-      // 顶部玻璃头（原型 F5：返回 + Agent 头像 + 会话名/状态 + 更多）
-      Row() {
-        IconBtn({ name: 'back', onTap: () => { this.router.back(); } })
-        Text(this.getAgentName().slice(0, 1))
-          .fontSize(13)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.sm.getColor('text_on_primary'))
-          .width(32)
-          .height(32)
-          .borderRadius(11)
-          .textAlign(TextAlign.Center)
-          .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
-          .margin({ left: 8 })
-        Column() {
-          Text(this.sessionTitle.length > 0 ? this.sessionTitle : '新对话')
-            .fontSize(this.sm.getFontSize('card_title'))
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.sm.getColor('text_primary'))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(this.getAgentName() + ' · ' + (this.isGenerating ? '生成中' : '就绪'))
-            .fontSize(this.sm.getFontSize('badge'))
-            .fontColor(this.isGenerating ? this.sm.getColor('success') : this.sm.getColor('text_tertiary'))
-            .margin({ top: 1 })
+  private confirmDeleteSession(s: ChatSession): void {
+    AlertDialog.show({
+      title: '确认删除',
+      message: `确定要删除会话"${s.title}"吗？此操作不可撤销。`,
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: '取消',
+        action: () => {}
+      },
+      secondaryButton: {
+        value: '删除',
+        fontColor: this.sm.getColor('error'),
+        action: () => {
+          this.deleteSession(s);
         }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
-        .margin({ left: 8 })
-        IconBtn({ name: 'more', onTap: () => { this.showSessionActions(); } })
       }
-      .width('100%')
-      .padding({ left: 12, right: 12, top: 6, bottom: 8 })
-      .backgroundBlurStyle(BlurStyle.Thin)
-      .backgroundColor(this.sm.getColor('surface_strong'))
-      .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
-      .alignItems(VerticalAlign.Center)
+    });
+  }
 
-      // Agent 切换器：横向滚动胶囊列表
-      AgentSwitcher({
-        currentAgentId: this.currentAgentId,
-        agents: this.agents,
-        onSwitch: (id: string) => { this.onSwitchAgent(id); }
-      })
-        .margin({
-          left: this.sm.getSpacing('md'),
-          right: this.sm.getSpacing('md'),
-          top: this.sm.getSpacing('sm'),
-          bottom: this.sm.getSpacing('sm'),
-        })
+  private async deleteSession(s: ChatSession): Promise<void> {
+    try {
+      await this.api.sessions.remove(s.id);
+      this.msg.success('已删除');
+      if (s.id === this.sessionId) {
+        this.startNewSession();
+      }
+      this.loadDrawerSessions();
+    } catch (e) {
+      this.msg.error('删除失败：' + (e as Error).message);
+    }
+  }
 
-      // 消息列表区
-      if (this.messages.length === 0) {
-        // 空状态：居中欢迎语
-        Column() {
-          Text('开始新对话')
-            .fontSize(this.sm.getFontSize('subtitle'))
-            .fontColor(this.sm.getColor('text_secondary'))
+  private async unarchiveSession(s: ChatSession): Promise<void> {
+    try {
+      await this.api.sessions.unarchive(s.id);
+      this.msg.success('已恢复');
+      this.loadDrawerSessions();
+    } catch (e) {
+      this.msg.error('恢复失败：' + (e as Error).message);
+    }
+  }
+
+  /** 抽屉条目头像：按 agent_id 找名称首字，找不到回退「会」 */
+  private getAgentInitial(agentId: string): string {
+    for (const a of this.agents) {
+      if (a.id === agentId && a.name.length > 0) {
+        return a.name.slice(0, 1);
+      }
+    }
+    return '会';
+  }
+
+  build() {
+    Stack() {
+      Column() {
+        // 顶部玻璃头（原型 F5：返回 + Agent 头像 + 会话名/状态 + ⋯呼出会话抽屉）
+        Row() {
+          IconBtn({ name: 'back', onTap: () => { this.router.back(); } })
+          Text(this.getAgentName().slice(0, 1))
+            .fontSize(13)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_on_primary'))
+            .width(32)
+            .height(32)
+            .borderRadius(11)
+            .textAlign(TextAlign.Center)
+            .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
+            .margin({ left: 8 })
+          Column() {
+            Text(this.sessionTitle.length > 0 ? this.sessionTitle : '新对话')
+              .fontSize(this.sm.getFontSize('card_title'))
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.sm.getColor('text_primary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(this.getAgentName() + ' · ' + (this.isGenerating ? '生成中' : '就绪'))
+              .fontSize(this.sm.getFontSize('badge'))
+              .fontColor(this.isGenerating ? this.sm.getColor('success') : this.sm.getColor('text_tertiary'))
+              .margin({ top: 1 })
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          .margin({ left: 8 })
+          IconBtn({ name: 'more', onTap: () => { this.openDrawer(); } })
         }
         .width('100%')
-        .layoutWeight(1)
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center)
-      } else {
-        // 消息列表：纵向滚动，关闭滚动条
-        // M5.2.2 改用 LazyForEach 惰性渲染，仅渲染可见区域 + 缓存项
-        // key 必须带上内容长度：流式回复是**原地改写同一对象**（content 追加），
-        // id 不变时 LazyForEach 按键复用组件、不重渲染该条目——这正是
-        // 「流式回复只显示光标、文本永不出现」（空回复）的根因
-        List({ space: this.sm.getSpacing('sm'), scroller: this.scroller }) {
-          LazyForEach(this.messagesDs, (msg: ChatMessageView) => {
-            ListItem() {
-              this.buildMessage(msg)
+        .padding({ left: 12, right: 12, top: 6, bottom: 8 })
+        .backgroundBlurStyle(BlurStyle.Thin)
+        .backgroundColor(this.sm.getColor('surface_strong'))
+        .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
+        .alignItems(VerticalAlign.Center)
+
+        // Agent 切换器：横向滚动胶囊列表
+        AgentSwitcher({
+          currentAgentId: this.currentAgentId,
+          agents: this.agents,
+          onSwitch: (id: string) => { this.onSwitchAgent(id); }
+        })
+          .margin({
+            left: this.sm.getSpacing('md'),
+            right: this.sm.getSpacing('md'),
+            top: this.sm.getSpacing('sm'),
+            bottom: this.sm.getSpacing('sm'),
+          })
+
+        // 消息列表区
+        if (this.messages.length === 0) {
+          // 空状态：居中欢迎语
+          Column() {
+            Text('开始新对话')
+              .fontSize(this.sm.getFontSize('subtitle'))
+              .fontColor(this.sm.getColor('text_secondary'))
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+        } else {
+          // 消息列表：纵向滚动，关闭滚动条
+          // M5.2.2 改用 LazyForEach 惰性渲染，仅渲染可见区域 + 缓存项
+          // key 必须带上内容长度：流式回复是**原地改写同一对象**（content 追加），
+          // id 不变时 LazyForEach 按键复用组件、不重渲染该条目——这正是
+          // 「流式回复只显示光标、文本永不出现」（空回复）的根因
+          List({ space: this.sm.getSpacing('sm'), scroller: this.scroller }) {
+            LazyForEach(this.messagesDs, (msg: ChatMessageView) => {
+              ListItem() {
+                this.buildMessage(msg)
+              }
+            }, (msg: ChatMessageView) => msg.id + '#' + msg.content.length.toString())
+          }
+          .layoutWeight(1)
+          .width('100%')
+          .scrollBar(BarState.Off)
+          .padding({
+            left: this.sm.getSpacing('md'),
+            right: this.sm.getSpacing('md'),
+            top: this.sm.getSpacing('sm'),
+            bottom: this.sm.getSpacing('sm'),
+          })
+        }
+
+        // 会话进度卡（设计 F5 .prog：流式生成中展示；步骤数后端未下发，不做假进度）
+        if (this.isGenerating) {
+          Row() {
+            AppIcon({ name: 'history', iconSize: 13, color: this.sm.getColor('accent') })
+            Text('会话进行中 · 正在生成回复')
+              .fontSize(this.sm.getFontSize('badge'))
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.sm.getColor('text_primary'))
+              .margin({ left: 7 })
+            LoadingProgress()
+              .width(14)
+              .height(14)
+              .color(this.sm.getColor('accent'))
+              .margin({ left: 6 })
+          }
+          .width('100%')
+          .padding({ left: 13, right: 13, top: 10, bottom: 10 })
+          .borderRadius(12)
+          .backgroundColor(this.sm.getColor('glass'))
+          .border({ width: 1, color: this.sm.getColor('border') })
+          .margin({
+            left: this.sm.getSpacing('md'),
+            right: this.sm.getSpacing('md'),
+            bottom: this.sm.getSpacing('sm'),
+          })
+        }
+
+        // 排队卡（设计 F5 .queued：后端 chat:queued 事件驱动，黄色虚线框）
+        if (this.queued) {
+          Row() {
+            AppIcon({ name: 'pause', iconSize: 14, color: this.sm.getColor('warning') })
+            Text('消息已排队，等待 Agent 空闲…')
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .margin({ left: 8 })
+          }
+          .width('100%')
+          .padding({ left: 13, right: 13, top: 9, bottom: 9 })
+          .borderRadius(14)
+          .border({ width: 1, color: 'rgba(251,191,36,0.40)', style: BorderStyle.Dashed })
+          .backgroundColor('rgba(251,191,36,0.08)')
+          .margin({
+            left: this.sm.getSpacing('md'),
+            right: this.sm.getSpacing('md'),
+            bottom: this.sm.getSpacing('sm'),
+          })
+        }
+
+        // 输入区（设计 F5 .inputbar：附件/语音 + 胶囊输入框 + 圆形发送/停止）
+        Row() {
+          IconBtn({ name: 'clip', onTap: () => { this.msg.info('附件发送即将开放'); } })
+          IconBtn({ name: 'mic', onTap: () => { this.msg.info('语音输入即将开放'); } })
+            .margin({ left: 8 })
+
+          GlassInput({
+            placeholder: '输入消息...',
+            value: this.inputText,
+            type: 'text',
+            cornerRadius: 999,
+            onChange: (v: string) => { this.inputText = v; },
+            onSubmit: () => { this.sendMessage(); }
+          })
+            .layoutWeight(1)
+            .margin({ left: 8 })
+
+          if (this.isGenerating) {
+            // 生成中：红色圆形停止钮（设计 .sendbtn.stop）
+            Column() {
+              AppIcon({ name: 'stop', iconSize: 18, color: this.sm.getColor('error') })
             }
-          }, (msg: ChatMessageView) => msg.id + '#' + msg.content.length.toString())
+            .width(42)
+            .height(42)
+            .borderRadius(21)
+            .backgroundColor('rgba(248,113,113,0.18)')
+            .border({ width: 1, color: 'rgba(248,113,113,0.50)' })
+            .justifyContent(FlexAlign.Center)
+            .alignItems(HorizontalAlign.Center)
+            .margin({ left: 8 })
+            .onClick(() => { this.stopGeneration(); })
+          } else {
+            // 空闲：品牌渐变圆形发送钮（设计 .sendbtn）
+            Column() {
+              AppIcon({ name: 'send', iconSize: 18, color: '#FFFFFF' })
+            }
+            .width(42)
+            .height(42)
+            .borderRadius(21)
+            .linearGradient({ angle: 135, colors: this.sm.getBrandGradient() })
+            .shadow({ radius: 18, color: 'rgba(99,102,241,0.45)', offsetY: 6 })
+            .justifyContent(FlexAlign.Center)
+            .alignItems(HorizontalAlign.Center)
+            .margin({ left: 8 })
+            .opacity(this.inputText.trim().length === 0 ? 0.5 : 1)
+            .onClick(() => { this.sendMessage(); })
+          }
+        }
+        .width('100%')
+        .padding(this.sm.getSpacing('md'))
+        .alignItems(VerticalAlign.Center)
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(this.sm.getColor('background'))
+
+      // F6 会话抽屉：右缘滑出 + 半透明遮罩（设计 .drawer-wrap）
+      if (this.drawerOpen) {
+        this.buildDrawer()
+      }
+
+      // 重命名弹层（抽屉条目编辑图标呼出；AlertDialog 无输入框故用页面内弹层）
+      if (this.renamingSession !== null) {
+        this.buildRenameOverlay()
+      }
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  // ===========================================================================
+  // F6 会话抽屉构建器
+  // ===========================================================================
+
+  /** 抽屉层：遮罩（点击收起）+ 右缘抽屉本体（设计 .drawer：300px → 76% 上限 340） */
+  @Builder
+  buildDrawer() {
+    Row() {
+      Column()
+        .layoutWeight(1)
+        .height('100%')
+        .backgroundColor('rgba(4,6,14,0.60)')
+        .onClick(() => { this.drawerOpen = false; })
+
+      Column() {
+        // 头部：会话 + 计数 + 新建（设计 .dh；「运行中」计数后端未下发，只显示真实总数）
+        Row() {
+          Text('会话')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+          Text(this.drawerSessions.length.toString() + ' 个')
+            .fontSize(this.sm.getFontSize('badge'))
+            .fontColor(this.sm.getColor('text_tertiary'))
+            .margin({ left: 6 })
+          Blank()
+          Column() {
+            AppIcon({ name: 'plus', iconSize: 14, color: this.sm.getColor('text_on_primary') })
+          }
+          .width(30)
+          .height(30)
+          .borderRadius(10)
+          .linearGradient({ angle: 135, colors: this.sm.getBrandGradient() })
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+          .onClick(() => { this.startNewSession(); })
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 8, right: 8, bottom: 12 })
+
+        // 跨会话搜索（已加载摘要的客户端过滤；后端无会话搜索端点，不设假联查）
+        GlassInput({
+          placeholder: '跨会话搜索',
+          iconName: 'search',
+          value: this.searchKeyword,
+          onChange: (v: string) => { this.searchKeyword = v; }
+        })
+          .margin({ bottom: 12 })
+
+        // 分组列表：置顶 → 今天 → 更早（设计 .grp/.di）
+        Scroll() {
+          Column() {
+            ForEach(this.drawerGroups(), (group: DrawerGroup) => {
+              Text(group.label)
+                .fontSize(10.5)
+                .fontColor(this.sm.getColor('text_tertiary'))
+                .letterSpacing(1.5)
+                .padding({ left: 10, top: 8, bottom: 4 })
+              ForEach(group.items, (s: ChatSession) => {
+                this.drawerItem(s)
+              }, (s: ChatSession) => s.id + '#' + s.title + '#' + this.drawerRev.toString())
+            }, (group: DrawerGroup) => group.label + '#' + this.drawerRev.toString())
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
         }
         .layoutWeight(1)
         .width('100%')
         .scrollBar(BarState.Off)
-        .padding({
-          left: this.sm.getSpacing('md'),
-          right: this.sm.getSpacing('md'),
-          top: this.sm.getSpacing('sm'),
-          bottom: this.sm.getSpacing('sm'),
-        })
-      }
+        .align(Alignment.Top)
 
-      // 会话进度卡（设计 F5 .prog：流式生成中展示；步骤数后端未下发，不做假进度）
-      if (this.isGenerating) {
-        Row() {
-          AppIcon({ name: 'history', iconSize: 13, color: this.sm.getColor('accent') })
-          Text('会话进行中 · 正在生成回复')
-            .fontSize(this.sm.getFontSize('badge'))
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.sm.getColor('text_primary'))
-            .margin({ left: 7 })
-          LoadingProgress()
-            .width(14)
-            .height(14)
-            .color(this.sm.getColor('accent'))
-            .margin({ left: 6 })
+        // 底部：归档会话入口（GET /console/chat/sessions/archived 真数据；设计 .foot）
+        Column() {
+          Row() {
+            AppIcon({ name: 'archive', iconSize: 14, color: this.sm.getColor('secondary') })
+            Text('查看 ' + this.archivedSessions.length.toString() + ' 个归档会话')
+              .fontSize(12)
+              .fontColor(this.sm.getColor('text_secondary'))
+              .margin({ left: 8 })
+              .layoutWeight(1)
+            AppIcon({ name: this.archivedOpen ? 'chev' : 'fork', iconSize: 12, color: this.sm.getColor('text_tertiary') })
+          }
+          .width('100%')
+          .padding({ top: 12, bottom: 6 })
+          .border({ width: { top: 1 }, color: this.sm.getColor('divider') })
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => { this.archivedOpen = !this.archivedOpen; })
+
+          if (this.archivedOpen) {
+            Column() {
+              if (this.archivedSessions.length === 0) {
+                Text('暂无归档会话')
+                  .fontSize(11.5)
+                  .fontColor(this.sm.getColor('text_tertiary'))
+                  .padding({ left: 8, top: 6, bottom: 6 })
+              }
+              ForEach(this.archivedSessions, (s: ChatSession) => {
+                Row() {
+                  Text(s.title.length > 0 ? s.title : '新对话')
+                    .fontSize(12)
+                    .fontColor(this.sm.getColor('text_secondary'))
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .layoutWeight(1)
+                  Text('恢复')
+                    .fontSize(11)
+                    .fontColor(this.sm.getColor('primary'))
+                    .padding({ left: 10, right: 4, top: 4, bottom: 4 })
+                    .onClick(() => { this.unarchiveSession(s); })
+                }
+                .width('100%')
+                .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                .alignItems(VerticalAlign.Center)
+              }, (s: ChatSession) => s.id + '#' + s.title + '#' + this.drawerRev.toString())
+            }
+            .width('100%')
+          }
         }
         .width('100%')
-        .padding({ left: 13, right: 13, top: 10, bottom: 10 })
-        .borderRadius(12)
-        .backgroundColor(this.sm.getColor('glass'))
-        .border({ width: 1, color: this.sm.getColor('border') })
-        .margin({
-          left: this.sm.getSpacing('md'),
-          right: this.sm.getSpacing('md'),
-          bottom: this.sm.getSpacing('sm'),
-        })
       }
-
-      // 排队卡（设计 F5 .queued：后端 chat:queued 事件驱动，黄色虚线框）
-      if (this.queued) {
-        Row() {
-          AppIcon({ name: 'pause', iconSize: 14, color: this.sm.getColor('warning') })
-          Text('消息已排队，等待 Agent 空闲…')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .margin({ left: 8 })
-        }
-        .width('100%')
-        .padding({ left: 13, right: 13, top: 9, bottom: 9 })
-        .borderRadius(14)
-        .border({ width: 1, color: 'rgba(251,191,36,0.40)', style: BorderStyle.Dashed })
-        .backgroundColor('rgba(251,191,36,0.08)')
-        .margin({
-          left: this.sm.getSpacing('md'),
-          right: this.sm.getSpacing('md'),
-          bottom: this.sm.getSpacing('sm'),
-        })
-      }
-
-      // 输入区（设计 F5 .inputbar：附件/语音 + 胶囊输入框 + 圆形发送/停止）
-      Row() {
-        IconBtn({ name: 'clip', onTap: () => { this.msg.info('附件发送即将开放'); } })
-        IconBtn({ name: 'mic', onTap: () => { this.msg.info('语音输入即将开放'); } })
-          .margin({ left: 8 })
-
-        GlassInput({
-          placeholder: '输入消息...',
-          value: this.inputText,
-          type: 'text',
-          cornerRadius: 999,
-          onChange: (v: string) => { this.inputText = v; },
-          onSubmit: () => { this.sendMessage(); }
-        })
-          .layoutWeight(1)
-          .margin({ left: 8 })
-
-        if (this.isGenerating) {
-          // 生成中：红色圆形停止钮（设计 .sendbtn.stop）
-          Column() {
-            AppIcon({ name: 'stop', iconSize: 18, color: this.sm.getColor('error') })
-          }
-          .width(42)
-          .height(42)
-          .borderRadius(21)
-          .backgroundColor('rgba(248,113,113,0.18)')
-          .border({ width: 1, color: 'rgba(248,113,113,0.50)' })
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center)
-          .margin({ left: 8 })
-          .onClick(() => { this.stopGeneration(); })
-        } else {
-          // 空闲：品牌渐变圆形发送钮（设计 .sendbtn）
-          Column() {
-            AppIcon({ name: 'send', iconSize: 18, color: '#FFFFFF' })
-          }
-          .width(42)
-          .height(42)
-          .borderRadius(21)
-          .linearGradient({ angle: 135, colors: this.sm.getBrandGradient() })
-          .shadow({ radius: 18, color: 'rgba(99,102,241,0.45)', offsetY: 6 })
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center)
-          .margin({ left: 8 })
-          .opacity(this.inputText.trim().length === 0 ? 0.5 : 1)
-          .onClick(() => { this.sendMessage(); })
-        }
-      }
-      .width('100%')
-      .padding(this.sm.getSpacing('md'))
-      .alignItems(VerticalAlign.Center)
+      .width('76%')
+      .constraintSize({ maxWidth: 340 })
+      .height('100%')
+      .backgroundColor(this.sm.getColor('surface_strong'))
+      .backgroundBlurStyle(BlurStyle.Thin)
+      .border({ width: { left: 1 }, color: this.sm.getColor('border') })
+      .padding({ left: 14, right: 14, top: 52, bottom: 14 })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.sm.getColor('background'))
+  }
+
+  /** 抽屉单条会话（设计 .di：头像 + 标题 + pin/操作图标；当前会话高亮） */
+  @Builder
+  drawerItem(s: ChatSession) {
+    Row() {
+      Text(this.getAgentInitial(s.agent_id))
+        .fontSize(11)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.sm.getColor('text_on_primary'))
+        .width(26)
+        .height(26)
+        .borderRadius(9)
+        .textAlign(TextAlign.Center)
+        .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
+      Text(s.title.length > 0 ? s.title : '新对话')
+        .fontSize(12.5)
+        .fontColor(this.sm.getColor('text_primary'))
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1)
+        .margin({ left: 10 })
+      // 操作图标各自包容器承接点击（自定义组件不外链 onClick）
+      Column() {
+        AppIcon({ name: 'pin', iconSize: 13, color: s.pinned ? this.sm.getColor('primary') : this.sm.getColor('text_tertiary') })
+      }
+      .padding(3)
+      .onClick(() => { this.togglePin(s); })
+      if (s.pinned) {
+        Column() {
+          AppIcon({ name: 'edit', iconSize: 13, color: this.sm.getColor('text_tertiary') })
+        }
+        .padding(3)
+        .margin({ left: 6 })
+        .onClick(() => { this.openRename(s); })
+      } else {
+        Column() {
+          AppIcon({ name: 'more', iconSize: 13, color: this.sm.getColor('text_tertiary') })
+        }
+        .padding(3)
+        .margin({ left: 6 })
+        .onClick(() => { this.showItemActions(s); })
+      }
+    }
+    .width('100%')
+    .padding({ left: 10, right: 10, top: 10, bottom: 10 })
+    .borderRadius(12)
+    .backgroundColor(s.id === this.sessionId ? 'rgba(99,102,241,0.16)' : 'rgba(0,0,0,0)')
+    .border({
+      width: 1,
+      color: s.id === this.sessionId ? 'rgba(99,102,241,0.35)' : 'rgba(0,0,0,0)'
+    })
+    .margin({ bottom: 2 })
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => { this.switchToSession(s); })
+  }
+
+  /** 重命名弹层：居中玻璃卡 + 输入 + 取消/保存 */
+  @Builder
+  buildRenameOverlay() {
+    Column() {
+      Column() {
+        Text('重命名会话')
+          .fontSize(15)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.sm.getColor('text_primary'))
+        GlassInput({
+          placeholder: '会话标题',
+          value: this.renameText,
+          onChange: (v: string) => { this.renameText = v; },
+          onSubmit: () => { this.confirmRename(); }
+        })
+          .margin({ top: 12 })
+        Row() {
+          Text('取消')
+            .fontSize(13)
+            .fontColor(this.sm.getColor('text_secondary'))
+            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+            .onClick(() => { this.renamingSession = null; })
+          Text('保存')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.sm.getColor('text_on_primary'))
+            .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+            .borderRadius(10)
+            .linearGradient({ angle: 135, colors: this.sm.getBrandGradient() })
+            .margin({ left: 8 })
+            .onClick(() => { this.confirmRename(); })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.End)
+        .margin({ top: 14 })
+      }
+      .width('82%')
+      .constraintSize({ maxWidth: 320 })
+      .padding(16)
+      .borderRadius(16)
+      .backgroundColor(this.sm.getColor('surface_strong'))
+      .backgroundBlurStyle(BlurStyle.Thin)
+      .border({ width: 1, color: this.sm.getColor('border') })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('rgba(4,6,14,0.60)')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
   }
 
   // ===========================================================================

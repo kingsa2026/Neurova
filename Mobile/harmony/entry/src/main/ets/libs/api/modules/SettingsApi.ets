@@ -39,12 +39,33 @@ function inferSettingType(value: Object): SettingType {
   return 'input';
 }
 
-/** settings.py 单键载荷 → SettingItem（单源映射；组名取键首段） */
+/**
+ * 后端 section 键 → 中文组名（单一映射出口）。
+ * 已知键译名；未知键诚实保留原键（不编造译名）。
+ */
+function sectionTitle(key: string): string {
+  if (key === 'general') { return '通用'; }
+  if (key === 'security') { return '安全'; }
+  if (key === 'storage') { return '存储'; }
+  if (key === 'advanced') { return '高级'; }
+  if (key === 'routing') { return '路由'; }
+  if (key === 'quota') { return '配额'; }
+  if (key === 'theme') { return '主题'; }
+  if (key === 'appearance') { return '外观'; }
+  if (key === 'notification') { return '通知'; }
+  if (key === 'privacy') { return '隐私'; }
+  if (key === 'about') { return '关于'; }
+  return key;
+}
+
+/** settings.py 单键载荷 → SettingItem（单源映射；组名取键首段译名，条目名取键尾段） */
 function toSettingItem(key: string, value: Object): SettingItem {
   const group = key.indexOf('.') !== -1 ? key.split('.')[0] : 'general';
+  const parts = key.split('.');
+  const label = parts.length > 1 ? parts[parts.length - 1] : key;
   const item: SettingItem = {
     key: key,
-    label: key,
+    label: label,
     type: inferSettingType(value),
     value: value,
     defaultValue: value,
@@ -84,14 +105,14 @@ export class SettingsApi {
           const subValue: Object = (value as Record<string, Object>)[sub];
           items.push(toSettingItem(`${key}.${sub}`, subValue));
         }
-        const group: SettingGroup = { key: key, title: key, items: items };
+        const group: SettingGroup = { key: key, title: sectionTitle(key), items: items };
         groups.push(group);
       } else {
         flatItems.push(toSettingItem(key, value));
       }
     }
     if (flatItems.length > 0) {
-      const general: SettingGroup = { key: 'general', title: 'general', items: flatItems };
+      const general: SettingGroup = { key: 'general', title: sectionTitle('general'), items: flatItems };
       groups.unshift(general);
     }
     return { code: 0, message: res.message, data: groups } as ApiResponse<SettingGroup[]>;
