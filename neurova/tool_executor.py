@@ -7882,6 +7882,7 @@ class ToolExecutor:
             from neurova.sync.session_sync_manager import (
                 EventType,
                 SessionEvent,
+                SYSTEM_ACTOR_AGENT,
                 get_session_sync_manager,
             )
 
@@ -7919,7 +7920,7 @@ class ToolExecutor:
                 payload["windows"] = windows
 
             mgr = get_session_sync_manager()
-            mgr.register_or_create_session(session_id=session_id, user_id="agent")
+            mgr.register_or_create_session(session_id=session_id, user_id=SYSTEM_ACTOR_AGENT)
             event = SessionEvent(
                 event_type=EventType.COMPUTER_ACTION,
                 session_id=session_id,

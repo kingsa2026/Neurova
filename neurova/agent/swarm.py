@@ -2499,11 +2499,12 @@ class SwarmManager:
             from neurova.sync.session_sync_manager import (
                 EventType,
                 SessionEvent,
+                SYSTEM_ACTOR_SWARM,
                 get_session_sync_manager,
             )
 
             mgr = get_session_sync_manager()
-            mgr.register_or_create_session(session_id=run.session_id, user_id="swarm")
+            mgr.register_or_create_session(session_id=run.session_id, user_id=SYSTEM_ACTOR_SWARM)
             event = SessionEvent(
                 event_type=EventType(event_name),
                 session_id=run.session_id,

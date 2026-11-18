@@ -29,6 +29,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = get_logger(__name__)
 
+# 系统行为者哨兵：session 同步注册面上"无法落到真人账号"的来源方。
+# 标的是「注册来源是哪个系统面」，与 "anonymous"（请求身份缺失时的用量
+# 兜底，§3 口径）语义互斥。fullrepo 审计 2026-11-18 C2 收口——字面量
+# 散落各处不能道出主体，收口到此单源。
+SYSTEM_ACTOR_SWARM = "swarm"  # 蜂群子代理会话（SwarmManager 派生）
+SYSTEM_ACTOR_AGENT = "agent"  # 工具执行侧会话（tool_executor 注册）
+
 
 # ---------------------------------------------------------------------------
 # 枚举和数据类
