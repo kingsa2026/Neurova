@@ -21,8 +21,11 @@ from datetime import datetime
 # 配置
 REPO_OWNER = "kingsa2026"
 REPO_NAME = "Neurova"
-CURRENT_VERSION = "v0.0.1"  # 当前版本
-NEXT_VERSION = "v0.0.2"    # 下一个版本
+# 版本事实源 = neurova/__init__.__version__（与 Chart.yaml 的 R4 同一口径）：
+# 发布 tag 跟随代码版本，不再手写死值（fullrepo 审计 2026-11-18）。
+from neurova import __version__ as _code_version  # noqa: E402
+
+NEXT_VERSION = f"v{_code_version}"  # 发布版本（=当前代码版本）
 
 def get_github_token():
     """获取 GitHub Token"""
@@ -151,7 +154,6 @@ pip install -r requirements.txt
 
 ### 文档
 - [README.md](https://github.com/{REPO_OWNER}/{REPO_NAME}/blob/{tag_name}/README.md)
-- [CONTEXT.md](https://github.com/{REPO_OWNER}/{REPO_NAME}/blob/{tag_name}/CONTEXT.md)
 """
     
     data = {
