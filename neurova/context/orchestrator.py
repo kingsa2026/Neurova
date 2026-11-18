@@ -1305,6 +1305,19 @@ class ContextOrchestrator:
 
         return compileConstitutionRulesSection(identityStrings(self._agent)[0])
 
+    def _livePersonalityTraitsText(self) -> str:
+        """无会话快照（无状态调用）时的人格特质活值。
+
+        E4（四域审计 2026-11-18）：与冻结路径共用同一编译单源
+        （personality_persistence.compilePersonalityTraitsSection）。
+        """
+        from neurova.api.endpoints.personality_persistence import (
+            compilePersonalityTraitsSection,
+        )
+        from neurova.context_pool import identityStrings
+
+        return compilePersonalityTraitsSection(identityStrings(self._agent)[0])
+
     # ══════════════════════════════════════════════════════════════
     # 上下文构建
     # ══════════════════════════════════════════════════════════════
@@ -1367,18 +1380,24 @@ class ContextOrchestrator:
             soul_text = frozen["soul"]
             personality_text = frozen.get("personality") or ""
             constitution_text = frozen.get("constitution") or ""
-            # E2：宪法规则段随身份三件套同点冻结（快照时点生效，会话内
-            # 规则增删改不漂移当前 prompt，下次会话生效）。
+            # E2/E4：宪法规则段与人格特质段随身份三件套同点冻结（快照时点
+            # 生效，会话内写入不漂移当前 prompt，下次会话生效）。
             constitution_rules_text = str(frozen.get("constitution_rules") or "")
+            personality_traits_text = str(frozen.get("personality_traits") or "")
         else:
             soul_text = self.soul or ""
             personality_text = self.personality or ""
             constitution_text = self.config.constitution or ""
             # 无快照（无状态调用）：现取活值，与冻结路径同一编译单源（诚实降级）。
             constitution_rules_text = self._liveConstitutionRulesText()
+            personality_traits_text = self._livePersonalityTraitsText()
         system_instructions = [soul_text]
         if personality_text:
             system_instructions.append(personality_text)
+        if personality_traits_text:
+            # E4：人格特质编译段——与 personality.md 文本轨同一组装点合流
+            # （紧随其后，不另起第二入口）。
+            system_instructions.append(personality_traits_text)
         if constitution_text:
             system_instructions.append(constitution_text)
         if constitution_rules_text:
@@ -1430,6 +1449,7 @@ class ContextOrchestrator:
                 {
                     "soul": soul_text,
                     "personality": personality_text,
+                    "personality_traits": personality_traits_text,
                     "constitution": constitution_text,
                     "constitution_rules": constitution_rules_text,
                     "time": time_section,

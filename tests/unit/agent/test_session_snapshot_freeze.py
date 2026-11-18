@@ -79,7 +79,8 @@ class TestSessionSnapshot:
 
     def test_snapshot_shape(self, agent):
         """快照含 prompt 身份层三件套（soul/personality/constitution）
-        + E2 宪法规则编译段（constitution_rules，随三件套同点冻结）。"""
+        + E2 宪法规则段（constitution_rules）+ E4 人格特质段
+        （personality_traits），均随三件套同点冻结。"""
         from neurova.agent.session_snapshot import SessionSnapshotCache
 
         cache = SessionSnapshotCache(max_sessions=10)
@@ -89,6 +90,7 @@ class TestSessionSnapshot:
             "personality",
             "constitution",
             "constitution_rules",
+            "personality_traits",
         }
 
 

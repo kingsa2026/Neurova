@@ -67,11 +67,13 @@ class SessionSnapshotCache:
 
     @staticmethod
     def _read_live(agent: Any) -> Dict[str, str]:
-        """读当前身份层活值（soul/personality/constitution 三件套 + 宪法规则段）。
+        """读当前身份层活值（soul/personality/constitution 三件套 + 规则/特质段）。
 
         E2（四域审计 2026-11-18）：宪法规则 JSON（constitution_persistence）与
         `config.constitution` 字符串轨**同点冻结**——规则段在会话首轮编译进快照，
         会话内增删改规则不漂移当前 prompt，下次会话（新快照）生效。
+        E4：人格特质 JSON（personality_persistence）与 personality.md 文本轨
+        **同点冻结**，语义同上。
         """
         config = getattr(agent, "config", None)
         agent_id = getattr(config, "agent_id", None)
@@ -80,12 +82,16 @@ class SessionSnapshotCache:
         from neurova.api.endpoints.constitution_persistence import (
             compileConstitutionRulesSection,
         )
+        from neurova.api.endpoints.personality_persistence import (
+            compilePersonalityTraitsSection,
+        )
 
         return {
             "soul": str(getattr(agent, "soul", "") or ""),
             "personality": str(getattr(agent, "personality", "") or ""),
             "constitution": str(getattr(config, "constitution", None) or ""),
             "constitution_rules": compileConstitutionRulesSection(agent_id),
+            "personality_traits": compilePersonalityTraitsSection(agent_id),
         }
 
     @property
