@@ -1,7 +1,7 @@
 """
 修3（2026-09-09）：finish_reason=length 空正文的单次压缩重试防线
 
-kai 空回复事故根因：思考模型（glm-5.3-flash）× max_tokens=4096 × 3.5万 token
+kai 空回复事故根因：思考模型 × max_tokens=4096 × 3.5万 token
 prompt → 思考吃满输出预算 → finish_reason=length 且正文为空，HTTP 200 无异常，
 compact_messages_for_overflow（只认 TokenLimitExceeded）永远不触发。
 

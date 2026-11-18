@@ -1,4 +1,4 @@
-"""QwenPaw 对照批 B1：声明式停止门编译。
+"""对照批 B1：声明式停止门编译。
 
 - specs 未声明（None/[]）→ compileLoopGates 返回 None（调用方回落默认装配，
   默认行为零变化）；

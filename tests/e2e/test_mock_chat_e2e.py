@@ -17,7 +17,7 @@ import json
 
 import pytest
 
-# QwenPaw 对照批 C12：mock 档（in-process mock LLM，不依赖真后端进程）
+# 对照批 C12：mock 档（in-process mock LLM，不依赖真后端进程）
 pytestmark = pytest.mark.e2e_mock
 
 

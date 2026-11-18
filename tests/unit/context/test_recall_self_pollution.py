@@ -1,4 +1,4 @@
-"""QwenPaw 对照批 C4：recall 防自污染。
+"""对照批 C4：recall 防自污染。
 
 recall 族工具（recall_history/recall_query/recall_context_span/pool_search/
 memory_search/voice_memory_search/graph_search）自身的调用与结果条目**不参与

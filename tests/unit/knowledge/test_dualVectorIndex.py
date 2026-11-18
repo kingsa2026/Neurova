@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""C4 红灯：双向量索引（heading+content，SAG 对比候选 C4，2026-11-05）。
+"""C4 红灯：双向量索引（heading+content，对比候选 C4，2026-11-05）。
 
-对照点（SAG 对比 §2.1/§6.2）：对方每 chunk 双向量（title_vector 1.0 /
+对照点（外部对比 §2.1/§6.2）：对方每 chunk 双向量（title_vector 1.0 /
 content_vector 0.95）并行召回——标题命中的精确实体不被正文长文本稀释。
 本仓现状：单向量（embeddingText=title+content 合成文本单点）。
 

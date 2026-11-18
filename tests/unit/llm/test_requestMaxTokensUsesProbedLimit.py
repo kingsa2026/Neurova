@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """请求侧输出预算必须认持久化探测值（2026-10-22 default 会话「思考吃满正文饿死」事故）。
 
-事故读数：amd/GLM-5.3-Flash 一轮思考连发 16384 字符同质片段后 `finish_reason=length`、
+事故读数：amd 网关思考模型一轮连发 16384 字符同质片段后 `finish_reason=length`、
 正文 0 字——16384 字符恰为 4096 token × 4 字符，即**整次调用的输出预算就是
 `DEFAULT_MAX_TOKENS = 4096`**。而同一个模型早先已在模型管理里探测出 65536 并写进
 `providers.json`。两份数各管一头：探测值只进了 `clamp_max_tokens` 的**上限**口径
@@ -31,8 +31,8 @@ def _clearMirror():
 class TestRequestBudgetPrecedence:
     def testProbedLimitBecomesTheRequestedBudget(self):
         """本次事故的正面：探测到 65536 后，请求值就该是 65536 而不是 4096。"""
-        ml.set_persisted_output_limit("amd", "GLM-5.3-Flash", 65536)
-        assert ml.get_model_max_tokens("GLM-5.3-Flash", "amd") == 65536, (
+        ml.set_persisted_output_limit("amd", "sample-flash-model", 65536)
+        assert ml.get_model_max_tokens("sample-flash-model", "amd") == 65536, (
             "探测值是本机对该服务商实际验证过的输出上限，只当上限用会让请求值停在目录占位 4096"
         )
 
@@ -49,14 +49,14 @@ class TestRequestBudgetPrecedence:
 
     def testProbeDoesNotLeakAcrossProviders(self):
         """同名模型在别的服务商未被探测过，不得借用别人的探测值。"""
-        ml.set_persisted_output_limit("amd", "GLM-5.3-Flash", 65536)
-        assert ml.get_model_max_tokens("GLM-5.3-Flash", "shanghai") == ml.DEFAULT_MAX_TOKENS
+        ml.set_persisted_output_limit("amd", "sample-flash-model", 65536)
+        assert ml.get_model_max_tokens("sample-flash-model", "shanghai") == ml.DEFAULT_MAX_TOKENS
 
     def testProviderUnknownUsesProbeOnlyWhenUnambiguous(self):
         """调用点拿不到 provider（schema 面）：该模型只有一个探测值时认它，
         两个服务商给出不同值时诚实回落目录——不猜，猜就是第二个事实源。"""
-        ml.set_persisted_output_limit("amd", "GLM-5.3-Flash", 65536)
-        assert ml.get_model_max_tokens("GLM-5.3-Flash") == 65536
+        ml.set_persisted_output_limit("amd", "sample-flash-model", 65536)
+        assert ml.get_model_max_tokens("sample-flash-model") == 65536
 
         ml.set_persisted_output_limit("amd", "same-name", 65536)
         ml.set_persisted_output_limit("other", "same-name", 8192)
@@ -80,14 +80,14 @@ class TestLiveClientCarriesProbedBudget:
             provider="openai",
             base_url="https://developer.amd.com.cn/radeon/api/v1",
             api_key="sk-test",
-            models=["GLM-5.3-Flash"],
+            models=["sample-flash-model"],
         )
         return manager, provider
 
     def testClientConfigUsesProbedLimit(self):
-        ml.set_persisted_output_limit("amd", "GLM-5.3-Flash", 65536)
+        ml.set_persisted_output_limit("amd", "sample-flash-model", 65536)
         manager, provider = self._provider()
-        client = manager._create_model_client(provider, "GLM-5.3-Flash")
+        client = manager._create_model_client(provider, "sample-flash-model")
         assert client is not None, "api_key 就绪时必须建出客户端"
         assert client.client.config.max_tokens == 65536, (
             "思考模型的思考与正文共享这一个预算；装配点若不读探测值，"
@@ -96,5 +96,5 @@ class TestLiveClientCarriesProbedBudget:
 
     def testClientConfigWithoutProbeKeepsCurrentBudget(self):
         manager, provider = self._provider()
-        client = manager._create_model_client(provider, "GLM-5.3-Flash")
+        client = manager._create_model_client(provider, "sample-flash-model")
         assert client.client.config.max_tokens == ml.DEFAULT_MAX_TOKENS

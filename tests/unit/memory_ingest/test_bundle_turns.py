@@ -83,7 +83,7 @@ def test_turn_keeps_extra_from_first_record():
 
 
 def test_standalone_compact_summary_keeps_extra_payload():
-    """压缩摘要的正文在 extra 里（Codex compacted 就是这个形状），只留 role/content 就是丢它。"""
+    """压缩摘要的正文在 extra 里（外部 compacted 会话格式就是这个形状），只留 role/content 就是丢它。"""
     messages = to_turn_messages([
         _direct(1, "compact_summary", role="assistant",
                 extra={"replacement_history": [{"a": 1}]})])

@@ -43,8 +43,8 @@ class FakeProviderManager:
     def get_all_models(self):
         return [
             SimpleNamespace(
-                id="GLM-5.3-Flash",
-                name="GLM-5.3-Flash",
+                id="sample-flash-model",
+                name="sample-flash-model",
                 owned_by="amd",
                 capabilities=["text"],
                 context_window=262144,
@@ -71,14 +71,14 @@ def testProbeOutputLimitEndpointPersistsThroughManager(monkeypatch):
 
     resp = client.post(
         "/api/v1/models/probe-output-limit",
-        json={"provider_id": "amd", "model_id": "GLM-5.3-Flash", "candidate": 65536},
+        json={"provider_id": "amd", "model_id": "sample-flash-model", "candidate": 65536},
         headers=_authHeaders(),
     )
 
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["limit"] == 65536 and data["accepted"] is True
-    assert manager.calls == [("amd", "GLM-5.3-Flash", 65536)]
+    assert manager.calls == [("amd", "sample-flash-model", 65536)]
 
 
 def testUnknownProviderIs404(monkeypatch):
@@ -101,7 +101,7 @@ def testModelsListSurfacesPersistedOutputLimit(monkeypatch):
     resp = client.get("/api/v1/models")
 
     assert resp.status_code == 200
-    row = next(r for r in resp.json() if r["model_id"] == "GLM-5.3-Flash")
+    row = next(r for r in resp.json() if r["model_id"] == "sample-flash-model")
     assert row["max_output_tokens"] == 65536
     assert row["max_output_tokens_source"] == "probed_accepted"
     assert row["max_output_tokens_probed_at"]

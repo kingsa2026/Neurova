@@ -43,7 +43,7 @@ class TestRecordAndTotal:
             ts="2026-09-01T10:00:00Z",
             usage_date="2026-09-01",
             user_id="u1",
-            model="glm-5.3-flash",
+            model="sample-flash-model",
             provider="zhipu",
             prompt_tokens=100,
             completion_tokens=50,

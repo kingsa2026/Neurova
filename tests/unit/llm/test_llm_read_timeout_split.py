@@ -49,10 +49,10 @@ class TestTimeoutSplit:
             provider="openai",
             base_url="https://api.b.ai/v1",
             api_key="sk-test",
-            models=["glm-5.3-flash"],
+            models=["sample-flash-model"],
             timeout=600,
         )
-        mc = manager._create_model_client(provider, "glm-5.3-flash")
+        mc = manager._create_model_client(provider, "sample-flash-model")
         assert mc is not None, "api_key 就绪时必须建出客户端"
         assert mc.client.config.timeout == 600, "服务商级读超时覆盖生效"
         assert mc.client.config.connect_timeout == 15, "建连不随覆盖放宽"

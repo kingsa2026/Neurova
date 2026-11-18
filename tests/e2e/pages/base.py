@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""e2e page object 基类（QwenPaw 对照批 C12）。
+"""e2e page object 基类（对照批 C12）。
 
 - `shouldSkipReal`/`shouldSkipMock`：双档跳过语义（真后端档需
   `NEUROVA_E2E_REAL=1` 显式开启；mock 档恒跑）；

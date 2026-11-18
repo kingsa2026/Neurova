@@ -3,7 +3,7 @@
 断点：`agent/tool_output_ref.py` 机制完备（咽喉 maybe_output_ref 已接线、
 失败不折叠、诚实降级），装配器 `ensure_output_ref_installed_from_env` 也已实现，
 但 **全仓零调用方**——其 docstring 自称「应用启动时（app.py lifespan）调用」，
-实际 app.py 没有这一行：本仓自己的文档-代码断层（与 KWeaver 对比 §6.2 清单
+实际 app.py 没有这一行：本仓自己的文档-代码断层（与外部参照系对比 §6.2 清单
 同形态）。同时 install 与 env-installer 两处 docstring 对默认口径互相矛盾
 （「默认不安装」vs「默认开启」）——本次一并钉死口径：库级默认不自动安装；
 应用 lifespan 按 W1-4 装配默认开启，env NEUROVA_TOOL_OUTPUT_REF=0 逃生。

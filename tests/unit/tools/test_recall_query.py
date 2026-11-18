@@ -1,4 +1,4 @@
-"""QwenPaw 对照批 B3：recall_query 受限 Python 表达式查询。
+"""对照批 B3：recall_query 受限 Python 表达式查询。
 
 红灯（实现前）：schema/dispatch 无 recall_query、引擎模块不存在。
 绿灯：

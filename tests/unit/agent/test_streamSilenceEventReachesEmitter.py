@@ -25,7 +25,7 @@ from neurova.llm_client import LLMResponse
 PAYLOAD = {
     "phase": "silence",
     "provider": "amd",
-    "model": "GLM-5.3-Flash",
+    "model": "sample-flash-model",
     "silent_seconds": 180.4,
     "reasoning_chars": 16384,
     "content_chars": 0,

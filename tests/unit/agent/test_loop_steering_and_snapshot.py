@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P2（ZCode agent-loop 对照 #3/#5）：
+"""P2（agent-loop 对照 #3/#5）：
 
 - #3 取消流快照：中断前已流式产出的部分正文随失败轮落点进会话盘；
 - #5 steering 入队侧：活跃回合注册表＋submitSteer 门（回合不在跑 = 不入队，

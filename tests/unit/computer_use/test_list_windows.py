@@ -1,6 +1,6 @@
-"""P2-6（ZCode 电脑操控对照评测）：computer_list_windows 窗口枚举工具。
+"""P2-6（电脑操控对照评测）：computer_list_windows 窗口枚举工具。
 
-ZCode 有 list_windows/list_apps 应用/窗口枚举面；Neurova 此前只能靠 dom_snapshot
+参照系有 list_windows/list_apps 应用/窗口枚举面；Neurova 此前只能靠 dom_snapshot
 按标题猜窗口。补 computer_list_windows（UIA 枚举顶层窗口，只读）+
 窗口管理 docstring 诚实化（包声明里"窗口管理-模拟实现"是无实现的自述，删）。
 """

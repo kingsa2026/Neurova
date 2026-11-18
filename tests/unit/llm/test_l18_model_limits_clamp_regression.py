@@ -85,9 +85,9 @@ class TestProbedCapsAndExplicitValues:
 
     def test_probed_amd_models_keep_explicit_65536(self):
         """探针实测值走 providers.json 持久化（不再写死在静态目录）。"""
-        ml.set_persisted_output_limit("amd", "GLM-5.3-Flash", 65536)
+        ml.set_persisted_output_limit("amd", "sample-flash-model", 65536)
         ml.set_persisted_output_limit("amd", "DeepSeek-V4-Flash-Vision-Exp", 65536)
-        assert ml.clamp_max_tokens(65536, "GLM-5.3-Flash", "amd") == 65536
+        assert ml.clamp_max_tokens(65536, "sample-flash-model", "amd") == 65536
         assert ml.clamp_max_tokens(65536, "DeepSeek-V4-Flash-Vision-Exp", "amd") == 65536
 
     def test_unknown_model_explicit_value_not_silently_capped_to_default(self):

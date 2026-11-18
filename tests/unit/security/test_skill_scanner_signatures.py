@@ -1,6 +1,6 @@
-"""QwenPaw 对照批 A2：技能扫描签名库八类覆盖补齐的红灯。
+"""对照批 A2：技能扫描签名库八类覆盖补齐的红灯。
 
-对照（2026-11-18 逐文件核实）：QwenPaw 42 条签名覆盖八类（prompt_injection/
+对照（2026-11-18 逐文件核实）：参照系 42 条签名覆盖八类（prompt_injection/
 command_injection/data_exfiltration/hardcoded_secrets/obfuscation/social_engineering/
 supply_chain/unauthorized_tool_use），本仓 `security/skill_scanner.py` 在 P1-6 已做
 中英双语注入签名，但四类仍缺：

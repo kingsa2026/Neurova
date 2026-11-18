@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""QwenPaw 对照批 C2：Anthropic 环的 retry_status/reset 契约。
+"""对照批 C2：Anthropic 环的 retry_status/reset 契约。
 
 multi_model_client.chat_stream 在流内 429/切换时产出 ``{"retry_status": ...}``
 dict；reset=True 表示"半截回复作废，清空后重来"。OpenAI 环已接线

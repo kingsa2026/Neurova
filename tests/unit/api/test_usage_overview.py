@@ -23,7 +23,7 @@ def _clean_history():
     reset_usage_history()
 
 
-def _record(user_id: str, days_ago: int, tokens: int, model: str = "glm-5.3-flash", calls: int = 1):
+def _record(user_id: str, days_ago: int, tokens: int, model: str = "sample-flash-model", calls: int = 1):
     """按相对今天的天数落盘 usage_history（days_ago=0 今天，1 昨天…）。"""
     d = date.today() - timedelta(days=days_ago)
     store = get_usage_history()
@@ -101,12 +101,12 @@ class TestContract:
         assert res["heatmap"][-1]["date"] == today  # 窗口以今天收尾，连续
 
         keyed = {(t["date"], t["model"]): t["tokens"] for t in res["trends"]}
-        assert keyed[(today, "glm-5.3-flash")] == 100
+        assert keyed[(today, "sample-flash-model")] == 100
         assert keyed[(today, "deepseek-v4")] == 50
-        assert keyed[(yesterday, "glm-5.3-flash")] == 30
+        assert keyed[(yesterday, "sample-flash-model")] == 30
 
         by_model = {m["model"]: m for m in res["by_model"]}
-        assert by_model["glm-5.3-flash"]["tokens"] == 130
+        assert by_model["sample-flash-model"]["tokens"] == 130
         assert by_model["deepseek-v4"]["tokens"] == 50
 
 

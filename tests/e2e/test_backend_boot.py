@@ -29,7 +29,7 @@ from tests.e2e.pages.boot_page import BootPage
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_PORT = 9527
 
-# QwenPaw 对照批 C12：真后端档标记（NEUROVA_E2E_REAL=1 才跑，否则诚实跳过）
+# 对照批 C12：真后端档标记（NEUROVA_E2E_REAL=1 才跑，否则诚实跳过）
 pytestmark = pytest.mark.e2e_real
 
 #: 后端就绪等待与关停收尸的预算唯一出处（§6-402 批 K 口径：父墙由它 ＋余量导出）。

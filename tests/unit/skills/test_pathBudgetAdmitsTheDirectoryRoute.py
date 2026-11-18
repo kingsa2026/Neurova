@@ -31,16 +31,16 @@ REPO = Path(__file__).resolve().parents[3]
 SKILL_SERVICE = REPO / "neurova" / "skills" / "skill_service.py"
 
 #: 深成员相对路径：目录名堆到一定长度就够越界，不必依赖本机绝对根长
-DEEP_MEMBER = "assets/builtin_templates/codex-grid-layout-library/artifact-tool-compose/run.sh"
+DEEP_MEMBER = "assets/builtin_templates/grid-layout-component-library/artifact-tool-compose/run.sh"
 
 
 def _srcWithDeepMember(base: Path, skill_id: str) -> Path:
     src = base / skill_id
-    (src / "assets" / "builtin_templates" / "codex-grid-layout-library"
+    (src / "assets" / "builtin_templates" / "grid-layout-component-library"
         / "artifact-tool-compose").mkdir(parents=True, exist_ok=True)
     (src / "manifest.json").write_text(
         json.dumps({"id": skill_id, "name": skill_id, "version": "1.0.0"}), encoding="utf-8")
-    (src / "assets" / "builtin_templates" / "codex-grid-layout-library"
+    (src / "assets" / "builtin_templates" / "grid-layout-component-library"
         / "artifact-tool-compose" / "run.sh").write_text("echo ok\n", encoding="utf-8")
     return src
 

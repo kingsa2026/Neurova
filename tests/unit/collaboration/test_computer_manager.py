@@ -183,7 +183,7 @@ class TestBYOAPairing:
             computer_id=comp.computer_id,
             pair_token="secret_token_123",
             host_name="MacBook-Pro.local",
-            available_engines=["claude", "codex"],
+            available_engines=["claude", "sample-engine"],
             daemon_version="0.1.0",
             supervised=True,
         )

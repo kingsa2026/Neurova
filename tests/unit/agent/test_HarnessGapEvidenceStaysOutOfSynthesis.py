@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""环节轴并进 `capability_gap` 单源，且两族用途不许混（ModularRSI 对照 §7.1-Q4 甲案）。
+"""环节轴并进 `capability_gap` 单源，且两族用途不许混（外部对照 §7.1-Q4 甲案）。
 
 ## 为什么扩这一族
 

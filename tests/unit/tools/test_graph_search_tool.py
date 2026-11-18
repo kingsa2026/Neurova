@@ -4,7 +4,7 @@
 schema/dispatch 全量对账由既有守卫（test_builtin_tools_expansion、
 test_tool_schema_contract）承担；本文件钉 graph_search 自己的行为面：
 三种 mode 的路由、参数校验、只读能力声明、失败诚实透传。
-（graphiti 对照批 C4，docs/08-research/graphiti_vs_neurova_*）
+（对照批 C4，docs/08-research/reference_i_vs_neurova_temporal_kg_memory_comparison_2026-11-13.md）
 """
 
 from unittest.mock import Mock

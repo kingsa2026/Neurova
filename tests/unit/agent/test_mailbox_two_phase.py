@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""H-1 邮箱两阶段确认单元测试（CoworkOS 对照评测改进项）。
+"""H-1 邮箱两阶段确认单元测试（对照评测改进项）。
 
-语义（对齐 CoworkOS "Queuing is not acknowledgement"）：
+语义（对齐参照系 "Queuing is not acknowledgement"）：
 - lease：把待投递消息以 {id, message} 形式交给消费方，并标记 leased——
   同会话再次 lease 仍能取到未 ack 的消息（至少一次投递，防"排空后落盘前
   崩溃丢信"）；
@@ -97,7 +97,7 @@ class TestLeaseAck:
 
 
 class TestReliabilitySemantics:
-    """S2 邮箱可靠性语义补全（CoworkOS 对照 C1/C3）。
+    """S2 邮箱可靠性语义补全（对照 C1/C3）。
 
     - 幂等：同 messageId 重复投递只生效一次；重复 ack 不重复计数；
     - 优先级：lease 按优先级降序（urgent > high > normal）、同级按时间升序；

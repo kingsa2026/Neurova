@@ -1,7 +1,7 @@
 """权限模式语义化（P1-4）：plan/build/edit/yolo/guarded（+auto 预留）。
 
 - inheritPermissionMode：限制型父模式（plan/guarded）对子代理**只收窄不升级**——
-  guarded 父把子代理 yolo 压回 guarded（ZCode 同款判据），plan 父同理；
+  guarded 父把子代理 yolo 压回 guarded（参照系同款判据），plan 父同理；
 - 解析优先级：继承上下文 > 治理设置 per-agent 覆写 > 默认 build；
 - 模式落到治理裁决：yolo 把 ASK 放行（DENY/SANDBOX 不动）、edit 只对工作区
   文件编辑三工具放行 ASK、plan 把非只读工具的 ALLOW 收成 ASK、auto 诚实按 build；

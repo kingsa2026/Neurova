@@ -1,4 +1,4 @@
-"""QwenPaw 对照批 A1：渠道子进程隔离 + 握手期依赖审计。
+"""对照批 A1：渠道子进程隔离 + 握手期依赖审计。
 
 红灯（实现前）：channels/ 下不存在 runner_spec/runner_protocol/runner_main/
 runner_bridge——"渠道以独立子进程运行、握手核对依赖与源码版本"能力缺位。

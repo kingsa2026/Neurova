@@ -23,9 +23,9 @@ def _clearMirror():
 
 class TestPersistedPrecedence:
     def testPersistedLimitOverridesStaticAndCapsExplicit(self):
-        ml.set_persisted_output_limit("amd", "GLM-5.3-Flash", 65536)
-        assert ml.clamp_max_tokens(65536, "GLM-5.3-Flash", "amd") == 65536
-        assert ml.clamp_max_tokens(100000, "GLM-5.3-Flash", "amd") == 65536, (
+        ml.set_persisted_output_limit("amd", "sample-flash-model", 65536)
+        assert ml.clamp_max_tokens(65536, "sample-flash-model", "amd") == 65536
+        assert ml.clamp_max_tokens(100000, "sample-flash-model", "amd") == 65536, (
             "持久化探测值是本机验证过的上限，必须优先于静态目录/显式大值"
         )
 
@@ -37,8 +37,8 @@ class TestPersistedPrecedence:
         )
 
     def testNoneStillUsesDefault(self):
-        ml.set_persisted_output_limit("amd", "GLM-5.3-Flash", 32768)
-        assert ml.clamp_max_tokens(None, "GLM-5.3-Flash", "amd") == ml.DEFAULT_MAX_TOKENS
+        ml.set_persisted_output_limit("amd", "sample-flash-model", 32768)
+        assert ml.clamp_max_tokens(None, "sample-flash-model", "amd") == ml.DEFAULT_MAX_TOKENS
 
 
 class TestProviderPersistence:

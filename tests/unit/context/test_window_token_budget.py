@@ -126,7 +126,7 @@ class TestWindowTokenBudget:
     @pytest.mark.asyncio
     async def test_budget_defaults_from_model_metadata(self):
         """未显式指定预算时：从 get_token_budget_for_model 解析（不崩溃）。"""
-        orch = self._mk_orchestrator(model="glm-5.3-flash")
+        orch = self._mk_orchestrator(model="sample-flash-model")
         # _window_token_budget 未设置 → 应有解析出的默认值且为正
         assert orch._resolve_window_token_budget() > 0
 

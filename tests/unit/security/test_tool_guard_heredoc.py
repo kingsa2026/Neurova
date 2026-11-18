@@ -1,6 +1,6 @@
-"""QwenPaw 对照批 B8：heredoc 逃逸检测红灯。
+"""对照批 B8：heredoc 逃逸检测红灯。
 
-QwenPaw ShellEvasionGuardian 含 heredoc 逃逸检测；本仓 `tool_guard.py` 的
+参照系 ShellEvasionGuardian 含 heredoc 逃逸检测；本仓 `tool_guard.py` 的
 逃逸模式表逐字相等面里没有「shell 接 heredoc」形态——命令体藏在 heredoc
 里、由 `sh <<EOF` 执行时，体里的每行若不自带 `| sh`/危险函数名就漏检。
 

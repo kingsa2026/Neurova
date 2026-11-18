@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """H 批补差：父侧叫停（cancel_subagent）与运行中改需求（continue_subagent 放宽）。
 
-对照 deepagents 异步子代理五工具的两个缺口：
+对照参照系异步子代理五工具的两个缺口：
 - 叫停：cancelRun 对运行中 run 取消其 asyncio 任务（CancelledError 路径既有
   落账/释放槽位/部分报告交接应照常工作）；对 blocked 等待件直接判失败落账
   （不再因依赖结算而启动）；对已终态/未知 id 幂等失败。

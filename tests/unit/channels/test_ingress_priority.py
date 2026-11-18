@@ -1,4 +1,4 @@
-"""QwenPaw 对照批 B9：渠道入站队列优先级。
+"""对照批 B9：渠道入站队列优先级。
 
 现网 `ChannelIngressQueue.claim` 严格按 id FIFO——审批/人工高优消息与
 普通消息同队排队。本批：入站行加 priority 列（v2 迁移，存量库自动补列），
@@ -6,7 +6,7 @@ claim 按 `priority DESC, id ASC`；消息 metadata.priority 作为默认优先�
 （渠道适配器侧发审批/人工消息时自带，无需改调用方）。
 
 群聊拆批不再立项：会话键单源 `resolve_session_scope_id` 已按
-share_session_in_group 裁决群共享/按发送者隔离（同 QwenPaw ACL 拆批语义）。
+share_session_in_group 裁决群共享/按发送者隔离（同参照系 ACL 拆批语义）。
 """
 
 import sqlite3

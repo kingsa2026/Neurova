@@ -1,6 +1,6 @@
 """HN2/HC2 可执行测试判据层 —— 红灯测试。
 
-HarnessPro 对照（2026-11-13）断点 HN2：合成评测停在 rubric 文本，判分靠
+外部对照（2026-11-13）断点 HN2：合成评测停在 rubric 文本，判分靠
 LLM judge——没有可执行断言套件。本文件钉五件事：
 
 1. 断言引擎：七种 op（contains/not_contains/equals/regex/non_empty/

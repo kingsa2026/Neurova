@@ -1,6 +1,6 @@
-"""QwenPaw 对照批 B5：File Guard 凭据后缀清单对齐。
+"""对照批 B5：File Guard 凭据后缀清单对齐。
 
-QwenPaw FilePathGuardian 的凭据面含 .pem/.key/.ppk/.p12/.kdbx 等**后缀**；
+参照系 FilePathGuardian 的凭据面含 .pem/.key/.ppk/.p12/.kdbx 等**后缀**；
 本仓 `_SENSITIVE_FILES` 只按精确文件名/stem 判——`keys/server.pem`、
 `backups/db.kdbx` 这类「正当目录下的凭据后缀文件」现网不拦（红灯）。
 

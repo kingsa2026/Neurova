@@ -1,6 +1,6 @@
-"""P2-7（ZCode 电脑操控对照评测）：computer_key / computer_paste / computer_drag。
+"""P2-7（电脑操控对照评测）：computer_key / computer_paste / computer_drag。
 
-对齐 ZCode CUA 的 key（组合键+repeat）/ paste（剪贴板写入+粘贴）/ left_click_drag
+对齐参照系 CUA 的 key（组合键+repeat）/ paste（剪贴板写入+粘贴）/ left_click_drag
 三动词——Neurova 桌面面此前缺组合键、剪贴板与拖拽。
 """
 

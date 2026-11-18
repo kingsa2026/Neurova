@@ -1,4 +1,4 @@
-"""P1-3（ZCode 电脑操控对照评测）：ref 路径的 route 自报必须进封闭词表。
+"""P1-3（电脑操控对照评测）：ref 路径的 route 自报必须进封闭词表。
 
 browser_manager 的 click_ref/fill_ref 自报 `route="playwright_ref"`
 （browser_manager.py 的 ref 动作成功分支），但 `action_result.ROUTES` 没有这个名字

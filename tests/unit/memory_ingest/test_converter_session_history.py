@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""QwenPaw 会话族转换器：只产包、不写库。
+"""会话族转换器：只产包、不写库。
 
 现脚本对 conversation_history 是字段级有损的（实测 15 列只 SELECT 9 列），本转换器的验收
 标准是把 headline / tool_state / agent_id / tool_input / metadata 补回；凡是契约与 extra

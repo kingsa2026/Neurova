@@ -1,4 +1,4 @@
-"""QwenPaw 对照批 B11：技能 manifest 渠道限定 + 环境依赖过滤。
+"""对照批 B11：技能 manifest 渠道限定 + 环境依赖过滤。
 
 - manifest 渠道限定：config.channels 非空时，本轮渠道（turn_context 盖章）
   不在名单 → 本轮不注入；渠道未盖章时不过滤（既有行为零变化）。

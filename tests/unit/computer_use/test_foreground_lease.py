@@ -1,6 +1,6 @@
-"""P2-5（ZCode 电脑操控对照评测）：跨会话前台输入互斥（controller_busy）。
+"""P2-5（电脑操控对照评测）：跨会话前台输入互斥（controller_busy）。
 
-对齐 ZCode CONTROLLER_BUSY：鼠标/键盘是全局单例，另一会话正持前台输入时，
+对齐参照系 CONTROLLER_BUSY：鼠标/键盘是全局单例，另一会话正持前台输入时，
 第二会话的前台桌面动作必须被拒（retry=never），不得并发互踩。
 """
 

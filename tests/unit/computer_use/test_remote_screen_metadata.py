@@ -1,4 +1,4 @@
-"""P3-9（ZCode 电脑操控对照评测）：远程会话 screen_metadata 补齐。
+"""P3-9（电脑操控对照评测）：远程会话 screen_metadata 补齐。
 
 RemoteComputerUseManager.screen_metadata() 此前恒返 None → 远程坐标链退化为
 恒等（RDP 150% 缩放下 LLM 截图像素坐标直接当屏幕坐标用，点击错位）。补齐：

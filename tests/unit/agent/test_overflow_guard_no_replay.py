@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""QwenPaw 对照批 C3：管线级溢出兜底的"不重放有效输出"约束。
+"""对照批 C3：管线级溢出兜底的"不重放有效输出"约束。
 
 loop 层已有 gotContent 门（openai_loop._resumeAfterOverflow：已产出即不
 续跑）；但溢出逃逸到管线后，`_callAgentLoopWithOverflowGuard` 会压缩并

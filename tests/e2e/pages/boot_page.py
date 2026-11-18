@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""后端 boot 冒烟的 page object（QwenPaw 对照批 C12）。
+"""后端 boot 冒烟的 page object（对照批 C12）。
 
 把 `test_backend_boot.py` 的探活/文档面断言收成可复用封装：
 - `waitHealth`：轮询 /health 直到 200（预算内）；

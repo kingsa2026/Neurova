@@ -3,7 +3,7 @@
 
 提供E2E测试所需的fixtures和基础设施
 
-QwenPaw 对照批 C12：双档 marker——
+对照批 C12：双档 marker——
 - `e2e_mock`：in-process mock LLM 档（不依赖真后端进程，恒跑）；
 - `e2e_real`：真后端子进程档（`NEUROVA_E2E_REAL=1` 才跑，否则诚实跳过）。
 页面对象封装见 `tests/e2e/pages/`。

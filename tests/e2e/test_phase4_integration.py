@@ -6,7 +6,7 @@ Neurova Style: Follows existing testing patterns (pytest, asyncio, fixtures)
 
 import pytest
 
-# QwenPaw 对照批 C12：真后端档（NEUROVA_E2E_REAL=1 才跑）
+# 对照批 C12：真后端档（NEUROVA_E2E_REAL=1 才跑）
 pytestmark = pytest.mark.e2e_real
 
 

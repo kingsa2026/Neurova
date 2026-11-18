@@ -1,6 +1,6 @@
-"""QwenPaw 对照批 B4：token 保证金（溢出拒收自适应抬高估算基线）。
+"""对照批 B4：token 保证金（溢出拒收自适应抬高估算基线）。
 
-QwenPaw 语义：provider 溢出拒收后**永久抬高**该模型的 token 估算基线，
+参照系语义：provider 溢出拒收后**永久抬高**该模型的 token 估算基线，
 防止同一模型被反复撞溢出（scroll/manager.py 的"拒收保证金"）。本仓
 token_estimator 是纯静态估算、无模型维度——红灯钉：
 

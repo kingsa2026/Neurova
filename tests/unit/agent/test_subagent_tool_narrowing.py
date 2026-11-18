@@ -208,9 +208,9 @@ class TestMcpBorrow:
 
 
 class TestSubagentForegroundDesktopPolicy:
-    """P2-4（ZCode 电脑操控对照评测）：子代理不得注入前台输入。
+    """P2-4（电脑操控对照评测）：子代理不得注入前台输入。
 
-    对齐 ZCode「CUA 仅主代理」：多个代理并发抢真实鼠标/键盘 = 互踩用户桌面。
+    对齐参照系「CUA 仅主代理」：多个代理并发抢真实鼠标/键盘 = 互踩用户桌面。
     子代理保留观察面（截图/快照/窗口枚举）与命令面（shell/ssh），剔除
     前台输入注入族。成员单源在 computer_use.foregroundDesktopTools()。
     """

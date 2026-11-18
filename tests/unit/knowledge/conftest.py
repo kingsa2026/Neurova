@@ -13,7 +13,7 @@ startup 经 `set_app_state` 把运行时对象（含 `agents`）写进
 
 - `test_ingest_endpoint::test_import_sync_default_unchanged`——导入路由因此去取
   `get_knowledge_repository()`，撞上 pytest 存储围栏 ⇒ 500；
-- `test_rerank_refine_weknora::TestAPIWiring::{test_default_off_preserves_contract,
+- `test_rerank_refine::TestAPIWiring::{test_default_off_preserves_contract,
   test_top_k_applied}`——检索改走真 agent 那条空数据面 ⇒ `results` 为空。
 
 复原（而不是无条件置 None）：用例若自己铺了注册表，不该被别人的夹具抹掉。

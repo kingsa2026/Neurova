@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""C2 红灯：更新后 facts 重抽＋异步摄取抽取补偿（SAG 对比候选 C2，2026-11-05）。
+"""C2 红灯：更新后 facts 重抽＋异步摄取抽取补偿（对比候选 C2，2026-11-05）。
 
-断点（SAG 对比 §4）：抽取只在同步导入与手动 backfill 触发——
+断点（外部对比 §4）：抽取只在同步导入与手动 backfill 触发——
 ① update_knowledge API 更新正文后不重抽，旧 facts 与新正文漂移只能靠
    drift 读数被动发现；
 ② 异步摄取路径恒 `skipped_async`（ingest_worker docstring 自认）。

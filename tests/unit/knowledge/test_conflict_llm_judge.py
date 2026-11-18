@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""C2（graphiti 对照批）：冲突裁决 LLM 参考意见——prompt/解析/编排纯函数面。
+"""C2（对照批）：冲突裁决 LLM 参考意见——prompt/解析/编排纯函数面。
 
 纪律：意见只读辅助，不落账不改状态；解析不合法/winner 越权一律 ValueError。
 """

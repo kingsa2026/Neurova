@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""C6（graphiti 对照批）：记忆行 fact 级有效期（valid_from/valid_until）。
+"""C6（对照批）：记忆行 fact 级有效期（valid_from/valid_until）。
 
 语义与 knowledge_facts/temporal_facts 的判活口径同源：生效窗口外不进
 检索召回；两字段缺省 NULL＝永远有效，旧行为零变化。判活谓词单点在

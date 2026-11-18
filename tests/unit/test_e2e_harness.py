@@ -1,4 +1,4 @@
-"""QwenPaw 对照批 C12：e2e 双档 marker + page object 骨架。
+"""对照批 C12：e2e 双档 marker + page object 骨架。
 
 红灯（实现前）：tests/e2e/pages/ 不存在、conftest 无 e2e_mock/e2e_real
 marker 注册、tests/e2e/_e2e.py 临时脚本未退役。

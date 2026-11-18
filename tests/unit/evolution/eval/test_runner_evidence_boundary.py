@@ -1,6 +1,6 @@
 """P2-3 验证器证据边界 — judge 输入契约钉死(2026-10-06)。
 
-外部对比(RSIAgent)的映射:其 Verifier 只拿"经哈希校验的产物视图
+外部对比(参照系)的映射:其 Verifier 只拿"经哈希校验的产物视图
 (program/trace/look),不见 Actor 的自我叙述"。Neurova 文本进化臂的对应
 边界在 runner↔judge 的输入契约:judge 只收
 (task_input, expected_behavior, output, skill_text, artifact_size, max_size)

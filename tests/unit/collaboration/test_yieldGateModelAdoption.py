@@ -2,7 +2,7 @@
 """A：客户端选型入口换模型是「采纳」，不是漂移；非客户端入口仍判漂移。
 
 事故形态（2026-10-21 `run_18b59bcd7f944345`）：第一轮 429 失败时闸已把 kai 钉在
-`DeepSeek-V4-Flash-Vision-Exp`；用户切到 `GLM-5.3-Flash` 重发，被
+`DeepSeek-V4-Flash-Vision-Exp`；用户切到另一款思考模型重发，被
 `model_pin_violation` 一次判挂起；续跑复用原载荷，7 次全撞同一 pin。
 
 边界：

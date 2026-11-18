@@ -1,4 +1,4 @@
-"""增强项②③（ZCode 电脑操控对照评测收尾）：
+"""增强项②③（电脑操控对照评测收尾）：
 
 ② 门控拒绝（前台互斥 controller_busy / 运行档 sandbox_session_required /
 审核 permission_required）也广播 computer_action——分屏面板看得见"为什么没动"，
