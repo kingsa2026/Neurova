@@ -1598,39 +1598,6 @@ async def get_console_tool_result(
     return {"code": 0, "message": "success", "data": entry}
 
 
-class MemoryMdUpdate(BaseModel):
-    agent_id: str = "default"
-    content: str = ""
-
-
-@router.get("/memory_md")
-async def get_console_memory_md(
-    request: Request,
-    agent_id: str = Query(default="default"),
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """人机共编长期记忆 MEMORY.md 的读面（QwenPaw 对照批 B2）。"""
-    requireAgentOwner(agent_id or "default", current_user, action="读取共编记忆")
-    from neurova.memory.memory_md import readMemoryMd
-
-    return {"code": 0, "message": "success",
-            "data": {"agent_id": agent_id or "default", "content": readMemoryMd(agent_id or "default")}}
-
-
-@router.put("/memory_md")
-async def update_console_memory_md(
-    body: MemoryMdUpdate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """人机共编长期记忆 MEMORY.md 的写面（用户直接编辑；蒸馏回写走后续批次）。"""
-    requireAgentOwner(body.agent_id or "default", current_user, action="编辑共编记忆")
-    from neurova.memory.memory_md import writeMemoryMd
-
-    content = writeMemoryMd(body.agent_id or "default", body.content)
-    return {"code": 0, "message": "success",
-            "data": {"agent_id": body.agent_id or "default", "content": content}}
-
-
 @router.get("/chat/subagents/{subagent_id}/events")
 async def get_console_subagent_events(
     subagent_id: str,
