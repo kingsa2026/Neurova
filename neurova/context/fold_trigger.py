@@ -50,6 +50,8 @@ REASON_INSUFFICIENT_GROWTH = "insufficient_growth"
 REASON_INSUFFICIENT_MASS = "insufficient_mass"
 #: SC-2 卡住抑制的归因：增长门想折、被卡住信号改判不折（诚实归因，不谎报"门没触发"）。
 REASON_STUCK_SUPPRESSED = "stuck_suppressed"
+#: SC-4 基准臂1：固定间隔触发的归因（封闭集合新成员，读数面按此归因）。
+REASON_FIXED_INTERVAL = "fixed_interval"
 
 #: SC-2：工具失败率阈值（失败率 = 1 - 成功率，**严格大于**该值判卡住）。
 STUCK_FAILURE_RATE_THRESHOLD = 0.5
@@ -127,6 +129,20 @@ def growthFloorTokens(budget_tokens: int) -> int:
     )
 
 
+def fixedIntervalMsgs() -> int:
+    """SC-4 基准臂1：固定间隔触发（env `NEUROVA_FOLD_FIXED_INTERVAL_MSGS`）。
+
+    >0 时每积累 K 条未折消息即主动折叠（不看占用下限与增量门槛）——四臂
+    基准的固定间隔臂。默认 0 = 关闭（生产行为零变化）；与增长门配合时
+    间隔到期优先判定（预算击穿仍在更前，安全线不受主动政策管辖）。
+    """
+    try:
+        value = int(os.environ.get("NEUROVA_FOLD_FIXED_INTERVAL_MSGS", "0"))
+    except (TypeError, ValueError):
+        value = 0
+    return max(0, value)
+
+
 def decideFoldTrigger(
     *,
     total_tokens: int,
@@ -141,11 +157,12 @@ def decideFoldTrigger(
     """判一轮该不该折叠（B5）。次序：
 
     1. 预算击穿 ⇒ 直接折（安全线，不受门管辖）；
-    2. 门未开 ⇒ 不折（行为与改前逐字一致：只有击穿才折）；
-    3. 占用 < 下限 ⇒ 不折（省 token 不省到影响质量为止——压缩按需不按比例）；
-    4. 增量不足（token 与条数双门槛）⇒ 不折（增量太小，摘要不划算且打断任务）；
-    5. 可折质量不足（去掉 keep_min 后没有可折对象）⇒ 不折；
-    6. 其余 ⇒ 增长门触发折叠。
+    2. 固定间隔到期（SC-4 基准臂，默认关）⇒ 折（可折质量不足则不折）；
+    3. 门未开 ⇒ 不折（行为与改前逐字一致：只有击穿才折）；
+    4. 占用 < 下限 ⇒ 不折（省 token 不省到影响质量为止——压缩按需不按比例）；
+    5. 增量不足（token 与条数双门槛）⇒ 不折（增量太小，摘要不划算且打断任务）；
+    6. 可折质量不足（去掉 keep_min 后没有可折对象）⇒ 不折；
+    7. 其余 ⇒ 增长门触发折叠。
     """
     total_tokens = max(0, int(total_tokens))
     budget_tokens = max(1, int(budget_tokens))
@@ -163,6 +180,14 @@ def decideFoldTrigger(
 
     if total_tokens > budget_tokens:
         return FoldTriggerDecision(True, REASON_BUDGET_BREACH, occupancy, growth_tokens, growth_msgs)
+
+    # SC-4 基准臂1：固定间隔触发（默认 0=关闭，生产行为零变化）。放在门判定
+    # 之前——臂1 在增长门关闭时也要按间隔折叠；可折质量不足同样不折。
+    intervalMsgs = fixedIntervalMsgs()
+    if intervalMsgs > 0 and growth_msgs >= intervalMsgs:
+        if max(0, int(foldable_msgs)) < max(0, int(keep_min_messages)):
+            return FoldTriggerDecision(False, REASON_INSUFFICIENT_MASS, occupancy, growth_tokens, growth_msgs)
+        return FoldTriggerDecision(True, REASON_FIXED_INTERVAL, occupancy, growth_tokens, growth_msgs)
 
     if enabled is None:
         enabled = growthGateEnabled()

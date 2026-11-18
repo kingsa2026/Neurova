@@ -1,0 +1,125 @@
+{
+  "benchmark": "SC-4 四臂折叠时机基准（固定间隔 / 增长门 / 增长门+相位抑制 / 增长门+前移触发）",
+  "run_command": ".venv/Scripts/python.exe -m pytest tests/performance/test_fold_trigger_four_arm_sc4.py -q -s",
+  "meta": {
+    "rounds": 24,
+    "budget_tokens": 6000,
+    "fixed_interval_msgs": 12,
+    "recall_window_turns": "50",
+    "recall_query": "事实F0 项目0 截止日期",
+    "turn_input": "今天天气如何",
+    "note": "激进臂（臂4）为实验臂，读数只描述不据此改默认配置（转正须另行拍板）。"
+  },
+  "arms": {
+    "arm1_fixed_interval": {
+      "session": "sess-sc4-arm1",
+      "peak_view_tokens": 5243,
+      "mean_view_tokens": 3535,
+      "fold_count": 3,
+      "folds_by_reason": {
+        "fixed_interval": 2,
+        "budget_breach": 1
+      },
+      "first_fold_turn": 12,
+      "fold_turns": [
+        12,
+        24,
+        41
+      ],
+      "fixed_interval_turns": [
+        12,
+        24
+      ],
+      "mid_truncations": 1,
+      "overflow_turns_raw": 8,
+      "view_overflow_turns": 0,
+      "fold_recall_rate": 0.7419,
+      "fold_recall_denominator": 31,
+      "fold_recall_numerator": 23,
+      "phase_hits": 0,
+      "summary_calls": 3,
+      "recoverable_retention": 1.0,
+      "view_retention": 0.9583
+    },
+    "arm2_growth_gate": {
+      "session": "sess-sc4-arm2",
+      "peak_view_tokens": 5247,
+      "mean_view_tokens": 3549,
+      "fold_count": 2,
+      "folds_by_reason": {
+        "growth_gate": 1,
+        "budget_breach": 1
+      },
+      "first_fold_turn": 17,
+      "fold_turns": [
+        17,
+        37
+      ],
+      "fixed_interval_turns": [],
+      "mid_truncations": 1,
+      "overflow_turns_raw": 8,
+      "view_overflow_turns": 0,
+      "fold_recall_rate": 0.84,
+      "fold_recall_denominator": 25,
+      "fold_recall_numerator": 21,
+      "phase_hits": 0,
+      "summary_calls": 2,
+      "recoverable_retention": 1.0,
+      "view_retention": 0.9583
+    },
+    "arm3_growth_gate_phase": {
+      "session": "sess-sc4-arm3",
+      "peak_view_tokens": 5197,
+      "mean_view_tokens": 3597,
+      "fold_count": 3,
+      "folds_by_reason": {
+        "growth_gate": 1,
+        "budget_breach": 2
+      },
+      "first_fold_turn": 17,
+      "fold_turns": [
+        17,
+        35,
+        47
+      ],
+      "fixed_interval_turns": [],
+      "mid_truncations": 2,
+      "overflow_turns_raw": 8,
+      "view_overflow_turns": 0,
+      "fold_recall_rate": 0.973,
+      "fold_recall_denominator": 37,
+      "fold_recall_numerator": 36,
+      "phase_hits": 1,
+      "summary_calls": 3,
+      "recoverable_retention": 1.0,
+      "view_retention": 0.8333
+    },
+    "arm4_growth_gate_early": {
+      "session": "sess-sc4-arm4",
+      "peak_view_tokens": 5142,
+      "mean_view_tokens": 3621,
+      "fold_count": 3,
+      "folds_by_reason": {
+        "growth_gate": 1,
+        "budget_breach": 2
+      },
+      "first_fold_turn": 12,
+      "fold_turns": [
+        12,
+        33,
+        45
+      ],
+      "fixed_interval_turns": [],
+      "mid_truncations": 2,
+      "overflow_turns_raw": 8,
+      "view_overflow_turns": 0,
+      "fold_recall_rate": 0.8857,
+      "fold_recall_denominator": 35,
+      "fold_recall_numerator": 31,
+      "phase_hits": 0,
+      "summary_calls": 3,
+      "recoverable_retention": 1.0,
+      "view_retention": 0.875
+    }
+  }
+}

@@ -165,10 +165,12 @@ def recordFoldIntervals(
     *,
     foldSeq: Optional[int] = None,
     turn: Optional[int] = None,
+    reason: Optional[str] = None,
 ) -> None:
     """折叠侧记账：一次折叠提交所覆盖的区间指纹集（covers hash）。
 
-    `turn` 缺省取当前回合序；`foldSeq` 为折叠代际（可解释性用）。
+    `turn` 缺省取当前回合序；`foldSeq` 为折叠代际；`reason` 为触发归因
+    （fold_trigger 封闭原因集，SC-4 基准按因归并读数用）。
     空 hashes 不记账（防抖/零覆盖轮不留空事件）。
     """
     key = str(sessionKey or _FOLD_RECALL_DEFAULT_SCOPE)
@@ -178,7 +180,7 @@ def recordFoldIntervals(
     with _foldRecallLock:
         resolvedTurn = int(currentContextTurn(key)) if turn is None else int(turn)
         _foldEvents.setdefault(key, []).append(
-            {"turn": resolvedTurn, "foldSeq": foldSeq, "hashes": cleaned}
+            {"turn": resolvedTurn, "foldSeq": foldSeq, "hashes": cleaned, "reason": reason}
         )
         events = _foldEvents[key]
         if len(events) > _MAX_FOLD_EVENTS_PER_SESSION:
@@ -228,8 +230,10 @@ def _aggregateFoldRecall(
     """聚合判据（纯函数，单源）：分子/分母/逐事件明细。
 
     - 分母 = 去重后被折叠区间 hash 数（事件 ∪ 重放恢复）；
-    - 分子 = 其中在折叠后第 1..N 轮内被召回的区间数
-      （折叠**当轮**命中不计：ht <= ft 排除——当轮防召回由
+    - 分子 = 其中在折叠后第 1..N 轮内**存在命中**的区间数（按"是否存在
+      窗内命中"判定，不取最早命中——折叠前区间尚在窗口内时抽屉也会选中
+      它并记账，那类折叠前命中不得永久掩盖折叠后真实发生的召回）；
+      折叠**当轮**命中不计（ht <= ft 排除——当轮防召回由
       `_last_folded_hashes` 在视图层管辖，这里口径一致）；
     - 重放恢复的折叠回合未知记 0：重启后第 t 轮命中即 Δt=t，t<=N 计入
       （尽力而为的近似，不谎报精确）。
@@ -243,21 +247,16 @@ def _aggregateFoldRecall(
     for h in restored or set():
         if h and h not in foldTurnByHash:
             foldTurnByHash[h] = 0
-    hitTurnByHash: Dict[str, int] = {}
+    hitsByHash: Dict[str, List[int]] = {}
     for hit in hits:
         h = hit.get("hash")
-        turn = int(hit.get("turn") or 0)
-        if h and (h not in hitTurnByHash or turn < hitTurnByHash[h]):
-            hitTurnByHash[h] = turn
+        if h:
+            hitsByHash.setdefault(h, []).append(int(hit.get("turn") or 0))
 
     numerator = 0
     for h, foldTurn in foldTurnByHash.items():
-        hitTurn = hitTurnByHash.get(h)
-        if hitTurn is None:
-            continue
-        if hitTurn <= foldTurn:
-            continue
-        if hitTurn - foldTurn <= windowTurns:
+        hitTurns = hitsByHash.get(h) or ()
+        if any(foldTurn < t <= foldTurn + windowTurns for t in hitTurns):
             numerator += 1
     denominator = len(foldTurnByHash)
     return {
@@ -266,7 +265,7 @@ def _aggregateFoldRecall(
         "unrecalled": denominator - numerator,
         "recall_rate": round(numerator / denominator, 4) if denominator else 0.0,
         "_foldTurnByHash": foldTurnByHash,
-        "_hitTurnByHash": hitTurnByHash,
+        "_hitsByHash": hitsByHash,
     }
 
 
@@ -307,8 +306,14 @@ def foldRecallReadout(sessionKey: Optional[str] = None) -> Dict[str, Any]:
                     restored |= set(_restoredFolds.get(key, set()))
         aggregate = _aggregateFoldRecall(events, hits, restored, windowTurns)
         aggregate.pop("_foldTurnByHash", None)
-        hitTurnByHash = aggregate.pop("_hitTurnByHash")
+        hitsByHash = aggregate.pop("_hitsByHash")
         readout = {"window_turns": windowTurns, "fold_events": len(events), **aggregate}
+        # 触发归因并集（SC-4 基准读数：按 reason 归并折叠次数）
+        foldsByReason: Dict[str, int] = {}
+        for event in events:
+            reasonKey = str(event.get("reason") or "unknown")
+            foldsByReason[reasonKey] = foldsByReason.get(reasonKey, 0) + 1
+        readout["folds_by_reason"] = foldsByReason
         if sessionKey is not None:
             perEvent = []
             for event in events:
@@ -316,13 +321,18 @@ def foldRecallReadout(sessionKey: Optional[str] = None) -> Dict[str, Any]:
                 eventHashes = [h for h in event.get("hashes") or [] if h]
                 hitTurns = {}
                 for h in eventHashes:
-                    hitTurn = hitTurnByHash.get(h)
-                    if hitTurn is not None and hitTurn > eventTurn and hitTurn - eventTurn <= windowTurns:
-                        hitTurns[h] = hitTurn
+                    qualifying = sorted(
+                        t
+                        for t in (hitsByHash.get(h) or [])
+                        if eventTurn < t <= eventTurn + windowTurns
+                    )
+                    if qualifying:
+                        hitTurns[h] = qualifying
                 perEvent.append(
                     {
                         "fold_seq": event.get("foldSeq"),
                         "turn": eventTurn,
+                        "reason": event.get("reason"),
                         "folded": len(eventHashes),
                         "recalled_in_window": len(hitTurns),
                         "hit_turns": hitTurns,
@@ -343,7 +353,7 @@ def foldRecallReadout(sessionKey: Optional[str] = None) -> Dict[str, Any]:
                     kRestored = set(_restoredFolds.get(key, set()))
                 kAgg = _aggregateFoldRecall(kEvents, kHits, kRestored, windowTurns)
                 kAgg.pop("_foldTurnByHash", None)
-                kAgg.pop("_hitTurnByHash", None)
+                kAgg.pop("_hitsByHash", None)
                 sessions[key] = {
                     "fold_events": len(kEvents),
                     **kAgg,

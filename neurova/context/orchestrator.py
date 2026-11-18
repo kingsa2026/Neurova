@@ -1030,7 +1030,7 @@ class ContextOrchestrator:
             cache["covered"].add(fingerprint)
         self._advanceFoldGeneration(cache, summary, covers=covers, turnIds=turnIds)
         # SC-6：后台补做提交的覆盖账同样进折叠后召回率账本（与热路径同源）
-        self._noteFoldRecallEvent(sessionKey, covers, cache)
+        self._noteFoldRecallEvent(sessionKey, covers, cache, reason="rollup")
 
     def _window_cache_slot(self, key: str) -> dict:
         """取（或建）折叠摘要缓存槽；超上限时淘汰**最久未使用**的槽。
@@ -2890,6 +2890,7 @@ class ContextOrchestrator:
         # 关闭时只有击穿才折，
         # 与改前行为一致。
         from neurova.context.fold_trigger import (
+            REASON_FIXED_INTERVAL,
             REASON_GROWTH_GATE,
             REASON_STUCK_SUPPRESSED,
             assessFoldTrigger,
@@ -2936,8 +2937,13 @@ class ContextOrchestrator:
                 head_rows = self._renderFrozenHead(cache, budget_tokens)
             head_tokens = estimate_window_tokens(head_rows)
             fold_budget = max(1000, budget_tokens - head_tokens)
-            if estimate_window_tokens(rest) <= fold_budget:
-                # 尾部未超份额：本轮零折叠（无摘要调用，头部字节稳定）
+            if (
+                decision.reason != REASON_FIXED_INTERVAL
+                and estimate_window_tokens(rest) <= fold_budget
+            ):
+                # 尾部未超份额：本轮零折叠（无摘要调用，头部字节稳定）。
+                # SC-4 固定间隔臂例外：间隔到期即折是其政策本体，不受
+                # "视图尚在预算内"的省摘要优化豁免（该优化服务于增长门）。
                 cache["frozen_head_rows"] = head_rows
                 logger.info(
                     "[WINDOW_COMPACT] 增量尾部未超份额，零折叠（reason=%s, 尾部 %d 条/%d token，份额 %d）",
@@ -2946,15 +2952,20 @@ class ContextOrchestrator:
                 return head_rows + rest
             fold_source: list = rest
             previous_summary = ""  # 增量折叠不续写冻结摘要——旧代保持字节稳定
+            if decision.reason == REASON_FIXED_INTERVAL:
+                # SC-4 固定间隔臂：与增长门主动折叠同款——把折叠目标压到
+                # 未覆盖尾部的一半，compact_window 才会真的动作（尾部未超
+                # 预算时其"超预算才折"不会动作）。
+                fold_budget = max(1000, int(estimate_window_tokens(rest) * 0.5))
         else:
             fold_source = msgs
             previous_summary = str(cache.get("summary") or "")
             fold_budget = budget_tokens
-            if decision.reason == "growth_gate":
+            if decision.reason in (REASON_GROWTH_GATE, REASON_FIXED_INTERVAL):
                 # B5 增长门主动折叠：源窗口未超预算，compact_window 的"超预算才折"
                 # 不会动作——把折叠目标压到当前占用的推荐比例（对齐
                 # split_window_by_budget 的 target_ratio=0.5），即"收走已消费的
-                # 老一半增量，保留近期区"。
+                # 老一半增量，保留近期区"。SC-4 固定间隔臂同款（主动折叠族）。
                 fold_budget = max(1000, int(total_tokens * 0.5))
 
         # ── SC-1/SC-8：软保护切分（相位边界锚点 + 活跃教训引用原文）——
@@ -3105,7 +3116,10 @@ class ContextOrchestrator:
         cache["last_fold_msgs"] = len(msgs)
         # S6'：基线随会话时间线持久化（重启后重放恢复，冷却重建同模式）
         self._persistFoldBaseline(
-            cache, cache_key or self._resolve_window_cache_key(), coveredDelta
+            cache,
+            cache_key or self._resolve_window_cache_key(),
+            coveredDelta,
+            reason=decision.reason,
         )
 
         if incremental:
@@ -3180,7 +3194,13 @@ class ContextOrchestrator:
         """SC-1 相位信号：run 生命周期只读（"子任务进行中"的权威源 = agent_run_ledger）。
 
         任何失败按无相位处理（抑制信号缺席 = 行为与改前一致）。
+        SC-4 基准开关：`NEUROVA_FOLD_PHASE_SUPPRESS=0` 关闭相位抑制
+        （对照臂"增长门不带相位抑制"）；默认开（生产行为不变）。
         """
+        import os as _os
+
+        if _os.environ.get("NEUROVA_FOLD_PHASE_SUPPRESS", "1") == "0":
+            return {"active": False, "subtaskRuns": 0}
         try:
             from neurova.core.agent_run_ledger import activeRunPhaseSignal
 
@@ -3284,13 +3304,20 @@ class ContextOrchestrator:
 
     # ── S6'：折叠基线跨重启持久化（时间线是事实源，复用冷却事件落盘面） ──
 
-    def _noteFoldRecallEvent(self, sessionKey: Optional[str], covers: list, cache: Optional[dict] = None) -> None:
+    def _noteFoldRecallEvent(
+        self,
+        sessionKey: Optional[str],
+        covers: list,
+        cache: Optional[dict] = None,
+        reason: Optional[str] = None,
+    ) -> None:
         """SC-6：折叠事件侧记区间指纹（budget_report 单源账本，fail-open）。
 
         与抽屉命中埋点（semantic_drawer.draw → recordRecallHits）写在**同一本**
         关联账上，聚合面 `foldRecallReadout` 出"折叠后 N 轮召回率"——
         不另造第二套事件账（修复教义第 6 条）。指纹与归档侧同源
         （`_windowChunkHash` = `ContextInput.compute_hash`），两侧才能按 hash 关联。
+        `reason` 为触发归因（fold_trigger 封闭原因集；SC-4 基准按因归并用）。
         """
         cleaned = [str(h) for h in (covers or []) if h]
         if not cleaned or not sessionKey:
@@ -3302,18 +3329,25 @@ class ContextOrchestrator:
                 str(sessionKey),
                 cleaned,
                 foldSeq=int((cache or {}).get("fold_seq") or 0) or None,
+                reason=reason,
             )
         except Exception:  # noqa: BLE001 - 读数账本故障不阻断折叠主链路
             logger.debug("折叠事件记账失败（忽略）", exc_info=True)
 
-    def _persistFoldBaseline(self, cache: dict, sessionKey: Optional[str], coveredNow: list) -> None:
+    def _persistFoldBaseline(
+        self,
+        cache: dict,
+        sessionKey: Optional[str],
+        coveredNow: list,
+        reason: Optional[str] = None,
+    ) -> None:
         """折叠基线落会话时间线（append-only；与 CompressionEvent 同一落盘面）。
 
         covered 取**增量**（本轮新覆盖），重放侧取并集——事件不随会话变长膨胀。
         fail-open：落盘失败不阻断折叠主链路（与 persistCompressionEvent 同纪律）。
         """
         # SC-6：覆盖账推进即记折叠事件（热路径：自动折叠与 /compact 共用本入口）
-        self._noteFoldRecallEvent(sessionKey, coveredNow, cache)
+        self._noteFoldRecallEvent(sessionKey, coveredNow, cache, reason=reason)
         try:
             agent = getattr(self, "_agent", None)
             manager = getattr(agent, "session_manager", None)
@@ -3665,7 +3699,9 @@ class ContextOrchestrator:
                 cache, compaction.summary, covers=coveredNow, turnIds=turnIdsNow
             )
             # S6'：手动压缩推进的覆盖账/代际同样落时间线（与自动折叠同一事实源）
-            self._persistFoldBaseline(cache, self._resolve_window_cache_key(), coveredNow)
+            self._persistFoldBaseline(
+                cache, self._resolve_window_cache_key(), coveredNow, reason="manual_compact"
+            )
             if int(cache.get("fold_seq") or 0) > prevFoldSeq:
                 # SC-5：仅当这一代真的归档进了池索引（层序推进了），才把寻址
                 # 信息透传给回执——没归档就编不出可下钻的引用。

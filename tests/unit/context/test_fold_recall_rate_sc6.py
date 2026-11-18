@@ -281,19 +281,25 @@ class TestFoldRecallPipeline:
 
     @pytest.mark.asyncio
     async def test_no_recall_ratio_zero(self):
-        """折叠发生但无召回（泛化输入，语义不相关）：比率=0。"""
+        """折叠发生但无召回（场景屏蔽召回通道）：比率=0。
+
+        同质事实池上被动抽屉会有机召回被折事实（向量刻度下同文相近）——
+        那是读数的正常工作态。本用例为钉"无召回 → 比率=0"的契约，屏蔽
+        该会话池的两条召回通道（draw/search 返回空），折叠照常发生。
+        """
         ledger = _importLedger()
         monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setenv("NEUROVA_FOLD_RECALL_WINDOW_TURNS", "50")
         try:
             orch = _mk_orchestrator("a-sc6-zero")
-            drops = await _driveTurns(orch, ROUNDS, "今天天气如何")
+            with patch.object(orch.context_pool, "draw", return_value=[]), patch.object(
+                orch.context_pool, "search", return_value=[]
+            ):
+                drops = await _driveTurns(orch, ROUNDS, "今天天气如何")
 
             readout = ledger.foldRecallReadout(SESSION)
             assert readout["denominator"] >= 1, "马拉松应发生折叠（分母>0）"
-            assert drops == [] or all(
-                "事实F" not in str(getattr(d, "content", "")) for d in drops
-            ), "无关输入不应取回事实条目"
+            assert drops == [], "召回通道已屏蔽，不应有取回"
             assert readout["numerator"] == 0, f"无召回时分子必须为 0: {readout}"
             assert readout["recall_rate"] == 0.0
         finally:
