@@ -193,7 +193,7 @@
 | 条目 | 结果 | 提交 |
 |---|---|---|
 | B1 声明式停止门编译 | ✅ 落地：`agent/loop_gates_compiler.py`（门目录单源+参数白名单+fail-closed 校验）+`_buildGateRunner` 接线（声明即全按声明、未声明零变化）；7 用例+门控回归 58 绿，live-verify 编译门行为实测 | — |
-| B2 人机共编 MEMORY.md | ✅ 落地（蒸馏回写另批）：`memory/memory_md.py` 存取+console GET/PUT（requireAgentOwner 门）+build_context 注入；8 用例绿，memory/context 2344 零回归（2 个 storage 失败 A/B 定责为预存） | — |
+| B2 人机共编 MEMORY.md | ✅ 落地（蒸馏回写另批）：`memory/memory_md.py` 存取+console GET/PUT（requireAgentOwner 门）+build_context 注入；8 用例绿，memory/context 2344 零回归（2 个 storage 失败 A/B 定责为预存）。**2026-11-18 退役**（用户拍板：宪法/人格/memories 温度生命周期已覆盖其价值，且无 UI/无蒸馏/无写入口成潜伏件；蒸馏回写改立独立方案进温度体系） | ca23e3940 |
 | B3 沙箱 Python recall | ✅ 落地（收敛为受限表达式引擎）：`tools/recall_expression.py`（白名单 AST+只读 items 注入+截断）+`recall_query` 工具（schema/dispatch/handler，与 recall_history 同取数源）；12 用例+tools 不变量 90 绿，live-verify 逃逸拦截实测 | — |
 | B4 token 保证金 | ✅ 落地：`token_estimator.py` 保证金三函数（×1.25 步进封顶 ×2.0，存模型能力缓存）+estimate_tokens 可选 model_id+multi_model_client context_overflow 接线；930 回归绿，live-verify 真溢出分类链实测 | — |
 | B5 File Guard | ✅ 落地：凭据后缀族对齐（.pem/.key/.ppk/.p12/.pfx/.kdbx/.git-credentials/.htpasswd）+%VAR%/$VAR 展开判定；5 用例+guard 回归 89 绿，live-verify 六形态实测 | — |
@@ -252,6 +252,7 @@ failureLanding/goal_gate 等无关项）；live-verify = 9681 真后端 boot
 （ChatPage.overflowRetry.test.ts，红 13→绿，全量 vitest 2679 绿 +
 vue-tsc 0 错，17d49137f）。reset 清空语义前端本就支持（case 'retry'
 既有分支），C2 流内切换（phase=switched）走既有文案，均零改动。
-可选增强（端点就绪、暂无 UI 消费方，待拍板另批）：B2 人机共编 MEMORY.md
-（console GET/PUT memory_md 端点）可挂 MemorySettingsPage 编辑卡片；
-B7 工具完成缓存查询（GET /chat/tools/{task_id}/result）可做结果查看面板。
+可选增强（端点就绪、暂无 UI 消费方，待拍板另批）：B7 工具完成缓存查询
+（GET /chat/tools/{task_id}/result）可做结果查看面板。（B2 MEMORY.md 已于
+2026-11-18 退役（ca23e3940），蒸馏回写另立
+`2026-11-18-memory-distillation-plan.md` 进记忆温度体系。）
