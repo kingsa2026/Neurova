@@ -212,6 +212,10 @@ export interface Memory {
 export type WSMessageType =
   | 'chat:send'           // 客户端 → 服务端：发送消息
   | 'chat:chunk'          // 服务端 → 客户端：流式 chunk
+  | 'chat:reasoning'      // 服务端 → 客户端：思考流（content 之前）
+  | 'chat:queued'         // 服务端 → 客户端：排队位/挂起卡
+  | 'chat:retry'          // 服务端 → 客户端：上游重试/切换状态
+  | 'chat:cancelled'      // 服务端 → 客户端：回合已取消
   | 'chat:done'           // 服务端 → 客户端：流式完成
   | 'chat:cancel'         // 客户端 → 服务端：取消生成
   | 'chat:error'          // 服务端 → 客户端：聊天错误

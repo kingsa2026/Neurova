@@ -27,6 +27,13 @@ except Exception:
 # 添加项目路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# .env 装配必须先于任何环境变量读取（含本模块顶部的 NEUROVA_LOG_LEVEL）。
+# 标准启动器此前不加载 .env，凡经 start.py 的重启都会丢掉 .env 里的部署配置
+# （NEUROVA_ADVERTISED_BASE_URL 丢失 → 移动端 ws_url 通告退回 ws:// → 空回复）。
+from neurova.core.config import loadEnvFile
+
+loadEnvFile()
+
 # 配置日志
 # 日志级别读 NEUROVA_LOG_LEVEL（ConfigMap/env 注入面）：此前写死 INFO，
 # 于是 Helm/compose 里设的日志级别（且键名还写成 LOG_LEVEL）完全无效。

@@ -467,6 +467,22 @@ def get(key: str, default: Optional[str] = None) -> Optional[str]:
     return os.environ.get(key, default)
 
 
+def loadEnvFile(envPath: Optional[Path] = None) -> bool:
+    """加载 .env 文件进 os.environ（python-dotenv 缺席时静默跳过）。
+
+    进程入口（start_server.py / app.run）统一经此装配。此前只有 app.run()
+    自带 load_dotenv，标准启动器 `start.py --backend` 走的 start_server.py
+    从未加载 .env——凡经 start.py 的重启都会丢掉只在 .env 登记的部署配置
+    （NEUROVA_ADVERTISED_BASE_URL 丢失使移动端 ws_url 通告退回 ws://，
+    是配对后聊天空回复的复发根因）。返回是否实际加载了文件。
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return False
+    return bool(load_dotenv(envPath))
+
+
 def get_int(key: str, default: int = 0) -> int:
     """读取环境变量并转为整数
 
