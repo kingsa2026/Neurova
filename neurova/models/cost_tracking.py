@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Optional, Dict, Any, List
+from neurova.core.logger import get_logger
 from functools import wraps
 
 from neurova.core.logger import get_logger
@@ -289,10 +290,24 @@ def track_llm_call(
     return decorator
 
 
+logger = get_logger(__name__)
+
+_UNKNOWN_MODEL_WARNED: set = set()
+
+
 def _calculate_cost_from_usage(provider: LLMProvider, model: str, usage: dict) -> float:
     """从 usage 计算成本（输入+输出 token，USD）"""
     price_map = PRICE_TABLES.get(provider, {}).get(model) or PRICE_TABLES.get(provider, {}).get("default")
     if not price_map:
+        # 未知模型按 0 记账是静默失真：「未计价」不等于「免费」——每
+        # (provider, model) 只警告一次，不刷屏（审计 2026-11-18 D 组）。
+        key = (str(provider), str(model))
+        if key not in _UNKNOWN_MODEL_WARNED:
+            _UNKNOWN_MODEL_WARNED.add(key)
+            logger.warning(
+                "成本计价缺价目表：provider=%s model=%s 按 0 记账（未计价≠免费）",
+                provider, model,
+            )
         return 0.0
     input_tokens = usage.get("prompt_tokens", 0) or 0
     output_tokens = usage.get("completion_tokens", 0) or 0

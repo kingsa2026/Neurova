@@ -1826,7 +1826,9 @@ def _build_mock_response(messages: List[Dict[str, str]]) -> LLMResponse:
     return LLMResponse(
         content=f"[mock-llm] echo: {last_user}",
         model="mock-model",
-        usage={"prompt_tokens": len(last_user), "completion_tokens": 8, "total_tokens": len(last_user) + 8},
+        # mock 不产生真实 token：usage 如实报 0——拿字符长度冒充 token 数会
+        # 经 record 链污染用量/成本面（fullrepo 审计 2026-11-18 D 组）。
+        usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         finish_reason="stop",
     )
 
