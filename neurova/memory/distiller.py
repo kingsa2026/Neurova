@@ -82,6 +82,16 @@ def _bump(name: str) -> None:
         _counters[name] = _counters.get(name, 0) + 1
 
 
+def _recordMetric(outcome: str) -> None:
+    """D4 观测面：蒸馏结果进既有 /metrics 指标读面（fail-soft）。"""
+    try:
+        from neurova.core.metrics import get_metrics
+
+        get_metrics().record_memory_distill(outcome)
+    except Exception:  # noqa: BLE001 - 观测失败不影响主流程
+        pass
+
+
 def _agentId(agent: Any) -> str:
     config = getattr(agent, "config", None)
     return str(getattr(config, "agent_id", "") or "default")
@@ -110,6 +120,7 @@ def _noteFailure(agent_id: str, message: str) -> Dict[str, Any]:
             _counters["breakerOpens"] = _counters.get("breakerOpens", 0) + 1
             opened = True
     _bump("llmFailures")
+    _recordMetric("failed")
     if opened:
         logger.warning(
             "记忆蒸馏连续失败 %d 次，已熔断 %s（冷却 %.0fs）：%s",
@@ -197,6 +208,7 @@ async def distillTurnMemory(
 
     prompt = _buildPrompt(window)
     _bump("turns")
+    _recordMetric("turn")
     try:
         response = await asyncio.wait_for(
             llm.chat([{"role": "user", "content": prompt}], temperature=0.0),
@@ -228,6 +240,7 @@ async def distillTurnMemory(
         if enforce and screenMemoryContent(content) is not None:
             skipped_sensitive += 1
             _bump("skippedSensitive")
+            _recordMetric("sensitive")
             continue
         try:
             rec = store.propose(
@@ -245,16 +258,19 @@ async def distillTurnMemory(
             # 墓碑/历史拒绝：内容不得再进队列（按重复弃置计）
             duplicates += 1
             _bump("duplicates")
+            _recordMetric("duplicate")
             continue
         if rid and rid in existing_ids:
             # 指纹幂等回指：同内容未决候选已存在，不重复计提交
             duplicates += 1
             _bump("duplicates")
+            _recordMetric("duplicate")
             continue
         if rid:
             existing_ids.add(rid)
         submitted += 1
         _bump("submitted")
+        _recordMetric("submitted")
 
     _noteSuccess(agent_id)
     logger.info(
