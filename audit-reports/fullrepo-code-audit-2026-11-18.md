@@ -78,6 +78,10 @@
 
 **已修复（每笔先红后绿+回归）**：R4 Chart beta14（a606f3bf8）；R5 守卫常量间接（a7213a8e0）；B1 webhook 属主门六端点 + live-verify 12/12（34decf4f2）；B2 子代理台账身份属主优先（51ed34649）；C1 usage.agent_id 接 cost_tracking 既有上下文（0c5507af2）；C3 保护清单两条目随 `8003eb949` 改名迁移+退役署名（ec48d4912）；C4 四份历史快照文档补沿革横幅（30369f0c6）；C6 改名引用面扫荡+断链清零（673 条 0 BROKEN）+0-index 补登 12 份+重复终评件退役（037b73bdd）；C8 端点计数对齐现读 115 路由模块/136 .py（c508bd548）；D 组 plugin grants 内层校验（cd76105bf）、`_is_youtube_url` host 边界（268f377cc）、发布脚本版本单源+删死链（450fe9666）、start.sh .venv 优先（49c923da9）；另清偿登记史守卫预存红——字面 `\n` 坏行拆解+两笔历史退役署名（4cc505d43）。
 
-**仍开放**：C7 Mobile 配对 scheme（待鸿蒙侧数据）；browser 工具 url 策略、`.cf_doc.md`/`.roles.md` 去留、skills 词表收口方向、R7 副本口径（产品/运维裁定）；swarm 回路的 cost 上下文写点（现仅 chat_pipeline 每轮写入，子代理 usage 行留空串不劣化）；`INTENT_CHANNEL_WEIGHTS` 两表数值确证不同（非重复实现，合并须裁定）。
+**已修复（每笔先红后绿+回归）**：R4 Chart beta14（a606f3bf8）；R5 守卫常量间接（a7213a8e0）；B1 webhook 属主门六端点 + live-verify 12/12（34decf4f2）；B2 子代理台账身份属主优先（51ed34649）；C1 usage.agent_id 接 cost_tracking 既有上下文（0c5507af2）；C3 保护清单两条目随 `8003eb949` 改名迁移+退役署名（ec48d4912）；C4 四份历史快照文档补沿革横幅（30369f0c6）；C6 改名引用面扫荡+断链清零（673 条 0 BROKEN）+0-index 补登 12 份+重复终评件退役（037b73bdd）；C8 端点计数对齐现读 115 路由模块/136 .py（c508bd548）；D 组 plugin grants 内层校验（cd76105bf）、`_is_youtube_url` host 边界（268f377cc）、发布脚本版本单源+删死链（450fe9666）、start.sh .venv 优先（49c923da9）；另清偿登记史守卫预存红——字面 `\n` 坏行拆解+两笔历史退役署名（4cc505d43）。
+
+**接手批补遗（2026-11-19，用户裁定后执行）**：R7 production 副本收回 1（f510f95fa）；INTENT_WEIGHTS 两表互指注记 + browser 抓页 SSRF 豁免注记（f05ad2260）；C9 外部厂商文档移 docs/external/（d506ca49f）；swarm member 成本上下文绑定/还原（c35c0168f）；user_id 哨兵常量单源（a98965321）；sandbox 句柄全路径回收（7b8596520/233d47a55）；计费诚实批——mock usage 报 0 + 未知模型计价缺目警告（86e4cdd07）；脚本卫生批——port_guard 兜底告警 + .scanignore 补敏感面（fef5c01ba）；G6 outcome 契约词单源（dce0c7081）；C7 鸿蒙配对深链 neurova://pair（cca951fee，hvigor 真构建通过）；NeurUI 按钮色令牌化 + tokens 同步守卫（2db50337b）；eslint 平面配置立项 + 存量违规清零 + CI lint 门（dbeec0a04）。
+
+**仍开放**：ASR 测试态 mock 无恢复与 benchmark 进程级累计差值两条的报告引用未能在现仓定位（可能指向审计时在途文件）——留档待指认；skills 词表外的历史 `any`/`unused-vars` 存量（eslint 棘轮起步档已显式关闭，按目录逐步收紧）；鸿蒙侧 hvigor 真构建已过，真机/模拟器活体验证归鸿蒙会话。
 
 **全量验证**：tests/unit/api 18 failed 均为预存（15 项见 S1/R4 台账，另 3 条经基线工作树 A/B 实证）；tests/unit/ci 修复前 26 failed → 修复后 18 failed，经基线 A/B 实证全部为预存 meta 守卫红，零新增；tests/llm 75P、plugins 128P、web_reach 84P、memory_ingest 296P、deploy_config_guard 38P、登记史守卫 9P。
