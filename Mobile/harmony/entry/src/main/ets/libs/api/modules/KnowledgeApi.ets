@@ -186,4 +186,23 @@ export class KnowledgeApi {
     const body: Record<string, Object> = {};
     return this.client.post<Object>('/knowledge/import-url?' + qs.join('&'), body);
   }
+
+  /**
+   * 文件导入（knowledge_ingestion.py /import：multipart file + query 参数；sync=true 同步抽取）。
+   * ocr：auto=仅无文字层页 / on=强制 / off=禁用；engine：structured=语义分块流水线 / legacy=单段抽取。
+   */
+  async importFile(fileName: string, fileBytes: ArrayBuffer, fileMime: string,
+    agentId?: string, category?: string, ocr?: string, engine?: string): Promise<ApiResponse<Object>> {
+    const qs: string[] = [];
+    qs.push('agent_id=' + encodeURIComponent(agentId && agentId.length > 0 ? agentId : 'default'));
+    qs.push('sync=true');
+    qs.push('ocr=' + encodeURIComponent(ocr && ocr.length > 0 ? ocr : 'auto'));
+    if (engine && engine.length > 0) {
+      qs.push('engine=' + encodeURIComponent(engine));
+    }
+    if (category && category.length > 0) {
+      qs.push('category=' + encodeURIComponent(category));
+    }
+    return this.client.postMultipart<Object>('/knowledge/import?' + qs.join('&'), fileName, fileBytes, fileMime);
+  }
 }

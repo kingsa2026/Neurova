@@ -103,6 +103,42 @@ export class HttpAdapter implements HttpBackend {
     }
   }
 
+  /** 原始体请求（multipart 等）：body 为 UTF-8 字符串或二进制 ArrayBuffer，原样发送不做 JSON 序列化 */
+  async requestRaw(
+    method: string,
+    url: string,
+    body: string | ArrayBuffer,
+    headers: Record<string, string>,
+  ): Promise<HttpBackendResponse> {
+    const httpRequest = http.createHttp();
+    const timeout: number = this.config.get<number>('request_timeout', DEFAULT_REQUEST_TIMEOUT_MS);
+    try {
+      const mergedHeaders: Record<string, string> = {};
+      for (const hk of Object.keys(this.defaultHeaders)) {
+        mergedHeaders[hk] = this.defaultHeaders[hk];
+      }
+      for (const hk of Object.keys(headers)) {
+        mergedHeaders[hk] = headers[hk];
+      }
+      const options: http.HttpRequestOptions = {
+        method: this.toHttpMethod(method),
+        header: mergedHeaders,
+        expectDataType: http.HttpDataType.STRING,
+        connectTimeout: timeout,
+        readTimeout: timeout,
+        extraData: body,
+      };
+      const response = await httpRequest.request(url, options);
+      return { status: response.responseCode, data: this.parseResponseBody(response.result) };
+    } catch (e) {
+      const err = e as Error;
+      this.logger.error('HttpAdapter', `${method} ${url} 原始体请求失败`, err);
+      throw new Error(`[HttpAdapter] ${method} ${url} 网络请求失败: ${err.message}`);
+    } finally {
+      httpRequest.destroy();
+    }
+  }
+
   /** 将字符串方法名转为鸿蒙 http.RequestMethod 枚举 */
   private toHttpMethod(method: string): http.RequestMethod {
     const upper = method.toUpperCase();

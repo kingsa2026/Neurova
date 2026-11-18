@@ -161,7 +161,7 @@ export struct ModelPage {
             .fontSize(12)
             .fontColor(this.sm.getColor('text_tertiary'))
           Text(this.activeModel && this.activeModel.model
-            ? this.activeModel.model + (this.activeModel.provider !== null && this.activeModel.provider.length > 0 ? ' · ' + this.activeModel.provider : '')
+            ? this.activeModel.model + (this.activeModel.provider ? ' · ' + this.activeModel.provider : '')
             : '未设置（在下方模型点「设为默认」）')
             .fontSize(12.5)
             .fontColor(this.sm.getColor('text_primary'))

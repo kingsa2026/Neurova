@@ -15,6 +15,7 @@
  */
 
 import { HttpClient } from '../HttpClient';
+import { asEnvelopeList } from '../envelope';
 import { ApiResponse } from '../../types';
 
 /** 用户行（enhanced_users_api UserOut 投影） */
@@ -110,5 +111,11 @@ export class AdminApi {
   /** 治理 agent-limits（仅管理员；响应形状为动态键值，页面按键遍历渲染） */
   async agentLimits(): Promise<ApiResponse<Object>> {
     return this.client.get<Object>('/governance/agent-limits');
+  }
+
+  /** 待审公共库知识投稿（GET /knowledge/public-submissions，仅管理员；裸数组归一） */
+  async publicSubmissions(): Promise<ApiResponse<Object[]>> {
+    const res = await this.client.get<Object[]>('/knowledge/public-submissions');
+    return asEnvelopeList<Object>(res) as ApiResponse<Object[]>;
   }
 }

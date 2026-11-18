@@ -141,6 +141,12 @@ export class SettingsApi {
     return { code: ok.code, message: ok.message, data: toSettingItem(dto.key, dto.value) } as ApiResponse<SettingItem>;
   }
 
+  /** 清空内存缓存（POST /settings/clear-cache——真实作用于 MemoryCache 注册表） */
+  async clearCache(): Promise<ApiResponse<Object>> {
+    const body: Record<string, Object> = {};
+    return this.client.post<Object>('/settings/clear-cache', body);
+  }
+
   /** @deprecated 后端无 POST /v1/settings/reset（最近真面是 POST /v1/settings/clear-cache，语义不同不冒充） */
   async reset(group?: string): Promise<ApiResponse<Object>> {
     throw new Error('后端无此端点：POST /v1/settings/reset（后端仅提供 PUT /v1/settings 整表更新与 POST /v1/settings/clear-cache）');

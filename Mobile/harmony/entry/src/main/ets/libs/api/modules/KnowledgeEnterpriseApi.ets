@@ -46,4 +46,9 @@ export class KnowledgeEnterpriseApi {
     const body: Record<string, Object> = {};
     return this.client.post<Object>(`/knowledge/enterprise/sources/${sourceId}/health`, body);
   }
+
+  /** 提交数据源（POST /enterprise/sources，{source_id, descriptor}；仅管理员，403 如实透出） */
+  async submitSource(body: Record<string, Object>): Promise<ApiResponse<Object>> {
+    return this.client.post<Object>('/knowledge/enterprise/sources', body);
+  }
 }

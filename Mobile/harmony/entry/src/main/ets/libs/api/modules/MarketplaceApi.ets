@@ -13,7 +13,7 @@
  * sandbox_required?——后端是技能市场，无 itemType(free/paid/subscription) 维度。
  */
 import { HttpClient } from '../HttpClient';
-import { asEnvelope } from '../envelope';
+import { asEnvelope, asEnvelopeList } from '../envelope';
 import { ApiResponse } from '../../types';
 
 /** 市场技能条目（marketplace.py MarketplaceSkill 模型） */
@@ -128,4 +128,43 @@ export class MarketplaceApi {
     const res = await this.client.delete<MarketOpResultDto>(url);
     return asEnvelope<MarketOpResultDto>(res, ['skill_id']);
   }
+
+  /** 同步远端市场源（POST /marketplace/sync?source=all，仅管理员） */
+  async sync(source: string = 'all'): Promise<ApiResponse<Object>> {
+    const body: Record<string, Object> = {};
+    const res = await this.client.post<Object>(`/marketplace/sync?source=${encodeURIComponent(source)}`, body);
+    return asEnvelope<Object>(res, ['created']) as ApiResponse<Object>;
+  }
+
+  /** 已安装清单（GET /marketplace/installed，裸数组边界归一） */
+  async installed(): Promise<ApiResponse<MarketSkillDto[]>> {
+    const res = await this.client.get<MarketSkillDto[]>('/marketplace/installed');
+    return asEnvelopeList<MarketSkillDto>(res) as ApiResponse<MarketSkillDto[]>;
+  }
+
+  /** 上架新技能（POST /marketplace/skills，仅管理员；MarketplaceSkillCreate 契约） */
+  async publish(body: MarketPublishBody): Promise<ApiResponse<Object>> {
+    const payload: Record<string, Object> = {
+      'skill_id': body.skillId,
+      'name': body.name,
+      'description': body.description,
+      'author': body.author,
+      'version': body.version,
+      'category': body.category,
+      'download_url': body.downloadUrl,
+    };
+    const res = await this.client.post<Object>('/marketplace/skills', payload);
+    return asEnvelope<Object>(res, ['skill_id']) as ApiResponse<Object>;
+  }
+}
+
+/** 上架技能请求体（MarketplaceSkillCreate 必填子集） */
+export interface MarketPublishBody {
+  skillId: string;
+  name: string;
+  description: string;
+  author: string;
+  version: string;
+  category: string;
+  downloadUrl: string;
 }

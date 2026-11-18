@@ -375,4 +375,18 @@ export class CapabilityApi {
   async removeMedia(mediaId: string): Promise<ApiResponse<Object>> {
     return this.client.delete<Object>(`/media/${mediaId}`);
   }
+
+  /** 存储用量（GET /files/storage/info，StorageInfo 投影；系统设置「清除缓存」读数） */
+  async storageInfo(): Promise<ApiResponse<StorageInfoDto>> {
+    const res = await this.client.get<StorageInfoDto>('/files/storage/info');
+    return asEnvelope<StorageInfoDto>(res, ['user_id', 'total_files', 'total_size']) as ApiResponse<StorageInfoDto>;
+  }
+}
+
+/** 存储用量（files_api.py StorageInfo 投影） */
+export interface StorageInfoDto {
+  user_id: string;
+  total_files: number;
+  total_size: number;
+  by_type: Record<string, number>;
 }

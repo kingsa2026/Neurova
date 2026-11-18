@@ -15,6 +15,7 @@ import { Logger } from '../logger/Logger';
 import { EventBus } from '../bus/EventBus';
 import { ErrorManager, ErrorCategory, AppError } from '../error/ErrorManager';
 import { ApiResponse } from '../types';
+import { util } from '@kit.ArkTS';
 
 /** 后端响应封装：HTTP 状态码 + 已解析响应体 */
 export interface HttpBackendResponse {
@@ -28,6 +29,13 @@ export interface HttpBackend {
     method: string,
     url: string,
     body: Object | null,
+    headers: Record<string, string>,
+  ): Promise<HttpBackendResponse>;
+  /** 原始体请求（multipart 等非 JSON 体；未实现的后端可不给——调用方先判存在） */
+  requestRaw?(
+    method: string,
+    url: string,
+    body: string | ArrayBuffer,
     headers: Record<string, string>,
   ): Promise<HttpBackendResponse>;
 }
@@ -139,6 +147,60 @@ export class HttpClient {
   /** DELETE 请求 */
   async delete<T>(url: string): Promise<ApiResponse<T>> {
     return this.request<T>('DELETE', url, null);
+  }
+
+  /**
+   * Multipart/form-data 上传（单文件；query 参数经 params 拼接）。
+   * 供知识文件导入（POST /knowledge/import）等 multipart 端点使用。
+   * 字符串段先 UTF-8 编码，与文件字节直拼为一个 ArrayBuffer 交网络层发送。
+   */
+  async postMultipart<T>(
+    url: string,
+    fileName: string,
+    fileBytes: ArrayBuffer,
+    fileMime: string,
+    params?: Record<string, Object>,
+  ): Promise<ApiResponse<T>> {
+    const backend = HttpClient.backend;
+    if (!backend || !backend.requestRaw) {
+      throw new Error('当前 HTTP 后端不支持 multipart 上传');
+    }
+    const boundary = 'nv' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    const enc = new util.TextEncoder();
+    const head =
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
+      `Content-Type: ${fileMime}\r\n\r\n`;
+    const tail = `\r\n--${boundary}--\r\n`;
+    const headBytes = enc.encodeInto(head);
+    const tailBytes = enc.encodeInto(tail);
+    const body = new Uint8Array(headBytes.length + fileBytes.byteLength + tailBytes.length);
+    body.set(headBytes, 0);
+    body.set(new Uint8Array(fileBytes), headBytes.length);
+    body.set(tailBytes, headBytes.length + fileBytes.byteLength);
+
+    const headers: Record<string, string> = {
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+    };
+    for (const i of this.interceptors) {
+      if (i.before) i.before(headers);
+    }
+    const fullUrl = this.buildUrl(url, params);
+    this.logger.debug('HttpClient', `POST(multipart) ${fullUrl}`);
+    const response = await backend.requestRaw('POST', fullUrl, body.buffer as ArrayBuffer, headers);
+    for (const i of this.interceptors) {
+      if (i.after) i.after(response);
+    }
+    if (response.status === 401) {
+      const payload: HttpEventPayload = { url };
+      this.bus.emit('auth:unauthorized', payload);
+      throw new HttpError(this.errors.fromHttpStatus(401, '未授权'));
+    }
+    if (response.status === 429) {
+      const payload: HttpEventPayload = { url };
+      this.bus.emit('api:rate-limited', payload);
+    }
+    return response.data as ApiResponse<T>;
   }
 
   /** 核心请求方法 */

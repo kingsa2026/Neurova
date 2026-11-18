@@ -307,9 +307,49 @@ export struct AgentDetailPage {
             }
             .margin({ bottom: 8 })
             .alignItems(VerticalAlign.Center)
-            this.kvRow('描述', this.agent && this.agent.description && this.agent.description.length > 0 ? this.agent.description : '—')
-            this.kvRow('模型', this.agent && this.agent.model && this.agent.model.length > 0 ? this.agent.model : '默认')
-            this.kvRow('已挂载工具', this.agent && this.agent.toolsCount ? this.agent.toolsCount.toString() : '0')
+            // kv 行内联（@Builder 按值参数不随异步状态刷新，故不抽通用行 Builder）
+            Row() {
+              Text('描述')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+              Blank()
+              Text(this.agent && this.agent.description && this.agent.description.length > 0 ? this.agent.description : '—')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_primary'))
+                .textAlign(TextAlign.End)
+                .constraintSize({ maxWidth: '62%' })
+            }
+            .width('100%')
+            .padding({ top: 6, bottom: 6 })
+            .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
+            Row() {
+              Text('模型')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+              Blank()
+              Text(this.agent && this.agent.model && this.agent.model.length > 0 ? this.agent.model : '默认')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_primary'))
+                .textAlign(TextAlign.End)
+                .constraintSize({ maxWidth: '62%' })
+            }
+            .width('100%')
+            .padding({ top: 6, bottom: 6 })
+            .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
+            Row() {
+              Text('已挂载工具')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+              Blank()
+              Text(this.agent && this.agent.toolsCount ? this.agent.toolsCount.toString() : '0')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_primary'))
+                .textAlign(TextAlign.End)
+                .constraintSize({ maxWidth: '62%' })
+            }
+            .width('100%')
+            .padding({ top: 6, bottom: 6 })
+            .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
           }
           .width('100%')
           .padding(14)
@@ -362,8 +402,34 @@ export struct AgentDetailPage {
             }
             .margin({ bottom: 8 })
             .alignItems(VerticalAlign.Center)
-            this.kvRow('当前阶段', this.sleep ? this.sleep.sleep_phase : '—')
-            this.kvRow('休眠周期', this.sleep ? this.sleep.sleep_cycles.toString() : '0')
+            Row() {
+              Text('当前阶段')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+              Blank()
+              Text(this.sleep ? this.sleep.sleep_phase : '—')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_primary'))
+                .textAlign(TextAlign.End)
+                .constraintSize({ maxWidth: '62%' })
+            }
+            .width('100%')
+            .padding({ top: 6, bottom: 6 })
+            .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
+            Row() {
+              Text('休眠周期')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+              Blank()
+              Text(this.sleep ? this.sleep.sleep_cycles.toString() : '0')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_primary'))
+                .textAlign(TextAlign.End)
+                .constraintSize({ maxWidth: '62%' })
+            }
+            .width('100%')
+            .padding({ top: 6, bottom: 6 })
+            .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
           }
           .width('100%')
           .padding(14)
@@ -382,23 +448,5 @@ export struct AgentDetailPage {
     .width('100%')
     .height('100%')
     .backgroundColor(this.sm.getColor('background'))
-  }
-
-  @Builder
-  kvRow(k: string, v: string) {
-    Row() {
-      Text(k)
-        .fontSize(this.sm.getFontSize('caption'))
-        .fontColor(this.sm.getColor('text_secondary'))
-      Blank()
-      Text(v)
-        .fontSize(this.sm.getFontSize('caption'))
-        .fontColor(this.sm.getColor('text_primary'))
-        .textAlign(TextAlign.End)
-        .constraintSize({ maxWidth: '62%' })
-    }
-    .width('100%')
-    .padding({ top: 6, bottom: 6 })
-    .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
   }
 }
