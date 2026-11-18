@@ -10,7 +10,6 @@ Agent 管理接口 - Agent Endpoint
 4. 删除 Agent (DELETE /api/v1/agents/{agent_id})
 5. 获取 Agent 统计 (GET /api/v1/agents/{agent_id}/stats)
 6. 切换 Agent (POST /api/v1/agents/{agent_id}/switch)
-7. 获取/更新宪法 (GET/PUT /api/v1/agents/{agent_id}/constitution)
 """
 
 import asyncio
@@ -269,12 +268,6 @@ class UpdateAgentRequest(BaseModel):
     # 执行档位局部更新（R6：None=未提及不覆盖；空串=清除回退部署档位）
     exec_profile: Optional[str] = Field(default=None, description="执行档位（lite/standard/heavy；空串=清除）")
     config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
-
-
-class UpdateConstitutionRequest(BaseModel):
-    """更新宪法请求"""
-
-    constitution: Dict[str, Any] = Field(..., description="宪法内容")
 
 
 class UpdatePersonalityRequest(BaseModel):
@@ -939,57 +932,6 @@ async def switch_agent(request: Request, agent_id: str = FastAPIPath(...), curre
     setDefaultAgentId(agent_id)
 
     return {"code": 0, "message": f"Switched to agent '{agent_id}'"}
-
-
-@router.get("/{agent_id}/constitution")
-async def get_constitution(
-    request: Request,
-    agent_id: str = FastAPIPath(...),
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """获取 Agent 宪法"""
-    _get_request_id(request)
-
-    agent = get_agent_from_state(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    constitution = {}
-    if hasattr(agent, "get_constitution"):
-        try:
-            constitution = agent.get_constitution()
-        except Exception as e:
-            logger.warning("Get constitution error: %s", e)
-
-    return {"code": 0, "data": {"constitution": constitution}}
-
-
-@router.put("/{agent_id}/constitution")
-async def update_constitution(
-    request: Request,
-    agent_id: str = FastAPIPath(...),
-    body: UpdateConstitutionRequest = Body(...), current_user: Dict[str, Any] = Depends(get_current_user),):
-    """更新 Agent 宪法"""
-    _get_request_id(request)
-
-    agent = get_agent_from_state(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    # P1-2（2026-11-16 审计）：写口属主门，与 PUT /agents/{id} 同判据
-    owner = resolve_agent_owner(agent_id, state_agent=agent)
-    if not can_access_agent(
-        str(current_user.get("user_id") or ""), str(current_user.get("role") or "user"), owner
-    ):
-        raise HTTPException(status_code=403, detail="无权修改他人 Agent 宪法")
-
-    if hasattr(agent, "update_constitution"):
-        try:
-            agent.update_constitution(body.constitution)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to update constitution: {str(e)}")
-
-    return {"code": 0, "message": "Constitution updated"}
 
 
 @router.post("/{agent_id}/decision")

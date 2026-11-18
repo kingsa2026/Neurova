@@ -219,14 +219,6 @@ def test_switch_agent_admin_allowed(agent_ep_env):
     assert resp.get("code") == 0
 
 
-def test_agent_constitution_rejects_non_owner(agent_ep_env):
-    ep = agent_ep_env
-    body = ep.UpdateConstitutionRequest(constitution={"rules": []})
-    with pytest.raises(HTTPException) as exc:
-        asyncio.run(ep.update_constitution(_Req(), "theirs", body, current_user=_U1))
-    assert exc.value.status_code == 403
-
-
 def test_agent_decision_rejects_non_owner(agent_ep_env):
     ep = agent_ep_env
     body = ep.DecisionRequest(context="ctx")

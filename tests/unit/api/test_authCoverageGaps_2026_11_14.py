@@ -64,9 +64,8 @@ _ANON_PROBES = [
     ("get", "/v1/context/inject/reflection", {}),
     ("get", "/v1/context/inject/memories", {}),
     ("get", "/v1/context/inject/hot", {}),
-    # P1-3 agent.py 三端点
+    # P1-3 agent.py 两端点（/constitution 死端点已随 E1 卡退役，探针同步摘除）
     ("get", "/v1/agents/ag-1/stats", {}),
-    ("get", "/v1/agents/ag-1/constitution", {}),
     ("post", "/v1/agents/ag-1/decision", {"json": {"context": "ctx"}}),
     # P1-4 neurflow_api（router 级代表 + 全部 admin 收口点）
     ("get", "/v1/neurflow/workflows", {}),
