@@ -1307,6 +1307,16 @@ class ContextOrchestrator:
         if constitution_text:
             system_instructions.append(constitution_text)
 
+        # QwenPaw 对照批 B2：人机共编长期记忆（MEMORY.md）——有内容才注入，
+        # 注入段挂在身份/宪法之后、时间与规则段之前（长期事实优先于时效信息）。
+        try:
+            from neurova.memory.memory_md import memoryMdContextLines
+
+            _md_agent_id = str(getattr(self.config, "agent_id", "") or "default")
+            system_instructions.extend(memoryMdContextLines(_md_agent_id))
+        except Exception:  # noqa: BLE001 - 共编记忆缺失不阻断上下文构建
+            pass
+
         # Bug T-1 修复:注入当前时间上下文(避免 LLM 误用训练截止日期回答时间问题)
         # build_context 是 chat_pipeline 实际调用的路径(build_system_prompt 只是工具方法,未被调用),
         # 所以必须在此处注入时间,否则 LLM 看不到真实当前时间。
