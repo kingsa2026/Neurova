@@ -78,12 +78,18 @@ class TestSessionSnapshot:
         assert cache.size <= 3
 
     def test_snapshot_shape(self, agent):
-        """快照含 prompt 身份层三件套（soul/personality/constitution）。"""
+        """快照含 prompt 身份层三件套（soul/personality/constitution）
+        + E2 宪法规则编译段（constitution_rules，随三件套同点冻结）。"""
         from neurova.agent.session_snapshot import SessionSnapshotCache
 
         cache = SessionSnapshotCache(max_sessions=10)
         snap = cache.get(agent, session_id="s")
-        assert set(snap.keys()) == {"soul", "personality", "constitution"}
+        assert set(snap.keys()) == {
+            "soul",
+            "personality",
+            "constitution",
+            "constitution_rules",
+        }
 
 
 class TestBuildContextConsumesSnapshot:

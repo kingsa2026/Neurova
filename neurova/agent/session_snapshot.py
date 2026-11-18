@@ -6,7 +6,8 @@
 
 会话开始时冻结注入 prompt 的身份快照，写入只在**下次
 会话**生效。Neurova 等价实现：
-- SessionSnapshotCache：session_id → {soul, personality, constitution}
+- SessionSnapshotCache：session_id → {soul, personality, constitution,
+  constitution_rules}（E2 起宪法规则段随三件套同点冻结）
   首轮冻结，同会话轮次复用；会话切换重建；LRU 上限防膨胀
 - build_context 的 system_instructions 优先消费快照（经 orchestrator
   _frozen_snapshot 属性，ChatPipeline 装配）
@@ -66,12 +67,25 @@ class SessionSnapshotCache:
 
     @staticmethod
     def _read_live(agent: Any) -> Dict[str, str]:
-        """读当前身份层活值（soul/personality/constitution 三件套）。"""
+        """读当前身份层活值（soul/personality/constitution 三件套 + 宪法规则段）。
+
+        E2（四域审计 2026-11-18）：宪法规则 JSON（constitution_persistence）与
+        `config.constitution` 字符串轨**同点冻结**——规则段在会话首轮编译进快照，
+        会话内增删改规则不漂移当前 prompt，下次会话（新快照）生效。
+        """
         config = getattr(agent, "config", None)
+        agent_id = getattr(config, "agent_id", None)
+        agent_id = agent_id if isinstance(agent_id, str) else ""
+        # 懒加载：断开 agent 层 → api.endpoints 包的导入环（深模块纪律）。
+        from neurova.api.endpoints.constitution_persistence import (
+            compileConstitutionRulesSection,
+        )
+
         return {
             "soul": str(getattr(agent, "soul", "") or ""),
             "personality": str(getattr(agent, "personality", "") or ""),
             "constitution": str(getattr(config, "constitution", None) or ""),
+            "constitution_rules": compileConstitutionRulesSection(agent_id),
         }
 
     @property

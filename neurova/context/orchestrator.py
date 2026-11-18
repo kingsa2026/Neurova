@@ -1291,6 +1291,20 @@ class ContextOrchestrator:
         # 故按订阅面本身退订：这是同一个方法，不新造第二个退订口。
         return injector.unsubscribeAllEvents()
 
+    def _liveConstitutionRulesText(self) -> str:
+        """无会话快照（无状态调用）时的宪法规则活值。
+
+        E2（四域审计 2026-11-18）：与冻结路径共用同一编译单源
+        （constitution_persistence.compileConstitutionRulesSection）——快照与
+        活值两条路读同一份规则 JSON、同一套有界渲染，不造第二套口径。
+        """
+        from neurova.api.endpoints.constitution_persistence import (
+            compileConstitutionRulesSection,
+        )
+        from neurova.context_pool import identityStrings
+
+        return compileConstitutionRulesSection(identityStrings(self._agent)[0])
+
     # ══════════════════════════════════════════════════════════════
     # 上下文构建
     # ══════════════════════════════════════════════════════════════
@@ -1353,15 +1367,24 @@ class ContextOrchestrator:
             soul_text = frozen["soul"]
             personality_text = frozen.get("personality") or ""
             constitution_text = frozen.get("constitution") or ""
+            # E2：宪法规则段随身份三件套同点冻结（快照时点生效，会话内
+            # 规则增删改不漂移当前 prompt，下次会话生效）。
+            constitution_rules_text = str(frozen.get("constitution_rules") or "")
         else:
             soul_text = self.soul or ""
             personality_text = self.personality or ""
             constitution_text = self.config.constitution or ""
+            # 无快照（无状态调用）：现取活值，与冻结路径同一编译单源（诚实降级）。
+            constitution_rules_text = self._liveConstitutionRulesText()
         system_instructions = [soul_text]
         if personality_text:
             system_instructions.append(personality_text)
         if constitution_text:
             system_instructions.append(constitution_text)
+        if constitution_rules_text:
+            # E2：enabled 宪法规则编译段——与 config.constitution 字符串轨
+            # 同一组装点合流（紧随其后，不另起第二注入点）。
+            system_instructions.append(constitution_rules_text)
 
         # Bug T-1 修复:注入当前时间上下文(避免 LLM 误用训练截止日期回答时间问题)
         # build_context 是 chat_pipeline 实际调用的路径(build_system_prompt 只是工具方法,未被调用),
@@ -1408,6 +1431,7 @@ class ContextOrchestrator:
                     "soul": soul_text,
                     "personality": personality_text,
                     "constitution": constitution_text,
+                    "constitution_rules": constitution_rules_text,
                     "time": time_section,
                     "rules": rules_section,
                     "workspace_docs": workspace_section or "",

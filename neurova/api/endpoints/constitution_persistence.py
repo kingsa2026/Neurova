@@ -85,3 +85,65 @@ def rule_to_model(agent_id: str, rule: Dict[str, Any]) -> ConstitutionRule:
         priority=rule.get("priority", 0),
         enabled=rule.get("enabled", True),
     )
+
+
+# ── E2 宪法规则接行为注入（四域审计 2026-11-18）──────────────────────────
+# 规则编译进 system prompt 宪法段的渲染上界（具名常量，超限诚实截断）。
+# 条数 × 单条长度共同界定 token 预算（修复计划 E2 卡：规则条数×长度设具名上限）。
+CONSTITUTION_RULES_MAX_COUNT = 20  # 单次注入 system prompt 的启用规则条数上限
+CONSTITUTION_RULES_MAX_CHARS = 500  # 单条规则文本的字符数上限
+
+
+def _rule_priority(rule: Dict[str, Any]) -> int:
+    """规则优先级安全读数（脏数据按 0 计，不在注入面抛异常）。"""
+    try:
+        return int(rule.get("priority", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def compileConstitutionRulesSection(agent_id: str) -> str:
+    """把该 agent 的 **enabled** 宪法规则编译为一段可注入 system prompt 的文本。
+
+    - 只读：不写任何状态；产物与 `config.constitution` 字符串轨在 orchestrator
+      `build_context` 的 system_instructions 组装点合流（同一注入点，不造第二个）。
+    - 有界：条数 ≤ `CONSTITUTION_RULES_MAX_COUNT`、单条 ≤ `CONSTITUTION_RULES_MAX_CHARS`；
+      超限在段内诚实标注（总数、未注入数与去向），不静默丢弃。
+    - 排序：priority 降序（高优先级在前），同优先级保持落盘顺序（稳定排序）。
+    - 无启用规则返回 ""，调用方据此不注入空段。
+    - 会话冻结语义：本函数在会话首轮经 `session_snapshot._read_live` 取值并随
+      快照冻结——同会话中途增删改规则不漂移当前 prompt，下次会话生效。
+    """
+    if not agent_id:
+        return ""
+    rules = load_constitution_rules(agent_id)
+    if not isinstance(rules, list):
+        return ""
+    enabled: List[tuple] = []
+    for rule in rules:
+        if not isinstance(rule, dict) or not rule.get("enabled", True):
+            continue
+        content = str(rule.get("content", "") or "").strip()
+        if not content:
+            continue
+        enabled.append((_rule_priority(rule), content))
+    if not enabled:
+        return ""
+    enabled.sort(key=lambda pair: -pair[0])
+    total = len(enabled)
+    lines = [f"宪法规则（启用 {total} 条，按优先级降序）："]
+    for index, (_priority, content) in enumerate(
+        enabled[:CONSTITUTION_RULES_MAX_COUNT], start=1
+    ):
+        if len(content) > CONSTITUTION_RULES_MAX_CHARS:
+            content = (
+                content[:CONSTITUTION_RULES_MAX_CHARS].rstrip()
+                + f"…[单条超长，已截断至{CONSTITUTION_RULES_MAX_CHARS}字符]"
+            )
+        lines.append(f"{index}. {content}")
+    if total > CONSTITUTION_RULES_MAX_COUNT:
+        lines.append(
+            f"（已截断：启用规则共 {total} 条，超出注入上限 {CONSTITUTION_RULES_MAX_COUNT} 条，"
+            f"另有 {total - CONSTITUTION_RULES_MAX_COUNT} 条未注入；完整清单见宪法规则管理页）"
+        )
+    return "\n".join(lines)
