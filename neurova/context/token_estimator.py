@@ -14,6 +14,7 @@
 ``tests/unit/context/test_token_estimator_calibration.py``。
 """
 
+import math
 import re
 from enum import Enum
 from typing import Dict, List, Optional
@@ -127,9 +128,70 @@ def get_token_estimator(strategy: EstimationStrategy = EstimationStrategy.EXACT)
     return estimator
 
 
-def estimate_tokens(text: str, strategy: EstimationStrategy = EstimationStrategy.EXACT) -> int:
-    """估算文本的 token 数量（全仓统一入口）。"""
-    return get_token_estimator(strategy).estimate(text)
+def estimate_tokens(text: str, strategy: EstimationStrategy = EstimationStrategy.EXACT,
+                    model_id: Optional[str] = None) -> int:
+    """估算文本的 token 数量（全仓统一入口）。
+
+    `model_id` 提供时应用该模型的**溢出保证金**系数（向上取整——宁可高估
+    不可低估；见 `recordModelOverflow`）。不传则与既有调用完全一致。
+    """
+    base = get_token_estimator(strategy).estimate(text)
+    if not model_id:
+        return base
+    margin = getModelSafetyMargin(model_id)
+    return int(math.ceil(base * margin))
+
+
+#: 溢出保证金参数（QwenPaw 对照批 B4）：单次溢出的抬高档、封顶与下界。
+MARGIN_STEP = 1.25
+MARGIN_CAP = 2.0
+MARGIN_FLOOR = 1.0
+_MARGIN_CAPABILITY = "token_safety_margin"
+
+
+def recordModelOverflow(model_id: str) -> float:
+    """provider 溢出拒收后抬高该模型的估算基线（QwenPaw"拒收保证金"的对偶实现）。
+
+    保证金存模型能力缓存单例（进程级记忆）；步进 ×1.25、封顶 ×2.0——封顶防
+    "一次坏估算把可用窗口砍半"。返回抬高后的系数。
+    """
+    from neurova.llm.model_capability_cache import get_capability_cache
+
+    key = str(model_id or "").strip()
+    if not key:
+        return MARGIN_FLOOR
+    cache = get_capability_cache()
+    try:
+        current = float(cache.get(key, _MARGIN_CAPABILITY, MARGIN_FLOOR) or MARGIN_FLOOR)
+    except (TypeError, ValueError):
+        current = MARGIN_FLOOR
+    raised = min(MARGIN_CAP, current * MARGIN_STEP)
+    cache.learn(key, _MARGIN_CAPABILITY, raised)
+    return raised
+
+
+def getModelSafetyMargin(model_id: str) -> float:
+    """读某模型的溢出保证金系数（无记录/非法值一律回落下界 1.0）。"""
+    from neurova.llm.model_capability_cache import get_capability_cache
+
+    key = str(model_id or "").strip()
+    if not key:
+        return MARGIN_FLOOR
+    try:
+        value = float(get_capability_cache().get(key, _MARGIN_CAPABILITY, MARGIN_FLOOR)
+                      or MARGIN_FLOOR)
+    except (TypeError, ValueError):
+        return MARGIN_FLOOR
+    if value < MARGIN_FLOOR:
+        return MARGIN_FLOOR
+    return min(value, MARGIN_CAP)
+
+
+def resetModelSafetyMargins() -> None:
+    """测试隔离用：清空保证金记忆（连能力缓存一起重置）。"""
+    from neurova.llm.model_capability_cache import get_capability_cache
+
+    get_capability_cache().clear()
 
 
 def isRulerCalibrated() -> bool:

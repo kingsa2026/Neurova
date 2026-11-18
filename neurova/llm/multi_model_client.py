@@ -1037,6 +1037,12 @@ class MultiModelLLMClient:
                 limiter.report_429(model_key, pause_seconds=pause)
             elif error_kind == "model_not_found":
                 self._note_404_reconnect(client.provider.id, client.model)
+            elif error_kind == "context_overflow":
+                # QwenPaw 对照批 B4：token 保证金——溢出拒收后抬高该模型估算
+                # 基线，防同一模型被反复撞溢出（估算偏差被记住，不重复撞）
+                from neurova.context.token_estimator import recordModelOverflow
+
+                recordModelOverflow(model_key)
             self._notePairingReject(e)
             try:
                 from neurova.core.metrics import get_metrics
