@@ -199,6 +199,11 @@ export class Router {
     return this.navStack;
   }
 
+  /** 路由栈是否已挂载（Navigation 进入页面后才有内容）——温启动深链据此分流 */
+  hasNavStack(): boolean {
+    return this.navStack.size() > 0;
+  }
+
   /** 压入新页面 */
   push(routeName: string, params?: Record<string, Object>): boolean {
     if (!canNavigate(routeName, this.authStore)) {

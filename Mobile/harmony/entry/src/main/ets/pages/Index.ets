@@ -13,6 +13,7 @@
  */
 
 import { Router, RouteNames } from '../routing/Router';
+import { PendingDeepLink } from '../routing/PendingDeepLink';
 import { AuthStore } from '../libs/state/stores/AuthStore';
 import { StorageAdapter } from '../libs/adapters/StorageAdapter';
 import { Logger } from '../libs/logger/Logger';
@@ -57,6 +58,15 @@ struct Index {
     } else {
       this.logger.info('Index', '冷启动：未登录，跳转登录页');
       this.router.replace(RouteNames.LOGIN);
+    }
+    // C7：扫码配对深链优先——用户扫 PC 端二维码进入本机，直达配对页
+    //（配对是鉴权前的引导流程，压在 LOGIN/SHELL 之上；配对成功后由
+    // PairingPage 自身的跳转逻辑决定去登录页还是壳）
+    const deepLinkUri = PendingDeepLink.getInstance().take();
+    if (deepLinkUri) {
+      this.logger.info('Index', '冷启动携带配对深链，直达配对页');
+      const params: Record<string, Object> = { 'deepLinkUri': deepLinkUri };
+      this.router.push(RouteNames.PAIRING, params);
     }
   }
 

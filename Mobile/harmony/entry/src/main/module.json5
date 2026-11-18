@@ -26,6 +26,16 @@
           {
             "entities": ["entity.system.home"],
             "actions": ["action.system.home"]
+          },
+          {
+            "actions": ["ohos.want.action.viewData"],
+            "entities": ["entity.system.browsable"],
+            "uris": [
+              {
+                "scheme": "neurova",
+                "host": "pair"
+              }
+            ]
           }
         ]
       }

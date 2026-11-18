@@ -2,6 +2,8 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { HttpAdapter } from '../libs/adapters';
+import { PendingDeepLink } from '../routing/PendingDeepLink';
+import { Router, RouteNames } from '../routing/Router';
 
 export default class EntryAbility extends UIAbility {
   private static readonly DOMAIN: number = 0x0001;
@@ -16,6 +18,31 @@ export default class EntryAbility extends UIAbility {
     // 组合根：把平台 HTTP 适配器注入 HttpClient——不调用 install 则所有请求
     // 抛「HttpBackend 未设置」（此前该调用全仓缺失，网络层从未装配）
     HttpAdapter.getInstance().install();
+    // C7：扫码配对深链（neurova://pair?ref=…&host=…）——冷启动先暂存，
+    // Index 在档案/认证就绪完成分发后再消费（路由栈就绪时序）
+    const coldUri = want?.uri ?? '';
+    if (coldUri) {
+      PendingDeepLink.getInstance().set(coldUri);
+      hilog.info(EntryAbility.DOMAIN, EntryAbility.TAG, '冷启动携带配对深链');
+    }
+  }
+
+  onNewIntent(want: Want): void {
+    // C7：温启动深链——应用已在前台时扫 PC 二维码进入。路由栈已挂载则直接
+    // 推配对页；否则暂存待 Index 消费。
+    const uri = want?.uri ?? '';
+    if (!uri) {
+      return;
+    }
+    const router = Router.getInstance();
+    if (router.hasNavStack()) {
+      const params: Record<string, Object> = { 'deepLinkUri': uri };
+      router.push(RouteNames.PAIRING, params);
+      hilog.info(EntryAbility.DOMAIN, EntryAbility.TAG, '温启动深链直达配对页');
+    } else {
+      PendingDeepLink.getInstance().set(uri);
+      hilog.info(EntryAbility.DOMAIN, EntryAbility.TAG, '温启动深链暂存（路由栈未挂载）');
+    }
   }
 
   onDestroy(): void {

@@ -35,7 +35,7 @@ import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
 import { PairingConfirm, PairingResolved } from '../libs/types';
-import { PairingPayload } from '../libs/protocol/PairingPayload';
+import { PairingPayload, ParsedPairingPayload } from '../libs/protocol/PairingPayload';
 import { ServerProfiles, ServerProfile } from '../libs/config/ServerProfiles';
 import { ConfigManager } from '../libs/config/ConfigManager';
 
@@ -101,7 +101,7 @@ export struct PairingPage {
   private logger = Logger.getInstance();
   private msg = MessageManager.getInstance();
 
-  aboutToAppear() {
+  async aboutToAppear() {
     // 拉取设备信息并拼装设备名：brand-model（如 HUAWEI-ABC001）
     try {
       const info = this.platform.getDeviceInfo();
@@ -115,6 +115,26 @@ export struct PairingPage {
     this.scanTimer = setInterval(() => {
       this.scanPhase = !this.scanPhase;
     }, 1300);
+    // C7：配对深链直达（neurova://pair?ref=…&host=…，与扫码同一载荷解析）
+    try {
+      const params = this.router.getCurrentParam() as Record<string, Object> | undefined;
+      const deepLinkUri = params ? String(params['deepLinkUri'] ?? '') : '';
+      if (deepLinkUri) {
+        this.logger.info(TAG, '消费配对深链');
+        const parsed = PairingPayload.parse(deepLinkUri);
+        if (parsed) {
+          await this.applyPairingPayload(parsed);
+        } else {
+          this.status = 'failed';
+          this.errorMessage = '配对链接无效';
+          this.logger.warn(TAG, `深链未匹配到配对载荷: ${deepLinkUri.slice(0, 100)}`);
+        }
+      }
+    } catch (e) {
+      this.status = 'failed';
+      this.errorMessage = (e as Error).message;
+      this.logger.error(TAG, '配对深链消费失败', e as Error);
+    }
   }
 
   aboutToDisappear() {
@@ -142,25 +162,30 @@ export struct PairingPage {
         this.logger.warn(TAG, `扫码内容未匹配到配对载荷: ${scanned.slice(0, 100)}`);
         return;
       }
-      if (parsed.kind === 'ref') {
-        // 一扫配全：载荷带对外地址时，先确保服务器档案存在并激活（扫码即完成连接配置）
-        if (parsed.host) {
-          await this.ensureServerProfile(parsed.host);
-        }
-        // 新流程：ref → resolve 换回连地址 → confirm（带 ref）
-        this.pairingRef = parsed.value;
-        await this.resolveAndConfirm();
-        return;
-      }
-      // 旧兼容：6 位码直连 confirm
-      this.code = parsed.value;
-      this.syncCodeToCells(this.code);
-      await this.confirmPairing();
+      await this.applyPairingPayload(parsed);
     } catch (e) {
       this.status = 'failed';
       this.errorMessage = (e as Error).message;
       this.logger.error(TAG, '扫码失败', e as Error);
     }
+  }
+
+  /** 配对载荷统一入口（扫码与深链共用，C7 收口）：ref=新流程，code=旧兼容 */
+  private async applyPairingPayload(parsed: ParsedPairingPayload): Promise<void> {
+    if (parsed.kind === 'ref') {
+      // 一扫配全：载荷带对外地址时，先确保服务器档案存在并激活（扫码即完成连接配置）
+      if (parsed.host) {
+        await this.ensureServerProfile(parsed.host);
+      }
+      // 新流程：ref → resolve 换回连地址 → confirm（带 ref）
+      this.pairingRef = parsed.value;
+      await this.resolveAndConfirm();
+      return;
+    }
+    // 旧兼容：6 位码直连 confirm
+    this.code = parsed.value;
+    this.syncCodeToCells(this.code);
+    await this.confirmPairing();
   }
 
   /** 一扫配全：按二维码里的对外地址确保服务器档案存在并激活（已存在则复用） */
