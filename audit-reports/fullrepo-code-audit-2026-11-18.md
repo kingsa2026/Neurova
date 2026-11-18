@@ -69,3 +69,15 @@
 ---
 
 *审计其中 7 个发现/结论系子代理在本对话内产出、统筹者去重+核验后合并;引证原序已在各条注明。记录日期 2026-11-18。*
+
+---
+
+## H. 复核与修复执行记录（2026-11-19 接手批，会话唯一无并发）
+
+**复核结论**：本报告主体属实；三处更正——① §A 复跑附带现状里「R5-env 死配置」系误报：`NEUROVA_MASTER_RECOVERY_PASSWORD` 经 `auth.py` 的 `_MASTER_RECOVERY_PASSWORD_ENV` 常量真被 `os.environ.get` 读取（守卫扫描器不解析常量间接），helm `deployment-backend.yaml:102` 注入同样有效；② §B2 所指 swarm.py 已无在途 diff，且 `current_user_id` 是 turn_state 明文的「唯一通道直读转发」，真问题仅是台账行被发送者优先顶掉属主裁定；③ §D「notifications auth_code 明文」实际在 `negative_screen_settings.py`（响应侧已 masked），「单条读无属主」实为仅测试消费、无 HTTP 暴露的 `manager.get_notification`。
+
+**已修复（每笔先红后绿+回归）**：R4 Chart beta14（a606f3bf8）；R5 守卫常量间接（a7213a8e0）；B1 webhook 属主门六端点 + live-verify 12/12（34decf4f2）；B2 子代理台账身份属主优先（51ed34649）；C1 usage.agent_id 接 cost_tracking 既有上下文（0c5507af2）；C3 保护清单两条目随 `8003eb949` 改名迁移+退役署名（ec48d4912）；C4 四份历史快照文档补沿革横幅（30369f0c6）；C6 改名引用面扫荡+断链清零（673 条 0 BROKEN）+0-index 补登 12 份+重复终评件退役（037b73bdd）；C8 端点计数对齐现读 115 路由模块/136 .py（c508bd548）；D 组 plugin grants 内层校验（cd76105bf）、`_is_youtube_url` host 边界（268f377cc）、发布脚本版本单源+删死链（450fe9666）、start.sh .venv 优先（49c923da9）；另清偿登记史守卫预存红——字面 `\n` 坏行拆解+两笔历史退役署名（4cc505d43）。
+
+**仍开放**：C7 Mobile 配对 scheme（待鸿蒙侧数据）；browser 工具 url 策略、`.cf_doc.md`/`.roles.md` 去留、skills 词表收口方向、R7 副本口径（产品/运维裁定）；swarm 回路的 cost 上下文写点（现仅 chat_pipeline 每轮写入，子代理 usage 行留空串不劣化）；`INTENT_CHANNEL_WEIGHTS` 两表数值确证不同（非重复实现，合并须裁定）。
+
+**全量验证**：tests/unit/api 18 failed 均为预存（15 项见 S1/R4 台账，另 3 条经基线工作树 A/B 实证）；tests/unit/ci 修复前 26 failed → 修复后 18 failed，经基线 A/B 实证全部为预存 meta 守卫红，零新增；tests/llm 75P、plugins 128P、web_reach 84P、memory_ingest 296P、deploy_config_guard 38P、登记史守卫 9P。
