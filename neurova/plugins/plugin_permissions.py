@@ -200,6 +200,11 @@ class PluginPermissionStore:
         if not isinstance(grants, dict):
             self._corrupt = "授权文件里的 grants 不是对象"
             return
+        for pid, per in grants.items():
+            if not isinstance(per, dict):
+                self._corrupt = f"授权文件 grants[{pid!r}] 不是对象"
+                logger.error("%s（%s）", self._corrupt, self._path)
+                return
         self._grants = {str(pid): {str(perm): dict(rec or {})
                                    for perm, rec in (per or {}).items()}
                         for pid, per in grants.items()}
