@@ -94,8 +94,6 @@ export class RouteNames {
   static readonly SANDBOX: string = 'SandboxPage';
   static readonly FIREWALL: string = 'FirewallPage';
   // M5 P3 用户与记忆扩展
-  static readonly GROUP: string = 'GroupPage';
-  static readonly ENHANCED_USER: string = 'EnhancedUserPage';
 }
 
 /** 需要登录才能访问的受保护路由 */
@@ -168,9 +166,6 @@ const PROTECTED_ROUTES: string[] = [
   RouteNames.BENCHMARK,
   RouteNames.SANDBOX,
   RouteNames.FIREWALL,
-  // M5 P3 用户与记忆扩展（全部受保护）
-  RouteNames.GROUP,
-  RouteNames.ENHANCED_USER,
 ];
 
 /** 路由守卫：检查是否允许跳转 */

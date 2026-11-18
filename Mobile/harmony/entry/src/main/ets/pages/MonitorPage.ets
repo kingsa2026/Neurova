@@ -203,9 +203,9 @@ export struct MonitorPage {
       const r = await this.api.monitor.getResources();
       this.resources = r.data;
       const c = await this.api.monitor.listConnections();
-      this.connections = c.data;
+      this.connections = c.data ?? [];
       const a = await this.api.monitor.listAlerts(undefined, undefined, 50);
-      this.alerts = a.data;
+      this.alerts = a.data ?? [];
     } catch (e) {
       this.logger.error(TAG, '加载监控数据失败', e as Error);
       this.errorMsg = (e as Error).message.length > 0 ? (e as Error).message : '加载监控数据失败';
@@ -242,7 +242,7 @@ export struct MonitorPage {
       await this.api.monitor.resolveAlert(alert.id);
       this.msg.success('告警已解决');
       const a = await this.api.monitor.listAlerts(undefined, undefined, 50);
-      this.alerts = a.data;
+      this.alerts = a.data ?? [];
     } catch (e) {
       this.logger.error(TAG, '解决告警失败', e as Error);
       this.msg.error((e as Error).message.length > 0 ? (e as Error).message : '解决告警失败');

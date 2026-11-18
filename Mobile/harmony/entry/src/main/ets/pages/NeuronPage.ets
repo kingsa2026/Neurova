@@ -194,7 +194,7 @@ export struct NeuronPage {
     try {
       const entityType = this.entityTypeFilter.length > 0 ? this.entityTypeFilter : undefined;
       const res = await this.api.monitor.listNeurons(entityType, { page: 1, size: 200 });
-      this.entities = res.data;
+      this.entities = res.data ?? [];
       const statsRes = await this.api.monitor.getNeuronStats();
       this.stats = statsRes.data;
     } catch (e) {

@@ -652,6 +652,7 @@ export struct SettingPage {
         this.entryRow('bell', '通知中心', this.unreadCount > 0 ? this.unreadCount.toString() : '', '', RouteNames.NOTIFICATION)
         this.entryRow('task', '任务看板', '', '', RouteNames.TASK)
         this.entryRow('folder', '文件', '', '', RouteNames.FILE)
+        this.entryRow('book', '技能市场', '', '', RouteNames.MARKETPLACE)
       }
       .width('calc(100% - 32vp)')
       .margin({ left: 16, right: 16, bottom: 10 })

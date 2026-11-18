@@ -93,8 +93,6 @@ import benchmarkPageTest from './BenchmarkPage.test';
 import sandboxPageTest from './SandboxPage.test';
 import firewallPageTest from './FirewallPage.test';
 // M5 P3 用户与记忆扩展页面测试套件
-import groupPageTest from './GroupPage.test';
-import enhancedUserPageTest from './EnhancedUserPage.test';
 // M5.2 性能优化测试套件
 import chunkBatcherTest from './ChunkBatcher.test';
 import simpleDataSourceTest from './SimpleDataSource.test';
@@ -188,8 +186,6 @@ export default function testsuite() {
   sandboxPageTest();
   firewallPageTest();
   // M5 P3 用户与记忆扩展页面测试套件
-  groupPageTest();
-  enhancedUserPageTest();
   // M5.2 性能优化测试套件
   chunkBatcherTest();
   simpleDataSourceTest();

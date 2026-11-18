@@ -39,15 +39,31 @@ export struct AgentDetailPage {
   private router = Router.getInstance();
   private sm = StyleManager.getInstance();
   private msg = MessageManager.getInstance();
-  // 分节胶囊清单（概览为当前页；其余路由跳转）
+  // 分节胶囊清单（概览为当前页；其余路由跳转）。
+  // route 一律取 RouteNames 值（PageMap 按值匹配）——此前这里写的是常量名
+  // （'MEMORY' 等），push 进 Router 落到 fallback 占位页，六个入口全是坏的。
+  // 2026-11-18 补入口：扩展 agent 域全部次级页（原 13 条孤儿路由由此可达）。
   private chips: DetailChip[] = [
     { label: '概览', route: '' },
-    { label: '记忆', route: 'MEMORY' },
-    { label: '技能', route: 'SKILL_POOL' },
-    { label: '成长', route: 'GROWTH' },
-    { label: '睡眠', route: 'SLEEP_STATUS' },
-    { label: '文件', route: 'AGENT_FILE' },
-    { label: '渠道', route: 'AGENT_CHANNEL' },
+    { label: '记忆', route: RouteNames.MEMORY },
+    { label: '技能', route: RouteNames.SKILL_POOL },
+    { label: '成长', route: RouteNames.GROWTH },
+    { label: '睡眠', route: RouteNames.SLEEP_STATUS },
+    { label: '文件', route: RouteNames.AGENT_FILE },
+    { label: '渠道', route: RouteNames.AGENT_CHANNEL },
+    { label: '规则', route: RouteNames.AGENT_RULE },
+    { label: '媒体', route: RouteNames.AGENT_MEDIA },
+    { label: '调度', route: RouteNames.AGENT_SCHEDULER },
+    { label: '上下文', route: RouteNames.CONTEXT_CHANNEL },
+    { label: '电脑', route: RouteNames.AGENT_COMPUTER },
+    { label: '轨迹', route: RouteNames.AGENT_TRACE },
+    { label: '轨迹点', route: RouteNames.AGENT_TRAJECTORY },
+    { label: '睡眠设置', route: RouteNames.SLEEP_SETTINGS },
+    { label: '防火墙', route: RouteNames.AGENT_FIREWALL },
+    { label: '经验库', route: RouteNames.EXPERIENCE_KNOWLEDGE },
+    { label: '图谱', route: RouteNames.KNOWLEDGE_GRAPH },
+    { label: '反思', route: RouteNames.REFLECTION },
+    { label: '元认知', route: RouteNames.METACOGNITION },
   ];
 
   aboutToAppear(): void {
@@ -275,6 +291,7 @@ export struct AgentDetailPage {
             }
           }
           .width('100%')
+          .scrollable(ScrollDirection.Horizontal)
           .scrollBar(BarState.Off)
           .padding({ bottom: 10 })
 

@@ -40,6 +40,18 @@ interface DashboardStats {
   backendOk: boolean;        // /home/data 是否成功（健康条唯一事实源，不写死）
 }
 
+/** 更多功能入口（2026-11-18 补入口：七域页面此前只有 PageMap 挂载、无导航入口） */
+interface DashEntry {
+  label: string;
+  route: string;
+}
+
+/** 更多功能分组 */
+interface DashGroup {
+  title: string;
+  entries: DashEntry[];
+}
+
 @Component
 export struct DashboardPage {
   // 统计数据（GET /home/data 真实统计；加载期 0 值占位）
@@ -58,6 +70,39 @@ export struct DashboardPage {
   @State agents: Agent[] = [];
   // 最近会话（/console/chat/sessions 前 3 条，同源 PC）
   @State recentSessions: ChatSession[] = [];
+  // 更多功能分组（七域页面导航入口；route 取 RouteNames 值，PageMap 按值匹配）
+  private moreGroups: DashGroup[] = [
+    {
+      title: '协作', entries: [
+        { label: '协作空间', route: RouteNames.COLLABORATION },
+        { label: '工作流', route: RouteNames.WORKFLOW },
+        { label: '项目', route: RouteNames.PROJECT },
+        { label: '团队', route: RouteNames.TEAM },
+        { label: '发起协作', route: RouteNames.COLLABORATION_INITIATE },
+        { label: 'AIGC 任务', route: RouteNames.AIGC }
+      ]
+    },
+    {
+      title: '监控与运维', entries: [
+        { label: '运行监控', route: RouteNames.MONITOR },
+        { label: '统计', route: RouteNames.STATS },
+        { label: '日志', route: RouteNames.LOG },
+        { label: '神经元', route: RouteNames.NEURON },
+        { label: '健康检查', route: RouteNames.HEALTH },
+        { label: '审计', route: RouteNames.AUDIT },
+        { label: '基准测试', route: RouteNames.BENCHMARK },
+        { label: '沙箱', route: RouteNames.SANDBOX },
+        { label: '防火墙', route: RouteNames.FIREWALL }
+      ]
+    },
+    {
+      title: '渠道与同步', entries: [
+        { label: '渠道集成', route: RouteNames.CHANNEL_INTEGRATION },
+        { label: '会话同步', route: RouteNames.SESSION_SYNC },
+        { label: 'Webhook', route: RouteNames.WEBHOOK }
+      ]
+    }
+  ];
   // 未读通知数（GET /notifications/unread-count；0 或失败不展示通知条）
   @State unreadCount: number = 0;
 
@@ -180,6 +225,46 @@ export struct DashboardPage {
   /** 切到对话 Tab（最近会话「全部」入口，经 AppStorage 与 ShellPage 同步） */
   private gotoSessionsTab(): void {
     AppStorage.setOrCreate('shellTab', 0);
+  }
+
+  /** 更多功能分组入口（补入口：七域页面可达性） */
+  @Builder
+  moreFunctionSection() {
+    Row() {
+      Text('更多功能')
+        .fontSize(this.sm.getFontSize('caption'))
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.sm.getColor('text_primary'))
+    }
+    .width('100%')
+    .padding({ left: 4, top: 12, bottom: 2 })
+
+    ForEach(this.moreGroups, (g: DashGroup) => {
+      Text(g.title)
+        .fontSize(this.sm.getFontSize('badge'))
+        .fontColor(this.sm.getColor('text_tertiary'))
+        .padding({ left: 4, top: 8, bottom: 4 })
+      Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
+        ForEach(g.entries, (e: DashEntry) => {
+          Row() {
+            Text(e.label)
+              .fontSize(this.sm.getFontSize('badge'))
+              .fontColor(this.sm.getColor('text_secondary'))
+            AppIcon({ name: 'chev', iconSize: 10, color: this.sm.getColor('text_tertiary') })
+              .margin({ left: 3 })
+          }
+          .width('31%')
+          .padding({ left: 9, right: 6, top: 9, bottom: 9 })
+          .borderRadius(10)
+          .backgroundColor(this.sm.getColor('glass'))
+          .border({ width: 1, color: this.sm.getColor('border') })
+          .margin({ bottom: 8 })
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => { this.router.push(e.route); })
+        }, (e: DashEntry) => e.label)
+      }
+      .width('100%')
+    }, (g: DashGroup) => g.title)
   }
 
   build() {
@@ -422,6 +507,9 @@ export struct DashboardPage {
               }, (s: ChatSession) => s.id + s.updated_at)
             }
             .width('100%')
+
+            // 4. 更多功能（七域页面导航入口，2026-11-18 补入口批）
+            this.moreFunctionSection()
           }
           .width('100%')
           .padding(this.sm.getSpacing('md'))
