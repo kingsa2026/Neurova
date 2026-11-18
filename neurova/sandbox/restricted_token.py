@@ -167,6 +167,10 @@ class RestrictedTokenSandbox:
         out_path = os.path.join(tempfile.gettempdir(), f"neurova_sbx_out_{os.getpid()}_{int(time.time()*1000)}")
         err_path = out_path.replace("_out_", "_err_")
         h_token = None
+        h_out = None
+        h_err = None
+        pi = _PROCESS_INFORMATION()
+        k32 = ctypes.windll.kernel32
         try:
             h_token = self._derive_restricted_token()
             h_out = self._make_inheritable(out_path)
@@ -177,7 +181,6 @@ class RestrictedTokenSandbox:
             si.dwFlags = _STARTF_USESTDHANDLES
             si.hStdOutput = h_out
             si.hStdError = h_err
-            pi = _PROCESS_INFORMATION()
 
             ok = ctypes.windll.advapi32.CreateProcessAsUserW(
                 h_token, None, ctypes.c_wchar_p(command), None, None,
@@ -185,8 +188,6 @@ class RestrictedTokenSandbox:
                 _CREATE_NO_WINDOW, None, cwd,
                 ctypes.byref(si), ctypes.byref(pi),
             )
-            k32.CloseHandle(h_out)
-            k32.CloseHandle(h_err)
             if not ok:
                 raise OSError(f"CreateProcessAsUserW 失败: {ctypes.GetLastError()}")
 
@@ -204,8 +205,6 @@ class RestrictedTokenSandbox:
                 }
             code = ctypes.c_uint32(-1)
             k32.GetExitCodeProcess(pi.hProcess, ctypes.byref(code))
-            k32.CloseHandle(pi.hProcess)
-            k32.CloseHandle(pi.hThread)
 
             stdout = _decode_console_output(open(out_path, "rb").read())
             stderr = _decode_console_output(open(err_path, "rb").read())
@@ -225,8 +224,17 @@ class RestrictedTokenSandbox:
                 "return_code": -1,
             }
         finally:
-            if h_token:
-                k32.CloseHandle(h_token)
+            # 句柄全路径回收（审计 2026-11-18 D 组）：原实现只在成功路径关
+            # pi.hProcess/hThread——超时路径 TerminateProcess 后直接 return
+            # 泄漏两个进程句柄；_make_inheritable 中途失败也会泄漏已建句柄。
+            # 统一在 finally 关干净（句柄值可能被系统复用，故不重复内联关）。
+            for handle in (h_out, h_err, h_token):
+                if handle:
+                    k32.CloseHandle(handle)
+            if pi.hProcess:
+                k32.CloseHandle(pi.hProcess)
+            if pi.hThread:
+                k32.CloseHandle(pi.hThread)
             for p in (out_path, err_path):
                 try:
                     if os.path.exists(p):
