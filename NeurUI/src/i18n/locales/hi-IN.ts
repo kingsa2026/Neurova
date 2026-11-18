@@ -617,6 +617,7 @@ export default {
     retrySwitched: 'बार-बार दर-सीमा — जारी रखने के लिए {model} पर स्विच किया (मॉडल {count}/{total})',
     retryExhausted: '{count} मॉडलों पर स्वतः पुनः प्रयास असफल रहे',
     retryYieldWait: 'समानांतर कोटा के कारण रुके हैं - {seconds} सेकंड में पुनःप्रयास ({retry}/{max})',
+    retryOverflowRetry: 'संदर्भ सीमा अतिरिक्त — स्वतः संकुचित कर पुनः प्रयास जारी',
     upstreamSilence: 'अपस्ट्रीम {seconds} सेकंड से मौन, प्रतीक्षा जारी है…',
     contextCompactedNotice: 'स्वतः कॉम्पैक्ट: {folded} संदेश फोल्ड किए, संदर्भ {before} → {after} टोकन',
     contextCompactCooldownNotice: 'संदर्भ संपीड़न कूलडाउन में: लगातार {failures} विफलताएँ, {seconds}s के लिए स्वतः संपीड़न रोका गया',

@@ -1090,6 +1090,10 @@ function retryNoticeText(msg: ChatMessage): string {
     const remain = Math.max(0, Math.round((n.remainingSeconds ?? 0) - elapsed))
     return t('chat.retryYieldWait', { retry: n.retry ?? 0, max: n.maxRetries ?? 0, seconds: remain })
   }
+  if (n.phase === 'overflow_retry') {
+    // QwenPaw 对照批 C3：管线溢出兜底——半截已按 reset 协议清空，压缩后重试中
+    return t('chat.retryOverflowRetry')
+  }
   return t('chat.retryExhausted', { count: n.failCount ?? 0 })
 }
 

@@ -617,6 +617,7 @@ export default {
     retrySwitched: 'تكرار تجاوز الحد — تم التحويل إلى {model} للمتابعة (النموذج {count}/{total})',
     retryExhausted: 'أُعيدت المحاولة تلقائيًا عبر {count} نماذج دون نجاح',
     retryYieldWait: 'تنزيل بسبب حيص التنفيذ المتوازي - إعادة المحاولة بعد {seconds} ثانية (المحاولة {retry}/{max})',
+    retryOverflowRetry: 'تجاوز سياق المحادثة — تم الضغط تلقائيًا وجارٍ إعادة المحاولة',
     upstreamSilence: 'لا بيانات من المصدر منذ {seconds} ثانية، ما زلنا ننتظر…',
     contextCompactedNotice: 'ضغط تلقائي: طي {folded} رسالة، السياق {before} → {after} رمز',
     contextCompactCooldownNotice: 'تهدئة ضغط السياق: {failures} حالات فشل متتالية، تم إيقاف الضغط التلقائي لمدة {seconds} ثانية',

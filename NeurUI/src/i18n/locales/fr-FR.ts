@@ -617,6 +617,7 @@ export default {
     retrySwitched: 'Limitations répétées — bascule vers {model} pour continuer (modèle {count}/{total})',
     retryExhausted: 'Réessais automatiques sur {count} modèles sans succès',
     retryYieldWait: 'Cession pour quota de concurrence - nouvelle tentative dans {seconds} s (essai {retry}/{max})',
+    retryOverflowRetry: 'Débordement de contexte — compression automatique effectuée, nouvelle tentative en cours',
     upstreamSilence: 'Amont silencieux depuis {seconds}s, attente en cours…',
     contextCompactedNotice: 'Compression automatique : {folded} messages repliés, contexte {before} → {after} tokens',
     contextCompactCooldownNotice: 'Compression du contexte en refroidissement : {failures} échecs consécutifs, compression automatique en pause pendant {seconds}s',

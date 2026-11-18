@@ -617,6 +617,7 @@ export default {
     retrySwitched: 'Повторные ограничения — переключено на {model} для продолжения (модель {count}/{total})',
     retryExhausted: 'Автоповторы на {count} моделях без успеха',
     retryYieldWait: 'Уступаем из-за лимита параллельности - повтор через {seconds} с (попытка {retry}/{max})',
+    retryOverflowRetry: 'Переполнение контекста — автоматически сжато, идёт повторная попытка',
     upstreamSilence: 'Нет данных от upstream {seconds}с, всё ещё ждём…',
     contextCompactedNotice: 'Автосжатие: свёрнуто сообщений {folded}, контекст {before} → {after} токенов',
     contextCompactCooldownNotice: 'Охлаждение сжатия контекста: {failures} неудач подряд, автосжатие приостановлено на {seconds} с',

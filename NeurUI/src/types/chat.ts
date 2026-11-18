@@ -65,7 +65,7 @@ export interface ChatMessage {
    * reset 时半截回复已清空。流式恢复（content/reasoning/done/error）即清除。
    */
   retryNotice?: {
-    phase: 'waiting' | 'switched' | 'exhausted' | 'yield_wait' | 'silence'
+    phase: 'waiting' | 'switched' | 'exhausted' | 'yield_wait' | 'silence' | 'overflow_retry'
     retry?: number
     maxRetries?: number
     /** waiting 时的总等待秒数（前端按 receivedAt 本地倒数） */

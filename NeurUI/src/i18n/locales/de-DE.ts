@@ -617,6 +617,7 @@ export default {
     retrySwitched: 'Wiederholte Ratelimits — umgeschaltet auf {model} zum Fortfahren (Modell {count}/{total})',
     retryExhausted: 'Automatische Wiederholungen über {count} Modelle ohne Erfolg',
     retryYieldWait: 'Ausweichen wegen Kontingent - erneuter Versuch in {seconds} s (Versuch {retry}/{max})',
+    retryOverflowRetry: 'Kontextüberlauf — automatisch komprimiert, neuer Versuch läuft',
     upstreamSilence: 'Keine Daten vom Upstream seit {seconds}s – es wird weiterhin gewartet…',
     contextCompactedNotice: 'Automatisch komprimiert: {folded} Nachrichten eingeklappt, Kontext {before} → {after} Token',
     contextCompactCooldownNotice: 'Kontextkomprimierung im Cooldown: {failures} Fehlschläge in Folge, automatische Komprimierung für {seconds}s pausiert',

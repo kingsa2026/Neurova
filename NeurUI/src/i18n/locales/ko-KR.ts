@@ -617,6 +617,7 @@ export default {
     retrySwitched: '한도 초과 반복으로 {model} 모델로 전환하여 계속합니다({count}/{total}번째)',
     retryExhausted: '{count}개 모델에서 자동 재시도했지만 실패했습니다',
     retryYieldWait: '동시 실행 한도로 양보 중 - {seconds}초 후 재시도({retry}/{max})',
+    retryOverflowRetry: '컨텍스트 초과 — 자동 압축 후 재시도 중',
     upstreamSilence: '업스트림이 {seconds}초 무응답입니다. 계속 대기 중…',
     contextCompactedNotice: '자동 압축: 메시지 {folded}개를 접었으며, 컨텍스트 {before} → {after} 토큰',
     contextCompactCooldownNotice: '컨텍스트 압축 쿨다운 중: 연속 {failures}회 실패, {seconds}초간 자동 압축 중단',
