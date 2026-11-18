@@ -56,14 +56,8 @@ export default class EntryAbility extends UIAbility {
     try {
       this.context.getApplicationContext()
         .setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
-      const mainWindow = windowStage.getMainWindowSync();
-      mainWindow.setWindowBackgroundColor('#0a0e1d');
-      mainWindow.setWindowSystemBarProperties({
-        statusBarColor: '#0a0e1d',
-        navigationBarColor: '#0a0e1d',
-      });
     } catch (e) {
-      hilog.error(EntryAbility.DOMAIN, EntryAbility.TAG, '窗口主题设置失败: %{public}s', (e as Error).message);
+      hilog.error(EntryAbility.DOMAIN, EntryAbility.TAG, '色彩模式设置失败: %{public}s', (e as Error).message);
     }
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
@@ -74,6 +68,19 @@ export default class EntryAbility extends UIAbility {
           JSON.stringify(err)
         );
         return;
+      }
+      // 窗口背景/系统栏属性必须在首页装载、窗口进入就绪态后再设——同步期调用
+      // 会报「This window state is abnormal」，且异常会吞掉系统栏设置，
+      // 把窗口留在未绘制态（实测表现为登录后整屏黑）
+      try {
+        const mainWindow = windowStage.getMainWindowSync();
+        mainWindow.setWindowBackgroundColor('#0a0e1d');
+        mainWindow.setWindowSystemBarProperties({
+          statusBarColor: '#0a0e1d',
+          navigationBarColor: '#0a0e1d',
+        });
+      } catch (e) {
+        hilog.error(EntryAbility.DOMAIN, EntryAbility.TAG, '窗口主题设置失败: %{public}s', (e as Error).message);
       }
       hilog.info(EntryAbility.DOMAIN, EntryAbility.TAG, '首页加载完成');
     });
