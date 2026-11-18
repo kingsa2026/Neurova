@@ -20,7 +20,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from .isolation import IsolationContext
@@ -231,6 +231,9 @@ class SleepConsolidation(StateValuesStore):
         self._insights: List[Dict[str, Any]] = []
         # 冲突解决审计记录（多成员簇合并时产生, /conflicts 端点数据源）
         self._conflict_resolutions: List[Dict[str, Any]] = []
+        # T2 睡眠归纳相位：LLM 客户端提供者（agent 装配注入；门控
+        # NEUROVA_SLEEP_INDUCTION 默认 off，客户端缺席时归纳如实跳过）
+        self._induction_llm_provider: Optional[Callable[[], Any]] = None
         # 深睡/休眠周期的真实统计留存 —— REM 洞察的唯一来源（本周期无则取上一周期/
         # 手动会话的真实统计，无来源如实为空，不编造）
         self._last_cycle_stats: Optional[Dict[str, Any]] = None
@@ -917,6 +920,9 @@ class SleepConsolidation(StateValuesStore):
                     )
 
                     write_stats = write_back_consolidation_result(self.memory_manager, cycle)
+                    # T2 归纳相位：整理落定后归纳 schema（门控
+                    # NEUROVA_SLEEP_INDUCTION，默认 off；fail-soft）
+                    self._run_induction()
 
                     result = {
                         "duration_minutes": duration_minutes,
@@ -983,6 +989,40 @@ class SleepConsolidation(StateValuesStore):
             return False
         self.wake()
         return True
+
+    def set_induction_llm_provider(self, provider: Optional[Callable[[], Any]]) -> None:
+        """设置睡眠归纳相位的 LLM 客户端提供者（agent 装配注入；None=归纳跳过）"""
+        self._induction_llm_provider = provider
+
+    def _run_induction(self) -> None:
+        """T2 归纳相位入口（手动深睡会话与自动周期共用）。
+
+        门控 ``NEUROVA_SLEEP_INDUCTION``（默认 off）；LLM 经 provider 取
+        客户端、``buildSyncLlmFn`` 桥接成同步调用；整个相位 fail-soft——
+        任何异常只留日志，绝不阻断睡眠整理主流程。
+        """
+        try:
+            from neurova.cognitive_layers.memory_layer.sleep_induction import (
+                buildSyncLlmFn,
+                runSleepInduction,
+                sleepInductionEnabled,
+            )
+
+            if not sleepInductionEnabled():
+                return
+            provider = self._induction_llm_provider
+            client = provider() if callable(provider) else None
+            stats = runSleepInduction(
+                self.memory_manager, buildSyncLlmFn(client)
+            )
+            if stats.get("clusters"):
+                logger.info(
+                    "睡眠归纳（手动会话）: 簇 %s, schema %s, 顺延 %s, 失败 %s",
+                    stats["clusters"], stats["schemas"], stats["deferred"],
+                    stats["failed"],
+                )
+        except Exception as e:  # noqa: BLE001 - 归纳故障不阻断睡眠链
+            logger.warning("睡眠归纳跳过: %s", e)
 
     def _load_logs(self) -> None:
         """从磁盘加载梦境/合并/冲突审计（logs_store_path 未配置则跳过）。"""

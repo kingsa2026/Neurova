@@ -141,10 +141,17 @@ class IdleTimeTracker(BaseModule):
         self._memory_manager = None
         # P2-6: 真实记忆温度来源（由 agent 注入 memory_manager.get_average_temperature）
         self._temperature_provider: Optional[Callable[[], float]] = None
+        # T2 睡眠归纳相位：LLM 客户端提供者（返回 agent.llm_client 或 None），
+        # 由 agent 装配注入；门控 NEUROVA_SLEEP_INDUCTION 默认 off
+        self._induction_llm_provider: Optional[Callable[[], Any]] = None
 
     def set_temperature_provider(self, provider: Callable[[], float]) -> None:
         """设置真实记忆温度提供者（无注入时退回 25.0 中性默认值）"""
         self._temperature_provider = provider
+
+    def set_induction_llm_provider(self, provider: Optional[Callable[[], Any]]) -> None:
+        """设置睡眠归纳相位的 LLM 客户端提供者（无注入/返回 None = 只能跳过归纳）"""
+        self._induction_llm_provider = provider
 
     def _current_memory_temperature(self) -> float:
         """获取当前真实平均记忆温度"""
@@ -290,6 +297,10 @@ class IdleTimeTracker(BaseModule):
                 # light_sleep/rem 不动记忆，无需写回。
                 if phase not in ("light_sleep", "rem"):
                     self._write_back_consolidated_memories(result)
+                    # T2 归纳相位：整理落定后对未被上层结构引用的事实做
+                    # schema 归纳（门控 NEUROVA_SLEEP_INDUCTION，默认 off；
+                    # fail-soft，绝不阻断整理主流程）
+                    self._run_sleep_induction()
 
                 # 通知回调
                 for callback in self._callbacks.get("consolidation", []):
@@ -319,6 +330,38 @@ class IdleTimeTracker(BaseModule):
             self.log_info(f"Write-back completed: {stats}")
         except Exception as e:
             self.log_error(f"Error during write-back: {e}")
+
+    def _run_sleep_induction(self) -> None:
+        """T2 睡眠归纳相位：对未被上层结构引用的事实做 LLM schema 归纳。
+
+        门控 ``NEUROVA_SLEEP_INDUCTION``（默认 off）；LLM 客户端经
+        ``set_induction_llm_provider`` 注入（缺省/缺席只跳过，不报错）。
+        整个相位 fail-soft——任何异常只留日志，绝不阻断睡眠整理主流程。
+        """
+        try:
+            from neurova.cognitive_layers.memory_layer.sleep_induction import (
+                runSleepInduction,
+                sleepInductionEnabled,
+            )
+
+            if not sleepInductionEnabled():
+                return
+            provider = self._induction_llm_provider
+            client = provider() if callable(provider) else None
+            from neurova.cognitive_layers.memory_layer.sleep_induction import (
+                buildSyncLlmFn,
+            )
+
+            llm_fn = buildSyncLlmFn(client)
+            stats = runSleepInduction(self._memory_manager, llm_fn)
+            if stats.get("clusters"):
+                self.log_info(
+                    f"Sleep induction: clusters={stats['clusters']}, "
+                    f"schemas={stats['schemas']}, deferred={stats['deferred']}, "
+                    f"failed={stats['failed']}"
+                )
+        except Exception as e:  # noqa: BLE001 - 归纳故障不阻断睡眠链
+            self.log_warning(f"Sleep induction skipped: {e}")
 
     def trigger_consolidation(self) -> Optional[Dict[str, Any]]:
         """公开入口: 触发一次记忆巩固（供认知负荷过载后整合等场景调用）
