@@ -96,6 +96,22 @@ _goal_var: ContextVar = ContextVar("neurova_turn_goal", default=None)
 _goal_verdict_var: ContextVar = ContextVar("neurova_turn_goal_verdict", default=None)
 _goal_continuations_var: ContextVar = ContextVar("neurova_turn_goal_continuations", default=0)
 
+# 本轮来源渠道（QwenPaw 对照批 B11）：渠道路由装配消息时盖章（source_channel），
+# 技能选择按 manifest 的 channels 声明过滤。写入点只有 chat 管线入口一处。
+_turn_channel_var: ContextVar = ContextVar("neurova_turn_channel", default=None)
+
+
+def set_turn_channel(channel: Optional[str]) -> None:
+    if channel is None:
+        _turn_channel_var.set(None)
+        return
+    _turn_channel_var.set(str(channel).strip() or None)
+
+
+def get_turn_channel() -> Optional[str]:
+    """本轮来源渠道（如 agent/console/telegram/feishu；未声明返回 None）。"""
+    return _turn_channel_var.get()
+
 
 def set_turn_injected_reflections(ids: Optional[list]) -> None:
     _injected_reflections_var.set(list(ids) if ids else None)

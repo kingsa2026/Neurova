@@ -529,6 +529,13 @@ class ChatPipeline:
         """执行完整管线；异常和取消也必须终结任务证据。"""
         from neurova.skills.creation_governance import finish_task
         from neurova.core.steer_queue import get_active_turn_registry
+        from neurova.core.turn_context import set_turn_channel
+
+        # QwenPaw 对照批 B11：本轮来源渠道盖章（技能 manifest 的 channels 过滤读它）
+        try:
+            set_turn_channel((ctx.metadata or {}).get("source_channel"))
+        except Exception:  # noqa: BLE001 - 渠道盖章失败不阻断主流程
+            pass
 
         completed = False
         # P2（loop 对照 #5）：登记"回合进行中"——请求入口据此把 turn 期间的

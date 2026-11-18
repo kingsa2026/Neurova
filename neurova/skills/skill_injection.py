@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
@@ -276,12 +277,26 @@ def select_skills_for_turn(
     """
     active: List[str] = []
     unpacked: Dict[str, Any] = {}
+    # QwenPaw 对照批 B11：本轮来源渠道（manifest.channels 过滤的读侧信号）
+    turn_channel = turn_context.get_turn_channel()
     for name, raw in skills.items():
         skill = raw[0] if isinstance(raw, tuple) and raw else raw
         cfg = getattr(skill, "config", None)
         if isinstance(cfg, dict) and cfg.get("model_invocable") is False:
             continue
         if getattr(skill, "enabled", True) is False:
+            continue
+        # B11：manifest 声明的渠道限定——config.channels 非空且本轮渠道不在
+        # 名单则出局（渠道未盖章时不过滤，保持既有行为零变化）
+        allowed_channels = cfg.get("channels") if isinstance(cfg, dict) else None
+        if allowed_channels and turn_channel and turn_channel not in allowed_channels:
+            continue
+        # B11：require_envs 环境依赖——缺失即出局并点名（不静默）
+        required_envs = cfg.get("require_envs") if isinstance(cfg, dict) else None
+        missing_envs = [e for e in (required_envs or [])
+                        if isinstance(e, str) and not os.environ.get(e)]
+        if missing_envs:
+            logger.warning("技能 %s 因缺少环境变量 %s，本轮不注入", name, missing_envs)
             continue
         if not match_skill_paths(skill, user_input):
             continue
