@@ -1582,11 +1582,22 @@ class ContextOrchestrator:
             # 同口径受 `compress_envelope` 确定性淘汰。
             blocks: Dict[str, list] = {
                 "memories": [],
+                "lessons": [],
                 "experience": [],
                 "emotion": [],
                 "tooling": [],
                 "history": [],
             }
+            # E5：池分支补元认知教训注入——此前 lessons 只走非池分支
+            # （builder → injector），生产主链路（use_pool=True）吃不到反思教训。
+            # 经 `_unifiedInjector.buildMetacogLessons()` 复用同一选取逻辑
+            # （≤3 条、过期不注，不造第二套）；注入形态与池内其他系统提醒一致
+            # （<lessons> 信封块，受信封预算与压缩淘汰管辖）。
+            _poolInjector = getattr(self, "_unifiedInjector", None)
+            if _poolInjector is not None:
+                _lessonsText = _poolInjector.buildMetacogLessons()
+                if _lessonsText:
+                    blocks["lessons"].append(_lessonsText)
             window_hashes = {
                 ContextInput.compute_hash(ContextSource.CONVERSATION, msg["content"])
                 for msg in window_msgs

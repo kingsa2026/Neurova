@@ -336,9 +336,7 @@ class UnifiedContextInjector(BaseModule):
             reflection_content = self._build_reflection_context()
 
         # V3 自模型：结构化教训（agent_id 经 kwargs 注入；缺省跳过——零行为变化）
-        metacog_content = ""
-        if getattr(self, "_metacog_agent_id", None):
-            metacog_content = self._build_metacog_lessons(self._metacog_agent_id)
+        metacog_content = self.buildMetacogLessons()
 
         memory_content = self._build_memory_context(memories, user_input)
 
@@ -511,6 +509,17 @@ class UnifiedContextInjector(BaseModule):
         except Exception as e:
             self.log_warning(f"构建反思日志上下文失败: {e}")
             return ""
+
+    def buildMetacogLessons(self) -> str:
+        """教训注入唯一入口：有归属身份才构建，无身份零注入。
+
+        非池分支（_build_context_internal）与池分支（orchestrator 经
+        `_unifiedInjector` 调用）共用本入口；选取逻辑单源在
+        `_build_metacog_lessons`（预算 ≤3 条、过期不注），不造第二套。
+        """
+        if not getattr(self, "_metacog_agent_id", None):
+            return ""
+        return self._build_metacog_lessons(self._metacog_agent_id)
 
     def _build_metacog_lessons(self, agent_id: str, limit: int = 3) -> str:
         """构建元认知教训上下文（活跃 avoid_tool/discount/review 教训，全确定性）"""
