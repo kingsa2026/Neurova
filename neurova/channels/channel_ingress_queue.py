@@ -61,6 +61,13 @@ CREATE INDEX IF NOT EXISTS idx_ingress_status ON channel_ingress_events(status, 
 # 表结构纳入版本域（v1=现行 schema，幂等可重放）；
 # 后续 schema 变更加 v2/3 注册，禁止再直接改 _SCHEMA 而无迁移条目
 register_migration(1, _SCHEMA, domain="channel_ingress")
+# v2（QwenPaw 对照批 B9）：入站优先级列——claim 按 priority DESC, id ASC；
+# 存量行默认 0（=既有 FIFO 语义不变），消息 metadata.priority 为默认来源
+register_migration(
+    2,
+    "ALTER TABLE channel_ingress_events ADD COLUMN priority INTEGER NOT NULL DEFAULT 0",
+    domain="channel_ingress",
+)
 
 # payload ↔ ChannelMessage 的往返由 dataclasses.asdict/from_dict 承担
 # （timestamp ISO 往返，raw_event/metadata JSON 内嵌）
@@ -97,6 +104,8 @@ class ChannelIngressQueue:
         self._conn.execute("PRAGMA journal_mode=WAL")
         with self._lock, self._conn:
             self._conn.executescript(_SCHEMA)
+            # v2 起走版本化迁移（v1 幂等重放；v2 补 priority 列，存量行默认 0）
+            apply_migrations(self._conn, domain="channel_ingress")
             # 启动恢复（重启不丢消息）：崩溃时遗留的 processing 租约重置回
             # pending，排水循环可重新 claim。单实例内 claim 由 drain 任务
             # 立即消费，重置不产生重复投递。
@@ -142,10 +151,11 @@ class ChannelIngressQueue:
     # 生产侧
     # ------------------------------------------------------------------
 
-    def enqueue(self, message: ChannelMessage) -> bool:
+    def enqueue(self, message: ChannelMessage, priority: Optional[int] = None) -> bool:
         """消息持久化。tombstone 去重：同 (channel_type, message_id) 幂等。
 
         已 done 的重复投递（平台消息重发）重开为 pending 再投一次。
+        priority：显式参数优先；缺省取消息 metadata.priority，再缺省 0（FIFO）。
 
         Returns:
             True=新入队/重开；False=重复消息（去重忽略）
@@ -157,13 +167,17 @@ class ChannelIngressQueue:
         payload = asdict(message)
         payload["timestamp"] = message.timestamp.isoformat()
         dedupe_key = f"{message.channel_type}:{message.message_id}"
+        # B9：优先级来自消息自带 metadata.priority（审批/人工消息可置高），
+        # 缺省 0=既有 FIFO 语义；显式参数供调用方覆盖。
+        priority = int(priority if priority is not None
+                       else (message.metadata or {}).get("priority") or 0)
         with self._lock:
             try:
                 with self._conn:
                     cur = self._conn.execute(
                         "INSERT OR IGNORE INTO channel_ingress_events"
                         " (channel_type, message_id, chat_id, payload, status, dedupe_key,"
-                        "  created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                        "  created_at, updated_at, priority) VALUES (?,?,?,?,?,?,?,?,?)",
                         (
                             message.channel_type,
                             message.message_id,
@@ -173,6 +187,7 @@ class ChannelIngressQueue:
                             dedupe_key,
                             _now_iso(),
                             _now_iso(),
+                            priority,
                         ),
                     )
                     if cur.rowcount > 0:
@@ -199,14 +214,14 @@ class ChannelIngressQueue:
     # ------------------------------------------------------------------
 
     def claim(self, worker: str = "drain") -> Optional[IngressEvent]:
-        """按 FIFO claim 一条 pending/过期租约的消息（租约防并发重复投递）。"""
+        """按优先级（高先）+ FIFO claim 一条 pending/过期租约的消息（租约防并发重复投递）。"""
         with self._lock:
             now = time.time()
             row = self._conn.execute(
                 "SELECT id, payload, attempt, status, claimed_at FROM channel_ingress_events"
                 " WHERE status='pending'"
                 "    OR (status='processing' AND (claimed_at IS NULL OR claimed_at < ?))"
-                " ORDER BY id LIMIT 1",
+                " ORDER BY COALESCE(priority, 0) DESC, id LIMIT 1",
                 (now - self.lease_seconds,),
             ).fetchone()
             if not row:
