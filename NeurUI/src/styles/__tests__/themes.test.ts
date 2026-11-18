@@ -251,3 +251,45 @@ describe('Liquid Glass 高光还原契约（iOS 26 玻璃材质标志性特征�
     expect(iosStarBg).not.toMatch(/transparent\s*\)\s*,\s*var\(--nr-bg-deep\)\s*$/)
   })
 })
+
+describe('按钮品牌色令牌契约（审计 2026-11-18：按钮块禁止再写死颜色）', () => {
+  const blockOf = (selector: string): string =>
+    globalCss.match(new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}'))?.[1] ?? ''
+
+  it('主按钮/危险按钮文字色走 --nr-text-on-primary 令牌', () => {
+    for (const selector of ['.ant-btn-primary', '.ant-btn-dangerous']) {
+      const block = blockOf(selector)
+      expect(block, `${selector} 应存在`).toContain('var(--nr-text-on-primary)')
+      expect(block, `${selector} 不得再写十六进制色值`).not.toMatch(/#[0-9a-fA-F]{3,8}/)
+    }
+  })
+
+  it('主按钮悬停渐变与投影全部走令牌', () => {
+    const hover = blockOf('.ant-btn-primary:hover')
+    expect(hover, '悬停背景应走 --nr-gradient-primary-hover').toContain(
+      'var(--nr-gradient-primary-hover)',
+    )
+    expect(hover, '悬停投影应走 --nr-primary-shadow-strong').toContain(
+      'var(--nr-primary-shadow-strong)',
+    )
+    expect(hover, '悬停块不得再写字面色/rgba 字面量').not.toMatch(/#[0-9a-fA-F]{3,8}|rgba?\(/)
+  })
+
+  it('主按钮基底投影走 --nr-primary-shadow 令牌', () => {
+    const base = blockOf('.ant-btn-primary')
+    expect(base).toContain('var(--nr-primary-shadow)')
+    expect(base, '基底块不得再写 rgba 字面量').not.toMatch(/rgba?\(/)
+  })
+
+  it('根块提供品牌派生令牌（四皮肤经 --nr-primary-rgb 级联解析）', () => {
+    const variablesCss = readFileSync(resolve(process.cwd(), 'src/styles/variables.css'), 'utf-8')
+    for (const token of ['--nr-text-on-primary', '--nr-primary-shadow', '--nr-gradient-primary-hover']) {
+      expect(variablesCss).toContain(`${token}:`)
+    }
+    for (const skin of ["[data-skin='cosmic']", "[data-skin='ios']"]) {
+      const block =
+        variablesCss.match(new RegExp(':root' + skin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}'))?.[1] ?? ''
+      expect(block, `${skin} 应声明 --nr-primary-rgb`).toContain('--nr-primary-rgb:')
+    }
+  })
+})

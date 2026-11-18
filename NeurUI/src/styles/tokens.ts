@@ -68,8 +68,10 @@ export const skinTokens = {
       spacing: sharedSpacing,
       radius: { sm: '6px', md: '10px', lg: '16px', xl: '24px', full: '9999px' },
       font: {
-        display: "'DM Sans', system-ui, sans-serif",
-        body: "'DM Sans', system-ui, sans-serif",
+        display:
+          "'DM Sans', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR', 'Noto Sans Arabic', 'Noto Sans Devanagari', system-ui, sans-serif",
+        body:
+          "'DM Sans', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR', 'Noto Sans Arabic', 'Noto Sans Devanagari', system-ui, sans-serif",
         mono: "'Space Mono', 'Fira Code', monospace",
       },
       transitions: {
@@ -108,8 +110,10 @@ export const skinTokens = {
       spacing: sharedSpacing,
       radius: { sm: '6px', md: '10px', lg: '16px', xl: '24px', full: '9999px' },
       font: {
-        display: "'DM Sans', system-ui, sans-serif",
-        body: "'DM Sans', system-ui, sans-serif",
+        display:
+          "'DM Sans', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR', 'Noto Sans Arabic', 'Noto Sans Devanagari', system-ui, sans-serif",
+        body:
+          "'DM Sans', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR', 'Noto Sans Arabic', 'Noto Sans Devanagari', system-ui, sans-serif",
         mono: "'Space Mono', 'Fira Code', monospace",
       },
       transitions: {
@@ -150,9 +154,11 @@ export const skinTokens = {
       spacing: sharedSpacing,
       radius: { sm: '10px', md: '14px', lg: '18px', xl: '28px', full: '9999px' },
       font: {
-        display: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'PingFang SC', sans-serif",
-        body: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', 'PingFang SC', sans-serif",
-        mono: "'SF Mono', ui-monospace, 'Cascadia Code', Consolas, monospace",
+        display:
+          "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'SF Pro', 'Segoe UI Variable', 'Segoe UI', 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', sans-serif",
+        body:
+          "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', 'Segoe UI Variable', 'Segoe UI', 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', sans-serif",
+        mono: "'SF Mono', ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace",
       },
       transitions: {
         fast: '0.2s cubic-bezier(0.32, 0.72, 0, 1)',
@@ -190,9 +196,11 @@ export const skinTokens = {
       spacing: sharedSpacing,
       radius: { sm: '10px', md: '14px', lg: '18px', xl: '28px', full: '9999px' },
       font: {
-        display: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'PingFang SC', sans-serif",
-        body: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', 'PingFang SC', sans-serif",
-        mono: "'SF Mono', ui-monospace, 'Cascadia Code', Consolas, monospace",
+        display:
+          "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'SF Pro', 'Segoe UI Variable', 'Segoe UI', 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', sans-serif",
+        body:
+          "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', 'Segoe UI Variable', 'Segoe UI', 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', sans-serif",
+        mono: "'SF Mono', ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace",
       },
       transitions: {
         fast: '0.2s cubic-bezier(0.32, 0.72, 0, 1)',

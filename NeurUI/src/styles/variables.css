@@ -23,6 +23,15 @@
   --nr-space-lg: 24px;
   --nr-space-xl: 32px;
   --nr-space-2xl: 48px;
+
+  /* 品牌派生（2026-11-19 审计复核：按钮/阴影禁止再写死颜色——
+     数值随各皮肤块的 --nr-primary-rgb / --nr-primary-light 级联解析） */
+  --nr-text-on-primary: #ffffff;
+  --nr-inset-highlight: rgba(255, 255, 255, 0.18);
+  --nr-inset-highlight-strong: rgba(255, 255, 255, 0.22);
+  --nr-primary-shadow: rgba(var(--nr-primary-rgb), 0.3);
+  --nr-primary-shadow-strong: rgba(var(--nr-primary-rgb), 0.4);
+  --nr-gradient-primary-hover: linear-gradient(180deg, var(--nr-primary-light) 0%, var(--nr-primary) 100%);
 }
 
 /* ─── ═══ Cosmic 皮肤（原版默认） · 深色 ═══ ───
@@ -56,6 +65,7 @@
   --nr-primary: #6366f1;
   --nr-primary-light: #818cf8;
   --nr-primary-dark: #4f46e5;
+  --nr-primary-rgb: 99, 102, 241;
   --nr-primary-soft: rgba(99, 102, 241, 0.12);
   --nr-primary-soft-border: rgba(99, 102, 241, 0.2);
   --nr-primary-ring: rgba(99, 102, 241, 0.15);
@@ -113,6 +123,7 @@
   --nr-radius-md: 10px;
   --nr-radius-lg: 16px;
   --nr-radius-xl: 24px;
+  --nr-radius-full: 9999px;
 
   /* Typography */
   --nr-font-display: 'DM Sans', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR', 'Noto Sans Arabic', 'Noto Sans Devanagari', system-ui, sans-serif;
@@ -158,6 +169,7 @@
   --nr-primary: #4d6bfe;
   --nr-primary-light: #3d5ce0;
   --nr-primary-dark: #3b57e8;
+  --nr-primary-rgb: 77, 107, 254;
   --nr-primary-soft: rgba(77, 107, 254, 0.08);
   --nr-primary-soft-border: rgba(77, 107, 254, 0.22);
   --nr-primary-ring: rgba(77, 107, 254, 0.12);
@@ -238,6 +250,7 @@
   --nr-primary: #0a84ff;
   --nr-primary-light: #409cff;
   --nr-primary-dark: #0064d2;
+  --nr-primary-rgb: 10, 132, 255;
   --nr-primary-soft: rgba(10, 132, 255, 0.16);
   --nr-primary-soft-border: rgba(10, 132, 255, 0.32);
   --nr-primary-ring: rgba(10, 132, 255, 0.22);
@@ -294,6 +307,7 @@
   --nr-radius-md: 14px;
   --nr-radius-lg: 18px;
   --nr-radius-xl: 28px;
+  --nr-radius-full: 9999px;
 
   /* Typography（SF Pro 系统字体栈） */
   --nr-font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'SF Pro', 'Segoe UI Variable', 'Segoe UI', 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
@@ -339,6 +353,7 @@
   --nr-primary: #007aff;
   --nr-primary-light: #3395ff;
   --nr-primary-dark: #0062cc;
+  --nr-primary-rgb: 0, 122, 255;
   --nr-primary-soft: rgba(0, 122, 255, 0.1);
   --nr-primary-soft-border: rgba(0, 122, 255, 0.24);
   --nr-primary-ring: rgba(0, 122, 255, 0.16);

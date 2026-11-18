@@ -324,12 +324,12 @@ input::placeholder,
 .ant-btn-primary {
   background: var(--nr-gradient-primary) !important;
   border: none !important;
-  color: #fff !important;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 2px 10px rgba(10, 132, 255, 0.3) !important;
+  color: var(--nr-text-on-primary) !important;
+  box-shadow: 0 1px 0 var(--nr-inset-highlight) inset, 0 2px 10px var(--nr-primary-shadow) !important;
 }
 .ant-btn-primary:hover {
-  background: linear-gradient(180deg, #4aa8ff 0%, #1f8fff 100%) !important;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.22) inset, 0 4px 16px rgba(10, 132, 255, 0.4) !important;
+  background: var(--nr-gradient-primary-hover) !important;
+  box-shadow: 0 1px 0 var(--nr-inset-highlight-strong) inset, 0 4px 16px var(--nr-primary-shadow-strong) !important;
 }
 .ant-btn:not(.ant-btn-primary):not(.ant-btn-dangerous) {
   background: var(--nr-glass-bg) !important;
@@ -344,7 +344,7 @@ input::placeholder,
 .ant-btn-dangerous {
   background: var(--nr-error) !important;
   border: none !important;
-  color: #fff !important;
+  color: var(--nr-text-on-primary) !important;
 }
 .ant-btn[disabled] {
   color: var(--nr-text-muted) !important;
