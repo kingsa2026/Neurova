@@ -635,7 +635,18 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
         return
 
     agent_id = data.get("agent_id", "default")
-    session_id = data.get("session_id", f"mobile-{uuid.uuid4().hex[:8]}")
+    session_id = (data.get("session_id") or "").strip()
+
+    # 会话记录落库走仓内单点 create_session（与 console SSE 面 chat.py 同一入口）：
+    # 移动端此前自铸 `session-<ts>` id 且本路径从不见仓——控制台会话列表
+    # （GET /console/chat/sessions）对移动端聊天恒空，「会话历史与 PC 同源」
+    # 在移动侧断链。客户端 id 仓里没有（或没带）就当场铸真记录；权威 id 随
+    # chunk/done 事件回传，端上采纳后同一会话续聊。
+    from neurova.session_repository import get_session_repository
+
+    repo = get_session_repository()
+    if not session_id or repo.get_session(agent_id, session_id) is None:
+        session_id = repo.create_session(agent_id=agent_id, user_id=user_id, title="新对话")
 
     # 孤儿取消标记只对在流会话生效：新流开始即消费残留标记
     _cancelled_sessions.pop(session_id, None)

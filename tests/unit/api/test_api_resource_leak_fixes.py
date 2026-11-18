@@ -170,6 +170,16 @@ def _freshRunStateSingletons():
 def cancelled_state(monkeypatch):
     monkeypatch.setattr(mp, "_cancelled_sessions", {})
     monkeypatch.setattr(mp, "_CANCELLED_SESSIONS_MAX", 8, raising=False)
+    # 会话仓打桩：client id 视作已存在（原样沿用），本档不触真存储
+    class _StubRepo:
+        def get_session(self, agent_id, session_id):
+            return {"session_id": session_id}
+
+        def create_session(self, agent_id, user_id, title):
+            return "minted-1"
+
+    stub_repo = _StubRepo()
+    monkeypatch.setattr("neurova.session_repository.get_session_repository", lambda: stub_repo)
     return mp
 
 

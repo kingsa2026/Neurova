@@ -345,6 +345,15 @@ class TestWSMessageDispatcher:
 class TestHandleChatSend:
     """_handle_chat_send 测试 — 流式聊天核心"""
 
+    @pytest.fixture(autouse=True)
+    def _repoPreserveClientIds(self):
+        """会话仓打桩：任何 client id 都视作仓里已有（原样沿用）——
+        本类只测流式契约；落库行为归 TestMobileChatSessionPersistence 专测。"""
+        repo = MagicMock()
+        repo.get_session.side_effect = lambda agent_id, session_id: {"session_id": session_id}
+        with patch("neurova.session_repository.get_session_repository", return_value=repo):
+            yield repo
+
     @pytest.mark.asyncio
     async def test_handle_chat_send_stream_yields_chunks_then_done(self):
         """管线 event_emitter 发的 content 事件 → chat:chunk ×N → chat:done"""
@@ -626,3 +635,98 @@ class TestHandleSessionCreate:
         assert sent["type"] == "error"
         assert sent["code"] == "session_create_failed"
         assert "quota exceeded" in sent["message"]
+
+
+class TestMobileChatSessionPersistence:
+    """移动 WS 聊天的会话落库——与 console SSE 面同一 create_session 单源
+
+    缺陷：移动端自铸 `session-<ts>` id 且 `_handle_chat_send` 从不见仓，
+    控制台会话列表（GET /console/chat/sessions）对移动端聊天恒空——
+    「会话历史与 PC 同源」在移动侧断链。修复后：客户端 id 仓里没有（或没带）
+    就当场铸真记录，权威 id 随 chunk/done 事件回传给端上采纳。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _repo(self):
+        self.repo = MagicMock()
+        self.repo.get_session.return_value = None           # 默认：id 不在仓里
+        self.repo.create_session.return_value = "minted-1"  # 铸出的权威 id
+        with patch("neurova.session_repository.get_session_repository", return_value=self.repo):
+            yield self.repo
+
+    @staticmethod
+    def _send_events_ok():
+        async def _fake_chat(**kwargs):
+            emitter = (kwargs.get("metadata") or {}).get("event_emitter")
+            if callable(emitter):
+                emitter("content", "ok")
+            return {"text": "ok", "success": True}
+
+        mock_agent = MagicMock()
+        mock_agent.chat = _fake_chat
+        return mock_agent
+
+    @pytest.mark.asyncio
+    async def test_chat_send_unknown_session_creates_session_record(self):
+        """仓里没有的 session_id → 当场 create_session，事件回传权威 id"""
+        from neurova.api.endpoints import mobile_pairing as mp
+
+        ws = MagicMock()
+        ws.send_json = AsyncMock()
+
+        with patch("neurova.api.endpoints.get_agent_instance", return_value=self._send_events_ok()):
+            await mp._handle_chat_send(
+                ws,
+                {"type": "chat:send", "content": "hi",
+                 "session_id": "session-1731", "agent_id": "default"},
+                "user-1",
+            )
+
+        self.repo.create_session.assert_called_once_with(
+            agent_id="default", user_id="user-1", title="新对话"
+        )
+        sent = [c.args[0] for c in ws.send_json.call_args_list]
+        carried = [m.get("session_id") for m in sent
+                   if m.get("type") in ("chat:chunk", "chat:done")]
+        assert carried, "应至少有一条 chunk/done 事件"
+        assert all(sid == "minted-1" for sid in carried), f"事件应带权威 id: {carried}"
+
+    @pytest.mark.asyncio
+    async def test_chat_send_without_session_id_mints_one(self):
+        """没带 session_id 也铸真记录（替代旧 mobile-<uuid> 野格式）"""
+        from neurova.api.endpoints import mobile_pairing as mp
+
+        ws = MagicMock()
+        ws.send_json = AsyncMock()
+
+        with patch("neurova.api.endpoints.get_agent_instance", return_value=self._send_events_ok()):
+            await mp._handle_chat_send(
+                ws, {"type": "chat:send", "content": "hi", "agent_id": "default"}, "user-1"
+            )
+
+        self.repo.create_session.assert_called_once_with(
+            agent_id="default", user_id="user-1", title="新对话"
+        )
+        done_msg = [c.args[0] for c in ws.send_json.call_args_list if c.args[0].get("type") == "chat:done"][0]
+        assert done_msg["session_id"] == "minted-1"
+
+    @pytest.mark.asyncio
+    async def test_chat_send_known_session_keeps_id(self):
+        """仓里已有的 id 原样沿用（续聊不重复铸、不改写）"""
+        from neurova.api.endpoints import mobile_pairing as mp
+
+        ws = MagicMock()
+        ws.send_json = AsyncMock()
+        self.repo.get_session.return_value = {"session_id": "s1", "agent_id": "default"}
+
+        with patch("neurova.api.endpoints.get_agent_instance", return_value=self._send_events_ok()):
+            await mp._handle_chat_send(
+                ws,
+                {"type": "chat:send", "content": "hi",
+                 "session_id": "s1", "agent_id": "default"},
+                "user-1",
+            )
+
+        self.repo.create_session.assert_not_called()
+        done_msg = [c.args[0] for c in ws.send_json.call_args_list if c.args[0].get("type") == "chat:done"][0]
+        assert done_msg["session_id"] == "s1"
