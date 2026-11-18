@@ -1387,9 +1387,8 @@ class ChatPipeline:
         """本次工具执行是否成功：读**执行器产出的判据**，读不到返回 None。
 
         优先读 `ToolExecutionManager.execute()` 随结果落下的 `success`
-        （生产端已经从执行器的 `_result_is_success` 归一过一次）；为兼容
-        直接调用 `execute_from_memory_async` 的入口，兜底读执行器的同一判据，
-        以及信封式 `{"status": "success"}` 的老形状。
+        （生产端已经从执行器的 `_result_is_success` 归一过一次）；兜底读
+        执行器的同一判据，以及信封式 `{"status": "success"}` 的老形状。
         """
         if not isinstance(result, dict):
             return None
@@ -1418,36 +1417,20 @@ class ChatPipeline:
 
     async def _record_tool_outcome(self, tool_name: str, ctx: ChatContext,
                                    success: bool, error_msg: str = ""):
-        """把这一轮的成败回流给肌肉记忆（成功与失败走同一出口）。
+        """把这一轮的成败回流（M1：记账单源在 on_tool_executed 咽喉）。
 
-        为什么成功也要回流：肌肉记忆的连击计数、成功率与温度都靠这条信号；
-        只有失败回流时，成功侧永远停在旧读数上——闭环写成"写入→读取"两半，
-        反馈那一半是断的。
+        成功侧不再另记一笔——自动执行链经 ToolExecutor.execute_tool 的
+        finally 统一进 on_tool_executed → record_tool_usage → 肌肉记忆，
+        本函数若再记一次，同一指纹一次成功连击 +2，固化阈值（2）被一次
+        成功击穿。失败侧除咽喉记账外，另走失败教训（反思日志 + 降级）。
         落盘失败不得影响本轮结论，但必须出声（不静默吞异常）。
         """
+        if success:
+            return
         try:
-            if success:
-                self._record_muscle_memory_outcome(ctx, success=True)
-            else:
-                await self._record_tool_failure(tool_name, ctx.user_input, error_msg)
+            await self._record_tool_failure(tool_name, ctx.user_input, error_msg)
         except Exception as e:
             logger.warning("工具成败回流到肌肉记忆失败（不影响本轮结论）: %s", e, exc_info=True)
-
-    def _record_muscle_memory_outcome(self, ctx: ChatContext, success: bool) -> None:
-        """在肌肉记忆上记一笔真实执行结果（命中本身不记账，见 check_tool_memory）。"""
-        tool_memory = self.tool_memory
-        muscle_memory = getattr(tool_memory, "muscle_memory", None)
-        if muscle_memory is None or not callable(getattr(muscle_memory, "record_usage", None)):
-            logger.debug("肌肉记忆不可用，成败回流跳过: success=%s", success)
-            return
-        record = ctx.tool_memory_result or {}
-        muscle_memory.record_usage(
-            tool_name=record.get("tool_name"),
-            query=ctx.user_input,
-            parameters=record.get("tool_params") or {},
-            success=success,
-            metadata={"source": "auto_execute", "confidence": record.get("confidence", 0)},
-        )
 
     def _on_tool_execution_status_change(self, event):
         """工具执行状态变更回调"""
