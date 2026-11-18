@@ -3913,6 +3913,11 @@ class MemoryManager:
                     emotion_score=emotion_score,
                     relation_count=0,
                 )
+                # T5：身份/偏好行视为硬信号——稳定事实优先常驻（睡眠归纳对
+                # identity 簇的证据行打 is_identity 标；复用既有晋升/结晶
+                # 机制，不动召回热路径）。
+                if not hits and (mem.metadata or {}).get("is_identity"):
+                    hits = True
                 if not hits:
                     continue
 
