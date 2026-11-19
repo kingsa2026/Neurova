@@ -60,19 +60,47 @@ async def getCqMatrix(
 
 @router.get("/ontology/readiness")
 async def getKnowledgeReadiness(
+    request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """复合就绪探针（P2-2，登录可读）：knowledge_ready / data_ready 两判据。
+    """复合就绪探针（P2-2/P2-3，登录可读）：knowledge/data/model 三判据。
 
-    术语/事实/目录/源四类现值一次报清；只读零网络，不提供启停动作。
-    事实源在 `neurova/knowledge/ontology/readiness.py`，本端点只转交。
+    术语/事实/目录/源现值一次报清；只读，不提供启停动作。model_ready 是
+    **可选**模型能力体检（P2-3）：env `NEUROVA_ONTOLOGY_MODEL_PROBE` 默认关
+    （关=disabled，零网络零成本）；开了才对 LLM 客户端面发一次最小探针，
+    失败如实报因。事实源在 `neurova/knowledge/ontology/readiness.py`。
     """
+    import os
+
     from neurova.knowledge.foundation import get_knowledge_fact_store
     from neurova.knowledge.ontology.readiness import knowledgeReadiness
 
     store = get_knowledge_fact_store()
+    modelProbe = None
+    if str(os.environ.get("NEUROVA_ONTOLOGY_MODEL_PROBE") or "").strip().lower() \
+            in ("1", "true", "on"):
+        def modelProbe() -> Dict[str, Any]:
+            from neurova.api.endpoints.knowledge_common import resolveAgentLlmClients
+            from neurova.mem_core import run_async_safely
+
+            clients = resolveAgentLlmClients(request)
+            if not clients:
+                return {"ok": False, "detail": "no LLM client configured"}
+            for client in clients:
+                try:
+                    resp = run_async_safely(
+                        client.chat([{"role": "user", "content": "ping"}]))
+                except Exception:  # noqa: BLE001 - 换下一个候选
+                    continue
+                content = getattr(resp, "content", "") or ""
+                if content.startswith("[LLM Error]"):
+                    continue
+                return {"ok": True, "detail": "pong"}
+            return {"ok": False, "detail": "all LLM clients failed probe"}
+
     return {"code": 0, "message": "success",
-            "data": knowledgeReadiness(store, _tenantOf(current_user))}
+            "data": knowledgeReadiness(store, _tenantOf(current_user),
+                                       modelProbe=modelProbe)}
 
 
 class AnswerabilityRequest(BaseModel):

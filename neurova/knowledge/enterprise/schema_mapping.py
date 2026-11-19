@@ -15,6 +15,14 @@ from .protocols import SOURCE_TYPES
 #: object kind 闭集：column（列值）/template（模板拼出）/term（常量术语）/literal（常量字面量）
 OBJECT_KINDS = ("column", "template", "term", "literal")
 
+#: 值变换链闭集（对照研究 P2-1，2026-11-19）：对 object 的**派生值**依次应用；
+#: 纯函数、无 IO——映射里仍不写任何可执行逻辑。
+VALUE_TRANSFORMS = ("upper", "lower", "trim", "collapse_ws")
+
+#: object 取值缺失策略（对照研究 P2-1，2026-11-19）：keep（缺省=现行为，空串照旧）/
+#: skip（整行跳过，摄取链如实记 finding）/ report（照常返回并带 objectMissing 标记）。
+MISSING_POLICIES = ("keep", "skip", "report")
+
 #: 变体闭集（2026-11-07 裁定 §2.3-1A）：单类型＋变体字段。编译期「给了就收口、
 #: 不给不拒」——B14 时代 sql/erp_api 描述符没有变体字段，存量判据不破；
 #: 工厂（registry.buildAdapter）按需强制要求。闭集随适配器批次只增不改。
@@ -122,6 +130,24 @@ def validateDescriptor(descriptor: Dict[str, Any], registry: Any,
     for slot in _TEMPLATE_SLOT.findall(str(obj.get("template") or "")):
         if slot not in columns:
             raise MappingError("object 模板占位符 {%s} 不是已声明列" % slot)
+    # 值变换链（P2-1）：只对派生值（column/template）有意义；常量对象（term/literal）
+    # 的身份是声明的，变换会破坏术语语义——编译期就拒。
+    transforms = list(obj.get("transform") or [])
+    if transforms:
+        if objKind not in ("column", "template"):
+            raise MappingError(
+                "object.transform 只适用于 column/template 派生值，%r 常量对象不变换"
+                % objKind)
+        for name in transforms:
+            if name not in VALUE_TRANSFORMS:
+                raise MappingError(
+                    "object.transform %r 不在闭集（%s）"
+                    % (name, " / ".join(VALUE_TRANSFORMS)))
+    # object 取值缺失策略（P2-1）：缺省 keep=现行为，存量描述符零漂移
+    missingPolicy = str(descriptor.get("missing") or "keep")
+    if missingPolicy not in MISSING_POLICIES:
+        raise MappingError(
+            "missing %r 不在闭集（%s）" % (missingPolicy, " / ".join(MISSING_POLICIES)))
     if objKind == "term":
         termId = str(obj.get("termId") or "")
         if registry is not None and registry.term(termId, tenantId=tenantId) is None:
@@ -162,12 +188,31 @@ def validateDescriptor(descriptor: Dict[str, Any], registry: Any,
             raise MappingError("描述符含 SQL 形状片段 %r——映射里不写 SQL" % banned.strip())
 
 
+def _applyTransforms(value: str, transforms: List[Any]) -> str:
+    """对派生值依次应用变换链（P2-1，纯函数；闭集见 VALUE_TRANSFORMS）。"""
+    out = str(value or "")
+    for name in transforms:
+        if name == "upper":
+            out = out.upper()
+        elif name == "lower":
+            out = out.lower()
+        elif name == "trim":
+            out = out.strip()
+        elif name == "collapse_ws":
+            out = " ".join(out.split())
+    return out
+
+
 def applyMapping(descriptor: Dict[str, Any], row: Dict[str, Any],
-                 registry: Any, tenantId: str = "default") -> Dict[str, Any]:
+                 registry: Any, tenantId: str = "default"):
     """把一行源数据按描述符映射成 AdmissionRequest 的字段面（不落库）。
 
     返回 {subjectLabel, predicateTermId, objectTerm, qualifier, validFrom, validUntil}。
     object 为列且列值命中关系白名单时映射为 term 语义；未命中按字面量处理（finding 面由调用方判）。
+
+    missing 策略（P2-1）：object（column/template）派生值为空时——keep（缺省）
+    照旧返回；skip 返回 None（调用方跳过该行并如实记 finding）；report 照常
+    返回但带 `objectMissing: True` 标记，去留由调用方定。
     """
     subject = descriptor.get("subject") or {}
     template = str(subject.get("template") or "")
@@ -183,6 +228,7 @@ def applyMapping(descriptor: Dict[str, Any], row: Dict[str, Any],
 
     obj = descriptor.get("object") or {}
     objKind = str(obj.get("kind") or "")
+    transforms = list(obj.get("transform") or [])
     if objKind == "column":
         objectTerm = str(row.get(str(obj.get("column") or ""), ""))
     elif objKind == "template":
@@ -191,10 +237,22 @@ def applyMapping(descriptor: Dict[str, Any], row: Dict[str, Any],
         objectTerm = str(obj.get("termId") or "")
     else:
         objectTerm = str(obj.get("value") or "")
+    if transforms:
+        objectTerm = _applyTransforms(objectTerm, transforms)
+
+    missingPolicy = str(descriptor.get("missing") or "keep")
+    if (missingPolicy in ("skip", "report") and objKind in ("column", "template")
+            and not str(objectTerm or "").strip()):
+        if missingPolicy == "skip":
+            return None
+        # report：照常返回，缺失事实交调用方定夺（不吞行、不假装正常）
+        flagged = True
+    else:
+        flagged = False
 
     qualifier = {key: str(row.get(column, ""))
                  for key, column in (descriptor.get("qualifiers") or {}).items()}
-    return {
+    result = {
         "subjectLabel": subjectLabel,
         "predicateTermId": predicateTermId,
         "objectTerm": objectTerm,
@@ -210,3 +268,6 @@ def applyMapping(descriptor: Dict[str, Any], row: Dict[str, Any],
         "sourceModifiedAt": str(row.get(str(descriptor.get("sourceModifiedAt") or ""), "")) or None
         if descriptor.get("sourceModifiedAt") else None,
     }
+    if flagged:
+        result["objectMissing"] = True
+    return result

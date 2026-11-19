@@ -170,8 +170,14 @@ class EnterpriseIngestor:
 
         gate = self._gateFactory(self._store)
         requests: List[AdmissionRequest] = []
-        for row in rows:
+        # missing=skip（P2-1，2026-11-19）：object 派生值为空的行整行跳过并如实
+        # 留名，不拖累同批其他行（admitBatch 语义不变）。
+        skipped: List[Dict[str, Any]] = []
+        for index, row in enumerate(rows):
             mapped = applyMapping(descriptor, row, self._registry, tenantId=tenantId)
+            if mapped is None:
+                skipped.append({"index": index, "reason": "missing_object"})
+                continue
             statement = "%s %s %s" % (mapped["subjectLabel"], mapped["predicateTermId"],
                                       mapped["objectTerm"])
             requests.append(AdmissionRequest(
@@ -204,7 +210,7 @@ class EnterpriseIngestor:
                 rejections.append({"index": finding.get("index"),
                                    "finding": finding.get("finding")})
         return {"admitted": admitted, "rejected": len(rejections),
-                "rejections": rejections, "cursor": cursorToken}
+                "rejections": rejections, "skipped": skipped, "cursor": cursorToken}
 
     def saveConfig(self, tenantId: str, sourceId: str, descriptor: Dict[str, Any],
                    enabled: bool = False) -> None:
