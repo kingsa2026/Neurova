@@ -72,6 +72,16 @@
               >{{ t('ontology.entIngestBtn') }}</GlassButton>
               <GlassButton
                 variant="ghost" size="sm"
+                data-testid="ent-interval-btn"
+                @click="openIntervalModal(record)"
+              >{{ t('ontology.entIntervalBtn') }}</GlassButton>
+              <GlassButton
+                variant="ghost" size="sm"
+                data-testid="ent-history-btn"
+                @click="openHistoryDrawer(record.source_id)"
+              >{{ t('ontology.entHistoryBtn') }}</GlassButton>
+              <GlassButton
+                variant="ghost" size="sm"
                 data-testid="ent-catalog-btn"
                 @click="openCatalogDrawer(record.source_id)"
               >{{ t('ontology.catalogDrawerTitle') }}</GlassButton>
@@ -136,6 +146,60 @@
         </GlassButton>
       </template>
     </a-modal>
+
+    <!-- 同步间隔设置（可靠性方案 D2：改完即时注册/摘除 job） -->
+    <a-modal
+      v-model:open="showIntervalModal"
+      :title="t('ontology.entIntervalTitle')"
+      width="460px"
+    >
+      <a-form layout="vertical">
+        <a-form-item :label="t('ontology.entIntervalLabel')" required>
+          <a-input-number
+            v-model:value="intervalSeconds"
+            :min="0"
+            :max="86400"
+            class="mono"
+            data-testid="ent-interval-input"
+          />
+          <p class="field-hint">{{ t('ontology.entIntervalHint') }}</p>
+        </a-form-item>
+      </a-form>
+      <template #footer>
+        <GlassButton variant="secondary" size="sm" @click="showIntervalModal = false">
+          {{ t('common.cancel') }}
+        </GlassButton>
+        <GlassButton variant="primary" size="sm" :loading="intervalSaving"
+          data-testid="ent-interval-save" @click="saveSyncInterval">
+          {{ t('common.save') }}
+        </GlassButton>
+      </template>
+    </a-modal>
+
+    <!-- 同步历史（可靠性方案 D1：每轮拉取一行） -->
+    <a-drawer
+      v-model:open="showHistoryDrawer"
+      :title="t('ontology.entHistoryTitle') + ' — ' + historySourceId"
+      width="720px"
+    >
+      <a-table
+        :data-source="historyItems"
+        :loading="historyLoading"
+        :pagination="false"
+        size="small"
+        data-testid="ent-history-table"
+        row-key="started_at"
+      >
+        <a-table-column :title="t('ontology.entHistColTime')" data-index="started_at" width="170">
+          <template #default="{ text }"><span class="mono">{{ formatTime(text) }}</span></template>
+        </a-table-column>
+        <a-table-column :title="t('ontology.entHistColTrigger')" data-index="trigger_kind" width="90" />
+        <a-table-column :title="t('ontology.entHistColStatus')" data-index="status" width="90" />
+        <a-table-column :title="t('ontology.entHistColAdmitted')" data-index="admitted" width="80" />
+        <a-table-column :title="t('ontology.entHistColRejected')" data-index="rejected" width="80" />
+        <a-table-column :title="t('ontology.entHistColReason')" data-index="reason" ellipsis />
+      </a-table>
+    </a-drawer>
 
     <!-- 新增/编辑向导（分步弹层） -->
     <a-modal
@@ -483,15 +547,19 @@ import { useAuthStore } from '@/stores/auth'
 import {
   deleteEnterpriseSource,
   getEnterpriseSourceHealth,
+  getEnterpriseSyncHistory,
+  getEnterpriseSyncInterval,
   listEnterpriseSources,
   submitEnterpriseSource,
   triggerEnterpriseIngest,
   triggerEnterpriseMedia,
+  updateEnterpriseSyncInterval,
   getWebhookConfig,
   rotateWebhookSecret,
   simulateWebhookPush,
   getWebhookDedupStats,
 } from '@/api/modules/ontology'
+import type { EnterpriseSyncHistoryItem } from '@/api/modules/ontology'
 import type { EnterpriseDescriptor, EnterpriseSourceConfig } from '@/types/ontology'
 import { extractApiDetail } from '@/utils/error'
 import { splitList } from '@/utils/ontologyFormat'
@@ -625,6 +693,58 @@ const removeSource = async (sourceId: string) => {
     await loadSources()
   } catch (err) {
     message.error(extractApiDetail(err) || t('common.error'))
+  }
+}
+
+// ── 同步间隔设置与同步历史（可靠性方案 D1/D2 前端适配） ──────────────────
+
+const showIntervalModal = ref(false)
+const intervalSourceId = ref('')
+const intervalSeconds = ref(0)
+const intervalSaving = ref(false)
+
+const openIntervalModal = async (row: EnterpriseSourceConfig) => {
+  intervalSourceId.value = row.source_id
+  try {
+    const res = await getEnterpriseSyncInterval(row.source_id)
+    intervalSeconds.value = res.data?.seconds ?? 0
+  } catch {
+    intervalSeconds.value = 0
+  }
+  showIntervalModal.value = true
+}
+
+const saveSyncInterval = async () => {
+  intervalSaving.value = true
+  try {
+    await updateEnterpriseSyncInterval(intervalSourceId.value, intervalSeconds.value ?? 0)
+    message.success(t('ontology.entIntervalTitle'))
+    showIntervalModal.value = false
+    await loadSources()
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
+  } finally {
+    intervalSaving.value = false
+  }
+}
+
+const showHistoryDrawer = ref(false)
+const historySourceId = ref('')
+const historyLoading = ref(false)
+const historyItems = ref<EnterpriseSyncHistoryItem[]>([])
+
+const openHistoryDrawer = async (sourceId: string) => {
+  historySourceId.value = sourceId
+  showHistoryDrawer.value = true
+  historyLoading.value = true
+  try {
+    const res = await getEnterpriseSyncHistory(sourceId)
+    historyItems.value = res.data?.items ?? []
+  } catch (err) {
+    historyItems.value = []
+    message.error(extractApiDetail(err) || t('common.error'))
+  } finally {
+    historyLoading.value = false
   }
 }
 

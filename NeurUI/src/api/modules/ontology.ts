@@ -320,6 +320,44 @@ export function triggerEnterpriseIngest(sourceId: string) {
   >(`${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/ingest`)
 }
 
+/** 同步历史一行（可靠性方案 D1）：每轮拉取的触发/状态/计数/游标。 */
+export interface EnterpriseSyncHistoryItem {
+  trigger_kind: string
+  status: string
+  reason: string
+  batches: number
+  admitted: number
+  rejected: number
+  rows_skipped: number
+  entries_written: number
+  truncated: boolean
+  cursor_before: string
+  cursor_after: string
+  duration_ms: number | null
+  started_at: string
+  finished_at: string
+}
+
+/** 同步间隔读面（可靠性方案 D2，仅管理员）。 */
+export function getEnterpriseSyncInterval(sourceId: string) {
+  return api.get<ApiResponse<{ source_id: string; seconds: number; enabled: boolean }>>(
+    `${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/sync-interval`)
+}
+
+/** 同步间隔写面（仅管理员）：seconds=0 关闭持续同步；改完即时注册/摘除 job。 */
+export function updateEnterpriseSyncInterval(sourceId: string, seconds: number) {
+  return api.put<ApiResponse<{ source_id: string; seconds: number; enabled: boolean }>>(
+    `${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/sync-interval`,
+    { seconds })
+}
+
+/** 同步历史读面（仅管理员）：按开始时间倒序，limit 缺省 50。 */
+export function getEnterpriseSyncHistory(sourceId: string, limit = 50) {
+  return api.get<ApiResponse<{ source_id: string; items: EnterpriseSyncHistoryItem[] }>>(
+    `${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/sync-history`,
+    { params: { limit } })
+}
+
 /** 提交映射描述符（仅管理员）：非法描述符 400 带定位拒因且零落库。 */
 export function submitEnterpriseSource(body: {
   source_id: string
