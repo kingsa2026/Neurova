@@ -468,3 +468,151 @@ class OntologyPipeline:
         # C5：回滚后图面已变，社区增量维护照走（fail-soft）
         return {"accepted": True, "baselineId": toBaselineId, "restored": restored,
                 "communities": self._refreshCommunities("", tenant)}
+
+
+def checkGate(store: Any, agentId: str, tenantId: str,
+              termUpserts: Optional[List[Dict[str, Any]]] = None,
+              ruleRegistrations: Optional[List[Dict[str, Any]]] = None,
+              factCandidates: Optional[List[Dict[str, Any]]] = None,
+              workDir: Optional[str] = None) -> Dict[str, Any]:
+    """三臂对照门禁（对照研究 P1-1，2026-11-19）：候选上线前在克隆副本里先演。
+
+    - 臂1 baseline：现库对候选事实 dry-run（零成本）；
+    - 臂2 draft：副本内应用术语/规则假设 → 候选 dry-run → 注入候选事实 →
+      引擎到不动点（与 simulation 同法：副本零回写，假设经同一咽喉）；
+    - 臂3 replay：臂1 同参重放——确定性校验下两臂必须逐条一致，漂移即
+      「环境不稳定」，门禁结果不可信，直接 fail。
+
+    gate 判定（诚实、可复算）：任一候选「基线 pass、草稿 violation」的倒退
+    即 fail（新假设制造了违规）；纯新增推导不拦（shifts 如实随报）。只读：
+    生产库零写入（副本即删）；不落台账（门禁是审批辅助，结论随审批流记录）。
+    """
+    import os
+    import sqlite3
+    import tempfile
+
+    from ..foundation.knowledge_facts import KnowledgeFactStore
+
+    tenant = str(tenantId or "default")
+    agent = str(agentId or "default")
+    termUpserts = list(termUpserts or [])
+    ruleRegistrations = list(ruleRegistrations or [])
+    factCandidates = list(factCandidates or [])
+
+    def _arm(target: Any) -> Dict[str, Any]:
+        rows = dryRunFactCandidates(target, agent, tenant, factCandidates)
+        return {"rows": len(rows),
+                "violations": sum(1 for r in rows if r["verdict"] == "violation"),
+                "verdicts": [r["verdict"] for r in rows]}
+
+    baseline = _arm(store)
+    replay = _arm(store)  # 臂3：同参重放（确定性对照）
+    reasons: List[str] = []
+    if baseline["verdicts"] != replay["verdicts"]:
+        reasons.append("replay drifted：基线臂与重放臂结论不一致——环境不稳定，门禁结果不可信")
+
+    draft: Dict[str, Any] = {"rows": 0, "violations": 0, "verdicts": []}
+    shifts: Dict[str, Any] = {"added": 0, "removed": 0, "affected_subjects": [],
+                              "notes": []}
+    workDirCreated = False
+    copyPath = ""
+    copyStore: Any = None
+    try:
+        if workDir is None:
+            workDir = tempfile.mkdtemp(prefix="kb_gate_")
+            workDirCreated = True
+        baseName = os.path.basename(str(getattr(store, "_db_path", "") or "kb"))
+        copyPath = os.path.join(workDir, "%s-gate-%s.db" % (baseName, uuid.uuid4().hex[:8]))
+        with store._lock:
+            store._conn.commit()
+        copyConn = sqlite3.connect(copyPath)
+        try:
+            store._conn.backup(copyConn)  # 与 simulation 同法：stdlib backup 整库复制
+        finally:
+            copyConn.close()
+        copyStore = KnowledgeFactStore(copyPath)
+        # 术语/规则假设先应用进副本（机器候选只进副本，不进生产）
+        copyRegistry = OntologyTermRegistry(copyStore)
+        for spec in termUpserts:
+            copyRegistry.declarePartial(str(spec.get("termId") or "").strip(),
+                                        str(spec.get("kind") or "").strip(),
+                                        dict(spec), tenantId=tenant)
+        copyEngine = ForwardChainingEngine(copyStore)
+        for spec in ruleRegistrations:
+            copyEngine.registerRule(
+                str(spec.get("ruleId") or "").strip(),
+                str(spec.get("headPredicate") or "").strip(),
+                list(spec.get("body") or []),
+                headSubjectVar=str(spec.get("headSubjectVar") or "X"),
+                headObjectConst=str(spec.get("headObjectConst") or ""),
+                materialization=str(spec.get("materialization") or "observe"),
+                enabled=bool(spec.get("enabled", True)),
+                version=str(spec.get("version") or "v1"), tenantId=tenant)
+        draft = _arm(copyStore)
+        # 候选事实经同一咽喉注入副本（dispatch 自动点燃规则+函数引擎）
+        from ..foundation.admission import AdmissionRequest, productionAdmissionGate
+
+        gate = productionAdmissionGate(copyStore, toolVersion="ontology_check_gate")
+        before = _factSnapshot(copyStore, agent, tenant)
+        for candidate in factCandidates:
+            subject = str(candidate.get("subjectLabel") or "").strip()
+            predicate = str(candidate.get("predicateTermId") or "").strip()
+            obj = str(candidate.get("objectTerm") or "").strip()
+            if not subject or not predicate or not obj:
+                continue
+            content = "%s %s %s" % (subject, predicate, obj)
+            try:
+                gate.admit(AdmissionRequest(
+                    agentId=agent, tenantId=tenant,
+                    subjectLabel=subject, predicateTermId=predicate,
+                    objectTerm=obj, content=content,
+                    assertions=[{"actorType": "pipeline",
+                                 "actorId": "ontology_check_gate",
+                                 "mediumRef": "check_gate",
+                                 "statementText": content}],
+                    activityKind="admit",
+                    activityBasis="pipeline.checkGate（草稿臂候选注入）"))
+            except ValueError as exc:
+                shifts["notes"].append("候选注入被拒（%s %s %s）：%s"
+                                       % (subject, predicate, obj, exc))
+        copyEngine.fireAll(agentId=agent, tenantId=tenant)
+        after = _factSnapshot(copyStore, agent, tenant)
+        addedKeys = set(after) - set(before)
+        removedKeys = set(before) - set(after)
+        shifts = {"added": len(addedKeys), "removed": len(removedKeys),
+                  "affected_subjects": sorted({after[k]["subject_key"]
+                                               for k in addedKeys}),
+                  "notes": shifts["notes"]}
+    finally:
+        if copyStore is not None:
+            copyStore.close()
+        try:
+            if copyPath and os.path.exists(copyPath):
+                os.remove(copyPath)
+            if workDirCreated and workDir and os.path.isdir(workDir) \
+                    and not os.listdir(workDir):
+                os.rmdir(workDir)
+        except OSError as exc:  # noqa: BLE001 - 清理失败留名，不吞
+            reasons.append("副本清理失败：%s" % exc)
+
+    for index, (beforeVerdict, afterVerdict) in enumerate(
+            zip(baseline["verdicts"], draft["verdicts"])):
+        if beforeVerdict == "pass" and afterVerdict == "violation":
+            reasons.append("candidate %d regressed：基线 pass、草稿 violation——"
+                           "新假设制造违规" % index)
+    return {"gate": "fail" if reasons else "pass", "reasons": reasons,
+            "arms": {"baseline": baseline, "draft": draft, "replay": replay},
+            "shifts": shifts}
+
+
+def _factSnapshot(store: Any, agentId: str, tenantId: str) -> Dict[str, Dict[str, Any]]:
+    """(agent, tenant) 域内事实快照（与 simulation._snapshot 同法；门禁私用）。"""
+    with store._lock:
+        rows = store._conn.execute(
+            "SELECT fact_id, subject_key, predicate_term_id, object_term, status"
+            " FROM knowledge_facts WHERE agent_id = ? AND tenant_id = ?"
+            " ORDER BY fact_id", (agentId, tenantId)).fetchall()
+    return {str(r["fact_id"]): {"subject_key": str(r["subject_key"]),
+                                "predicate_term_id": str(r["predicate_term_id"]),
+                                "object_term": str(r["object_term"]),
+                                "status": str(r["status"])} for r in rows}

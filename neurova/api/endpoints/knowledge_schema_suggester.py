@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -215,3 +215,33 @@ async def detectSchemaFamilies(
     result = suggestFamilies(suggester, suggester._catalog,
                              _tenantOf(current_user), body.source_id.strip())
     return {"code": 0, "message": "success", "data": result}
+
+
+class CheckGateRequest(BaseModel):
+    """三臂对照门禁的候选面（P1-1）：术语/规则/事实候选一次提交。"""
+    term_upserts: List[Dict[str, Any]] = Field(default_factory=list)
+    rule_registrations: List[Dict[str, Any]] = Field(default_factory=list)
+    fact_candidates: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+@router.post("/ontology/check-gate")
+async def runOntologyCheckGate(
+    body: CheckGateRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """三臂对照门禁（P1-1，仅管理员）：候选上线前在克隆副本里先演。
+
+    臂1 基线 dry-run / 臂2 副本应用假设后对照 / 臂3 基线重放（确定性对照）。
+    候选出现「基线 pass、草稿 violation」倒退即 fail；只读，生产库零写入。
+    判据单一出处 `neurova/knowledge/ontology/pipeline.py::checkGate`。
+    """
+    _requireAdmin(current_user)
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.pipeline import checkGate
+
+    out = checkGate(get_knowledge_fact_store(), "default",
+                    _tenantOf(current_user),
+                    termUpserts=body.term_upserts,
+                    ruleRegistrations=body.rule_registrations,
+                    factCandidates=body.fact_candidates)
+    return {"code": 0, "message": "success", "data": out}

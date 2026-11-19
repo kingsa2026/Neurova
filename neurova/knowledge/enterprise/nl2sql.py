@@ -46,6 +46,61 @@ CREATE INDEX IF NOT EXISTS idx_query_history_tenant
 _MAX_REPAIR_ROUNDS = 2
 _MAX_ROWS = 200
 
+#: P1-3 贡献度档位（确定性批一）：misleading 留名——确定性 grounding 下
+#: 「误导」不可自证，待模型评估批再判。
+ASSESSMENT_VERDICTS = ("essential", "helpful", "marginal", "not_assessed")
+
+
+def _assessGrounding(sql: str, context: Optional[Dict[str, Any]],
+                     attempts: int, lastError: str) -> Dict[str, Any]:
+    """本体贡献度评估（P1-3，确定性规则版，零额外模型成本）。
+
+    - essential：grounding 的术语映射/join 路径实际进入了最终 SQL（首轮即成）；
+    - helpful：grounding 参与了修复（修复轮后成功）；
+    - marginal：成功但 grounding 零命中（单表自明）。
+    grounds 如实记录命中面，gaps 记录越界尝试。
+    """
+    context = context or {}
+    usedTables = set(tablesInSql(sql))
+    hintTables = {str(h.get("table") or "") for h in (context.get("termHints") or [])}
+    joinTables: set = set()
+    for path in (context.get("joinPaths") or {}).values():
+        for hop in path:
+            joinTables.add(str(hop.get("source_table") or ""))
+            joinTables.add(str(hop.get("target_table") or ""))
+    grounds = {
+        "terms": sorted(t for t in usedTables & hintTables if t),
+        "joins": sorted(t for t in usedTables & joinTables if t),
+        "tables": sorted(t for t in usedTables if t),
+        "patterns": sum(1 for p in (context.get("patterns") or [])
+                        if set(tablesInSql(str(p.get("sql") or ""))) & usedTables),
+    }
+    gaps: List[str] = []
+    if attempts > 1:
+        verdict = "helpful"
+        if "目录外表" in str(lastError or ""):
+            gaps.append("out_of_catalog_attempt")
+    elif grounds["terms"] or grounds["joins"]:
+        verdict = "essential"
+    else:
+        verdict = "marginal"
+    return {"verdict": verdict, "grounds": grounds, "gaps": gaps}
+
+
+def _refusalGaps(reason: str) -> List[str]:
+    """拒因 → 缺口归类（诚实拒答也要说清缺什么）。"""
+    gaps: List[str] = []
+    text = str(reason or "")
+    if "源目录为空" in text:
+        gaps.append("missing_catalog")
+    if "未配置可用 LLM" in text:
+        gaps.append("missing_model")
+    if "连续" in text and "轮" in text:
+        gaps.append("invalid_sql")
+        if "目录外表" in text:
+            gaps.append("out_of_catalog_attempt")
+    return gaps or ["missing_term"]
+
 _LLM_SQL_PROMPT = """你是严谨的数据分析 SQL 编写器。只依据给出的目录与连接提示写一条只读 SELECT。
 
 可用表（table_name(列: 类型)）：
@@ -220,7 +275,9 @@ class Nl2SqlService:
             status = "ok" if not executionError else "error"
             result = {"answerable": True, "sql": sql, "explanation": explanation,
                       "rows": rows, "row_count": len(rows), "truncated": truncated,
-                      "steps": steps, "status": status}
+                      "steps": steps, "status": status,
+                      "assessment": _assessGrounding(sql, context, attempts,
+                                                     lastError)}
             if executionError:
                 result["error"] = executionError
             self._recordHistory(tenant, source, question, sql, status,
@@ -420,4 +477,10 @@ class Nl2SqlService:
                             askedBy)
         return {"answerable": False, "sql": "", "explanation": explanation,
                 "rows": [], "row_count": 0, "truncated": False,
-                "steps": steps, "status": "refused", "reason": reason}
+                "steps": steps, "status": "refused", "reason": reason,
+                # 拒答不硬评分（本体没参与生成）：verdict 如实标 not_assessed，
+                # gaps 按拒因归类——缺目录/缺模型/缺术语/非法 SQL。
+                "assessment": {"verdict": "not_assessed",
+                               "grounds": {"terms": [], "joins": [],
+                                           "tables": [], "patterns": 0},
+                               "gaps": _refusalGaps(reason)}}

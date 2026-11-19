@@ -103,6 +103,32 @@ async def getKnowledgeReadiness(
                                        modelProbe=modelProbe)}
 
 
+@router.get("/ontology/audit")
+async def getOntologyAudit(
+    source_id: str = "",
+    stale_days: int = 7,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """数据驱动本体缺口审计（P1-2，仅管理员）：目录/候选队列的缺口与漂移。
+
+    五类信号：uncovered（表无术语链接）/ broken_reference（外键指向目录外表）/
+    clash（一术语链接多表）/ stale（pending 超期未审）/ ambiguity（同源同名表）。
+    零模型调用、纯只读；每条带跨轮稳定 fingerprint 与建议动作。
+    判据单一出处 `neurova/knowledge/ontology/audit.py::auditOntologyCoverage`。
+    """
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403,
+                            detail="本体缺口审计是治理读数面，仅管理员可读")
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.audit import auditOntologyCoverage
+
+    store = get_knowledge_fact_store()
+    out = auditOntologyCoverage(store, _tenantOf(current_user),
+                                sourceId=str(source_id or "").strip(),
+                                staleDays=max(0, int(stale_days)))
+    return {"code": 0, "message": "success", "data": out}
+
+
 class AnswerabilityRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     threshold: float = Field(default=0.5, ge=0.0, le=1.0)
