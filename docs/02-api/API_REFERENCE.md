@@ -411,7 +411,7 @@
 > 守卫 `tests/unit/api/test_authSurfaceFreshness.py` 逐字比对，漂移即红。
 > 口径：只认**路由依赖图**里的身份/角色门；在 handler 体内自验 token 的那一类**未覆盖**，要确认它只能真打请求。404/405 不算门。
 
-**汇总**：路由 1004 条（含方法展开）——需认证 **984**、公开 **20**。
+**汇总**：路由 1028 条（含方法展开）——需认证 **1008**、公开 **20**。
 
 | 模块前缀 | 路由 | 需认证 | 公开 |
 |----------|------|--------|------|
@@ -422,21 +422,21 @@
 | `api` | 37 | 37 | 0 |
 | `artifacts` | 2 | 2 | 0 |
 | `audio` | 7 | 7 | 0 |
-| `audit` | 4 | 4 | 0 |
+| `audit` | 5 | 5 | 0 |
 | `auth` | 10 | 0 | 10 |
 | `backups` | 3 | 3 | 0 |
-| `benchmark` | 14 | 14 | 0 |
+| `benchmark` | 16 | 16 | 0 |
 | `budgets` | 7 | 7 | 0 |
 | `build` | 6 | 6 | 0 |
 | `builder` | 5 | 5 | 0 |
-| `channel-adapters` | 11 | 10 | 1 |
+| `channel-adapters` | 14 | 13 | 1 |
 | `channel-configs` | 16 | 16 | 0 |
 | `channel-sharing` | 7 | 7 | 0 |
 | `chat` | 6 | 6 | 0 |
-| `collaboration` | 23 | 23 | 0 |
+| `collaboration` | 27 | 27 | 0 |
 | `computer` | 25 | 25 | 0 |
 | `computers` | 11 | 10 | 1 |
-| `console` | 26 | 26 | 0 |
+| `console` | 28 | 28 | 0 |
 | `context` | 10 | 10 | 0 |
 | `cost-rollup` | 8 | 8 | 0 |
 | `diagnostics` | 1 | 1 | 0 |
@@ -461,13 +461,13 @@
 | `logs-api` | 6 | 6 | 0 |
 | `marketplace` | 12 | 12 | 0 |
 | `media` | 15 | 15 | 0 |
-| `memory` | 68 | 68 | 0 |
+| `memory` | 71 | 71 | 0 |
 | `memory-enhancement` | 6 | 6 | 0 |
 | `memory-settings` | 7 | 7 | 0 |
 | `memory-share-groups` | 11 | 11 | 0 |
 | `memory-timeline` | 4 | 4 | 0 |
 | `metacognition` | 7 | 7 | 0 |
-| `mobile` | 10 | 7 | 3 |
+| `mobile` | 19 | 16 | 3 |
 | `models` | 15 | 15 | 0 |
 | `monitor` | 5 | 5 | 0 |
 | `negative-screen` | 4 | 4 | 0 |
@@ -477,7 +477,7 @@
 | `phase3` | 15 | 15 | 0 |
 | `plans` | 6 | 6 | 0 |
 | `plugins` | 24 | 24 | 0 |
-| `projects` | 15 | 15 | 0 |
+| `projects` | 16 | 16 | 0 |
 | `providers` | 13 | 13 | 0 |
 | `quality` | 4 | 4 | 0 |
 | `rules` | 8 | 8 | 0 |
@@ -490,14 +490,14 @@
 | `skill-pool` | 37 | 37 | 0 |
 | `skill-versions` | 8 | 8 | 0 |
 | `skills` | 8 | 8 | 0 |
-| `sleep` | 14 | 14 | 0 |
+| `sleep` | 15 | 15 | 0 |
 | `stats` | 9 | 9 | 0 |
 | `studio` | 21 | 21 | 0 |
 | `sync` | 8 | 8 | 0 |
 | `synonyms` | 12 | 12 | 0 |
 | `tasks` | 8 | 8 | 0 |
 | `teams` | 10 | 10 | 0 |
-| `tool-layers` | 13 | 13 | 0 |
+| `tool-layers` | 11 | 11 | 0 |
 | `tools` | 7 | 7 | 0 |
 | `trace` | 5 | 5 | 0 |
 | `webhooks` | 7 | 7 | 0 |

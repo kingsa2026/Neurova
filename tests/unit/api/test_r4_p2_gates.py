@@ -687,7 +687,7 @@ def test_aigc_services_no_hardcoded_admin_bypass():
 # ── url_guard 合一单源 ───────────────────────────────────────────────────
 
 
-def test_url_guard_single_source_and_semantics():
+def test_url_guard_single_source_and_semantics(monkeypatch):
     import importlib.util
 
     import neurova.security.url_guard as guard
@@ -705,7 +705,15 @@ def test_url_guard_single_source_and_semantics():
     assert guard.validate_public_http_url("http://mcp.internal:8123/x", trusted_hosts={"mcp.internal"}) is True
     # IPv4-mapped IPv6 环回不得绕过
     assert guard.validate_public_http_url("http://[::ffff:127.0.0.1]/x") is False
-    # DNS 解析失败 fail-closed
+    # DNS 解析失败 fail-closed——不依赖真 DNS：本机 DNS 可能对任意域名做
+    # wildcard 应答（实测 .invalid 也被解析到 198.18.0.156），真解析会让这条
+    # 环境相关断言假红；mock 精确触发 fail-closed 分支本身。
+    import socket as _socket
+
+    def _failResolve(host, *args, **kwargs):
+        raise _socket.gaierror(-2, "Name or service not known")
+
+    monkeypatch.setattr(_socket, "getaddrinfo", _failResolve)
     assert guard.validate_public_http_url("http://nonexistent-host-r4.invalid/x") is False
 
 

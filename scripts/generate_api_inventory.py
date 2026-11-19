@@ -1053,6 +1053,28 @@ def _normalizePath(path: str) -> str:
                     for part in path.rstrip("/").split("/")) or "/"
 
 
+def frontPathMatches(routePath: str, frontPath: str) -> bool:
+    """前端调用形状 ↔ 后端注册路由的**段级**匹配。
+
+    两侧的 `*` 与后端 `{param}` 都是通配语义：前端形状里的 `*` 段（模板串的
+    动态段归一）与后端注册键里的 `*`/`{param}` 段互为通配；前端末段粘尾的
+    `*`（查询串省略标记，如 `export.graphml*`）剥掉后比字面。此前把前端路径
+    当字面量喂给后端正则，通配对通配反而互不匹配，差异表被污染成假阳性。
+    """
+    routeSegs = [s for s in str(routePath or "").strip("/").split("/") if s]
+    frontSegs = [s for s in str(frontPath or "").strip("/").split("/") if s]
+    if len(routeSegs) != len(frontSegs):
+        return False
+    for routeSeg, frontSeg in zip(routeSegs, frontSegs):
+        if routeSeg.startswith("{") or routeSeg == "*" or frontSeg == "*":
+            continue  # 任一侧通配段：匹配任意
+        # 前端末段粘尾的 `*` 是查询串省略标记：剥掉后比字面
+        frontBare = frontSeg[:-1] if frontSeg.endswith("*") and len(frontSeg) > 1 else frontSeg
+        if routeSeg != frontBare:
+            return False
+    return True
+
+
 def unmatchedFrontCallRows() -> list:
     """逐条比对：前端发出的每个调用是否命中真实路由表。
 
@@ -1066,6 +1088,12 @@ def unmatchedFrontCallRows() -> list:
             # 通配段会与更具体的同前缀路由重叠（`/plugins/*` 也匹配 `/plugins/discover`），
             # 故按**具体度**取最具体的那条判方法：具体度高者才是该调用真正落到的那条。
             hits = [(route, registered[route]) for route, pattern in patterns if pattern.match(fullPath)]
+            if not hits:
+                # 正则字面匹配不上时再走段级通配比较：前端形状里的 `*` 段/尾星
+                # （查询串省略标记）与后端 `{param}`/`*` 段互为通配——只放宽这一类，
+                # 其余差异的判定与既有口径逐字一致。
+                hits = [(route, registered[route]) for route in registered
+                        if frontPathMatches(route, fullPath)]
             if hits:
                 best = max(len(route) for route, _methods in hits)
                 methods = set().union(*(m for route, m in hits if len(route) == best))

@@ -251,7 +251,8 @@ class TestAnswerQuestion:
         pending = suggester.listSuggestions("default", kind="sql_pattern")
         assert len(pending) == 1
         suggester.decideSuggestion("default", pending[0]["suggestion_id"],
-                                   "approved", reviewedBy="admin")
+                                   "approved", reviewedBy="admin",
+                                   evidenceHash=pending[0]["evidence_hash"])
         captured = {}
 
         def llm(prompt):

@@ -115,10 +115,16 @@ class TestCodeOracleIsClosed:
             f"带凭证读不到状态：{status.status_code} {status.text[:120]}")
 
 
+#: 本域合法的认证门：用户门（按码口挂的）与 admin 门（connection-config 系列
+#: 挂的，档三后端引入——比用户门更严）。枚举预言机只关心"有没有门"，
+#: 不关心门是哪一档；只认一种门形态会把带更严门的口误报成裸奔。
+_GATES = (MP._get_current_user_id, MP._requireAdminDep)
+
+
 def _gateOf(route):
     """这一条路由的"门"：路由级 dependencies 与签名里的 Depends 都算（两形都会出现在真码里）。"""
     for d in (getattr(route, "dependencies", None) or []):
-        if getattr(d, "dependency", None) is MP._get_current_user_id:
+        if getattr(d, "dependency", None) in _GATES:
             return "route-level"
     endpoint = getattr(route, "endpoint", None)
     if endpoint is None:
@@ -129,7 +135,7 @@ def _gateOf(route):
         return None
     for param in sig.parameters.values():
         if isinstance(param.default, DependsMarker) \
-                and getattr(param.default, "dependency", None) is MP._get_current_user_id:
+                and getattr(param.default, "dependency", None) in _GATES:
             return "signature"
     return None
 

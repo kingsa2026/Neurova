@@ -47,7 +47,7 @@ def _restart(client, tmp_path):
 
 class TestPersistence:
     def test_created_webhook_written_to_disk(self, client, tmp_path):
-        r = client.post("/api/v1/webhooks", json={"name": "ops", "url": "http://127.0.0.1:9/hook", "events": ["chat"]})
+        r = client.post("/api/v1/webhooks", json={"name": "ops", "url": "https://example.com/hook", "events": ["chat"]})
         assert r.status_code == 200
         f = tmp_path / "webhooks.json"
         assert f.exists(), "webhook 未落盘"
@@ -55,7 +55,8 @@ class TestPersistence:
         assert any(w["name"] == "ops" for w in saved["webhooks"].values())
 
     def test_survives_restart(self, client, tmp_path):
-        r = client.post("/api/v1/webhooks", json={"name": "ops", "url": "http://x/y", "events": ["a"]})
+        # URL 必须过 url_guard 公网校验（127.0.0.1/单字符 host 都会被 400 拒）
+        r = client.post("/api/v1/webhooks", json={"name": "ops", "url": "https://example.com/hook", "events": ["a"]})
         wh_id = r.json()["webhook_id"]
         _restart(client, tmp_path)
         items = client.get("/api/v1/webhooks").json()
@@ -63,9 +64,9 @@ class TestPersistence:
         assert client.get(f"/api/v1/webhooks/{wh_id}").status_code == 200
 
     def test_update_and_delete_persist(self, client, tmp_path):
-        wh_id = client.post("/api/v1/webhooks", json={"name": "n1", "url": "u"}).json()["webhook_id"]
+        wh_id = client.post("/api/v1/webhooks", json={"name": "n1", "url": "https://example.com/n1"}).json()["webhook_id"]
         client.put(f"/api/v1/webhooks/{wh_id}", json={"name": "n2"})
-        client.post("/api/v1/webhooks", json={"name": "drop", "url": "u2"}).json()
+        client.post("/api/v1/webhooks", json={"name": "drop", "url": "https://example.com/drop"}).json()
         _wh2 = client.get("/api/v1/webhooks").json()
         # 删除其一
         other = [w["webhook_id"] for w in _wh2 if w["webhook_id"] != wh_id][0]
@@ -79,9 +80,9 @@ class TestPersistence:
 
 class TestHonestDelivery:
     def test_test_endpoint_reports_real_failure(self, client):
-        """不可达 URL（端口 9 拒连）必须记 failed，不得谎报 delivered/200。"""
+        """不可达 URL（合规公网域名的拒连端口）必须记 failed，不得谎报 delivered/200。"""
         wh_id = client.post("/api/v1/webhooks", json={
-            "name": "dead", "url": "http://127.0.0.1:9/hook",
+            "name": "dead", "url": "https://example.com:9/hook",
         }).json()["webhook_id"]
         r = client.post(f"/api/v1/webhooks/{wh_id}/test", json={"event_type": "ping"})
         assert r.status_code == 200, r.text

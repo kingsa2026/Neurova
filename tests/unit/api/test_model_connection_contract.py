@@ -329,7 +329,9 @@ class TestProviderChatModelChainIntact:
             assert forbidden not in result.error, (
                 f"{module_name} 模型级连接检查仍带失效签名 {forbidden!r}: {result.error}"
             )
-        assert result.success is True, f"{module_name} 连接检查应成功: {result.error}"
+        # 本档只钉「错误形态诚实」（初心见上：不再报未安装/失效签名）。
+        # base_url 被故意钉到不可路由地址：anthropic 的真触网实现此刻
+        # success=False（连接拒绝如实上报）是正确行为，不再要求恒成功。
 
 
 # ---------------------------------------------------------------------------

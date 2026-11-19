@@ -182,7 +182,9 @@ class TestRouterConsumesPersistedCaps:
         provider = mgr.get_provider(mgr._test_provider.id)
         register_provider_from_config(provider.id, provider.name, provider.models)
         router = llm_router.get_llm_router()
-        models = {m["name"]: m for m in router._providers[provider.id]["models"]}
+        # P2-10：注册表键是 scope 复合键（admin:<id>），裸 id 读不到
+        models = {m["name"]: m
+                  for m in router._providers[router._scopedKey(provider.id, "admin")]["models"]}
         assert "reasoning" in models["deepseek-r1"]["capabilities"]
         assert "image_generation" in models["flux.1-dev"]["capabilities"]
 

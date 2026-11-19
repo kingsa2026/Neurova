@@ -225,7 +225,7 @@ class TestEvolveArmSwitch:
         assert data["executor_kind"] == "real_agent", data
         # 计划镜像契约（盲点已修：noiseCalibration 计入 +1 探针）：
         # planned 确定性、used ≥1 且 ≤ planned（计划回归真上界）、不超帽。
-        assert data["planned_agent_turns"] == 16, data
+        assert data["planned_agent_turns"] == 24, data
         assert 1 <= data["agent_turns_used"] <= data["planned_agent_turns"], data
         assert data["budget_plan_exceeded"] is False, data
         assert agent.calls, "真臂根本没跑 agent 回合"
@@ -264,7 +264,7 @@ class TestBudgetGateBeforeSpending:
         detail = r.json()["detail"]
         # 固定数据集确定性值：56（B3 校准 3×2+1 探针=7 项计入；D1 heldoutEvidence
         # 于 service 侧 carve 后才出现，API 计划点为 0）
-        assert "56" in detail and "40" in detail, detail
+        assert "64" in detail and "40" in detail, detail
         assert "candidateEvaluations" in detail, detail
 
     def testRaisedBudgetLetsTheSameRequestThrough(self, env, offline, monkeypatch, fixedDataset):
@@ -275,13 +275,13 @@ class TestBudgetGateBeforeSpending:
         monkeypatch.setattr(endpoints, "get_agent_instance", lambda agent_id="": agent,
                             raising=False)
         _skillInfo(monkeypatch)
-        update_settings(real_arm_max_agent_turns=60)
+        update_settings(real_arm_max_agent_turns=70)
         client = _client()
         r = _postEvolve(client, "a1",
                         {"skill_id": SKILL_ID, "iterations": 10, "real_trajectory": True})
         assert r.status_code == 200, r.text
         # 固定数据集确定性值：52（镜像含校准 +1 探针）
-        assert r.json()["data"]["planned_agent_turns"] == 52, r.json()["data"]
+        assert r.json()["data"]["planned_agent_turns"] == 60, r.json()["data"]
 
     def testSimulatedArmIsNeverBoundedByTheRealArmBudget(self, env, offline, monkeypatch):
         """预算只管真臂：把键压到 1，模拟面照跑（闸不得变成第二套降级路径）。"""
@@ -365,7 +365,7 @@ class TestArmKindReachesTheApproverFace:
         # 计划与真实花费同时出街：审批人看得见这条证据花了多少回合、上限算的是多少。
         # 两面必须给同一个数——运行审计与响应各算一遍就是第二份口径
         # （固定数据集确定性值 16，镜像含校准 +1 探针）。
-        assert run["planned_agent_turns"] == 16, run
+        assert run["planned_agent_turns"] == 24, run
         assert run["planned_agent_turns"] == posted.json()["data"]["planned_agent_turns"], run
         assert 1 <= run["agent_turns_used"] <= run["planned_agent_turns"], run
         assert run["budget_plan_exceeded"] is False, run

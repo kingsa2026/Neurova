@@ -195,7 +195,10 @@ class EnterpriseIngestor:
                 assertions=[{"actorType": "importer",
                              "actorId": "source:%s" % sourceId,
                              "mediumRef": "source:%s:%s" % (sourceId, cursorToken),
-                             "statementText": statement}],
+                             "statementText": statement,
+                             # 行级血缘（P3-1b 写入方接线）：span 记批内行序，
+                             # 与 mediumRef 的 cursor 一起可回溯到源批次的具体一行
+                             "sourceSpan": {"row": index}}],
                 activityKind="import",
                 activityBasis="enterprise.ingestBatch（source=%s cursor=%s）"
                               % (sourceId, cursorToken),

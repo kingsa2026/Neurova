@@ -115,18 +115,27 @@ class TestQrUrlStaysOnOrigin:
         assert r.content[:4] == b"\x89PNG", "回的不是 PNG——端点承诺的就是 PNG"
         assert len(r.content) > 100, f"图太小，不像是真二维码：{len(r.content)} 字节"
 
-    def test_served_image_is_the_qr_of_the_pairing_payload(self, app_client):
+    def test_served_image_is_the_qr_of_the_pairing_payload(self, app_client, monkeypatch):
         """实质判据：那张图必须**就是**配对载荷的二维码（同一渲染器、同一文本）。
 
-        S1b 起文本从"含 host 的回连地址"改成 `neurova://pair?ref=…`（§3.4：
-        「谁」与「在哪」分离，地址漂移不得让已发的码作废）。本格的职责没变——
-        仍是"served 字节 == 生产渲染器渲染生产载荷"，只是被渲染的那串换了。
-        期望值由生产那两处自己算（`protocol.pairingQrPayload` + `generate_qrcode_image`），
-        测试不复刻渲染逻辑——复刻过的桩件会与被审那行犯同一个错。
+        2026-11-16 起载荷升为「一扫配全」：`neurova://pair?ref=…&host=…`（ref 之外
+        还带对外地址）。本格把 host 的三个来源（隧道/advertised/入站）钉死到**入站
+        回落**（无隧道、无 advertised ⇒ `http://testserver`），期望值仍由生产渲染器
+        ＋生产 payload 函数计算——测试不复刻渲染逻辑，也不复刻 host 推导。
         """
+        import neurova.tunnel.agent as tunnelAgent
+
+        class _NoTunnel:
+            def tunnelStatus(self):
+                return {"configured": False, "state": "", "route_id": ""}
+
+        monkeypatch.setattr(tunnelAgent, "getTunnelAgent", lambda: _NoTunnel())
+        monkeypatch.setattr(MP, "_advertisedBaseUrl", lambda: "")
+
         body = _generate(app_client)
         expected = base64.b64decode(
-            generate_qrcode_image(protocol.pairingQrPayload(body["ref"])))
+            generate_qrcode_image(
+                protocol.pairingQrPayload(body["ref"], f"http://{HOST}")))
 
         served = app_client.get(_pathOf(body["qr_code_url"])).content
         assert served == expected, (
