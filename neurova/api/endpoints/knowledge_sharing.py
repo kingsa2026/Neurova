@@ -63,6 +63,13 @@ class PublishCopyDecideRequest(BaseModel):
     note: str = Field(default="", description="审批备注（拒绝原因等）")
 
 
+class RecallCopyRequest(BaseModel):
+    """远程召回请求体（仅源租户管理员）"""
+
+    copy_knowledge_id: str = Field(..., description="要召回的外发副本 id")
+    reason: str = Field(default="", description="召回原因（留证）")
+
+
 def _ensureTenantExists(tenant_id: str) -> None:
     """目标租户存在性校验：部门根组树是租户的权威源（user_group_model §2.3）；
     default 恒存在；不存在 400。"""
@@ -436,6 +443,32 @@ async def publish_copy_knowledge(
                 {"knowledge_id": knowledge_id, "target_tenant": body.target_tenant,
                  "request_id": result["request_id"]})
     return {"code": 0, "message": "success", "data": result}
+
+
+@router.post("/{knowledge_id}/recall-copy")
+async def recall_published_copy(
+    request: Request,
+    knowledge_id: str = Path(...),
+    body: RecallCopyRequest = ...,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """远程召回外发副本（仅源租户管理员，§8.5 拍板）：副本即刻归档下架并留证。"""
+    repo = get_repository()
+    entry_or_403(repo, knowledge_id, current_user)
+    try:
+        result = repo.recall_published_copy(current_user, knowledge_id,
+                                            body.copy_knowledge_id, reason=body.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except (PermissionError, LookupError) as exc:
+        raise guard(exc)
+    _auditShare("copy_recalled", current_user,
+                {"knowledge_id": knowledge_id, "copy_knowledge_id": body.copy_knowledge_id,
+                 "reason": body.reason})
+    return {"code": 0, "message": "success",
+            "data": {"copy_knowledge_id": result["knowledge_id"],
+                     "lifecycle_status": result["lifecycle_status"],
+                     "origin_recall": result.get("origin_recall")}}
 
 
 @router.post("/{knowledge_id}/submit-public", response_model=KnowledgeItem)

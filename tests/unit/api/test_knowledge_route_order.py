@@ -196,6 +196,7 @@ _KB_ROUTES = [
     ('/copy-requests', 'GET'),
     ('/copy-requests/{request_id}/decide', 'POST'),
     ('/{knowledge_id}/publish-copy', 'POST'),
+    ('/{knowledge_id}/recall-copy', 'POST'),
     # 2026-11-19 企业源同步可靠性（3c234791d）：interval/历史读写给面
     ('/enterprise/sources/{source_id}/sync-interval', 'GET'),
     ('/enterprise/sources/{source_id}/sync-interval', 'PUT'),

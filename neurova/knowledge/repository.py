@@ -1482,6 +1482,35 @@ class KnowledgeRepository:
             self._record_index_op("reindex", copyId)
         return copyId
 
+    def recall_published_copy(
+        self, user: Optional[Dict[str, Any]], knowledge_id: str,
+        copy_knowledge_id: str, reason: str = "",
+    ) -> Dict[str, Any]:
+        """源租户 admin 远程召回外发副本（§8.5 拍板：做召回）。
+
+        副本被置 archived（isRetrievable 即刻剔除，各检索/读面不再可见），并打
+        `origin_recall` 留证（谁/何时/原因）。数据不物理删除——召回是治理下架，
+        不是销毁；目标租户 admin 仍可经台账/审计看到召回标记。
+        """
+        agent_id, item = self._find_or_raise(knowledge_id)
+        ownTenant = str(item.get("tenant_id") or "default")
+        if not self._is_admin(user) or self._tenant(user) != ownTenant:
+            raise PermissionError("仅源租户管理员可召回外发副本")
+        found = self.find_item(copy_knowledge_id)
+        if found is None:
+            raise LookupError("外发副本不存在: %s" % copy_knowledge_id)
+        copyAgent, copyItem = found
+        if (str(copyItem.get("origin_knowledge_id") or "") != str(knowledge_id)
+                or str(copyItem.get("origin_tenant_id") or "") != ownTenant):
+            raise ValueError("该条目不是 %s 的外发副本，不在召回范围" % knowledge_id)
+        copyItem["lifecycle_status"] = ARCHIVED
+        copyItem["origin_recall"] = {
+            "recalled_by": self._user_id(user),
+            "recalled_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "reason": str(reason or ""),
+        }
+        return self._set_entry(copyAgent, copyItem)
+
     def submit_to_public(self, user: Optional[Dict[str, Any]], knowledge_id: str) -> Dict[str, Any]:
         """把私有条目提交公共库，进入 pending 待管理员审批。"""
         agent_id, item = self._find_or_raise(knowledge_id)

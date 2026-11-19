@@ -169,3 +169,41 @@ class TestPublishCopy:
 
         copy = repo.get_item("agent-1", result["copy_knowledge_id"])
         assert copy["title"] == "原标题"
+
+
+class TestRecallPublishedCopy:
+    """源租户远程召回外发副本（§8.5 拍板：做召回）。"""
+
+    def _approvedCopy(self, repo):
+        entry = _mkEntry(repo)
+        req = repo.request_publish_copy(SRC_ADMIN, entry["knowledge_id"], "tenant-b")
+        result = repo.decide_publish_copy(DST_ADMIN, req["request_id"], approve=True)
+        return entry, result["copy_knowledge_id"]
+
+    def test_recallRequiresSourceAdmin(self, repo):
+        entry, copyId = self._approvedCopy(repo)
+
+        with pytest.raises(PermissionError):
+            repo.recall_published_copy(DST_ADMIN, entry["knowledge_id"], copyId)
+        with pytest.raises(PermissionError):
+            repo.recall_published_copy(SRC_USER, entry["knowledge_id"], copyId)
+
+    def test_recallOnlyWorksOnItsOwnCopies(self, repo):
+        entry, copyId = self._approvedCopy(repo)
+
+        with pytest.raises(ValueError):
+            repo.recall_published_copy(SRC_ADMIN, entry["knowledge_id"],
+                                       entry["knowledge_id"])
+
+    def test_recallArchivesCopyAndLeavesEvidence(self, repo):
+        entry, copyId = self._approvedCopy(repo)
+
+        result = repo.recall_published_copy(SRC_ADMIN, entry["knowledge_id"], copyId,
+                                            reason="数据不再共享")
+
+        assert result["lifecycle_status"] == "archived"
+        assert result["origin_recall"]["recalled_by"] == "1"
+        assert result["origin_recall"]["reason"] == "数据不再共享"
+        copy = repo.get_item("agent-1", copyId)
+        assert copy["lifecycle_status"] == "archived"
+        assert all(i["knowledge_id"] != copyId for i in repo.visible_items(DST_ADMIN))

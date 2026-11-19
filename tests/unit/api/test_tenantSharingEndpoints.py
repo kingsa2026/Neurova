@@ -152,3 +152,40 @@ class TestPublishCopyEndpoint:
         assert resp.json()["data"]["copy_knowledge_id"] is None
         assert all(i.get("origin_knowledge_id") != kid
                    for items in repo._items.values() for i in items)
+
+
+class TestRecallCopyEndpoint:
+    def _approvedCopy(self, client, holder):
+        kid = _mkEntry(client, holder)
+        holder["user"] = dict(SRC_ADMIN)
+        requestId = client.post(f"{PREFIX}/{kid}/publish-copy",
+                                json={"target_tenant": "tenant-b"}).json()["data"]["request_id"]
+        holder["user"] = dict(DST_ADMIN)
+        copyId = client.post(f"{PREFIX}/copy-requests/{requestId}/decide",
+                             json={"approve": True}).json()["data"]["copy_knowledge_id"]
+        return kid, copyId
+
+    def test_recallArchivesCopy(self, api):
+        client, holder, repo = api
+        kid, copyId = self._approvedCopy(client, holder)
+        holder["user"] = dict(SRC_ADMIN)
+
+        resp = client.post(f"{PREFIX}/{kid}/recall-copy",
+                           json={"copy_knowledge_id": copyId, "reason": "数据不再共享"})
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["lifecycle_status"] == "archived"
+        copy = next(i for items in repo._items.values() for i in items
+                    if i["knowledge_id"] == copyId)
+        assert copy["lifecycle_status"] == "archived"
+        assert copy["origin_recall"]["reason"] == "数据不再共享"
+
+    def test_recallUnknownCopyIs400(self, api):
+        client, holder, _ = api
+        kid, _copyId = self._approvedCopy(client, holder)
+        holder["user"] = dict(SRC_ADMIN)
+
+        resp = client.post(f"{PREFIX}/{kid}/recall-copy",
+                           json={"copy_knowledge_id": kid})
+
+        assert resp.status_code == 400
