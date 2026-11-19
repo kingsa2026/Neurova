@@ -30,6 +30,7 @@ import { MessageManager } from '../libs/message/MessageManager';
 import { ConfigManager } from '../libs/config/ConfigManager';
 import { PlatformAdapter } from '../libs/adapters/PlatformAdapter';
 import { ServerProfiles } from '../libs/config/ServerProfiles';
+import { http } from '@kit.NetworkKit';
 
 @Entry
 @Component
@@ -42,8 +43,10 @@ export struct LoginPage {
   @State remember: boolean = true;
   // 登录中加载态（禁用按钮并显示"登录中..."）
   @State loading: boolean = false;
-  // 当前 PC 终端档案（F1 终端胶囊：当前 PC 终端 xxx）
+  // 当前 PC 终端档案（F1 终端胶囊：只显示地址 IP:端口）
   @State serverLabel: string = '';
+  // 终端连通性：0=检测中（灰）1=可达（绿）-1=不可达（红）——胶囊图标据此变色
+  @State serverReachable: number = 0;
   // 终端档案编辑（胶囊点击呼出：改名称/地址三要素，保存后立即重连装配点）
   @State showServerEdit: boolean = false;
   @State editServerName: string = '';
@@ -126,7 +129,26 @@ export struct LoginPage {
     const active = ServerProfiles.getInstance().getActive();
     if (active) {
       this.serverLabel = active.baseUrl.replace(/^https?:\/\//, '');
+      this.checkServerReachable(active.baseUrl);
     }
+  }
+
+  /**
+   * 终端连通性探测：GET {baseUrl}/health，3s 超时。
+   * 可达 → 胶囊图标绿；不可达/超时 → 红；检测中 → 灰。fail-soft，不阻塞登录。
+   */
+  private checkServerReachable(baseUrl: string): void {
+    this.serverReachable = 0;
+    const httpRequest = http.createHttp();
+    httpRequest.request(baseUrl + '/health', {
+      method: http.RequestMethod.GET,
+      connectTimeout: 3000,
+      readTimeout: 3000
+    }, (err, data) => {
+      const ok = !err && data.responseCode >= 200 && data.responseCode < 300;
+      this.serverReachable = ok ? 1 : -1;
+      httpRequest.destroy();
+    });
   }
 
   /**
@@ -208,7 +230,7 @@ export struct LoginPage {
               // 终端档案胶囊（F1 .srv-chip：仅显示地址 IP:端口）
               if (this.serverLabel !== '') {
                 Row() {
-                  AppIcon({ name: 'server', iconSize: 14, color: this.sm.getColor('success') })
+                  AppIcon({ name: 'server', iconSize: 14, color: this.serverReachable === 1 ? this.sm.getColor('success') : (this.serverReachable === -1 ? this.sm.getColor('error') : this.sm.getColor('text_tertiary')) })
                   Text(this.serverLabel)
                     .fontSize(this.sm.getFontSize('badge'))
                     .fontWeight(FontWeight.Medium)
@@ -336,12 +358,12 @@ export struct LoginPage {
                 Text('SSL')
                   .fontSize(this.sm.getFontSize('caption'))
                   .fontColor(this.sm.getColor('text_secondary'))
-                  .layoutWeight(1)
                 Toggle({ type: ToggleType.Switch, isOn: this.editServerSsl })
                   .selectedColor(this.sm.getColor('primary'))
                   .onChange((on: boolean) => { this.editServerSsl = on; })
               }
               .width('100%')
+              .justifyContent(FlexAlign.End)
               .margin({ top: this.sm.getSpacing('sm') })
 
               Row() {
@@ -393,6 +415,7 @@ export struct LoginPage {
     const updated = profiles.getActive();
     if (updated) {
       this.serverLabel = updated.baseUrl.replace(/^https?:\/\//, '');
+      this.checkServerReachable(updated.baseUrl);
     }
     await this.cm.applyServerProfile(profiles.getActiveApiBase(), getContext(this) as Context);
     this.showServerEdit = false;
