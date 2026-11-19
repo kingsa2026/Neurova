@@ -463,7 +463,7 @@ neurova mcp      # MCP 工具管理（列出、调用、安装）
 neurova dev      # 开发调试（数据库检查、缓存清理、事件监控）
 neurova benchmark # 基准测试（记忆、情感、Skill 性能测试）
 neurova model    # 模型适配器管理（列出、测试、设置默认）
-neurova computer # Computer Use 管理（截图、点击、视觉解析）
+neurova computer # Computer Use 管理（真入口：`python -m neurova.computer_use`，2026-11-19 AD-5 起可用；本清单的 `neurova <子命令>` 形态未实现，勿按此操作）
 neurova runtime  # 运行时管理（进程查看、资源监控）
 neurova image    # Image 管道管理（列出、测试、预处理）
 ```
@@ -1748,32 +1748,27 @@ Agent 星星可以连接到你使用的各种平台：
 #### 6. Computer Use 能力
 - **功能**：让 Agent 能够操作计算机（截图、点击、输入、滚动、文件操作、Shell 命令、浏览器自动化）
 - **隔离层级**：全局共享 + L1/L2 防火墙
-- **使用方式**：
+- **使用方式**（真入口 `python -m neurova.computer_use`，AD-5）：
   ```bash
-  # 截图
-  neurova computer screenshot my_session
-  
-  # 点击
-  neurova computer click my_session --x 100 --y 200
-  
-  # 输入文本
-  neurova computer type my_session --text "Hello, World!"
-  
-  # 滚动
-  neurova computer scroll my_session --dx 0 --dy -100
-  
-  # 文件操作
-  neurova computer file read /path/to/file
-  neurova computer file write /path/to/file --content "内容"
-  
-  # Shell 命令
-  neurova computer shell "ls -la"
-  
-  # 浏览器自动化
-  neurova computer browser navigate --url "https://example.com"
-  neurova computer browser screenshot
-  neurova computer browser click --selector "#login-button"
-  neurova computer browser type --selector "#username" --text "user"
+  # 能力探测
+  python -m neurova.computer_use status
+
+  # 截图（--out 写文件，否则回 base64）
+  python -m neurova.computer_use screenshot --out shot.png
+
+  # 控件树快照（骨架概览 + 下钻）
+  python -m neurova.computer_use dom-snapshot --window-title "记事本" --skeleton
+  python -m neurova.computer_use dom-snapshot --root-index 3
+
+  # 按元素语义点击 / 写值（来自快照 index/runtime_id，不抢焦点）
+  python -m neurova.computer_use click-element --index 3
+  python -m neurova.computer_use set-value --index 5 --value "Hello, World!"
+
+  # 像素点击 / 键入 / 滚动 / 按键（全局输入兜底，会动真实光标）
+  python -m neurova.computer_use click --x 100 --y 200
+  python -m neurova.computer_use type --text "Hello, World!"
+  python -m neurova.computer_use scroll --x 0 --y 0 --dy -100
+  python -m neurova.computer_use key --keys esc
   ```
 
 #### 7. 运行时抽象
