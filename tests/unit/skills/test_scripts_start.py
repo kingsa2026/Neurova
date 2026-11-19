@@ -33,17 +33,23 @@ class TestGetBackendPython:
             result = _get_backend_python()
             assert result == ["/path/to/python"]
     
-    def test_returns_system_python_when_no_venv(self):
-        """当虚拟环境不存在时，返回系统 Python"""
+    def test_raises_system_exit_when_no_venv(self):
+        """虚拟环境缺失时显式报错退出，不再静默回退系统 Python。
+
+        旧形态在 venv 缺失时返回 sys.executable：系统 Python 恰好装了
+        fastapi 就能把服务拉起来，缺的依赖留到运行期才爆（端点注册表缺角、
+        鉴权面静默降级）。现契约：启动期 SystemExit，把"先建 .venv"提前暴露。
+        """
         from start import _get_backend_python
-        
+
         with patch('start.get_venv_python') as mock_get:
             mock_path = MagicMock()
             mock_path.exists.return_value = False
             mock_get.return_value = mock_path
-            
-            result = _get_backend_python()
-            assert result == [sys.executable]
+
+            with pytest.raises(SystemExit) as exc_info:
+                _get_backend_python()
+            assert exc_info.value.code == 1
 
 
 class TestStartBackend:

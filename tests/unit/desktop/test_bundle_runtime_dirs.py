@@ -1,13 +1,17 @@
 """
-打包脚本 agent_workspaces 预创建回归（安装版 2026-09-04 启动崩溃第二道防线）
+打包脚本后端运行时数据目录预创建回归（安装版 2026-09-04 启动崩溃第二道防线）
 
 根因：bundle_backend.py 只复制 neurova/models/config/start_server.py，
-从不创建 agent_workspaces/。干净安装机上该目录天然不存在，
-后端 _load_saved_agents 曾因 os.listdir 缺目录直接崩（已由
+从不预创建任何运行时数据目录。干净安装机上该目录天然不存在，
+后端启动曾因 os.listdir 缺目录直接崩（已由
 test_load_saved_agents_missing_dir.py 根治启动崩溃）。
 
 本测试锁定打包侧不变量：bundle 结束后暂存区必须有
-agent_workspaces/default/，消除"后端运行时自建目录"这个单点依赖。
+data/default/workspaces/——v2 统一布局下运行时经
+core.agent_workspaces.get_agent_workspace_dir("default") 落在数据根
+data/（桌面安装态数据根＝后端包根，Rust 启动器不注入 NEUROVA_DATA_DIR）；
+旧扁平布局 agent_workspaces/<id> 已随 v2 迁移退役，不得回退。
+消除"后端运行时自建目录"这个单点依赖。
 """
 import importlib.util
 from pathlib import Path
@@ -31,7 +35,7 @@ class TestBundleCreatesWorkspaces:
         stage = tmp_path / "backend"
         stage.mkdir()
         mod.ensure_runtime_dirs(stage)
-        assert (stage / "agent_workspaces" / "default").is_dir()
+        assert (stage / "data" / "default" / "workspaces").is_dir()
 
     def test_ensure_runtime_dirs_idempotent(self, tmp_path):
         mod = _load_bundle_module()
@@ -39,7 +43,7 @@ class TestBundleCreatesWorkspaces:
         stage.mkdir()
         mod.ensure_runtime_dirs(stage)
         mod.ensure_runtime_dirs(stage)  # 幂等：重复调用不抛异常
-        assert (stage / "agent_workspaces" / "default").is_dir()
+        assert (stage / "data" / "default" / "workspaces").is_dir()
 
     def test_ensure_runtime_dirs_missing_stage_raises(self, tmp_path):
         mod = _load_bundle_module()

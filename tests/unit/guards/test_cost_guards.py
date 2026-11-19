@@ -92,6 +92,45 @@ def tracked_call_file(tmp_path):
     return f
 
 
+@pytest.fixture
+def tracked_caller_wrapper_file(tmp_path):
+    """内部 retry 包装函数（_createCompletion 形态）——调用方均已记账，应放行。
+
+    真实落点：llm_client.py 的 chat()（@track_llm_call）与 chat_stream /
+    chat_stream_async（体内 record_llm_cost）。给包装函数再挂装饰器会把
+    同一次调用记两遍，故豁免走枚举清单而非装饰器。
+    """
+    f = tmp_path / "wrapper.py"
+    f.write_text(
+        "class C:\n"
+        "    def _createCompletion(self, client, params):\n"
+        "        while True:\n"
+        "            try:\n"
+        "                return client.chat.completions.create(**params)\n"
+        "            except Exception:\n"
+        "                raise\n",
+        encoding="utf-8",
+    )
+    return f
+
+
+@pytest.fixture
+def capability_probe_file(tmp_path):
+    """能力探测（probe* 函数，"Reply with: ok"）——与 capability_detector.py
+    整文件豁免同类，应放行。"""
+    f = tmp_path / "probe.py"
+    f.write_text(
+        "async def probe_model_output_limit(self, model_id):\n"
+        "    return await asyncio.to_thread(\n"
+        "        client.client.chat.completions.create,\n"
+        "        model=model_id,\n"
+        "        messages=[{'role': 'user', 'content': 'Reply with: ok'}],\n"
+        "    )\n",
+        encoding="utf-8",
+    )
+    return f
+
+
 # ── 脚本存在性 ──────────────────────────────────────────────────────────
 
 
@@ -125,6 +164,22 @@ class TestTrackingGuard:
     def test_allows_decorated_call(self, tracked_call_file):
         code, out = _run(TRACKING, tracked_call_file)
         assert code == 0, "带 @track_llm_call 装饰器的调用应通过检查"
+
+    def test_allows_tracked_caller_wrapper(self, tracked_caller_wrapper_file):
+        """豁免清单钉住：调用方均已记账的内部包装函数不算违规。"""
+        code, out = _run(TRACKING, tracked_caller_wrapper_file)
+        assert code == 0, (
+            "内部 retry 包装（_createCompletion 形态，调用方均已记账）应放行——"
+            f"若此 case 变红，说明豁免清单被改动，需重新核对记账拓扑:\n{out[-400:]}"
+        )
+
+    def test_allows_capability_probe(self, capability_probe_file):
+        """豁免清单钉住：能力探测（probe*）不算违规（同 capability_detector.py 先例）。"""
+        code, out = _run(TRACKING, capability_probe_file)
+        assert code == 0, (
+            "能力探测（probe* 函数）应按先例放行——"
+            f"若此 case 变红，说明豁免清单被改动，需重新核对探测面归属:\n{out[-400:]}"
+        )
 
 
 # ── 全库扫描（回归：现网必须 0 违规） ───────────────────────────────────

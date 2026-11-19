@@ -96,7 +96,10 @@ class TestGuestUiaActions:
         calls = {}
 
         class FakeUia:
-            def snapshot(self, window_title=None, max_nodes=None, max_depth=None):
+            # 签名对齐 DesktopUIAManager.snapshot：AD-3 下钻 root_index/root_runtime_id
+            # 与 AD-4 skeleton 由 server._uia_action 透传，缺参即 TypeError→error 响应。
+            def snapshot(self, window_title=None, max_nodes=None, max_depth=None,
+                         root_index=None, root_runtime_id=None, skeleton=False):
                 calls["snapshot"] = (window_title, max_nodes, max_depth)
                 return {"success": True, "nodes": [{"index": 1}]}
 

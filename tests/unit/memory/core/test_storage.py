@@ -12,6 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from neurova.cognitive_layers.memory_layer.isolation import IsolationContext
+
 
 class TestMemoryStorage(unittest.TestCase):
 
@@ -86,23 +88,27 @@ class TestMemoryStorage(unittest.TestCase):
         self.assertEqual(len(store.list_all()), 3)
 
     def test_list_by_tags(self):
+        # 审计 3.3-6 后 query/list_by_tags 对 isolation_context=None fail-closed，
+        # 读写须带同一隔离上下文（默认三元组）才能命中。
+        ctx = IsolationContext()
         store = self._create_store()
-        store.save(content="A", memory_type="episodic", tags=["work"])
-        store.save(content="B", memory_type="episodic", tags=["life"])
-        hits = store.list_by_tags(["work"])
+        store.save(content="A", memory_type="episodic", tags=["work"], isolation_context=ctx)
+        store.save(content="B", memory_type="episodic", tags=["life"], isolation_context=ctx)
+        hits = store.list_by_tags(["work"], isolation_context=ctx)
         self.assertEqual(len(hits), 1)
         self.assertEqual(hits[0]["content"], "A")
 
     def test_query_filters_by_type_and_tags(self):
+        ctx = IsolationContext()
         store = self._create_store()
-        store.save(content="青海湖之旅", memory_type="episodic", tags=["travel"])
-        store.save(content="写代码", memory_type="semantic", tags=["work"])
+        store.save(content="青海湖之旅", memory_type="episodic", tags=["travel"], isolation_context=ctx)
+        store.save(content="写代码", memory_type="semantic", tags=["work"], isolation_context=ctx)
 
-        by_type = store.query(memory_type="semantic")
+        by_type = store.query(memory_type="semantic", isolation_context=ctx)
         self.assertEqual(len(by_type), 1)
         self.assertIn("写代码", by_type[0]["content"])
 
-        by_tag = store.query(tags=["travel"])
+        by_tag = store.query(tags=["travel"], isolation_context=ctx)
         self.assertEqual(len(by_tag), 1)
         self.assertIn("青海湖之旅", by_tag[0]["content"])
 

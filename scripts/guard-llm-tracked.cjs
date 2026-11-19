@@ -8,6 +8,8 @@
  * 1. All LLM API calls must use cost tracking decorator
  * 2. No bare LLM API calls allowed without tracking
  * 3. CI-enforced: Must pass before merge
+ * 4. Enumerated name exemptions: see EXEMPT_FUNCTION_PATTERNS
+ *    (tracked-by-caller wrappers / capability probes)
  * 
  * Usage:
  *   npm run guard:llm-tracked
@@ -101,6 +103,26 @@ const EXCLUDED_FILES = [
   /capability_detector\.py$/,          // Model capability detection
 ]
 
+// Function-name exemptions (matched against the bare function name).
+// Both classes are tracked-by-construction or non-billable ops traffic.
+// Keep this list ENUMERATED: every entry is a conscious, reviewable decision,
+// and any new raw SDK call outside it still fails the guard loudly.
+//
+// - /^_createCompletion/  llm_client.py retry/dispatch wrappers (T-18
+//   采样值回执学习). The raw SDK call lives inside these helpers, but every
+//   caller is itself a tracked entry point: chat() via @track_llm_call,
+//   chat_stream()/chat_stream_async() via in-body record_llm_cost.
+//   Decorating the wrapper would double-count the same call, and the wrapper
+//   returns the raw SDK object whose usage the decorator cannot parse.
+// - /^probe[A-Z_]/  capability/limit probes (e.g. probe_model_output_limit):
+//   minimal "Reply with: ok" ops detection calls — same class as the
+//   file-level capability_detector.py exemption above, not billable chat
+//   turns; results are persisted to providers.json as their own audit trail.
+const EXEMPT_FUNCTION_PATTERNS = [
+  /^_createCompletion/,
+  /^probe[A-Z_]/,
+]
+
 // ============================================================================
 // Core Logic
 // ============================================================================
@@ -114,12 +136,17 @@ function isInExcludedContext(lines, lineNumber, maxLinesBack = 50) {
   for (let i = lineNumber - 1; i >= start; i--) {
     const line = lines[i]
     
-    // Found function/class definition
-    const funcMatch = line.match(/^(async\s+)?def\s+([\w_]+)/)
+    // Found function/class definition. `\s*` is required: class methods and
+    // nested defs are indented, and the exclusion must reach them too (the
+    // decorator check in isInsideDefinition already scans indented defs).
+    const funcMatch = line.match(/^\s*(async\s+)?def\s+([\w_]+)/)
     if (funcMatch) {
       const funcName = funcMatch[2]
       // Check if function name matches excluded patterns
-      return EXCLUDED_CONTEXTS.some(pattern => pattern.test(funcName))
+      return (
+        EXCLUDED_CONTEXTS.some(pattern => pattern.test(funcName)) ||
+        EXEMPT_FUNCTION_PATTERNS.some(pattern => pattern.test(funcName))
+      )
     }
   }
   
