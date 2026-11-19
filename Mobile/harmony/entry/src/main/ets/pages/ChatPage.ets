@@ -1,15 +1,15 @@
 /**
  * ChatPage - 对话页
  *
- * 职责：基于 WebSocket 流式协议的实时对话界面，支持 Agent 切换、流式消息渲染、停止生成
- * 设计：Column [TopNavMenu] + [AgentSwitcher] + [List 消息列表 layoutWeight:1] + [输入区 Row]；
+ * 职责：基于 WebSocket 流式协议的实时对话界面，支持流式消息渲染、停止生成
+ * 设计：Column [TopNavMenu] + [List 消息列表 layoutWeight:1] + [输入区 Row]；
  *       进入页面通过 WebSocketAdapter 建立 WS 连接，订阅 EventBus 的 chat:chunk/done/error 事件；
  *       用户发送消息时创建 user 消息 + assistant 占位消息，通过 WS 下发 chat:send；
  *       收到 chunk 追加到占位消息，收到 done/error 结束流式状态；
  *       颜色统一走 StyleManager，配置走 ConfigManager，日志走 Logger，路由走 Router
  *
  * 依赖：
- *   - ../components/glass：TopNavMenu、AgentSwitcher、GlassInput、GlassButton、GlassPanel
+ *   - ../components/glass：TopNavMenu、GlassInput、GlassButton、GlassPanel
  *   - ../libs/api/ApiFacade：统一 API 门面（加载 Agent 列表）
  *   - ../libs/state/stores/AuthStore、AgentsStore：认证与 Agent 状态
  *   - ../libs/adapters/WebSocketAdapter：WS 连接/发送
@@ -24,7 +24,7 @@
  *   由 Router.push(RouteNames.CHAT) 跳转进入；离开页面自动断开 WS 并取消事件订阅
  */
 
-import { AgentSwitcher, GlassInput } from '../components/glass';
+import { GlassInput } from '../components/glass';
 import { AppIcon } from '../components/common/AppIcon';
 import { IconBtn } from '../components/common/IconBtn';
 import { ApiFacade } from '../libs/api/ApiFacade';
@@ -75,7 +75,7 @@ export struct ChatPage {
   @State sessionTitle: string = '新对话';
   // 当前 Agent ID（从 AgentsStore 读取）
   @State currentAgentId: string = '';
-  // Agent 列表（供 AgentSwitcher 渲染）
+  // Agent 列表（气泡署名与状态行展示用）
   @State agents: Agent[] = [];
   // 排队态（chat:queued 事件置位，done/error 清除；设计 F5 .queued 卡）
   @State queued: boolean = false;
@@ -381,12 +381,6 @@ export struct ChatPage {
       this.logger.error(TAG, '停止生成失败', e as Error);
     }
     this.isGenerating = false;
-  }
-
-  /** Agent 切换：更新当前 ID 并写回 store */
-  private onSwitchAgent(agentId: string): void {
-    this.currentAgentId = agentId;
-    this.agentsStore.switchAgent(agentId);
   }
 
   /** 滚动到消息列表底部（新消息到达时调用） */
@@ -718,18 +712,8 @@ export struct ChatPage {
         .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
         .alignItems(VerticalAlign.Center)
 
-        // Agent 切换器：横向滚动胶囊列表
-        AgentSwitcher({
-          currentAgentId: this.currentAgentId,
-          agents: this.agents,
-          onSwitch: (id: string) => { this.onSwitchAgent(id); }
-        })
-          .margin({
-            left: this.sm.getSpacing('md'),
-            right: this.sm.getSpacing('md'),
-            top: this.sm.getSpacing('sm'),
-            bottom: this.sm.getSpacing('sm'),
-          })
+        // Agent 切换器已按产品要求移出对话页顶部：会话列表走右缘抽屉，
+        // 切 Agent 走智能体列表页发起会话（顶部只留标题 + 状态 + 抽屉入口）
 
         // 消息列表区
         if (this.messages.length === 0) {
