@@ -250,7 +250,8 @@ class TestUnknownRelationCandidate:
         candidates = RelationCandidateStore(store)
         pending = candidates.list(tenantId="default", status="pending")
         promoted = candidates.approve(pending[0]["candidate_id"], tenantId="default",
-                                      termRegistry=registry)
+                                      termRegistry=registry,
+                                      evidenceHash=pending[0]["evidence_hash"])
 
         assert promoted["promoted_term_id"] == "telepathizes"
         assert registry.term("telepathizes") is not None, "批准即登记术语"
@@ -265,7 +266,8 @@ class TestUnknownRelationCandidate:
                           sourceEntryId="k9", sourceText="张三念力传送行李", confidence=0.4)
         pending = candidates.list(tenantId="default", status="pending")
 
-        candidates.reject(pending[0]["candidate_id"], tenantId="default")
+        candidates.reject(pending[0]["candidate_id"], tenantId="default",
+                          evidenceHash=pending[0]["evidence_hash"])
 
         rejected = candidates.list(tenantId="default", status="rejected")
         assert len(rejected) == 1 and rejected[0]["surface"] == "念力传送"
