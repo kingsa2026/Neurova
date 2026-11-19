@@ -44,11 +44,14 @@ def client(storage, secret_store):
 
     manager = StoreConnectionManager(storage=storage, secret_store=secret_store)
     with patch.object(mod, "_get_store_manager", return_value=manager):
-        from neurova.api.auth import get_current_user_or_default
+        from neurova.api.auth import get_current_user, get_current_user_or_default
         from neurova.api.endpoints.neurflow_api import router
 
         app = FastAPI()
         app.include_router(router)
+        # P1-4 鉴权收口（50e74df1a）后 router 挂了级联登录门 get_current_user：
+        # 测试身份须同时覆盖严格门与端点级回落门，且两个身份同源（user_a）。
+        app.dependency_overrides[get_current_user] = lambda: {"user_id": "user_a", "role": "user"}
         app.dependency_overrides[get_current_user_or_default] = lambda: {"user_id": "user_a"}
         with TestClient(app) as tc:
             yield tc

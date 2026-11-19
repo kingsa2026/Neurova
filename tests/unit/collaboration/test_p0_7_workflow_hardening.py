@@ -223,12 +223,22 @@ class TestTriggerAuth:
 
 
 class TestWebhookBodyLimit:
-    def test_oversized_body_413(self):
+    @staticmethod
+    def _client() -> TestClient:
+        from neurova.api.auth import get_current_user
         from neurova.api.endpoints.neurflow_api import router
 
         app = FastAPI()
         app.include_router(router)
-        client = TestClient(app)
+        # P1-4 鉴权收口（50e74df1a）后 router 挂了级联登录门：身份走依赖覆盖；
+        # 登录门只读 header，body 上限的"先于读 body 硬拒"语义不受影响。
+        app.dependency_overrides[get_current_user] = lambda: {
+            "user_id": "user_a", "username": "user_a", "role": "user", "neuser_id": "user_a",
+        }
+        return TestClient(app)
+
+    def test_oversized_body_413(self):
+        client = self._client()
         big = b"x" * (1024 * 1024 + 1)
         resp = client.post(
             RECEIVE, content=big, headers={"Content-Type": "application/json"}
@@ -236,11 +246,7 @@ class TestWebhookBodyLimit:
         assert resp.status_code == 413
 
     def test_normal_body_not_413(self):
-        from neurova.api.endpoints.neurflow_api import router
-
-        app = FastAPI()
-        app.include_router(router)
-        client = TestClient(app)
+        client = self._client()
         resp = client.post(RECEIVE, content=b"{}")
         assert resp.status_code != 413
 

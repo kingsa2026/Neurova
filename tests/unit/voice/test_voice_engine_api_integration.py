@@ -40,7 +40,16 @@ def app_with_voice_engines(mock_tts_voice_engine, mock_asr_voice_engine):
     
     from neurova.api.endpoints.audio import router
     app.include_router(router, prefix="/api/v1/audio")
-    
+
+    # 端点鉴权链是 Depends(get_current_user)（HTTPBearer 凭据版）——不 override
+    # 就走真实鉴权，无凭据一律 401
+    from neurova.api.auth import get_current_user
+
+    async def _fake_user():
+        return {"user_id": "u-admin", "role": "admin"}
+
+    app.dependency_overrides[get_current_user] = _fake_user
+
     yield app
     
     patcher.stop()

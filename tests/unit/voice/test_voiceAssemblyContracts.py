@@ -111,7 +111,8 @@ class TestChannelVoiceRecallBehavior:
         from neurova.cognitive_layers.memory_layer.neurova_recall import NeurovaRecallEngine
 
         class _Store:
-            def get_all_memories(self):
+            # 与真实 MemoryManager.get_all_memories(scoped: bool = False) 同签名
+            def get_all_memories(self, scoped: bool = False):
                 return list(memories)
 
         return NeurovaRecallEngine(memory_manager=_Store())

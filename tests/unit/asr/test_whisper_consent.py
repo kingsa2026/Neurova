@@ -74,14 +74,17 @@ def client(monkeypatch):
     fake_mgr = _make_manager(consent=False, funasr_ok=False)
     monkeypatch.setattr(audio_mod, "_get_asr_manager", lambda: fake_mgr)
 
-    from neurova.api.auth import get_current_user_or_default
+    # 端点鉴权链是 Depends(get_current_user)（HTTPBearer 凭据版），不是
+    # get_current_user_or_default——override 必须压在端点真实声明的依赖上
+    from neurova.api.auth import get_current_user
 
     app = FastAPI()
     app.include_router(audio_mod.router, prefix="/audio")
-    app.dependency_overrides[get_current_user_or_default] = lambda: {
-        "user_id": "u-admin",
-        "role": "admin",
-    }
+
+    async def _admin():
+        return {"user_id": "u-admin", "role": "admin"}
+
+    app.dependency_overrides[get_current_user] = _admin
     return TestClient(app), fake_mgr
 
 

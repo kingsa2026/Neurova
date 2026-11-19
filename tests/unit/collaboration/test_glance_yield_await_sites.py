@@ -81,6 +81,13 @@ def testYieldCheckerResetEndpointActuallyResets(tmp_path):
 
     app = fastapi.FastAPI()
     app.include_router(coordination_api.router, prefix="/api")
+    # P1-5 鉴权收口（50e74df1a）后 coordination router 挂了级联登录门，reset 另收 admin：
+    # 测试身份走 dependency_overrides（仓库既有模式），admin 角色一并给到。
+    from neurova.api.auth import get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: {
+        "user_id": "user_a", "username": "user_a", "role": "admin", "neuser_id": "user_a",
+    }
     client = TestClient(app)
 
     def registeredCount() -> int:
@@ -117,6 +124,13 @@ def testYieldCheckerCheckEndpointAnswersWithTheRealDecision():
 
     app = fastapi.FastAPI()
     app.include_router(coordination_api.router, prefix="/api")
+    # P1-5 鉴权收口（50e74df1a）后 coordination router 挂了级联登录门：
+    # 测试身份走 dependency_overrides（仓库既有模式），不打真凭证。
+    from neurova.api.auth import get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: {
+        "user_id": "user_a", "username": "user_a", "role": "user", "neuser_id": "user_a",
+    }
     client = TestClient(app)
 
     response = client.post(

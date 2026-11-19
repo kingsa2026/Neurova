@@ -42,9 +42,16 @@ SAMPLE_COMFYUI_WORKFLOW = {
 @pytest.fixture
 def app():
     """创建仅挂载 neurflow router 的最小 app"""
+    from neurova.api.auth import get_current_user
     from neurova.api.endpoints.neurflow_api import router
     app = FastAPI()
     app.include_router(router, prefix="/v1/neurflow")
+    # P1-4/P1-6 鉴权收口（50e74df1a）：router 级登录门与 execute 的 admin 门
+    # 都从 get_current_user 取身份——覆盖这一处，status（登录即可）与
+    # execute（另收 admin）两条腿都按管理员身份放行。
+    app.dependency_overrides[get_current_user] = lambda: {
+        "user_id": "user_a", "username": "user_a", "role": "admin", "neuser_id": "user_a",
+    }
     return app
 
 

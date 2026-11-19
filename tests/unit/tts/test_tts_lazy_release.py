@@ -288,6 +288,15 @@ def test_stream_endpoint_lazy_ready_after_release(heavy_manager):
     with patch.object(audio_mod, "_get_tts_manager", fake_get_tts_manager):
         app = FastAPI()
         app.include_router(audio_mod.router, prefix="/audio")
+
+        # 端点鉴权链是 Depends(get_current_user)（HTTPBearer 凭据版）——不
+        # override 就走真实鉴权，无凭据 401（同 voice/asr 域修法）
+        from neurova.api.auth import get_current_user
+
+        async def _fake_user():
+            return {"user_id": "u-admin", "role": "admin"}
+
+        app.dependency_overrides[get_current_user] = _fake_user
         client = TestClient(app)
         resp = client.post("/audio/synthesize-stream", json={"text": "释放后流式"})
     assert resp.status_code == 200, resp.text
