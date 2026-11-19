@@ -786,11 +786,16 @@ class TaskScheduler:
 
         任务体系的 TaskType/executor 是 Agent 任务语义；基础设施级周期调用
         （外部系统拉取等）不塞进那套语义，直接挂本调度器的 APScheduler——
-        不新造第二台调度器（specs/2026-11-12 §5 通则）。调度器未启动时
-        APScheduler 会缓冲 job，start 后自动生效。"""
+        不新造第二台调度器（specs/2026-11-12 §5 通则）。APScheduler「未
+        start 缓冲 job」的前提是实例已创建；本调度器是惰性单例、启动链若
+        不显式 start 则 `_apscheduler` 恒为 None，add_job 会直接炸——所以
+        system job 的前置（调度器在跑）在本公开面内自保证：未跑先 start。
+        """
         from apscheduler.triggers.interval import IntervalTrigger
 
         with self._task_lock:
+            if self._apscheduler is None or not self._apscheduler.running:
+                self.start()
             self._apscheduler.add_job(
                 func=func,
                 trigger=IntervalTrigger(seconds=max(1, int(seconds))),

@@ -1835,13 +1835,13 @@ def create_app(
             except Exception as e:  # noqa: BLE001
                 logger.warning("状态事件桥启动失败（事件→状态写入将不可用）: %s", e)
             try:
-                from neurova.agent.scheduler import get_scheduler
+                from neurova.agent.scheduler import init_scheduler
 
                 from neurova.knowledge.enterprise.registry import registerIntervalSyncs
 
                 from neurova.knowledge.foundation import get_knowledge_fact_store
 
-                registered = registerIntervalSyncs(get_scheduler(),
+                registered = registerIntervalSyncs(init_scheduler(),
                                                    store=get_knowledge_fact_store())
                 if registered:
                     logger.info("企业源 interval 同步已注册 %d 个 job", registered)
