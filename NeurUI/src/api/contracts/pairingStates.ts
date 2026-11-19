@@ -51,3 +51,15 @@ export const DEVICE_CONNECTION_STATES = [
   'closed',
 ] as const
 export type DeviceConnectionState = (typeof DEVICE_CONNECTION_STATES)[number]
+
+/**
+ * 配对连接方式（档一）：手机从哪条路回连服务端。权威侧单源在
+ * `neurova/tunnel/connection_config.py::CONNECTION_MODES`，这里镜像给选择器取词。
+ * - `auto`：跟随环境配置（存量行为）；
+ * - `direct`：强制入站地址（有公网 IP/端口转发或纯内网）；
+ * - `custom`：用户自备反代入口（Cloudflare Tunnel、自建 nginx/Caddy 等——本仓只
+ *   接受并探测地址，不集成第三方隧道二进制）；
+ * - `relay`：自建中继（`neurova/relay` 部署在用户自己的服务器上）。
+ */
+export const CONNECTION_MODES = ['auto', 'direct', 'custom', 'relay'] as const
+export type ConnectionMode = (typeof CONNECTION_MODES)[number]

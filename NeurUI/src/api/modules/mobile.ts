@@ -1,7 +1,7 @@
 import api, { request } from '@/api'
 import type { ApiResponse } from '@/types/response'
-import type { PairingCodeState, DeviceRegistryState, TunnelState, AddressSource }
-  from '@/api/contracts/pairingStates'
+import type { PairingCodeState, DeviceRegistryState, TunnelState, AddressSource,
+  ConnectionMode } from '@/api/contracts/pairingStates'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -98,4 +98,51 @@ export function getPairedDevices() {
 /** Revoke a pairing. */
 export function revokePairing(pairingId: string) {
   return api.delete<ApiResponse<{ message: string }>>(`${BASE}/pairing/${pairingId}`)
+}
+
+// ---------------------------------------------------------------------------
+// 连接方式（档一）：手机从哪条路回连——管理员的全局选择
+// ---------------------------------------------------------------------------
+
+/** 连接方式配置读数（令牌只回掩码，全文不出读口） */
+export interface TunnelConnectionConfig {
+  mode: ConnectionMode
+  custom_advertised_url: string
+  relay_url: string
+  relay_enrollment_token_masked: string
+  has_relay_enrollment_token: boolean
+  updated_at?: string
+  /** 后端顺手带回的通道现状，面板免得再发一次 status 请求 */
+  tunnel?: TunnelStatus
+}
+
+/** 连通性预检结果：连不上就是 ok=false + 原因，不静默降级 */
+export interface PreflightResult {
+  ok: boolean
+  url: string
+  status_code?: number | null
+  latency_ms?: number | null
+  error: string
+}
+
+export interface ConnectionConfigUpdate {
+  mode: ConnectionMode
+  custom_advertised_url?: string
+  relay_url?: string
+  relay_enrollment_token?: string
+}
+
+/** 读连接方式配置（admin；403 = 非管理员，面板据此整块隐藏）。 */
+export function getConnectionConfig() {
+  return api.get<TunnelConnectionConfig>(`${BASE}/pairing/connection-config`)
+}
+
+/** 写连接方式配置（admin）：后端落盘并立即重建出站隧道，改完即生效。 */
+export function updateConnectionConfig(data: ConnectionConfigUpdate) {
+  return api.put<TunnelConnectionConfig>(`${BASE}/pairing/connection-config`, data)
+}
+
+/** 对外地址连通性预检（admin）：对 `{url}{path}` 发一次真 GET，结果如实回。 */
+export function preflightConnectionConfig(url: string, path: string = '/health') {
+  return api.post<PreflightResult>(`${BASE}/pairing/connection-config/preflight`, { url, path })
 }

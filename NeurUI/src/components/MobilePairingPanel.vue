@@ -23,6 +23,53 @@
     <p v-if="blockedByChannel" class="nr-mpp-blocked" data-testid="pairing-blocked">
       {{ t('channel.pairingBlockedByChannel', { state: channelText }) }}
     </p>
+
+    <!-- 连接方式（档一）：手机从哪条路回连是**全局**配置，只有管理员读得到
+         （403 ⇒ 整块不渲染，面板其余功能不受影响）。地址来源的优先级在后端
+         `connection_config` 单源，这里只收集选择、做连通性预检。 -->
+    <div v-if="connConfig" class="nr-mpp-conn" data-testid="connection-config">
+      <p class="nr-mpp-sub">{{ t('channel.connModeTitle') }}</p>
+      <p class="nr-mpp-desc">{{ t('channel.connModeDesc') }}</p>
+      <a-radio-group v-model:value="connDraft.mode" class="nr-mpp-modes" data-testid="connection-mode">
+        <a-radio v-for="m in CONNECTION_MODES" :key="m" :value="m">
+          {{ t('channel.' + MODE_LABEL_KEY[m]) }}
+        </a-radio>
+      </a-radio-group>
+      <div v-if="connDraft.mode === 'custom'" class="nr-mpp-field" data-testid="connection-custom-field">
+        <span class="nr-mpp-label">{{ t('channel.connCustomUrlLabel') }}</span>
+        <a-input v-model:value="connDraft.custom_advertised_url" size="small"
+          :placeholder="t('channel.connCustomUrlPlaceholder')" data-testid="connection-custom-url" />
+      </div>
+      <template v-if="connDraft.mode === 'relay'">
+        <div class="nr-mpp-field">
+          <span class="nr-mpp-label">{{ t('channel.connRelayUrlLabel') }}</span>
+          <a-input v-model:value="connDraft.relay_url" size="small" data-testid="connection-relay-url" />
+        </div>
+        <div class="nr-mpp-field">
+          <span class="nr-mpp-label">{{ t('channel.connRelayTokenLabel') }}</span>
+          <a-input-password v-model:value="connDraft.relay_token_input" size="small"
+            :placeholder="savedTokenPlaceholder" data-testid="connection-relay-token" />
+        </div>
+      </template>
+      <div class="nr-mpp-actions">
+        <GlassButton size="sm" variant="primary" :disabled="connSaving" data-testid="connection-save"
+          @click="saveConnConfig">
+          {{ t('channel.connSave') }}
+        </GlassButton>
+        <GlassButton size="sm" variant="ghost" :disabled="preflightRunning || !preflightUrl"
+          data-testid="connection-preflight" @click="runPreflight">
+          {{ t('channel.connPreflight') }}
+        </GlassButton>
+        <span v-if="preflightResult" class="nr-mpp-preflight"
+          :class="preflightResult.ok ? 'is-ok' : 'is-fail'" data-testid="preflight-result">
+          {{ preflightResult.ok
+            ? t('channel.connPreflightOk', { ms: preflightResult.latency_ms ?? '?' })
+            : t('channel.connPreflightFail', { error: preflightResult.error }) }}
+        </span>
+      </div>
+      <p v-if="connNotice" class="nr-mpp-connnotice" data-testid="connection-notice">{{ connNotice }}</p>
+    </div>
+
     <!-- 终态提示位：码收摊之后屏上不能什么都不留。`revoked`（有人解除了设备）与
          `expired`（码放久了）处置不同，合并成一句就是把两种事说成一件事（§2.5）。 -->
     <p v-if="terminalNotice" class="nr-mpp-terminal" data-testid="pairing-terminal">
@@ -115,10 +162,13 @@ import { useI18n } from 'vue-i18n'
 import { identityFailureOf } from '@/utils/authIdentity'
 import GlassButton from '@/components/GlassButton.vue'
 import {
-  cancelPairing, generatePairing, getPairedDevices, getPairingQrcodeBlob, getPairingStatus,
-  getTunnelStatus, revokePairing,
-  type PairedDevice, type PairingCode, type PairingStatus, type TunnelStatus,
+  cancelPairing, generatePairing, getConnectionConfig, getPairedDevices, getPairingQrcodeBlob,
+  getPairingStatus, getTunnelStatus, preflightConnectionConfig, revokePairing,
+  updateConnectionConfig,
+  type ConnectionConfigUpdate, type PairedDevice, type PairingCode, type PairingStatus,
+  type PreflightResult, type TunnelConnectionConfig, type TunnelStatus,
 } from '@/api/modules/mobile'
+import { CONNECTION_MODES, type ConnectionMode } from '@/api/contracts/pairingStates'
 
 const { t } = useI18n()
 
@@ -357,7 +407,117 @@ async function unpair(device: PairedDevice) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 连接方式（档一）：读配置 → 草稿 → 保存（后端落盘并重建隧道）→ 连通性预检。
+// 非管理员读不到（403）就整块不渲染——这不是"没配置"，是"无权改全局"。
+// ---------------------------------------------------------------------------
+
+const connConfig = ref<TunnelConnectionConfig | null>(null)
+
+/** 模式 → 词典键：i18n 键是驼峰、模式字面量不带下划线，对应关系钉死在此，不拼字符串。 */
+const MODE_LABEL_KEY: Record<ConnectionMode, string> = {
+  auto: 'connModeAuto',
+  direct: 'connModeDirect',
+  custom: 'connModeCustom',
+  relay: 'connModeRelay',
+}
+
+const connDraft = ref<{
+  mode: ConnectionMode
+  custom_advertised_url: string
+  relay_url: string
+  relay_token_input: string
+}>({ mode: 'auto', custom_advertised_url: '', relay_url: '', relay_token_input: '' })
+const connSaving = ref(false)
+const connNotice = ref('')
+const preflightRunning = ref(false)
+const preflightResult = ref<PreflightResult | null>(null)
+
+const savedTokenPlaceholder = computed(() =>
+  connConfig.value?.has_relay_enrollment_token ? t('channel.connTokenSavedPlaceholder') : '')
+
+/** 预检对象：custom/relay 各自那条地址；其他模式没有可探测的对外地址。 */
+const preflightUrl = computed(() => {
+  if (connDraft.value.mode === 'custom') return connDraft.value.custom_advertised_url.trim()
+  if (connDraft.value.mode === 'relay') return connDraft.value.relay_url.trim()
+  return ''
+})
+
+async function loadConnConfig() {
+  try {
+    const res: any = await getConnectionConfig()
+    const body = (res?.data ?? res) as TunnelConnectionConfig
+    connConfig.value = body
+    connDraft.value = {
+      mode: body.mode,
+      custom_advertised_url: body.custom_advertised_url,
+      relay_url: body.relay_url,
+      relay_token_input: '',
+    }
+  } catch {
+    connConfig.value = null
+  }
+}
+
+async function saveConnConfig() {
+  if (connSaving.value) return
+  connSaving.value = true
+  connNotice.value = ''
+  try {
+    const payload: ConnectionConfigUpdate = { mode: connDraft.value.mode }
+    if (connDraft.value.custom_advertised_url) {
+      payload.custom_advertised_url = connDraft.value.custom_advertised_url
+    }
+    if (connDraft.value.relay_url) {
+      payload.relay_url = connDraft.value.relay_url
+    }
+    // 令牌只写不读：用户没敲就不带键（后端保持现值），敲了才换
+    if (connDraft.value.relay_token_input) {
+      payload.relay_enrollment_token = connDraft.value.relay_token_input
+    }
+    const res: any = await updateConnectionConfig(payload)
+    const body = (res?.data ?? res) as TunnelConnectionConfig
+    connConfig.value = body
+    connDraft.value = {
+      mode: body.mode,
+      custom_advertised_url: body.custom_advertised_url,
+      relay_url: body.relay_url,
+      relay_token_input: '',
+    }
+    connNotice.value = t('channel.connSaved')
+    // 通道现状可能随配置变化（如 relay 由 disabled 转 probing）——徽标立刻跟上
+    await loadTunnel()
+  } catch (e: any) {
+    connNotice.value = t('channel.connSaveFailed', {
+      error: String(e?.response?.data?.detail || e?.message || ''),
+    })
+  } finally {
+    connSaving.value = false
+  }
+}
+
+async function runPreflight() {
+  const url = preflightUrl.value
+  if (!url || preflightRunning.value) return
+  preflightRunning.value = true
+  preflightResult.value = null
+  try {
+    // 自建中继的健康口是 /healthz（neurova/relay），其余探 /health
+    const probePath = connDraft.value.mode === 'relay' ? '/healthz' : '/health'
+    const res: any = await preflightConnectionConfig(url, probePath)
+    preflightResult.value = (res?.data ?? res) as PreflightResult
+  } catch (e: any) {
+    preflightResult.value = {
+      ok: false, url, status_code: e?.response?.status ?? null, latency_ms: null,
+      error: String(e?.message || ''),
+    }
+  } finally {
+    preflightRunning.value = false
+  }
+}
+
 // 先问通道再列设备：面板打开的第一拍就得知道"现在能不能发码"
+loadConnConfig()
 loadTunnel()
 loadDevices()
 startPanelPolling(IDLE_POLL_MS)
@@ -397,4 +557,12 @@ onBeforeUnmount(() => {
 .nr-mpp-via, .nr-mpp-last { color: var(--nr-text-tertiary); }
 .nr-mpp-dormant { color: var(--nr-text-tertiary); font-style: italic; }
 .nr-mpp-risk { margin: var(--nr-space-md) 0 0; font-size: 11px; color: var(--nr-text-muted); }
+.nr-mpp-conn { margin-top: var(--nr-space-md); padding-top: var(--nr-space-md); border-top: 1px solid var(--nr-border-subtle, rgba(255, 255, 255, 0.06)); }
+.nr-mpp-conn .nr-mpp-modes { display: flex; flex-wrap: wrap; gap: var(--nr-space-sm); margin: var(--nr-space-xs) 0 0; }
+.nr-mpp-field { display: flex; align-items: center; gap: var(--nr-space-sm); margin-top: var(--nr-space-xs); }
+.nr-mpp-label { min-width: 96px; font-size: 12px; color: var(--nr-text-secondary); }
+.nr-mpp-actions { display: flex; align-items: center; gap: var(--nr-space-sm); margin-top: var(--nr-space-sm); }
+.nr-mpp-preflight.is-ok { font-size: 12px; color: var(--nr-success); }
+.nr-mpp-preflight.is-fail { font-size: 12px; color: var(--nr-error); }
+.nr-mpp-connnotice { margin: var(--nr-space-xs) 0 0; font-size: 12px; color: var(--nr-text-secondary); }
 </style>
