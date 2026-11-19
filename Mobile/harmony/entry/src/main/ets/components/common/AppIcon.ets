@@ -1,39 +1,96 @@
 /**
- * AppIcon - 全量单线图标库（对照界面布局规划原型的 24 网格 1.7px monoline 体系）
+ * AppIcon - 全量图标库
  *
- * 职责：以几何原语 Path（1.7vp 单线，24 网格）绘制设计文档图标全集；
- *      零资源依赖（系统符号库无对应名，Path 自绘）。
- *      A 弧一律以 C 三次曲线近似（渲染确定性最高，与 TabIcon 同法）。
- * 填充型图标（spark/stop/more）走 fill，其余走 stroke。
+ * 职责：优先走官方系统符号库 SymbolGlyph（sys.symbol.*，华为设计系统标准单色
+ *      符号，自动跟随深浅色与字重，形状/尺寸由系统保证）；少数系统库没有的
+ *      名字（spark/fork/graph/globe）回退 Path 手绘（24 网格 1.7 线宽 monoline，
+ *      A 弧以 C 三次曲线近似）。
+ * 填充型回退图标（spark/stop/more）走 fill，其余回退走 stroke。
  *
- * 用法：AppIcon({ name: 'search', size: 17, color: sm.getColor('text_primary') })
+ * 用法：AppIcon({ name: 'search', iconSize: 17, color: sm.getColor('text_primary') })
  */
 
 @Component
 export struct AppIcon {
-  /** 图标名（见 commands() 的 case 清单） */
+  /** 图标名（见 symbolRes()/pathFor() 的 case 清单） */
   @Prop name: string = 'info';
   /** 画布边长（vp），线条粗细按比例缩放（命名避开通用属性 size） */
   @Prop iconSize: number = 24;
   /** 线条/填充颜色（调用方传 token 色） */
   @Prop color: string = '#FFFFFF';
 
-  /** 填充型图标：spark 四芒星 / stop 停止块 / more 三点 */
+  /**
+   * sys.symbol 映射表：命中走官方符号库，未命中（返回 undefined）走 Path 回退。
+   * 资源名必须是字面量 $r()（编译期解析），故用 switch 而非查表字符串拼接。
+   */
+  private symbolRes(): Resource | undefined {
+    switch (this.name) {
+      case 'chat': return $r('sys.symbol.message');
+      case 'home': return $r('sys.symbol.house');
+      case 'agent': return $r('sys.symbol.robot');
+      case 'book': return $r('sys.symbol.book');
+      case 'user': return $r('sys.symbol.person');
+      case 'search': return $r('sys.symbol.magnifyingglass');
+      case 'plus': return $r('sys.symbol.plus');
+      case 'bell': return $r('sys.symbol.bell');
+      case 'mic': return $r('sys.symbol.mic');
+      case 'clip': return $r('sys.symbol.paperclip');
+      case 'send': return $r('sys.symbol.paperplane');
+      case 'stop': return $r('sys.symbol.stop_circle');
+      case 'back': return $r('sys.symbol.chevron_left');
+      case 'chev': return $r('sys.symbol.chevron_right');
+      case 'more': return $r('sys.symbol.more');
+      case 'pin': return $r('sys.symbol.pin');
+      case 'archive': return $r('sys.symbol.archivebox');
+      case 'edit': return $r('sys.symbol.square_and_pencil');
+      case 'scan': return $r('sys.symbol.qrcode');
+      case 'check': return $r('sys.symbol.checkmark');
+      case 'gear': return $r('sys.symbol.gearshape');
+      case 'server': return $r('sys.symbol.externaldrive');
+      case 'shield': return $r('sys.symbol.checkmark_shield');
+      case 'folder': return $r('sys.symbol.folder');
+      case 'task': return $r('sys.symbol.doc_text');
+      case 'moon': return $r('sys.symbol.moon');
+      case 'palette': return $r('sys.symbol.paintpalette');
+      case 'logout': return $r('sys.symbol.arrow_right_to_line');
+      case 'info': return $r('sys.symbol.info_circle');
+      case 'lock': return $r('sys.symbol.lock');
+      case 'mail': return $r('sys.symbol.envelope');
+      case 'model': return $r('sys.symbol.square_grid_2x2');
+      case 'history': return $r('sys.symbol.clock');
+      case 'signal': return $r('sys.symbol.signal');
+      case 'batt': return $r('sys.symbol.battery');
+      case 'wifi': return $r('sys.symbol.wifi');
+      case 'link': return $r('sys.symbol.link');
+      case 'pause': return $r('sys.symbol.pause');
+      case 'eye': return $r('sys.symbol.eye');
+      case 'sun': return $r('sys.symbol.sun_min');
+      default: return undefined;
+    }
+  }
+
+  /** 填充型图标：spark 四芒星 / stop 停止块 / more 三点（仅 Path 回退分支使用） */
   private isFilled(): boolean {
     return this.name === 'spark' || this.name === 'stop' || this.name === 'more';
   }
 
   build() {
-    Path()
-      .commands(this.scaledCommands())
-      .fillOpacity(this.isFilled() ? 1 : 0)
-      .fill(this.color)
-      .stroke(this.color)
-      .strokeWidth(1.7 * this.iconSize / 24)
-      .strokeLineCap(LineCapStyle.Round)
-      .strokeLineJoin(LineJoinStyle.Round)
-      .width(this.iconSize)
-      .height(this.iconSize)
+    if (this.symbolRes() !== undefined) {
+      SymbolGlyph(this.symbolRes())
+        .fontSize(this.iconSize)
+        .fontColor([this.color])
+    } else {
+      Path()
+        .commands(this.scaledCommands())
+        .fillOpacity(this.isFilled() ? 1 : 0)
+        .fill(this.color)
+        .stroke(this.color)
+        .strokeWidth(1.7 * this.iconSize / 24)
+        .strokeLineCap(LineCapStyle.Round)
+        .strokeLineJoin(LineJoinStyle.Round)
+        .width(this.iconSize)
+        .height(this.iconSize)
+    }
   }
 
   /**
@@ -59,19 +116,30 @@ export struct AppIcon {
   }
 
   private commands(): string {
-    switch (this.name) {
+    return AppIcon.pathFor(this.name);
+  }
+
+  /**
+   * 图标几何单一事实源（TabIcon 同名页签图标亦从此取，勿在两处各画一份）。
+   * 24 网格绝对坐标 + 1.7 线宽 + 圆头；放大到 28vp 后原手绘几何的形状缺陷
+   * 会暴露（真机反馈「图标大小不适配/不像」），重画时按标准 monoline 结构：
+   * 气泡=圆角矩形+短尾、房屋=屋顶/墙体/门三段、机器人=圆角方+天线+双眼、
+   * 书=左右对开页、人像=小头+低肩弧（头肩留隙）。
+   */
+  static pathFor(name: string): string {
+    switch (name) {
       case 'spark':
         return 'M12 2.5 L14 9.5 L21 12 L14 14.5 L12 21.5 L10 14.5 L3 12 L10 9.5 Z';
       case 'chat':
-        return 'M7.5 4 L16.5 4 C18.71 4 20.5 5.79 20.5 7.5 L20.5 14.5 C20.5 16.43 18.71 18 16.5 18 L9 18 L4.6 21.4 C4.1 21.8 3.4 21.4 3.4 20.7 L3.4 7.5 C3.4 5.57 5.57 4 7.5 4 Z M8.5 9 L15.5 9 M8.5 12.5 L13 12.5';
+        return 'M6.5 4 L17.5 4 C19 4 20 5 20 6.5 L20 13.5 C20 15 19 16 17.5 16 L9 16 L5.2 19 C4.7 19.4 4 19.1 4 18.4 L4 6.5 C4 5 5 4 6.5 4 Z M8 8.8 L16 8.8 M8 12 L13 12';
       case 'agent':
-        return 'M9.5 7 L14.5 7 C16.71 7 18.5 8.79 18.5 11 L18.5 14.5 C18.5 16.71 16.71 18.5 14.5 18.5 L9.5 18.5 C7.29 18.5 5.5 16.71 5.5 14.5 L5.5 11 C5.5 8.79 7.29 7 9.5 7 Z M12 7 L12 4 M9.7 12.6 L10 12.6 M14 12.6 L14.3 12.6 M9.8 15.4 L14.2 15.4';
+        return 'M8 8.5 L16 8.5 C18.2 8.5 19.5 9.8 19.5 12 L19.5 14.5 C19.5 16.7 18.2 18 16 18 L8 18 C5.8 18 4.5 16.7 4.5 14.5 L4.5 12 C4.5 9.8 5.8 8.5 8 8.5 Z M12 8.5 L12 5.5 M10.6 4.6 L13.4 4.6 M9 12.6 L9.01 12.6 M15 12.6 L15.01 12.6 M9.5 15.2 L14.5 15.2';
       case 'home':
-        return 'M3.4 10.2 L12 3 L20.6 10.2 L20.6 20 L14.2 20 L14.2 14.6 L9.8 14.6 L9.8 20 L3.4 20 Z';
+        return 'M3.5 10.5 L12 3.5 L20.5 10.5 M5.5 8.8 L5.5 20.5 L18.5 20.5 L18.5 8.8 M10 20.5 L10 14.5 L14 14.5 L14 20.5';
       case 'book':
-        return 'M5 5.5 C5 4.12 6.12 3 7.5 3 L19 3 L19 18.5 L7.5 18.5 C6.12 18.5 5 19.4 5 20.5 L5 5.5 Z M5 18.5 C5 17.12 6.12 16 7.5 16 L19 16';
+        return 'M12 6 C10.5 4.8 8.5 4.2 5.5 4.2 L5.5 17.5 C8.5 17.5 10.5 18.1 12 19.3 M12 6 C13.5 4.8 15.5 4.2 18.5 4.2 L18.5 17.5 C15.5 17.5 13.5 18.1 12 19.3';
       case 'user':
-        return 'M12 5.2 C13.88 5.2 15.4 6.72 15.4 8.6 C15.4 10.48 13.88 12 12 12 C10.12 12 8.6 10.48 8.6 8.6 C8.6 6.72 10.12 5.2 12 5.2 Z M4.6 20 C5.4 16.6 8.1 14.6 12 14.6 C15.9 14.6 18.6 16.6 19.4 20';
+        return 'M12 4.6 C14 4.6 15.6 6.2 15.6 8.2 C15.6 10.2 14 11.8 12 11.8 C10 11.8 8.4 10.2 8.4 8.2 C8.4 6.2 10 4.6 12 4.6 Z M4.8 20 C4.8 16.2 8 13.8 12 13.8 C16 13.8 19.2 16.2 19.2 20';
       case 'search':
         return 'M4.8 11 C4.8 7.58 7.58 4.8 11 4.8 C14.42 4.8 17.2 7.58 17.2 11 C17.2 14.42 14.42 17.2 11 17.2 C7.58 17.2 4.8 14.42 4.8 11 Z M15.6 15.6 L19.6 19.6';
       case 'plus':
