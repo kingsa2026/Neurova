@@ -25,6 +25,13 @@ export interface ServerProfile {
   lastAccount: string;
 }
 
+/** 终端地址三要素：地址栏（IP/中继域名[+路径]）、端口、SSL（编辑/新增表单与完整地址互转用） */
+export interface ServerAddrParts {
+  addr: string;
+  port: string;
+  ssl: boolean;
+}
+
 function normalizeBaseUrl(url: string): string {
   return (url || '').replace(/\/+$/g, '').trim();
 }
@@ -37,6 +44,46 @@ export class ServerProfiles {
   private loaded: boolean = false;
 
   private constructor() {}
+
+  /**
+   * 完整地址 → 三要素：地址栏只填 IP 或中继域名（端口单列、协议由 SSL 开关决定）。
+   * 路径（中继 /t/<routeId>）并入地址栏带回，否则编辑一次就丢配对路由。
+   */
+  static splitBaseUrl(baseUrl: string): ServerAddrParts {
+    const parts: ServerAddrParts = { addr: baseUrl, port: '', ssl: false };
+    let rest = baseUrl;
+    if (rest.startsWith('https://')) {
+      parts.ssl = true;
+      rest = rest.slice(8);
+    } else if (rest.startsWith('http://')) {
+      rest = rest.slice(7);
+    }
+    const slash = rest.indexOf('/');
+    const hostPort = slash >= 0 ? rest.slice(0, slash) : rest;
+    const path = slash >= 0 ? rest.slice(slash) : '';
+    const colon = hostPort.indexOf(':');
+    if (colon >= 0) {
+      parts.addr = hostPort.slice(0, colon) + path;
+      parts.port = hostPort.slice(colon + 1);
+    } else {
+      parts.addr = hostPort + path;
+    }
+    return parts;
+  }
+
+  /** 三要素 → 完整地址：端口只拼在 host 段（地址栏里的中继路径不吞端口） */
+  static joinBaseUrl(ssl: boolean, addr: string, port: string): string {
+    let a = addr.trim();
+    const proto = a.indexOf('://');
+    if (proto >= 0) {
+      a = a.slice(proto + 3);
+    }
+    const slash = a.indexOf('/');
+    const host = slash >= 0 ? a.slice(0, slash) : a;
+    const path = slash >= 0 ? a.slice(slash) : '';
+    const p = port.trim();
+    return (ssl ? 'https://' : 'http://') + host + (p.length > 0 ? ':' + p : '') + path;
+  }
 
   static getInstance(): ServerProfiles {
     if (!ServerProfiles.instance) {

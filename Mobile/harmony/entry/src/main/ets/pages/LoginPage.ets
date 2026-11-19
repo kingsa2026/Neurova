@@ -44,10 +44,12 @@ export struct LoginPage {
   @State loading: boolean = false;
   // 当前 PC 终端档案（F1 终端胶囊：当前 PC 终端 xxx）
   @State serverLabel: string = '';
-  // 终端档案编辑（胶囊点击呼出：改名称/URL，保存后立即重连装配点）
+  // 终端档案编辑（胶囊点击呼出：改名称/地址三要素，保存后立即重连装配点）
   @State showServerEdit: boolean = false;
   @State editServerName: string = '';
-  @State editServerUrl: string = '';
+  @State editServerHost: string = '';
+  @State editServerPort: string = '';
+  @State editServerSsl: boolean = false;
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -225,7 +227,10 @@ export struct LoginPage {
                   const active = ServerProfiles.getInstance().getActive();
                   if (active) {
                     this.editServerName = active.name;
-                    this.editServerUrl = active.baseUrl;
+                    const parts = ServerProfiles.splitBaseUrl(active.baseUrl);
+                    this.editServerHost = parts.addr;
+                    this.editServerPort = parts.port;
+                    this.editServerSsl = parts.ssl;
                     this.showServerEdit = true;
                   }
                 })
@@ -303,17 +308,42 @@ export struct LoginPage {
                 onChange: (v: string) => { this.editServerName = v; }
               })
 
-              Text('地址（http(s)://host:port）')
+              Text('地址（IP 或中继域名）')
                 .fontSize(this.sm.getFontSize('caption'))
                 .fontColor(this.sm.getColor('text_secondary'))
                 .width('100%')
                 .margin({ top: this.sm.getSpacing('sm') })
               GlassInput({
-                placeholder: 'https://www.neurova.top',
-                value: this.editServerUrl,
+                placeholder: '如 192.168.1.5 或 relay.example.com',
+                value: this.editServerHost,
                 type: 'text',
-                onChange: (v: string) => { this.editServerUrl = v; }
+                onChange: (v: string) => { this.editServerHost = v; }
               })
+
+              Text('端口')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .width('100%')
+                .margin({ top: this.sm.getSpacing('sm') })
+              GlassInput({
+                placeholder: '如 9527',
+                value: this.editServerPort,
+                type: 'text',
+                onChange: (v: string) => { this.editServerPort = v; }
+              })
+
+              // SSL 开关：开自动补 https，关自动补 http
+              Row() {
+                Text('SSL（开 = https，关 = http）')
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('text_secondary'))
+                  .layoutWeight(1)
+                Toggle({ type: ToggleType.Switch, isOn: this.editServerSsl })
+                  .selectedColor(this.sm.getColor('primary'))
+                  .onChange((on: boolean) => { this.editServerSsl = on; })
+              }
+              .width('100%')
+              .margin({ top: this.sm.getSpacing('sm') })
 
               Row() {
                 GlassButton({
@@ -345,13 +375,13 @@ export struct LoginPage {
     }
   }
 
-  /** 保存终端档案编辑：更新档案 → 重连 HTTP 装配点 → 刷新胶囊文案 */
+  /** 保存终端档案编辑：三要素拼完整地址 → 更新档案 → 重连 HTTP 装配点 → 刷新胶囊 */
   private async saveServerEdit(): Promise<void> {
-    const url = this.editServerUrl.trim();
-    if (url.length === 0) {
-      this.msg.warning('请填写终端地址');
+    if (this.editServerHost.trim().length === 0) {
+      this.msg.warning('请填写终端地址（IP 或中继域名）');
       return;
     }
+    const url = ServerProfiles.joinBaseUrl(this.editServerSsl, this.editServerHost, this.editServerPort);
     const profiles = ServerProfiles.getInstance();
     const active = profiles.getActive();
     if (!active) {
@@ -360,7 +390,7 @@ export struct LoginPage {
     await profiles.update(active.id, this.editServerName.trim(), url);
     const updated = profiles.getActive();
     if (updated) {
-      this.serverLabel = `${updated.name} · ${updated.baseUrl}`;
+      this.serverLabel = updated.baseUrl.replace(/^https?:\/\//, '');
     }
     await this.cm.applyServerProfile(profiles.getActiveApiBase(), getContext(this) as Context);
     this.showServerEdit = false;

@@ -27,7 +27,10 @@ const TAG = 'ConnectionPage';
 export struct ConnectionPage {
   @State profiles: ServerProfile[] = [];
   @State activeId: string = '';
-  @State newUrl: string = '';
+  // 新增档案三要素：地址栏（IP/中继域名）+ 端口 + SSL（开=https，关=http）
+  @State newHost: string = '';
+  @State newPort: string = '';
+  @State newSsl: boolean = false;
   @State newName: string = '';
   @State busy: boolean = false;
 
@@ -66,15 +69,18 @@ export struct ConnectionPage {
   }
 
   private async addProfile(): Promise<void> {
-    if (!this.newUrl || this.newUrl.length < 7) {
-      this.msg.warning('请输入有效的终端地址');
+    if (this.newHost.trim().length === 0) {
+      this.msg.warning('请输入终端地址（IP 或中继域名）');
       return;
     }
     this.busy = true;
     try {
-      const added = await this.store.add(this.newName, this.newUrl);
+      const url = ServerProfiles.joinBaseUrl(this.newSsl, this.newHost, this.newPort);
+      const added = await this.store.add(this.newName, url);
       this.newName = '';
-      this.newUrl = '';
+      this.newHost = '';
+      this.newPort = '';
+      this.newSsl = false;
       // 新档案立即激活并进入扫码配对：二维码只带 ref 不带地址（§3.4），
       // 所以先录地址、再扫码配对，两步缺一不可
       await this.store.switchTo(added.id);
@@ -172,12 +178,29 @@ export struct ConnectionPage {
               })
                 .margin({ bottom: 8 })
               GlassInput({
-                placeholder: 'http://192.168.x.x:9527 或 中继转发地址',
-                value: this.newUrl,
+                placeholder: '地址：IP 或中继域名（如 192.168.1.5）',
+                value: this.newHost,
                 iconName: 'link',
-                onChange: (v: string) => { this.newUrl = v; }
+                onChange: (v: string) => { this.newHost = v; }
               })
                 .margin({ bottom: 8 })
+              Row() {
+                GlassInput({
+                  placeholder: '端口（如 9527）',
+                  value: this.newPort,
+                  onChange: (v: string) => { this.newPort = v; }
+                })
+                  .layoutWeight(1)
+                Text('SSL')
+                  .fontSize(this.sm.getFontSize('badge'))
+                  .fontColor(this.sm.getColor('text_secondary'))
+                  .margin({ left: 12, right: 6 })
+                Toggle({ type: ToggleType.Switch, isOn: this.newSsl })
+                  .selectedColor(this.sm.getColor('primary'))
+                  .onChange((on: boolean) => { this.newSsl = on; })
+              }
+              .width('100%')
+              .margin({ bottom: 8 })
               GlassButton({
                 text: '添加 PC 终端',
                 type: 'gradient',
