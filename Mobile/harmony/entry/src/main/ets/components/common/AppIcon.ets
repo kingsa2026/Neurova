@@ -1,10 +1,10 @@
 /**
  * AppIcon - 全量图标库
  *
- * 职责：优先走官方系统符号库 SymbolGlyph（sys.symbol.*，华为设计系统标准单色
- *      符号，自动跟随深浅色与字重，形状/尺寸由系统保证）；少数系统库没有的
- *      名字（spark/fork/graph/globe）回退 Path 手绘（24 网格 1.7 线宽 monoline，
- *      A 弧以 C 三次曲线近似）。
+ * 职责：全部走官方系统符号库 SymbolGlyph（sys.symbol.*，华为设计系统标准单色
+ *      符号，自动跟随深浅色与字重，形状/尺寸由系统保证）；symbolRes() 未命中
+ *      的名字才回退 Path 手绘（24 网格 1.7 线宽 monoline，A 弧以 C 三次曲线
+ *      近似）——当前在用的 30 个名字已全部命中符号库，回退仅兜底未来新增。
  * 填充型回退图标（spark/stop/more）走 fill，其余回退走 stroke。
  *
  * 用法：AppIcon({ name: 'search', iconSize: 17, color: sm.getColor('text_primary') })
@@ -65,6 +65,9 @@ export struct AppIcon {
       case 'pause': return $r('sys.symbol.pause');
       case 'eye': return $r('sys.symbol.eye');
       case 'sun': return $r('sys.symbol.sun_min');
+      case 'spark': return $r('sys.symbol.wand_and_stars');
+      case 'globe': return $r('sys.symbol.translate');
+      case 'fork': return $r('sys.symbol.a_360_rotation');
       default: return undefined;
     }
   }
