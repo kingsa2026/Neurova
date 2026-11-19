@@ -80,14 +80,20 @@ Neurova 后端（agent 决策 · 治理四级裁决 · 审批链 L0–L2 · H-4 
 - **熔断**：对齐 QwenPaw 借鉴批的 token 保证金/限流口径，手机侧增加步数/时长维。
 - **指令通道**：复用移动 WS，不另起 socket/调试桥。
 
-## 7. 鸿蒙端预研项（R 系列，只调研不动生产码）
+## 7. 鸿蒙端预研结论（R 系列，2026-11-19 已完成调研）
 
-| 项 | 问题 | 产出 |
-| --- | --- | --- |
-| R1 能力边界 | AccessibilityExtensionAbility 对三方应用：可读？可注入手势？需要哪些权限，是否涉 ACL/系统应用 | 权限清单 + 可行性判定 |
-| R2 运行时通道 | uitest/hdc 等是否可作为**运行时**指令通道（还是仅测试域） | 结论：可用/不可用 + 依据 |
-| R3 退让形态 | 若注入受限：先做「读屏展示 + 引导人操作」（agent 读屏分析、人手执行）的方案草图 | 形态草案 |
-| R4 结论 | 汇总 R1–R3：鸿蒙端走「完整执行器」还是「读屏助手」还是「暂缓」 | 一页结论供拍板 |
+> 依据：OpenHarmony 官方开源文档仓（Gitee `openharmony/docs` master，`application-dev/reference/apis-accessibility-kit/`）。华为开发者官网文档中心为 JS 渲染单页应用，脚本直读仅得空壳；OpenHarmony 与商用 HarmonyOS NEXT 的 Accessibility Kit 同源，商用侧政策以官方站为准。
+
+| 项 | 结论 |
+| --- | --- |
+| **R1 能力边界** | **API 12（HarmonyOS NEXT）起，无障碍扩展能力对三方应用收口**：公开版 `AccessibilityExtensionAbility` 全部生命周期回调与 `AccessibilityExtensionContext` 全部接口（读屏 `getWindowRootElement`/`getFocusElement`/`findElement`、动作执行 `performAction`（click/longClick/setText/scroll 等）、手势注入 `injectGesture(Sync)`）**自 API 12 起废弃，官方注明「系统不再开放相关能力」**。新接口自 **API 20** 起为 **systemapi**（`onAccessibilityEventInfo`/`onAccessibilityKeyEvent` 等），需系统应用 + `ohos.permission.ACCESSIBILITY_EXTENSION_ABILITY` 权限，非系统应用调用报错 202。三方应用（含本仓鸿蒙端）**无法再获得读屏/注入执行器能力**。 |
+| **R2 运行时通道** | `uitest`/`hdc` 属测试/调试域（测试框架与开发者调试桥，需开发者模式/测试舱运行），不是面向用户设备的运行时自动化通道，不可作为产品能力依赖。 |
+| **R3 退让形态** | 「读屏展示」同样依赖被收口的无障碍能力，**不可行**。鸿蒙端可行形态退化为：**审批终端 + 通知/卡片提醒 + 人工执行**（审批作答只需普通 UI 与生物确认，不依赖无障碍能力）。 |
+| **R4 总结论** | **鸿蒙端执行器暂缓**。产品分工：安卓端承担「agent 代操作」，鸿蒙端承担「审批终端 + 任务提醒 + 状态展示」。 |
+
+## 7.1 安卓侧对照佐证
+
+Android 侧 `AccessibilityService` 对三方应用持续开放（仅需用户在系统设置中授权开启），读屏/节点查找/`performAction`/`dispatchGesture` 均可用——这正是参照项目在安卓真机上完整跑通的基础。两端能力不对称因此是**系统政策差异**，不是本仓工程差异；产品文案与市场材料应据实描述（安卓先行，鸿蒙端为审批与提醒终端）。
 
 ## 8. 风险与缓解
 
@@ -101,7 +107,7 @@ Neurova 后端（agent 决策 · 治理四级裁决 · 审批链 L0–L2 · H-4 
 
 ## 9. 里程碑
 
-- **P0（预研）**：R1–R4 鸿蒙结论 + 安卓 M1 技术验证（无障碍开关与读屏跑通）。
+- **P0（预研）**：~~R1–R4 鸿蒙结论~~（**已完成，2026-11-19，见 §7：鸿蒙执行器不可行，定位审批终端**）+ 安卓 M1 技术验证（无障碍开关与读屏跑通）。
 - **P1（最小闭环）**：M1–M6 + M8，无真机全链回归。
 - **P2（真机演示）**：M7 + M9，真机演示任务成功 + 安全判据全过。
 - **P3（产品化）**：多任务场景、定时任务接入（复用 scheduler）、报告导出面（对齐 P2-2）。
@@ -109,5 +115,5 @@ Neurova 后端（agent 决策 · 治理四级裁决 · 审批链 L0–L2 · H-4 
 ## 10. 待拍板
 
 1. M9 演示任务选型（设置查询起步，还是直接上跨应用任务）。
-2. 鸿蒙端 R4 结论前的资源投入上限。
+2. 鸿蒙端按 R4 结论执行「审批终端 + 提醒」定位（不再投入执行器预研）——如无异议即销项。
 3. 产品文案发布口径（见 [手机执行器产品文案草案](../03-user-guide/MOBILE_EXECUTOR_PRODUCT_COPY_2026-11-19.md)）是否随预研先行挂出。
