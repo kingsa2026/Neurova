@@ -82,7 +82,13 @@ class TestManagerValidity:
     def test_futureNotRecalled(self, tmp_path):
         mgr = _mgr(tmp_path)
         try:
-            mgr.remember("未来事实", valid_from=NOW + datetime.timedelta(days=1))
+            # 「未来」必须取真实时钟的未来——模块级 NOW 是写死的 2026-11-14，
+            # 跨天后 NOW+1day 落入过去，futureNotRecalled 语义翻车（2026-11-20 实证）
+            mgr.remember(
+                "未来事实",
+                valid_from=datetime.datetime.now(datetime.timezone.utc)
+                + datetime.timedelta(days=1),
+            )
             mgr.remember("现在事实")
             hits = mgr.recall(query="事实", use_semantic=False)
             contents = [h["content"] for h in hits]

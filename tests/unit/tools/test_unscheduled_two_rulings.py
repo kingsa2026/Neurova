@@ -149,16 +149,16 @@ class TestRealCostFaceStaysWired:
         )
 
     def test_llmClientCarriesTheThreeCallSiteWrites(self):
-        """`llm_client.py` 仍承载三处调用点写入：装饰器 ×2 + 流式显式记账。
+        """`llm_client.py` 仍承载三处调用点写入：装饰器 ×1 + 流式显式记账 ×2。
 
-        这是**逐路**断言，不是「看一眼文件里有没有这个词」——非流式两路
-        （`chat` / `_call_api` 的装饰器）与流式两路（`chat_stream` / `chat_stream_sync`
-        末尾的显式 `record_llm_cost`）各算一处。
+        这是**逐路**断言：非流式唯一入口 `chat` 挂装饰器（`_call_api` 已随
+        8249ed7ed 死码清偿退役，四路收敛为三路）；流式两路（`chat_stream` /
+        `chat_stream_async`）末尾显式 `record_llm_cost`。
         """
         text = (PROJECT_ROOT / "neurova/llm_client.py").read_text(encoding="utf-8")
-        assert text.count("@track_llm_call(") >= 2, (
-            f"llm_client.py 的 @track_llm_call 装饰器少于 2 处"
-            f"（实测 {text.count('@track_llm_call(')}）——非流式两路写入断了"
+        assert text.count("@track_llm_call(") == 1, (
+            f"llm_client.py 的 @track_llm_call 装饰器应为 1 处（非流式唯一入口 chat）"
+            f"（实测 {text.count('@track_llm_call(')}）"
         )
         assert text.count("record_llm_cost(") >= 2, (
             f"llm_client.py 的显式 record_llm_cost 少于 2 处"

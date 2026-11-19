@@ -676,10 +676,13 @@ class TestFullDeclarationCoverage:
             "file_read", "file_search", "get_datetime",
             # 知识图谱只读走查（递归 CTE 只读、无写作用域，依据行在 builtin_tools.py 声明位）。
             "graph_search",
-            "list_agents", "memory_search",
+            "list_agents", "list_teams", "memory_search",
             # 环境预检：只读环境变量名与 SecretStore 键名、不读凭据值、无写作用域，
             # 故与同批其余只读工具并发安全（依据行在 `builtin_tools.py` 该声明位上方）。
             "node_env_preflight",
+            # 团队/项目只读枚举（S10/S13）：列团队/列项目/项目详情均为只读读面，
+            # 同 list_agents（依据行在 builtin_tools.py 各自声明位）。
+            "project_detail", "project_list",
             "recall_context_span", "recall_history", "rss_read", "subagent_status",
             # 子代理结构化结果提交：同 escalate 的通知面（依据行在声明位）。
             "submit_result",

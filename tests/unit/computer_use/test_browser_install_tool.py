@@ -182,6 +182,11 @@ class TestInstallKernel:
         stale.close = AsyncMock(return_value=None)
         bm._backends["playwright"] = stale
         probe = await bm.reprobe()
+        if not probe["ok"]:
+            # 无 Chromium 内核的环境（未跑 playwright install）下，重探的精确
+            # 诊断本身就是被验对象；条目重建断言须有内核才可证。
+            assert "playwright install chromium" in str(probe.get("error")), probe
+            pytest.skip("Playwright Chromium 内核未安装——重探精确诊断已验证")
         assert probe["ok"] is True, f"重探应成功: {probe}"
         assert "playwright" in bm._backends and bm._backends["playwright"] is not stale
         stale.close.assert_awaited_once()

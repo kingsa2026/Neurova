@@ -2441,6 +2441,9 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     # 桌面/浏览器操作：突变或瞬时快照（截图重放不回当时画面）
     "computer_click", "computer_click_element", "computer_click_mark",
     "computer_type", "computer_scroll", "computer_set_value",
+    # 桌面写动作（AD 批补齐）：拖拽/按键/粘贴改共享桌面状态，重放制造新副作用，
+    # 与 computer_click/computer_type 同面同判
+    "computer_drag", "computer_key", "computer_paste",
     "computer_screenshot", "computer_som_snapshot", "computer_dom_snapshot",
     "browser_click", "browser_click_role", "browser_fill_role",
     # ref 寻址族与 role 族同轴：都是对同一页面的突变，重放制造新变更

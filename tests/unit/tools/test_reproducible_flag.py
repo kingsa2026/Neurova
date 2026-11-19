@@ -60,6 +60,16 @@ EXPECTED_NON_REPRODUCIBLE = {
     "exec_command", "write_stdin",
     # 多步编排：内层步进可能含任意写操作，重放制造新变更
     "orchestrate_tools",
+    # 团队派活/沉淀提议（S10）：重放制造新运行、重复建审批单/重复写团队
+    "dispatch_team", "propose_team",
+    # 项目发起/房间发言（S13）：重放建出第二个项目/重复投递房间消息
+    "project_create", "room_post",
+    # 跨 agent 审批链（P3-1）：建单/裁决都改共享审批状态，重放制造第二张审批单
+    "request_approval", "decide_subagent_approval",
+    # 叫停（H 批补差）：改共享运行状态并终止成员任务，重放制造第二次取消
+    "cancel_subagent",
+    # 桌面写动作（AD 批）：拖拽/按键/粘贴重放制造新桌面副作用，同 computer_type
+    "computer_drag", "computer_key", "computer_paste",
 }
 
 
