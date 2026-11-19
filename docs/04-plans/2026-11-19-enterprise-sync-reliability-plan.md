@@ -152,3 +152,76 @@ CREATE INDEX IF NOT EXISTS idx_enterprise_sync_history
 1. D3 单飞在 file 源上表现为串行执行而非 `already_running` 跳过——file 适配器 `fetchBatch` 无 await 让出点，单事件循环内两请求天然串行；单飞锁语义由带让出点的 fake adapter 测试覆盖，真实 HTTP/ERP 源（有 IO 让出）防线有效。
 2. 验收标准 3 的「已注册 N 个 job」启动日志仅在「启动时已存在启用 interval 的源」场景打印；运行时经 PUT 注册的源走跟随路径，不重打该行。
 3. TaskScheduler 启动后，任务台账 `agent_scheduler_tasks.json` 中 enabled+schedule 的 Agent 定时任务将开始按计划执行（此前调度器从未启动、它们从未真正跑过）——这是断点接活的伴生影响，执行走既有 executor/审计链。
+
+---
+
+## 8. 租户共享设计（2026-11-19 用户拍板：复制发布语义）
+
+> 回答「企业连接器有没有按租户隔离，租户自己的数据按私人库处理，再共享至公共库或分享给其他租户」。
+> 结论：隔离已完备、跨租户流动无机制；本节按**复制发布**语义细化，复用既有共享机制做最小扩展，不新造平行体系。
+
+### 8.1 现状证据（2026-11-19 逐点核实）
+
+| 层 | 现状 | 出处 |
+|---|---|---|
+| 连接器配置 | 按 `tenant_id` 隔离；interval jobId 带租户段 | `enterprise_source_configs`、`registry._registerOneJob` |
+| 本体/事实层 | v25 起按租户分区，`(tenant_id, id)` 复合主键 | `foundation_schema.py:115`、`knowledge_facts.py` 62 处 tenant 过滤 |
+| 条目层 | `tenant_id` 字段（缺省 default）；`visibility` public/private；`shared_with` **用户 id 列表**只读共享；私→公已有完整审批链 `submit_to_public` → admin `review_public_submission` → `unpublish` | `repository.py:765/1021/1311-1400`、`knowledge_sharing.py:272-322` |
+| 可见性判定 | **租户先于角色**：`can_view` 首条即跨租户一律不可见（admin 也不穿透）；同租户内 public / 属主 / shared_with | `repository.py:1117-1133` |
+| 检索过滤 | FTS 按 `shared_with_json` json_each 精确匹配 uid；scope=public/private/shared | `fts_index.py:225-244` |
+| 差距 | `shared_with` 只装用户 id；public 也出不了租户；无跨租户分享/发布通道 | — |
+
+### 8.2 设计原则
+
+1. **复制发布，不做跨租户实时视图**：检索/读面的租户过滤点遍布（can_view、检索快照循环、fts 下推、本体分区），实时视图要把每处改成双租户逻辑，泄露面与复杂度都大；复制发布只在写入侧开受治理的口子，天然可审计、可撤回。
+2. **单一事实源**：共享判定仍只看 `shared_with` 一个字段（用户 id + `tenant:<id>` 段同列），不新造第二份共享声明；公开审批仍走既有 `submission` 链。
+3. **租户先于角色不破**：`can_view` 的跨租户默认拒绝保持不变，跨租户可见只能来自显式分享段或显式发布的副本。
+4. **血缘必留**：跨租户副本带 `origin_tenant_id` / `origin_knowledge_id`；企业源数据继承 `sourceSpan`。
+
+### 8.3 分期设计
+
+**P1 · 条目层跨租户分享与发布副本（本方案实施范围）**
+
+- E1 `shared_with` 租户段（零 schema 迁移）：
+  - `shared_with` 列表允许 `tenant:<tenant_id>` 段（用户 id 现为数字/uuid，无前缀冲突）；
+  - `can_view` 扩展：跨租户且 `tenant:<user.tenant>` ∈ shared_with → 只读可见（can_modify 仍 false，不属目标租户成员不可改）；
+  - 检索扩展：`repository` 快照过滤与 `fts_index.py:234/241` 的 json_each 匹配值同时传 uid 与 `tenant:<tid>`；
+  - 端点扩展：既有 `POST /knowledge/sharing/{id}/share|unshare` 的 body 增加 `tenant_ids`（经租户存在性校验），复用同一写路径；
+  - 撤回＝unshare 摘段，即时生效。
+- E2 跨租户发布副本（复制语义）：
+  - 新端点 `POST /knowledge/sharing/{id}/publish-copy`，body `{target_tenant}`：把条目**复制**一条进目标租户（`tenant_id=target`，`origin_tenant_id`/`origin_knowledge_id` 留血缘，`visibility=private`）；
+  - 目标租户内公开仍走目标租户 admin 的既有 `submit-public → 审批` 链——副本进公共库必然过人审；
+  - 审批模型（双边）：源租户 admin 发起 + 目标租户 admin 审批放行落库；审批记录挂条目 `submission`（扩展 `copy_target` 字段）与审计事件；
+  - 副本独立演进：源条目后续修改/撤回不影响已发布副本（复制语义的核心代价与收益）；源侧 `origin_*` 反查可列出所有外发副本；
+  - 撤回：目标租户 admin 可 `unpublish`/删除副本；源侧暂不做远程召回（挂 §8.5 待拍板）。
+- E3 权限与审计：share/unshare/publish-copy/审批四动作全部落审计事件（复用 `_landActivity` 模式）；publish-copy 仅源租户 admin 可发起，目标租户 admin 可审可拒。
+- E4 live-verify：真后端建两个租户的 admin，走「分享段可见 → 发布副本 → 目标审批 → 公共可见 → 撤回」全链。
+
+**P2 · 企业源/事实层共享（挂台账，另行拍板后实施）**
+
+- 源级策略：`enterprise_source_configs` 增 `share_tenants`，同步落账后把批次数据复制写入目标租户分区（每目标租户独立游标与幂等键派生，admission 咽喉不变）；
+- 事实层复制：`knowledge_facts` 按 v25 分区复制断言行（保留 `sourceSpan`，qualifier 注记 origin），与目标租户既有事实的冲突交由既有 conflict_judge 阶梯处理；
+- 规模较大且涉及增量游标语义，不并入 P1。
+
+### 8.4 测试计划（先红后绿）
+
+1. `can_view`：跨租户无段不可见；有 `tenant:<tid>` 段只读可见；目标租户成员不可改（can_modify false）；
+2. 分片：带租户段的条目落 shared 片（`_shardOf`）；
+3. 检索：fts scope 过滤按租户段命中/不命中；快照检索同判；
+4. publish-copy：复制血缘完整（origin_*）、目标租户内初始 private、目标 admin 审批后才 public、源后续修改副本不变；
+5. 权限：非属主/非源 admin 发起 403；非目标 admin 审批 403；租户不存在 400；
+6. 撤回：unshare 摘段即时不可见；目标侧 unpublish 回 private；
+7. 回归：knowledge 全域 + api 域零新增失败；locale 若新增前端键需 11 语言对齐。
+
+### 8.5 待拍板残留
+
+1. 源侧远程召回（撤回外发副本）要不要做——影响目标租户数据完整性预期；
+2. P2 源级 `share_tenants` 自动复制的准入级别（admin 配置即可，还是逐目标审批）；
+3. 事实/本体层是否开放条目级之外的发布（当前 P1 仅条目层）。
+
+### 8.6 验收标准
+
+1. 两个租户互不可见对方任何数据（回归确认现状不破）；
+2. 显式分享后目标租户成员可读不可写，取消分享即时失效；
+3. 发布副本在目标租户 admin 审批前不可见，审批后按目标租户可见性规则流转，血缘可反查；
+4. 全程审计事件可查，knowledge/api 域回归零新增失败，live-verify 全链通过。
