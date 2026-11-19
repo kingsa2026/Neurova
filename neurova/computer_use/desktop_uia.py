@@ -58,6 +58,21 @@ def is_available() -> bool:
     return bool(availabilityDetail()["available"])
 
 
+# 骨架「可交互」判定键。注意不含 legacy_default：真机实测（2026-11-19 Notepad 活体）
+# LegacyIAccessible pattern 对几乎一切 UIA 元素可取用（19/19 空名元素全带该位），
+# 拿它当交互信号会让骨架折叠率归零；它只留在 _deliver_click 的递降链里当点击路径。
+_SKELETON_INTERACTIVE_KEYS = ("invokable", "togglable", "expandable", "settable")
+
+
+def _skeleton_keep(el: Dict[str, Any]) -> bool:
+    """骨架保留判定（AD-4）：结构根 / 有名元素 / 可交互元素留下，其余折叠。"""
+    if str(el.get("role")) == "window":
+        return True
+    if el.get("name"):
+        return True
+    return any(el.get(k) for k in _SKELETON_INTERACTIVE_KEYS)
+
+
 class DesktopUIAManager:
     """桌面 UIA 语义会话管理器（按窗口键缓存快照事实 + generation）"""
 
@@ -87,12 +102,15 @@ class DesktopUIAManager:
         max_depth: int = DEFAULT_MAX_DEPTH,
         root_index: Optional[int] = None,
         root_runtime_id: Optional[str] = None,
+        skeleton: bool = False,
     ) -> Dict[str, Any]:
         """枚举窗口控件树（观察，无投递语义 → 不带 action_result）。
 
         root_index/root_runtime_id（AD-3 drill-down）：从已有快照的某元素下钻其子树，
         避免密集树反复全量重枚举。root 必须来自当前会话已有快照（ref 归属 snapshot）；
         下钻结果 index 续接并入缓存（不动既有 index），观察刷新不递增 generation。
+        skeleton（AD-4 骨架概览）：折叠无名且不可交互的容器（omitted_count 计数），
+        密集树先看骨架再下钻。
         """
         if self._backend is None:
             return self._refused("桌面 UIA 层不可用（非 Windows 或缺少 uiautomation）", "unsupported_method")
@@ -191,6 +209,11 @@ class DesktopUIAManager:
             if depth_truncated:
                 result["depth_truncated"] = True
                 result["observed_max_depth"] = observed_max_depth
+            if skeleton:
+                kept = [e for e in result["elements"] if _skeleton_keep(e)]
+                result["omitted_count"] = len(result["elements"]) - len(kept)
+                result["elements"] = kept
+                result["skeleton"] = True
             return result
 
     # ── 窗口枚举（P2-6）────────────────────────────────
@@ -494,6 +517,7 @@ class UiautomationBackend:
                 return
             el = self._element_info(ctrl)
             if el is not None:
+                el["depth"] = depth
                 elements.append(el)
                 stats["observed_max_depth"] = max(stats["observed_max_depth"], depth)
             try:

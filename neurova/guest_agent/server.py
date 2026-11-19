@@ -135,6 +135,7 @@ def _uia_action(kind: str, p: Dict[str, Any], mgr: Any) -> Dict[str, Any]:
             max_depth=p.get("max_depth"),
             root_index=p.get("root_index"),
             root_runtime_id=p.get("root_runtime_id"),
+            skeleton=p.get("skeleton") or False,
         )
     if kind == "click_element":
         return mgr.click_element(

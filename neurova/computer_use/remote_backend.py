@@ -52,11 +52,13 @@ class RemoteComputerUseManager:
         max_depth=None,
         root_index=None,
         root_runtime_id=None,
+        skeleton=False,
     ) -> Dict[str, Any]:
         # 与本地 DesktopUIAManager.snapshot 同签名（wire kind 仍为 dom_snapshot）
         return self._client.action("dom_snapshot", {
             "window_title": window_title, "max_nodes": max_nodes, "max_depth": max_depth,
             "root_index": root_index, "root_runtime_id": root_runtime_id,
+            "skeleton": skeleton,
         })
 
     def click_element(self, index=None, runtime_id=None, window_title=None, button="left", generation=None) -> Dict[str, Any]:

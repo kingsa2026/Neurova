@@ -313,7 +313,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "computer_dom_snapshot": {
         # 并行能力声明：只读但作用域为共享（UIA 树快照，读的是共享桌面的瞬时结构）⇒ 推导判为不可并行。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
-        "description": "【桌面可访问性快照】枚举前台（或指定标题）窗口控件树（index/角色/名称/矩形/可交互）。桌面交互前必先调用，按快照 index 用 computer_click_element/computer_set_value 语义操作，勿盲猜坐标；窗口变化后 generation 递增需重快照。truncated=true 表示节点数或深度任一不完整；出现 depth_truncated 时树被深度剪枝（observed_max_depth=实际走到的深度，被切元素带 subtree_truncated 标记）——勿把残树当全貌，可对 subtree_truncated 元素用 root_index/root_runtime_id 下钻其子树（新元素 index 续接进缓存），或提高 max_depth/max_nodes 重新观察。",
+        "description": "【桌面可访问性快照】枚举前台（或指定标题）窗口控件树（index/角色/名称/矩形/可交互/层级）。桌面交互前必先调用，按快照 index 用 computer_click_element/computer_set_value 语义操作，勿盲猜坐标；窗口变化后 generation 递增需重快照。truncated=true 表示节点数或深度任一不完整；出现 depth_truncated 时树被深度剪枝（observed_max_depth=实际走到的深度，被切元素带 subtree_truncated 标记）——勿把残树当全貌，可对 subtree_truncated 元素用 root_index/root_runtime_id 下钻其子树（新元素 index 续接进缓存），或提高 max_depth/max_nodes 重新观察。skeleton=true 为骨架概览：折叠无名且不可交互的容器（omitted_count 计数），适合密集树先看骨架再下钻。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -322,6 +322,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "max_depth": {"type": "integer", "description": "可选。控件树最大深度（默认 32）", "minimum": 1},
                 "root_index": {"type": "integer", "description": "可选。下钻根元素序号（drill-down，必须来自本窗口已有快照）；提供后只枚举该元素子树，新元素 index 续接进缓存。root 不在已有快照中会被拒绝（ref_not_found）", "minimum": 0},
                 "root_runtime_id": {"type": "string", "description": "可选。下钻根元素 runtime_id（优先于 root_index）"},
+                "skeleton": {"type": "boolean", "description": "可选。骨架概览模式：折叠无名且不可交互的容器/文本（返回 omitted_count），保留结构根/有名/可交互元素；配合 root_index 下钻使用"},
             },
             "required": [],
         },

@@ -7601,6 +7601,7 @@ class ToolExecutor:
                 int(params["max_depth"]) if params.get("max_depth") else None,
                 int(params["root_index"]) if params.get("root_index") is not None else None,
                 params.get("root_runtime_id"),
+                bool(params.get("skeleton")),
             )
             await self._emit_computer_event("computer_dom_snapshot", params, result)
             return result
