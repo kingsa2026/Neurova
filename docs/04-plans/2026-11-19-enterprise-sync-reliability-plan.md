@@ -225,3 +225,15 @@ CREATE INDEX IF NOT EXISTS idx_enterprise_sync_history
 2. 显式分享后目标租户成员可读不可写，取消分享即时失效；
 3. 发布副本在目标租户 admin 审批前不可见，审批后按目标租户可见性规则流转，血缘可反查；
 4. 全程审计事件可查，knowledge/api 域回归零新增失败，live-verify 全链通过。
+
+### 8.7 执行记录（2026-11-19 P1 当日实施完毕）
+
+P1（E1–E4）已落地：提交 `625b994a8`。
+
+- **E1**：`share_segment.py` 为租户段唯一构造/判别入口；`can_view` 对跨租户显式 `tenant:<id>` 段只读放行，`can_modify`/`can_categorize` 加租户守卫（跨租户一律不可写）；`visible_items` 快照过滤与 `fts_index` 下推同步认段；share/unshare body 增 `tenant_ids`（目标租户经部门根组树校验存在性，default 恒在）。
+- **E2**：`request_publish_copy`/`decide_publish_copy`/`pending_copy_requests`——请求挂源条目 `copy_requests`，审批前不落副本；批准才经 `_copyItemForTenant` 复制落库（origin 血缘、初始 private、属主=审批人）；条目响应投影带 `origin_*`。
+- **E3**：share/unshare/publish-copy/decide 四动作落 `knowledge_activities` 审计（fail-soft 点名）。
+- **红绿**：`test_tenantSharing.py` 13 用例先红（12 failed / 1 现状基线）后绿；`test_tenantSharingEndpoints.py` 7/7 绿；knowledge 全域 2044 passed、api 域 3315 passed、enterprise 202 passed 零新增；路由快照随批更新（顺带补登上一批漏登的三条 enterprise sync 端点）。
+- **E4 live-verify**：双租户真后端（临时数据根+真实部门根组）13 步全链通过——默认 404 → 分享后 200 → PUT 403 → 发起/待审/批准落副本（origin 血缘、private、owner=审批人）→ 普通用户 404 → unshare 撤回 404 → reject 无副本 → 待审清空；启动 `[ERROR]` 计数 0。
+- **实施注记**：live-verify 首轮 dst-user 误见副本，定位为验证脚本 token 缺 `sub` 声明（auth 层 user_id 回退 `sub`，缺省 "unknown" 撞等）——非产品缺陷，修正验证姿势后复跑全绿。
+- **P2**（企业源 `share_tenants` 自动复制、事实层复制）维持挂台账待拍板。
