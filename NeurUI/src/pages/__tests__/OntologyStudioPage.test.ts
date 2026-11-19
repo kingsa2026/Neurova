@@ -219,6 +219,7 @@ beforeEach(() => {
           reviewed_at: '',
           reviewed_by: '',
           promoted_term_id: '',
+          evidence_hash: 'evh-cand-1',
         },
       ],
     },
@@ -365,7 +366,7 @@ describe('OntologyStudioPage（UI-0）', () => {
     expect(wrapper.find('[data-testid="studio-relations"]').text()).toContain('0.87')
     await approveBtn.trigger('click')
     await flushPromises()
-    expect(approveMock).toHaveBeenCalledWith('cand-1')
+    expect(approveMock).toHaveBeenCalledWith('cand-1', '', 'evh-cand-1')
     expect(message.success).toHaveBeenCalled()
   })
 })

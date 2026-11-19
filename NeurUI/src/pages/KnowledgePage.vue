@@ -148,6 +148,14 @@
             </a-space>
           </template>
           <template v-if="column.key === 'content'">
+            <a-tag
+              v-if="record.origin_tenant_id"
+              color="purple"
+              class="kb-origin-tag"
+              :title="record.origin_knowledge_id"
+            >
+              {{ t('knowledge.originFromTenant') }}: {{ record.origin_tenant_id }}
+            </a-tag>
             <span class="kb-preview">{{ truncate(record.content, 80) }}</span>
             <div v-if="(record.chunk_hits?.length ?? 0) > 0" class="kb-chunk-hits">
               <span class="kb-chunk-label">{{ t('knowledge.chunkHit') }}</span>
@@ -180,6 +188,22 @@
                 @click="handleSubmitPublic(record)"
               >
                 {{ t('knowledge.submitPublic') }}
+              </GlassButton>
+              <GlassButton
+                v-if="isAdmin && canManage(record) && record.visibility === 'private'"
+                variant="ghost"
+                size="sm"
+                @click="openPublishCopyModal(record)"
+              >
+                {{ t('knowledge.publishCopyBtn') }}
+              </GlassButton>
+              <GlassButton
+                v-if="isAdmin && canManage(record)"
+                variant="ghost"
+                size="sm"
+                @click="openCopiesModal(record)"
+              >
+                {{ t('knowledge.copiesBtn') }}
               </GlassButton>
               <GlassButton variant="ghost" size="sm" @click="editItem(record)">
                 {{ t('common.edit') }}
@@ -215,7 +239,83 @@
         v-model:value="shareUsernames"
         :placeholder="t('knowledge.shareUsernamesPlaceholder')"
       />
+      <a-input
+        v-model:value="shareTenantsInput"
+        style="margin-top: 8px"
+        :placeholder="t('knowledge.shareTenantsPlaceholder')"
+      />
     </a-modal>
+
+    <!-- §8-E2 Publish Copy Modal（源租户 admin 发起，目标租户 admin 审批后落库） -->
+    <a-modal
+      v-model:open="publishCopyVisible"
+      :title="t('knowledge.publishCopyTitle')"
+      :confirm-loading="publishCopyLoading"
+      @ok="handlePublishCopy"
+      @cancel="publishCopyVisible = false"
+    >
+      <p class="kb-share-target">{{ publishCopyTarget?.title }}</p>
+      <a-input
+        v-model:value="publishCopyTenant"
+        :placeholder="t('knowledge.publishCopyPlaceholder')"
+      />
+    </a-modal>
+
+    <!-- §8-E2 外发副本反查 + 远程召回（源租户 admin） -->
+    <a-modal
+      v-model:open="copiesVisible"
+      :title="t('knowledge.copiesTitle')"
+      :footer="null"
+      @cancel="copiesVisible = false"
+    >
+      <a-empty v-if="!copiesRows.length" :description="t('knowledge.copiesEmpty')" />
+      <a-list v-else :data-source="copiesRows" row-key="copy_knowledge_id">
+        <template #renderItem="{ item }">
+          <a-list-item>
+            <a-list-item-meta
+              :title="`${t('knowledge.copiesTargetTenant')}: ${item.target_tenant}`"
+              :description="`${t('knowledge.copiesStatus')}: ${item.recalled ? t('knowledge.copiesRecalled') : item.lifecycle_status}`"
+            />
+            <template #actions>
+              <a-button
+                v-if="!item.recalled && item.lifecycle_status === 'active'"
+                danger
+                size="small"
+                @click="handleRecallCopy(item)"
+              >
+                {{ t('knowledge.recallCopyBtn') }}
+              </a-button>
+            </template>
+          </a-list-item>
+        </template>
+      </a-list>
+    </a-modal>
+
+    <!-- §8-E2 跨租户副本请求审批（目标租户 admin） -->
+    <GlassPanel v-if="isAdmin" class="kb-review">
+      <div class="kb-review-header">
+        <h3 class="kb-review-title">{{ t('knowledge.copyRequestsTitle') }}</h3>
+      </div>
+      <a-empty v-if="!copyRequests.length" :description="t('knowledge.copyRequestsEmpty')" />
+      <a-list v-else :data-source="copyRequests" row-key="request_id">
+        <template #renderItem="{ item }">
+          <a-list-item>
+            <a-list-item-meta
+              :title="item.title"
+              :description="`${t('knowledge.copyRequestsSource')}: ${item.source_tenant} → ${t('knowledge.copiesTargetTenant')}: ${item.target_tenant}`"
+            />
+            <template #actions>
+              <a-button type="primary" size="small" @click="handleDecideCopyRequest(item, true)">
+                {{ t('knowledge.reviewApprove') }}
+              </a-button>
+              <a-button danger size="small" @click="handleDecideCopyRequest(item, false)">
+                {{ t('knowledge.reviewReject') }}
+              </a-button>
+            </template>
+          </a-list-item>
+        </template>
+      </a-list>
+    </GlassPanel>
 
     <!-- Admin: Public Submissions Review -->
     <GlassPanel v-if="isAdmin" class="kb-review">
@@ -915,6 +1015,11 @@ import {
   deleteKnowledgeNode,
   hybridKnowledgeSearch,
   shareKnowledgeNode,
+  publishKnowledgeCopy,
+  listKnowledgeCopies,
+  recallKnowledgeCopy,
+  listKnowledgeCopyRequests,
+  decideKnowledgeCopyRequest,
   submitKnowledgeToPublic,
   listPublicSubmissions,
   reviewKnowledgePublic,
@@ -981,6 +1086,9 @@ interface KnowledgeItem {
   owner_user_id?: string
   shared_with?: string[]
   submission?: { status?: string } | null
+  // §8-E2 跨租户发布副本的血缘（本租户原生条目两者皆空）
+  origin_tenant_id?: string
+  origin_knowledge_id?: string
   // P0-2 分块契约：块数 + 检索命中的块级溯源
   chunk_count?: number
   chunk_hits?: { chunk_index: number; content: string; score?: number }[]
@@ -1019,6 +1127,16 @@ const shareVisible = ref(false)
 const sharing = ref(false)
 const shareTarget = ref<KnowledgeItem | null>(null)
 const shareUsernames = ref('')
+const shareTenantsInput = ref('')
+// §8-E2 发布副本 / 外发副本反查与召回 / 跨租户副本审批
+const publishCopyVisible = ref(false)
+const publishCopyLoading = ref(false)
+const publishCopyTarget = ref<KnowledgeItem | null>(null)
+const publishCopyTenant = ref('')
+const copiesVisible = ref(false)
+const copiesTarget = ref<KnowledgeItem | null>(null)
+const copiesRows = ref<Array<{ copy_knowledge_id: string; target_tenant: string; owner_user_id: string; visibility: string; lifecycle_status: string; recalled: boolean; created_at?: number }>>([])
+const copyRequests = ref<Array<{ request_id: string; target_tenant: string; source_knowledge_id: string; source_tenant: string; title: string; requested_by: string; requested_at: string }>>([])
 const publicSubmissions = ref<KnowledgeItem[]>([])
 // P0-3 冲突队列 / P0-2 墓碑 + revisions / P1-1 消解队列
 const conflicts = ref<KnowledgeConflict[]>([])
@@ -1757,6 +1875,7 @@ function openCreateModal() {
 function openShareModal(record: KnowledgeItem) {
   shareTarget.value = record
   shareUsernames.value = ''
+  shareTenantsInput.value = ''
   shareVisible.value = true
 }
 
@@ -1766,13 +1885,17 @@ async function handleShare() {
     .split(/[,，;；\s]+/)
     .map((s) => s.trim())
     .filter(Boolean)
-  if (!names.length) {
+  const tenants = shareTenantsInput.value
+    .split(/[,，;；\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (!names.length && !tenants.length) {
     message.error(t('knowledge.shareUsernamesPlaceholder'))
     return
   }
   sharing.value = true
   try {
-    await shareKnowledgeNode(shareTarget.value.id, names)
+    await shareKnowledgeNode(shareTarget.value.id, names, tenants)
     message.success(t('knowledge.shareSuccess'))
     shareVisible.value = false
     fetchKnowledge()
@@ -1780,6 +1903,76 @@ async function handleShare() {
     message.error(extractApiDetail(err) || t('knowledge.shareError'))
   } finally {
     sharing.value = false
+  }
+}
+
+// ── §8-E2 发布副本 / 外发副本反查与召回 / 跨租户副本审批 ──
+
+function openPublishCopyModal(record: KnowledgeItem) {
+  publishCopyTarget.value = record
+  publishCopyTenant.value = ''
+  publishCopyVisible.value = true
+}
+
+async function handlePublishCopy() {
+  if (!publishCopyTarget.value) return
+  const target = publishCopyTenant.value.trim()
+  if (!target) {
+    message.error(t('knowledge.publishCopyPlaceholder'))
+    return
+  }
+  publishCopyLoading.value = true
+  try {
+    await publishKnowledgeCopy(publishCopyTarget.value.id, target)
+    message.success(t('knowledge.publishCopySuccess'))
+    publishCopyVisible.value = false
+  } catch (err: any) {
+    message.error(extractApiDetail(err) || t('knowledge.shareError'))
+  } finally {
+    publishCopyLoading.value = false
+  }
+}
+
+async function openCopiesModal(record: KnowledgeItem) {
+  copiesTarget.value = record
+  copiesVisible.value = true
+  copiesRows.value = []
+  try {
+    const res: any = await listKnowledgeCopies(record.id)
+    copiesRows.value = res?.data ?? res ?? []
+  } catch (err: any) {
+    message.error(extractApiDetail(err) || t('knowledge.shareError'))
+  }
+}
+
+async function handleRecallCopy(row: { copy_knowledge_id: string }) {
+  if (!copiesTarget.value) return
+  try {
+    await recallKnowledgeCopy(copiesTarget.value.id, row.copy_knowledge_id)
+    message.success(t('knowledge.recallCopySuccess'))
+    await openCopiesModal(copiesTarget.value)
+  } catch (err: any) {
+    message.error(extractApiDetail(err) || t('knowledge.shareError'))
+  }
+}
+
+async function loadCopyRequests() {
+  if (!isAdmin.value) return
+  try {
+    const res: any = await listKnowledgeCopyRequests()
+    copyRequests.value = res?.data ?? res ?? []
+  } catch {
+    copyRequests.value = []
+  }
+}
+
+async function handleDecideCopyRequest(row: { request_id: string }, approve: boolean) {
+  try {
+    await decideKnowledgeCopyRequest(row.request_id, approve)
+    message.success(t('knowledge.copyRequestDecided'))
+    await loadCopyRequests()
+  } catch (err: any) {
+    message.error(extractApiDetail(err) || t('knowledge.shareError'))
   }
 }
 
@@ -2382,6 +2575,7 @@ onMounted(() => {
   fetchConflicts()
   fetchTombstones()
   fetchResolutionReviews()
+  loadCopyRequests()
 })
 
 // 闭环审查：消解队列按 agent 分库，切换 agent 后 admin 面板数据会陈旧

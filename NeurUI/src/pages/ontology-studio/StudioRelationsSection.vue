@@ -119,7 +119,7 @@ async function loadCandidates() {
 
 async function approveCandidate(candidate: RelationCandidate) {
   try {
-    await approveRelationCandidate(candidate.candidate_id)
+    await approveRelationCandidate(candidate.candidate_id, '', candidate.evidence_hash ?? '')
     message.success(t('ontology.candidateApprovedDone'))
     await loadCandidates()
     emit('candidates-changed')
@@ -130,7 +130,7 @@ async function approveCandidate(candidate: RelationCandidate) {
 
 async function rejectCandidate(candidate: RelationCandidate) {
   try {
-    await rejectRelationCandidate(candidate.candidate_id)
+    await rejectRelationCandidate(candidate.candidate_id, '', candidate.evidence_hash ?? '')
     message.success(t('ontology.candidateRejectedDone'))
     await loadCandidates()
     emit('candidates-changed')

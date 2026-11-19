@@ -1511,6 +1511,33 @@ class KnowledgeRepository:
         }
         return self._set_entry(copyAgent, copyItem)
 
+    def listPublishedCopies(self, user: Optional[Dict[str, Any]],
+                            knowledge_id: str) -> List[Dict[str, Any]]:
+        """源租户 admin 反查某条目的全部外发副本（§8-E2 血缘反查读面）。
+
+        召回入口依赖它发现副本 id；返回含召回状态（recalled）与目标租户。
+        """
+        _agent_id, item = self._find_or_raise(knowledge_id)
+        ownTenant = str(item.get("tenant_id") or "default")
+        if not self._is_admin(user) or self._tenant(user) != ownTenant:
+            raise PermissionError("仅源租户管理员可查看外发副本")
+        copies: List[Dict[str, Any]] = []
+        with self._lock:
+            for items in self._items.values():
+                for candidate in items:
+                    if (str(candidate.get("origin_knowledge_id") or "") == str(knowledge_id)
+                            and str(candidate.get("origin_tenant_id") or "") == ownTenant):
+                        copies.append({
+                            "copy_knowledge_id": candidate.get("knowledge_id"),
+                            "target_tenant": candidate.get("tenant_id"),
+                            "owner_user_id": candidate.get("owner_user_id"),
+                            "visibility": candidate.get("visibility"),
+                            "lifecycle_status": candidate.get("lifecycle_status"),
+                            "recalled": bool(candidate.get("origin_recall")),
+                            "created_at": candidate.get("created_at"),
+                        })
+        return copies
+
     def submit_to_public(self, user: Optional[Dict[str, Any]], knowledge_id: str) -> Dict[str, Any]:
         """把私有条目提交公共库，进入 pending 待管理员审批。"""
         agent_id, item = self._find_or_raise(knowledge_id)

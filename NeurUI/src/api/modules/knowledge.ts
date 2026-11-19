@@ -43,6 +43,9 @@ export interface KnowledgeNode {
   sources?: KnowledgeSourceEvidence[]
   geo?: { lat: number; lon: number } | null
   duplicate?: boolean
+  // §8-E2 跨租户发布副本的血缘（本租户原生条目两者皆空）
+  origin_tenant_id?: string
+  origin_knowledge_id?: string
 }
 
 /** 来源证据（A1：同文多来源并入既有条目时的溯源清单） */
@@ -161,14 +164,65 @@ export function hybridKnowledgeSearch(query: string, params?: { top_k?: number; 
 // Sharing & public submission (batch 1 isolation)
 // ---------------------------------------------------------------------------
 
-/** Share a private node to given usernames (read-only for sharees). */
-export function shareKnowledgeNode(id: string, usernames: string[]) {
-  return api.post<ApiResponse<KnowledgeNode>>(`${BASE}/${id}/share`, { usernames })
+/** Share a private node to given usernames and/or tenants (read-only for sharees).
+ *  §8-E1：tenant_ids 写入 shared_with 的 `tenant:<id>` 段，目标租户全体成员只读可见。 */
+export function shareKnowledgeNode(id: string, usernames: string[], tenantIds: string[] = []) {
+  return api.post<ApiResponse<KnowledgeNode>>(`${BASE}/${id}/share`, {
+    usernames,
+    tenant_ids: tenantIds,
+  })
 }
 
-/** Revoke sharing for given usernames. */
-export function unshareKnowledgeNode(id: string, usernames: string[]) {
-  return api.post<ApiResponse<KnowledgeNode>>(`${BASE}/${id}/unshare`, { usernames })
+/** Revoke sharing for given usernames and/or tenants. */
+export function unshareKnowledgeNode(id: string, usernames: string[], tenantIds: string[] = []) {
+  return api.post<ApiResponse<KnowledgeNode>>(`${BASE}/${id}/unshare`, {
+    usernames,
+    tenant_ids: tenantIds,
+  })
+}
+
+/** §8-E2：发起跨租户发布副本（源租户 admin；目标租户 admin 审批通过才落库）。 */
+export function publishKnowledgeCopy(id: string, targetTenant: string) {
+  return api.post<ApiResponse<{ request_id: string; status: string; target_tenant: string }>>(
+    `${BASE}/${id}/publish-copy`, { target_tenant: targetTenant })
+}
+
+/** §8-E2：待本租户审批的跨租户发布副本请求（目标租户 admin）。 */
+export function listKnowledgeCopyRequests() {
+  return api.get<ApiResponse<Array<{
+    request_id: string
+    target_tenant: string
+    source_knowledge_id: string
+    source_tenant: string
+    title: string
+    requested_by: string
+    requested_at: string
+  }>>>(`${BASE}/copy-requests`)
+}
+
+/** §8-E2：审批跨租户发布副本（目标租户 admin；approve=复制落库）。 */
+export function decideKnowledgeCopyRequest(requestId: string, approve: boolean, note = '') {
+  return api.post<ApiResponse<{ request_id: string; status: string; copy_knowledge_id: string | null; target_tenant: string }>>(
+    `${BASE}/copy-requests/${encodeURIComponent(requestId)}/decide`, { approve, note })
+}
+
+/** §8-E2：外发副本反查（源租户 admin）——召回入口依赖它发现副本 id。 */
+export function listKnowledgeCopies(id: string) {
+  return api.get<ApiResponse<Array<{
+    copy_knowledge_id: string
+    target_tenant: string
+    owner_user_id: string
+    visibility: string
+    lifecycle_status: string
+    recalled: boolean
+    created_at: number
+  }>>>(`${BASE}/${id}/copies`)
+}
+
+/** §8.5：远程召回外发副本（源租户 admin；副本即刻归档下架并留证）。 */
+export function recallKnowledgeCopy(id: string, copyKnowledgeId: string, reason = '') {
+  return api.post<ApiResponse<{ copy_knowledge_id: string; lifecycle_status: string }>>(
+    `${BASE}/${id}/recall-copy`, { copy_knowledge_id: copyKnowledgeId, reason })
 }
 
 /** Submit a private node to the public KB (requires admin approval). */

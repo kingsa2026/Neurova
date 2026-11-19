@@ -207,3 +207,14 @@ class TestRecallPublishedCopy:
         copy = repo.get_item("agent-1", copyId)
         assert copy["lifecycle_status"] == "archived"
         assert all(i["knowledge_id"] != copyId for i in repo.visible_items(DST_ADMIN))
+
+    def test_listPublishedCopiesReturnsLineage(self, repo):
+        """血缘反查读面：召回入口依赖它发现副本 id。"""
+        entry, copyId = self._approvedCopy(repo)
+
+        copies = repo.listPublishedCopies(SRC_ADMIN, entry["knowledge_id"])
+
+        assert len(copies) == 1
+        assert copies[0]["copy_knowledge_id"] == copyId
+        assert copies[0]["target_tenant"] == "tenant-b"
+        assert copies[0]["recalled"] is False

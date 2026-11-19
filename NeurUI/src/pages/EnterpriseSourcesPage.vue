@@ -77,6 +77,11 @@
               >{{ t('ontology.entIntervalBtn') }}</GlassButton>
               <GlassButton
                 variant="ghost" size="sm"
+                data-testid="ent-share-tenants-btn"
+                @click="openShareTenantsModal(record)"
+              >{{ t('ontology.entShareTenantsBtn') }}</GlassButton>
+              <GlassButton
+                variant="ghost" size="sm"
                 data-testid="ent-history-btn"
                 @click="openHistoryDrawer(record.source_id)"
               >{{ t('ontology.entHistoryBtn') }}</GlassButton>
@@ -171,6 +176,33 @@
         </GlassButton>
         <GlassButton variant="primary" size="sm" :loading="intervalSaving"
           data-testid="ent-interval-save" @click="saveSyncInterval">
+          {{ t('common.save') }}
+        </GlassButton>
+      </template>
+    </a-modal>
+
+    <!-- 租户级共享策略（§8.3-P2：下一轮同步成功后按清单投影复制到目标租户分区） -->
+    <a-modal
+      v-model:open="showShareTenantsModal"
+      :title="t('ontology.entShareTenantsTitle')"
+      width="460px"
+    >
+      <a-form layout="vertical">
+        <a-form-item :label="t('ontology.entShareTenantsLabel')" required>
+          <a-input
+            v-model:value="shareTenantsInput"
+            class="mono"
+            data-testid="ent-share-tenants-input"
+          />
+          <p class="field-hint">{{ t('ontology.entShareTenantsHint') }}</p>
+        </a-form-item>
+      </a-form>
+      <template #footer>
+        <GlassButton variant="secondary" size="sm" @click="showShareTenantsModal = false">
+          {{ t('common.cancel') }}
+        </GlassButton>
+        <GlassButton variant="primary" size="sm" :loading="shareTenantsSaving"
+          data-testid="ent-share-tenants-save" @click="saveShareTenants">
           {{ t('common.save') }}
         </GlassButton>
       </template>
@@ -547,12 +579,14 @@ import { useAuthStore } from '@/stores/auth'
 import {
   deleteEnterpriseSource,
   getEnterpriseSourceHealth,
+  getEnterpriseShareTenants,
   getEnterpriseSyncHistory,
   getEnterpriseSyncInterval,
   listEnterpriseSources,
   submitEnterpriseSource,
   triggerEnterpriseIngest,
   triggerEnterpriseMedia,
+  updateEnterpriseShareTenants,
   updateEnterpriseSyncInterval,
   getWebhookConfig,
   rotateWebhookSecret,
@@ -725,6 +759,42 @@ const saveSyncInterval = async () => {
     message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     intervalSaving.value = false
+  }
+}
+
+// ── 租户级共享策略（§8.3-P2 前端适配） ──────────────────
+
+const showShareTenantsModal = ref(false)
+const shareTenantsSourceId = ref('')
+const shareTenantsInput = ref('')
+const shareTenantsSaving = ref(false)
+
+const openShareTenantsModal = async (row: EnterpriseSourceConfig) => {
+  shareTenantsSourceId.value = row.source_id
+  try {
+    const res = await getEnterpriseShareTenants(row.source_id)
+    shareTenantsInput.value = (res.data?.share_tenants ?? []).join(', ')
+  } catch {
+    shareTenantsInput.value = ''
+  }
+  showShareTenantsModal.value = true
+}
+
+const saveShareTenants = async () => {
+  shareTenantsSaving.value = true
+  try {
+    const tenantIds = shareTenantsInput.value
+      .split(/[,，;；\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+    await updateEnterpriseShareTenants(shareTenantsSourceId.value, tenantIds)
+    message.success(t('ontology.entShareTenantsTitle'))
+    showShareTenantsModal.value = false
+    await loadSources()
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
+  } finally {
+    shareTenantsSaving.value = false
   }
 }
 

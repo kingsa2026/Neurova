@@ -454,6 +454,24 @@ async def recall_published_copy(
                      "origin_recall": result.get("origin_recall")}}
 
 
+@router.get("/{knowledge_id}/copies")
+async def list_published_copies(
+    request: Request,
+    knowledge_id: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """外发副本反查（仅源租户管理员，§8-E2 血缘读面）：召回入口依赖它发现副本。"""
+    repo = get_repository()
+    entry_or_403(repo, knowledge_id, current_user)
+    try:
+        copies = repo.listPublishedCopies(current_user, knowledge_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "message": "success", "data": copies}
+
+
 @router.post("/{knowledge_id}/submit-public", response_model=KnowledgeItem)
 async def submit_knowledge_to_public(
     request: Request,

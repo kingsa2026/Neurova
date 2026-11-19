@@ -119,19 +119,20 @@ export function listRelationCandidates(status: 'pending' | 'approved' | 'rejecte
   })
 }
 
-export function approveRelationCandidate(candidateId: string, basis = '') {
+export function approveRelationCandidate(candidateId: string, basis = '', evidenceHash = '') {
   return api.post<ApiResponse<{ candidate: RelationCandidate; activity_id: string }>>(
     `${BASE}/ontology/relation-candidates/${encodeURIComponent(candidateId)}/approve`,
     {},
-    { params: basis ? { basis } : {} },
+    // P3-1a 证据哈希绑定：绑定证据的候选审批必须回带同一哈希，缺失/不符被拒
+    { params: { ...(basis ? { basis } : {}), ...(evidenceHash ? { evidence_hash: evidenceHash } : {}) } },
   )
 }
 
-export function rejectRelationCandidate(candidateId: string, basis = '') {
+export function rejectRelationCandidate(candidateId: string, basis = '', evidenceHash = '') {
   return api.post<ApiResponse<{ candidate: RelationCandidate; activity_id: string }>>(
     `${BASE}/ontology/relation-candidates/${encodeURIComponent(candidateId)}/reject`,
     {},
-    { params: basis ? { basis } : {} },
+    { params: { ...(basis ? { basis } : {}), ...(evidenceHash ? { evidence_hash: evidenceHash } : {}) } },
   )
 }
 
@@ -356,6 +357,19 @@ export function getEnterpriseSyncHistory(sourceId: string, limit = 50) {
   return api.get<ApiResponse<{ source_id: string; items: EnterpriseSyncHistoryItem[] }>>(
     `${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/sync-history`,
     { params: { limit } })
+}
+
+/** §8.3-P2 租户级共享策略读面（仅管理员）：投影复制的目标租户清单。 */
+export function getEnterpriseShareTenants(sourceId: string) {
+  return api.get<ApiResponse<{ source_id: string; share_tenants: string[] }>>(
+    `${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/share-tenants`)
+}
+
+/** §8.3-P2 租户级共享策略写面（仅管理员）：落库后下一轮同步即按清单投影复制。 */
+export function updateEnterpriseShareTenants(sourceId: string, tenantIds: string[]) {
+  return api.put<ApiResponse<{ source_id: string; share_tenants: string[] }>>(
+    `${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/share-tenants`,
+    { tenant_ids: tenantIds })
 }
 
 /** 提交映射描述符（仅管理员）：非法描述符 400 带定位拒因且零落库。 */
@@ -716,10 +730,13 @@ export function runSchemaSuggestions(sourceId = '', useLlm = false, probe = fals
     { source_id: sourceId, use_llm: useLlm, probe })
 }
 
-/** P1-2：建议审批（approve=登记术语并回填目录链接；reject=留审计不再重生）。 */
-export function decideSchemaSuggestion(suggestionId: string, action: 'approve' | 'reject') {
+/** P1-2：建议审批（approve=登记术语并回填目录链接；reject=留审计不再重生）。
+ *  P3-1a 证据哈希绑定：绑定证据的建议审批必须回带同一 evidence_hash。 */
+export function decideSchemaSuggestion(suggestionId: string, action: 'approve' | 'reject', evidenceHash = '') {
   return api.post<ApiResponse<Record<string, unknown>>>(
-    `${BASE}/ontology/schema-suggestions/${encodeURIComponent(suggestionId)}/${action}`)
+    `${BASE}/ontology/schema-suggestions/${encodeURIComponent(suggestionId)}/${action}`,
+    {},
+    { params: evidenceHash ? { evidence_hash: evidenceHash } : {} })
 }
 
 /** P3-2：同构表副本聚族（admin；确定性算法，产物 pending 建议）。 */

@@ -183,7 +183,7 @@ async function detectFamilies() {
 
 async function decide(item: SchemaSuggestion, action: 'approve' | 'reject') {
   try {
-    await decideSchemaSuggestion(item.suggestion_id, action)
+    await decideSchemaSuggestion(item.suggestion_id, action, item.evidence_hash ?? '')
     message.success(action === 'approve' ? t('ontology.candidateApprovedDone') : t('ontology.candidateRejectedDone'))
     await load()
   } catch (e: any) {

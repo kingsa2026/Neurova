@@ -168,6 +168,8 @@ export interface RelationCandidate {
   reviewed_at: string
   reviewed_by: string
   promoted_term_id: string
+  /** P3-1a 审批证据哈希绑定：审批请求必须回带同一哈希 */
+  evidence_hash?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -562,6 +564,8 @@ export interface SchemaSuggestion {
   created_at: string
   reviewed_at: string | null
   reviewed_by: string
+  /** P3-1a 审批证据哈希绑定：审批请求必须回带同一哈希 */
+  evidence_hash?: string
 }
 
 export interface SchemaSuggestionRunResult {
