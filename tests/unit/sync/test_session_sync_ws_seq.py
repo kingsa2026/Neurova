@@ -14,12 +14,22 @@ from fastapi.testclient import TestClient
 
 from neurova.api.auth import create_access_token
 from neurova.api.endpoints import session_sync
+from tests.auth_headers import pinJwtSecret
 
 
-_TOKEN = create_access_token(
-    {"sub": "u1", "username": "u1", "role": "user", "neuser_id": "u1", "user_id": "u1"}
-)
-_TOKEN_QS = f"&token={_TOKEN}"
+def _tokenQs() -> str:
+    """运行期现签 token 的查询串——**不烘在导入期**。
+
+    同场其它档会经 `pinJwtSecret()` 把本轮密钥对齐到测试共享值（auth_headers
+    模块注释点名的形态）：导入期签出的令牌在对齐之后被验签门以
+    "Signature verification failed" 拒收——单跑绿、合跑红。令牌属于
+    "这一轮"，不属于"这个进程"。
+    """
+    pinJwtSecret()
+    token = create_access_token(
+        {"sub": "u1", "username": "u1", "role": "user", "neuser_id": "u1", "user_id": "u1"}
+    )
+    return f"&token={token}"
 
 
 @pytest.fixture
@@ -31,7 +41,7 @@ def client():
 
 class TestSyncWsSeqHandshake:
     def test_hello_precedes_history_and_carries_next_seq(self, client):
-        with client.websocket_connect("/api/v1/sync/ws/ws-seq-hello?channel_type=web&user_id=u1" + _TOKEN_QS) as ws:
+        with client.websocket_connect("/api/v1/sync/ws/ws-seq-hello?channel_type=web&user_id=u1" + _tokenQs()) as ws:
             hello = ws.receive_json()
             assert hello["type"] == "sync_hello"
             assert isinstance(hello["next_seq"], int) and hello["next_seq"] >= 1
@@ -41,7 +51,7 @@ class TestSyncWsSeqHandshake:
             assert replayed.get("seq") == 1
 
     def test_sync_resume_replays_events_above_cursor(self, client):
-        with client.websocket_connect("/api/v1/sync/ws/ws-seq-resume?channel_type=web&user_id=u1" + _TOKEN_QS) as ws:
+        with client.websocket_connect("/api/v1/sync/ws/ws-seq-resume?channel_type=web&user_id=u1" + _tokenQs()) as ws:
             hello = ws.receive_json()
             assert hello["type"] == "sync_hello"
             # 初始重放：SESSION_CREATED(1) + register_channel 写入的 CHANNEL_CONNECTED(2)

@@ -191,6 +191,16 @@ class RestrictedTokenSandbox:
             if not ok:
                 raise OSError(f"CreateProcessAsUserW 失败: {ctypes.GetLastError()}")
 
+            # 句柄继承在进程创建瞬间完成快照，父侧写句柄此刻即完成使命。
+            # 这两个句柄以共享模式 0（独占）创建，若留到读回时仍未关，
+            # 下方 open(out_path) 会撞 ERROR_SHARING_VIOLATION（CRT 映射成
+            # errno 13 Permission denied）——子进程都退出了，父进程却读不了
+            # 自己建的中转文件。这里随即关闭并置 None，finally 不重复关。
+            k32.CloseHandle(h_out)
+            h_out = None
+            k32.CloseHandle(h_err)
+            h_err = None
+
             # 进程级超时（超过即终止——受限令牌子进程无完成的必要条件）
             wait_ms = int(timeout * 1000)
             status = k32.WaitForSingleObject(pi.hProcess, wait_ms)

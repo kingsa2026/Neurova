@@ -37,13 +37,8 @@ def env(tmp_path, monkeypatch):
     from neurova.session_manager import SessionManager
 
     monkeypatch.setenv("NEUROVA_SESSIONS_DIR", str(tmp_path / "sessions"))
-    # tmp_path 下的裸仓库不继承本仓 git config；CI/宿主未配全局身份时
-    # commit-tree 会因 "Author identity unknown" 失败——用 env 隔离，
-    # 让断言落在快照内容本身，而不是环境缺身份。
-    monkeypatch.setenv("GIT_AUTHOR_NAME", "neurova-test")
-    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "neurova-test@example.com")
-    monkeypatch.setenv("GIT_COMMITTER_NAME", "neurova-test")
-    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "neurova-test@example.com")
+    # git 身份由本域 conftest 的 _gitIdentityForCheckpoints 统一自备
+    # （tmp_path 裸仓库不继承本仓 config，宿主/CI 未必配全局身份）。
     SessionManager._instance = None
     sm = SessionManager()
     yield {"sm": sm, "tmp": tmp_path}

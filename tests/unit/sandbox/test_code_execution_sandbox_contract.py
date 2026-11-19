@@ -56,7 +56,11 @@ EXECUTION_LIMIT_SECONDS = 2.0
 EXECUTION_TIMEOUT_CEILING_RATIO = 2.0
 #: 收尾宽裕量（秒级附加余量）：进程树杀灭 + 收尸在共享负载下也需要一点余量。
 #: 判据阈值 = 时限 × 倍率 + 这条宽裕量 —— 全部由常量算出，不随机器速度漂移。
-EXECUTION_TEARDOWN_SLACK_SECONDS = 0.25
+#: Windows 收尾走 `taskkill /T /F`（killProcessTree 起子进程遍历子树）再收尸，
+#: 实测尾延迟本身就能到 ~0.26s（0.25s 余量下本格在共享负载里红/绿翻飞，
+#: 4.263s vs 上界 4.25s）；放宽到 1s 仍远低于"未掐断"形态（睡满 120s），
+#: 掐断语义的判据力不变。
+EXECUTION_TEARDOWN_SLACK_SECONDS = 1.0
 EXECUTION_TIMEOUT_CEILING_SECONDS = (
     EXECUTION_LIMIT_SECONDS * EXECUTION_TIMEOUT_CEILING_RATIO + EXECUTION_TEARDOWN_SLACK_SECONDS
 )

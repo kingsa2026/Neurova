@@ -43,6 +43,9 @@ _STARTF_USESTDHANDLES = 0x100
 _HANDLE_FLAG_INHERIT = 1
 _GENERIC_WRITE = 0x40000000
 _FILE_ATTRIBUTE_NORMAL = 0x80
+_CREATE_ALWAYS = 2
+_FILE_SHARE_READWRITE = 0x1 | 0x2
+_INVALID_HANDLE = ctypes.c_void_p(-1).value
 _PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES = 0x00020009
 _WAIT_OBJECT_0 = 0
 
@@ -230,11 +233,17 @@ class AppContainerSandbox:
         timeout: float = 30.0,
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
+        _direct_app: Optional[str] = None,
     ) -> Dict[str, Any]:
         """AppContainer 内执行命令。
 
         注意（探针实证）：cwd 必须显式传递——容器进程 CWD 解析失败会得到
         "当前目录无效"。输出经容器可写的临时目录文件回传。
+
+        `_direct_app`：容器内**直接进程启动**的 exe 绝对路径，`command` 退化为
+        它的参数行。默认 None 走既有 `cmd /c` 包裹形态。区分两条路的实测依据：
+        whoami 作为 cmd 孙进程在本机 OS build 10.0.26300 上报
+        STATUS_DLL_INIT_FAILED(0xC0000142)，作为容器直接子进程 rc=0。
         """
         if not _DLL.load():
             return {
@@ -263,6 +272,7 @@ class AppContainerSandbox:
         h_process = None
         h_thread = None
         profile_name = None
+        h_out = None
         try:
             profile_name, psid = self._create_profile_fresh()
             s = ctypes.c_wchar_p()
@@ -285,17 +295,36 @@ class AppContainerSandbox:
             ):
                 raise OSError(f"UpdateProcThreadAttribute err {ctypes.get_last_error()}")
 
-            # 子进程 cmd 自重定向（容器可写目录）
-            cmdline = ctypes.create_unicode_buffer(
-                f'cmd /c {command} > "{out_path}" 2>&1'
-            )
             si = _SIEX()
             si.si.cb = ctypes.sizeof(si)
             si.lpAttributeList = ctypes.cast(buf, ctypes.c_void_p)
             pi = _PROCESS_INFORMATION()
 
+            if _direct_app is not None:
+                # 直接进程启动：输出经继承句柄回传（不经 cmd 重定向）。
+                cmdline = ctypes.create_unicode_buffer(f'"{_direct_app}" {command}')
+                h_out = k32.CreateFileW(
+                    out_path, _GENERIC_WRITE, _FILE_SHARE_READWRITE,
+                    None, _CREATE_ALWAYS, _FILE_ATTRIBUTE_NORMAL, None,
+                )
+                if h_out in (_INVALID_HANDLE, 0):
+                    raise OSError(f"CreateFileW 失败: {ctypes.GetLastError()}")
+                k32.SetHandleInformation(h_out, _HANDLE_FLAG_INHERIT, _HANDLE_FLAG_INHERIT)
+                si.si.dwFlags = _STARTF_USESTDHANDLES
+                si.si.hStdOutput = h_out
+                si.si.hStdError = h_out
+                app_buf = ctypes.create_unicode_buffer(_direct_app)
+                inherit_handles = 1
+            else:
+                # 子进程 cmd 自重定向（容器可写目录）
+                cmdline = ctypes.create_unicode_buffer(
+                    f'cmd /c {command} > "{out_path}" 2>&1'
+                )
+                app_buf = None
+                inherit_handles = 0
+
             ok = k32.CreateProcessW(
-                None, cmdline, None, None, 0,
+                app_buf, cmdline, None, None, inherit_handles,
                 _EXTENDED_STARTUPINFO_PRESENT | _CREATE_UNICODE_ENVIRONMENT | _CREATE_NO_WINDOW,
                 None, work_dir,
                 ctypes.cast(ctypes.byref(si), ctypes.c_void_p),
@@ -304,6 +333,11 @@ class AppContainerSandbox:
             if not ok:
                 raise OSError(f"CreateProcessW err {ctypes.get_last_error()}")
             h_process, h_thread = pi.hProcess, pi.hThread
+            if h_out is not None:
+                # 父侧写句柄随进程创建即完成使命（子进程持继承副本）；不关会在
+                # 读回时撞共享冲突（与 restricted_token 同一坑，见彼处注释）
+                k32.CloseHandle(h_out)
+                h_out = None
 
             status = k32.WaitForSingleObject(pi.hProcess, int(timeout * 1000))
             if status != _WAIT_OBJECT_0:
@@ -342,6 +376,8 @@ class AppContainerSandbox:
                 "return_code": -1,
             }
         finally:
+            if h_out:
+                k32.CloseHandle(h_out)
             if h_process:
                 k32.CloseHandle(h_process)
             if h_thread:
@@ -359,13 +395,17 @@ class AppContainerSandbox:
                 pass
 
     def verify_restriction_marker(self) -> bool:
-        """自证：沙箱内 whoami /groups 含 Low integrity（S-1-16-4096）。"""
+        """自证：沙箱内 whoami /groups 含 Low integrity（S-1-16-4096）。
+
+        whoami 走**直接进程启动**（`_direct_app`），不经 `cmd /c` 包裹——
+        实测（2026-11-20，OS build 10.0.26300）：cmd 孙进程形态下 whoami
+        STATUS_DLL_INIT_FAILED(0xC0000142)，容器直接子进程 rc=0。
+        """
         system_root = os.environ.get("SystemRoot", r"C:\Windows")
         whoami = os.path.join(system_root, "System32", "whoami.exe")
         if not os.path.exists(whoami):
             return False
-        # cmd /c 形态（探针实证：带引号绝对路径直接跑会 err 文件缺失）
-        result = self.execute(f"cmd /c whoami /groups", timeout=20)
+        result = self.execute("/groups", timeout=20, _direct_app=whoami)
         if not result["success"]:
             return False
         return "S-1-16-4096" in result["output"]
