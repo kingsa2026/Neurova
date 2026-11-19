@@ -205,3 +205,21 @@
 - 本评分为静态代码级对照，未实机运行对方栈；「实证闭环」维度按仓内可核验事实评分。
 - 评分卡为本仓评测序列首次使用的本体专项卡（8 维 20 子项），锚点已写明但无历史轮次可比；后续若复评其他本体项目应沿用同卡。
 - 对方迭代极快（六周 2,154 星），读数仅代表克隆时点（2026-11-19）。
+
+---
+
+## 8. 实施回执（2026-11-19，§5 借鉴清单 P1–P3 全部落地）
+
+按用户指令「采纳建议开始实施 P1 到 P3」执行，三批提交、每批先红后绿：
+
+| 批 | 内容 | 提交 |
+|---|---|---|
+| 批 1（P2×3） | P2-1 映射增强：`VALUE_TRANSFORMS` 闭集（upper/lower/trim/collapse_ws，仅 column/template 派生值，常量对象编译期拒）+ `missing` 三策略（keep 缺省/skip 整行跳过并留名/report 带 objectMissing 标记），摄取链对 skip 行隔离；P2-2 `impactOfDiff` 四态影响预标注（breaking/needs_remap/needs_reextraction/needs_rule_build，纯函数）；P2-3 readiness 增 `model_ready` 可选探针（回调缺省 disabled 零网络，端点 env `NEUROVA_ONTOLOGY_MODEL_PROBE` 默认关） | `dab74d955` |
+| 批 2（P1×3） | P1-1 `checkGate` 三臂对照门禁（臂1 基线 dry-run / 臂2 克隆副本应用术语与规则假设后对照、候选经同一咽喉注入并到引擎不动点 / 臂3 基线重放；「基线 pass、草稿 violation」倒退即 fail，纯新增推导不拦，shifts 随报；只读零生产写、副本即删）；P1-2 `auditOntologyCoverage` 五类信号（uncovered/broken_reference/clash/stale/ambiguity，fingerprint 跨轮稳定+建议动作）；P1-3 nl2sql 答案随附确定性 `assessment`（essential/helpful/marginal；拒答 not_assessed+gaps 按拒因归类）。端点 `POST /ontology/check-gate`、`GET /ontology/audit`（均 admin） | `11c050a63` |
+| 批 3（P3-1 血缘×3） | a) 审批决策绑定证据哈希（v54：候选/建议两审批面加 evidence_hash=生成时 sha256，人工审批必须回带，不匹配 409；存量空哈希行兼容放行；REST approve/reject 加 evidence_hash 参数）；b) 断言位置锚定（v55：knowledge_assertions.source_span_json，lineage 透传、溯源读面透出）；c) nl2sql 可答结果强制 citations（catalog_table/term/join_path/approved_pattern 四型，SQL 引用表全在目录白名单内故恒非空；拒答 citations 恒空） | `21a7ff7de` |
+
+**测试证据**：新增 6 个测试文件先红后绿（映射/impact 28 例、门禁/审计/评估 14 例、血缘 19 例）；既有用例按新契约跟随（审批补哈希、路由清单补两路由、v25 旧库夹具按真实状态补 v3 断言表、迁移终态断言 53→55、manual live-verify 脚本同步）。回归：knowledge/ontology 全目录 547 passed；knowledge 全域 2,010 passed；tests/unit/api 3,290 passed。A/B 定责（基线 worktree `0dacae4f0` vs 当前）：api 域失败集合 18→19，差额 1 条系并行 mobile/relay 批（`2ecccc2a1` 等）新增未挂门路由所致，与本批无关；其余 18 条逐条相同=预存。
+
+**live-verify（真后端 9761，`start_server.py` 起动，health OK）**：`GET /ontology/readiness` → knowledge_ready=true、model_ready=null(disabled)；`GET /ontology/audit` → 200 findings 结构完整；`POST /ontology/check-gate`（空候选）→ gate=pass 三臂齐整；`POST /ontology/relation-candidates/{unknown}/approve` → 404（路由通、门在、零写入）。
+
+**遗留（如实登记）**：§5 远期两项（行级数据血缘、事实级快照对比）按原判暂不实施；P3-1b 的 `sourceSpan` 生产写入方待抽取链携带位置信息后接线（当前为存储+读回能力，无生产写入方——不为凑闭环而伪造写入）；api 域 19 条预存失败（authSurface/evolve/webhooks url_guard 等）与本批无关，已 A/B 定责，留待统筹者派单。
