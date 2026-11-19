@@ -8,6 +8,7 @@ terminate）、request 按 id 配对、通知回调（session/update 等）、�
 """
 import json
 import queue
+import shutil
 import subprocess
 import threading
 from collections import deque
@@ -76,9 +77,15 @@ class NeuacpClient:
         if self._process is not None:
             raise NeuacpError("NeuacpClient already started")
         env = self._childEnvironment()
+        # Windows：PATH 里的 npx/qoder 等实为 .cmd/.bat，Popen 不做 PATHEXT
+        # 解析——用 shutil.which 把首词解析成可执行全路径（解析不到原样保留）。
+        command = list(self._command)
+        resolved_head = shutil.which(command[0]) if command else None
+        if resolved_head:
+            command[0] = resolved_head
         try:
             self._process = subprocess.Popen(
-                self._command,
+                command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

@@ -115,7 +115,7 @@ def test_terminateStopsProcess():
 
 
 def test_startFailsGracefullyWhenBinaryMissing():
-    client = NeuacpClient([sys.executable, "definitely_missing_binary_xyz.py"])
+    client = NeuacpClient(["definitely-missing-binary-xyz", "--flag"])
     with pytest.raises(Exception):
         client.start()
     assert not client.is_alive

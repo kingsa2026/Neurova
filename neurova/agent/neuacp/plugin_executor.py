@@ -9,6 +9,7 @@
 （命令行 --disallowed-tools 收权 + 本仓审批链对任务书把关）。
 """
 import json
+import shutil
 import subprocess
 import threading
 from typing import Any, Callable, List, Optional
@@ -47,6 +48,10 @@ class NeuacpPluginExecutor:
 
     async def prompt(self, task_text: str, emitter: Callable[[str, Any], None], on_permission: Callable[[str, str, str], dict]) -> NeuacpExecResult:
         command = self._command + [self._prompt_arg, task_text]
+        # Windows：PATH 里的 CLI 可能是 .cmd/.bat，Popen 不做 PATHEXT 解析。
+        resolved_head = shutil.which(command[0]) if command else None
+        if resolved_head:
+            command[0] = resolved_head
         try:
             proc = subprocess.Popen(
                 command,
