@@ -12,23 +12,21 @@
 
 本目录包含 Neutesting 的完整实现，专为 Neurova 项目设计。
 
-## 📊 测试覆盖率统计
+## 📊 测试规模读数（核对基准 2026-11-19）
 
-| 模块 | 测试数 | 状态 |
-|------|--------|------|
-| core | 68 | ✅ 全部通过 |
-| memory | 165 | ✅ 164通过, 1跳过 |
-| security | 41 | ✅ 全部通过 |
-| admin | 56 | ✅ 全部通过 |
-| api | 12 | ✅ 全部通过 |
-| auth | 12 | ✅ 全部通过 |
-| projects | 19 | ✅ 全部通过 |
-| channels | 11 | ✅ 全部通过 |
-| execution | 9 | ✅ 全部通过 |
-| skills | 9 | ✅ 全部通过 |
-| cognitive | 9 | ✅ 全部通过 |
-| llm | 7 | ✅ 全部通过 |
-| **总计** | **419** | **✅ 418 通过, 1 跳过** |
+> 口径：测试文件数按 `find tests -name 'test_*.py' | wc -l` 计；测试函数数按
+> `grep -rE '^\s*(async )?def test_' tests --include='*.py' | wc -l` 计。
+> 不再维护"逐模块通过数"快照——那是会过期的读数，实时结果以当次 `pytest` 输出为准。
+
+| 测试层 | 测试文件数 | 测试函数数 |
+|--------|-----------|-----------|
+| unit（单元测试） | 2684 | 23546 |
+| integration（集成测试） | 58 | 568 |
+| e2e（端到端测试） | 5 | 26 |
+| performance（性能测试） | 10 | 72 |
+| fixtures（共享测试数据） | 1 | 6 |
+| 其他历史目录（api/core/llm/test_api/test_memory/test_channels 等） | 59 | 589 |
+| **总计** | **2817** | **24807** |
 
 ## 🐛 已修复的 Bug
 
@@ -66,71 +64,45 @@
 ## 📁 目录结构
 
 ```
-tests/                          # Neutesting 根目录
+tests/                          # Neutesting 根目录（pytest 配置在仓库根 pyproject.toml 的 [tool.pytest.ini_options]，核对基准 2026-11-19）
 ├── __init__.py              # 测试包初始化
-├── pytest.ini               # Neutesting pytest 配置
-├── README.md                # Neutesting 文档
-├── NEUTESTING.md            # Neutesting 概述文档
-├── run_all_tests.py         # Neutesting 完整测试运行脚本
-├── run_all_unit_tests.py    # 单元测试运行脚本
-├── comprehensive_test_runner.py  # 综合测试运行器
+├── conftest.py              # 全局 fixtures
+├── README.md                # 测试说明
+├── runners/                 # 测试运行器
+│   └── comprehensive_test_runner.py
+├── fixtures/                # 共享测试数据（知识库评测语料等 JSON）
 │
-├── unit/                    # Neutesting 单元测试层 (419 测试)
-│   ├── __init__.py
-│   ├── core/               # 核心模块测试 (68 测试)
-│   │   ├── test_config.py
-│   │   ├── test_event_bus.py
-│   │   ├── test_logger.py
-│   │   ├── test_module_system.py
-│   │   └── test_state_manager.py
-│   ├── auth/               # 认证模块测试
-│   │   └── test_password_hasher.py
-│   ├── security/           # 安全模块测试
-│   │   ├── test_data_masking.py
-│   │   └── test_rbac.py
-│   ├── projects/           # 项目管理测试
-│   │   ├── test_collaboration_isolation.py
-│   │   └── test_teams.py
-│   ├── skills/             # 技能系统测试
-│   │   └── test_skill_registry.py
-│   ├── channels/           # 通道管理测试
-│   │   └── test_channel_manager.py
-│   ├── execution/          # 执行引擎测试
-│   │   └── test_tool_engine.py
-│   ├── cognitive/          # 认知层测试
-│   │   └── test_memory_layer.py
-│   ├── api/                # API层测试
-│   │   └── test_api_router.py
-│   ├── admin/              # 管理模块测试
-│   │   ├── test_admin_service.py
-│   │   └── test_resource_quota_manager.py
-│   ├── llm/                # LLM模块测试
-│   │   └── test_secret_store.py
-│   └── memory/             # Memory模块测试 (165 测试)
-│       └── core/
-│           ├── test_compression.py
-│           ├── test_emotion.py
-│           ├── test_manager.py
-│           ├── test_storage.py
-│           ├── test_temperature.py
-│           └── test_vector_search.py
+├── unit/                    # Neutesting 单元测试层（2684 个测试文件 / 23546 个测试函数）
+│   ├── agent/  api/  knowledge/  evolution/  core/  context/  memory/
+│   ├── skills/  llm/  channels/  tools/  security/  neurflow/  cognitive_layers/
+│   └── ...                  # 共 59 个模块子目录，不逐一罗列
 │
-├── integration/            # Neutesting 集成测试层
-│   ├── __init__.py
+├── integration/            # Neutesting 集成测试层（58 个测试文件）
 │   ├── conftest.py         # 集成测试配置和fixtures
-│   ├── test_event_workflow.py
-│   ├── test_module_system_integration.py
-│   └── test_security_integration.py
+│   ├── test_agent_loop.py
+│   ├── test_chat_closed_loop.py
+│   ├── test_memory_system.py
+│   └── ...
 │
-├── e2e/                   # Neutesting 端到端测试层
-│   ├── __init__.py
+├── e2e/                   # Neutesting 端到端测试层（5 个测试文件）
 │   ├── conftest.py         # E2E测试配置和fixtures
-│   └── test_complete_workflow.py
+│   ├── test_backend_boot.py
+│   ├── test_mock_chat_e2e.py
+│   └── test_phase4_integration.py
 │
-└── performance/           # Neutesting 性能测试层
-    ├── __init__.py
-    └── test_benchmarks.py
+└── performance/           # Neutesting 性能测试层（10 个测试文件）
+    ├── knowledge/test_admissionThroughput.py
+    ├── memory/test_memoryRecallBenchmark.py
+    ├── memory/test_associativeRecallGate.py
+    ├── memory/test_longTermMemoryBaselineGate.py
+    ├── test_context_pool_load.py
+    ├── test_perf_gate_contract.py
+    └── ...
 ```
+
+> 注：`tests/` 下另有 `api/`、`core/`、`llm/`、`test_api/`、`test_memory/`、
+> `test_channels/`、`archive/`、`manual/` 等历史目录（合计 59 个测试文件），
+> 按 `AGENTS.md` 的测试目录纪律逐步归位到上述标准层。
 
 ## 🚀 快速开始
 
@@ -142,12 +114,14 @@ pip install pytest pytest-cov
 
 ### 运行 Neutesting 测试套件
 
-```bash
-# 方式1: 使用 Neutesting 完整测试脚本
-python tests/run_all_tests.py
+pytest 配置集中在仓库根 `pyproject.toml` 的 `[tool.pytest.ini_options]`（`tests/pytest.ini` 不存在）。
 
-# 方式2: 直接使用 pytest 运行
-pytest tests/ -v
+```bash
+# 使用项目虚拟环境解释器直接跑 pytest（Windows）
+.venv/Scripts/python.exe -m pytest tests/ -v
+
+# Linux / macOS
+.venv/bin/python -m pytest tests/ -v
 ```
 
 ### 运行 Neutesting 特定测试层
@@ -162,8 +136,8 @@ pytest tests/integration/ -v
 # 仅运行 Neutesting 端到端测试层
 pytest tests/e2e/ -v
 
-# 运行 Neutesting 性能基准测试
-python tests/performance/test_benchmarks.py
+# 运行 Neutesting 性能基准测试（实际性能测试文件见上方目录树）
+.venv/Scripts/python.exe -m pytest tests/performance/ -v
 ```
 
 ### 运行特定模块测试
@@ -232,14 +206,19 @@ open htmlcov/index.html  # macOS
 
 项目配置了 GitHub Actions 工作流 (`.github/workflows/ci.yml`)，在以下情况自动运行:
 
-- 推送到 `main` 或 `develop` 分支
-- 创建针对这些分支的 Pull Request
+- 推送到 `main` / `master` 分支
+- 创建 Pull Request
+- 手动触发（`workflow_dispatch`）
 
-Neutesting CI 流程:
-1. 在 Python 3.10 和 3.11 上运行所有测试
-2. 运行代码质量检查 (flake8, pylint)
-3. 在 main 分支上运行性能基准测试
-4. 构建项目并上传制品
+Neutesting CI 流程（job 清单实测于 `.github/workflows/ci.yml`，核对基准 2026-11-19）:
+1. static-gate — 语法/未定义名快速静态门（pyflakes + ruff）
+2. deploy-config / architecture-gate — 部署配置一致性与架构门禁
+3. import-and-regression / unit-tests / coverage / e2e — 导入巡检、单元、覆盖率与端到端测试
+4. perf-gate — 性能门禁
+5. frontend — 前端 vitest 与 vue-tsc
+6. dependency-audit / experience-quality — 依赖审计与经验质量门
+
+Python 版本：CI 各 job 实际使用 **3.11 与 3.12**（static-gate、import-and-regression 用 3.11；deploy-config、architecture-gate 用 3.12）。
 
 ## ✍️ 编写 Neutesting 测试
 

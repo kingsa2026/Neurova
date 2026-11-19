@@ -1,3 +1,5 @@
+> ⚠️ 本文档已归档（2026-11-19）。文中描述的原生 JS 组件体系（NeurovaUI/static 文件树）在当前代码中不存在；现行前端为 NeurUI（Vue 3 + TypeScript，见 NeurUI/src/），后端为 FastAPI。请勿按本文开发。
+
 # Neurova UI 框架使用指南
 
 ## 概述

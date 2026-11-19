@@ -21,12 +21,12 @@
 | 架构决策(ADR) | `docs/01-architecture/adr/` | 已编号的决策记录，不可覆盖 |
 | API 规范 | [`docs/02-api/`](02-api/) + [`API_REFERENCE.md`](02-api/API_REFERENCE.md) | 接口事实源 |
 | 记忆系统 | [`docs/01-architecture/02-memory-system.md`](01-architecture/02-memory-system.md)（架构）＋ [`docs/01-architecture/memory/retrieval-spine.md`](01-architecture/memory/retrieval-spine.md)（检索脊柱）＋ `docs/01-architecture/memory/`（专题与计划） | 记忆层事实源；两份 [权威] 各管一层，计划文档不是架构事实源 |
-| 认知架构 | `NEUROVA_CogArch_2.0.md` | **2026-05-12 设计快照（沿革）**；§8.2 状态列不可作事实源（D9，台账 §6-362）；**现行组件状态见 [`cognitive-component-table.md`](01-architecture/cognitive-component-table.md)（机器生成）** |
+| 认知架构 | `docs/01-architecture/NEUROVA_CogArch_2.0.md` | **2026-05-12 设计快照（沿革）**；§8.2 状态列不可作事实源（D9，台账 §6-362）；**现行组件状态见 [`cognitive-component-table.md`](01-architecture/cognitive-component-table.md)（机器生成）** |
 | 开发进度 | `docs/09-dev-progress/` | 迭代记录（历史） |
-| Bug 修复史 | 根目录 `bugfix-*.md` 集群 | 变更日志（历史，归档用） |
+| Bug 修复史 | [`docs/06-bugfix/`](06-bugfix/)（53 篇，其中 `bugfix-*.md` 38 篇；根目录已无 bugfix-*.md，核对基准 2026-11-19） | 变更日志（历史，归档用） |
 | 配置 | `docs/10-configuration/` | 部署/配置事实源 |
 | 国际化 | `docs/03-user-guide/i18n/` | 多语言事实源 |
-| 产品/品牌 | `PRODUCT_GUIDE.md` / `NEUROVA_BRAND.md` | 对外信息事实源 |
+| 产品/品牌 | `docs/03-user-guide/PRODUCT_GUIDE.md` / `docs/03-user-guide/NEUROVA_BRAND.md` | 对外信息事实源 |
 | 鸿蒙端 | `HARMONYOS_*.md` | Mobile/harmony 端事实源 |
 
 ## 2. 文档真实分布（实测，2026-08-23）
@@ -172,7 +172,7 @@
 ### 2.6 产品 / 品牌 / 鸿蒙端
 
 `BRAND_GUIDELINES.md`、`BRAND_UPDATE.md`、`NEUROVA_BRAND.md`、`NEUROVA_LAUNCH.md`、
-`PRODUCT_GUIDE.md`、`UI_FRAMEWORK_GUIDE.md`、
+`PRODUCT_GUIDE.md`、`UI_FRAMEWORK_GUIDE.md`（已归档至 `docs/11-legacy/`，2026-11-19）、
 `HARMONYOS_DESIGN.md`、`HARMONYOS_PRIVACY_POLICY.md`、`HARMONYOS_RELEASE_CHECKLIST.md`、`HARMONYOS_SIGNING_GUIDE.md`
 
 ### 2.7 技能 / 插件实现
@@ -237,6 +237,12 @@
 
 > 说明：`04-plans/` 的逐条登记在 [`docs/0-index/README.md`](0-index/README.md) 的「04-plans 实施计划」节，本节只收录跨领域入口与本目录内已归集条目。
 
+### 2.11 安全与成本 / 测试框架（2026-11-19 增补登记）
+
+- `docs/security/THREAT-MODEL-ATLAS.md` — 威胁模型图集（安全事实源）
+- `docs/LLM_COST_CONTROL_SYSTEM.md` — LLM 成本控制系统说明
+- `docs/README.md` — Neutesting 测试框架说明（测试规模读数核对基准 2026-11-19）
+
 ## 3. 已识别的重复/待合并项（下一步清理）
 
 | 重复簇 | 建议 | 动作 |
@@ -255,4 +261,4 @@
 5. 本索引由人工/脚本在每次文档变更时同步更新；[`docs/INDEX.md`](INDEX.md) 是文档体系的唯一导航事实源。
 
 ---
-最后更新：2026-08-23 ｜ 文档总数：约 296 篇（含 `docs/` 子目录）
+最后更新：2026-11-19（本轮修订索引指向与登记；第 2 节文档总数沿用 2026-08-23 快照口径） ｜ 文档总数：约 296 篇（含 `docs/` 子目录，2026-08-23 实测）

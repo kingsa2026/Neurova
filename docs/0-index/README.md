@@ -1,6 +1,6 @@
 # Neurova 文档总索引
 
-> 版本: v1.0.0-beta1 · 中文名: 智星 · 更新时间: 2026-08-31
+> 版本: v1.0.0-beta14 · 中文名: 智星 · 更新时间: 2026-11-19（版本读自 `neurova/__init__.py` 的 `__version__`）
 > 本索引是 `docs/` 目录的唯一入口。功能状态标注基于对 `neurova/` 代码库的逐项核对。
 
 ## 快速导航
@@ -12,7 +12,7 @@
 | 项目上下文 | [CONTEXT.md](../CONTEXT.md) | 架构概览、技术栈、设计规则 |
 | 文档总索引 | [docs/INDEX.md](../INDEX.md) | 文档体系唯一导航事实源 |
 | 功能模块矩阵 | [见下](#功能模块矩阵) | 全部功能的状态对照 |
-| API 参考 | [API_REFERENCE.md](../02-api/API_REFERENCE.md) | 82 端点模块参考 |
+| API 参考 | [API_REFERENCE.md](../02-api/API_REFERENCE.md) | 96 端点模块参考（`ENDPOINT_MODULES` 注册项实测，2026-11-19） |
 
 ---
 
@@ -31,10 +31,10 @@
 | 情感中枢引擎（四层 17 种情感） | ✅ | `cognitive_layers/emotion_context_layer/emotion_hub_engine.py` | [15-emotion-resonance-engine](../01-architecture/15-emotion-resonance-engine.md) |
 | 自我进化引擎（人格/动机/宪法/反思） | ✅ | `evolution/` + `agent_core.py`/`chat_pipeline.py` 注入面——E1–E5 已闭环：宪法死端点修复+规则注入行为、动机行动生成按 E3 裁定退役改道（不直接驱动行为）、人格特质注入、反思 lessons 补池 | [21-recursive-self-improvement](../01-architecture/21-recursive-self-improvement.md) |
 | RSI 递归自我进化（8 组件） | ✅ | `evolution/rsi/`（orchestrator/convergence/ratchet 等） | [21-recursive-self-improvement-v1.3](../01-architecture/21-recursive-self-improvement-v1.3-summary.md) |
-| 意图理解（QueryIntent 检测） | ✅ | `memory_layer/query_intent.py`（检测器） | [20-retrieval-context-injection](../01-architecture/20-retrieval-context-injection.md) |
+| 意图理解（QueryIntent 检测） | ✅ | `cognitive_layers/memory_layer/neurova_recall.py`（`QueryIntent` :110 / `QueryIntentDetector` :121，经 `memory_layer/__init__.py` 导出；无独立 query_intent.py） | [20-retrieval-context-injection](../01-architecture/20-retrieval-context-injection.md) |
 | 知识库适配 + RAG | ✅ | `knowledge/`（repository/storage/vector_index） | [24-knowledge-isolation-rag](../01-architecture/24-knowledge-isolation-rag.md) |
 | 知识图谱 | ✅ | `knowledge/graph_bridge.py` `knowledge_graph_api` | [cognitive-graph-storage-architecture](../01-architecture/cognitive-graph-storage-architecture.md) |
-| 元认知监控 | ✅ | `cognitive_layers/metacognition_layer/` | [20-retrieval-context-injection](../01-architecture/20-retrieval-context-injection.md) |
+| 元认知监控 | ✅ | `cognitive_layers/meta_cognition_layer/` | [20-retrieval-context-injection](../01-architecture/20-retrieval-context-injection.md) |
 
 ### 执行层
 
@@ -43,7 +43,7 @@
 | 多 Agent 协作（四种模式） | ✅ | `collaboration/` | [04-multi-agent-collaboration](../01-architecture/04-multi-agent-collaboration.md) |
 | NeurFlow 工作流引擎 | ✅ | `collaboration/neurflow/`（20+ 文件：dag/execution_engine/subflow/storage） | [22-neurflow-workflow-engine](../01-architecture/22-neurflow-workflow-engine.md) |
 | 消息路由（事件总线） | ✅ | `collaboration/neurflow/` `core/` | [03-message-routing](../01-architecture/03-message-routing.md) |
-| 任务调度（CognitionOrchestrator） | ✅ | `planning/` `scheduler/` | [07-implementation-plan](../01-architecture/07-implementation-plan.md) |
+| 任务调度（AgentScheduler + PlanningTool） | ✅ | `agent/scheduler.py` `planning/planning_tool.py`；编排器另见 `agent/supervisor/orchestrator.py`（SupervisorOrchestrator）与 `evolution/closed_loop.py`（EvolutionOrchestrator） | [07-implementation-plan](../01-architecture/07-implementation-plan.md) |
 | 多语言 i18n | ✅ | `language/` + `NeurUI/src/i18n/`（11 语言） | [i18n/README.en](../03-user-guide/i18n/README.en.md) |
 | 检查点/回滚（Agent 会话/工作区） | ✅ | `checkpoints/service.py`（restore_snapshot / restore_with_rollback 恢复面，K1）+ `api/app.py` 启动收敛接线（reconcileSwarmRunsAtStartup，K2）+ `api/endpoints/memory/versions.py` 回滚端点（K3）；蜂群 run 续跑（K5）另立项未含 | [14a-version-control-evolution](../01-architecture/14a-version-control-evolution.md) |
 
@@ -52,14 +52,14 @@
 | 功能模块 | 状态 | 关键代码 | 关联文档 |
 |----------|------|----------|----------|
 | Skill 系统（注册表/版本/热插拔） | ✅ | `skills/` `skill_system/` | [05-skill-system](../01-architecture/05-skill-system.md) |
-| Skill 协议兼容 | ✅ | `skills/adapters/` | [05-skill-system](../01-architecture/05-skill-system.md) |
+| Skill 协议兼容 | ✅ | `skills/market_adapters.py` | [05-skill-system](../01-architecture/05-skill-system.md) |
 | Skill 归档与回滚（治理面 + 技能页入口） | ✅ | `api/endpoints/governance.py` `evolution/skill_experience.py` `NeurUI/src/pages/AgentSkillPage.vue` | [05-skill-system](../01-architecture/05-skill-system.md) |
-| 肌肉记忆（ToolMemory 三层） | ✅ | `cognitive_layers/memory_layer/muscle_memory.py`（L1/L2/L3 三层存取+固化/遗忘）+ `tool_memory_integration.py`（裁定门面）——写（on_tool_executed 统一记账，2026-11-18 M1 收口单源）→存（JSON 原子落盘）→读（check_tool_memory 跨层检索→auto_execute/suggest）→反馈（失败降级/权重联动/RSI 调参）全链闭环，NeuHebb 空转支路已退役 | [tool-memory-muscle-analysis](../01-architecture/tool-memory-muscle-analysis.md) |
+| 肌肉记忆（ToolMemory 三层） | ✅ | `cognitive_layers/memory_layer/muscle_memory.py`（L1/L2/L3 三层存取+固化/遗忘）+ `cognitive_layers/memory_layer/tool_memory_integration.py`（裁定门面）——写（on_tool_executed 统一记账，2026-11-18 M1 收口单源）→存（JSON 原子落盘）→读（check_tool_memory 跨层检索→auto_execute/suggest）→反馈（失败降级/权重联动/RSI 调参）全链闭环，NeuHebb 空转支路已退役 | [tool-memory-muscle-analysis](../01-architecture/tool-memory-muscle-analysis.md) |
 | MCP 集成 | ✅ | `tool_layers/mcp_client.py` `mcp_config.py` | [25-mcp-governance](../01-architecture/25-mcp-governance.md) |
 | MCP 治理安全加固（P0 六项） | ✅ | `tool_layers/mcp_bootstrap.py` `security/url_guard.py` | [25-mcp-governance](../01-architecture/25-mcp-governance.md) |
 | LLM Provider 管理（元数据/智能路由） | ✅ | `llm/provider_manager.py` `multi_model_client.py` | [23-llm-provider-management](../01-architecture/23-llm-provider-management.md) |
 | LLM Router（多模态选择） | ✅ | `llm/llm_router.py` | [23-llm-provider-management](../01-architecture/23-llm-provider-management.md) |
-| Computer Use（视觉理解） | ✅ | `computer_use/`（vision.py + vision_lite） | [01-core-architecture](../01-architecture/01-core-architecture.md) |
+| Computer Use（视觉理解） | ✅ | `computer_use/`（browser_manager.py、actions.py、desktop_uia.py、som.py 等 17 个 py 模块） | [01-core-architecture](../01-architecture/01-core-architecture.md) |
 | 浏览器自动化（Camofox） | ✅ | `computer_use/browser_manager.py` | [CUA 能力台账](../CUA能力台账.md)（投递路径与拒绝码登记） |
 | web_reach 网络工具 | ✅ | `web_reach/`（reach.py + 5 工具） | `agent-reach-integration.md` 已随第三方痕迹清除波（685e40a3）退役 |
 | 插件系统 | ✅ | `plugins/` | [06-plugin-cli-system](../01-architecture/06-plugin-cli-system.md) |
@@ -69,11 +69,11 @@
 
 | 功能模块 | 状态 | 关键代码 | 关联文档 |
 |----------|------|----------|----------|
-| 多渠道接入（14+ 渠道） | ✅ | `channels/`（42 py 文件） | [03-message-routing](../01-architecture/03-message-routing.md) |
-| REST API（82 端点模块） | ✅ | `api/endpoints/` | [API_REFERENCE](../02-api/API_REFERENCE.md) |
-| NeurUI 前端（60 页面） | ✅ | `NeurUI/src/pages/` | [UI_FRAMEWORK_GUIDE](../03-user-guide/UI_FRAMEWORK_GUIDE.md) |
+| 多渠道接入（14+ 渠道） | ✅ | `channels/`（62 py 文件，实测） | [03-message-routing](../01-architecture/03-message-routing.md) |
+| REST API（96 端点模块，`ENDPOINT_MODULES` 实测） | ✅ | `api/endpoints/` | [API_REFERENCE](../02-api/API_REFERENCE.md) |
+| NeurUI 前端（90 页面） | ✅ | `NeurUI/src/pages/` | [UI_FRAMEWORK_GUIDE（已归档）](../11-legacy/UI_FRAMEWORK_GUIDE.md) |
 | 上下文管线（活水上下文池） | ✅ | `context/`（fold_trigger 软抑制 SC-1/2/8 + 时机判读 SC-3、budget_report 折叠后召回率读数 SC-6、compression_doctrine 严格变小）——S6 压缩纪律 + S15 失败冷却 + SC 批 + S6' 折叠基线跨重启已闭环 | [26-context-pipeline-p1](../01-architecture/26-context-pipeline-p1.md) |
-| 上下文缓存与压缩 | ✅ | `context_cache.py`（压缩已收口到 `context/orchestrator.py` 的确定性淘汰） | [CONTEXT_CACHE_COMPRESSION](../01-architecture/CONTEXT_CACHE_COMPRESSION.md) |
+| 上下文缓存与压缩 | ✅ | `context/orchestrator.py`（ContextOrchestrator，压缩与确定性淘汰收口于此；原 `context_cache.py` 已删除） | [CONTEXT_CACHE_COMPRESSION](../01-architecture/CONTEXT_CACHE_COMPRESSION.md) |
 | 移动配对（QR + WebSocket） | ✅ | `api/endpoints/mobile_pairing.py` | [API_REFERENCE](../02-api/API_REFERENCE.md) |
 | 睡眠系统管理（睡眠设置页） | ✅ | `cognitive_layers/memory_layer/sleep.py` | [02-memory-system](../01-architecture/02-memory-system.md) |
 
@@ -147,7 +147,7 @@
 
 ### 02-api API
 
-- [API_REFERENCE.md](../02-api/API_REFERENCE.md) — 82 端点模块参考（核心）
+- [API_REFERENCE.md](../02-api/API_REFERENCE.md) — 96 端点模块参考（核心；按 `neurova/api/endpoints/__init__.py` 的 `ENDPOINT_MODULES` 注册表实测 96 项，核对基准 2026-11-19）
 - [API_CALLING_SPECIFICATION.md](../02-api/API_CALLING_SPECIFICATION.md) — 前端 API 调用规范
 - [api_architecture_analysis.md](../02-api/api_architecture_analysis.md) — API 架构分析
 - [console_api.md](../02-api/console_api.md) — 控制台 API
@@ -160,7 +160,7 @@
 - [工作流调试指南.md](../03-user-guide/工作流调试指南.md) — NeurFlow 工作流调试
 - [触发器配置指南.md](../03-user-guide/触发器配置指南.md) — 触发器配置
 - [心流知识库功能使用指南.md](../03-user-guide/心流知识库功能使用指南.md) — 知识库使用
-- [UI_FRAMEWORK_GUIDE.md](../03-user-guide/UI_FRAMEWORK_GUIDE.md) — UI 框架指南
+- [UI_FRAMEWORK_GUIDE.md](../11-legacy/UI_FRAMEWORK_GUIDE.md) — UI 框架指南（**已归档 2026-11-19**：所述原生 JS 组件体系已不存在，现行前端为 NeurUI/Vue 3）
 - [MIND_EXPANDER_USAGE.md](../03-user-guide/MIND_EXPANDER_USAGE.md) — Mind Expander 使用
 - [HARMONYOS_DESIGN.md](../03-user-guide/HARMONYOS_DESIGN.md) — HarmonyOS 设计
 - [HARMONYOS_PRIVACY_POLICY.md](../03-user-guide/HARMONYOS_PRIVACY_POLICY.md) — HarmonyOS 隐私政策
@@ -310,6 +310,7 @@
 
 ### 11-legacy 归档
 
+- [UI_FRAMEWORK_GUIDE.md](UI_FRAMEWORK_GUIDE.md) — 旧 UI 框架指南（2026-11-19 自 `03-user-guide/` 归档；文中原生 JS 组件体系在当前代码中不存在，现行前端为 NeurUI/Vue 3，勿按其开发）
 - 历史/过时文档（grilling-* 分析、旧升级方案、旧 UI 方案、旧测试结果等），保留可追溯，不再维护。
 
 ---

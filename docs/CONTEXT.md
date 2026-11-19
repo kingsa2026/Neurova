@@ -10,12 +10,14 @@ Neurova 是一个功能完整的 AI Agent 框架，核心特点是为每个 Agen
 |------|-----|
 | 后端语言 | Python 3.10+ |
 | 前端框架 | Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue |
-| Python 文件数 | 550+ |
-| 测试文件数 | 532 |
-| 前端页面组件 | 82 |
-| API 端点 | 77+ |
+| Python 文件数 | 1188（`neurova/` 下 `*.py` 实测） |
+| 测试文件数 | 2817（`tests/` 下 `test_*.py` 实测） |
+| 前端页面组件 | 90（`NeurUI/src/pages/` 下 `*.vue` 实测） |
+| API 端点模块 | 96（`ENDPOINT_MODULES` 注册项实测） |
 | 通信渠道 | 14 种 |
-| 版本 | Agent 1.0.0 (CogArch 2.0) |
+| 版本 | 1.0.0-beta14（`neurova/__init__.py` 的 `__version__`；代码内架构自称 CogArch 1.0.0） |
+
+> 表中数字核对基准 2026-11-19。
 
 ## 核心架构
 
@@ -29,11 +31,13 @@ Agent 类是系统的心脏，通过深度模块化模式逐步拆分。
 > Phase 0（尺寸棘轮 + 公开契约快照守卫，常驻 CI）与 Phase 1（轮次状态
 > 门面 `neurova/agent/turn_state.py`）已完成；目标 ≤900 行/类 ≤400 行。
 
-当前实测：**agent_core.py 2159 行；Agent 类 1122 行 / 57 方法**
-（棘轮基线 `tests/unit/agent/agent_core_size_baseline.json` 只降不升）。
+当前实测（核对基准 2026-11-19）：**agent_core.py 2044 行；Agent 类（第 966 行
+`class Agent:` 起至文件尾）1079 行 / 55 方法**（口径：`wc -l neurova/agent_core.py`；
+方法数按类体内 4 空格缩进的 `def` / `async def` 计；棘轮基线
+`tests/unit/agent/agent_core_size_baseline.json` 只降不升）。
 
 ```
-Agent (2159 行文件, 类 1122 行/57 方法，拆分中)
+Agent (2044 行文件, 类 1079 行/55 方法，拆分中)
 ├── TurnState (agent/turn_state.py)    — 轮次级状态门面 (Phase 1)
 ├── MemCore (mem_core.py)              — 记忆检索/保存/温度管理
 ├── ContextOrchestrator                — 上下文构建/系统提示/工具描述
@@ -45,7 +49,7 @@ Agent (2159 行文件, 类 1122 行/57 方法，拆分中)
 
 **设计模式**: 所有深度模块通过 `agent_ref` 访问 Agent 属性，不反向导入 Agent，无循环依赖。
 
-### ChatPipeline 对话管线 (`neurova/agent/chat_pipeline.py`, 706行)
+### ChatPipeline 对话管线 (`neurova/agent/chat_pipeline.py`, 3868 行，核对基准 2026-11-19)
 
 从 `Agent.chat()` 提取的 6 步管线：
 
@@ -89,9 +93,12 @@ Agent (2159 行文件, 类 1122 行/57 方法，拆分中)
 
 | dataclass | 文件 | 字段数 | temperature | importance | 用途 |
 |-----------|------|--------|-------------|------------|------|
-| `Memory` | `cognitive_layers/memory_layer/models.py:249` | 21 | 0-100 | 0-100 | **主领域模型**，业务逻辑层使用 |
-| `MemoryRecord` | `cognitive_layers/memory_layer/storage.py:29` | 15 | 无 | 0+ | 持久化层（JSON 序列化） |
-| `UnifiedMemoryNode` | `cognitive_layers/memory_layer/cognitive_storage_engine.py:54` | 11 | 0-100 | 无 | LSM-Tree 五层架构（L0-L4） |
+| `Memory` | `cognitive_layers/memory_layer/models.py:264` | 25 | 0-100 | 0-100 | **主领域模型**，业务逻辑层使用 |
+| `MemoryRecord` | `cognitive_layers/memory_layer/storage.py:31` | 15 | 无 | 0+ | 持久化层（JSON 序列化） |
+| `UnifiedMemoryNode` | `cognitive_layers/memory_layer/cognitive_storage_engine.py:106` | 12 | 0-100 | 无 | LSM-Tree 五层架构（L0-L4） |
+
+> 行号与字段数核对基准 2026-11-19（`grep -n '^class ...'` 实测；字段数按类体内
+> `name: type` 注解行实数）。
 
 **量纲规范**：
 - `temperature` 统一 0-100 量纲（`MemoryRecord` 无此字段）
@@ -186,9 +193,9 @@ Agent (2159 行文件, 类 1122 行/57 方法，拆分中)
 
 ### 前端 (`NeurUI/`)
 
-Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue，82 个页面组件：
+Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue，90 个页面组件（`NeurUI/src/pages/` 实测，核对基准 2026-11-19）：
 
-- **核心**: ChatPage (47KB), DashboardPage, SettingPage, WorkflowPage (50KB)
+- **核心**: ChatPage (约 142KB), DashboardPage, SettingPage, WorkflowPage（约 29KB，位于 `NeurUI/src/workflow/`）
 - **Agent 管理**: 15 个页面 (Form/List/Skill/Sleep/Channel/...)
 - **运维**: Monitor, Health, Audit, Security, Firewall
 - **知识**: Knowledge, KnowledgeGraph, ExperienceKnowledge
@@ -203,7 +210,7 @@ Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue，82 个页面组件：
 ```
                     ┌──────────────┐
                     │  Agent Class │
-                    │  (1520 LOC)  │
+                    │  (2044 行)   │
                     └──────┬───────┘
                            │ delegates
         ┌──────────────────┼──────────────────┐
