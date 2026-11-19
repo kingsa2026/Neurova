@@ -36,19 +36,24 @@ class TestHttpMetricsMiddleware:
         async def item(item_id: str):
             return {"id": item_id}
 
+        def sample(method, route, status):
+            # 全局 REGISTRY 会被同进程内其他 create_app 测试累积计数——
+            # 断言用「基线+增量」，测试顺序无关。
+            return REGISTRY.get_sample_value(
+                "neurova_http_requests_total",
+                {"method": method, "route": route, "status": status},
+            ) or 0.0
+
+        base_item = sample("GET", "/items/{item_id}", "200")
+        base_unmatched = sample("GET", UNMATCHED_ROUTE, "404")
+
         client = TestClient(app)
         client.get("/items/1")
         client.get("/items/2")
         client.get("/no-such-route")
 
-        assert REGISTRY.get_sample_value(
-            "neurova_http_requests_total",
-            {"method": "GET", "route": "/items/{item_id}", "status": "200"},
-        ) == 2.0
-        assert REGISTRY.get_sample_value(
-            "neurova_http_requests_total",
-            {"method": "GET", "route": UNMATCHED_ROUTE, "status": "404"},
-        ) == 1.0
+        assert sample("GET", "/items/{item_id}", "200") == base_item + 2.0
+        assert sample("GET", UNMATCHED_ROUTE, "404") == base_unmatched + 1.0
 
     def test_counts_unmatched_without_raw_path_label(self):
         """未匹配路由不得回落成原始 path（否则扫描器把 label 基数打爆）。"""
