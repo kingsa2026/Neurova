@@ -432,6 +432,29 @@ class NeuacpExecutor(Protocol):
 
 > 变更记录：原 P2 的「Qoder / CodeBuddy 接入」已提前至 P0（A7）、「ZCode 插件接入」已提前至 P0（A8）（D1 裁定更新，2026-11-19）；Trae 已裁定暂不接入（留档 §4.10）。
 
+### 并行开工编排（三波次，按文件冲突规避分线）
+
+**依赖关系**：A2 依赖 A1；A3 依赖 A2；A4 依赖 A3+A5；A6 依赖 A1–A5+A8；A7 依赖 A2+catalog；A8 依赖 A3+catalog；A9 与 A1–A3 无文件交叉可独立。
+
+**波次 1（三线并行，无文件交叉，可立即开工）**：
+
+| 线 | 任务卡 | 独占文件面 |
+|----|--------|------------|
+| 线甲（neuacp 核心链） | A1 → A2 → A3（同包串行） | `neurova/agent/neuacp/`（executor/acp_client/acp_executor/acp_member）+ `tests/unit/agent/neuacp/` |
+| 线乙（名册与团队租户） | A5 | `teams_api.py` 独占 |
+| 线丙（租户收口） | A9 | `agent_run_store.py`（迁移）/`agent_run_ledger.py`/`approval_chain.py`/`session_sync.py`+`session_sync_manager.py` 独占；**intake 调用点传租户（swarm.py:2200 一带）留到 A4 同批提交**，避免与线甲后续在 swarm.py 交叉 |
+
+**波次 2（两线并行，依赖波次 1 对应卡转绿）**：
+
+| 线 | 任务卡 | 前置 | 文件面 |
+|----|--------|------|--------|
+| 线甲续 | A4（swarm.py 切口 + 派活租户校验 + intake 传租户） | A3 适配器就绪、A5 名册结构定稿 | `swarm.py` 独占（与线丙的衔接点并入本卡） |
+| 线丁（插件与多 CLI） | A8（ZCode 插件）→ A7（Qoder/CodeBuddy）**同会话串行** | A3 就绪 | `neuacp/plugin_executor.py`、`neuacp/catalog.py`（两卡共改 catalog，**同会话避免同文件并行**） |
+
+**波次 3（串行收口）**：A6 端到端 live-verify——真后端 9527 + 真 `opencode acp` 全链真跑；qoder/codebuddy 测试连接握手；zcode 插件小任务真跑；全量 A/B 失败集合逐行比对（预存不算回归、新增才算）。
+
+**冲突规避纪律**：共享文件点名——`swarm.py`（仅 A4；A9 的 intake 传参并入 A4 同 commit）、`neuacp/catalog.py`（仅线丁 A8→A7 串行）、`teams_api.py`（仅 A5）、台账/审批/WS 四件（仅 A9）；每卡 `git commit --only -- <逐文件点名>`，不卷入工作树其他会话在途件；A/B 用 patch 法（不用 stash）；pytest 串行跑（并行会触发全仓 AST 扫描档假红）。
+
 ---
 
 ## 8. 测试与验收
