@@ -57,6 +57,9 @@ class KnowledgeItem(BaseModel):
     # B11 双时态事实视图：confidence/qualifier/valid/transaction 随条目带出；
     # 条目检索旧行为不填（空字典），不改变既有响应形状。
     metadata: Dict[str, Any] = {}
+    # §8-E2 跨租户发布副本的血缘（本租户原生条目两者皆空）
+    origin_tenant_id: Optional[str] = None
+    origin_knowledge_id: Optional[str] = None
 
 
 class KnowledgeCreate(BaseModel):
@@ -136,9 +139,11 @@ class KnowledgeSearchRequest(BaseModel):
 
 
 class KnowledgeShareRequest(BaseModel):
-    """共享请求（按用户名）"""
+    """共享请求（按用户名和/或租户段，§8-E1：两者至少给一项）"""
 
-    usernames: List[str] = Field(..., description="目标用户名列表")
+    usernames: Optional[List[str]] = Field(default=None, description="目标用户名列表")
+    tenant_ids: Optional[List[str]] = Field(
+        default=None, description="目标租户 id 列表（shared_with 写入 tenant:<id> 段）")
 
 
 class KnowledgeReviewRequest(BaseModel):
@@ -206,6 +211,8 @@ def item_response(item: Dict[str, Any]) -> KnowledgeItem:
         sources=item.get("sources") or [],
         geo=item.get("geo"),
         duplicate=item.get("duplicate"),
+        origin_tenant_id=item.get("origin_tenant_id"),
+        origin_knowledge_id=item.get("origin_knowledge_id"),
     )
 
 

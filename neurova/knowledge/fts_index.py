@@ -21,6 +21,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from neurova.core.logger import get_logger
 from neurova.knowledge.lifecycle import isRetrievable
 from neurova.knowledge.search import tokenize
+from neurova.knowledge.share_segment import tenantSegment
 from neurova.knowledge.splitter import build_index_content
 from neurova.core.time_utils import nowIso as _nowIso
 
@@ -219,8 +220,13 @@ class KnowledgeFtsIndex:
         user = user or {}
         uid = str(user.get("user_id") or "")
         tenant = str(user.get("tenant_id") or "default")
-        clauses.append("d.tenant_id = ?")
-        params.append(tenant)
+        # §8-E1：本租户条目 + 显式分享给本租户的条目（shared_with 的 tenant:<id> 段）
+        tenantSeg = tenantSegment(tenant)
+        clauses.append(
+            "(d.tenant_id = ? OR EXISTS"
+            " (SELECT 1 FROM json_each(d.shared_with_json) WHERE value = ?))"
+        )
+        params.extend([tenant, tenantSeg])
         admin = str(user.get("role") or "") == "admin"
         if not admin:
             if scope == "public":
@@ -231,16 +237,18 @@ class KnowledgeFtsIndex:
             elif scope == "shared":
                 clauses.append(
                     "d.visibility = 'private' AND EXISTS"
-                    " (SELECT 1 FROM json_each(d.shared_with_json) WHERE value = ?)"
+                    " (SELECT 1 FROM json_each(d.shared_with_json)"
+                    " WHERE value IN (?, ?))"
                 )
-                params.append(uid)
+                params.extend([uid, tenantSeg])
             else:
                 clauses.append(
                     "(d.visibility = 'public' OR (d.visibility = 'private'"
                     " AND (d.owner_user_id = ? OR EXISTS"
-                    " (SELECT 1 FROM json_each(d.shared_with_json) WHERE value = ?))))"
+                    " (SELECT 1 FROM json_each(d.shared_with_json)"
+                    " WHERE value IN (?, ?)))))"
                 )
-                params.extend([uid, uid])
+                params.extend([uid, uid, tenantSeg])
         if agent_id:
             clauses.append("d.agent_id = ?")
             params.append(str(agent_id))

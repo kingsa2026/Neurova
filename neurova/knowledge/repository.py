@@ -36,6 +36,7 @@ from neurova.knowledge.foundation.knowledge_facts import (
     KnowledgeFactStore,
 )
 from neurova.knowledge.foundation.narratives import FOUNDATION_DB_NAME, NarrativeStore
+from neurova.knowledge.share_segment import tenantSegment
 from neurova.knowledge.foundation.storage_fence import (
     PRODUCTION_STORAGE_DIR,
     assertNotUnderProductionStorage,
@@ -1116,8 +1117,10 @@ class KnowledgeRepository:
 
     def can_view(self, user: Optional[Dict[str, Any]], item: Dict[str, Any]) -> bool:
         # 租户先于角色：管理员只在自己租户内全可见，不是跨租户穿透。
+        # 跨租户唯一例外＝源租户显式分享的 tenant:<id> 段（§8-E1），且仅只读
+        # （写权由 can_modify 的租户守卫拦住）。
         if str(item.get("tenant_id") or "default") != self._tenant(user):
-            return False
+            return tenantSegment(self._tenant(user)) in (item.get("shared_with") or [])
         if self._is_admin(user):
             return True
         # 部门分类白名单（specs/2026-11-07 批 C）：非 admin 且部门受限时，
@@ -1133,6 +1136,9 @@ class KnowledgeRepository:
         )
 
     def can_modify(self, user: Optional[Dict[str, Any]], item: Dict[str, Any]) -> bool:
+        # 租户守卫：跨租户（含租户段只读分享与外发副本）一律不可写，admin 不例外。
+        if str(item.get("tenant_id") or "default") != self._tenant(user):
+            return False
         if self._is_admin(user):
             return True
         deptScope = self._departmentScope(user)
@@ -1143,7 +1149,10 @@ class KnowledgeRepository:
     def can_categorize(self, user: Optional[Dict[str, Any]], item: Dict[str, Any]) -> bool:
         """分类字段的写权限（用户裁定 2026-11-09）：公共库归属主/管理员，
         私有条目（含被共享）已由可见性按用户隔离——可见即可改分类。
-        部门白名单由 can_view/can_modify 原样继承，不在此重复。"""
+        部门白名单由 can_view/can_modify 原样继承，不在此重复。
+        跨租户分享是只读语义（§8-E1），分类写权同样不外放。"""
+        if str(item.get("tenant_id") or "default") != self._tenant(user):
+            return False
         if item.get("visibility") == VISIBILITY_PUBLIC:
             return self.can_modify(user, item)
         return self.can_view(user, item)
@@ -1179,11 +1188,19 @@ class KnowledgeRepository:
             groups = self._items.items() if not agent_id else [(agent_id, self._items.get(agent_id, []))]
             snapshot = [(aid, [dict(i) for i in items]) for aid, items in groups]
         results: List[Dict[str, Any]] = []
+        userTenant = self._tenant(user)
         for aid, items in snapshot:
             for item in items:
                 if agent_id and aid != agent_id:
                     continue
-                if str(item.get("tenant_id") or "default") != self._tenant(user):
+                itemTenant = str(item.get("tenant_id") or "default")
+                # §8-E1：跨租户条目仅当源租户显式分享 tenant:<id> 段时，
+                # 才放行进后续 scope 过滤；否则维持租户硬隔离。
+                sharedAcrossTenants = (
+                    itemTenant != userTenant
+                    and tenantSegment(userTenant) in (item.get("shared_with") or [])
+                )
+                if itemTenant != userTenant and not sharedAcrossTenants:
                     continue
                 # 部门分类白名单（specs/2026-11-07 批 C）：admin 不受限（上面已排除），
                 # 非 admin 且部门受限 → 白名单外条目先于一切检索被剔除（先筛后检）
@@ -1200,7 +1217,7 @@ class KnowledgeRepository:
                     continue
                 if scope == "shared" and not (
                     item.get("visibility") == VISIBILITY_PRIVATE
-                    and uid in (item.get("shared_with") or [])
+                    and (uid in (item.get("shared_with") or []) or sharedAcrossTenants)
                 ):
                     continue
                 if scope == "all" and not self.can_view(user, item):
@@ -1307,6 +1324,163 @@ class KnowledgeRepository:
         removed = {str(u) for u in user_ids}
         item["shared_with"] = [u for u in (item.get("shared_with") or []) if u not in removed]
         return self._set_entry(agent_id, item)
+
+    # ── 租户级共享（可靠性方案 §8-P1，2026-11-19 拍板复制发布语义） ──
+
+    def share_tenants(
+        self, user: Optional[Dict[str, Any]], knowledge_id: str, tenant_ids: List[str]
+    ) -> Dict[str, Any]:
+        """把私有条目共享给指定租户（shared_with 增 `tenant:<id>` 段，只读）。
+
+        §8-E1：目标租户全体成员经 can_view 只读可见；不能分享给条目所属租户自身
+        （同租户可见性走既有用户级 share_entry）。owner/admin 可操作。
+        """
+        agent_id, item = self._find_or_raise(knowledge_id)
+        if not self.can_modify(user, item):
+            raise PermissionError("仅条目属主或管理员可共享")
+        if item.get("visibility") == VISIBILITY_PUBLIC:
+            raise ValueError("公开条目无需共享")
+        ownTenant = str(item.get("tenant_id") or "default")
+        current = list(item.get("shared_with") or [])
+        for tid in tenant_ids or []:
+            tid = str(tid or "").strip()
+            if not tid:
+                continue
+            if tid == ownTenant:
+                raise ValueError("不能共享给条目所属租户自身（同租户走用户级共享）")
+            segment = tenantSegment(tid)
+            if segment not in current:
+                current.append(segment)
+        item["shared_with"] = current
+        return self._set_entry(agent_id, item)
+
+    def unshare_tenants(
+        self, user: Optional[Dict[str, Any]], knowledge_id: str, tenant_ids: List[str]
+    ) -> Dict[str, Any]:
+        """取消对指定租户的共享（摘 `tenant:<id>` 段，即时失效）。owner/admin 可操作。"""
+        agent_id, item = self._find_or_raise(knowledge_id)
+        if not self.can_modify(user, item):
+            raise PermissionError("仅条目属主或管理员可取消共享")
+        removed = {
+            tenantSegment(str(t or "").strip())
+            for t in (tenant_ids or []) if str(t or "").strip()
+        }
+        item["shared_with"] = [v for v in (item.get("shared_with") or []) if v not in removed]
+        return self._set_entry(agent_id, item)
+
+    def request_publish_copy(
+        self, user: Optional[Dict[str, Any]], knowledge_id: str, target_tenant: str
+    ) -> Dict[str, Any]:
+        """发起跨租户发布副本请求（§8-E2，复制发布语义）。
+
+        仅源租户 admin 可发起；请求只登记在源条目 `copy_requests` 上，**不落副本**——
+        目标租户 admin 审批通过才复制落库（审批前目标租户侧不可见，验收 §8.6-3）。
+        """
+        agent_id, item = self._find_or_raise(knowledge_id)
+        if not self.can_modify(user, item) or not self._is_admin(user):
+            raise PermissionError("跨租户发布副本仅源租户管理员可发起")
+        target = str(target_tenant or "").strip()
+        ownTenant = str(item.get("tenant_id") or "default")
+        if not target or target == ownTenant:
+            raise ValueError("target_tenant 必须是不同于条目所属租户的目标租户")
+        request = {
+            "request_id": str(uuid.uuid4()),
+            "target_tenant": target,
+            "requested_by": self._user_id(user),
+            "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "status": "pending",
+            "decided_by": None,
+            "decided_at": None,
+            "note": None,
+            "copy_knowledge_id": None,
+        }
+        item.setdefault("copy_requests", []).append(request)
+        self._set_entry(agent_id, item)
+        return dict(request)
+
+    def decide_publish_copy(
+        self, user: Optional[Dict[str, Any]], request_id: str, approve: bool,
+        note: str = "",
+    ) -> Dict[str, Any]:
+        """目标租户 admin 审批发布副本：approve 复制落库 / reject 关闭请求。
+
+        副本落目标租户：origin_* 血缘、初始 private、属主＝审批的目标 admin
+        （目标租户内公开仍走既有 submit-public → 审批链）。
+        """
+        agent_id, item, request = self._find_copy_request(request_id)
+        target = str(request.get("target_tenant") or "")
+        if not self._is_admin(user) or self._tenant(user) != target:
+            raise PermissionError("仅目标租户管理员可审批该发布副本请求")
+        if request.get("status") != "pending":
+            raise ValueError("该发布副本请求已审批过")
+        request["status"] = "approved" if approve else "rejected"
+        request["decided_by"] = self._user_id(user)
+        request["decided_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        request["note"] = str(note or "")
+        copyId = None
+        if approve:
+            copyId = self._copyItemForTenant(agent_id, item, target, self._user_id(user))
+            request["copy_knowledge_id"] = copyId
+        self._set_entry(agent_id, item)
+        return {"request_id": request_id, "status": request["status"],
+                "copy_knowledge_id": copyId, "target_tenant": target}
+
+    def pending_copy_requests(self, user: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """目标租户 admin 视角：待本租户审批的发布副本请求（带源条目摘要）。"""
+        if not self._is_admin(user):
+            raise PermissionError("仅管理员可查看发布副本审批请求")
+        tenant = self._tenant(user)
+        pending: List[Dict[str, Any]] = []
+        with self._lock:
+            for items in self._items.values():
+                for item in items:
+                    for request in item.get("copy_requests") or []:
+                        if (str(request.get("target_tenant") or "") == tenant
+                                and request.get("status") == "pending"):
+                            pending.append({
+                                "request_id": request["request_id"],
+                                "target_tenant": tenant,
+                                "source_knowledge_id": item.get("knowledge_id"),
+                                "source_tenant": str(item.get("tenant_id") or "default"),
+                                "title": item.get("title"),
+                                "requested_by": request.get("requested_by"),
+                                "requested_at": request.get("requested_at"),
+                            })
+        return pending
+
+    def _find_copy_request(
+        self, request_id: str,
+    ) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
+        with self._lock:
+            for agent_id, items in self._items.items():
+                for item in items:
+                    for request in item.get("copy_requests") or []:
+                        if str(request.get("request_id") or "") == str(request_id):
+                            return (agent_id, item, request)
+        raise LookupError("发布副本请求不存在: %s" % request_id)
+
+    def _copyItemForTenant(self, agent_id: str, item: Dict[str, Any],
+                           target_tenant: str, ownerId: str) -> str:
+        """复制条目进目标租户（§8-E2）：origin 血缘、初始 private、属主＝审批人。"""
+        copy = json.loads(json.dumps(item, ensure_ascii=False))
+        copyId = str(uuid.uuid4())
+        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        copy["knowledge_id"] = copyId
+        copy["tenant_id"] = target_tenant
+        copy["origin_tenant_id"] = str(item.get("tenant_id") or "default")
+        copy["origin_knowledge_id"] = str(item.get("knowledge_id") or "")
+        copy["owner_user_id"] = str(ownerId or "")
+        copy["visibility"] = VISIBILITY_PRIVATE
+        copy["shared_with"] = []
+        copy["submission"] = None
+        copy.pop("copy_requests", None)
+        copy["created_at"] = now
+        copy["updated_at"] = now
+        with self._lock:
+            self._items.setdefault(agent_id, []).append(copy)
+            self._save()
+            self._record_index_op("reindex", copyId)
+        return copyId
 
     def submit_to_public(self, user: Optional[Dict[str, Any]], knowledge_id: str) -> Dict[str, Any]:
         """把私有条目提交公共库，进入 pending 待管理员审批。"""

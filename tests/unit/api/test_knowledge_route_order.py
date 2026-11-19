@@ -192,6 +192,14 @@ _KB_ROUTES = [
     ('/ontology/webhook/simulate', 'POST'),
     ('/preview-chunking', 'POST'),
     ('/public-submissions', 'GET'),
+    # 2026-11-19 §8-P1 租户级共享：字面 GET /copy-requests 遮蔽契约同上
+    ('/copy-requests', 'GET'),
+    ('/copy-requests/{request_id}/decide', 'POST'),
+    ('/{knowledge_id}/publish-copy', 'POST'),
+    # 2026-11-19 企业源同步可靠性（3c234791d）：interval/历史读写给面
+    ('/enterprise/sources/{source_id}/sync-interval', 'GET'),
+    ('/enterprise/sources/{source_id}/sync-interval', 'PUT'),
+    ('/enterprise/sources/{source_id}/sync-history', 'GET'),
     ('/search', 'POST'),
     ('/{knowledge_id}', 'DELETE'),
     ('/{knowledge_id}', 'GET'),

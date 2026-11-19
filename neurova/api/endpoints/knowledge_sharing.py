@@ -48,6 +48,90 @@ class ConflictResolutionRequest(BaseModel):
         description="事实侧 supersede_old 的胜方事实 id（必须是该冲突的成员）；条目侧忽略")
 
 
+# ── 租户级共享（可靠性方案 §8-P1，2026-11-19 拍板复制发布语义） ──
+
+class PublishCopyRequest(BaseModel):
+    """跨租户发布副本请求体（仅源租户管理员发起）"""
+
+    target_tenant: str = Field(..., description="目标租户 id（部门根组 id）")
+
+
+class PublishCopyDecideRequest(BaseModel):
+    """发布副本审批请求体（仅目标租户管理员）"""
+
+    approve: bool = Field(..., description="true=批准复制落库 / false=拒绝")
+    note: str = Field(default="", description="审批备注（拒绝原因等）")
+
+
+def _ensureTenantExists(tenant_id: str) -> None:
+    """目标租户存在性校验：部门根组树是租户的权威源（user_group_model §2.3）；
+    default 恒存在；不存在 400。"""
+    tid = str(tenant_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="目标租户 id 不能为空")
+    if tid == "default":
+        return
+    from neurova.auth.user_group_model import get_user_group_manager
+
+    try:
+        group = get_user_group_manager().get_group(tid)
+    except Exception:  # noqa: BLE001 - 组树不可用时不假装校验通过
+        group = None
+    if group is None:
+        raise HTTPException(status_code=400, detail="目标租户不存在: %s" % tid)
+
+
+def _auditShare(action: str, current_user: Dict[str, Any], target: Dict[str, Any]) -> None:
+    """共享/发布动作留痕（复用 knowledge_activities 活动账，fail-soft）。"""
+    try:
+        _factStore().insertActivity(
+            "knowledge_share_write",
+            inputs={
+                "actor": str(current_user.get("user_id") or ""),
+                "actor_name": str(current_user.get("username") or ""),
+                "action": action,
+                **target,
+            },
+            tenantId=str(current_user.get("tenant_id") or "default"),
+        )
+    except Exception as exc:  # noqa: BLE001 - 审计失败不阻断主流程，但点名
+        logger.warning("共享动作审计落账失败（%s）：%s", action, exc)
+
+
+@router.get("/copy-requests")
+async def list_copy_requests(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """待本租户审批的跨租户发布副本请求（仅目标租户管理员，§8-E2）"""
+    repo = get_repository()
+    try:
+        return {"code": 0, "message": "success",
+                "data": repo.pending_copy_requests(current_user)}
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+
+@router.post("/copy-requests/{request_id}/decide")
+async def decide_copy_request(
+    request: Request,
+    request_id: str = Path(...),
+    body: PublishCopyDecideRequest = ...,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """目标租户管理员审批发布副本：approve 复制落库 / reject 关闭（§8-E2）"""
+    repo = get_repository()
+    try:
+        result = repo.decide_publish_copy(current_user, request_id,
+                                          approve=bool(body.approve), note=body.note)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    _auditShare("copy_request_decided", current_user, {**result, "note": body.note})
+    return {"code": 0, "message": "success", "data": result}
+
+
 @router.get("/public-submissions")
 async def list_public_submissions(
     request: Request,
@@ -276,16 +360,28 @@ async def share_knowledge(
     knowledge_id: str = Path(...),
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """把私有条目共享给指定用户（只读；属主/管理员）"""
+    """把私有条目共享给指定用户/租户（只读；属主/管理员；§8-E1）"""
     repo = get_repository()
     entry_or_403(repo, knowledge_id, current_user)
+    usernames = [u for u in (body.usernames or []) if str(u or "").strip()]
+    tenantIds = [t for t in (body.tenant_ids or []) if str(t or "").strip()]
+    if not usernames and not tenantIds:
+        raise HTTPException(status_code=400, detail="usernames 与 tenant_ids 至少给一项")
+    for tid in tenantIds:
+        _ensureTenantExists(tid)
     try:
-        mapping = resolve_usernames(body.usernames)
-        item = repo.share_entry(current_user, knowledge_id, list(mapping.values()))
+        item = None
+        if usernames:
+            mapping = resolve_usernames(usernames)
+            item = repo.share_entry(current_user, knowledge_id, list(mapping.values()))
+        if tenantIds:
+            item = repo.share_tenants(current_user, knowledge_id, tenantIds)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except (PermissionError, LookupError) as exc:
         raise guard(exc)
+    _auditShare("shared", current_user, {"knowledge_id": knowledge_id,
+                                         "usernames": usernames, "tenant_ids": tenantIds})
     return item_response(item)
 
 
@@ -296,17 +392,50 @@ async def unshare_knowledge(
     knowledge_id: str = Path(...),
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """取消对指定用户的共享（属主/管理员）"""
+    """取消对指定用户/租户的共享（属主/管理员；摘除即时失效）"""
     repo = get_repository()
     entry_or_403(repo, knowledge_id, current_user)
+    usernames = [u for u in (body.usernames or []) if str(u or "").strip()]
+    tenantIds = [t for t in (body.tenant_ids or []) if str(t or "").strip()]
+    if not usernames and not tenantIds:
+        raise HTTPException(status_code=400, detail="usernames 与 tenant_ids 至少给一项")
     try:
-        mapping = resolve_usernames(body.usernames)
-        item = repo.unshare_entry(current_user, knowledge_id, list(mapping.values()))
+        item = None
+        if usernames:
+            mapping = resolve_usernames(usernames)
+            item = repo.unshare_entry(current_user, knowledge_id, list(mapping.values()))
+        if tenantIds:
+            item = repo.unshare_tenants(current_user, knowledge_id, tenantIds)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except (PermissionError, LookupError) as exc:
         raise guard(exc)
+    _auditShare("unshared", current_user, {"knowledge_id": knowledge_id,
+                                           "usernames": usernames, "tenant_ids": tenantIds})
     return item_response(item)
+
+
+@router.post("/{knowledge_id}/publish-copy")
+async def publish_copy_knowledge(
+    request: Request,
+    knowledge_id: str = Path(...),
+    body: PublishCopyRequest = ...,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """发起跨租户发布副本（仅源租户管理员；目标租户 admin 审批通过才落库，§8-E2）"""
+    repo = get_repository()
+    entry_or_403(repo, knowledge_id, current_user)
+    _ensureTenantExists(body.target_tenant)
+    try:
+        result = repo.request_publish_copy(current_user, knowledge_id, body.target_tenant)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except (PermissionError, LookupError) as exc:
+        raise guard(exc)
+    _auditShare("publish_copy_requested", current_user,
+                {"knowledge_id": knowledge_id, "target_tenant": body.target_tenant,
+                 "request_id": result["request_id"]})
+    return {"code": 0, "message": "success", "data": result}
 
 
 @router.post("/{knowledge_id}/submit-public", response_model=KnowledgeItem)
