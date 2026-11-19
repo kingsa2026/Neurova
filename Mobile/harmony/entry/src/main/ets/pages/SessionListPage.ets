@@ -272,7 +272,7 @@ export struct SessionListPage {
               })
           }, (label: string) => label)
 
-          // Agent 筛选下拉：选中后列表仅显示该 agent 的会话
+          // Agent 筛选下拉：选中后列表仅显示该 agent 的会话（尺寸对齐旁边胶囊）
           Select(this.agentOptions())
             .selected(this.agentFilterIdx)
             .value(this.agentFilterIdx === 0 ? '全部 Agent' : this.agentName(this.agentFilter))
@@ -284,7 +284,8 @@ export struct SessionListPage {
             .backgroundColor(this.sm.getColor('glass'))
             .borderRadius(999)
             .border({ width: 1, color: this.sm.getColor('border') })
-            .padding({ left: 12, right: 10, top: 5, bottom: 5 })
+            .padding({ left: 12, right: 10 })
+            .height(30)
             .onSelect((index: number) => {
               this.agentFilterIdx = index;
               this.agentFilter = index === 0 ? '' : (this.agents[index - 1]?.id ?? '');
