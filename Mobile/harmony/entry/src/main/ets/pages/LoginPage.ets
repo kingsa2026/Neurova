@@ -125,10 +125,10 @@ export struct LoginPage {
   }
 
   aboutToAppear(): void {
-    // F1 终端胶囊：只显示地址（IP:端口，去协议头与名称）——胶囊不堆文字
+    // F1 终端胶囊：终端名称 · 地址（IP:端口，去协议头）
     const active = ServerProfiles.getInstance().getActive();
     if (active) {
-      this.serverLabel = active.baseUrl.replace(/^https?:\/\//, '');
+      this.serverLabel = `${active.name} · ${active.baseUrl.replace(/^https?:\/\//, '')}`;
       this.checkServerReachable(active.baseUrl);
     }
   }
@@ -414,7 +414,7 @@ export struct LoginPage {
     await profiles.update(active.id, this.editServerName.trim(), url);
     const updated = profiles.getActive();
     if (updated) {
-      this.serverLabel = updated.baseUrl.replace(/^https?:\/\//, '');
+      this.serverLabel = `${updated.name} · ${updated.baseUrl.replace(/^https?:\/\//, '')}`;
       this.checkServerReachable(updated.baseUrl);
     }
     await this.cm.applyServerProfile(profiles.getActiveApiBase(), getContext(this) as Context);
