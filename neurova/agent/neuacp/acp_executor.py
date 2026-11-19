@@ -93,6 +93,13 @@ class NeuacpStdioExecutor:
 
     # ---------- 内部 ----------
 
+    def setToolCallHandler(self, handler: Optional[Callable[[dict], None]]) -> None:
+        """注册 tool_call(_update) 镜像回调（B2：适配器经此接入轨迹/账本）。
+
+        handler 收到的是 ACP update dict 原样透传；传 None 注销。
+        """
+        self._on_tool_call = handler
+
     def _onCrash(self, reason: str) -> None:
         self._crash_reason = reason
 
@@ -127,7 +134,12 @@ class NeuacpStdioExecutor:
         if asker is None:
             return {"outcome": {"choice": "deny"}}
         tool = params.get("toolCall") or {}
-        action = tool.get("title") or tool.get("toolCallId") or "unknown"
+        toolName = tool.get("title") or tool.get("toolCallId") or "unknown"
+        # B1（§4.4）：action 命名空间 acp:{tool}:{kind}；kind 为 ACP 工具调用
+        # 类别（read/edit/delete/move/search/execute/think/fetch/other），
+        # 未声明按 other（审批档由适配器按 kind 声明、链内危险正则统一升档）。
+        kind = str(tool.get("kind") or "other")
+        action = f"acp:{toolName}:{kind}"
         try:
             decision = asker(action, str(params.get("reason") or ""), json.dumps(params, ensure_ascii=False))
         except Exception:

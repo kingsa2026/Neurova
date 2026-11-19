@@ -9,13 +9,40 @@
 - ``current_session_id`` = run.member_session_id。
 - ``llm_client.chat`` → 验收/评审判定通道（D2 裁定提供；由装配方注入
   本仓 provider 通道）。
-- ``permission_asker(action, reason, context) -> {"approved": bool}``：
-  同步裁决钩子，由 B1 桥接审批链；未注入时一律 deny（fail-closed）。
+- ``bindRun(run, logEvent, recorder=None, spanId=None)``：swarm._run_member
+  在调用 chat 前注入运行上下文（B1 审批桥接 + B2 工具镜像的锚点）。
+- ``permission_asker(action, reason, context) -> dict``：同步裁决钩子。
+  默认实现接审批链单源 ``requestRunApproval``（B1）；显式注入的 asker 优先。
 """
+import asyncio
+import logging
 from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
 from neurova.agent.neuacp.executor import NeuacpSessionContext
+
+logger = logging.getLogger(__name__)
+
+#: ACP 工具调用类别 → 审批声明档（§4.4 分级建议）：读/搜索/抓取/思考类低危 L0；
+#: 写/编辑/删除/执行/未知一律 L1（危险命令升档由链内 classifyActionLevel
+#: 统一处理——分级只此一套，不另造第二份正则）。
+ACP_LEVEL_BY_KIND = {
+    "read": "L0",
+    "search": "L0",
+    "fetch": "L0",
+    "think": "L0",
+}
+
+
+def acpActionLevel(action: str) -> str:
+    """``acp:{tool}:{kind}`` → 审批声明档。
+
+    非本命名空间或缺 kind 的动作保守按 L1（需人/父裁决），不静默放行。
+    """
+    parts = str(action or "").split(":", 2)
+    if len(parts) < 3 or parts[0] != "acp":
+        return "L1"
+    return "L0" if parts[2].strip().lower() in ACP_LEVEL_BY_KIND else "L1"
 
 
 class NeuacpMemberAdapter:
@@ -33,17 +60,133 @@ class NeuacpMemberAdapter:
     ) -> None:
         self._executor = executor
         self._cwd = cwd or ""
-        self._permission_asker = permission_asker
         self._prompt_timeout = prompt_timeout
         self.config = SimpleNamespace(name=name)
         self.llm_client = verify_channel
         self.current_session_id: Optional[str] = None
+        # B1/B2 运行绑定：chat 前由 swarm._run_member 经 bindRun 注入。
+        self._run: Optional[Any] = None
+        self._logEvent: Optional[Callable] = None
+        self._recorder: Optional[Any] = None
+        self._spanId: Optional[str] = None
+        # B1：chat 时刻捕获的事件循环——泵线程的同步裁决经它桥回异步审批链。
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        # 显式注入的 asker 优先（测试/定制面）；默认接审批链（B1）。
+        self._permission_asker = permission_asker or self._approvalPermissionAsker
+        self._attachToolCallMirror()
+
+    # ── B1：运行绑定与审批桥接 ───────────────────────────────────────────
+
+    def bindRun(self, run: Any, logEvent: Callable, recorder: Optional[Any] = None,
+                spanId: Optional[str] = None) -> None:
+        """绑定 swarm 运行上下文（``swarm._run_member`` 在 chat 前调用）。
+
+        - ``run``：SubAgentRun——审批单与台账的主体；
+        - ``logEvent(run, eventType, payload)``：H-4 事件账本写入口
+          （swarm._logRunEvent）；
+        - ``recorder``/``spanId``：member span 轨迹（TrajectoryRecorder），
+          可空——无 recorder 时工具镜像只走 logEvent。
+        """
+        self._run = run
+        self._logEvent = logEvent
+        self._recorder = recorder
+        self._spanId = spanId
+
+    def _approvalPermissionAsker(self, action: str, reason: str, context: str) -> dict:
+        """session/request_permission → ``requestRunApproval``（审批链单源）。
+
+        调用发生在 ACP 泵线程（NeuacpClient 的 request handler），必须同步
+        返回：审批协程经 ``asyncio.run_coroutine_threadsafe`` 投回 chat 时刻
+        捕获的事件循环，``result(timeout)`` 桥接为同步应答。超时预算取
+        ``NEUROVA_SWARM_APPROVAL_WAIT_S``（审批链同源读数），另加 5s 桥接
+        宽限——让链内审批超时先到，回传诚实的 pending/denied 形态而非桥接
+        超时异常。未 bindRun / 无循环 / 桥接失败一律 deny（fail-closed）。
+        """
+        run = self._run
+        loop = self._loop
+        if run is None or loop is None:
+            return {
+                "approved": False, "pending": False, "denied": True,
+                "reason": "external_member_not_bound",
+            }
+        from neurova.agent.approval_chain import approvalWaitSeconds, requestRunApproval
+
+        coro = requestRunApproval(
+            run,
+            action,
+            reason=reason,
+            level=acpActionLevel(action),
+            context=context or "acp_permission",
+        )
+        try:
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            return future.result(timeout=approvalWaitSeconds() + 5.0)
+        except Exception as exc:  # noqa: BLE001 - 桥接故障按拒绝收口（fail-closed）
+            logger.warning("外部成员审批桥接失败，按 deny 处理 (action=%s): %s", action, exc)
+            return {
+                "approved": False, "pending": False, "denied": True,
+                "reason": f"approval_bridge_failed: {exc}",
+            }
+
+    # ── B2：工具调用镜像 ─────────────────────────────────────────────────
+
+    def _attachToolCallMirror(self) -> None:
+        """把镜像回调挂到执行体：优先 setToolCallHandler（StdioExecutor），
+        退回 ``_on_tool_call`` 属性（无该方法的自定义/插件执行体）。"""
+        register = getattr(self._executor, "setToolCallHandler", None)
+        if callable(register):
+            try:
+                register(self._mirrorToolCall)
+                return
+            except Exception as exc:  # noqa: BLE001 - 挂钩失败退回属性注入
+                logger.debug("setToolCallHandler 挂载失败，退回属性注入: %s", exc)
+        if hasattr(self._executor, "_on_tool_call"):
+            try:
+                self._executor._on_tool_call = self._mirrorToolCall
+            except Exception as exc:  # noqa: BLE001 - 镜像是可观测面，失败不阻断
+                logger.debug("工具镜像挂载失败（不阻断外部执行）: %s", exc)
+
+    def _mirrorToolCall(self, update: dict) -> None:
+        """tool_call(_update) → H-4 账本 + member span 轨迹（§4.4/§6.3：
+        外部代理工具不纳管执行、但全量可见）。可在泵线程被调，fail-open。"""
+        run = self._run
+        if run is None:
+            return
+        logEvent = self._logEvent
+        if callable(logEvent):
+            try:
+                logEvent(run, "tool_call", update)
+            except Exception as exc:  # noqa: BLE001 - 账本故障不阻断外部执行
+                logger.debug("tool_call 账本镜像失败: %s", exc)
+        recorder = self._recorder
+        if recorder is not None and getattr(run, "trace_id", ""):
+            try:
+                recorder.record_event(
+                    run.trace_id,
+                    "info",
+                    {
+                        "event": "tool_call",
+                        "subagent_id": run.subagent_id,
+                        "agent_name": run.agent_name,
+                        "tool_call": update,
+                    },
+                    span_id=self._spanId,
+                )
+            except Exception as exc:  # noqa: BLE001 - 轨迹故障不阻断外部执行
+                logger.debug("tool_call 轨迹镜像失败: %s", exc)
+
+    # ── swarm 成员鸭子面 ─────────────────────────────────────────────────
 
     async def chat(self, user_input: str, *, stream: bool = True, session_id: Optional[str] = None, metadata: Optional[dict] = None, **_ignored) -> dict:
         # swarm._run_member 的签名约束（swarm.py:2256-2259）：不接受 temperature/max_tokens。
         emitter = (metadata or {}).get("event_emitter")
         if session_id:
             self.current_session_id = session_id
+        # B1：捕获本轮回环——泵线程的权限裁决要经它桥回审批链。
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
         context = NeuacpSessionContext(
             member_session_id=self.current_session_id or "",
             task_text=user_input,

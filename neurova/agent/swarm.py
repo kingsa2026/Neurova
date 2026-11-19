@@ -545,6 +545,11 @@ class SwarmManager:
         # S4 结果候选板：member 结果先落候选（submitted），主侧 CAS 合入；
         # 冲突保留升级。随管理器单例存活，留痕经 H-4 run 事件账本。
         self._candidates = CandidateMergeBoard()
+        # B3：外部编码代理成员的适配器登记（subagent_id → (adapter, spawnLoop)）。
+        # cancelRun 据此把叫停传导进外部代理进程（adapter.cancel → executor.cancel
+        # → ACP session/cancel）；run 到终态即摘除。spawnLoop 是派生时的事件循环，
+        # 供无循环的调用线程经 run_coroutine_threadsafe 投递取消协程。
+        self._externalAdapters: Dict[str, tuple] = {}
         self._lock = threading.RLock()
 
     # ── 公共接口 ──────────────────────────────────────────────
@@ -785,6 +790,9 @@ class SwarmManager:
                         "team_role": teamRoleLabel,
                         "team_member": dict(teamMember) if teamMember else None,
                         "runtime_budget_sec": max(0.0, float(runtimeBudgetSec or 0.0)),
+                        # B3：外部成员适配器随等待件携带——放行时直接续用，
+                        # 不再走 _resolve_agent（外部 id 不在 Agent 注册表里）。
+                        "external_adapter": externalAdapter,
                         "deps": list(deps), "status": "blocked", "created_at": time.time(),
                     }
             return {
@@ -845,6 +853,11 @@ class SwarmManager:
                 self._model_active[model] = self._model_active.get(model, 0) + 1
                 run.slot_model = model
             self._runs[run.subagent_id] = run
+            # B3：外部成员适配器随 run 登记（终态在 _execute finally 摘除），
+            # cancelRun 据此向外部代理进程传导叫停。
+            if externalAdapter is not None:
+                self._externalAdapters[run.subagent_id] = (
+                    externalAdapter, asyncio.get_running_loop())
             self._evict_finished_runs()
 
         # H-4：派生事实入 run 事件账本（正文不进账本，task 只留摘要）
@@ -1515,7 +1528,13 @@ class SwarmManager:
 
     def _launchRun(self, info: Dict[str, Any]) -> SubAgentRun:
         """把（blocked 放行的）启动信息落成 SubAgentRun 并异步执行。"""
-        agent, resolved_id, _fallback = self._resolve_agent(info["agent_id"])
+        # B3：外部成员的适配器在 blocked 登记时已解析（外部 id 不在 Agent
+        # 注册表，_resolve_agent 会错拿默认兜底）——放行时原样续用。
+        externalAdapter = info.get("external_adapter")
+        if externalAdapter is not None:
+            agent, resolved_id, _fallback = externalAdapter, str(info["agent_id"]), False
+        else:
+            agent, resolved_id, _fallback = self._resolve_agent(info["agent_id"])
         model = self._resolve_model_name(agent) if agent is not None else ""
         run = SubAgentRun(
             subagent_id=info["subagent_id"],
@@ -1543,6 +1562,10 @@ class SwarmManager:
         )
         with self._lock:
             self._runs[run.subagent_id] = run
+            # B3：放行的外部成员同样登记适配器（cancelRun 传导链不断）
+            if externalAdapter is not None:
+                self._externalAdapters[run.subagent_id] = (
+                    externalAdapter, asyncio.get_running_loop())
         self._logRunEvent(run, "spawned", {
             "task": run.task[:EVENT_TASK_SUMMARY_CHARS], "origin": run.origin, "depth": run.depth,
             "subagent_type": run.subagent_type, "model": run.model,
@@ -1650,6 +1673,9 @@ class SwarmManager:
                              "（如需可停，请以 background=true 派生）"}
         run.cancel_note = str(reason or "").strip() or "父代理主动叫停"
         task.cancel()
+        # B3：外部成员把叫停同步传导进外部代理进程（task.cancel 只取消本仓侧
+        # 的等待协程，外部子进程仍在跑——必须经 adapter.cancel 发 session/cancel）。
+        self._cancelExternalMember(sid)
 
         # 取消落账兜底：若 cancel 早于成员任务的首个执行步，协程体从未运行，
         # CancelledError 处理器不会执行——这里在任务收尾时把 run 如实判为
@@ -1673,6 +1699,33 @@ class SwarmManager:
         return {"success": True, "subagent_id": sid, "status": "cancelling",
                 "hint": "取消已发出；终态将以 failed(subagent_cancelled) 落账，"
                         "subagent_status 可确认"}
+
+    def _cancelExternalMember(self, sid: str) -> None:
+        """B3：向外部编码代理成员传导叫停（cancelRun → adapter.cancel →
+        executor.cancel → ACP session/cancel）。
+
+        best-effort：叫停主信号是 ``task.cancel()``（本仓侧等待协程照常取消
+        收账）；这里负责让外部子进程也停下来。cancelRun 可能在无事件循环的
+        线程被调（工具/API 线程）——协程经 spawn 时登记的循环投递；投递失败
+        （循环已关等）记 debug，不影响取消主流程。
+        """
+        with self._lock:
+            registered = self._externalAdapters.get(sid)
+        if registered is None:
+            return
+        adapter, spawnLoop = registered
+        try:
+            runningLoop = asyncio.get_running_loop()
+        except RuntimeError:
+            runningLoop = None
+        try:
+            if runningLoop is not None:
+                runningLoop.create_task(adapter.cancel())
+            else:
+                asyncio.run_coroutine_threadsafe(adapter.cancel(), spawnLoop)
+            logger.info("Swarm: 外部成员叫停已传导 (subagent_id=%s)", sid)
+        except Exception as e:  # noqa: BLE001 - 传导失败不阻断取消主流程
+            logger.debug("Swarm: 外部成员叫停传导失败 (subagent_id=%s): %s", sid, e)
 
     async def updateSubagent(
         self,
@@ -2303,6 +2356,15 @@ class SwarmManager:
         self._logRunEvent(run, "started", {
             "status": run.status, "model": run.model, "trace_id": run.trace_id,
         })
+        # B1/B2：外部编码代理成员（NeuacpMemberAdapter）在 chat 前绑定运行上下文
+        # ——permission 桥接审批链、tool_call 镜像进账本与 span 轨迹都以此为锚。
+        # 内置 Agent 无此方法，getattr 鸭子判定，零影响。
+        bindRun = getattr(agent, "bindRun", None)
+        if callable(bindRun):
+            try:
+                bindRun(run, self._logRunEvent, recorder=recorder, spanId=memberSpanId)
+            except Exception as e:  # noqa: BLE001 - 绑定失败不阻断派生（外部成员按未绑定态 fail-closed）
+                logger.warning("Swarm: 外部成员 bindRun 失败 (%s): %s", run.subagent_id, e)
         await self._broadcast(
             run,
             "subagent_started",
@@ -2486,6 +2548,9 @@ class SwarmManager:
             reset_subagent_depth(depth_token)
             set_subagent_tool_allowlist(None)
             self._restoreCostContext(prevCostCtx)
+            # B3：run 已终态，外部成员适配器登记随之摘除（防跨 run 复用/泄漏）。
+            with self._lock:
+                self._externalAdapters.pop(run.subagent_id, None)
 
         await self._broadcast(
             run,
