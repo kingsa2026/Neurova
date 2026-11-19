@@ -145,6 +145,23 @@ async def websocket_sync(
     await websocket.accept()
 
     manager = get_session_sync_manager()
+    # A9c（§6.4 租户隔离红线）：订阅腿归属校验前置——存量会话不因「已在册」
+    # 放行任意认证用户（修前 register_or_create_session 对已注册会话直接返回，
+    # 任何持有效 JWT 的用户都能订阅他人会话的全部事件，外部编码代理的流式
+    # 内容/代码片段因此可被窃读）。判据转交 console 的「空属主=共享」单源，
+    # 与 REST 侧 _requireSessionOwnership 同解；新会话由本连接创建，属主即本人。
+    existing_session = manager.get_session(session_id)
+    if existing_session is not None:
+        try:
+            from neurova.api.endpoints.console import _check_session_ownership
+
+            _check_session_ownership(
+                {"user_id": getattr(existing_session, "user_id", "") or ""},
+                user_id,
+            )
+        except HTTPException:
+            await websocket.close(code=4403, reason="forbidden")
+            return
     session = manager.register_or_create_session(
         session_id=session_id,
         user_id=user_id,
