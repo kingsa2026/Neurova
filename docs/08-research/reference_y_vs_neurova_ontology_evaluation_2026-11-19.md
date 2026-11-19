@@ -222,4 +222,4 @@
 
 **live-verify（真后端 9761，`start_server.py` 起动，health OK）**：`GET /ontology/readiness` → knowledge_ready=true、model_ready=null(disabled)；`GET /ontology/audit` → 200 findings 结构完整；`POST /ontology/check-gate`（空候选）→ gate=pass 三臂齐整；`POST /ontology/relation-candidates/{unknown}/approve` → 404（路由通、门在、零写入）。
 
-**遗留（如实登记）**：§5 远期两项（行级数据血缘、事实级快照对比）按原判暂不实施；P3-1b 的 `sourceSpan` 生产写入方待抽取链携带位置信息后接线（当前为存储+读回能力，无生产写入方——不为凑闭环而伪造写入）；api 域 19 条预存失败（authSurface/evolve/webhooks url_guard 等）与本批无关，已 A/B 定责，留待统筹者派单。
+**遗留清偿（2026-11-19，`6ffa82f7b`）**：上述三项遗留已处理——① api 域 19 条预存失败全部清偿（枚举预言机判定器认 admin 门、url_guard DNS mock、webhooks URL 合规化、console_split/authSurface 重生成、evolve 计划镜像按实测定标 24/60/64/32、capability 复合键读取、connection 断言回归错误形态初心、pairingQr host 钉入站回落、route_mount 通配二次判定）；清偿后 api 全量 3,308 passed / 1 failed，仅剩一条为跑测时点仓根在途散件的瞬态污染（单跑通过、现仓根已净，非代码缺陷）。② sourceSpan 生产写入方已接线（企业源摄取断言带行级 span，行级血缘最小形态落地）。③ 远期两项经复评维持缓办：事实级快照对比的主要用例已由 checkGate 的 shifts 覆盖，行级血缘已由 sourceSpan.row 落地；完整事实面基线快照待同步批次有真实规模后再评估。
