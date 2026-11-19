@@ -173,13 +173,21 @@
 - **本仓现状**：readiness 是数据就绪（术语/事实/目录/源），不探「模型能不能干本体活」。
 - **建议**：readiness 增第三判据 model_ready（可选探针，一次廉价试调用），失败给具体原因。落点：`readiness.py`。默认关（避免每次探针花钱）。
 
-### P3-1 held claim 式证据绑定（谨慎借鉴）
+### P3-1 血缘（provenance）专项借鉴：决策绑定证据、锚定到字节、引用强制化
 
-对方的 ClaimKey+ClaimSpan+StatementHash「决策绑定本人读到的原文」与本仓逐字可核闸同哲学，但对方做到「决策对象级」。本仓审批候选若未来带证据原文，可借鉴三元组绑定防「批准时看的和生效的不是同一份」。落点：`relation_candidates.py`。**注意**：本仓已有逐字可核闸与决策账本，此为增强非补缺。
+> 应用户要求对血缘域单独展开。总判：对方强在「锚定到字节、绑定到决策、呈现到引用」；本仓强在「推导链与时效治理」（推导账本/双时态/PROV-O），对方完全没有规则级推导账本。借鉴方向是补「文档/数据侧证据锚定」，不是重构本仓体系。
 
-### P3-2 多版本共存+load 级对比（远期）
+**已同构、无需学**（防止重复建设）：推导溯源——本仓 `derivation_edges`+`rule_fires` 两本账、沿边逐层精确撤销（derivation_ledger.py:213-272），对方无；时效治理——双时态 valid_from/until + supersedes 链（knowledge_facts.py:59-88），对方无时态字段；标准化导出——PROV-O（export/prov.py），对方无标准格式；入口诚实闸——逐字可核（admission.py:249-267）。
 
-对方「多版本图数据共存一库+按 load 标记隔离+同版本两 load 对比」适合数据图谱形态；本仓基线 diff 已覆盖术语/规则级，事实级对比可作远期项（当前回滚+重推已闭环）。
+**差距一：审批决策绑定「证据内容哈希」（StatementHash 模式）——价值最高。** 对方人审五类决策（resolve/prop/release/reject/withdraw）每条必带 `ClaimKey(sha256) + ClaimSpan + StatementHash` 三元组（foundry_review_decisions.go:113-119），StatementHash 绑定「**批准人当时读到的原文内容**」；键变更致决策失配时标记 stale 重审，而非静默丢弃（decisions.go:265-271）。本仓 `relation_candidates`/`schema_suggestions` 的 approve 只回填 promoted_term_id（relation_candidates.py:101-134），不绑定「审批时看到的证据内容」——若候选背后的证据文本后来变了，批准仍然生效。落点与影响面：候选表加 `evidence_hash` 列 + 审批入口校验，涉及 `relation_candidates.py`、`schema_suggester.py` 审批端点，影响面小；与逐字可核闸同一哲学，堵「**批准时看的 ≠ 生效时用的**」这个真实治理洞。此为增强非补缺。
+
+**差距二：事实证据的位置锚定（ClaimSpan 模式）。** 对方每条抽取结论锚定到文档的 `section + 字节区间`，引用时可回跳高亮原文。本仓 `assertions_json` 记录了证据断言、admission 做了「存在性」校验，但没有结构化的「在哪个文档哪个区间」——前端 FactExplorer 展示证据时无法定位回原文。落点与影响面：assertions 元数据增可选 `source_span` 字段（不破坏现有 schema），知识前端可做证据回跳；渐进可做。
+
+**差距三：答案逐论断强制引用（citation marker→target）。** 对方 Ask 解码强制「每个引用必须有 marker 与证据、不得重复」（ask.go:560-566），引用恰好三型——实体/属性/文档引文（section+字节区间），Analyst 页面每条结论旁边就是可点的来源。本仓有 `annotateDerivations` 推导标注与 derivation_citation 读面，但「答案句级引用强制落到源文档位置」未见同等硬约束。落点与影响面：MCP `ontology_query` / 知识问答链路的答案组装处，复用现有 assertions 字段输出 citation 列表；治理上可借鉴其「解码期强制校验，缺失即拒」的姿态。
+
+**远期两项（成本高，暂列不动；原 P3-2 并入此处）**：① **行级数据血缘**——对方 S3 快照 key 自带 `ws/connector/table/row` 路径、批次可回放；本仓企业源事实可补「来源行定位」元数据。② **事实级快照对比**——对方 compare 按证据类型逐类 diff 两次装载；本仓基线 diff 目前是术语/规则级，事实级对比可等同步批次有真实规模后再做（当前回滚+重推已闭环）。另：对方「多版本图数据共存一库+按 load 标记隔离」属数据流水线形态产物，不照搬存储形态。
+
+**一句话**：学它的「证据可定位、决策可绑定、引用可强制」，不必学它的「快照存储形态」——本仓 SQLite 单库+账本体系已能以更轻的方式达到同等工作效果。
 
 **不建议照搬**：手写本体永不加载的单行道（本仓人工构建是正当路径）；闭源 sidecar 依赖（与本仓可选依赖惰性加载纪律相反）；compare 只支持同版本两 load 的限制；把本体治理简化为「证据计数+无新 block 违规」（本仓 admission 六维校验更严）。
 
