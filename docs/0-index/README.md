@@ -29,7 +29,7 @@
 | 记忆温度机制（遗忘曲线 + 固化） | ✅ | `temperature.py` | [12-memory-temperature-mechanism](../01-architecture/12-memory-temperature-mechanism.md) |
 | 睡眠整理（记忆巩固 + 梦境） | ✅ | `sleep.py` `sleep_writeback.py` | [13-memory-intelligence-enhancements](../01-architecture/13-memory-intelligence-enhancements.md) |
 | 情感中枢引擎（四层 17 种情感） | ✅ | `cognitive_layers/emotion_context_layer/emotion_hub_engine.py` | [15-emotion-resonance-engine](../01-architecture/15-emotion-resonance-engine.md) |
-| 自我进化引擎（人格/动机/宪法/反思） | 🟡 | `evolution/`（11 文件，遗传引擎部分） | [21-recursive-self-improvement](../01-architecture/21-recursive-self-improvement.md) |
+| 自我进化引擎（人格/动机/宪法/反思） | ✅ | `evolution/` + `agent_core.py`/`chat_pipeline.py` 注入面——E1–E5 已闭环：宪法死端点修复+规则注入行为、动机行动生成按 E3 裁定退役改道（不直接驱动行为）、人格特质注入、反思 lessons 补池 | [21-recursive-self-improvement](../01-architecture/21-recursive-self-improvement.md) |
 | RSI 递归自我进化（8 组件） | ✅ | `evolution/rsi/`（orchestrator/convergence/ratchet 等） | [21-recursive-self-improvement-v1.3](../01-architecture/21-recursive-self-improvement-v1.3-summary.md) |
 | 意图理解（QueryIntent 检测） | ✅ | `memory_layer/query_intent.py`（检测器） | [20-retrieval-context-injection](../01-architecture/20-retrieval-context-injection.md) |
 | 知识库适配 + RAG | ✅ | `knowledge/`（repository/storage/vector_index） | [24-knowledge-isolation-rag](../01-architecture/24-knowledge-isolation-rag.md) |
@@ -45,7 +45,7 @@
 | 消息路由（事件总线） | ✅ | `collaboration/neurflow/` `core/` | [03-message-routing](../01-architecture/03-message-routing.md) |
 | 任务调度（CognitionOrchestrator） | ✅ | `planning/` `scheduler/` | [07-implementation-plan](../01-architecture/07-implementation-plan.md) |
 | 多语言 i18n | ✅ | `language/` + `NeurUI/src/i18n/`（11 语言） | [i18n/README.en](../03-user-guide/i18n/README.en.md) |
-| 检查点/回滚（Agent 会话/工作区） | ⬜ | 无实现（仅工作流定义级版本快照） | [14a-version-control-evolution](../01-architecture/14a-version-control-evolution.md) 标注 |
+| 检查点/回滚（Agent 会话/工作区） | ✅ | `checkpoints/service.py`（restore_snapshot / restore_with_rollback 恢复面，K1）+ `api/app.py` 启动收敛接线（reconcileSwarmRunsAtStartup，K2）+ `api/endpoints/memory/versions.py` 回滚端点（K3）；蜂群 run 续跑（K5）另立项未含 | [14a-version-control-evolution](../01-architecture/14a-version-control-evolution.md) |
 
 ### 工具层
 
@@ -72,7 +72,7 @@
 | 多渠道接入（14+ 渠道） | ✅ | `channels/`（42 py 文件） | [03-message-routing](../01-architecture/03-message-routing.md) |
 | REST API（82 端点模块） | ✅ | `api/endpoints/` | [API_REFERENCE](../02-api/API_REFERENCE.md) |
 | NeurUI 前端（60 页面） | ✅ | `NeurUI/src/pages/` | [UI_FRAMEWORK_GUIDE](../03-user-guide/UI_FRAMEWORK_GUIDE.md) |
-| 上下文管线（活水上下文池） | 🟡 | `context/`（collector/compressor/converter），P1-1 已补齐溢出恢复/真摘要等 | [26-context-pipeline-p1](../01-architecture/26-context-pipeline-p1.md) |
+| 上下文管线（活水上下文池） | ✅ | `context/`（fold_trigger 软抑制 SC-1/2/8 + 时机判读 SC-3、budget_report 折叠后召回率读数 SC-6、compression_doctrine 严格变小）——S6 压缩纪律 + S15 失败冷却 + SC 批 + S6' 折叠基线跨重启已闭环 | [26-context-pipeline-p1](../01-architecture/26-context-pipeline-p1.md) |
 | 上下文缓存与压缩 | ✅ | `context_cache.py`（压缩已收口到 `context/orchestrator.py` 的确定性淘汰） | [CONTEXT_CACHE_COMPRESSION](../01-architecture/CONTEXT_CACHE_COMPRESSION.md) |
 | 移动配对（QR + WebSocket） | ✅ | `api/endpoints/mobile_pairing.py` | [API_REFERENCE](../02-api/API_REFERENCE.md) |
 | 睡眠系统管理（睡眠设置页） | ✅ | `cognitive_layers/memory_layer/sleep.py` | [02-memory-system](../01-architecture/02-memory-system.md) |
@@ -171,6 +171,7 @@
 ### 04-plans 实施计划
 
 - [2026-11-19-enterprise-datasource-mcp-plan.md](../04-plans/2026-11-19-enterprise-datasource-mcp-plan.md) — 企业数据源接入与 MCP 形态方案（备稿待拍板）：ERP/MES/进销存/CRM 作本体数据源的路线选型——直连连接器为主路径（协议/工厂/映射/准入既有设施盘点）、内置 MCP 只读工具组先行（source_list/schema/sync/mapping_check + 治理红线五条）、`mcp_tool` 源类型挂台账缓办（立项条件 + 入模前净检闸）；含六项待拍板（增量游标/实体对齐/值变换闭集/变更准入语义/sync 开放范围/MES 设备层）与 P0–P2 批次建议
+- [2026-11-19-enterprise-sync-reliability-plan.md](../04-plans/2026-11-19-enterprise-sync-reliability-plan.md) — 企业源持续同步可靠性方案（待实施）：补齐连接器主动取数三缺口——同步历史落账（v56 `enterprise_sync_history`，runOnceAsync 统一写点，trigger=manual/interval，读面 admin）、interval 调度全租户覆盖（listSyncTenants+jobId 租户段+运行时单源跟随）、per-source 非阻塞单飞（already_running 如实跳过）；含测试计划/拆卡 A–D/live-verify 验收（源自同日主动取数机制分析的三缺口）
 - [2026-11-19-mobile-executor-research-plan.md](../04-plans/2026-11-19-mobile-executor-research-plan.md) — 手机执行器预研与实施方案（安卓先行）：把手机端从「用户客户端」升级为「agent 的手」——后端经既有移动 WS 通道指挥端上无障碍执行器代用户操作手机；安卓最小闭环 M1–M9 拆卡（按需开关/指令协议/凭据隔离/审批扣住/事件账本/熔断/体检/演示模式/端到端）+ 鸿蒙 R1–R4 能力边界预研 + 安全红线五条 + 与既有审批/账本/调度设施的单源关系；源自 reference_x 对照报告的 P2-1 启发（待拍板排期）
 - [neurova-upgrade-p0-p1-implementation-steps.md](../04-plans/neurova-upgrade-p0-p1-implementation-steps.md) — 升级 P0-P1 实施步骤（TDD）
 - [neurflow-ide-upgrade.md](../04-plans/neurflow-ide-upgrade.md) — NeurFlow IDE 升级计划
