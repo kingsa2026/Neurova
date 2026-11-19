@@ -286,9 +286,8 @@ export struct LoginPage {
           .backgroundColor(this.sm.getColor('overlay_mask'))
           .onClick(() => { this.showServerEdit = false; })
 
-        // 面板层（GlassPanel 尾闭包后不可链属性——外包 Column 承接宽度）
+        // 面板层：不透明 surface 底（用户拍板编辑弹层不用透明玻璃——防下层渐变透成背景条）
         Column() {
-          GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
             Column() {
               Text('编辑终端档案')
                 .fontSize(this.sm.getFontSize('subtitle'))
@@ -332,9 +331,9 @@ export struct LoginPage {
                 onChange: (v: string) => { this.editServerPort = v; }
               })
 
-              // SSL 开关：开自动补 https，关自动补 http
+              // SSL 开关：开自动补 https，关自动补 http（滑动开关）
               Row() {
-                Text('SSL（开 = https，关 = http）')
+                Text('SSL')
                   .fontSize(this.sm.getFontSize('caption'))
                   .fontColor(this.sm.getColor('text_secondary'))
                   .layoutWeight(1)
@@ -366,9 +365,12 @@ export struct LoginPage {
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
-          }
         }
         .width('90%')
+        .padding(20)
+        .borderRadius(16)
+        .backgroundColor(this.sm.getColor('surface'))
+        .border({ width: 1, color: this.sm.getColor('border') })
       }
       .width('100%')
       .height('100%')
