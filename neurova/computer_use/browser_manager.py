@@ -2942,10 +2942,12 @@ class BrowserManager:
 
         def _run() -> Tuple[int, str]:
             try:
-                proc = subprocess.run(
+                # 子进程文本解码走单源（proc_text）：playwright 输出是 UTF-8，
+                # text=True 在中文 Windows 上会按 GBK 解码出错（subprocess 编码棘轮钉点）
+                from neurova.core.proc_text import runText
+
+                proc = runText(
                     [sys.executable, "-m", "playwright", "install", browser],
-                    capture_output=True,
-                    text=True,
                     timeout=self.INSTALL_TIMEOUT_SECONDS,
                 )
                 return int(proc.returncode), f"{proc.stdout or ''}{proc.stderr or ''}"

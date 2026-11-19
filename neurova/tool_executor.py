@@ -332,7 +332,7 @@ ACTION_REFRESH_NOTE = "操作后的画面已实时回传到操作面板（如需
 
 # ── P2-5 跨会话前台输入租约（CONTROLLER_BUSY）──────────────────
 # 鼠标/键盘是全局单例：一个会话正在注入前台输入时，其它会话的前台桌面动作
-# 必须被拒（对齐 ZCode CUA 的 CONTROLLER_BUSY，retry=never）。观察面与
+# 必须被拒：前台输入租约被占用时返回 CONTROLLER_BUSY（retry=never）。观察面与
 # shell/ssh 不持租约。owner=会话键（_somSessionKey 同源）。
 _foregroundLeaseLock = threading.RLock()
 _foregroundLease = {"owner": None}

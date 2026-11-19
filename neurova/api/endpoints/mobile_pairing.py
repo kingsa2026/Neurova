@@ -232,6 +232,9 @@ MAX_CONNECTIONS_PER_USER = protocol.MAX_CONNECTIONS_PER_USER
 # **每进程随机**密钥（接入票据本就进程内单次消费，跨进程失效是既有语义）；
 # 生产环境未配置仍然拒绝启动。
 _dev_ws_secret: Optional[str] = None
+# dev 兜底密钥的懒建双检锁（AGENTS.md §3）：并发首调只铸一次随机密钥。
+# 环境覆盖（NEUROVA_WS_SECRET）每次调用现读，不在此缓存。
+_wsSecretLock = threading.RLock()
 
 
 def _get_ws_secret() -> str:
@@ -254,11 +257,13 @@ def _get_ws_secret() -> str:
                 detail="NEUROVA_WS_SECRET 未配置，生产环境必须设置此环境变量",
             )
         if _dev_ws_secret is None:
-            _dev_ws_secret = _secrets.token_urlsafe(48)
-            logger.warning(
-                "NEUROVA_WS_SECRET 未配置：开发环境改用每进程随机 WS 密钥"
-                "（进程重启后旧凭证失效）。生产部署必须显式配置 NEUROVA_WS_SECRET。"
-            )
+            with _wsSecretLock:
+                if _dev_ws_secret is None:
+                    _dev_ws_secret = _secrets.token_urlsafe(48)
+                    logger.warning(
+                        "NEUROVA_WS_SECRET 未配置：开发环境改用每进程随机 WS 密钥"
+                        "（进程重启后旧凭证失效）。生产部署必须显式配置 NEUROVA_WS_SECRET。"
+                    )
         secret = _dev_ws_secret
 
     return secret

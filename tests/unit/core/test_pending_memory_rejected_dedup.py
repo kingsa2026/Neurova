@@ -21,6 +21,9 @@ def test_legacy_duplicate_rejected_rows_are_converged(tmp_path):
 
     # 造"存量"：撤掉索引后塞入同分区两条 rejected（旧库升级前的形态）
     raw = sqlite3.connect(db)
+    # 迁移版本化（ea8f29e77）后，建库清理挂在版本链上按 user_version 幂等跳过；
+    # 把库降回 v3 之前，重开 store 才会沿真实升级路径重放 legacy 去重/重建索引
+    raw.execute("PRAGMA user_version = 2")
     raw.execute("DROP INDEX IF EXISTS pending_memories_live_fp_idx")
     for i, decided in enumerate((100.0, 200.0)):
         raw.execute(

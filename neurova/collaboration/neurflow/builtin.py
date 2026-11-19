@@ -2189,7 +2189,7 @@ _WEB_FETCH_TIMEOUT_SECONDS = 30
 _LINK_CHECK_LIMIT_DEFAULT = 20
 
 
-def _upstreamData(config: Dict[str, Any], ctx: Dict[str, Any], key: str = "data") -> Any:
+def _upstreamData(config: Dict[str, Any], ctx: Dict[str, Any], key: str) -> Any:
     """取节点输入数据：config 显式给定优先（变量引用此时已被解析器替换），
     否则回退最近一个有输出的上游节点。"""
     value = config.get(key)

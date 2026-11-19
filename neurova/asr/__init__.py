@@ -14,6 +14,10 @@ from neurova.asr.base import ASRBase
 from neurova.asr.manager import ASRConfig, ASRManager
 from neurova.asr.mock_asr import MockASREngine
 from neurova.asr.whisper_engine import WhisperEngine
+# FunASR 无条件导入（审计 §3.5-5：原形是 `__all__.append("FunASREngine")` 动态追加，
+# 静态扫描不可见，名字成了"隐式公开面"。funasr/torch 等重依赖都在引擎方法内惰性
+# 加载，funasr_engine 的模块级 import 全部安全，无条件导入不会失败）。
+from neurova.asr.funasr_engine import FunASREngine
 
 __all__ = [
     "ASRBase",
@@ -21,17 +25,5 @@ __all__ = [
     "ASRConfig",
     "WhisperEngine",
     "MockASREngine",
+    "FunASREngine",
 ]
-
-# 条件导入 FunASR（funasr 依赖在引擎方法内惰性加载，模块本身可安全导入；
-# 审计 §3.5-5：原形是 `try: pass; __all__.append("FunASREngine")`——名字进了
-# __all__ 却从未导入，`from neurova.asr import FunASREngine` 必 ImportError）
-try:
-    from neurova.asr.funasr_engine import FunASREngine
-
-    __all__.append("FunASREngine")
-except ImportError as _e:
-    # funasr_engine 依赖面不可用时保持 fail-soft，但不把不存在的名字留在 __all__
-    import logging
-
-    logging.getLogger(__name__).debug("FunASREngine 不可用（funasr 依赖未装?）: %s", _e)

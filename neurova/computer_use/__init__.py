@@ -27,7 +27,9 @@ logger = get_logger(__name__)
 # 没有这一份声明，"谁能用这个包"只存在于读代码的人的直觉里。
 __all__ = [
     "ComputerUseManager",
+    "KEY_ALIASES",
     "bind_remote_desktop",
+    "foregroundDesktopTools",
     "get_active_remote_desktop",
     "get_computer_use_manager",
     "reset_computer_use_manager",

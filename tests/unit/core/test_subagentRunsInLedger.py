@@ -73,6 +73,10 @@ def _memberAgent(name="蜂群成员", reply="子任务报告", *, hang=False, de
 def _initiator():
     agent = MagicMock()
     agent.current_session_id = SESSION
+    # 台账 user_id 按「属主优先」裁定（51ed34649）：_subagentAccountingUserId
+    # 先读 owner_user_id 再 fallback current_user_id——Mock 的 getattr 永远
+    # 命中自动属性，必须显式给 owner，否则 fallback 分支永不可达。
+    agent.owner_user_id = USER
     agent.current_user_id = USER
     return agent
 
