@@ -539,16 +539,19 @@ class ONNXEmbeddingEngine:
         return vector
 
     def _unreadyReason(self) -> str:
-        """引擎未就绪的原因（点名到缺哪一件，好让调用方把它写进日志而不是留白）。"""
+        """引擎未就绪的原因（点名到缺哪一件，好让调用方把它写进日志而不是留白）。
+
+        用 find_spec 只定位不执行：本函数在 encodeOrNone 的**未就绪日志路径**上被
+        调用，真去 import 会把 sentence_transformers→sklearn→scipy 整条重链拉起来
+        （实测首次 60s+，pytest-timeout 当场判死全量跑）；诊断只需要「装没装」。
+        """
         if self._initialized:
             return "已初始化"
-        try:
-            import onnxruntime  # noqa: F401
-        except ImportError:
+        import importlib.util
+
+        if importlib.util.find_spec("onnxruntime") is None:
             return "onnxruntime 未安装"
-        try:
-            import sentence_transformers  # noqa: F401
-        except ImportError:
+        if importlib.util.find_spec("sentence_transformers") is None:
             return "onnxruntime/sentence_transformers 均缺或模型未加载"
         return "后端未加载"
 
