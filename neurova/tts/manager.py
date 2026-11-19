@@ -12,6 +12,7 @@ shutdown 并丢弃实例缓存，当前引擎切 fallback 链下一轻量引擎�
 后续请求由轻引擎立即服务。默认关闭，行为与历史完全一致。
 """
 
+import os
 import time
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Literal, Optional
@@ -28,8 +29,10 @@ from neurova.tts.sapi5_tts import SAPI5TTS
 
 logger = get_logger(__name__)
 
-# Fallback 引擎优先级（默认链；可用 TTSConfig.fallback_chain 覆盖，P1-12）
-FALLBACK_CHAIN = ["moss-nano", "edge-tts", "sapi5", "mock"]
+# Fallback 引擎优先级（默认链；可用 TTSConfig.fallback_chain 覆盖，P1-12）。
+# mock 不进默认链——对齐 ASR 补课 4.1（假音频会污染上层）；仅 NEUROVA_ENV=test
+# 或显式 engine="mock" 时参与（见 fallback_chain 属性）。
+FALLBACK_CHAIN = ["moss-nano", "edge-tts", "sapi5"]
 
 # 本地大模型引擎（GB 级常驻，TTL 释放的对象；在线/系统引擎零常驻成本不释放）
 _HEAVY_ENGINES = frozenset({"moss-nano"})
@@ -146,7 +149,11 @@ class TTSManager:
                     seen.append(name)
             if seen:
                 return seen
-        return list(FALLBACK_CHAIN)
+        chain = list(FALLBACK_CHAIN)
+        # 测试态本地追加 mock 到链尾（不改写模块级常量）——对齐 ASR 同款口径。
+        if os.environ.get("NEUROVA_ENV") == "test":
+            chain.append("mock")
+        return chain
 
     @property
     def is_initialized(self) -> bool:
@@ -169,6 +176,7 @@ class TTSManager:
         result = {
             "engine": self._engine_name,
             "initialized": self._initialized,
+            "mock_active": self._engine_name == "mock",
             "available_engines": self._available_engines.copy(),
         }
         if self._engine and hasattr(self._engine, "stats"):
@@ -196,6 +204,10 @@ class TTSManager:
             success = await self._initialize_engine(engine_name)
             if success:
                 self._fallback_index = self.fallback_chain.index(engine_name)
+                if engine_name == "mock":
+                    logger.warning(
+                        "TTS 落到 mock——输出为占位音频（测试态/显式指定），非真人声"
+                    )
                 return True
             self._available_engines[engine_name] = False
 

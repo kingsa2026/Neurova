@@ -254,7 +254,7 @@ class AgentConfig:
         tts_pitch: float = 1.0,  # 音调倍率（0.5-2.0，仅 edge-tts 支持，映射为 "+XHz"）
         # ASR 配置
         enable_asr: bool = False,  # 是否启用 ASR
-        asr_engine: str = "mock",  # ASR 引擎类型 (funasr/whisper/mock)
+        asr_engine: str = "auto",  # ASR 引擎类型 (funasr/remote_whisper/whisper/mock/auto)；mock 仅测试/显式指定（2026-11-19 前默认 mock＝假识别，已改 auto）
         asr_voice: str = "zh",  # 语言
         asr_auto_download: bool = True,  # 是否自动下载模型
         # 活水上下文池配置

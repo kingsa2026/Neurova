@@ -72,6 +72,7 @@ class ASRManager:
         result = {
             "engine": self._engine_name,
             "initialized": self._initialized,
+            "mock_active": self._engine_name == "mock",
             "available_engines": self._available_engines.copy(),
         }
         if self._engine and hasattr(self._engine, "stats"):
@@ -88,10 +89,13 @@ class ASRManager:
         3. 失败时自动 fallback
         """
         if self._config.engine == "auto":
-            # 补课 4.1：测试态追加 mock 到链尾——生产 mock 返回假识别会污染上层
-            if os.environ.get("NEUROVA_ENV") == "test" and "mock" not in FALLBACK_CHAIN:
-                FALLBACK_CHAIN.append("mock")
-            return await self._initialize_with_fallback()
+            # 补课 4.1：测试态追加 mock 到链尾——生产 mock 返回假识别会污染上层。
+            # 追加只发生在本次初始化的**本地链副本**，不改写模块级 FALLBACK_CHAIN
+            #（原实现原地 append 全局列表且永不恢复，同进程后续实例全被污染
+            # ——fullrepo 审计 2026-11-18 D 组，动态探针实证）。
+            return await self._initialize_with_fallback(
+                append_mock=os.environ.get("NEUROVA_ENV") == "test"
+            )
         else:
             # 显式指定本地 whisper 同样过同意门（拒绝优于静默下载）
             if (
@@ -102,13 +106,17 @@ class ASRManager:
                 return False
             return await self._initialize_engine(self._config.engine)
 
-    async def _initialize_with_fallback(self) -> bool:
+    async def _initialize_with_fallback(self, append_mock: bool = False) -> bool:
         """按 fallback 链初始化。
 
         本地 whisper 是管理员 opt-in（local_whisper_consent）：未同意时
         链中跳过（模型 ~140MB+torch 下载需用户知情同意），同意后自动参与。
+        mock 仅在 append_mock（测试态/显式指定）时追加到**本地链副本**尾，
+        不改写模块级 FALLBACK_CHAIN。
         """
         chain = list(FALLBACK_CHAIN)
+        if append_mock:
+            chain.append("mock")
         if not self._config.local_whisper_consent and "whisper" in chain:
             chain.remove("whisper")
             logger.info("本地 whisper 未获用户同意，链中跳过（funasr→remote_whisper）")
@@ -124,6 +132,10 @@ class ASRManager:
                 if self._engine_name != engine_name or not self._initialized:
                     self._engine_name = engine_name
                     self._initialized = True
+                if engine_name == "mock":
+                    logger.warning(
+                        "ASR 落到 mock——转写为占位结果（测试态/显式指定），非真实语音识别"
+                    )
                 return True
             self._available_engines[engine_name] = False
 
