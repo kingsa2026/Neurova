@@ -11,7 +11,7 @@
 1. **方向成立**：本仓成员模型是「名册 `user_id` → 进程内 Agent 实例 → `_run_member` 里一句 `agent.chat()`」。接入外部编码代理的最小切口，是让 `SwarmManager._resolve_agent` 对带外部执行体标记的名册成员返回一个 **chat 兼容适配器**；事件回灌、审批、台账、轨迹、数据围栏、进度流经现有 spawn 主链路自动生效，**不建第二套编排管线**（修复教义第 6 条）。
 2. **生态现实**：ACP v1 稳定（传输仅 stdio），v2 草案中；官方 registry 已收录 46 个 agent。七家目标工具中，**OpenCode / Gemini CLI / Qoder / CodeBuddy 原生支持**，**Claude Code / Codex 经官方组织适配器接入**，**Trae 暂无可核验的公开支持**（以「插件形态」预留，见 §4.10）。
 3. **角色模型**：Neurova 扮演 **ACP Client**（编排方/授权方），外部编码代理扮演 **ACP Agent**（被驱动的子进程/远端进程）。这与 Zed/JetBrains 把 ACP agent 接给「单个用户在编辑器里用」不同——本仓把它们编入**受治理的多代理团队**（任务书、验收门、审批链、房间协作、全量台账），是 ACP 生态尚无的编排层玩法。
-4. **撞名澄清（必读）**：仓内已有 `neurova/agent/protocols/acp_runtime.py` + `team.py AgentTeam` + `acp_api.py`，那是**进程内 AgentMessage 消息总线**（自研 Agent Communication Protocol），与 Zed 的 Agent Client Protocol **同名不同物**，且该路线绕过 Swarm 治理/台账/验收——**不作为本方案主路径**。新模块命名避开 `acp_` 前缀歧义，落 `neurova/agent/external/`。
+4. **撞名澄清（必读）**：仓内已有 `neurova/agent/protocols/acp_runtime.py` + `team.py AgentTeam` + `acp_api.py`，那是**进程内 AgentMessage 消息总线**（自研 Agent Communication Protocol），与 Zed 的 Agent Client Protocol **同名不同物**，且该路线绕过 Swarm 治理/台账/验收——**不作为本方案主路径**。新模块命名经用户拍板（2026-11-19）：**统一以 `neuacp` 为准**，落 `neurova/agent/neuacp/`，类名以 `Neuacp` 前缀（`NeuacpMemberAdapter` 等），与仓内 `acp_runtime` 总线划清界限。
 
 ---
 
@@ -79,17 +79,17 @@ SwarmManager.spawn（neurova/agent/swarm.py:552）── 治理三明治/数据�
 _resolveTeamMember → 名册成员带 executor 标记
    ▼
 _resolve_agent 切口（swarm.py:1931）：executor.kind ∈ {acp, plugin}
-   → 返回 ExternalMemberAdapter（chat 兼容鸭子面），不再取进程内 Agent
+   → 返回 NeuacpMemberAdapter（chat 兼容鸭子面），不再取进程内 Agent
    ▼
 _run_member（swarm.py:2178）→ adapter.chat(task_text, stream=True,
    session_id=member_session_id, metadata={"event_emitter": ...})
    ▼
-ExternalMemberAdapter（新，neurova/agent/external/）
-   ├─ AcpStdioExecutor：JSON-RPC 2.0 over stdio（ACP v1）
+NeuacpMemberAdapter（新，neurova/agent/neuacp/）
+   ├─ NeuacpStdioExecutor：JSON-RPC 2.0 over stdio（ACP v1）
    │    initialize → session/new → session/prompt（任务书文本）
    │    ← session/update（流式块/工具调用）→ emitter("content"/"reasoning")
    │    ← session/request_permission → requestRunApproval（审批链）
-   ├─ PluginCliExecutor（预留）：行协议文本插件（Trae/ZCode 等）
+   ├─ NeuacpPluginExecutor（预留）：行协议文本插件（Trae/ZCode 等）
    ▼
 session/prompt 返回 → 适配器返回 {"text": ...} → _extract_text
    ▼
@@ -103,19 +103,19 @@ closeSubagentRun + subagent_completed 广播（不变）
 ### 3.2 模块结构（新增）
 
 ```
-neurova/agent/external/
+neurova/agent/neuacp/     # 模块名经用户拍板（2026-11-19）：统一以 neuacp 为准
 ├── __init__.py
-├── executor.py          # ExternalExecutor 协议 + ExecutorSession 生命周期管理
-├── acp_client.py        # ACP v1 JSON-RPC over stdio 客户端（帧层复用 runner_bridge 骨架）
-├── acp_executor.py      # AcpStdioExecutor：session/prompt/update/permission 映射
-├── acp_member.py        # ExternalMemberAdapter：swarm 成员鸭子面（chat/config.name/llm_client）
-├── plugin_executor.py   # PluginCliExecutor：通用 CLI 行协议插件（P2，Trae/ZCode 预留）
-├── catalog.py           # 工具目录：内置七家预设 + 官方 registry 拉取缓存 + 本地命令探测
-└── process_pool.py      # 外部代理进程池（按 tool+command+cwd 复用进程；session 每 run 一个）
-tests/unit/agent/external/   # 单元测试（假 ACP agent 用测试内 stdio 子进程）
+├── executor.py          # NeuacpExecutor 协议 + 会话生命周期管理
+├── acp_client.py        # NeuacpClient：ACP v1 JSON-RPC over stdio 客户端（帧层复用 runner_bridge 骨架）
+├── acp_executor.py      # NeuacpStdioExecutor：session/prompt/update/permission 映射
+├── acp_member.py        # NeuacpMemberAdapter：swarm 成员鸭子面（chat/config.name/llm_client）
+├── plugin_executor.py   # NeuacpPluginExecutor：通用 CLI 行协议插件（P2，Trae/ZCode 预留）
+├── catalog.py           # NeuacpCatalog：工具目录（内置七家预设 + 官方 registry 拉取缓存 + 本地命令探测）
+└── process_pool.py      # NeuacpProcessPool：外部代理进程池（按 tool+command+cwd 复用进程；session 每 run 一个）
+tests/unit/agent/neuacp/   # 单元测试（假 ACP agent 用测试内 stdio 子进程）
 ```
 
-命名纪律：模块/类 PascalCase、函数 camelCase；**不用** `acp_runtime`（已被仓内进程内总线占用）。
+命名纪律：模块/类 PascalCase、函数 camelCase；包名/前缀统一 `neuacp`，**不复用** `acp_runtime`（已被仓内进程内总线占用）。
 
 ---
 
@@ -123,7 +123,7 @@ tests/unit/agent/external/   # 单元测试（假 ACP agent 用测试内 stdio �
 
 ### 4.1 团队名册成员模型扩展
 
-`neurova/api/endpoints/teams_api.py` 的 `members_detail` 单条结构（现：`user_id/name/role/prompt/joined_at`，add_members :288-297）增加可选 `executor` 字段（JSON 落盘 `_STORE_FILE`，向后兼容——无 `executor` 即内置成员，行为零漂移）：
+`neurova/api/endpoints/teams_api.py` 的 `members_detail` 单条结构（现：`user_id/name/role/prompt/joined_at`，add_members :288-297）增加可选 `executor` 字段（JSON 落盘 `_STORE_FILE`，向后兼容——无 `executor` 即内置成员，行为零漂移）。**执行体适配器落 `neurova/agent/neuacp/`（命名经用户拍板）**：
 
 ```json
 {
@@ -156,11 +156,11 @@ tests/unit/agent/external/   # 单元测试（假 ACP agent 用测试内 stdio �
 - `permission_mode`：`chain`（映射审批链，默认）| `auto`（仅 L0，且须 admin 建成员时显式勾选）。
 - `remote`：`transport=ssh` 时的 `{host, port, user, key_ref}`；`key_ref` 指向凭据面，不落明文。
 
-请求模型扩展：`MemberBatchAdd`（teams_api.py:78）增加 `executor: Optional[ExternalExecutorSpec]`；**添加外部成员限 admin 角色**（外部成员涉及本机进程拉起与凭据注入，按核心原则第 9 条须显式受控；内置成员维持现状）。新增 `DELETE /{team_id}/members/{member_id}`（现名册无移除入口，前端亦无）。
+请求模型扩展：`MemberBatchAdd`（teams_api.py:78）增加 `executor: Optional[NeuacpExecutorSpec]`；**添加外部成员限 admin 角色**（外部成员涉及本机进程拉起与凭据注入，按核心原则第 9 条须显式受控；内置成员维持现状）。新增 `DELETE /{team_id}/members/{member_id}`（现名册无移除入口，前端亦无）。
 
 ### 4.2 `_resolve_agent` 切口（唯一主链路改动点）
 
-`neurova/agent/swarm.py:1931 _resolve_agent` 前置一步：按 `run.team_id` 查名册，若命中成员带 `executor` 标记，则返回 `ExternalMemberAdapter` 实例而非进程内 Agent。适配器鸭子面（与 `_run_member`/验收/评审的既有约定严格对齐，见核实报告）：
+`neurova/agent/swarm.py:1931 _resolve_agent` 前置一步：按 `run.team_id` 查名册，若命中成员带 `executor` 标记，则返回 `NeuacpMemberAdapter` 实例而非进程内 Agent。适配器鸭子面（与 `_run_member`/验收/评审的既有约定严格对齐，见核实报告）：
 
 1. `async chat(user_input, *, stream=True, session_id, metadata)` → 返回 `str | {"text": str}`：
    - 必须消费 `metadata["event_emitter"]`，以 `emitter("content", chunk)`（可选 `emitter("reasoning", chunk)`）同步回调产出块——流式事件、卡死看门狗（`swarm.py:2011 _stallWatchdog` 读 `run.last_progress_at`）、失败交接缓冲（`contentBuffer`）都依赖它；
@@ -174,7 +174,7 @@ tests/unit/agent/external/   # 单元测试（假 ACP agent 用测试内 stdio �
 
 **不改**：`spawn`、`_run_member`、`_broadcast`、事件账本、轨迹、围栏、验收/评审/合入、`closeSubagentRun`。
 
-### 4.3 ACP stdio 客户端（acp_client.py）
+### 4.3 ACP stdio 客户端（neuacp/acp_client.py，`NeuacpClient`）
 
 帧层/进程层复用 `neurova/channels/runner_bridge.py` 骨架，帧内协议换成 ACP v1：
 
@@ -185,7 +185,7 @@ tests/unit/agent/external/   # 单元测试（假 ACP agent 用测试内 stdio �
 - 监督：崩溃回调 → 有限重启（对齐 `ChannelProcessSupervisor`，max_restarts=3）；stderr 泵落轨迹。
 - 超时：prompt 级超时 = run budget；单请求级超时（initialize 等）30s（对齐 RunnerHost.sendRequest 默认）。
 
-### 4.4 AcpStdioExecutor：事件与权限映射（acp_executor.py)
+### 4.4 NeuacpStdioExecutor：事件与权限映射（neuacp/acp_executor.py）
 
 | ACP 侧 | 本仓侧 |
 |--------|--------|
@@ -223,7 +223,7 @@ tests/unit/agent/external/   # 单元测试（假 ACP agent 用测试内 stdio �
 ### 4.8 远程形态（transport=ssh）
 
 - 现阶段：本机经 SSH 在远端主机拉起同一 ACP 进程，stdio 经 SSH 隧道（`ssh -o BatchMode=yes host -- <command>`），复用配对档三的 SSH 凭据代管理经验（`key_ref` 指向凭据面）。
-- ACP 远程 Streamable HTTP RFD 定稿后，再增 `transport=http` 实现（接口已由 ExternalExecutor 协议预留），**不在本期实现**。
+- ACP 远程 Streamable HTTP RFD 定稿后，再增 `transport=http` 实现（接口已由 `NeuacpExecutor` 协议预留），**不在本期实现**。
 
 ### 4.9 工具目录（catalog.py）
 
@@ -243,17 +243,17 @@ registry 拉取仅作**扩编发现**（新工具浮现时提示可加），不�
 
 ### 4.10 插件形态（plugin_executor.py，Trae/ZCode 预留）
 
-`ExternalExecutor` 协议统一两种形态：
+`NeuacpExecutor` 协议统一两种形态：
 
 ```
-class ExternalExecutor(Protocol):
+class NeuacpExecutor(Protocol):
     async def start(self, ctx: SessionContext) -> None: ...      # 握手/建会话
-    async def prompt(self, task_text: str, emitter, on_permission) -> ExecutorResult: ...
+    async def prompt(self, task_text: str, emitter, on_permission) -> NeuacpExecResult: ...
     async def cancel(self) -> None: ...
     async def close(self) -> None: ...
 ```
 
-`PluginCliExecutor` 约定（对无 ACP 但有 headless CLI 的工具）：spawn CLI 子进程，stdin 写任务文本，stdout 按行读 JSON 事件（`{"type":"chunk"|"tool"|"permission"|"done"|"error", ...}`），语义与 ACP 映射表（§4.4）一致。**这是接口预留，不是承诺**：Trae 具体接入前必须查证其 CLI 是否具备非交互/headless 模式与事件输出能力（P2 调研卡 T0）；查证不具备则如实登记「无法接入原因」，不硬造。
+`NeuacpPluginExecutor` 约定（对无 ACP 但有 headless CLI 的工具）：spawn CLI 子进程，stdin 写任务文本，stdout 按行读 JSON 事件（`{"type":"chunk"|"tool"|"permission"|"done"|"error", ...}`），语义与 ACP 映射表（§4.4）一致。**这是接口预留，不是承诺**：Trae 具体接入前必须查证其 CLI 是否具备非交互/headless 模式与事件输出能力（P2 调研卡 T0）；查证不具备则如实登记「无法接入原因」，不硬造。
 
 ### 4.11 配置开关
 
@@ -282,7 +282,7 @@ class ExternalExecutor(Protocol):
 2. 新增「移除成员」按钮 → `DELETE /teams/{id}/members/{member_id}`（后端 §4.1 同步新增）。
 3. 「添加成员」弹窗拆两档：**内置成员**（现状交互不变）与**外部编码代理**（新增表单，见 5.2）。
 
-### 5.2 外部成员配置表单（新组件 `TeamExternalMemberForm.vue`）
+### 5.2 外部成员配置表单（新组件 `TeamNeuacpMemberForm.vue`）
 
 字段（与 §4.1 契约一一对应）：
 
@@ -352,9 +352,9 @@ class ExternalExecutor(Protocol):
 
 | 卡 | 内容 | 主要落点 | 红灯测试点 | live-verify 判据 |
 |----|------|----------|------------|------------------|
-| A1 | `ExternalExecutor` 协议 + `AcpStdioClient` 帧层（JSON-RPC over stdio、initialize 握手、版本协商 fail-closed、崩溃回调、UTF-8/编码纪律） | `neurova/agent/external/acp_client.py` | 假 ACP agent（测试内子进程）握手成功/版本不兼容拒绝/EOF 崩溃上报 | — |
-| A2 | `AcpStdioExecutor`：session/new→prompt→update 流→文本返回；content/reasoning → emitter | `acp_executor.py` | 假 agent 回放 update 流，断言 emitter 收到等价块序列、返回文本正确 | — |
-| A3 | `ExternalMemberAdapter` 鸭子面（chat/config.name/超时/错误文本约定） | `acp_member.py` | 适配器对 `_run_member` 调用形态的契约测试（stream=True、metadata.event_emitter、budget 内返回） | — |
+| A1 | `NeuacpExecutor` 协议 + `NeuacpClient` 帧层（JSON-RPC over stdio、initialize 握手、版本协商 fail-closed、崩溃回调、UTF-8/编码纪律） | `neurova/agent/neuacp/acp_client.py` | 假 ACP agent（测试内子进程）握手成功/版本不兼容拒绝/EOF 崩溃上报 | — |
+| A2 | `NeuacpStdioExecutor`：session/new→prompt→update 流→文本返回；content/reasoning → emitter | `neuacp/acp_executor.py` | 假 agent 回放 update 流，断言 emitter 收到等价块序列、返回文本正确 | — |
+| A3 | `NeuacpMemberAdapter` 鸭子面（chat/config.name/超时/错误文本约定） | `neuacp/acp_member.py` | 适配器对 `_run_member` 调用形态的契约测试（stream=True、metadata.event_emitter、budget 内返回） | — |
 | A4 | `_resolve_agent` 切口：名册 executor 成员返回适配器；`NEUROVA_EXTERNAL_AGENTS_ENABLED` off 时拒绝并诚实报错 | `swarm.py:1931` 前置分支 | 开关 off→spawn 拒绝；on→解析出适配器；内置成员路径零变化（A/B） | — |
 | A5 | 名册 executor 字段 + admin 门 + 移除成员端点 | `teams_api.py` | executor 字段落盘回读；非 admin 加外部成员 403；移除成员后名册更新 | — |
 | A6 | 端到端：建队→加 opencode 外部成员→spawn 派小任务→流式→候选→台账 completed | 全链 | 集成测试（真 opencode 子进程，标记 e2e） | 真后端 9527（.venv、清代理变量）+ 真 `opencode acp`：subagent_chunk 上屏、台账 completed、无 [ERROR] |
@@ -366,9 +366,9 @@ class ExternalExecutor(Protocol):
 | B1 | permission 映射：`session/request_permission` → `requestRunApproval`；denied 回注会话；L 分级 | `acp_executor.py` | 假 agent 发 permission 请求→断言审批单创建、denied 后 agent 收到拒绝、L2 上房间卡 |
 | B2 | 工具调用事件镜像进 span 轨迹 + H-4 账本 | `acp_executor.py` + `swarm.py _logRunEvent` | update(tool_call) 后账本/轨迹出现对应事件行 |
 | B3 | `session/cancel` 对接 cancelRun；进程池上限/空闲回收/崩溃重启 | `process_pool.py` | 取消后 agent 进程 session 终止；超限排队；崩溃后有限重启计数 |
-| B4 | catalog + test + status 三个 admin 端点（内置预设 + registry 缓存 + which 探测） | `catalog.py` + `api/endpoints/external_agents_api.py` | registry 失联降级内置清单；test 端点对假命令返回握手错误原文 |
+| B4 | catalog + test + status 三个 admin 端点（内置预设 + registry 缓存 + which 探测） | `neuacp/catalog.py` + `api/endpoints/neuacp_admin_api.py` | registry 失联降级内置清单；test 端点对假命令返回握手错误原文 |
 | B5 | Claude Code / Codex 接入（npx 适配器；catalog 预设 + 文档 + 测试连接实测） | `catalog.py` | 各自真适配器握手测试（标记 e2e，本机无 Node 时 skip 并如实标注） |
-| B6 | 前端：TeamPage 名册增强 + TeamExternalMemberForm + acp/external-agents API 模块 + admin 门 | `TeamPage.vue`、`TeamExternalMemberForm.vue`、`api/modules/externalAgents.ts`、`types/agent.ts` | vitest：表单校验/提交 payload/徽标渲染；vue-tsc 0 错 |
+| B6 | 前端：TeamPage 名册增强 + TeamNeuacpMemberForm + neuacp API 模块 + admin 门 | `TeamPage.vue`、`TeamNeuacpMemberForm.vue`、`api/modules/neuacp.ts`、`types/agent.ts` | vitest：表单校验/提交 payload/徽标渲染；vue-tsc 0 错 |
 | B7 | i18n 25-35 键 ×11 locale | `src/i18n/locales/*.ts` | locale-consistency 全绿 |
 
 ### P2 扩编与远程
@@ -377,7 +377,7 @@ class ExternalExecutor(Protocol):
 |----|------|------|
 | C1 | Qoder / CodeBuddy 接入（原生 `--acp`，catalog 预设 + 实测） | 本机安装对应 CLI |
 | C2 | SSH 远程 transport（隧道跑 stdio；key_ref 凭据面接线；remote 字段） | 凭据面按 agent_id 作用域取 SSH key |
-| C3 | Trae 插件形态调研 +（若可行）PluginCliExecutor 实现 | **T0 调研先行**：Trae CLI 是否有 headless/非交互模式与结构化输出；无则登记不可接入原因 |
+| C3 | Trae 插件形态调研 +（若可行）`NeuacpPluginExecutor` 实现 | **T0 调研先行**：Trae CLI 是否有 headless/非交互模式与结构化输出；无则登记不可接入原因 |
 | C4 | 反向 MCP：本仓工具面经自建 MCP server 暴露给外部编码代理（复用 `mcp_ontology_server.py` 双鉴权先例） | 另批细化 |
 | C5 | ACP 远程 HTTP transport（RFD 定稿后） | 上游 v1 纳入远程传输 |
 
@@ -385,7 +385,7 @@ class ExternalExecutor(Protocol):
 
 ## 8. 测试与验收
 
-- **单元**（tests/unit/agent/external/）：帧编解码、握手协商、update 流映射、permission 映射、适配器鸭子面契约、名册 executor 解析、开关行为、进程池上限/回收。假 ACP agent = 测试内可执行脚本子进程（真 stdio，非 mock 对象冒充——遵守教义第 3 条禁例）。
+- **单元**（tests/unit/agent/neuacp/）：帧编解码、握手协商、update 流映射、permission 映射、适配器鸭子面契约、名册 executor 解析、开关行为、进程池上限/回收。假 ACP agent = 测试内可执行脚本子进程（真 stdio，非 mock 对象冒充——遵守教义第 3 条禁例）。
 - **集成**：名册→spawn→适配器→假 agent→候选→台账全链；审批请求→审批单→裁决回注。
 - **A/B 纪律**：共享文件（swarm.py/teams_api.py）改动前后全量比对失败集合（patch 法，不用 stash），预存失败不算回归、新增失败才算。
 - **live-verify**：真后端（`.venv\Scripts\python.exe`、`create_app --factory`、清代理变量、[ERROR]=0、`/v1/providers` 注册行在）+ 真 OpenCode/Gemini CLI 跑通「建队→外部成员→派活→流式上屏→验收→台账 completed」；审批链验一个 L1 请求的人工批准回注。
