@@ -78,6 +78,22 @@ export struct SessionListPage {
     return items;
   }
 
+  /** 新对话菜单项：先选 agent（写入当前 agent），再进对话页新建会话 */
+  private newSessionMenuItems(): MenuElement[] {
+    const items: MenuElement[] = [];
+    for (const a of this.agents) {
+      const item: MenuElement = {
+        value: a.name,
+        action: () => {
+          this.agentsStore.switchAgent(a.id);
+          this.newSession();
+        }
+      };
+      items.push(item);
+    }
+    return items;
+  }
+
   aboutToDisappear(): void {
     this.bus.off('chat:sessions-changed', this.sessionsRefreshHandler);
   }
@@ -224,6 +240,8 @@ export struct SessionListPage {
 
           IconBtn({ name: 'search', onTap: () => { this.showSearch = !this.showSearch; } })
 
+          // 新对话：先弹 agent 选择菜单（用户拍板），选定后再进对话页；
+          // agents 未加载成功时兜底直接进入（按当前默认 agent）
           Button() {
             Text('＋ 新对话')
               .fontSize(13)
@@ -233,8 +251,11 @@ export struct SessionListPage {
           .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
           .height(34)
           .margin({ left: 8 })
+          .bindMenu(this.newSessionMenuItems())
           .onClick(() => {
-            this.newSession();
+            if (this.agents.length === 0) {
+              this.newSession();
+            }
           })
         }
         .width('100%')

@@ -425,12 +425,13 @@ export struct ChatPage {
     this.loadDrawerSessions();
   }
 
-  /** 拉取会话摘要 + 归档列表（归档失败仅记日志，不阻塞主列表） */
+  /** 拉取会话摘要 + 归档列表（归档失败仅记日志，不阻塞主列表）。
+   * 抽屉只展示当前 agent 的会话历史（用户拍板：归属哪个 agent 就只看该 agent 的对话） */
   private async loadDrawerSessions(): Promise<void> {
     try {
       const res = await this.api.sessions.listAll('');
       if (res.code === 0 && res.data) {
-        this.drawerSessions = res.data.sessions;
+        this.drawerSessions = res.data.sessions.filter((s: ChatSession) => s.agent_id === this.currentAgentId);
       }
     } catch (e) {
       this.msg.error('会话列表加载失败：' + (e as Error).message);
@@ -438,7 +439,7 @@ export struct ChatPage {
     try {
       const arch = await this.api.sessions.listArchived('');
       if (arch.code === 0 && arch.data) {
-        this.archivedSessions = arch.data.sessions;
+        this.archivedSessions = arch.data.sessions.filter((s: ChatSession) => s.agent_id === this.currentAgentId);
       }
     } catch (e) {
       this.logger.warn(TAG, '归档会话加载失败', e as Error);
@@ -500,7 +501,7 @@ export struct ChatPage {
     return groups;
   }
 
-  /** 抽屉内点击会话：切换当前会话并拉取历史 */
+  /** 抽屉内点击会话：切换当前会话并拉取历史（当前 agent 跟随会话归属，抽屉过滤口径一致） */
   private switchToSession(s: ChatSession): void {
     if (s.id === this.sessionId) {
       this.drawerOpen = false;
@@ -508,6 +509,9 @@ export struct ChatPage {
     }
     this.sessionId = s.id;
     this.sessionTitle = s.title;
+    if (s.agent_id !== '') {
+      this.currentAgentId = s.agent_id;
+    }
     this.fromList = true;
     this.drawerOpen = false;
     this.messages = [];
