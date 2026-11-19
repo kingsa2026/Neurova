@@ -56,6 +56,15 @@ CREATE INDEX IF NOT EXISTS idx_enterprise_sync_history
     ON enterprise_sync_history(tenant_id, source_id, started_at);
 """
 
+#: v57：企业源租户级共享策略（可靠性方案 §8.3-P2，2026-11-19 拍板全量实施）——
+#: enterprise_source_configs 加 share_tenants_json（目标租户 id 列表，JSON 数组）。
+#: 投影式复制：连接器凭据属源租户，目标租户不独立拉取——源租户每轮拉取成功后，
+#: 同一批断言投影到目标租户分区（qualifier.shared_from 血缘注记，内容键按租户分区各自幂等）。
+_SCHEMA_V57_SHARE_TENANTS = """
+ALTER TABLE enterprise_source_configs
+    ADD COLUMN share_tenants_json TEXT NOT NULL DEFAULT '[]';
+"""
+
 #: D3 单源单飞：`(tenant_id, source_id)` → 进程内锁。非阻塞 try-acquire，
 #: 拿不到＝同源已有一轮在跑，第二轮如实 `already_running` 跳过（不排队、不并发双拉）。
 #: 进程内锁覆盖单体单进程部署；多 worker 互斥不在本批（方案 §2 非目标）。
@@ -257,14 +266,18 @@ class EnterpriseIngestor:
         self._lock = threading.RLock()
 
     def ingestBatch(self, descriptor: Dict[str, Any], rows: List[Dict[str, Any]],
-                    cursorToken: str = "") -> Dict[str, Any]:
+                    cursorToken: str = "", tenantOverride: str = "",
+                    originTenant: str = "") -> Dict[str, Any]:
         """一批源行 → 映射 → 批量准入。返回 {admitted, rejected, findings}。
 
         - 每行一条 AdmissionRequest（activityKind=import，mediumRef=source:<id>:<cursor>）；
         - 坏一行只退它自己（admitBatch 语义），finding 留名；
-        - 幂等：内容键去重由咽喉承担，重放不产生重复事实。
+        - 幂等：内容键去重由咽喉承担，重放不产生重复事实；
+        - tenantOverride/originTenant（P2 投影式复制）：把同一批断言投影到目标
+          租户分区——租户取 override，qualifier.shared_from 注记血缘；
+          内容键按租户分区各自幂等。
         """
-        tenantId = str(descriptor.get("tenantId") or "default")
+        tenantId = str(tenantOverride or descriptor.get("tenantId") or "default")
         sourceId = str(descriptor.get("sourceId") or "")
         from neurova.knowledge.foundation.admission import AdmissionRequest
 
@@ -280,6 +293,9 @@ class EnterpriseIngestor:
                 continue
             statement = "%s %s %s" % (mapped["subjectLabel"], mapped["predicateTermId"],
                                       mapped["objectTerm"])
+            qualifier = dict(mapped.get("qualifier") or {})
+            if originTenant:
+                qualifier["shared_from"] = originTenant
             requests.append(AdmissionRequest(
                 agentId=str(descriptor.get("agentId") or "default"),
                 tenantId=tenantId,
@@ -287,7 +303,7 @@ class EnterpriseIngestor:
                 predicateTermId=mapped["predicateTermId"],
                 objectTerm=mapped["objectTerm"],
                 content=statement,
-                qualifier=mapped["qualifier"],
+                qualifier=qualifier,
                 validFrom=mapped["validFrom"],
                 validUntil=mapped["validUntil"],
                 sourceCreatedAt=mapped.get("sourceCreatedAt"),
@@ -322,21 +338,52 @@ class EnterpriseIngestor:
         stamp = self._now()
         with self._store._lock, self._store._conn:
             existing = self._store._conn.execute(
-                "SELECT created_at FROM enterprise_source_configs"
+                "SELECT created_at, share_tenants_json FROM enterprise_source_configs"
                 " WHERE tenant_id = ? AND source_id = ?",
                 (str(tenantId or "default"), str(sourceId or ""))).fetchone()
             self._store._conn.execute(
                 "INSERT OR REPLACE INTO enterprise_source_configs (source_id, tenant_id,"
-                " descriptor_json, cursor, enabled, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?)",
+                " descriptor_json, cursor, enabled, created_at, updated_at,"
+                " share_tenants_json)"
+                " VALUES (?,?,?,?,?,?,?,?)",
                 (str(sourceId or ""), str(tenantId or "default"),
                  json.dumps(descriptor, ensure_ascii=False, sort_keys=True),
                  "", 1 if enabled else 0,
-                 existing["created_at"] if existing else stamp, stamp),
+                 existing["created_at"] if existing else stamp, stamp,
+                 # INSERT OR REPLACE 会把未声明列清成默认值——共享策略是治理配置，
+                 # 保存描述符不得顺手清掉它（显式带旧值回填）。
+                 (existing["share_tenants_json"] if existing else "[]") or "[]"),
             )
         # D2 运行时跟随：按落库后的 enabled/间隔现值即时注册/摘除单源 job
         # （INSERT OR REPLACE 会把未声明列清零，故以现值而非入参为准）。
         _followUpSyncJob(tenantId, sourceId, store=self._store)
+
+    def setShareTenants(self, tenantId: str, sourceId: str,
+                        tenantIds: List[str]) -> List[str]:
+        """P2：声明源的租户级共享策略（v57 列；投影式复制的目标租户清单）。
+
+        不能共享给源所属租户自身；空清单＝清空（停止共享）。目标租户存在性
+        由端点层经部门根组树校验（repo 层不依赖 auth 面）。
+        """
+        ownTenant = str(tenantId or "default")
+        if self.loadConfig(ownTenant, sourceId) is None:
+            raise LookupError("source 配置不存在: %s" % sourceId)
+        cleaned: List[str] = []
+        for tid in tenantIds or []:
+            tid = str(tid or "").strip()
+            if not tid:
+                continue
+            if tid == ownTenant:
+                raise ValueError("不能共享给源所属租户自身")
+            if tid not in cleaned:
+                cleaned.append(tid)
+        with self._store._lock, self._store._conn:
+            self._store._conn.execute(
+                "UPDATE enterprise_source_configs SET share_tenants_json = ?,"
+                " updated_at = ? WHERE tenant_id = ? AND source_id = ?",
+                (json.dumps(cleaned, ensure_ascii=False), self._now(),
+                 ownTenant, str(sourceId or "")))
+        return cleaned
 
     def setSyncInterval(self, tenantId: str, sourceId: str, seconds: int) -> None:
         """W3：声明源的 interval 同步间隔（v44 列；0＝不持续同步）。
@@ -366,6 +413,7 @@ class EnterpriseIngestor:
                          "cursor": config.get("cursor") or "",
                          "enabled": bool(config.get("enabled")),
                          "sync_interval_seconds": int(config.get("sync_interval_seconds") or 0),
+                         "share_tenants": config.get("share_tenants") or [],
                          "created_at": config.get("created_at") or "",
                          "updated_at": config.get("updated_at") or ""})
         return rows
@@ -373,7 +421,7 @@ class EnterpriseIngestor:
     def loadConfig(self, tenantId: str, sourceId: str) -> Optional[Dict[str, Any]]:
         row = self._store._conn.execute(
             "SELECT descriptor_json, cursor, enabled, created_at, updated_at,"
-            " sync_interval_seconds"
+            " sync_interval_seconds, share_tenants_json"
             " FROM enterprise_source_configs"
             " WHERE tenant_id = ? AND source_id = ?",
             (str(tenantId or "default"), str(sourceId or ""))).fetchone()
@@ -382,6 +430,7 @@ class EnterpriseIngestor:
         return {"descriptor": json.loads(row["descriptor_json"] or "{}"),
                 "cursor": row["cursor"], "enabled": bool(row["enabled"]),
                 "sync_interval_seconds": int(row["sync_interval_seconds"] or 0),
+                "share_tenants": json.loads(row["share_tenants_json"] or "[]"),
                 "created_at": row["created_at"] or "",
                 "updated_at": row["updated_at"] or ""}
 
@@ -486,6 +535,12 @@ class EnterpriseIngestor:
         entries = {"written": 0, "duplicated": 0, "skipped": 0}
         batches = 0
         truncated = False
+        # P2 投影式复制：源租户每轮拉到的批，同批投影到 share_tenants 目标租户分区
+        # （qualifier.shared_from 血缘注记；内容键按租户分区各自幂等，重拉零重复）。
+        shareTo = [str(t).strip() for t in (config.get("share_tenants") or [])
+                   if str(t or "").strip()]
+        projectedCounts: Dict[str, int] = {}
+        projectionErrors: Dict[str, str] = {}
         try:
             while batches < _RUN_ONCE_MAX_BATCHES:
                 change = await adapter.fetchBatch(cursor or None, _FETCH_BATCH_LIMIT)
@@ -496,6 +551,23 @@ class EnterpriseIngestor:
                     admitted += int(result.get("admitted") or 0)
                     rejected += int(result.get("rejected") or 0)
                     rowsSkipped += len(result.get("skipped") or [])
+                    for targetTenant in shareTo:
+                        try:
+                            projected = self.ingestBatch(
+                                descriptor, change.rows,
+                                cursorToken=str(cursor.token or ""),
+                                tenantOverride=targetTenant, originTenant=tenantId)
+                            projectedCounts[targetTenant] = (
+                                projectedCounts.get(targetTenant, 0)
+                                + int(projected.get("admitted") or 0))
+                        except Exception as exc:  # noqa: BLE001 - 投影失败不回滚源轮，
+                            # 但必须点名（静默丢数据=教义第 2 条）；下轮重拉按内容键幂等补齐
+                            projectedErrors[targetTenant] = str(exc)
+                            from neurova.core.logger import get_logger
+
+                            get_logger(__name__).error(
+                                "企业源投影到目标租户失败（%s/%s → %s）：%s",
+                                tenantId, sourceId, targetTenant, exc)
                     # 正文分档能力钩子（批 C7c，§14-C）：适配器若提供 writeArchiveEntries
                     # （现仅存档面聊天源），行集在 facts 之外另承正文进条目链——
                     # registry 不感知 chat 细节，只认能力面。
@@ -531,7 +603,9 @@ class EnterpriseIngestor:
         return {"admitted": admitted, "rejected": rejected,
                 "entries": entries,
                 "batches": batches, "truncated": truncated,
-                "cursor": str(cursor.token or "")}
+                "cursor": str(cursor.token or ""),
+                "projected": projectedCounts, **({"projection_errors": projectionErrors}
+                                                 if projectionErrors else {})}
 
     def _recordHistorySafe(self, tenantId: str, sourceId: str, triggerKind: str,
                            status: str, startedAt: str, reason: str = "",

@@ -48,7 +48,7 @@ from ..community_graph import _SCHEMA_V48_COMMUNITIES
 from ..enterprise.webhook_receiver import _SCHEMA_V49_WEBHOOK_DEDUP
 from ..enterprise.schema_catalog import _SCHEMA_V51_CATALOG
 from ..enterprise.nl2sql import _SCHEMA_V53_QUERY_HISTORY
-from ..enterprise.registry import _SCHEMA_V56_SYNC_HISTORY
+from ..enterprise.registry import _SCHEMA_V56_SYNC_HISTORY, _SCHEMA_V57_SHARE_TENANTS
 from ..ontology.relation_candidates import _SCHEMA_V54_CANDIDATE_EVIDENCE
 from ..ontology.schema_suggester import _SCHEMA_V54_SUGGESTION_EVIDENCE
 from ..ontology.artifact_store import _SCHEMA_V50_ARTIFACTS
@@ -210,6 +210,11 @@ _STEPS: List[tuple] = [
     #      enterprise_sync_history：每轮拉取（手动/interval，成功/失败/跳过）
     #      落一行；写入单点 = runOnceAsync，回答「上次同步何时/拉了多少/为何失败」
     (56, _SCHEMA_V56_SYNC_HISTORY),
+    # v57：企业源租户级共享策略（可靠性方案 §8.3-P2，2026-11-19 拍板全量实施）——
+    #      enterprise_source_configs 加 share_tenants_json（目标租户 id 列表）；
+    #      投影式复制：源租户每轮拉取成功后同批断言投影到目标租户分区
+    #      （qualifier.shared_from 血缘注记，内容键按租户分区各自幂等）
+    (57, _SCHEMA_V57_SHARE_TENANTS),
 ]
 
 _registered = False

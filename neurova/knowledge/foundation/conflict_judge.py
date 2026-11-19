@@ -249,7 +249,11 @@ def _derivedBy(fact: Dict[str, Any]) -> str:
 
 
 def _qualifierKey(fact: Dict[str, Any]) -> str:
-    return json.dumps(fact.get("qualifier") or {}, ensure_ascii=False, sort_keys=True)
+    # shared_from 是租户投影的血缘注记（§8-P2），不是业务限定条件——
+    # 参与分组会把"同一 slot 的竞争主张"按来源拆散，冲突就此漏判。
+    qualifier = dict(fact.get("qualifier") or {})
+    qualifier.pop("shared_from", None)
+    return json.dumps(qualifier, ensure_ascii=False, sort_keys=True)
 
 
 def _entryScopeOf(fact: Dict[str, Any]) -> str:

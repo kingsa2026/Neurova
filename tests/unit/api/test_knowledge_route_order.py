@@ -201,6 +201,9 @@ _KB_ROUTES = [
     ('/enterprise/sources/{source_id}/sync-interval', 'GET'),
     ('/enterprise/sources/{source_id}/sync-interval', 'PUT'),
     ('/enterprise/sources/{source_id}/sync-history', 'GET'),
+    # 2026-11-19 §8.3-P2 租户级共享策略（投影式复制目标清单）
+    ('/enterprise/sources/{source_id}/share-tenants', 'GET'),
+    ('/enterprise/sources/{source_id}/share-tenants', 'PUT'),
     ('/search', 'POST'),
     ('/{knowledge_id}', 'DELETE'),
     ('/{knowledge_id}', 'GET'),

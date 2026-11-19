@@ -207,7 +207,9 @@ class TestMigrationVersions:
         # v53：问数历史（对照研究 P1-4/P2-3，2026-11-15）——ontology_query_history。
         # v54：审批证据哈希（对照研究 P3-1a，2026-11-19）——候选/建议两审批面加 evidence_hash。
         # v55：断言位置锚定（对照研究 P3-1b，2026-11-19）——knowledge_assertions 加 source_span_json。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 56
+        # v56：企业源同步历史（可靠性方案 D1，2026-11-19）——enterprise_sync_history。
+        # v57：企业源租户级共享策略（§8.3-P2，2026-11-19）——enterprise_source_configs 加 share_tenants_json。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 57
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
                 'ontology_change_log', 'enterprise_source_configs',

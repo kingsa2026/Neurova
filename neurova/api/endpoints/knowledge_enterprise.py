@@ -15,13 +15,14 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
+from neurova.api.endpoints.knowledge_common import ensureTenantExists
 
 router = APIRouter()
 
@@ -256,6 +257,61 @@ async def getSyncHistory(
         ).fetchall()
     return {"code": 0, "message": "success",
             "data": {"source_id": sourceId, "items": [dict(r) for r in rows]}}
+
+
+class ShareTenantsRequest(BaseModel):
+    """租户级共享策略请求体（P2，仅管理员）：目标租户 id 列表，空=停止共享"""
+
+    tenant_ids: List[str] = Field(default_factory=list, description="目标租户 id 列表")
+
+
+@router.get("/enterprise/sources/{source_id}/share-tenants")
+async def getShareTenants(
+    source_id: str,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """租户级共享策略读面（P2，仅管理员）：回显投影复制的目标租户清单。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403,
+                            detail="企业源共享策略是治理配置，仅管理员可读")
+    ingestor, _adapters, _store = _parts()
+    tenant = _tenantOf(current_user)
+    config = ingestor.loadConfig(tenant, str(source_id or "").strip()) or {}
+    if not config:
+        raise HTTPException(status_code=404, detail="source 配置不存在")
+    return {"code": 0, "message": "success",
+            "data": {"source_id": str(source_id or "").strip(),
+                     "share_tenants": config.get("share_tenants") or []}}
+
+
+@router.put("/enterprise/sources/{source_id}/share-tenants")
+async def putShareTenants(
+    source_id: str,
+    body: ShareTenantsRequest,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """租户级共享策略写面（P2，仅管理员）：落库后下一轮同步即按清单投影复制。
+
+    目标租户经部门根组树校验存在性；源所属租户自身不可作为目标。
+    """
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403,
+                            detail="企业源共享策略是治理配置，仅管理员可写")
+    ingestor, _adapters, _store = _parts()
+    tenant = _tenantOf(current_user)
+    sourceId = str(source_id or "").strip()
+    if not sourceId or ingestor.loadConfig(tenant, sourceId) is None:
+        raise HTTPException(status_code=404, detail="source 配置不存在")
+    for tid in body.tenant_ids:
+        if str(tid or "").strip() == tenant:
+            raise HTTPException(status_code=400, detail="不能共享给源所属租户自身")
+        ensureTenantExists(tid)
+    try:
+        saved = ingestor.setShareTenants(tenant, sourceId, body.tenant_ids)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"code": 0, "message": "success",
+            "data": {"source_id": sourceId, "share_tenants": saved}}
 
 
 @router.post("/enterprise/sources/{source_id}/media")

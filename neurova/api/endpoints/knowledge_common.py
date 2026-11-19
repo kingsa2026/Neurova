@@ -232,6 +232,24 @@ def resolve_usernames(usernames: List[str]) -> Dict[str, str]:
     return mapping
 
 
+def ensureTenantExists(tenant_id: str) -> None:
+    """目标租户存在性校验（租户级共享 §8 共用）：部门根组树是租户的权威源
+    （user_group_model §2.3）；default 恒存在；不存在 400。"""
+    tid = str(tenant_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="目标租户 id 不能为空")
+    if tid == "default":
+        return
+    from neurova.auth.user_group_model import get_user_group_manager
+
+    try:
+        group = get_user_group_manager().get_group(tid)
+    except Exception:  # noqa: BLE001 - 组树不可用时不假装校验通过
+        group = None
+    if group is None:
+        raise HTTPException(status_code=400, detail="目标租户不存在: %s" % tid)
+
+
 def entry_or_404(repo, knowledge_id: str, current_user: Dict[str, Any]):
     """取条目并做可见性校验；不可见一律 404（不泄露存在性）。（原 _entry_or_404）"""
     found = repo.find_item(knowledge_id)

@@ -22,6 +22,7 @@ from neurova.api.endpoints.knowledge_common import (
     KnowledgeItem,
     KnowledgeReviewRequest,
     KnowledgeShareRequest,
+    ensureTenantExists as _ensureTenantExists,
     entry_or_403,
     entry_or_404,
     get_repository,
@@ -68,24 +69,6 @@ class RecallCopyRequest(BaseModel):
 
     copy_knowledge_id: str = Field(..., description="要召回的外发副本 id")
     reason: str = Field(default="", description="召回原因（留证）")
-
-
-def _ensureTenantExists(tenant_id: str) -> None:
-    """目标租户存在性校验：部门根组树是租户的权威源（user_group_model §2.3）；
-    default 恒存在；不存在 400。"""
-    tid = str(tenant_id or "").strip()
-    if not tid:
-        raise HTTPException(status_code=400, detail="目标租户 id 不能为空")
-    if tid == "default":
-        return
-    from neurova.auth.user_group_model import get_user_group_manager
-
-    try:
-        group = get_user_group_manager().get_group(tid)
-    except Exception:  # noqa: BLE001 - 组树不可用时不假装校验通过
-        group = None
-    if group is None:
-        raise HTTPException(status_code=400, detail="目标租户不存在: %s" % tid)
 
 
 def _auditShare(action: str, current_user: Dict[str, Any], target: Dict[str, Any]) -> None:
