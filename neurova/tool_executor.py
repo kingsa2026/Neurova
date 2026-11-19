@@ -3164,7 +3164,8 @@ class ToolExecutor:
         """列出固定团队名册（数据单源 = teams_api 的 JSON 落盘，不另建团队存储）。"""
         from neurova.api.endpoints import teams_api
 
-        views = await teams_api.list_teams()
+        # A5 租户隔离：list_teams 端点按租户过滤；内部复用面传当前请求租户
+        views = await teams_api.list_teams({"tenant_id": teams_api.currentUserTenant()})
         teams = []
         for view in views:
             info = view.model_dump() if hasattr(view, "model_dump") else dict(view)

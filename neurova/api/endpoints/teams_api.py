@@ -50,6 +50,8 @@ class TeamInfo(BaseModel):
     description: str = ""
     project_id: Optional[str] = None
     owner_id: str = ""
+    # A5 租户隔离（§6.4）：团队归属租户（部门根），缺省 default（存量数据兼容）
+    tenant_id: str = "default"
     members: List[str] = []
     members_detail: List[Dict[str, Any]] = []
     created_at: float = 0
@@ -58,6 +60,23 @@ class TeamInfo(BaseModel):
     origin: str = "manual"
     approved_by: str = ""
     promoted_from_run: str = ""
+
+
+class NeuacpExecutorSpec(BaseModel):
+    """外部编码代理执行体配置（设计文档 §4.1）。
+
+    只随名册落盘键名与启动参数；凭据值不经名册（运行时从凭据面按
+    租户+agent 作用域取）。
+    """
+
+    kind: str = Field(default="acp", description="执行体类型：acp | plugin")
+    tool: str = Field(default="", description="工具目录标识（catalog）")
+    transport: str = Field(default="stdio", description="stdio | ssh")
+    command: List[str] = Field(default_factory=list, description="启动命令 argv")
+    cwd: str = Field(default="", description="外部代理工作目录（必填）")
+    env_keys: List[str] = Field(default_factory=list, description="凭据键名清单（只录键名不录值）")
+    permission_mode: str = Field(default="chain", description="chain（审批链）| auto（仅 L0，admin 专属）")
+    remote: Optional[Dict[str, Any]] = Field(default=None, description="transport=ssh 时的连接参数（key_ref 不落明文）")
 
 
 class TeamCreate(BaseModel):
@@ -80,6 +99,8 @@ class MemberBatchAdd(BaseModel):
 
     members: List[str] = Field(..., min_length=1, description="成员用户 ID 列表")
     prompt: str = Field(default="", description="共同职责描述")
+    # A5：外部编码代理执行体（整批成员共用一份执行体配置）；仅 admin 可配
+    executor: Optional[NeuacpExecutorSpec] = None
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +120,8 @@ def _team_view(team: Dict[str, Any]) -> TeamInfo:
         description=team.get("description", ""),
         project_id=team.get("project_id"),
         owner_id=team.get("owner_id", ""),
+        # A5 租户隔离：存量数据无 tenant_id 时回落 default（与身份缺省一致）
+        tenant_id=str(team.get("tenant_id") or "default"),
         members=members,
         members_detail=team.get("members_detail", []),
         created_at=team.get("created_at", 0),
@@ -108,6 +131,44 @@ def _team_view(team: Dict[str, Any]) -> TeamInfo:
         approved_by=str(team.get("approved_by") or ""),
         promoted_from_run=str(team.get("promoted_from_run") or ""),
     )
+
+
+# ---------------------------------------------------------------------------
+# A5 租户隔离（§6.4 强制红线）：读限同租户；写限同租户且（属主或平台 admin）。
+# 团队租户取自团队 dict 的 tenant_id（存量数据缺省 default）；请求者租户取
+# JWT 身份字典的 tenant_id（buildIdentityClaims 部门根，缺省 default）。
+# ---------------------------------------------------------------------------
+
+
+def _userTenant(user: Dict[str, Any]) -> str:
+    return str((user or {}).get("tenant_id") or "default")
+
+
+def _isPlatformAdmin(user: Dict[str, Any]) -> bool:
+    return str((user or {}).get("role") or "") == "admin"
+
+
+def _teamReadable(team: Dict[str, Any], user: Dict[str, Any]) -> bool:
+    return _userTenant(team) == _userTenant(user)
+
+
+def _teamWritable(team: Dict[str, Any], user: Dict[str, Any]) -> bool:
+    if _userTenant(team) != _userTenant(user):
+        return False
+    return _isPlatformAdmin(user) or str(team.get("owner_id") or "") == str(user.get("user_id") or "")
+
+
+def _requireReadable(team: Dict[str, Any], user: Dict[str, Any]) -> None:
+    if not _teamReadable(team, user):
+        # 404 而非 403：不向其他租户泄露团队存在性
+        raise HTTPException(status_code=404, detail=f"Team '{team.get('id')}' not found")
+
+
+def _requireWritable(team: Dict[str, Any], user: Dict[str, Any]) -> None:
+    if not _teamReadable(team, user):
+        raise HTTPException(status_code=404, detail=f"Team '{team.get('id')}' not found")
+    if not _teamWritable(team, user):
+        raise HTTPException(status_code=403, detail="无权修改该团队（需同租户且为属主或平台 admin）")
 
 
 def _load_store() -> None:
@@ -140,6 +201,28 @@ def getTeamRoster(team_id: str) -> Optional[Dict[str, Any]]:
     return dict(team) if team else None
 
 
+def currentUserTenant() -> str:
+    """当前请求租户（内部复用面用；HTTP 面走依赖注入的身份字典）。
+
+    读取身份通道取"这轮是谁"，经部门根解析为租户；无身份/解析失败回落
+    default。身份读方台账（test_turnIdentitySingleSource READERS）已登记。
+    """
+    try:
+        from neurova.core.identity_context import get_request_user_id
+
+        user_id = get_request_user_id()
+    except Exception:
+        return "default"
+    if not user_id:
+        return "default"
+    try:
+        from neurova.auth.user_group_model import resolveUserDepartment
+
+        return str((resolveUserDepartment(user_id) or {}).get("tenant_id") or "default")
+    except Exception:
+        return "default"
+
+
 # ---------------------------------------------------------------------------
 # S10 临时团队沉淀（agent 提议 → 人批准 → 写入本单源）
 # 团队是用户资产，agent 不得自行立队：提议先挂审批链（L1），批准前只进
@@ -168,15 +251,22 @@ def createAgentProposedTeam(
     membersDetail: List[Dict[str, Any]],
     promotedFromRun: str = "",
     approvedBy: str = "",
+    tenantId: str = "default",
+    ownerId: str = "default",
 ) -> Dict[str, Any]:
-    """agent 沉淀提议经人批准后写入团队单源（origin=agent_proposed）。"""
+    """agent 沉淀提议经人批准后写入团队单源（origin=agent_proposed）。
+
+    tenantId/ownerId：A5 租户隔离——调用方（裁决入口有请求上下文）应传入
+    裁决者租户/ID；未传时落 default（关联缺口：approval_chain 传参接线另批）。
+    """
     now = time.time()
     team = {
         "id": str(uuid.uuid4()),
         "name": str(name or "").strip() or "未命名团队",
         "description": str(description or ""),
         "project_id": None,
-        "owner_id": "default",
+        "owner_id": str(ownerId or "default"),
+        "tenant_id": str(tenantId or "default"),
         "members_detail": [dict(m) for m in (membersDetail or [])],
         "created_at": now,
         "updated_at": now,
@@ -218,14 +308,15 @@ def applyTeamProposalDecision(
 
 
 @router.post("", response_model=TeamInfo)
-async def create_team(body: TeamCreate):
-    """创建团队"""
+async def create_team(body: TeamCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """创建团队（租户戳印：tenant_id=创建者租户，owner_id=创建者）"""
     team = {
         "id": str(uuid.uuid4()),
         "name": body.name,
         "description": body.description,
         "project_id": body.project_id,
-        "owner_id": "default",
+        "owner_id": str(current_user.get("user_id") or "default"),
+        "tenant_id": str(current_user.get("tenant_id") or "default"),
         "members_detail": [],
         "created_at": time.time(),
         "updated_at": time.time(),
@@ -239,26 +330,29 @@ async def create_team(body: TeamCreate):
 
 
 @router.get("", response_model=List[TeamInfo])
-async def list_teams():
-    """列出团队"""
-    return [_team_view(t) for t in _teams_store.values()]
+async def list_teams(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """列出团队（A5：仅本租户）"""
+    tenant = _userTenant(current_user)
+    return [_team_view(t) for t in _teams_store.values() if _userTenant(t) == tenant]
 
 
 @router.get("/{team_id}", response_model=TeamInfo)
-async def get_team(team_id: str):
-    """获取团队详情"""
+async def get_team(team_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取团队详情（A5：跨租户 404 不泄露存在性）"""
     team = _teams_store.get(team_id)
     if not team:
         raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found")
+    _requireReadable(team, current_user)
     return _team_view(team)
 
 
 @router.put("/{team_id}", response_model=TeamInfo)
-async def update_team(team_id: str, body: TeamUpdate):
-    """更新团队（FE updateTeam 契约；原缺失恒 405）"""
+async def update_team(team_id: str, body: TeamUpdate, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """更新团队（FE updateTeam 契约；原缺失恒 405；A5：同租户+属主/admin）"""
     team = _teams_store.get(team_id)
     if not team:
         raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found")
+    _requireWritable(team, current_user)
     if body.name is not None:
         team["name"] = body.name
     if body.description is not None:
@@ -269,43 +363,57 @@ async def update_team(team_id: str, body: TeamUpdate):
 
 
 @router.delete("/{team_id}")
-async def delete_team(team_id: str):
-    """删除团队"""
-    if team_id not in _teams_store:
+async def delete_team(team_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """删除团队（A5：同租户+属主/admin）"""
+    team = _teams_store.get(team_id)
+    if not team:
         raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found")
+    _requireWritable(team, current_user)
     del _teams_store[team_id]
     _save_store()
     return {"code": 0, "message": f"Team '{team_id}' deleted"}
 
 
 @router.post("/{team_id}/members", response_model=TeamInfo)
-async def add_members(team_id: str, body: MemberBatchAdd):
-    """批量添加成员（FE {members: [...], prompt} 契约；原单成员 user_id 恒 422）"""
+async def add_members(team_id: str, body: MemberBatchAdd, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """批量添加成员（FE {members: [...], prompt} 契约；A5：executor 外部成员仅 admin）"""
     team = _teams_store.get(team_id)
     if not team:
         raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found")
+    _requireWritable(team, current_user)
+    executor_spec = None
+    if body.executor is not None:
+        if not _isPlatformAdmin(current_user):
+            raise HTTPException(status_code=403, detail="外部编码代理成员仅平台 admin 可配置")
+        if str(body.executor.permission_mode or "chain") not in ("chain", "auto"):
+            raise HTTPException(status_code=422, detail="executor.permission_mode 仅支持 chain/auto")
+        executor_spec = body.executor.model_dump()
     existing = {m["user_id"] for m in team["members_detail"]}
     for uid in body.members:
         if not uid or uid in existing:
             continue
-        team["members_detail"].append({
+        entry = {
             "user_id": uid,
             "name": uid,
             "role": "member",
             "prompt": body.prompt,
             "joined_at": time.time(),
-        })
+        }
+        if executor_spec is not None:
+            entry["executor"] = dict(executor_spec)
+        team["members_detail"].append(entry)
     team["updated_at"] = time.time()
     _save_store()
     return _team_view(team)
 
 
 @router.delete("/{team_id}/members/{member_id}")
-async def remove_member(team_id: str, member_id: str):
-    """移除成员"""
+async def remove_member(team_id: str, member_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """移除成员（A5：同租户+属主/admin）"""
     team = _teams_store.get(team_id)
     if not team:
         raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found")
+    _requireWritable(team, current_user)
     before = len(team["members_detail"])
     team["members_detail"] = [m for m in team["members_detail"] if m["user_id"] != member_id]
     if len(team["members_detail"]) == before:
@@ -316,11 +424,12 @@ async def remove_member(team_id: str, member_id: str):
 
 
 @router.put("/{team_id}/members/{member_id}/prompt")
-async def update_member_prompt(team_id: str, member_id: str, body: Dict[str, Any]):
-    """更新成员职责描述"""
+async def update_member_prompt(team_id: str, member_id: str, body: Dict[str, Any], current_user: Dict[str, Any] = Depends(get_current_user)):
+    """更新成员职责描述（A5：同租户+属主/admin）"""
     team = _teams_store.get(team_id)
     if not team:
         raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found")
+    _requireWritable(team, current_user)
     for m in team["members_detail"]:
         if m["user_id"] == member_id:
             m["prompt"] = str(body.get("prompt", ""))
@@ -331,11 +440,12 @@ async def update_member_prompt(team_id: str, member_id: str, body: Dict[str, Any
 
 
 @router.get("/{team_id}/members/{member_id}/prompt")
-async def get_member_prompt(team_id: str, member_id: str):
-    """获取成员职责描述"""
+async def get_member_prompt(team_id: str, member_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取成员职责描述（A5：同租户可读）"""
     team = _teams_store.get(team_id)
     if not team:
         raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found")
+    _requireReadable(team, current_user)
     for m in team["members_detail"]:
         if m["user_id"] == member_id:
             return {"code": 0, "data": {"prompt": m.get("prompt", "")}}
@@ -343,11 +453,12 @@ async def get_member_prompt(team_id: str, member_id: str):
 
 
 @router.get("/{team_id}/prompt-context")
-async def get_team_prompt_context(team_id: str):
-    """获取团队所有成员职责上下文"""
+async def get_team_prompt_context(team_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取团队所有成员职责上下文（A5：同租户可读）"""
     team = _teams_store.get(team_id)
     if not team:
         raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found")
+    _requireReadable(team, current_user)
     context = "\n\n".join(
         f"## {m.get('name', m['user_id'])}\n{m.get('prompt', '')}"
         for m in team["members_detail"] if m.get("prompt")

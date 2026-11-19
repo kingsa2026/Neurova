@@ -98,6 +98,7 @@ READERS: Dict[str, Set[str]] = {
         "neurova/memory_admission.py::_recordRejectionAudit",
         "neurova/memory_discipline.py::_auditDisciplineEvent",
         "neurova/post_chat_pipeline.py::resolveSessionOwner",
+        "neurova/api/endpoints/teams_api.py::currentUserTenant",
         "neurova/tool_executor.py::ToolExecutor._execute_computer_ssh_exec",
         "neurova/tool_layers/mcp_server.py::NeurovaMCPServer._current_user_id",
     },
