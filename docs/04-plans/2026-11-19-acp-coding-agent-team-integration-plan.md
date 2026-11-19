@@ -13,6 +13,7 @@
 3. **角色模型**：Neurova 扮演 **ACP Client**（编排方/授权方），外部编码代理扮演 **ACP Agent**（被驱动的子进程/远端进程）。这与 Zed/JetBrains 把 ACP agent 接给「单个用户在编辑器里用」不同——本仓把它们编入**受治理的多代理团队**（任务书、验收门、审批链、房间协作、全量台账），是 ACP 生态尚无的编排层玩法。
 4. **撞名澄清（必读）**：仓内已有 `neurova/agent/protocols/acp_runtime.py` + `team.py AgentTeam` + `acp_api.py`，那是**进程内 AgentMessage 消息总线**（自研 Agent Communication Protocol），与 Zed 的 Agent Client Protocol **同名不同物**，且该路线绕过 Swarm 治理/台账/验收——**不作为本方案主路径**。新模块命名经用户拍板（2026-11-19）：**统一以 `neuacp` 为准**，落 `neurova/agent/neuacp/`，类名以 `Neuacp` 前缀（`NeuacpMemberAdapter` 等），与仓内 `acp_runtime` 总线划清界限。
 5. **拍板状态（2026-11-19，D1–D6 全部裁定，见 §10；D1 当日更新）**：P0 接入 **OpenCode / Qoder / CodeBuddy（ACP 原生）+ ZCode（插件形态）** 四家；Gemini CLI / Claude Code / Codex 移入后续批次；外部成员**提供判定模型通道**（验收/评审不降级）；**允许主代理自主派活**给外部成员；**开放 `permission_mode=auto`（admin 专属）**；Trae 暂不接入；成本**不计 token**（`cost_source=external`）。方案可进入 P0 实施。
+6. **租户隔离红线（用户拍板 2026-11-19，强制）**：外部编码代理的全生命周期（名册→派活→执行→审批→回灌→台账）严格按 JWT 租户（部门根）隔离；团队名册 / run 台账 / 审批单 / WS 订阅的租户判定缺口在本方案 P0 一并收口（§6.4）。
 
 ---
 
@@ -361,7 +362,27 @@ class NeuacpExecutor(Protocol):
 
 外部代理**自带工具**（其 CLI 内置 bash/edit 等），不经过本仓 `computeSubagentToolAllowlist`（swarm.py:711）。约定：外部成员不参与本仓工具白名单借用（`mcpBorrowedToolNames` 对其无效）；其工具调用以 ACP update 事件**镜像进轨迹与账本**，实现「不纳管执行、但全量可见」——这是与内置成员在治理上的关键差异，须在团队页成员详情中明示。
 
-### 6.4 可借鉴机制台账（源自 ZCode 官方文档 2026-11-19 核实；登记备查，不属本期接入范围，另批评估）
+### 6.4 租户隔离纪律（强制红线，用户拍板 2026-11-19）
+
+**原则**：外部编码代理的整个生命周期——名册配置 → 派活 → 进程执行 → 权限审批 → 事件回灌 → 台账留存——全部按 **JWT 租户（部门根）** 隔离，任何环节不得跨租户。租户解析单源：`buildIdentityClaims`（endpoints/auth.py:309-325，tenant_id=部门根，仅非 default 才签入）→ `_user_identity`（api/auth.py:735-752，缺省 `"default"`）；部门根解析单源 `resolveUserDepartment`（user_group_model.py:1025-1098）。
+
+**判定点清单**（每处先红后绿，随对应任务卡落地）：
+
+| 环节 | 租户判定 | 现状与落点 |
+|------|----------|------------|
+| 团队名册 | 团队补 `tenant_id` 段（落盘 JSON 同步）+ `owner_id`=创建者；list/get/update/delete/members 全链按「JWT 租户过滤 + 属主或平台 admin 可写」；`executor` 外部成员的添加限 admin 且操作者租户==团队租户 | **既有缺口**：teams_api.py:45-60 无租户段、owner_id 恒 "default"（:228）、全链不过滤（:241-315 任何认证用户可读写全部团队）——外部成员可拉起本机进程+注入凭据，风险升级，**本方案 P0 内收口**（A5 扩展） |
+| 派活 | spawn 发起者租户必须等于目标团队租户；跨租户团队不得派活外部成员 | `_resolve_agent` 切口（swarm.py:1931）前置校验（A4 扩展） |
+| 进程与会话隔离 | 外部进程池键加入租户段：`(tenant, tool, command, cwd, transport, remote)`；`ZCODE_DATA_BASE_DIR` 等数据根按 **租户+成员** 派生，跨租户不共享进程/会话；`cwd` 必须属本租户工作区 | A8 扩展（§4.5/§4.10） |
+| 凭据 | `env_keys` 键值按 **租户+agent** 作用域从凭据面取；子进程环境白名单沿用 `_RUNNER_ENV_BASE_KEYS`（runner_bridge.py:44-48），不另立第二份白名单 | 复用 secret_store（secret_store.py:31-66，数据根派生条目）＋ CREDENTIAL_KEY_NAMES 单源 |
+| 审批 | 审批单挂租户（metadata.tenant_id=发起者租户）；`decideSwarmApproval` 增加「裁决人租户==单据租户 或 平台 admin」判定；房间裁决沿用 `_require_room_decisioner`（collaboration_room_api.py:76-84，admin/project.owner）并加同租户前提 | **既有缺口**：approval_requests 表无租户段（approval_manager.py:29-47）、decideSwarmApproval 不验裁决人租户（approval_chain.py:385-443）——A9 收口 |
+| 事件可见性 | 外部成员的 chunk/审批卡沿用会话属主可见性（resolveSessionOwner，post_chat_pipeline.py:184-240）；**WS 订阅腿补归属校验**——外部成员流式内容不得被任意认证用户订阅 | **既有缺口**：`register_or_create_session`（session_sync_manager.py:491-568）对存量会话直接放行、`/ws/{session_id}`（session_sync.py:127-168）只验 JWT——外部成员接入使泄漏面升级，**本方案 P0 内收口**（A9） |
+| 台账/轨迹 | `agent_runs` 补 `tenant_id` 列（照 v5 迁移模式，agent_run_store.py:127-146）；intake 落发起者租户；读面（list_runs_by_project 等）按租户过滤；外部成员 run 的 user_id=发送者、tenant_id=发送者租户 | **既有缺口**：列集无 tenant（agent_run_store.py:46-69）——A9 收口 |
+
+**禁止事项**：跨租户把外部成员加入名册；外部代理 `cwd` 指向其他租户工作区；凭据跨租户复用；以 API-key 身份（现恒 default 租户，api_key_manager.py:32-63）配置外部成员——外部成员管理面走 JWT+admin；移动端路径（mobile_pairing.py:751 硬编码 default）如需触达外部成员，须先改身份透传（登记关联缺口，另批）。
+
+**关联缺口移交（不在本方案范围，登记防遗忘）**：项目/房间全面租户化（collaboration_isolation.py Project 无 tenant_id、add_member :378-383 不验租户）；APIKey 补 tenant_id；移动端 tenant_id 硬编码。这些不因本方案恶化，但与外部成员共存时应在后续批次收口。
+
+### 6.5 可借鉴机制台账（源自 ZCode 官方文档 2026-11-19 核实；登记备查，不属本期接入范围，另批评估）
 
 1. **AIMD 共享并发治理**：按 provider key 的自适应限流（降 ×0.75 / 连胜 +1）+ run 级上限取小 + 超限子代理 parking 保位 + 「工具执行不占票据」——可用于 swarm 多成员的模型配额公平调度。
 2. **工作流 journal/resume/supersede**：run 全量 journal、恢复即重放（"Resume is crash recovery, not re-verification"）、修订版取代在跑 run 并记录 supersededBy。
@@ -382,11 +403,12 @@ class NeuacpExecutor(Protocol):
 | A1 | `NeuacpExecutor` 协议 + `NeuacpClient` 帧层（JSON-RPC over stdio、initialize 握手、版本协商 fail-closed、崩溃回调、UTF-8/编码纪律） | `neurova/agent/neuacp/acp_client.py` | 假 ACP agent（测试内子进程）握手成功/版本不兼容拒绝/EOF 崩溃上报 | — |
 | A2 | `NeuacpStdioExecutor`：session/new→prompt→update 流→文本返回；content/reasoning → emitter | `neuacp/acp_executor.py` | 假 agent 回放 update 流，断言 emitter 收到等价块序列、返回文本正确 | — |
 | A3 | `NeuacpMemberAdapter` 鸭子面（chat/config.name/超时/错误文本约定） | `neuacp/acp_member.py` | 适配器对 `_run_member` 调用形态的契约测试（stream=True、metadata.event_emitter、budget 内返回） | — |
-| A4 | `_resolve_agent` 切口：名册 executor 成员返回适配器；`NEUROVA_EXTERNAL_AGENTS_ENABLED` off 时拒绝并诚实报错 | `swarm.py:1931` 前置分支 | 开关 off→spawn 拒绝；on→解析出适配器；内置成员路径零变化（A/B） | — |
-| A5 | 名册 executor 字段 + admin 门 + 移除成员端点 | `teams_api.py` | executor 字段落盘回读；非 admin 加外部成员 403；移除成员后名册更新 | — |
+| A4 | `_resolve_agent` 切口：名册 executor 成员返回适配器；`NEUROVA_EXTERNAL_AGENTS_ENABLED` off 时拒绝并诚实报错；**派活租户校验：发起者租户==目标团队租户，跨租户拒绝（§6.4）** | `swarm.py:1931` 前置分支 | 开关 off→spawn 拒绝；on→解析出适配器；跨租户派活外部成员被拒；内置成员路径零变化（A/B） | — |
+| A5 | 名册 executor 字段 + admin 门 + 移除成员端点；**团队租户隔离收口：TeamInfo/落盘 JSON 补 `tenant_id` + `owner_id`=创建者，list/get/update/delete/members 全链按 JWT 租户过滤、写限属主或 admin（§6.4，既有缺口在本卡收口）** | `teams_api.py` | executor 字段落盘回读；非 admin 加外部成员 403；跨租户读/写团队被拒；移除成员后名册更新 | — |
 | A6 | 端到端：建队→加 opencode 外部成员→spawn 派小任务→流式→候选→台账 completed | 全链 | 集成测试（真 opencode 子进程，标记 e2e） | 真后端 9527（.venv、清代理变量）+ 真 `opencode acp`：subagent_chunk 上屏、台账 completed、无 [ERROR]；qoder/codebuddy 以测试连接握手通过为准；zcode 以插件通道小任务真跑为准 |
 | A7 | **Qoder / CodeBuddy 接入**（均原生 ACP：`qoder --acp`、npx `@tencent-ai/codebuddy-code --acp`；catalog 预设；codebuddy 需 Node）。**CLI 安装检查在用户启用连接时进行**（catalog 探测 / 测试连接返回 `installed`+`install_hint`），不要求实施期预装 | `neuacp/catalog.py` | 假 CLI 桩测握手/事件流；测试连接对本机未装 CLI 返回 `installed=false`+`install_hint` | 用户启用且本机已装 CLI 时：测试连接返回版本/能力 |
-| A8 | **ZCode 插件接入**（`NeuacpPluginExecutor` 首个实现：stream-json NDJSON 解析/`type:"result"` 终行/`--resume` 续跑/隔离红线四件套：独立 cwd + 独立 `ZCODE_DATA_BASE_DIR` + 环境白名单 + `--disallowed-tools` 收权；事件流+文件产物双核验） | `neuacp/plugin_executor.py`、`neuacp/catalog.py` | 假 ZCode CLI（测试内子进程）回放事件流断言 emitter 序列；隔离红线缺一即拒启 | 真 `zcode --prompt` 小任务：流式上屏、产物在 cwd、台账 completed |
+| A8 | **ZCode 插件接入**（`NeuacpPluginExecutor` 首个实现：stream-json NDJSON 解析/`type:"result"` 终行/`--resume` 续跑/隔离红线四件套：独立 cwd + 独立 `ZCODE_DATA_BASE_DIR` + 环境白名单 + `--disallowed-tools` 收权；事件流+文件产物双核验）。**租户段：进程池键与数据根按「租户+成员」派生，跨租户不共享进程/会话（§6.4）** | `neuacp/plugin_executor.py`、`neuacp/catalog.py`、`neuacp/process_pool.py` | 假 ZCode CLI（测试内子进程）回放事件流断言 emitter 序列；隔离红线缺一即拒启；跨租户不命中进程池/数据根 | 真 `zcode --prompt` 小任务：流式上屏、产物在 cwd、台账 completed |
+| A9 | **租户隔离收口（§6.4 强制红线）**：`agent_runs` 补 `tenant_id` 列（照 v5 迁移模式）+ intake 落发起者租户 + 读面按租户过滤；审批单 metadata 挂 `tenant_id` + `decideSwarmApproval` 增「裁决人租户==单据租户或平台 admin」；WS 订阅腿归属校验前置（外部成员 chunk 不得被任意认证用户订阅） | `agent_run_store.py`（迁移）、`agent_run_ledger.py`、`approval_chain.py`、`session_sync.py`/`session_sync_manager.py` | 跨租户读 run/裁决审批/订阅会话均被拒；同租户放行；存量路径 A/B 零新增失败 | — |
 
 ### P1 治理完备 + Gemini CLI / Claude Code / Codex
 
@@ -465,4 +487,5 @@ class NeuacpExecutor(Protocol):
 - 2026-11-19：**D1–D6 全部拍板**（交互选项逐项确认）：P0 三家同批（OpenCode+Gemini CLI+Claude Code，新增 A7 卡）；提供判定模型通道（D2）；允许主代理自主派活（D3）；开放 auto 模式 admin 专属（D4）；成本不计 token（D6）。方案具备 P0 开工条件。
 - 2026-11-19：**D1 裁定更新（用户改定）——首批接入改为 OpenCode / Qoder / CodeBuddy / ZCode 四家**（本 commit）：Qoder/CodeBuddy 由 P2 提前至 P0（A7）、ZCode 插件由 P2 提前至 P0（A8）；Gemini CLI / Claude Code / Codex 移 P1（B5）；catalog 增 zcode 插件预设；P2 剩 SSH 远程/反向 MCP/远程 HTTP。
 - 2026-11-19：**Qoder/CodeBuddy 的 CLI 安装检查时机定为「用户启用连接时」**（用户拍板）：catalog/测试连接实时探测（`installed`+`install_hint`，未装展示安装指引），部署期不预装不强校验；A7 卡与 §5.2 表单同步。
+- 2026-11-19：**新增租户隔离强制红线（用户拍板）**：外部编码代理全生命周期按 JWT 租户（部门根）隔离，新增 §6.4 判定点清单；团队名册/run 台账/审批单/WS 订阅四处**既有无租户判定的缺口**（teams_api 全量可读写、agent_runs 无 tenant 列、decideSwarmApproval 不验裁决人租户、WS 订阅腿不验归属）因外部成员接入风险升级，**在 P0 一并收口**（A4/A5/A8 扩展 + 新增 A9 卡）；项目/房间全面租户化、APIKey/移动端租户透传登记为关联缺口另批。
 - （实施时逐卡继续回填：commit 号、红→绿实测输出摘要、A/B 失败集合比对、live-verify 证据、偏离说明。）
