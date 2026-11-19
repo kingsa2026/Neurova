@@ -146,6 +146,9 @@ AD-2 落地后，`subtree_truncated` 标记正好给模型指出「该从哪个�
 | AD-1 | `d40f57a4c` | 删 `NEVER_RETRY_REFUSAL_CODES` 死码（-5）；台账补登 retry 词表（14 码全表）并顺带补齐 route 4 项/拒绝码 3 项（test_capability_ledger 两个预存失败转绿，15 passed）；新增反向钉子 test_never_advice_non_empty（retry 守卫 8 passed） |
 | AD-2 | `a31d46ead` | walk 返回 (elements, stats)：depth_truncated/observed_max_depth，被切元素自标 subtree_truncated；snapshot truncated 升义、未超限不加键；computer_dom_snapshot 描述补截断语义。红灯 1 failed→绿灯 53 passed，全域 786 passed 零新增 |
 | AD-3 | `e5bad7a07` | drill-down（root_index/root_runtime_id，ref 归属快照、index 续接、代次不递增、标记解除）；同签名扫荡 remote_backend + guest server。红灯 5 failed→绿灯 5 passed，全域 791 passed 零新增 |
+| AD-4 | `2c3d720b4` | skeleton 骨架概览（匿名不可交互容器折叠，omitted_count）；元素新增 depth。**真机教训**：首版交互信号含 legacy_default，Notepad 真树 19/19 空名元素全带该位→折叠率归零，根修为只认 invokable/togglable/expandable/settable，复验 91→15。红灯 2 failed→绿灯，全域 796 passed 零新增 |
+| AD-5 | `0f89e0145` | CUA 独立 CLI `python -m neurova.computer_use`（10 子命令、JSON 信封、退出码 0/1/2）；README `neurova computer` 漂移修正。定位=人工代理形态（进程内直调不走治理门）；MCP stdio 挂 ACP 批次（外部 agent 必须过治理）。红灯 collection error→绿灯 7 passed，真机活体 status/dom-snapshot --skeleton/badcmd 全通 |
+| AD-6 | 本笔 | 三平台适配骨架第一期：`platform.py` 单一探测源（windows=UIA available；macos AX/linux AT-SPI=not-configured 且 reason 点名平台与缺什么）；`backends_macos.py`/`backends_linux.py` 预留 backend（动作诚实 NotImplemented）；desktop_uia.availabilityDetail 改单源派生。红灯 collection error→绿灯 9 passed，全域 816 passed 零新增。真机适配（macOS/Linux fixture）留档 C 待办 |
 
 **live-verify（真 UIA 活体，真窗口 `API资料.txt - Notepad`）**：max_depth=1 →
 truncated=True / depth_truncated=True / observed_max_depth=1、7 元素自标被切；

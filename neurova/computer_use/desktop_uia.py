@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from neurova.core.logger import get_logger
 from neurova.computer_use import action_result as ar
+from neurova.computer_use import platform as cu_platform
 
 logger = get_logger(__name__)
 
@@ -34,23 +35,12 @@ def _global_input_enabled() -> bool:
 
 
 def availabilityDetail() -> dict:
-    """UIA 可用性的**唯一**判定点：布尔由它派生，状态与具名原因一并给出（T-07）。
+    """UIA 可用性（Windows 语义后端）——从 platform 单源派生（AD-6）。
 
-    分成 `not-configured`（非 Windows / 缺库）而不是笼统 False——两者的自救动作相反：
-    一个是"这台机器本就没有"，一个是"装 `uiautomation`"。
+    三平台各自的三态见 `platform.desktopBackendAvailability()`（macOS AX / Linux
+    AT-SPI 为预留骨架）；本函数只取 Windows 位。布尔仍由本点派生（T-07）。
     """
-    from neurova.computer_use.capability_state import CAP_AVAILABLE, CAP_NOT_CONFIGURED
-
-    if os.name != "nt":
-        return {"available": False, "state": CAP_NOT_CONFIGURED, "platform": os.name,
-                "reason": f"UIA 只在 Windows 侧有意义（当前 os.name={os.name!r}）"}
-    try:
-        import uiautomation  # noqa: F401
-    except Exception as e:  # noqa: BLE001 - 缺库是读数，不是崩溃
-        return {"available": False, "state": CAP_NOT_CONFIGURED, "platform": os.name,
-                "reason": f"缺 uiautomation 库：{type(e).__name__}: {e}"}
-    return {"available": True, "state": CAP_AVAILABLE, "platform": os.name,
-            "reason": "uiautomation 可导入且平台匹配"}
+    return cu_platform.desktopBackendAvailability()["windows"]
 
 
 def is_available() -> bool:
@@ -113,7 +103,11 @@ class DesktopUIAManager:
         密集树先看骨架再下钻。
         """
         if self._backend is None:
-            return self._refused("桌面 UIA 层不可用（非 Windows 或缺少 uiautomation）", "unsupported_method")
+            detail = availabilityDetail()
+            return self._refused(
+                f"桌面语义后端不可用（当前平台={cu_platform.desktopPlatform()}）：{detail['reason']}",
+                "unsupported_method",
+            )
         max_nodes = max(int(max_nodes or DEFAULT_MAX_NODES), 1)
         max_depth = max(int(max_depth or DEFAULT_MAX_DEPTH), 1)
         with self._lock:

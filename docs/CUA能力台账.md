@@ -8,7 +8,7 @@
 
 | route | 语义 | 投递模式 | 后端 |
 |---|---|---|---|
-| `accessibility` | AX/语义动作（预留） | background | 桌面（macOS 预留） |
+| `accessibility` | AX/语义动作（macOS AXUIElement，AD-6 预留骨架：`backends_macos.py` 动作未实现、三态探测如实在案） | background | 桌面（macOS 预留，档 C 待真机） |
 | `uia` | Windows UIA 语义动作（Invoke/Toggle/Expand/Legacy/Value） | background | desktop_uia |
 | `app_post` | PostMessage 消息直投目标窗口（不抢焦点） | background | desktop_uia |
 | `global_input` | 全局指针/键盘（**移动真实光标、抢前台**） | foreground | pyautogui 路径 |
