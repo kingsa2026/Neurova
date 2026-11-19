@@ -203,6 +203,18 @@ export struct DashboardPage {
     return (d.getMonth() + 1).toString() + ' 月 ' + d.getDate().toString() + ' 日 星期' + week;
   }
 
+  /** 服务端 UTC ISO → 本地时区 ISO（切片日期/时间前必须过这里，否则晚间会话显示成前一天） */
+  private localIso(iso: string): string {
+    if (iso.length < 19) {
+      return iso;
+    }
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) {
+      return iso;
+    }
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString();
+  }
+
   /** 工作区地址（档案地址去 /api/v1 尾缀） */
   private workspaceHost(): string {
     const base = ServerProfiles.getInstance().getActiveApiBase();
@@ -483,7 +495,7 @@ export struct DashboardPage {
                       }
                     }
                     .alignItems(VerticalAlign.Center)
-                    Text((s.updated_at.length >= 10 ? s.updated_at.slice(5, 10) : s.updated_at) + ' · ' + s.agent_id)
+                    Text((s.updated_at.length >= 10 ? this.localIso(s.updated_at).slice(5, 10) : s.updated_at) + ' · ' + s.agent_id)
                       .fontSize(this.sm.getFontSize('badge'))
                       .fontColor(this.sm.getColor('text_tertiary'))
                       .margin({ top: 2 })
@@ -491,7 +503,7 @@ export struct DashboardPage {
                   .layoutWeight(1)
                   .alignItems(HorizontalAlign.Start)
                   .margin({ left: 10 })
-                  Text(s.updated_at.length >= 10 ? s.updated_at.slice(11, 16) : '')
+                  Text(s.updated_at.length >= 10 ? this.localIso(s.updated_at).slice(11, 16) : '')
                     .fontSize(this.sm.getFontSize('badge'))
                     .fontColor(this.sm.getColor('text_tertiary'))
                 }

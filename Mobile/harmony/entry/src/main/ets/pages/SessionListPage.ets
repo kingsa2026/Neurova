@@ -166,11 +166,15 @@ export struct SessionListPage {
     }
   }
 
+  /** 会话时间（本地时区 MM-DD；服务端是 UTC ISO，直接切片晚间会显示成前一天） */
   private fmtTime(iso: string): string {
-    if (iso.length >= 10) {
-      return iso.slice(5, 10);
+    if (iso.length >= 19) {
+      const d = new Date(iso);
+      if (!isNaN(d.getTime())) {
+        return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(5, 10);
+      }
     }
-    return iso;
+    return iso.slice(5, 10);
   }
 
   build() {

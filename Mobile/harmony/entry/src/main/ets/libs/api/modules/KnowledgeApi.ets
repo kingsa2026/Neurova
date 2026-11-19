@@ -20,6 +20,14 @@
 import { HttpClient } from '../HttpClient';
 import { ApiResponse, KnowledgeItem, PageResult } from '../../types';
 
+/** 提交公共库审批态（后端 submission 字段，pending=审批队列中） */
+export interface KnowledgeSubmissionDto {
+  status?: string;
+  submitted_at?: string;
+  submitted_by?: string;
+  note?: string;
+}
+
 /** 后端条目投影（item_response，字段名为后端 snake_case 原样） */
 export interface KnowledgeItemDto {
   knowledge_id: string;
@@ -34,6 +42,7 @@ export interface KnowledgeItemDto {
   visibility: string;
   owner_user_id: string;
   shared_with: string[];
+  submission?: KnowledgeSubmissionDto;
 }
 
 /** 列表信封载荷 */
@@ -60,6 +69,15 @@ export class KnowledgeApi {
     this.client = client;
   }
 
+  /** 秒级 Unix → 本地时区 ISO。toISOString 是 UTC：本地晚间创建的条目日期会显示成前一天 */
+  private static localIso(sec: number): string {
+    if (sec <= 0) {
+      return '';
+    }
+    const d = new Date(sec * 1000);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString();
+  }
+
   /** 后端条目 → 前端 KnowledgeItem（单源映射） */
   private static toItem(dto: KnowledgeItemDto): KnowledgeItem {
     const item: KnowledgeItem = {
@@ -70,12 +88,14 @@ export class KnowledgeApi {
       category: dto.category,
       tags: dto.tags,
       status: 'ready',
-      createdAt: dto.created_at > 0 ? new Date(dto.created_at * 1000).toISOString() : '',
-      updatedAt: dto.updated_at > 0 ? new Date(dto.updated_at * 1000).toISOString() : '',
+      createdAt: KnowledgeApi.localIso(dto.created_at),
+      updatedAt: KnowledgeApi.localIso(dto.updated_at),
       visibility: dto.visibility,
       ownerUserId: dto.owner_user_id,
       sharedWith: dto.shared_with,
     };
+    item.submissionStatus = dto.submission !== undefined && dto.submission !== null
+      && dto.submission.status !== undefined ? dto.submission.status : '';
     return item;
   }
 

@@ -287,9 +287,10 @@ export class WebSocketAdapter {
     this.ws.on('close', (value: Object) => {
       this.connected = false;
       this.stopHeartbeat();
-      const ev = value as CloseEventData;
-      const code: number = ev.code ?? 0;
-      const reason: string = ev.reason ?? '';
+      // close 事件载荷可能缺省（2026-11-19 11:53 实测崩溃 undefined.code）——可选链兜底
+      const ev = value as CloseEventData | undefined;
+      const code: number = ev?.code ?? 0;
+      const reason: string = ev?.reason ?? '';
       this.logger.warn(TAG, `WebSocket 已关闭 code=${code} reason=${reason}`);
 
       if (this.manualClose) {
@@ -313,8 +314,8 @@ export class WebSocketAdapter {
       // 全量打出事件原值：ErrorEventData 只有可选 message，漏掉 code/stack 会把
       // 真因（如 TLS/握手细节）吞成「未知错误」，真机排查无从下手
       this.logger.error(TAG, `WebSocket 错误原值: ${JSON.stringify(value)}`);
-      const ev = value as ErrorEventData;
-      const message: string = ev.message ?? '未知错误';
+      const ev = value as ErrorEventData | undefined;
+      const message: string = ev?.message ?? '未知错误';
       this.logger.error(TAG, `WebSocket 错误: ${message}`);
       this.errorManager.reportError(
         'ws_error',

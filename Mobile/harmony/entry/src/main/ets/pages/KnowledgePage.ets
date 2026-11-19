@@ -168,11 +168,11 @@ export struct KnowledgePage {
     return '';
   }
 
-  /** 提交公共库 */
+  /** 提交公共库（后端语义：进入审批队列，管理员审过才转公开） */
   private async submitToPublic(item: KnowledgeItem): Promise<void> {
     try {
       await this.api.knowledge.submitPublic(item.id);
-      this.msg.success('已提交公共库');
+      this.msg.success('已提交公共库，待管理员审核');
       this.loadKnowledge();
     } catch (e) {
       this.msg.error('提交失败：' + (e as Error).message);
@@ -448,17 +448,26 @@ export struct KnowledgePage {
           .width('100%')
           .margin({ top: 8 })
 
-          // 操作行：详情 + 删除；私有条目追加 提交公共库 / 共享
+          // 操作行：详情 + 删除；私有条目追加 提交公共库（待审中显示徽章）/ 共享
           Row() {
             if (item.visibility === 'private') {
-              GlassButton({
-                text: '提交公共库',
-                type: 'default',
-                btnSize: 'small',
-                onTap: () => {
-                  this.submitToPublic(item);
-                }
-              })
+              if (item.submissionStatus === 'pending') {
+                Text('待审')
+                  .fontSize(this.sm.getFontSize('badge'))
+                  .fontColor(this.sm.getColor('primary'))
+                  .border({ width: 1, color: this.sm.getColor('primary') })
+                  .borderRadius(6)
+                  .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+              } else {
+                GlassButton({
+                  text: '提交公共库',
+                  type: 'default',
+                  btnSize: 'small',
+                  onTap: () => {
+                    this.submitToPublic(item);
+                  }
+                })
+              }
               GlassButton({
                 text: '共享',
                 type: 'default',
@@ -576,7 +585,8 @@ export struct KnowledgePage {
       return '—';
     }
     const d = new Date(ts);
-    return d.toISOString().slice(0, 10);
+    // 本地时区日期（toISOString 是 UTC，晚间时间戳会显示成前一天）
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   }
 
   // ===========================================================================
