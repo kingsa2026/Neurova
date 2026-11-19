@@ -237,3 +237,18 @@ P1（E1–E4）已落地：提交 `625b994a8`。
 - **E4 live-verify**：双租户真后端（临时数据根+真实部门根组）13 步全链通过——默认 404 → 分享后 200 → PUT 403 → 发起/待审/批准落副本（origin 血缘、private、owner=审批人）→ 普通用户 404 → unshare 撤回 404 → reject 无副本 → 待审清空；启动 `[ERROR]` 计数 0。
 - **实施注记**：live-verify 首轮 dst-user 误见副本，定位为验证脚本 token 缺 `sub` 声明（auth 层 user_id 回退 `sub`，缺省 "unknown" 撞等）——非产品缺陷，修正验证姿势后复跑全绿。
 - **P2**（企业源 `share_tenants` 自动复制、事实层复制）维持挂台账待拍板。
+
+### 8.8 执行记录·追记（2026-11-19 同日，用户四项拍板后全部落地）
+
+用户对遗留项逐项拍板：P2 全量实施、做远程召回、agent 域 9 条预存失败清偿、推送双远端。
+
+- **agent 域 9 条预存失败清偿**（`32c199965`）：tkg 桩补 `allowedCategories` 形参；快照按维护协议退役 `Agent.chat_stream`（a334ffb05 假流式收编进 `agent.chat(stream=True)`）与 `Agent.spawn_subagent`（6312384c7 SubAgentManager 并入退役，派单走 SwarmManager）并写明去向；failureLanding 的 chat_stream 守卫随之退役、改版出**现役流式分支失败落点守卫**（`agent.chat(..., stream=True)` 注入 `llm_client.chat_stream` 失败仍落 assistant 终态）；`toolLoopDeadlines.txt` 六行补记 `loop_gates_compiler` 新引用站（3→4 / 5→6，循 8f9adfe50「改回实状」先例）。agent 全域 2110 passed 全绿。
+- **远程召回**（`85fe74baa`）：`recall_published_copy` 仅源租户 admin、仅作用于 `origin_*` 吻合的本源外发副本；副本 lifecycle 置 archived（各检索/读面即刻不可见）并打 `origin_recall` 留证——治理下架而非销毁；端点 `POST /{knowledge_id}/recall-copy` + 审计。
+- **P2 全量**（`d10dad497`）：
+  - v57：`enterprise_source_configs.share_tenants_json`（saveConfig 显式回填，防 INSERT OR REPLACE 清零）；
+  - **投影式复制**（设计决策：连接器凭据属源租户，目标租户不独立拉取——源每轮拉取成功后，同一批断言投影到目标租户分区）：`ingestBatch` 增 `tenantOverride`/`originTenant`；投影行 `qualifier.shared_from` 注记血缘、mediumRef/sourceSpan 与源轮一致、内容键按租户分区各自幂等（重拉零重复）；投影失败点名进 `projection_errors` 不静默，下轮重拉按内容键幂等补齐；
+  - `conflict_judge._qualifierKey` 剔除 `shared_from`——血缘注记不是业务限定，参与分组会把同 slot 竞争主张按来源拆散漏判；
+  - 端点 `GET/PUT /enterprise/sources/{id}/share-tenants`（admin，部门根组树校验，自身租户 400）；`ensureTenantExists` 下沉 `knowledge_common` 两域共用；
+  - 测试：`test_enterpriseShareTenants.py` 13 用例先红（11 红）后绿；fact_store 版本断言 56→57；路由快照 +2。
+- **终验回归**：knowledge 2058 / api 3317（metrics 1 条为全局计数器顺序污染，单跑即绿，与本批无关）/ enterprise 215 / agent 2110 全绿。
+- **推送**：origin（cnb.cool）已达 §8 细化批；agent 清偿/召回/P2 三批与本追记随批补推（github 当日网络重置，补推见提交后记录）。
