@@ -34,13 +34,16 @@ if str(PROJECT_ROOT) not in sys.path:
 
 ledger = importlib.import_module("scripts.ci.audit_ledger_commit_guard")
 
-#: 与守卫档同一口径的父墙（唯一出处见 `test_audit_ledger_commit_guard.py`）。本批把逐号 fork
-#: 收掉后一场实测 2.5–3.5s，故两边一起收到 60——降成本不顺手收墙，等于把宽墙留给下一次回归。
-SCAN_WALL_S = 60
+#: 与守卫档同一口径的父墙（唯一出处见 `test_audit_ledger_commit_guard.py`）。
+#: 墙必须盖住**满载机器**的真实扫描耗时：2026-11-20 全量跑实测本机约 2 分钟
+#: （仓库提交数较作者当年 2.5–3.5s 的读数已翻倍、且叠加 Defender 文件扫描），
+#: 60s 墙必超——pytest-timeout 当场杀进程，全量跑两次无声死亡即此根因。
+#: 放宽到 240s 保留棘轮语义（扫描成本再涨仍会红）。
+SCAN_WALL_S = 240
 
 #: 本档每一次 `subprocess.run` 的**子等待上界**（必须严格小于上面的父墙，同 §6-402 口径）：
 #: 无界的那一层先到点时，Windows 侧 thread 法报的是"整场跑测没了"，而不是这一格红。
-CHILD_WAIT_S = 30
+CHILD_WAIT_S = 90
 
 
 class _RunSpy:

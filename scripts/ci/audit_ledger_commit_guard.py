@@ -219,8 +219,17 @@ def headIndex() -> list:
 
 
 def findReplacement(token: str, index: list) -> str:
-    """同标题 + diffstat 逐行一致且唯一时才给替代号，否则空串（不许猜）。"""
-    staleSubject = _git("log", "-1", "--format=%s", token).strip()
+    """同标题 + diffstat 逐行一致且唯一时才给替代号，否则空串（不许猜）。
+
+    标题从 `headIndex()` 的内存索引按短号取——2026-11-20 全量实测：失效号达
+    1795 枚时逐号起 `git log -1` 累计 2 分钟（§6-414 的第三处逐号命中点，
+    当年只扫荡了 merge-base 与 cat-file 两处），是全量跑被 pytest-timeout
+    强杀的直接成本来源。短号歧义（同前缀多号）按守卫口径返回空串，不许猜。
+    """
+    subjects = [subj for short, subj in index if short == token or short.startswith(token)]
+    if len(subjects) != 1:
+        return ""
+    staleSubject = subjects[0]
     if not staleSubject:
         return ""
     candidates = [short for short, subj in index if subj == staleSubject]
