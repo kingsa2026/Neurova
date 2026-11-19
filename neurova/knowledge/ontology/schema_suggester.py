@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import uuid
@@ -47,6 +48,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_schema_suggestions_target
 """
 
 _SUGGESTION_STATUSES = ("pending", "approved", "rejected")
+
+#: v54（对照研究 P3-1a，2026-11-19）：审批决策绑定证据内容哈希——建议生成时
+#: 记下 payload_json 的 sha256 截断，人工审批请求必须回带同一哈希。
+#: 存量行为空串：不带哈希放行（兼容），带哈希按不匹配拒。
+_SCHEMA_V54_SUGGESTION_EVIDENCE = """
+ALTER TABLE ontology_schema_suggestions
+    ADD COLUMN evidence_hash TEXT NOT NULL DEFAULT '';
+"""
 
 _LLM_ENRICH_PROMPT = """你是数据目录编辑。根据表名与列清单给出业务概念命名。
 输出严格 JSON（不要解释）：
@@ -261,8 +270,11 @@ class SchemaSuggester:
         return out
 
     def decideSuggestion(self, tenantId: str, suggestionId: str, decision: str,
-                         reviewedBy: str = "") -> Dict[str, Any]:
-        """人工处置：approved 落术语并回填目录链接；rejected 留审计不再重生。"""
+                         reviewedBy: str = "", evidenceHash: str = "") -> Dict[str, Any]:
+        """人工处置：approved 落术语并回填目录链接；rejected 留审计不再重生。
+
+        证据哈希绑定（P3-1a）：建议带 evidence_hash 时审批请求必须回带同一哈希。
+        """
         if decision not in ("approved", "rejected"):
             raise ValueError("decision 只允许 approved|rejected，收到 %r" % decision)
         tenant = str(tenantId or "default")
@@ -276,6 +288,17 @@ class SchemaSuggester:
         if row["status"] != "pending":
             raise ValueError("建议 %s 已是 %s 态，不能重复审批"
                              % (suggestionId, row["status"]))
+        expectedHash = str(row["evidence_hash"] or "") if "evidence_hash" in row.keys() else ""
+        if expectedHash:
+            got = str(evidenceHash or "").strip()
+            if not got:
+                raise ValueError(
+                    "建议 %s 绑定了证据哈希，审批请求必须回带 evidence_hash"
+                    % suggestionId)
+            if got != expectedHash:
+                raise ValueError(
+                    "建议 %s 的证据哈希不匹配（expected %s, got %s）"
+                    % (suggestionId, expectedHash, got))
         payload = json.loads(row["payload_json"] or "{}")
         applied: Dict[str, Any] = {}
         if decision == "approved" and row["kind"] == "term":
@@ -317,15 +340,16 @@ class SchemaSuggester:
                           payload: Dict[str, Any], basis: str,
                           confidence: float) -> str:
         suggestionId = "schsug_%s" % uuid.uuid4().hex[:12]
+        payloadJson = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        evidenceHash = hashlib.sha256(payloadJson.encode("utf-8")).hexdigest()[:16]
         with self._store._lock, self._store._conn:
             self._store._conn.execute(
                 "INSERT OR IGNORE INTO ontology_schema_suggestions"
                 " (suggestion_id, tenant_id, source_id, kind, target, payload_json,"
-                "  basis, confidence, status, created_at)"
-                " VALUES (?,?,?,?,?,?,?,?,'pending',?)",
-                (suggestionId, tenant, source, kind, target,
-                 json.dumps(payload, ensure_ascii=False, sort_keys=True),
-                 basis, confidence, _now()))
+                "  basis, confidence, status, evidence_hash, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,'pending',?,?)",
+                (suggestionId, tenant, source, kind, target, payloadJson,
+                 basis, confidence, evidenceHash, _now()))
         return suggestionId
 
     def _termPayload(self, table: Dict[str, Any],

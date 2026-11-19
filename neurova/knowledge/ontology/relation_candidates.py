@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import uuid
 from typing import Any, Dict, List, Optional
@@ -39,6 +40,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_relation_candidates_dedupe
     ON ontology_relation_candidates(tenant_id, normalized_surface, source_entry_id);
 """
 
+#: v54（对照研究 P3-1a，2026-11-19）：审批决策绑定证据内容哈希——候选生成时
+#: 记下证据（source_text）的 sha256 截断，人工审批请求必须回带同一哈希，
+#: 防「批准时看的 ≠ 生效时用的」。存量行（迁移前生成）为空串：不带哈希放行
+#: （不阻断存量治理流），带哈希按不匹配拒。
+_SCHEMA_V54_CANDIDATE_EVIDENCE = """
+ALTER TABLE ontology_relation_candidates
+    ADD COLUMN evidence_hash TEXT NOT NULL DEFAULT '';
+"""
+
 
 def normalizeSurface(text: str) -> str:
     """候选去重的词形归一口径（与 term_registry._normalizeSurface 同一规则，勿抄两份口径）。"""
@@ -60,7 +70,11 @@ class RelationCandidateStore:
 
     def record(self, tenantId: str, surface: str, sourceEntryId: str = "",
                sourceText: str = "", confidence: Optional[float] = None) -> Optional[str]:
-        """记一条候选。同 (租户, 词形, 条目) 重复时幂等跳过，返回既存 candidate_id。"""
+        """记一条候选。同 (租户, 词形, 条目) 重复时幂等跳过，返回既存 candidate_id。
+
+        证据内容哈希（P3-1a）：sha256(source_text) 截断——审批面凭它绑定
+        「批准人当时读到的证据」。
+        """
         surface = str(surface or "").strip()
         if not surface:
             return None
@@ -68,6 +82,8 @@ class RelationCandidateStore:
         if not normalized:
             return None
         tenant = str(tenantId or "default")
+        evidenceHash = hashlib.sha256(
+            str(sourceText or "").encode("utf-8")).hexdigest()[:16]
         with self._store._lock, self._store._conn:
             existing = self._store._conn.execute(
                 "SELECT candidate_id FROM ontology_relation_candidates"
@@ -79,9 +95,9 @@ class RelationCandidateStore:
             self._store._conn.execute(
                 "INSERT INTO ontology_relation_candidates (candidate_id, tenant_id,"
                 " surface, normalized_surface, source_entry_id, source_text, confidence,"
-                " status, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                " status, evidence_hash, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (candidateId, tenant, surface, normalized, str(sourceEntryId or ""),
-                 str(sourceText or ""), confidence, "pending", _now()),
+                 str(sourceText or ""), confidence, "pending", evidenceHash, _now()),
             )
         return candidateId
 
@@ -99,14 +115,18 @@ class RelationCandidateStore:
         return [dict(r) for r in rows]
 
     def approve(self, candidateId: str, tenantId: str = "default",
-                reviewedBy: str = "", termRegistry: Any = None) -> Dict[str, Any]:
+                reviewedBy: str = "", termRegistry: Any = None,
+                evidenceHash: str = "") -> Dict[str, Any]:
         """批准：登记术语（term_id 即规范化的 surface）并回填 promoted_term_id。
 
         批准动作落在注册表 `register` 上——候选面只做审批流，不另造一条登记路径。
+        证据哈希绑定（P3-1a）：候选带 evidence_hash 时审批请求必须回带同一哈希，
+        防「批准时看的证据 ≠ 生效时用的证据」；存量空哈希行不带哈希放行。
         """
         row = self._requireCandidate(candidateId, tenantId)
         if row["status"] != "pending":
             raise ValueError("候选 %s 已是 %s 态，不能重复审批" % (candidateId, row["status"]))
+        self._checkEvidenceHash(row, evidenceHash)
         termId = str(row["normalized_surface"])
         if termRegistry is not None:
             if termRegistry.term(termId, tenantId=tenantId) is None:
@@ -121,17 +141,34 @@ class RelationCandidateStore:
         return self.get(candidateId, tenantId=tenantId) or {}
 
     def reject(self, candidateId: str, tenantId: str = "default",
-               reviewedBy: str = "") -> Dict[str, Any]:
+               reviewedBy: str = "", evidenceHash: str = "") -> Dict[str, Any]:
         """拒绝：保留审计行不删除——"拒绝过什么"与"批准过什么"是同一本账的两面。"""
         row = self._requireCandidate(candidateId, tenantId)
         if row["status"] != "pending":
             raise ValueError("候选 %s 已是 %s 态，不能重复审批" % (candidateId, row["status"]))
+        self._checkEvidenceHash(row, evidenceHash)
         with self._store._lock, self._store._conn:
             self._store._conn.execute(
                 "UPDATE ontology_relation_candidates SET status = 'rejected',"
                 " reviewed_at = ?, reviewed_by = ? WHERE candidate_id = ?",
                 (_now(), str(reviewedBy or ""), candidateId))
         return self.get(candidateId, tenantId=tenantId) or {}
+
+    @staticmethod
+    def _checkEvidenceHash(row: Dict[str, Any], evidenceHash: str) -> None:
+        """证据哈希绑定（P3-1a）：有哈希的候选必须回带同值；空哈希（存量）放行。"""
+        expected = str(row.get("evidence_hash") or "")
+        if not expected:
+            return
+        if not str(evidenceHash or "").strip():
+            raise ValueError(
+                "候选 %s 绑定了证据哈希，审批请求必须回带 evidence_hash"
+                "（防批准内容与生效内容不一致）" % row["candidate_id"])
+        if str(evidenceHash).strip() != expected:
+            raise ValueError(
+                "候选 %s 的证据哈希不匹配：审批基于的证据已不是生成候选时的证据"
+                "（expected %s, got %s）——请基于最新证据重新审阅"
+                % (row["candidate_id"], expected, str(evidenceHash).strip()))
 
     def get(self, candidateId: str, tenantId: str = "default") -> Optional[Dict[str, Any]]:
         with self._store._lock:

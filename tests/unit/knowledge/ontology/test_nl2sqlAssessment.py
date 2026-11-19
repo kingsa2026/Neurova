@@ -62,8 +62,13 @@ def _ingestCatalog(store, sideDb, source="s1"):
                    for r in conn.execute("PRAGMA table_info(%s)" % tableName)]
         tables.append({"name": tableName, "columns": columns})
     conn.close()
+    relations = {"foreign_keys": [
+        {"source_table": "orders", "source_column": "customer_id",
+         "target_table": "customers", "target_column": "id"}],
+        "primary_keys": {}}
     catalog = SchemaCatalogStore(store)
-    catalog.ingestSchema("default", source, "sql", type("S", (), {"tables": tables})())
+    catalog.ingestSchema("default", source, "sql",
+                         type("S", (), {"tables": tables})(), relations=relations)
     return catalog
 
 
@@ -155,3 +160,46 @@ class TestAssessment:
         assert out["answerable"] is True
         assert out["assessment"]["verdict"] == "helpful"
         assert "out_of_catalog_attempt" in out["assessment"]["gaps"]
+
+
+class TestCitations:
+    """P3-1c 答案逐论断强制引用（血缘差距三）：可答结果必须带 citations
+    （目录表/术语映射/join 路径/已批准模式四型），缺失即内部不一致；
+    拒答结果 citations 恒空（没有产出就没有可引用的论断）。"""
+
+    def test_answerCarriesTableCitation(self, store, sideDb):
+        _ingestCatalog(store, sideDb)
+        service = Nl2SqlService(store)
+        out = service.answerQuestion(
+            "default", "s1", "orders", _llmSql(
+                "SELECT id FROM orders WHERE amount > 1 ORDER BY id LIMIT 5"),
+            _executor(sideDb))
+        assert out["answerable"] is True
+        citations = out["citations"]
+        assert {"kind": "catalog_table", "ref": "orders"} in citations
+
+    def test_answerCarriesTermAndJoinCitations(self, store, sideDb):
+        catalog = _ingestCatalog(store, sideDb)
+        for table in catalog.listTables("default"):
+            if table["table_name"] == "customers":
+                catalog.linkTableTerm("default", table["catalog_table_id"],
+                                      "Customer")
+        registry = OntologyTermRegistry(store)
+        registry.register("Customer", "concept", label="Customer")
+        service = Nl2SqlService(store)
+        out = service.answerQuestion(
+            "default", "s1", "orders customers", _llmSql(
+                "SELECT o.id FROM orders o JOIN customers c "
+                "ON o.customer_id = c.id ORDER BY o.id LIMIT 5"),
+            _executor(sideDb))
+        assert out["answerable"] is True
+        citations = out["citations"]
+        assert {"kind": "term", "ref": "Customer"} in citations
+        assert any(c["kind"] == "join_path" for c in citations)
+
+    def test_refusalHasEmptyCitations(self, store, sideDb):
+        service = Nl2SqlService(store)  # 目录为空
+        out = service.answerQuestion("default", "s1", "任意",
+                                     _llmSql("SELECT 1"), _executor(sideDb))
+        assert out["answerable"] is False
+        assert out["citations"] == []

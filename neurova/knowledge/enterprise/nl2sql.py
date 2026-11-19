@@ -63,6 +63,8 @@ def _assessGrounding(sql: str, context: Optional[Dict[str, Any]],
     context = context or {}
     usedTables = set(tablesInSql(sql))
     hintTables = {str(h.get("table") or "") for h in (context.get("termHints") or [])}
+    # join 命中要求 SQL 真的做了连接（单表查询谈不上用了连接路径）
+    hasJoin = re.search(r"\bjoin\b", str(sql or ""), re.IGNORECASE) is not None
     joinTables: set = set()
     for path in (context.get("joinPaths") or {}).values():
         for hop in path:
@@ -70,7 +72,7 @@ def _assessGrounding(sql: str, context: Optional[Dict[str, Any]],
             joinTables.add(str(hop.get("target_table") or ""))
     grounds = {
         "terms": sorted(t for t in usedTables & hintTables if t),
-        "joins": sorted(t for t in usedTables & joinTables if t),
+        "joins": sorted(t for t in usedTables & joinTables if t) if hasJoin else [],
         "tables": sorted(t for t in usedTables if t),
         "patterns": sum(1 for p in (context.get("patterns") or [])
                         if set(tablesInSql(str(p.get("sql") or ""))) & usedTables),
@@ -100,6 +102,45 @@ def _refusalGaps(reason: str) -> List[str]:
         if "目录外表" in text:
             gaps.append("out_of_catalog_attempt")
     return gaps or ["missing_term"]
+
+
+def _buildCitations(sql: str, context: Optional[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """答案的逐论断引用（P3-1c，血缘差距三）：每个论断可溯到四型来源——
+
+    catalog_table（目录表）/ term（审批回填的术语映射）/ join_path（已核实的
+    连接边）/ approved_pattern（已批准历史模式）。SQL 引用的表全部在目录
+    白名单内（只读硬闸保证），因此可答结果的 citations 恒非空。
+    """
+    context = context or {}
+    usedTables = sorted({t for t in tablesInSql(sql) if t})
+    hintByTable = {str(h.get("table") or ""): str(h.get("term_id") or "")
+                   for h in (context.get("termHints") or [])}
+    hasJoin = re.search(r"\bjoin\b", str(sql or ""), re.IGNORECASE) is not None
+    citations: List[Dict[str, str]] = [{"kind": "catalog_table", "ref": t}
+                                       for t in usedTables]
+    for table in usedTables:
+        termId = hintByTable.get(table) or ""
+        if termId:
+            citations.append({"kind": "term", "ref": termId})
+    if not hasJoin:
+        return citations
+    joinTables = set(usedTables)
+    for target, hops in (context.get("joinPaths") or {}).items():
+        if str(target) not in joinTables:
+            continue
+        for hop in hops:
+            ref = "%s.%s=%s.%s" % (hop.get("source_table"),
+                                   hop.get("source_column"),
+                                   hop.get("target_table"),
+                                   hop.get("target_column") or "id")
+            citation = {"kind": "join_path", "ref": ref}
+            if citation not in citations:
+                citations.append(citation)
+    for pattern in (context.get("patterns") or []):
+        if set(tablesInSql(str(pattern.get("sql") or ""))) & joinTables:
+            citations.append({"kind": "approved_pattern",
+                              "ref": str(pattern.get("question") or "")[:80]})
+    return citations
 
 _LLM_SQL_PROMPT = """你是严谨的数据分析 SQL 编写器。只依据给出的目录与连接提示写一条只读 SELECT。
 
@@ -277,7 +318,9 @@ class Nl2SqlService:
                       "rows": rows, "row_count": len(rows), "truncated": truncated,
                       "steps": steps, "status": status,
                       "assessment": _assessGrounding(sql, context, attempts,
-                                                     lastError)}
+                                                     lastError),
+                      # 逐论断引用（P3-1c）：可答结果必可溯到目录/术语/连接边
+                      "citations": _buildCitations(sql, context)}
             if executionError:
                 result["error"] = executionError
             self._recordHistory(tenant, source, question, sql, status,
@@ -483,4 +526,6 @@ class Nl2SqlService:
                 "assessment": {"verdict": "not_assessed",
                                "grounds": {"terms": [], "joins": [],
                                            "tables": [], "patterns": 0},
-                               "gaps": _refusalGaps(reason)}}
+                               "gaps": _refusalGaps(reason)},
+                # 没有产出就没有可引用的论断（P3-1c）
+                "citations": []}

@@ -167,6 +167,13 @@ ALTER TABLE knowledge_assertions ADD COLUMN erased_at TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_assertion_erased ON knowledge_assertions(erased_at, fact_id);
 """
 
+# v55（对照研究 P3-1b，2026-11-19）：断言证据的位置锚定——source_span_json
+# 存 {"start","end"}（源文档内字符区间，可选）。能力面：存储＋溯源读面透出；
+# 生产写入方（抽取链带位置信息时）按需接线，不携带时零漂移。
+_SCHEMA_V55_ASSERTION_SPAN = """
+ALTER TABLE knowledge_assertions ADD COLUMN source_span_json TEXT NOT NULL DEFAULT '';
+"""
+
 # 按知识命中的 token 归因（批次：反馈/评估剩余缺口）。一次回答命中多条事实时
 # 按命中数均分；attribution 列把“均分估计”写成可读事实，不冒充逐条真实成本。
 _SCHEMA_V14 = """
@@ -1820,11 +1827,16 @@ class KnowledgeFactStore:
     def insertAssertion(
         self, factId: str, actorType: str, actorId: str, mediumRef: str,
         statementText: str, statementHash: str, activityId: Optional[str] = None,
-        weight: float = 1.0,
+        weight: float = 1.0, sourceSpan: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
-        """幂等插断言；已存在返回 None（同主体同来源同陈述不重复计一次）。"""
+        """幂等插断言；已存在返回 None（同主体同来源同陈述不重复计一次）。
+
+        sourceSpan（P3-1b，可选）：证据在源文档内的字符区间 {"start","end"}。
+        """
         self._requireFact(factId)
         assertionId = "asrt_%s" % uuid.uuid4().hex[:12]
+        spanJson = json.dumps(sourceSpan, ensure_ascii=False, sort_keys=True) \
+            if sourceSpan else ""
         with self._lock, self._conn:
             slot = self._digestChain.nextSlot(self._conn, activityId)
             item = {"assertion_id": assertionId, "fact_id": factId,
@@ -1837,10 +1849,11 @@ class KnowledgeFactStore:
             cur = self._conn.execute(
                 "INSERT OR IGNORE INTO knowledge_assertions (assertion_id, fact_id, actor_type,"
                 " actor_id, activity_id, medium_ref, statement_text, statement_hash, asserted_at,"
-                " weight, seq, digest, prev_digest) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " weight, seq, digest, prev_digest, source_span_json)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (assertionId, factId, actorType, actorId, activityId, mediumRef,
                  statementText, statementHash, _now(), weight,
-                 item["seq"], digest, item["prev_digest"]),
+                 item["seq"], digest, item["prev_digest"], spanJson),
             )
             if not cur.rowcount:
                 return None
@@ -1860,7 +1873,17 @@ class KnowledgeFactStore:
                 " ORDER BY asserted_at, assertion_id",
                 (factId,),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._hydrateAssertionSpan(dict(row)) for row in rows]
+
+    @staticmethod
+    def _hydrateAssertionSpan(row: Dict[str, Any]) -> Dict[str, Any]:
+        """source_span_json → source_span（P3-1b；缺省空 dict，零漂移）。"""
+        raw = row.pop("source_span_json", "") or ""
+        try:
+            row["source_span"] = json.loads(raw) if raw else {}
+        except Exception:  # noqa: BLE001 - 坏行如实置空，不让读面崩
+            row["source_span"] = {}
+        return row
 
     def liveAssertions(self, factId: str) -> List[Dict[str, Any]]:
         """只回仍在主张这行的断言——已擦除的那跳留在链上，但不再是一个来源。
@@ -1874,7 +1897,7 @@ class KnowledgeFactStore:
                 " AND erased_at = '' ORDER BY asserted_at, assertion_id",
                 (factId,),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._hydrateAssertionSpan(dict(row)) for row in rows]
 
     def setAssertionVerification(self, assertionId: str, state: str) -> None:
         """回写一条断言的校验结论。校验器是唯一写入者，列上的值域在这里收口。"""

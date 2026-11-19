@@ -205,7 +205,9 @@ class TestMigrationVersions:
         # v51：schema 目录（对照研究 P1-1，2026-11-15）——ontology_catalog_tables/_columns。
         # v52：schema 术语建议（对照研究 P1-2，2026-11-15）——ontology_schema_suggestions。
         # v53：问数历史（对照研究 P1-4/P2-3，2026-11-15）——ontology_query_history。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 53
+        # v54：审批证据哈希（对照研究 P3-1a，2026-11-19）——候选/建议两审批面加 evidence_hash。
+        # v55：断言位置锚定（对照研究 P3-1b，2026-11-19）——knowledge_assertions 加 source_span_json。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 55
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
                 'ontology_change_log', 'enterprise_source_configs',

@@ -159,14 +159,19 @@ async def runSchemaSuggestions(
 @router.post("/ontology/schema-suggestions/{suggestion_id}/approve")
 async def approveSchemaSuggestion(
     suggestion_id: str,
+    evidence_hash: str = "",
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """批准术语建议（仅管理员）：登记概念术语 + 回填目录 term_id 链接。"""
+    """批准术语建议（仅管理员）：登记概念术语 + 回填目录 term_id 链接。
+
+    evidence_hash（P3-1a）：建议绑定证据内容哈希，审批请求必须回带同一哈希。
+    """
     _requireAdmin(current_user)
     try:
         result = _suggester().decideSuggestion(
             _tenantOf(current_user), str(suggestion_id or "").strip(),
-            "approved", reviewedBy=str(current_user.get("username") or ""))
+            "approved", reviewedBy=str(current_user.get("username") or ""),
+            evidenceHash=str(evidence_hash or "").strip())
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
@@ -177,6 +182,7 @@ async def approveSchemaSuggestion(
 @router.post("/ontology/schema-suggestions/{suggestion_id}/reject")
 async def rejectSchemaSuggestion(
     suggestion_id: str,
+    evidence_hash: str = "",
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
     """拒绝建议（仅管理员）：留审计行，同目标不再重生。"""
@@ -184,7 +190,8 @@ async def rejectSchemaSuggestion(
     try:
         result = _suggester().decideSuggestion(
             _tenantOf(current_user), str(suggestion_id or "").strip(),
-            "rejected", reviewedBy=str(current_user.get("username") or ""))
+            "rejected", reviewedBy=str(current_user.get("username") or ""),
+            evidenceHash=str(evidence_hash or "").strip())
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:

@@ -1596,8 +1596,13 @@ async def approve_relation_candidate(
     candidate_id: str, request: Request,
     current_user: Dict = Depends(get_current_user_or_service),
     basis: str = Query(""),
+    evidence_hash: str = Query(""),
 ):
-    """批准候选：登记术语并回填 promoted_term_id（审批流走注册表，不另造登记路径）。"""
+    """批准候选：登记术语并回填 promoted_term_id（审批流走注册表，不另造登记路径）。
+
+    evidence_hash（P3-1a）：候选绑定证据内容哈希，审批请求必须回带同一哈希——
+    防「批准时看的证据 ≠ 生效时用的证据」；存量空哈希行不带哈希放行。
+    """
     _requireAdmin(current_user)
     store, registry, engine = _ontologyParts()
     from neurova.knowledge.ontology.relation_candidates import RelationCandidateStore
@@ -1606,7 +1611,7 @@ async def approve_relation_candidate(
         candidate = RelationCandidateStore(store).approve(
             str(candidate_id or "").strip(), tenantId=_tenantOf(current_user),
             reviewedBy=str(current_user.get("username") or current_user.get("user_id") or ""),
-            termRegistry=registry)
+            termRegistry=registry, evidenceHash=str(evidence_hash or "").strip())
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
@@ -1626,8 +1631,12 @@ async def reject_relation_candidate(
     candidate_id: str, request: Request,
     current_user: Dict = Depends(get_current_user_or_service),
     basis: str = Query(""),
+    evidence_hash: str = Query(""),
 ):
-    """拒绝候选：保留审计行不删除（拒绝过什么与批准过什么是同一本账的两面）。"""
+    """拒绝候选：保留审计行不删除（拒绝过什么与批准过什么是同一本账的两面）。
+
+    evidence_hash（P3-1a）：与批准同纪律——绑定审批时读到的证据。
+    """
     _requireAdmin(current_user)
     store, _registry, _engine = _ontologyParts()
     from neurova.knowledge.ontology.relation_candidates import RelationCandidateStore
@@ -1635,7 +1644,8 @@ async def reject_relation_candidate(
     try:
         candidate = RelationCandidateStore(store).reject(
             str(candidate_id or "").strip(), tenantId=_tenantOf(current_user),
-            reviewedBy=str(current_user.get("username") or current_user.get("user_id") or ""))
+            reviewedBy=str(current_user.get("username") or current_user.get("user_id") or ""),
+            evidenceHash=str(evidence_hash or "").strip())
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:

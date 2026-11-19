@@ -35,6 +35,7 @@ from .knowledge_facts import (
     _SCHEMA_V25,
     _SCHEMA_V26,
     _SCHEMA_V27,
+    _SCHEMA_V55_ASSERTION_SPAN,
 )
 from .digest_chain import _SCHEMA_V11
 from ..categories_registry import _SCHEMA_V38_CATEGORIES
@@ -47,6 +48,8 @@ from ..community_graph import _SCHEMA_V48_COMMUNITIES
 from ..enterprise.webhook_receiver import _SCHEMA_V49_WEBHOOK_DEDUP
 from ..enterprise.schema_catalog import _SCHEMA_V51_CATALOG
 from ..enterprise.nl2sql import _SCHEMA_V53_QUERY_HISTORY
+from ..ontology.relation_candidates import _SCHEMA_V54_CANDIDATE_EVIDENCE
+from ..ontology.schema_suggester import _SCHEMA_V54_SUGGESTION_EVIDENCE
 from ..ontology.artifact_store import _SCHEMA_V50_ARTIFACTS
 from ..ontology.schema_suggester import _SCHEMA_V52_SUGGESTIONS
 from ..ontology.decision_ledger import _SCHEMA_V47_DECISIONS
@@ -194,6 +197,14 @@ _STEPS: List[tuple] = [
     # v53：问数历史（对照研究 P1-4/P2-3，2026-11-15）——ontology_query_history
     #      （成功/失败/拒答都留行的诚实审计；高频表组合回灌 sql_pattern 候选）
     (53, _SCHEMA_V53_QUERY_HISTORY),
+    # v54：审批决策绑定证据内容哈希（对照研究 P3-1a，2026-11-19）——
+    #      关系候选/术语建议两审批面各加 evidence_hash 列（生成时算 sha256，
+    #      审批必须回带；存量空哈希行兼容放行）
+    (54, _SCHEMA_V54_CANDIDATE_EVIDENCE + "\n" + _SCHEMA_V54_SUGGESTION_EVIDENCE),
+    # v55：断言证据位置锚定（对照研究 P3-1b，2026-11-19）——
+    #      knowledge_assertions 加 source_span_json（可选 {"start","end"}；
+    #      存储与溯源读面透出，写入方按需接线）
+    (55, _SCHEMA_V55_ASSERTION_SPAN),
 ]
 
 _registered = False

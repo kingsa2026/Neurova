@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any, Dict, List, Optional
 
 ACTIVITY_KINDS: tuple = (
@@ -46,7 +47,11 @@ class KnowledgeLineageLedger:
         self, factId: str, assertions: List[Dict[str, Any]],
         activityId: Optional[str] = None,
     ) -> int:
-        """挂断言，返回实际新增条数。校验前置：匿名断言一律不进。"""
+        """挂断言，返回实际新增条数。校验前置：匿名断言一律不进。
+
+        断言可带可选 `sourceSpan`（{"start","end"}，源文档内字符区间，P3-1b）
+        ——随溯源账本落库、读回，证据因此可定位回原文。
+        """
         if not assertions:
             raise ValueError(
                 "事实 %s 没有任何断言：缺 actorType / actorId / statementText 的来源声明，"
@@ -66,6 +71,7 @@ class KnowledgeLineageLedger:
                 statementHash=statementHash,
                 activityId=assertion.get("activityId") or activityId,
                 weight=float(assertion.get("weight", 1.0)),
+                sourceSpan=assertion.get("sourceSpan") or None,
             ):
                 attached += 1
         self._syncAssertionCount(factId)
@@ -90,8 +96,9 @@ class KnowledgeLineageLedger:
 
     def traceLineage(self, factId: str) -> List[Dict[str, Any]]:
         rows = self._store.lineageRows(factId)
-        return [
-            {
+        out = []
+        for row in rows:
+            entry = {
                 "assertion_id": row["assertion_id"],
                 "fact_id": row["fact_id"],
                 "actor_type": row["actor_type"],
@@ -105,5 +112,11 @@ class KnowledgeLineageLedger:
                 "activity_basis": row.get("activity_basis"),
                 "activity_inputs": row.get("activity_inputs") or {},
             }
-            for row in rows
-        ]
+            # 位置锚定（P3-1b）：断言可携带源文档内字符区间，证据可回跳定位
+            rawSpan = str(row.get("source_span_json") or "")
+            try:
+                entry["source_span"] = json.loads(rawSpan) if rawSpan else {}
+            except Exception:  # noqa: BLE001 - 坏行如实置空，不让溯源读面崩
+                entry["source_span"] = {}
+            out.append(entry)
+        return out

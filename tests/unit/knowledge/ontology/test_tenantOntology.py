@@ -43,8 +43,14 @@ class TestV25Migration:
         # v36 起迁移链会 ALTER knowledge_facts（K-09 源钟两列）：真实 v24 库必有 v1 建的
         # 这张表（链式迁移下 user_version 只在成功后前移，不可能有"24 版却缺 v1 表"的库），
         # 夹具照真实状态补 v1 DDL，不再依赖"v25–v35 恰好不碰它"的巧合。
-        from neurova.knowledge.foundation.knowledge_facts import _SCHEMA as _FACTS_SCHEMA_V1
+        # v55 起迁移链会 ALTER knowledge_assertions（P3-1b 位置锚定列）：同理补 v3 建的
+        # 断言表（真实 v24 库必有），否则 v55 在这份夹具上炸 "no such table"。
+        from neurova.knowledge.foundation.knowledge_facts import (
+            _SCHEMA as _FACTS_SCHEMA_V1,
+            _SCHEMA_V3 as _FACTS_SCHEMA_V3,
+        )
         conn.executescript(_FACTS_SCHEMA_V1)
+        conn.executescript(_FACTS_SCHEMA_V3)
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS ontology_terms (
                 term_id TEXT PRIMARY KEY, kind TEXT NOT NULL,

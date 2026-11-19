@@ -170,7 +170,8 @@ class TestSchemaSuggester:
         sales = [s for s in suggester.listSuggestions("default")
                  if s["target"] == "term:erp:sales_orders"][0]
         result = suggester.decideSuggestion("default", sales["suggestion_id"],
-                                            "approved", reviewedBy="admin")
+                                            "approved", reviewedBy="admin",
+                                            evidenceHash=sales["evidence_hash"])
         assert result["term_id"] == "SalesOrders"
         assert cat.tableDetail("default", sales["payload"]["table_id"])["term_id"] \
             == "SalesOrders"
@@ -188,7 +189,8 @@ class TestSchemaSuggester:
         suggester.runForSource("default", "erp")
         first = suggester.listSuggestions("default")[0]
         suggester.decideSuggestion("default", first["suggestion_id"], "rejected",
-                                   reviewedBy="admin")
+                                   reviewedBy="admin",
+                                   evidenceHash=first["evidence_hash"])
         again = suggester.runForSource("default", "erp")
         # 被拒目标不再重生（尊重人工否决），其余保持 pending 不重复生成
         assert again["term_suggestions"] == 0
@@ -274,12 +276,15 @@ class TestSchemaSuggestionRest:
                   if s["target"] == "term:erp:sales_orders"][0]
 
         approve = restClient.post(PREFIX + "/ontology/schema-suggestions/"
-                                  + target["suggestion_id"] + "/approve")
+                                  + target["suggestion_id"] + "/approve",
+                                  params={"evidence_hash": target["evidence_hash"]})
         assert approve.status_code == 200, approve.text
         assert approve.json()["data"]["term_id"] == "SalesOrders"
 
         reject = restClient.post(PREFIX + "/ontology/schema-suggestions/"
-                                 + listing["items"][0]["suggestion_id"] + "/reject")
+                                 + listing["items"][0]["suggestion_id"] + "/reject",
+                                 params={"evidence_hash":
+                                         listing["items"][0]["evidence_hash"]})
         assert reject.status_code == 200
 
     def testRunIsAdminOnly(self, restClient):

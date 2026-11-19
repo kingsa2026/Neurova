@@ -77,7 +77,8 @@ class TestRelationCandidateEndpoints:
         pending = client.get(PREFIX + "/ontology/relation-candidates").json()["data"]["items"]
 
         resp = client.post(PREFIX + "/ontology/relation-candidates/%s/approve"
-                           % pending[0]["candidate_id"])
+                           % pending[0]["candidate_id"],
+                           params={"evidence_hash": pending[0]["evidence_hash"]})
 
         assert resp.status_code == 200
         promoted = resp.json()["data"]["candidate"]
@@ -88,7 +89,8 @@ class TestRelationCandidateEndpoints:
         pending = client.get(PREFIX + "/ontology/relation-candidates").json()["data"]["items"]
 
         resp = client.post(PREFIX + "/ontology/relation-candidates/%s/reject"
-                           % pending[0]["candidate_id"])
+                           % pending[0]["candidate_id"],
+                           params={"evidence_hash": pending[0]["evidence_hash"]})
 
         assert resp.status_code == 200
         assert resp.json()["data"]["candidate"]["status"] == "rejected"
@@ -96,7 +98,8 @@ class TestRelationCandidateEndpoints:
     def test_approveTwiceReturns409(self, client, seeded):
         pending = client.get(PREFIX + "/ontology/relation-candidates").json()["data"]["items"]
         candidateId = pending[0]["candidate_id"]
-        client.post(PREFIX + "/ontology/relation-candidates/%s/approve" % candidateId)
+        client.post(PREFIX + "/ontology/relation-candidates/%s/approve" % candidateId,
+                    params={"evidence_hash": pending[0]["evidence_hash"]})
 
         resp = client.post(PREFIX + "/ontology/relation-candidates/%s/approve" % candidateId)
 
