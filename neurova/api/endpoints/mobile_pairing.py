@@ -29,6 +29,7 @@ import threading
 from neurova.core import config
 from neurova.core import mobile_device_store
 from neurova.core.logger import get_logger
+from neurova.api.deps import require_admin
 from neurova.tunnel import protocol
 import secrets
 import time
@@ -316,9 +317,14 @@ def _advertisedBaseUrl() -> str:
     为什么需要它：服务端无固定 IP 时，入站请求那个 Host 是中继/反代的地址或局域网地址，
     照它出回连地址，手机在网外就连不上。这一条也是「一台固定域名的反代机 + DDNS」
     那条最朴素路线今天就能跑通的前提。
+
+    来源优先级单源在 `connection_config.effectiveAdvertisedBaseUrl()`：
+    面板显式选择（custom）> env 广播（auto，存量行为）；direct/relay 模式不广播
+    （前者强制入站，后者的地址来自隧道路由 /t/<routeId>）。这里只收口，不另立优先级。
     """
-    raw = (config.get("NEUROVA_ADVERTISED_BASE_URL") or "").strip()
-    return raw.rstrip("/")
+    from neurova.tunnel.connection_config import effectiveAdvertisedBaseUrl
+
+    return effectiveAdvertisedBaseUrl().rstrip("/")
 
 
 def _wsOrigin(request) -> tuple:
@@ -953,6 +959,85 @@ async def get_tunnel_status(user_id: str = Depends(_get_current_user_id)):
     return {"code": 0, "data": status}
 
 
+# 连接方式（档一）的写面只给管理员：它是**全局**配置（影响所有用户的配对地址），
+# 且准入令牌是机密——读写口都过角色门，令牌只回掩码。
+_requireAdminDep = require_admin()
+
+
+class ConnectionConfigRequest(BaseModel):
+    """连接方式写入体：缺省键＝保持现值（部分更新），显式空串＝清空该字段。"""
+    mode: str = Field(..., description="连接方式：auto/direct/custom/relay")
+    custom_advertised_url: Optional[str] = Field(default=None, description="custom 模式的对外地址")
+    relay_url: Optional[str] = Field(default=None, description="relay 模式的自建中继地址")
+    relay_enrollment_token: Optional[str] = Field(default=None, description="中继准入令牌（只写）")
+
+
+class PreflightRequest(BaseModel):
+    url: str = Field(..., description="待探测的对外地址（http/https）")
+    path: str = Field(default="/health", description="探测路径；自建中继用 /healthz")
+
+
+@router.get("/pairing/connection-config")
+async def get_connection_config(_admin: Dict[str, Any] = Depends(_requireAdminDep)):
+    """连接方式配置读面（admin）：令牌只回掩码；附通道现状，面板一次取全。"""
+    from neurova.tunnel.agent import getTunnelAgent
+    from neurova.tunnel.connection_config import getConnectionConfig
+
+    view = getConnectionConfig()
+    view["tunnel"] = getTunnelAgent().tunnelStatus()
+    return view
+
+
+@router.put("/pairing/connection-config")
+async def put_connection_config(body: ConnectionConfigRequest,
+                                _admin: Dict[str, Any] = Depends(_requireAdminDep)):
+    """连接方式写面（admin）：落盘 + 立即重建出站 agent——改完即生效，不必重启进程。"""
+    from neurova.tunnel.connection_config import applyConnectionConfig, setConnectionConfig
+
+    try:
+        setConnectionConfig(mode=body.mode,
+                            customAdvertisedUrl=body.custom_advertised_url,
+                            relayUrl=body.relay_url,
+                            relayEnrollmentToken=body.relay_enrollment_token)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return await applyConnectionConfig()
+
+
+@router.post("/pairing/connection-config/preflight")
+async def preflight_connection_config(body: PreflightRequest,
+                                      _admin: Dict[str, Any] = Depends(_requireAdminDep)):
+    """对外地址连通性预检（admin）：对 `{url}{path}` 发一次真 GET，结果如实回。
+
+    任何 HTTP 应答都算"可达"（状态码原样给，404 也算通——那是主机可达、路径没有）；
+    连接类失败 ok=False + 原因。预检是**建议读数**不是门：generate 的阻断判据
+    在通道判定里（§8-S0.5），这里不替它做主。
+    """
+    import httpx
+
+    url = (body.url or "").strip()
+    probePath = (body.path or "/health").strip() or "/health"
+    if not probePath.startswith("/"):
+        raise HTTPException(status_code=422, detail="path 必须以 / 开头")
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        raise HTTPException(status_code=422, detail="url 必须是 http/https 的完整地址")
+    target = url.rstrip("/") + probePath
+    started = time.monotonic()
+    try:
+        # trust_env=False：预探测的是"这台地址通不通"，不能被宿主代理变量截胡
+        # （AGENTS §0：代理环境的故障会伪装成目标地址的故障）。
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False,
+                                     trust_env=False) as client:
+            resp = await client.get(target)
+        latency = round((time.monotonic() - started) * 1000, 1)
+        return {"ok": True, "url": url, "status_code": resp.status_code,
+                "latency_ms": latency, "error": ""}
+    except Exception as e:  # noqa: BLE001 - 连不上的原因本身就是预检结果
+        return {"ok": False, "url": url, "status_code": None, "latency_ms": None,
+                "error": f"{type(e).__name__}: {e}"}
+
+
 def _addressSource() -> str:
     """本次会用的地址来源（`direct` / `via_relay`）——与隧道态**可并存**，见 §5.2。"""
     return "via_relay" if _relayRouteIsUsable() else "direct"
@@ -989,6 +1074,29 @@ def _requireScannableChannel() -> None:
                 "code": protocol.TUNNEL_ERROR_CODES[0],
                 "message": ("中继已配置但未注册成功（当前 %s），现在生成的二维码手机扫了也连不上；"
                             "请检查中继可达性与准入凭据" % status["state"]),
+                "tunnel_state": status["state"],
+            },
+        )
+    # 连接方式（档一）的两种"选了但没配好"同样要拦：不然发出去的码照旧是张死图，
+    # 只是失败原因从"中继没连上"换成"地址没填/没配"。判据在后端，不在 UI（§8-S0.5）。
+    from neurova.tunnel.connection_config import getConnectionConfig
+
+    mode = getConnectionConfig()["mode"]
+    if mode == "relay" and not status["configured"]:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": protocol.TUNNEL_ERROR_CODES[0],
+                "message": "连接方式为自建中继，但尚未配置中继地址与准入令牌——请先在配对面板填写并保存",
+                "tunnel_state": status["state"],
+            },
+        )
+    if mode == "custom" and not _advertisedBaseUrl():
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": protocol.TUNNEL_ERROR_CODES[0],
+                "message": "连接方式为自定义对外地址，但该地址为空——请先在配对面板填写并保存",
                 "tunnel_state": status["state"],
             },
         )

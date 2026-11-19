@@ -323,19 +323,23 @@ _agent: Optional[TunnelAgent] = None
 _agentLock = threading.RLock()
 
 
-def buildAgentFromEnv() -> TunnelAgent:
+def stableInstanceId() -> str:
+    """稳定实例号：重注册要拿到**同一条 routeId**，否则每次重启都换地址，
+    手机侧已配对的设备就得重扫——那正是本案要避免的那件事。"""
     instanceId = (os.environ.get("NEUROVA_TUNNEL_INSTANCE_ID") or "").strip()
-    if not instanceId:
-        from neurova.core.data_root import dataPath
+    if instanceId:
+        return instanceId
+    from neurova.core.data_root import dataPath
 
-        # 稳定实例号：重注册要拿到**同一条 routeId**，否则每次重启都换地址，
-        # 手机侧已配对的设备就得重扫——那正是本案要避免的那件事。
-        instanceId = "nv-" + hashlib.sha256(
-            dataPath("tunnel").encode("utf-8")).hexdigest()[:12]
+    return "nv-" + hashlib.sha256(
+        dataPath("tunnel").encode("utf-8")).hexdigest()[:12]
+
+
+def buildAgentFromEnv() -> TunnelAgent:
     return TunnelAgent(
         relayUrl=os.environ.get(protocol.RELAY_URL_ENV, ""),
         enrollmentToken=os.environ.get(protocol.ENROLLMENT_TOKEN_ENV, ""),
-        instanceId=instanceId,
+        instanceId=stableInstanceId(),
     )
 
 

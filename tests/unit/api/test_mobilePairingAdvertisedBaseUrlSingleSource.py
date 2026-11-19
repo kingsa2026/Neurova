@@ -153,9 +153,18 @@ def test_advertised_reader_goes_through_the_config_entrypoint():
     """读法纪律：对外地址经 `neurova/core/config.py` 的统一入口，不散成第二份 `os.getenv`。
 
     AGENTS/知识档案都点过这个形态——环境变量读取的集中入口就是那四个函数。
+    档一（连接方式选择）后读法分两层：`_advertisedBaseUrl()` 收口到
+    `connection_config.effectiveAdvertisedBaseUrl()`（按面板选择解析优先级），
+    env 兜底仍在统一入口——两层都不许出现散装 `os.getenv`。
     """
     text = (REPO / "neurova/api/endpoints/mobile_pairing.py").read_text(encoding="utf-8")
     body = re.search(r"def _advertisedBaseUrl\(.*?\n(?=\S)", text, re.S)
     assert body, "找不到 `_advertisedBaseUrl()`——对外地址的读处必须唯一"
-    snippet = body.group(0)
-    assert "config.get" in snippet, f"没走统一配置入口：{snippet}"
+    assert "os.getenv" not in body.group(0), "对外地址不得散装读环境变量"
+    assert "effectiveAdvertisedBaseUrl" in body.group(0), (
+        "对外地址的取值单源在 connection_config（按连接方式解析优先级），别在端点里另立一份")
+
+    ccText = (REPO / "neurova/tunnel/connection_config.py").read_text(encoding="utf-8")
+    ccBody = re.search(r"def effectiveAdvertisedBaseUrl\(.*?\n(?=\S)", ccText, re.S)
+    assert ccBody, "找不到 `effectiveAdvertisedBaseUrl()`——env 兜底读法必须唯一"
+    assert "config.get" in ccBody.group(0), f"没走统一配置入口：{ccBody.group(0)}"
