@@ -59,7 +59,8 @@ class FakeUIABackend:
 
     def walk(self, window, max_nodes, max_depth):
         self.calls.append(("walk", max_nodes, max_depth))
-        return [dict(e) for e in self.elements][:max_nodes]
+        stats = {"depth_truncated": False, "observed_max_depth": 0}
+        return [dict(e) for e in self.elements][:max_nodes], stats
 
     def invoke(self, element):
         self.calls.append(("invoke", element["runtime_id"]))

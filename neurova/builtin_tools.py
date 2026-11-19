@@ -313,7 +313,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "computer_dom_snapshot": {
         # 并行能力声明：只读但作用域为共享（UIA 树快照，读的是共享桌面的瞬时结构）⇒ 推导判为不可并行。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
-        "description": "【桌面可访问性快照】枚举前台（或指定标题）窗口控件树（index/角色/名称/矩形/可交互）。桌面交互前必先调用，按快照 index 用 computer_click_element/computer_set_value 语义操作，勿盲猜坐标；窗口变化后 generation 递增需重快照。",
+        "description": "【桌面可访问性快照】枚举前台（或指定标题）窗口控件树（index/角色/名称/矩形/可交互）。桌面交互前必先调用，按快照 index 用 computer_click_element/computer_set_value 语义操作，勿盲猜坐标；窗口变化后 generation 递增需重快照。truncated=true 表示节点数或深度任一不完整；出现 depth_truncated 时树被深度剪枝（observed_max_depth=实际走到的深度，被切元素带 subtree_truncated 标记）——勿把残树当全貌，应提高 max_depth/max_nodes 或收窄 window_title 重新观察。",
         "parameters": {
             "type": "object",
             "properties": {

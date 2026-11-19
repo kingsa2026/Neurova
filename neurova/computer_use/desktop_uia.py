@@ -98,7 +98,7 @@ class DesktopUIAManager:
                     f"未找到目标窗口（window_title={window_title!r}，缺省为前台窗口）", "ref_not_found"
                 )
             try:
-                stored_elements = self._backend.walk(window, max_nodes, max_depth)
+                stored_elements, walk_stats = self._backend.walk(window, max_nodes, max_depth)
             except Exception as e:
                 return self._refused(f"控件树枚举失败: {e}", "backend_error")
 
@@ -114,15 +114,22 @@ class DesktopUIAManager:
                 "window": {k: v for k, v in window.items() if not k.startswith("_")},
                 "elements": stored_elements,
             }
-            return {
+            # truncated 升义（AD-2）：节点数或深度任一不完整都算截断；
+            # depth 截断细节仅在确有剪枝时附带（未超限不加噪声字段）
+            depth_truncated = bool(walk_stats.get("depth_truncated"))
+            result = {
                 "success": True,
                 "generation": self._sessions[session_key]["generation"],
                 "window": self._sessions[session_key]["window"],
                 "elements": public_elements,
-                "truncated": len(stored_elements) >= max_nodes,
+                "truncated": len(stored_elements) >= max_nodes or depth_truncated,
                 "max_nodes": max_nodes,
                 "max_depth": max_depth,
             }
+            if depth_truncated:
+                result["depth_truncated"] = True
+                result["observed_max_depth"] = int(walk_stats.get("observed_max_depth", 0))
+            return result
 
     # ── 窗口枚举（P2-6）────────────────────────────────
 
@@ -404,27 +411,40 @@ class UiautomationBackend:
             logger.debug("UIA get_window 失败: %s", e)
             return None
 
-    def walk(self, window: Dict[str, Any], max_nodes: int, max_depth: int) -> list:
+    def walk(self, window: Dict[str, Any], max_nodes: int, max_depth: int) -> tuple:
+        """枚举控件树，返回 (elements, stats)。
+
+        stats（AD-2 诚实上报）：depth_truncated=存在因 depth>max_depth 被剪的子树；
+        observed_max_depth=实际走到的最大深度。被剪元素（depth==max_depth 且仍有
+        子代）自标 subtree_truncated=True，模型可从根走到截断边界。
+        """
         root = window.get("_control")
         if root is None:
             raise RuntimeError("window info 缺少 _control")
         elements: list = []
+        stats = {"depth_truncated": False, "observed_max_depth": 0}
 
         def visit(ctrl: Any, depth: int) -> None:
-            if len(elements) >= max_nodes or depth > max_depth:
+            if len(elements) >= max_nodes:
+                return
+            if depth > max_depth:
+                stats["depth_truncated"] = True
                 return
             el = self._element_info(ctrl)
             if el is not None:
                 elements.append(el)
+                stats["observed_max_depth"] = max(stats["observed_max_depth"], depth)
             try:
                 children = ctrl.GetChildren()
             except Exception:
                 children = []
+            if children and el is not None and depth == max_depth:
+                el["subtree_truncated"] = True
             for child in children:
                 visit(child, depth + 1)
 
         visit(root, 0)
-        return elements
+        return elements, stats
 
     def list_windows(self, limit: int = 50) -> list:
         """枚举桌面顶层窗口（P2-6）：title/class/pid/hwnd/rect/focused。
