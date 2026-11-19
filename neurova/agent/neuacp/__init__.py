@@ -12,6 +12,7 @@ from neurova.agent.neuacp.acp_client import (
     NeuacpTimeoutError,
 )
 from neurova.agent.neuacp.acp_executor import NeuacpStdioExecutor
+from neurova.agent.neuacp.acp_member import NeuacpMemberAdapter
 from neurova.agent.neuacp.executor import (
     NeuacpExecResult,
     NeuacpExecutor,
@@ -24,6 +25,7 @@ __all__ = [
     "NeuacpProtocolError",
     "NeuacpTimeoutError",
     "NeuacpStdioExecutor",
+    "NeuacpMemberAdapter",
     "NeuacpExecResult",
     "NeuacpExecutor",
     "NeuacpSessionContext",
