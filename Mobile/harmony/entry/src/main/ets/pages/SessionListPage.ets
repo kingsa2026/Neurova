@@ -30,7 +30,6 @@ export struct SessionListPage {
   @State private filter: number = FILTER_ALL;
   // Agent 筛选下拉：'' = 全部 Agent；选中后列表仅显示该 agent 的会话
   @State private agentFilter: string = '';
-  @State private agentFilterIdx: number = 0;
   @State private agents: Agent[] = [];
   // 搜索展开态与关键词（本地按标题过滤）
   @State showSearch: boolean = false;
@@ -67,14 +66,16 @@ export struct SessionListPage {
     }
   }
 
-  /** Agent 筛选下拉选项：首项「全部 Agent」不过滤，其余按 agents 顺序 */
-  private agentOptions(): SelectOption[] {
-    const opts: SelectOption[] = [{ value: '全部 Agent' }];
+  /** Agent 筛选菜单项：首项「全部 Agent」不过滤，其余按 agents 顺序 */
+  private agentMenuItems(): MenuElement[] {
+    const items: MenuElement[] = [
+      { value: '全部 Agent', action: () => { this.agentFilter = ''; } }
+    ];
     for (const a of this.agents) {
-      const so: SelectOption = { value: a.name };
-      opts.push(so);
+      const item: MenuElement = { value: a.name, action: () => { this.agentFilter = a.id; } };
+      items.push(item);
     }
-    return opts;
+    return items;
   }
 
   aboutToDisappear(): void {
@@ -272,24 +273,15 @@ export struct SessionListPage {
               })
           }, (label: string) => label)
 
-          // Agent 筛选下拉：选中后列表仅显示该 agent 的会话（尺寸对齐旁边胶囊）
-          Select(this.agentOptions())
-            .selected(this.agentFilterIdx)
-            .value(this.agentFilterIdx === 0 ? '全部 Agent' : this.agentName(this.agentFilter))
-            .font({ size: this.sm.getFontSize('caption') })
+          // Agent 筛选胶囊：与旁边胶囊同构同尺寸，点击弹菜单选 agent
+          Text((this.agentFilter === '' ? 'Agent 筛选' : this.agentName(this.agentFilter)) + ' ▾')
+            .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_secondary'))
-            .selectedOptionFont({ size: this.sm.getFontSize('caption') })
-            .optionFont({ size: this.sm.getFontSize('caption') })
-            .fontColor(this.sm.getColor('text_secondary'))
-            .backgroundColor(this.sm.getColor('glass'))
+            .padding({ left: 14, right: 14, top: 7, bottom: 7 })
             .borderRadius(999)
+            .backgroundColor(this.sm.getColor('glass'))
             .border({ width: 1, color: this.sm.getColor('border') })
-            .padding({ left: 12, right: 10 })
-            .height(30)
-            .onSelect((index: number) => {
-              this.agentFilterIdx = index;
-              this.agentFilter = index === 0 ? '' : (this.agents[index - 1]?.id ?? '');
-            })
+            .bindMenu(this.agentMenuItems())
 
           Blank()
         }
