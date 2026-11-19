@@ -120,10 +120,10 @@ export struct LoginPage {
   }
 
   aboutToAppear(): void {
-    // F1 终端胶囊：展示当前活动档案（Index 冷启动已 load，此处只读）
+    // F1 终端胶囊：只显示地址（IP:端口，去协议头与名称）——胶囊不堆文字
     const active = ServerProfiles.getInstance().getActive();
     if (active) {
-      this.serverLabel = `${active.name} · ${active.baseUrl}`;
+      this.serverLabel = active.baseUrl.replace(/^https?:\/\//, '');
     }
   }
 
@@ -203,13 +203,10 @@ export struct LoginPage {
               })
                 .margin({ top: 24 })
 
-              // 终端档案胶囊（F1 .srv-chip：当前 PC 终端 xxx）
+              // 终端档案胶囊（F1 .srv-chip：仅显示地址 IP:端口）
               if (this.serverLabel !== '') {
                 Row() {
                   AppIcon({ name: 'server', iconSize: 14, color: this.sm.getColor('success') })
-                  Text('当前 PC 终端 ')
-                    .fontSize(this.sm.getFontSize('badge'))
-                    .fontColor(this.sm.getColor('text_secondary'))
                   Text(this.serverLabel)
                     .fontSize(this.sm.getFontSize('badge'))
                     .fontWeight(FontWeight.Medium)
