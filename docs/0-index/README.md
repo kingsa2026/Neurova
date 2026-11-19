@@ -155,6 +155,7 @@
 ### 03-user-guide 用户指南
 
 - [PRODUCT_GUIDE.md](../03-user-guide/PRODUCT_GUIDE.md) — 产品指南
+- [MOBILE_EXECUTOR_PRODUCT_COPY_2026-11-19.md](../03-user-guide/MOBILE_EXECUTOR_PRODUCT_COPY_2026-11-19.md) — 手机执行器产品文案草案（规划中能力：授权后代操作手机/人在环审批/凭据隔离/敏感应用隐身/任务熔断；随预研推进更新）
 - [cli_usage.md](../03-user-guide/cli_usage.md) — CLI 使用指南
 - [工作流调试指南.md](../03-user-guide/工作流调试指南.md) — NeurFlow 工作流调试
 - [触发器配置指南.md](../03-user-guide/触发器配置指南.md) — 触发器配置
@@ -169,6 +170,7 @@
 
 ### 04-plans 实施计划
 
+- [2026-11-19-mobile-executor-research-plan.md](../04-plans/2026-11-19-mobile-executor-research-plan.md) — 手机执行器预研与实施方案（安卓先行）：把手机端从「用户客户端」升级为「agent 的手」——后端经既有移动 WS 通道指挥端上无障碍执行器代用户操作手机；安卓最小闭环 M1–M9 拆卡（按需开关/指令协议/凭据隔离/审批扣住/事件账本/熔断/体检/演示模式/端到端）+ 鸿蒙 R1–R4 能力边界预研 + 安全红线五条 + 与既有审批/账本/调度设施的单源关系；源自 reference_x 对照报告的 P2-1 启发（待拍板排期）
 - [neurova-upgrade-p0-p1-implementation-steps.md](../04-plans/neurova-upgrade-p0-p1-implementation-steps.md) — 升级 P0-P1 实施步骤（TDD）
 - [neurflow-ide-upgrade.md](../04-plans/neurflow-ide-upgrade.md) — NeurFlow IDE 升级计划
 - [memory-nerf-upgrade-plan.md](../04-plans/memory-nerf-upgrade-plan.md) — NeRF 升级计划
