@@ -1158,7 +1158,8 @@ export struct ChatPage {
       // 布局歧义——真机实测 GlassPanel 溢出左缘裁切，改定宽消除歧义）
       Row() {
         Column() {
-          // 气泡左上方：当前 agent 圆形头像 + 名称（用户指定圆形头像）
+          // 气泡左上方：当前 agent 圆形头像 + 名称（用户指定圆形头像；
+          // 行宽撑满气泡——Column 默认居中会把这行挤到正中，须显式左对齐）
           Row() {
             Text(this.getAgentName().slice(0, 1))
               .fontSize(11)
@@ -1174,7 +1175,9 @@ export struct ChatPage {
               .fontColor(this.sm.getColor('text_secondary'))
               .margin({ left: 6 })
           }
+          .width('100%')
           .alignItems(VerticalAlign.Center)
+          .justifyContent(FlexAlign.Start)
           .margin({ bottom: 4 })
 
           Column() {
