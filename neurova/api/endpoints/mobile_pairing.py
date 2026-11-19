@@ -1038,6 +1038,70 @@ async def preflight_connection_config(body: PreflightRequest,
                 "error": f"{type(e).__name__}: {e}"}
 
 
+class RemoteDeployRequest(BaseModel):
+    """代部署请求（档三）：agent 以所给 SSH 凭据登录用户服务器，代装自建中继。"""
+    host: str = Field(..., description="服务器 IP/域名（SSH 目标）")
+    ssh_port: int = Field(default=22, description="SSH 端口")
+    username: str = Field(default="root", description="SSH 登录用户名（需 root/sudo）")
+    password: Optional[str] = Field(default=None, description="SSH 密码（与 key_text 二选一）")
+    key_text: Optional[str] = Field(default=None, description="SSH 私钥（PEM 文本）")
+    relay_port: int = Field(default=8443, description="中继监听端口")
+    domain: Optional[str] = Field(default=None, description="对外域名（缺省用 host）")
+    tls_cert: Optional[str] = Field(default=None, description="服务器上 TLS 证书路径")
+    tls_key: Optional[str] = Field(default=None, description="服务器上 TLS 私钥路径")
+
+
+class RemoteUndeployRequest(BaseModel):
+    """代卸载请求：停掉并移除服务器上的中继，连接方式退回 auto。"""
+    host: str = Field(..., description="服务器 IP/域名（SSH 目标）")
+    ssh_port: int = Field(default=22, description="SSH 端口")
+    username: str = Field(default="root", description="SSH 登录用户名")
+    password: Optional[str] = Field(default=None, description="SSH 密码")
+    key_text: Optional[str] = Field(default=None, description="SSH 私钥（PEM 文本）")
+
+
+@router.post("/pairing/connection-config/remote-deploy")
+async def post_remote_deploy(body: RemoteDeployRequest,
+                             _admin: Dict[str, Any] = Depends(_requireAdminDep)):
+    """代部署（档三，admin）：发起 SSH 远程安装，返回任务 id 供面板轮询进度。
+
+    触发即确认：面板明示 agent 将以所给凭据登录服务器执行安装；凭据加密落盘、
+    只写不读；部署幂等（重复执行=更新）。
+    """
+    from neurova.tunnel import remote_deploy as RD
+
+    loop = asyncio.get_running_loop()
+    payload = body.model_dump() if hasattr(body, "model_dump") else body.dict()
+    try:
+        return RD.startRemoteDeploy(str(_admin.get("user_id", "")), payload, loop=loop)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/pairing/connection-config/remote-deploy/{taskId}")
+async def get_remote_deploy_status(taskId: str,
+                                   _admin: Dict[str, Any] = Depends(_requireAdminDep)):
+    """代部署进度读面（admin）：步骤、状态、成功后的 relay_url（令牌仅掩码）。"""
+    from neurova.tunnel import remote_deploy as RD
+
+    view = RD.getDeployTask(taskId)
+    if view is None:
+        raise HTTPException(status_code=404, detail="部署任务不存在")
+    return view
+
+
+@router.post("/pairing/connection-config/remote-undeploy")
+async def post_remote_undeploy(body: RemoteUndeployRequest,
+                               _admin: Dict[str, Any] = Depends(_requireAdminDep)):
+    """代卸载（admin）：停掉并移除服务器上的中继，连接方式退回 auto。"""
+    from neurova.tunnel import remote_deploy as RD
+
+    loop = asyncio.get_running_loop()
+    payload = body.model_dump() if hasattr(body, "model_dump") else body.dict()
+    return await asyncio.to_thread(RD.runRemoteUndeploy,
+                                   str(_admin.get("user_id", "")), payload, loop)
+
+
 def _addressSource() -> str:
     """本次会用的地址来源（`direct` / `via_relay`）——与隧道态**可并存**，见 §5.2。"""
     return "via_relay" if _relayRouteIsUsable() else "direct"

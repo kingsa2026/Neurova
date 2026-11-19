@@ -17,7 +17,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_tunnel_01234567")
+os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_tunnel_0123456789")
 
 from neurova.api.endpoints import mobile_pairing as MP  # noqa: E402
 from neurova.relay.app import RelayState, _routeIdFor, create_relay_app  # noqa: E402
