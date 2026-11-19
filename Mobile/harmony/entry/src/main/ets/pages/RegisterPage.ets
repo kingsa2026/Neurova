@@ -34,7 +34,7 @@ import { AuthApi } from '../libs/api/modules/AuthApi';
 import { EventBus } from '../libs/bus/EventBus';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { StyleManager } from '../libs/style/StyleManager';
+import { StyleManager, ThemeMode } from '../libs/style/StyleManager';
 import { Router, RouteNames } from '../routing/Router';
 import { StarBackground, TopNavMenu, GlassPanel, GlassInput, GlassButton } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
@@ -255,17 +255,19 @@ export struct RegisterPage {
           Column() {
             GlassPanel({ variant: 'elevated', innerPadding: 24, radius: 16 }) {
               Column() {
-                // 主标题
-                Text('Neurova')
-                  .fontSize(32)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(this.sm.getColor('text_primary'))
+                // 品牌 LOGO（与登录页同源：深色底用白标 / 浅色底用黑标，随主题切换；设计高 54）
+                Image(this.sm.getThemeMode() === ThemeMode.DARK
+                  ? $r('app.media.neurova_logo_dark')
+                  : $r('app.media.neurova_logo_light'))
+                  .height(54)
+                  .objectFit(ImageFit.Contain)
+                  .margin({ top: 4 })
 
                 // 副标题
                 Text('创建账号')
-                  .fontSize(16)
-                  .fontColor(this.sm.getColor('text_secondary'))
-                  .margin({ top: 4 })
+                  .fontSize(this.sm.getFontSize('body_sm'))
+                  .fontColor(this.sm.getColor('text_tertiary'))
+                  .margin({ top: 6 })
 
                 // 用户名输入框
                 GlassInput({
@@ -319,10 +321,10 @@ export struct RegisterPage {
                 .alignItems(VerticalAlign.Center)
                 .margin({ top: 16 })
 
-                // 注册按钮：primary + block，loading 时禁用并显示"注册中..."
+                // 注册按钮：品牌渐变 + block（与登录页「登 录」同款），loading 时禁用并显示"注册中..."
                 GlassButton({
                   text: this.loading ? '注册中...' : '注册',
-                  type: 'primary',
+                  type: 'gradient',
                   block: true,
                   disabled: this.loading,
                   onTap: () => { this.handleSubmit(); }
