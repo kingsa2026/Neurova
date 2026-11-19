@@ -1158,12 +1158,26 @@ export struct ChatPage {
       // 布局歧义——真机实测 GlassPanel 溢出左缘裁切，改定宽消除歧义）
       Row() {
         Column() {
-          Column() {
-            // Agent 署名
-            Text(this.sessionTitle.length > 0 ? this.sessionTitle : this.getAgentName())
+          // 气泡左上方：当前 agent 圆形头像 + 名称（用户指定圆形头像）
+          Row() {
+            Text(this.getAgentName().slice(0, 1))
+              .fontSize(11)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.sm.getColor('text_on_primary'))
+              .width(22)
+              .height(22)
+              .borderRadius(11)
+              .textAlign(TextAlign.Center)
+              .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
+            Text(this.getAgentName())
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_secondary'))
-              .margin({ bottom: 4 })
+              .margin({ left: 6 })
+          }
+          .alignItems(VerticalAlign.Center)
+          .margin({ bottom: 4 })
+
+          Column() {
             // 消息内容 + 流式光标
             Row() {
               Text(msg.content.length > 0 ? msg.content : (msg.isStreaming ? '' : '（空回复）'))
