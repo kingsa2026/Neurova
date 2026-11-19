@@ -32,7 +32,7 @@ class TestSwarmToolSchemas:
             registry._tools[name] = BuiltinTool(
                 name=name, description=spec["description"], parameters=spec["parameters"]
             )
-        openai_tools = registry.get_openai_tools()
+        openai_tools = [t.to_openai_format() for t in registry.list_tools()]
         names = {t["function"]["name"] for t in openai_tools}
         assert {"spawn_subagent", "subagent_status", "list_agents"} <= names
 

@@ -104,7 +104,9 @@ class TestBrowserToolSchemas:
             registry._tools[name] = BuiltinTool(
                 name=name, description=spec["description"], parameters=spec["parameters"]
             )
-        names = {t["function"]["name"] for t in registry.get_openai_tools()}
+        names = {
+            t["function"]["name"] for t in (x.to_openai_format() for x in registry.list_tools())
+        }
         assert set(BROWSER_TOOLS) <= names
 
     def test_navigate_schema_requires_url(self):

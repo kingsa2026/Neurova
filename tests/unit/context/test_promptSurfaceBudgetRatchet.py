@@ -88,7 +88,9 @@ def _load_baseline():
 def _measure():
     """实测常驻提示面（经生产测量单源，段键与 budget_report 分段同名）。"""
     rules = build_all_sections(workspace_path="")
-    tools_desc = render_tools_description(BuiltinToolRegistry().get_openai_tools())
+    tools_desc = render_tools_description(
+        [t.to_openai_format() for t in BuiltinToolRegistry().list_tools()]
+    )
     report = buildAlwaysOnBudgetReport({"rules": rules, "tools": tools_desc})
     chars = {item["segment"]: item["chars"] for item in report["segments"]}
     return {

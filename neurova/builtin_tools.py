@@ -2793,10 +2793,6 @@ class BuiltinToolRegistry:
         """获取所有工具名称"""
         return list(self._tools.keys())
 
-    def get_openai_tools(self) -> List[Dict]:
-        """获取 OpenAI function calling 格式的工具列表"""
-        return [tool.to_openai_format() for tool in self._tools.values()]
-
     def has_tool(self, tool_name: str) -> bool:
         """检查工具是否存在"""
         return tool_name in self._tools

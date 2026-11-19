@@ -72,7 +72,10 @@ class TestCanvasToolSchemas:
     def test_openai_tools_visibility(self):
         from neurova.builtin_tools import BuiltinToolRegistry
 
-        names = {t["function"]["name"] for t in BuiltinToolRegistry().get_openai_tools()}
+        names = {
+            t["function"]["name"]
+            for t in (x.to_openai_format() for x in BuiltinToolRegistry().list_tools())
+        }
         assert set(CANVAS_TOOLS) <= names
 
     @pytest.mark.parametrize("tool_name", sorted(CANVAS_TOOLS))

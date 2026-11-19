@@ -81,7 +81,7 @@ class TestSchemaRegistration:
         from neurova.builtin_tools import BuiltinToolRegistry
 
         registry = BuiltinToolRegistry()
-        openai_tools = registry.get_openai_tools()
+        openai_tools = [t.to_openai_format() for t in registry.list_tools()]
         names = {t["function"]["name"] for t in openai_tools}
         missing = set(NEW_TOOLS) - names
         assert not missing, f"工具列表缺少: {missing}"
