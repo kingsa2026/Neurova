@@ -204,23 +204,12 @@ def getTeamRoster(team_id: str) -> Optional[Dict[str, Any]]:
 def currentUserTenant() -> str:
     """当前请求租户（内部复用面用；HTTP 面走依赖注入的身份字典）。
 
-    读取身份通道取"这轮是谁"，经部门根解析为租户；无身份/解析失败回落
-    default。身份读方台账（test_turnIdentitySingleSource READERS）已登记。
+    单源已收敛至 user_group_model.currentUserTenantId（A9 收敛），本函数
+    保留为兼容转调。
     """
-    try:
-        from neurova.core.identity_context import get_request_user_id
+    from neurova.auth.user_group_model import currentUserTenantId
 
-        user_id = get_request_user_id()
-    except Exception:
-        return "default"
-    if not user_id:
-        return "default"
-    try:
-        from neurova.auth.user_group_model import resolveUserDepartment
-
-        return str((resolveUserDepartment(user_id) or {}).get("tenant_id") or "default")
-    except Exception:
-        return "default"
+    return currentUserTenantId()
 
 
 # ---------------------------------------------------------------------------

@@ -1990,22 +1990,10 @@ class SwarmManager:
         return raw in ("on", "1", "true", "yes")
 
     def _currentTenantId(self) -> str:
-        """发起者租户（JWT 部门根，§6.4）；无身份/解析失败回落 default。"""
-        try:
-            from neurova.core.identity_context import get_request_user_id
+        """发起者租户（JWT 部门根，§6.4）；单源在 user_group_model.currentUserTenantId。"""
+        from neurova.auth.user_group_model import currentUserTenantId
 
-            user_id = get_request_user_id()
-        except Exception:
-            return "default"
-        if not user_id:
-            return "default"
-        try:
-            from neurova.auth.user_group_model import resolveUserDepartment
-
-            info = resolveUserDepartment(user_id) or {}
-            return str(info.get("tenant_id") or "default")
-        except Exception:
-            return "default"
+        return currentUserTenantId()
 
     def _resolveExternalMember(self, agent_id: Optional[str], team_id: Optional[str]) -> tuple:
         """名册成员带 executor 标记时构造外部成员适配器。

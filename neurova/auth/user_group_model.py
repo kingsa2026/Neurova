@@ -1096,3 +1096,26 @@ def resolveUserDepartment(
     except Exception as e:  # noqa: BLE001 - 解析失败回落 default，不猜部门（设计 §2.3）
         logger.warning("resolveUserDepartment fallback to default for %s: %s", username, e)
         return dict(empty)
+
+
+def currentUserTenantId() -> str:
+    """当前请求租户（部门根）单源。
+
+    读唯一身份通道（``get_request_user_id``）取"这轮是谁"，经
+    :func:`resolveUserDepartment` 解析部门根；无身份/解析失败回落
+    ``default``。teams_api / swarm / approval_chain / tool_executor 的
+    租户判定统一转调本函数（A5/A9 收敛，身份读点台账同步登记）。
+    """
+    try:
+        from neurova.core.identity_context import get_request_user_id
+
+        user_id = get_request_user_id()
+    except Exception:
+        return "default"
+    if not user_id:
+        return "default"
+    try:
+        info = resolveUserDepartment(user_id) or {}
+        return str(info.get("tenant_id") or "default")
+    except Exception:
+        return "default"

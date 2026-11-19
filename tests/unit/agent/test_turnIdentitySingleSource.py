@@ -83,12 +83,13 @@ TURN_IDENTITY = ("neurova_turn_user_input", "neurova_turn_session_id")
 #: 兜底口径属于消费方，门面再兜一层就是第二个事实源）
 #: 与 `post_chat_pipeline.resolveSessionOwner`（属主取法单点：显式键优先，缺省才读通道）。
 #: 先钉住读面：多一处读点即红（少一处也要红，退役一条读点同样是一次口径变更）。
-#: 2026-11-19 增 `SwarmManager._currentTenantId`：ACP 外部编码代理派活的租户校验
-#: （§6.4 红线）需要发起者租户==团队租户；读通道取"这轮谁在派活"，不经 agent 属主转手。
+#: 2026-11-19 增 `user_group_model.currentUserTenantId`：租户判定单源——
+#: ACP 外部编码代理派活（§6.4 红线）需要发起者租户==团队租户；teams_api/
+#: swarm/tool_executor/approval_chain 的租户判定统一转调它，读点收敛一处。
 READERS: Dict[str, Set[str]] = {
     "neurova_request_user_id": {
         "neurova/agent/turn_state.py::TurnState.current_user_id",
-        "neurova/agent/swarm.py::SwarmManager._currentTenantId",
+        "neurova/auth/user_group_model.py::currentUserTenantId",
         "neurova/computer_use/browser_manager.py::BrowserManager._get_or_create_user_camofox_backend",
         "neurova/computer_use/camofox_server_backend.py::CamofoxServerBackend._eff_user_id",
         "neurova/core/request_archive.py::recordRequestArchive",
@@ -98,7 +99,6 @@ READERS: Dict[str, Set[str]] = {
         "neurova/memory_admission.py::_recordRejectionAudit",
         "neurova/memory_discipline.py::_auditDisciplineEvent",
         "neurova/post_chat_pipeline.py::resolveSessionOwner",
-        "neurova/api/endpoints/teams_api.py::currentUserTenant",
         "neurova/tool_executor.py::ToolExecutor._execute_computer_ssh_exec",
         "neurova/tool_layers/mcp_server.py::NeurovaMCPServer._current_user_id",
     },

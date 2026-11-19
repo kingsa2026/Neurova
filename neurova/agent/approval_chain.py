@@ -275,6 +275,7 @@ async def requestRunApproval(
         approved=False 且 denied=True → 已被明确拒绝。
     """
     from neurova.security.approval_manager import get_approval_manager
+    from neurova.auth.user_group_model import currentUserTenantId
 
     started = time.time()
     act = str(action or "").strip()
@@ -299,6 +300,8 @@ async def requestRunApproval(
             "effective_level": effective,
             "mode": mode,
             "context": str(context or "")[:500],
+            # A9b（§6.4）：发起者租户随单落档，裁决面据此做同租户校验
+            "tenant_id": currentUserTenantId(),
         },
     )
     entry = {
@@ -382,6 +385,33 @@ async def requestRunApproval(
     return payload
 
 
+def _deciderTenant(actor: str) -> str:
+    """裁决人租户（部门根）；查不到/解析失败回落 default。"""
+    try:
+        from neurova.auth.user_group_model import resolveUserDepartment
+
+        return str((resolveUserDepartment(actor) or {}).get("tenant_id") or "default")
+    except Exception:
+        return "default"
+
+
+def _deciderIsPlatformAdmin(actor: str) -> bool:
+    """裁决人是否平台 admin（users 表 role）；查询失败按非 admin（fail-closed）。"""
+    try:
+        from neurova.auth.user_model import UserModel
+
+        model = UserModel()
+        user = model.get_user_by_username(actor)
+        if user is None:
+            try:
+                user = model.get_user_by_id(int(actor))
+            except (TypeError, ValueError):
+                user = None
+        return bool(user is not None and getattr(user, "role", "") == "admin")
+    except Exception:
+        return False
+
+
 def decideSwarmApproval(
     requestId: str, decision: str, note: str = "",
     decidedBy: str = "", decidedByChannel: str = "parent_agent",
@@ -415,6 +445,20 @@ def decideSwarmApproval(
             "success": False,
             "error": f"审批单已裁决（status={request.status.value}）——裁决幂等，不重复受理",
         }
+    # A9b（§6.4 租户隔离红线）：人裁通道校验裁决人租户==审批单租户（平台 admin
+    # 例外）；parent_agent 通道是 L1 代理给父的既有链路（信任链在 spawn 时建立），
+    # 不做用户租户判定。存量无租户单按 default 口径。
+    if channel != "parent_agent":
+        request_tenant = str((request.metadata or {}).get("tenant_id") or "default")
+        decider_tenant = _deciderTenant(actor)
+        if decider_tenant != request_tenant and not _deciderIsPlatformAdmin(actor):
+            return {
+                "success": False,
+                "error": (
+                    f"跨租户裁决被拒（§6.4）：裁决人租户 {decider_tenant!r} != "
+                    f"审批单租户 {request_tenant!r}"
+                ),
+            }
     if act == "approve":
         ok = manager.approve_request(rid, approved_by=actor, note=str(note or ""))
     else:
