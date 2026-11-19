@@ -1751,6 +1751,32 @@ def create_app(
         # 注册路由
         _register_routes(app, _app_state)
 
+        # ACP P2 卡 C2：外部编码代理只读工具 MCP server（streamable-http，双鉴权
+        # fail-closed）。运输为每请求独立 session manager（mcp_server_api 同构接法，
+        # 无 app 级 lifespan 需要驱动）。挂载点在 /v1/mcp 之下——Starlette Mount
+        # 前缀先注册先命中，必须先挂深路径 /v1/mcp/agent-tools，再挂 /v1/mcp 本体，
+        # 否则深路径会被本体 Mount 吞掉后在其子应用里 404。另：Mount 的前缀正则带
+        # 尾斜杠，**无尾斜杠**的 /v1/mcp/agent-tools 会被 /v1/mcp 本体 Mount 先截走
+        # （在其子应用里 404），故补一条同路径 307 归一路由——两种写法都落到本面，
+        # 与 /v1/mcp 本体（父级 redirect_slashes 补斜杠）行为一致。
+        # 挂载失败不阻断启动但必须出声（静默跳过等于静撤开放面）。
+        try:
+            from fastapi.responses import RedirectResponse
+
+            from neurova.mcp_agent_tools_server import build_agent_tools_mcp_asgi
+
+            # 注意：处理函数**不写返回注解**——RedirectResponse 是函数内局部导入，
+            # 写成注解会让 FastAPI 的 openapi 生成期解析到不可解析的 ForwardRef，
+            # 整个 app.openapi() 当场炸（test_openapiNoLongerAdvertisesUnhonouredParameters 实测）。
+            @app.api_route("/v1/mcp/agent-tools", methods=["GET", "POST", "DELETE"])
+            async def _agentToolsMcpSlashRedirect():
+                return RedirectResponse(url="/v1/mcp/agent-tools/", status_code=307)
+
+            app.mount("/v1/mcp/agent-tools", build_agent_tools_mcp_asgi())
+            logger.info("Agent tools MCP server mounted at /v1/mcp/agent-tools")
+        except Exception as _atMountErr:  # noqa: BLE001
+            logger.error("外部代理工具 MCP server 挂载异常（MCP 面将不可用）: %s", _atMountErr)
+
         # G4/M0：本体 MCP server（streamable-http，双鉴权 fail-closed）——
         # 本体四动词/事实写入以 MCP tools 开放（补全设计 §3.0）；挂载失败不阻断
         # 启动但必须出声（静默跳过等于静撤开放面）。
