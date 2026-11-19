@@ -24,6 +24,13 @@ class TestRetryVocabulary:
         for code, advice in ar.REFUSAL_RETRY_ADVICE.items():
             assert advice in ar.RETRY_MODES, f"{code} 的建议 {advice!r} 越界"
 
+    def test_never_advice_non_empty(self):
+        """反向钉子（AD-1）：never 档不得被清空——权限/参数/互斥类拒绝
+        必须保持「停止或换路径」语义；消费方封死盲重放读的是
+        action_result["retry"] == "never"，单一事实源是 REFUSAL_RETRY_ADVICE。"""
+        never = [c for c, a in ar.REFUSAL_RETRY_ADVICE.items() if a == "never"]
+        assert never, "never 档被清空：权限/参数/互斥类拒绝将失去「勿重试」语义"
+
 
 class TestBuildDerivesFields:
     def test_confirmed_implies_action_sent(self):

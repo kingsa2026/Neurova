@@ -93,11 +93,6 @@ REFUSAL_RETRY_ADVICE = {
     "backend_error": "retry",
 }
 
-#: 永不重试的拒绝码（NEVER_RETRY 集合，消费方据此封死非幂等动作的盲重放）
-NEVER_RETRY_REFUSAL_CODES = frozenset(
-    code for code, advice in REFUSAL_RETRY_ADVICE.items() if advice == "never"
-)
-
 
 def retry_advice_for(refusal_code: str) -> str:
     """拒绝码 → 重试建议（未知码回保守的 retry；词表封闭由守卫测试保证）。"""

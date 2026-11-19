@@ -16,6 +16,10 @@
 | `camofox_ref` | camofox [eN] ref 定位交互 | background | browser: camofox |
 | `dom` | DOM 层导航/求值 | background | browser: 全部 |
 | `remote` | 远程会话平面（RS 批次预留） | background | RS-2+ |
+| `atspi` | Linux AT-SPI2 doAction（UIA 的 Linux 等价物，不动光标） | background | 桌面（Linux 预留，无实现） |
+| `xdotool` | X11 定窗合成事件投递（Wayland 下不可用） | foreground | 桌面（Linux 预留，无实现） |
+| `shell` | CLI 命令通道（不经任何输入设备，天然无抢占） | not_applicable | computer_shell / computer_ssh_exec |
+| `playwright_ref` | Playwright 快照 [eN] ref 定位交互（click_ref/fill_ref） | background | browser: playwright |
 
 ## 拒绝码（refusal_code 词表）
 
@@ -32,6 +36,34 @@
 | `element_not_clickable` | 元素无可投递交互 | 元素无任何可用 pattern/矩形（预留） |
 | `missing_params` | 必要参数缺失 | 工具参数校验失败 |
 | `backend_error` | 后端执行错误 | 未分类异常（兜底，需逐步收敛到精确码） |
+| `sandbox_session_required` | 运行档要求隔离会话但当前无活动会话 | sandbox 档下 computer_* 动作无活动会话 |
+| `stale_frame` | 坐标所属观测帧已过期（画面已变化），须重新观察 | 截图帧 fresh 校验失败 |
+| `controller_busy` | 另一会话正持有前台输入，拒绝并发操控 | 前台租约被占 |
+
+## 重试建议（retry 词表，随 action_result 回灌模型）
+
+三值：`reobserve`（事实可能已变，先重新观察再行动；非幂等动作禁止凭旧事实重放）/
+`retry`（同一调用可安全重试，瞬时故障/后端未就绪）/ `never`（重试无意义或危险，应停止或换路径）。
+refused 结果由 `REFUSAL_RETRY_ADVICE`（`action_result.py`，单一事实源）按拒绝码自动推导；
+消费方封死非幂等盲重放读 `action_result["retry"] == "never"`。
+守卫：`tests/unit/computer_use/test_action_result_retry_contract.py`（词表封闭 + 每码必有建议 + never 档非空）。
+
+| 拒绝码 | retry 建议 |
+|---|---|
+| `stale_generation` | `reobserve` |
+| `ref_not_found` | `reobserve` |
+| `ambiguous_ref` | `reobserve` |
+| `background_unavailable` | `reobserve` |
+| `background_occluded` | `reobserve` |
+| `element_not_clickable` | `reobserve` |
+| `stale_frame` | `reobserve` |
+| `permission_required` | `never` |
+| `unsupported_method` | `never` |
+| `missing_params` | `never` |
+| `sandbox_session_required` | `never` |
+| `controller_busy` | `never` |
+| `not_initialized` | `retry` |
+| `backend_error` | `retry` |
 
 ## 已证明矩阵（delivered = 测试断言过状态变化）
 
