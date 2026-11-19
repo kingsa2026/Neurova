@@ -99,8 +99,24 @@ class MemberBatchAdd(BaseModel):
 
     members: List[str] = Field(..., min_length=1, description="成员用户 ID 列表")
     prompt: str = Field(default="", description="共同职责描述")
+    # P1 移交清偿：成员角色落盘。FE TeamNeuacpMemberForm 上送 coder/reviewer/member；
+    # 兼容既有 AgentRole 枚举值；缺省 member 维持既有契约（不传 role 行为不变）
+    role: str = Field(default="member", description="成员角色：member/coder/reviewer 或既有协作角色")
     # A5：外部编码代理执行体（整批成员共用一份执行体配置）；仅 admin 可配
     executor: Optional[NeuacpExecutorSpec] = None
+
+
+def _legalMemberRoles() -> set:
+    """名册成员合法角色集：FE 契约三元 + 既有 AgentRole 枚举值（单一事实源对齐）。
+
+    AgentRole 是协作角色枚举单源（neurova/agent/templates/collaboration_template.py）；
+    member/coder/reviewer 是名册面（FE TeamNeuacpMemberForm）的契约取值。
+    """
+    from neurova.agent.templates.collaboration_template import AgentRole
+
+    roles = {"member", "coder", "reviewer"}
+    roles.update(str(role.value) for role in AgentRole)
+    return roles
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +386,10 @@ async def add_members(team_id: str, body: MemberBatchAdd, current_user: Dict[str
     if not team:
         raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found")
     _requireWritable(team, current_user)
+    # P1 移交清偿：role 校验（FE 三元 + 既有 AgentRole 取值），非法值 422 诚实拒绝
+    member_role = str(body.role or "member")
+    if member_role not in _legalMemberRoles():
+        raise HTTPException(status_code=422, detail="role 仅支持 member/coder/reviewer 或既有协作角色")
     executor_spec = None
     if body.executor is not None:
         if not _isPlatformAdmin(current_user):
@@ -384,7 +404,7 @@ async def add_members(team_id: str, body: MemberBatchAdd, current_user: Dict[str
         entry = {
             "user_id": uid,
             "name": uid,
-            "role": "member",
+            "role": member_role,
             "prompt": body.prompt,
             "joined_at": time.time(),
         }

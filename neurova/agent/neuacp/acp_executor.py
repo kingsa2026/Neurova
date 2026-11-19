@@ -9,14 +9,23 @@ session/request_permission → on_permission 同步裁决（B1 接审批链）�
 """
 import asyncio
 import json
+import logging
 from typing import Any, Callable, List, Optional
 
 from neurova.agent.neuacp.acp_client import NeuacpClient, NeuacpError
 from neurova.agent.neuacp.executor import NeuacpExecResult, NeuacpSessionContext
 
+logger = logging.getLogger(__name__)
+
 
 class NeuacpStdioExecutor:
-    """绑定一个外部代理子进程；每次 prompt 对应一个 ACP session。"""
+    """绑定一个外部代理子进程；每次 prompt 对应一个 ACP session。
+
+    P1 移交清偿（进程池接入）：经 :meth:`attachProcessPool` 挂上
+    NeuacpProcessPool 后，start 从池 acquire 已握手进程（键含租户段）、
+    prompt 复用、close 归还（池负责空闲回收/上限排队/崩溃踢出）；池侧
+    异常一律 fail-open 退回直启，不阻断派活。未接池保持直启行为。
+    """
 
     def __init__(
         self,
@@ -29,6 +38,9 @@ class NeuacpStdioExecutor:
         on_tool_call: Optional[Callable[[dict], None]] = None,
     ) -> None:
         self._cwd = cwd or ""
+        self._command = [str(part) for part in command]
+        self._env_extra = dict(env_extra or {})
+        self._request_timeout = request_timeout
         self._prompt_timeout = prompt_timeout
         self._on_tool_call = on_tool_call
         self._emitter: Optional[Callable[[str, Any], None]] = None
@@ -36,17 +48,22 @@ class NeuacpStdioExecutor:
         self._session_id: Optional[str] = None
         self._text_buffer = ""
         self._crash_reason: Optional[str] = None
-        self._client = NeuacpClient(
-            command,
-            cwd=cwd,
-            env_extra=env_extra,
-            on_event=self._onEvent,
-            on_crash=self._onCrash,
-            request_timeout=request_timeout,
-        )
-        self._client.setRequestHandler("session/request_permission", self._handlePermissionRequest)
+        # P1 移交清偿：进程池挂载点（attachProcessPool 注入；None = 直启）
+        self._pool: Optional[Any] = None
+        self._pool_key: Optional[tuple] = None
+        self._pool_entry: Optional[Any] = None
+        self._client = self._newClient()
 
     # ---------- NeuacpExecutor 协议 ----------
+
+    def attachProcessPool(self, pool: Any, pool_key: tuple) -> None:
+        """挂载进程池（swarm._resolveExternalMember 装配期调用）。
+
+        ``pool`` 需提供 ``acquire(key, factory)`` / ``release(key, entry)``
+        鸭子面（NeuacpProcessPool 满足）；``pool_key`` 为含租户段的池键。
+        """
+        self._pool = pool
+        self._pool_key = tuple(pool_key)
 
     async def start(self, ctx: NeuacpSessionContext) -> None:
         self._session_id = None
@@ -54,7 +71,8 @@ class NeuacpStdioExecutor:
         self._crash_reason = None
         if ctx.cwd:
             self._cwd = ctx.cwd
-        await asyncio.to_thread(self._client.start)
+        # 幂等：已启动（握手完成且进程存活）则复用同一进程，不重复 initialize。
+        await asyncio.to_thread(self._ensureClient)
 
     async def prompt(self, task_text: str, emitter: Callable[[str, Any], None], on_permission: Callable[[str, str, str], dict]) -> NeuacpExecResult:
         self._emitter = emitter
@@ -89,9 +107,66 @@ class NeuacpStdioExecutor:
                 pass
 
     async def close(self) -> None:
+        entry, self._pool_entry = self._pool_entry, None
+        if entry is not None and self._pool is not None:
+            # 池路径：归还进程（池负责复用/空闲回收/崩溃踢出），不直接 terminate。
+            # release 是同步记账（健康件驻留不阻塞；死件才走 terminate）。
+            try:
+                self._pool.release(self._pool_key, entry)
+            except Exception as exc:  # noqa: BLE001 - 归还失败兜底直关（防进程泄漏）
+                logger.warning("外部进程归还失败，兜底关闭 (key=%s): %s", self._pool_key, exc)
+                await asyncio.to_thread(self._client.terminate)
+            # 复位为未启动客户端：防止归还被复用进程后本执行体残留旧引用。
+            self._client = self._newClient()
+            return
         await asyncio.to_thread(self._client.terminate)
 
     # ---------- 内部 ----------
+
+    def _ensureClient(self) -> None:
+        """确保底层 ACP 客户端就绪（幂等）：优先池取件，池故障 fail-open 直启。"""
+        if self._client.started:
+            return
+        if self._pool is not None and self._pool_key is not None:
+            try:
+                entry = self._pool.acquire(self._pool_key, self._newStartedClient)
+            except Exception as exc:  # noqa: BLE001 - fail-open：池异常不阻断派活
+                logger.warning("外部进程池获取失败，退回直启 (key=%s): %s", self._pool_key, exc)
+            else:
+                self._pool_entry = entry
+                self._client = entry.process
+                self._bindClientCallbacks(self._client)
+                return
+        # 直启（未接池或池故障退回）：当前件已死/未启动则换新件拉起。
+        if not self._client.started:
+            self._client = self._newStartedClient()
+
+    def _newClient(self) -> NeuacpClient:
+        """构造未启动的 ACP 客户端（回调/权限处理器随本执行体绑定）。"""
+        client = NeuacpClient(
+            self._command,
+            cwd=self._cwd,
+            env_extra=self._env_extra,
+            on_event=self._onEvent,
+            on_crash=self._onCrash,
+            request_timeout=self._request_timeout,
+        )
+        client.setRequestHandler("session/request_permission", self._handlePermissionRequest)
+        return client
+
+    def _newStartedClient(self) -> NeuacpClient:
+        """构造并拉起一个 ACP 客户端（池 factory 与直启路径共用）。"""
+        client = self._newClient()
+        client.start()
+        return client
+
+    def _bindClientCallbacks(self, client: NeuacpClient) -> None:
+        """池复用件回调重绑：事件/崩溃/权限裁决随本次取用方执行体。"""
+        try:
+            client.setEventHandlers(on_event=self._onEvent, on_crash=self._onCrash)
+            client.setRequestHandler("session/request_permission", self._handlePermissionRequest)
+        except Exception as exc:  # noqa: BLE001 - 重绑失败不影响已持有的可用回调
+            logger.debug("池复用件回调重绑失败（沿用原回调）: %s", exc)
 
     def setToolCallHandler(self, handler: Optional[Callable[[dict], None]]) -> None:
         """注册 tool_call(_update) 镜像回调（B2：适配器经此接入轨迹/账本）。

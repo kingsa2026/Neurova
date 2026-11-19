@@ -51,6 +51,8 @@ class NeuacpClient:
         on_crash: Optional[Callable[[str], None]] = None,
         request_timeout: float = _DEFAULT_REQUEST_TIMEOUT,
         frame_limit: int = _DEFAULT_FRAME_LIMIT,
+        transport: str = "stdio",
+        remote: Optional[dict] = None,
     ) -> None:
         self._command = [str(part) for part in command]
         self._cwd = cwd
@@ -59,6 +61,9 @@ class NeuacpClient:
         self._on_crash = on_crash
         self._request_timeout = request_timeout
         self._frame_limit = frame_limit
+        # 传输形态（§4.8）：stdio 本机直拉；ssh 经 SSH 隧道在远端拉起同一命令。
+        self._transport = str(transport or "stdio")
+        self._remote = remote if isinstance(remote, dict) else None
 
         self._process: Optional[subprocess.Popen] = None
         self._lock = threading.RLock()
@@ -69,17 +74,48 @@ class NeuacpClient:
         self._stderr_tail: deque = deque(maxlen=50)
         self._write_lock = threading.Lock()
         self._request_handlers: Dict[str, Callable[[dict], dict]] = {}
+        # P1 移交清偿（二次 chat 会话复用）：initialize 握手结果缓存 +
+        # start 序列互斥锁（握手期不持 self._lock，泵线程可正常派发应答）。
+        self._handshake: Optional[dict] = None
+        self._start_lock = threading.Lock()
 
     # ---------- 生命周期 ----------
 
+    @property
+    def started(self) -> bool:
+        """握手完成且进程存活（复用判定单点）。"""
+        return self._handshake is not None and self.is_alive
+
     def start(self, *, protocol_version: str = "1", client_capabilities: Optional[dict] = None) -> dict:
-        """拉起子进程并完成 initialize 握手；版本不兼容 fail-closed。"""
-        if self._process is not None:
-            raise NeuacpError("NeuacpClient already started")
+        """拉起子进程并完成 initialize 握手；版本不兼容 fail-closed。
+
+        幂等：已启动（握手完成且进程存活）直接返回已存握手结果，不重复
+        initialize（P1 移交清偿——验收回炉轮会对同一执行体二次 chat）；
+        进程已死（崩溃/terminate 后）则惰性重建并重新握手。
+        """
+        handshake = self._handshake
+        if handshake is not None and self.is_alive:
+            return handshake
+        with self._start_lock:
+            handshake = self._handshake
+            if handshake is not None and self.is_alive:
+                return handshake
+            return self._startLocked(protocol_version, client_capabilities)
+
+    def _startLocked(self, protocol_version: str, client_capabilities: Optional[dict]) -> dict:
+        self._handshake = None
+        self._closed = False
+        self._crash_reported = False
         env = self._childEnvironment()
         # Windows：PATH 里的 npx/qoder 等实为 .cmd/.bat，Popen 不做 PATHEXT
         # 解析——用 shutil.which 把首词解析成可执行全路径（解析不到原样保留）。
+        # transport=ssh：先包装成 ssh 前缀命令（§4.8，缺 remote/凭据 fail-closed），
+        # ssh.exe 本身在 PATH，同样走 which 解析。
         command = list(self._command)
+        if self._transport != "stdio":
+            from neurova.agent.neuacp.ssh_transport import resolveSpawnCommand
+
+            command = resolveSpawnCommand(command, self._transport, self._remote)
         resolved_head = shutil.which(command[0]) if command else None
         if resolved_head:
             command[0] = resolved_head
@@ -111,12 +147,14 @@ class NeuacpClient:
             raise NeuacpProtocolError(
                 f"ACP 版本协商失败: 期望 {protocol_version!r}，实际 {remote_version!r}"
             )
-        return result or {}
+        self._handshake = result or {}
+        return self._handshake
 
     def terminate(self, wait_s: float = _TERMINATE_WAIT_S) -> None:
         """关闭子进程；正常关闭不触发 on_crash。幂等。"""
         with self._lock:
             self._closed = True
+            self._handshake = None
             proc = self._process
             self._process = None
         if proc is None:
@@ -188,6 +226,32 @@ class NeuacpClient:
         """
         with self._lock:
             self._request_handlers[method] = handler
+
+    def setTransport(self, transport: str, remote: Optional[dict]) -> None:
+        """构造后补设传输形态（§4.8，swarm 名册透传入口）。
+
+        须在 spawn（start）之前调用；进程已启动后变更一律 fail-closed，
+        防止同一进程的传输语义被中途改写。
+        """
+        if self._process is not None:
+            raise NeuacpError("外部代理进程已启动，不能再变更 transport/remote（fail-closed）")
+        self._transport = str(transport or "stdio")
+        self._remote = remote if isinstance(remote, dict) else None
+
+    def setEventHandlers(
+        self,
+        *,
+        on_event: Optional[Callable[[str, dict], None]] = None,
+        on_crash: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        """重绑通知/崩溃回调（P1 移交清偿：池复用进程时，回调随取用方执行体重绑）。
+
+        传 None 保持原回调不动；泵线程每帧读取实例属性，重绑对后续帧即刻生效。
+        """
+        if on_event is not None:
+            self._on_event = on_event
+        if on_crash is not None:
+            self._on_crash = on_crash
 
     # ---------- 内部实现 ----------
 

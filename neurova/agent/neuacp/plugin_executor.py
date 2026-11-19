@@ -33,12 +33,17 @@ class NeuacpPluginExecutor:
         env_extra: Optional[dict] = None,
         prompt_arg: str = "--prompt",
         frame_limit: int = _DEFAULT_FRAME_LIMIT,
+        transport: str = "stdio",
+        remote: Optional[dict] = None,
     ) -> None:
         self._command = [str(part) for part in command]
         self._cwd = cwd or ""
         self._env_extra = dict(env_extra or {})
         self._prompt_arg = prompt_arg
         self._frame_limit = frame_limit
+        # 传输形态（§4.8）：stdio 本机直拉；ssh 经 SSH 隧道在远端拉起同一命令。
+        self._transport = str(transport or "stdio")
+        self._remote = remote if isinstance(remote, dict) else None
         self._process: Optional[subprocess.Popen] = None
         self._lock = threading.RLock()
 
@@ -49,6 +54,12 @@ class NeuacpPluginExecutor:
     async def prompt(self, task_text: str, emitter: Callable[[str, Any], None], on_permission: Callable[[str, str, str], dict]) -> NeuacpExecResult:
         command = self._command + [self._prompt_arg, task_text]
         # Windows：PATH 里的 CLI 可能是 .cmd/.bat，Popen 不做 PATHEXT 解析。
+        # transport=ssh：先包装成 ssh 前缀命令（§4.8，缺 remote/凭据 fail-closed），
+        # ssh.exe 本身在 PATH，同样走 which 解析。
+        if self._transport != "stdio":
+            from neurova.agent.neuacp.ssh_transport import resolveSpawnCommand
+
+            command = resolveSpawnCommand(command, self._transport, self._remote)
         resolved_head = shutil.which(command[0]) if command else None
         if resolved_head:
             command[0] = resolved_head

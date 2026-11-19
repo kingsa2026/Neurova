@@ -550,6 +550,8 @@ class SwarmManager:
         # → ACP session/cancel）；run 到终态即摘除。spawnLoop 是派生时的事件循环，
         # 供无循环的调用线程经 run_coroutine_threadsafe 投递取消协程。
         self._externalAdapters: Dict[str, tuple] = {}
+        # P1 移交清偿：run 终态后释放外部适配器的后台任务强引用集（防 GC 吞任务）。
+        self._adapterCloseTasks: set = set()
         self._lock = threading.RLock()
 
     # ── 公共接口 ──────────────────────────────────────────────
@@ -2093,21 +2095,82 @@ class SwarmManager:
         if not command:
             return None, f"外部成员 {agent_id} 缺少启动命令（executor.command）"
         cwd = str(spec.get("cwd") or "")
+        # C1（§4.8）：名册 transport/remote 透传——remote.key_ref 只透引用名，
+        # 私钥路径由 ssh_transport 在 spawn 期经 key_resolver 从环境解析。
+        transport = str(spec.get("transport") or "stdio")
+        remote = spec.get("remote") if isinstance(spec.get("remote"), dict) else None
         name = str(member.get("name") or agent_id)
         try:
+            from neurova.agent.neuacp import NeuacpError
+
             if kind == "acp":
                 from neurova.agent.neuacp import NeuacpMemberAdapter, NeuacpStdioExecutor
+                from neurova.agent.neuacp.ssh_transport import applyRemoteTransport
 
                 executor = NeuacpStdioExecutor(command, cwd=cwd)
+                applyRemoteTransport(executor, transport, remote)
+                # P1 移交清偿：spawn 装配接入进程池（键含租户段，§6.4）；
+                # 池故障 fail-open——acquire 失败在 executor.start 内退回直启。
+                self._attachExternalProcessPool(executor, spec, team_tenant, command, cwd)
             elif kind == "plugin":
                 from neurova.agent.neuacp import NeuacpMemberAdapter, NeuacpPluginExecutor
 
-                executor = NeuacpPluginExecutor(command, cwd=cwd)
+                executor = NeuacpPluginExecutor(command, cwd=cwd, transport=transport, remote=remote)
             else:
                 return None, f"外部成员 {agent_id} 的执行体类型未知：{kind!r}"
         except ImportError:
             return None, f"外部成员 {agent_id} 的插件执行体尚未可用（kind=plugin 待 A8 落地）"
+        except NeuacpError as exc:
+            return None, f"外部成员 {agent_id} 的传输配置无效：{exc}"
         return NeuacpMemberAdapter(executor, name=name, cwd=cwd), None
+
+    def _attachExternalProcessPool(self, executor: Any, spec: dict, tenant: str,
+                                   command: List[str], cwd: str) -> None:
+        """给 ACP 执行体挂进程池（NeuacpProcessPool，进程级单例）。
+
+        池键 ``(tenant, tool, command, cwd, transport, remote)``——租户段固定
+        首位（§6.4 跨租户不共享进程）；remote 连接参数确定性序列化进键段。
+        挂载失败只降级为直启（fail-open），不阻断派活。
+        """
+        try:
+            from neurova.agent.neuacp.process_pool import getNeuacpProcessPool, poolKey
+
+            remote = spec.get("remote")
+            if isinstance(remote, dict):
+                remoteSeg = json.dumps(remote, sort_keys=True, ensure_ascii=False)
+            else:
+                remoteSeg = str(remote or "")
+            key = poolKey(
+                tenant,
+                str(spec.get("tool") or ""),
+                [str(part) for part in (command or [])],
+                str(cwd or ""),
+                str(spec.get("transport") or "stdio"),
+                remoteSeg,
+            )
+            executor.attachProcessPool(getNeuacpProcessPool(), key)
+        except Exception as exc:  # noqa: BLE001 - fail-open：池不可用则直启
+            logger.warning("外部进程池接入失败，执行体退回直启 (tool=%s): %s",
+                           spec.get("tool"), exc)
+
+    def _releaseExternalAdapter(self, adapter: Any) -> None:
+        """run 终态后释放外部成员适配器（executor.close）。
+
+        池接入时 close=release（进程回池待复用，秒级记账）；直启时
+        close=terminate（可能秒级阻塞）——统一放后台任务执行，不阻塞终态
+        广播；强引用集合防任务被 GC 吞掉。适配器无 close（替身对象）时跳过。
+        """
+        closeAdapter = getattr(adapter, "close", None)
+        if not callable(closeAdapter):
+            return
+        try:
+            task = asyncio.create_task(closeAdapter())
+        except RuntimeError:
+            # 无运行中事件循环（罕见）：池路径由空闲回收兜底，直启路径随进程退出收尾
+            logger.debug("外部适配器释放无可用事件循环 (adapter=%s)", getattr(adapter, "config", None))
+            return
+        self._adapterCloseTasks.add(task)
+        task.add_done_callback(self._adapterCloseTasks.discard)
 
 
     async def _execute(
@@ -2550,7 +2613,12 @@ class SwarmManager:
             self._restoreCostContext(prevCostCtx)
             # B3：run 已终态，外部成员适配器登记随之摘除（防跨 run 复用/泄漏）。
             with self._lock:
-                self._externalAdapters.pop(run.subagent_id, None)
+                registeredAdapter = self._externalAdapters.pop(run.subagent_id, None)
+            # P1 移交清偿：终态即释放外部执行体——池接入时 release 归还进程
+            # 待复用，直启时 terminate 收尾；不释放会让池名额只增不减（4 个
+            # run 后永久排队）。
+            if registeredAdapter is not None:
+                self._releaseExternalAdapter(registeredAdapter[0])
 
         await self._broadcast(
             run,
