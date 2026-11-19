@@ -28,6 +28,10 @@ export struct SessionListPage {
   @State private sessions: ChatSession[] = [];
   @State private loading: boolean = false;
   @State private filter: number = FILTER_ALL;
+  // Agent 筛选下拉：'' = 全部 Agent；选中后列表仅显示该 agent 的会话
+  @State private agentFilter: string = '';
+  @State private agentFilterIdx: number = 0;
+  @State private agents: Agent[] = [];
   // 搜索展开态与关键词（本地按标题过滤）
   @State showSearch: boolean = false;
   @State searchText: string = '';
@@ -48,8 +52,29 @@ export struct SessionListPage {
 
   aboutToAppear(): void {
     this.loadSessions();
+    this.loadAgents();
     // 聊天页回合结束广播：返回本页时列表不再停留在登录时的旧快照
     this.bus.on('chat:sessions-changed', this.sessionsRefreshHandler);
+  }
+
+  /** Agent 下拉选项数据（失败降级用 store 缓存，下拉退化为仅「全部 Agent」） */
+  private async loadAgents(): Promise<void> {
+    try {
+      this.agents = await this.api.agents.list();
+      this.agentsStore.setAgents(this.agents);
+    } catch (e) {
+      this.agents = this.agentsStore.agents;
+    }
+  }
+
+  /** Agent 筛选下拉选项：首项「全部 Agent」不过滤，其余按 agents 顺序 */
+  private agentOptions(): SelectOption[] {
+    const opts: SelectOption[] = [{ value: '全部 Agent' }];
+    for (const a of this.agents) {
+      const so: SelectOption = { value: a.name };
+      opts.push(so);
+    }
+    return opts;
   }
 
   aboutToDisappear(): void {
@@ -71,15 +96,18 @@ export struct SessionListPage {
     this.loading = false;
   }
 
-  /** 按筛选 Tab 与搜索词输出可见列表（置顶优先，其次按更新时间倒序） */
+  /** 按筛选 Tab、Agent 下拉与搜索词输出可见列表（置顶优先，其次按更新时间倒序） */
   private visible(): ChatSession[] {
     const kw = this.searchText.trim();
     const base = this.filter === FILTER_PINNED
       ? this.sessions.filter((s: ChatSession) => s.pinned)
       : this.sessions;
-    const filtered = kw.length === 0
+    const byAgent = this.agentFilter === ''
       ? base
-      : base.filter((s: ChatSession) => s.title.indexOf(kw) >= 0);
+      : base.filter((s: ChatSession) => s.agent_id === this.agentFilter);
+    const filtered = kw.length === 0
+      ? byAgent
+      : byAgent.filter((s: ChatSession) => s.title.indexOf(kw) >= 0);
     const sorted = filtered.slice();
     sorted.sort((a: ChatSession, b: ChatSession) => {
       // 比较器三分支契约：a 应排前返回负数、b 应排前返回正数、相等返回 0——
@@ -243,10 +271,30 @@ export struct SessionListPage {
                 this.filter = idx;
               })
           }, (label: string) => label)
+
+          // Agent 筛选下拉：选中后列表仅显示该 agent 的会话
+          Select(this.agentOptions())
+            .selected(this.agentFilterIdx)
+            .value(this.agentFilterIdx === 0 ? '全部 Agent' : this.agentName(this.agentFilter))
+            .font({ size: this.sm.getFontSize('caption') })
+            .fontColor(this.sm.getColor('text_secondary'))
+            .selectedOptionFont({ size: this.sm.getFontSize('caption') })
+            .optionFont({ size: this.sm.getFontSize('caption') })
+            .fontColor(this.sm.getColor('text_secondary'))
+            .backgroundColor(this.sm.getColor('glass'))
+            .borderRadius(999)
+            .border({ width: 1, color: this.sm.getColor('border') })
+            .padding({ left: 12, right: 10, top: 5, bottom: 5 })
+            .onSelect((index: number) => {
+              this.agentFilterIdx = index;
+              this.agentFilter = index === 0 ? '' : (this.agents[index - 1]?.id ?? '');
+            })
+
           Blank()
         }
         .width('100%')
         .padding({ left: 20, right: 20, bottom: 10 })
+        .alignItems(VerticalAlign.Center)
 
         // 列表
         Scroll() {
