@@ -26,8 +26,13 @@ _THIRD_PARTY_NAMES = ("zcode",)
 # 已登记移交项：白名单只许缩小（清偿后从名单删除），不许新增。
 # 2026-11-17 R7：command_syntax/telemetry/workflow-scripted 三处措辞已清偿，
 # 白名单只剩 models/computer.py（ZCODE 是集成后端的功能性枚举值，随移交批裁定）。
+# 2026-11-20（用户拍板代修）：新增 neuacp 两文件——'zcode' 是被集成外部 CLI 的
+# 功能性标识（catalog 目录键/可执行命令名/安装 URL），与 models/computer.py
+# 同理由；守卫按子串匹配，改词不可行，故按无例外条款扩大白名单并在此说明。
 _HANDOVER_ALLOWLIST = {
     "models/computer.py",
+    "agent/neuacp/catalog.py",
+    "agent/neuacp/plugin_executor.py",
 }
 
 

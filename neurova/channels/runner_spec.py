@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from dataclasses import dataclass, field
+
+from neurova.core.proc_text import runText
 from typing import Any, Dict, List
 
 
@@ -28,9 +29,11 @@ def defaultSourceRevision() -> str:
     if explicit:
         return explicit
     try:
-        out = subprocess.run(
+        # 子进程文本解码走单源（proc_text）：git 输出 UTF-8，text=True 在
+        # 中文 Windows 上按 GBK 解码会坏（subprocess 编码棘轮钉点）
+        out = runText(
             ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            timeout=5,
             cwd=defaultCodeRoot(),
         )
         if out.returncode == 0 and out.stdout.strip():

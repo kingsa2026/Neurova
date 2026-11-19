@@ -1674,10 +1674,6 @@ class SwarmManager:
                     "error": "该子任务随父回合前台阻塞运行，无独立任务句柄可叫停"
                              "（如需可停，请以 background=true 派生）"}
         run.cancel_note = str(reason or "").strip() or "父代理主动叫停"
-        task.cancel()
-        # B3：外部成员把叫停同步传导进外部代理进程（task.cancel 只取消本仓侧
-        # 的等待协程，外部子进程仍在跑——必须经 adapter.cancel 发 session/cancel）。
-        self._cancelExternalMember(sid)
 
         # 取消落账兜底：若 cancel 早于成员任务的首个执行步，协程体从未运行，
         # CancelledError 处理器不会执行——这里在任务收尾时把 run 如实判为
@@ -1696,7 +1692,18 @@ class SwarmManager:
                     "error": run.error[:EVENT_ERROR_SUMMARY_CHARS]})
                 self._settleDependencies(run)
 
-        task.add_done_callback(_finalizeCancelled)
+        # 跨线程投递必须走 call_soon_threadsafe：cancelRun 可能在无事件循环的
+        # 线程被调（工具/API 线程），task.cancel()/add_done_callback() 内部的
+        # call_soon 不唤醒 spawnLoop——若外部传导（run_coroutine_threadsafe）
+        # 先唤醒循环并抢先收尾任务，随后的回调登记将无人唤醒，兜底落账
+        # _finalizeCancelled 迟迟不执行（实测 status 停在 pending）。先挂
+        # 回调再发取消，保证终态落账必达。
+        taskLoop = task.get_loop()
+        taskLoop.call_soon_threadsafe(task.add_done_callback, _finalizeCancelled)
+        taskLoop.call_soon_threadsafe(task.cancel)
+        # B3：外部成员把叫停同步传导进外部代理进程（task.cancel 只取消本仓侧
+        # 的等待协程，外部子进程仍在跑——必须经 adapter.cancel 发 session/cancel）。
+        self._cancelExternalMember(sid)
         self._logRunEvent(run, "cancelled", {"reason": run.cancel_note})
         return {"success": True, "subagent_id": sid, "status": "cancelling",
                 "hint": "取消已发出；终态将以 failed(subagent_cancelled) 落账，"
