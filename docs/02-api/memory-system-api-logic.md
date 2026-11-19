@@ -44,9 +44,9 @@
 
 | 步骤 | 行为 | 失败形态 |
 |---|---|---|
-| 1 | `get_app_state()` 取应用状态 | 无 state → `APIError(AGENT_NOT_INITIALIZED=6001)` → **HTTP 500** |
-| 2 | 传 `agent_id` → `_state.agents.get()`；不传 → `_state.get_agent()`（`app.py:70-80` → `endpoints.get_agent_instance`） | agent 不存在 → 404；默认 agent 未初始化 → 6001 → 500 |
-| 3 | `agent.memory_manager` 缺席 | `MEMORY_OPERATION_FAILED=7001` → **500**（未列映射表） |
+| 1 | `get_app_state()` 取应用状态 | 无 state → `APIError(AGENT_NOT_INITIALIZED=6001)` → **HTTP 503**（2026-11-19 复核：错误码映射已更新，见 §八） |
+| 2 | 传 `agent_id` → `_state.agents.get()`；不传 → `_state.get_agent()`（`app.py:70-80` → `endpoints.get_agent_instance`） | agent 不存在 → 404；默认 agent 未初始化 → 6001 → 503（2026-11-19 复核） |
+| 3 | `agent.memory_manager` 缺席 | "记忆系统未启用"现抛 `AGENT_NOT_READY=6003`（`base.py:308`）→ **503**；7001 留给真故障仍 500（2026-11-19 复核：错误码映射已更新；本表取证时原写 7001→500） |
 | 4 | `set_request_scope(neuser_id, user_id)`（`manager.py:852-860`，ContextVar，不改共享单例） | 不支持时仅 `logger.debug`（`base.py:208`）——**静默降级** |
 
 身份缺省值：`(user or {}).get("neuser_id") or "default"`，`user_id` 同理（`base.py:203-204`）`[静态]`。
@@ -229,12 +229,13 @@
 | `PERMISSION_DENIED` | 2002 | 403 | `pending.py:74-75`（非 admin 读裁决历史） |
 | `NOT_FOUND`/`AGENT_NOT_FOUND`/`MEMORY_NOT_FOUND` | 3000/6002/7002 | 404 | `crud.py:248/329/364`、`base.py:191` |
 | `RATE_LIMITED` | 4290 | 429 | — |
-| `MEMORY_OPERATION_FAILED` | **7001** | **500** | `base.py:198`（"记忆系统未启用"）、`crud.py:117/376` |
-| `MEMORY_SEARCH_FAILED` | **7003** | **500** | `crud.py:75` |
-| `AGENT_NOT_INITIALIZED` | **6001** | **500** | `base.py:186/195` |
+| `MEMORY_OPERATION_FAILED` | **7001** | **500** | `crud.py:117/376`（真故障；"记忆系统未启用"一用已由 `base.py:308` 改抛 `AGENT_NOT_READY`，7001 现显式列于 `_SERVER_FAULT_CODES`） |
+| `MEMORY_SEARCH_FAILED` | **7003** | **500** | `crud.py:75`（现显式列于 `_SERVER_FAULT_CODES`） |
+| `AGENT_NOT_INITIALIZED` | **6001** | **503** | `base.py:292/301` |
+| `AGENT_NOT_READY` | **6003** | **503** | `base.py:308`（"记忆系统未启用"） |
 | `INTERNAL_ERROR` | 5001 | 500 | 各文件 `APIError.internal` |
 
-即：**"记忆系统未启用""Agent 未初始化"这类本应 4xx/503 的状态全按 500 呈现**，未列映射表就是 500（`error_handlers.py:16` 注释自陈"未列出的错误码保持 500"）`[静态]`。
+即：**"Agent 未初始化/未就绪""记忆系统未启用"这类状态按 503 呈现**——`error_handlers.py:26-39` 的 `_CODE_TO_HTTP_STATUS` 现显式映射 `AGENT_NOT_INITIALIZED=6001`/`AGENT_NOT_READY=6003` → 503。**2026-11-19 复核：错误码映射已更新**——上文取证时（2026-10-05/07）6001 与"记忆系统未启用"（当时穿 7001）均按 500 呈现、未列映射表即 500；其后映射表增设 6001/6003→503，"记忆系统未启用"抛点由 7001 改为 `AGENT_NOT_READY`（错码穿在对的状态上），7001/7003 仍按 500 呈现（真故障，显式列于 `_SERVER_FAULT_CODES`）。现行映射以 `neurova/api/error_handlers.py` 为准。
 
 静默/降级形态清单（只登记不修）：`crud.py:65-71`（未初始化 → 200 空列表）、`emotion.py` summary/distribution（except → 200 "获取成功(降级)"）、`metacognition.py:461-466/489-494`（except → 200 空数据）、`enhanced_memory_search_api.py:81-91/130-136`（无引擎 code:0、异常 code:-1 但 200）、`share_group.py:114-115`（写盘失败仅 error 日志）、`manager.py:3199` 系列 `logger.debug` 吞索引失败（`:660-661`）、`base.py:208`（不支持 set_request_scope 仅 debug）。
 
