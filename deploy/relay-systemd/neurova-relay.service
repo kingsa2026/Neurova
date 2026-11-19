@@ -1,0 +1,25 @@
+[Unit]
+Description=Neurova Tunnel Relay (self-hosted)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=neurova-relay
+Group=neurova-relay
+# 准入令牌/监听/TLS 证书都在这里（600，root 可读）；install.sh 负责生成与更新
+EnvironmentFile=/etc/neurova-relay/config.env
+# 中继运行的最小文件集装在 lib/（install.sh 按 RELAY_FILES 清单拷贝）
+Environment=PYTHONPATH=/opt/neurova-relay/lib
+ExecStart=/opt/neurova-relay/venv/bin/python -m neurova.relay
+Restart=on-failure
+RestartSec=3
+# 加固：跑在专用系统账号下，不给写系统目录的余地
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/neurova-relay
+
+[Install]
+WantedBy=multi-user.target

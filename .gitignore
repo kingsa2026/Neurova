@@ -271,8 +271,9 @@ token.txt
 /backups/
 /backup_test_files/
 
-# 部署
-/deploy/
+# 部署（仅收自建中继的部署包源文件；其余部署产物仍忽略）
+/deploy/*
+!/deploy/relay-systemd/
 
 # Web 官方网站文件夹（仅根目录）
 /web/
