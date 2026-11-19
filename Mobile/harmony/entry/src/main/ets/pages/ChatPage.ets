@@ -354,8 +354,12 @@ export struct ChatPage {
       this.logger.error(TAG, '发送消息失败', e as Error);
       this.isGenerating = false;
       const last = this.messages[this.messages.length - 1];
-      if (last) {
+      if (last && last.role === 'assistant') {
         last.isStreaming = false;
+        // 诚实标注失败原因：发送抛错＝连接不可用（WS 死态 send 必抛「未连接」），
+        // 不是模型产出为空。此前留空被渲染成「（空回复）」，把断连误当模型没回复，
+        // 排障方向被带偏（2026-11-19 真机实测）
+        last.content = '（消息未送达：连接不可用，请检查网络或重新配对）';
         this.messages = [...this.messages];
         // M5.2.2 同步 LazyForEach 数据源
         this.messagesDs.setData(this.messages);
