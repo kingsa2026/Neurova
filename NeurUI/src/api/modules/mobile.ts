@@ -146,3 +146,46 @@ export function updateConnectionConfig(data: ConnectionConfigUpdate) {
 export function preflightConnectionConfig(url: string, path: string = '/health') {
   return api.post<PreflightResult>(`${BASE}/pairing/connection-config/preflight`, { url, path })
 }
+
+/** 代部署任务读数（档三）：步骤/状态/成功后的 relay_url；凭据只写不读，视图不含。 */
+export interface DeployTaskView {
+  task_id: string
+  steps: Array<{ name: string; ok: boolean; detail: string }>
+  relay_url: string
+  enrollment_token_masked: string
+  error: string
+}
+
+/** 代部署（admin）：agent 以所给 SSH 凭据登录用户服务器，幂等安装自建中继。 */
+export function remoteDeploy(data: {
+  host: string
+  ssh_port?: number
+  username?: string
+  password?: string
+  key_text?: string
+  relay_port?: number
+  domain?: string
+  tls_cert?: string
+  tls_key?: string
+}) {
+  return api.post<{ task_id: string }>(
+    `${BASE}/pairing/connection-config/remote-deploy`, data)
+}
+
+/** 代部署进度（admin）：按步骤回报；成功后 relay_url 已回填连接配置。 */
+export function getRemoteDeployStatus(taskId: string) {
+  return api.get<DeployTaskView>(
+    `${BASE}/pairing/connection-config/remote-deploy/${taskId}`)
+}
+
+/** 代卸载（admin）：停掉并移除服务器上的中继，连接方式退回 auto。 */
+export function remoteUndeploy(data: {
+  host: string
+  ssh_port?: number
+  username?: string
+  password?: string
+  key_text?: string
+}) {
+  return api.post<DeployTaskView>(
+    `${BASE}/pairing/connection-config/remote-undeploy`, data)
+}

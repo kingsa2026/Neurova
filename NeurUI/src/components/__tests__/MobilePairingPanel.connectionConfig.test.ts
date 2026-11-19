@@ -22,6 +22,9 @@ const cancelPairing = vi.fn()
 const getConnectionConfig = vi.fn()
 const updateConnectionConfig = vi.fn()
 const preflightConnectionConfig = vi.fn()
+const remoteDeploy = vi.fn()
+const getRemoteDeployStatus = vi.fn()
+const remoteUndeploy = vi.fn()
 
 vi.mock('@/api/modules/mobile', () => ({
   generatePairing: (...a: unknown[]) => generatePairing(...a),
@@ -34,6 +37,9 @@ vi.mock('@/api/modules/mobile', () => ({
   getConnectionConfig: (...a: unknown[]) => getConnectionConfig(...a),
   updateConnectionConfig: (...a: unknown[]) => updateConnectionConfig(...a),
   preflightConnectionConfig: (...a: unknown[]) => preflightConnectionConfig(...a),
+  remoteDeploy: (...a: unknown[]) => remoteDeploy(...a),
+  getRemoteDeployStatus: (...a: unknown[]) => getRemoteDeployStatus(...a),
+  remoteUndeploy: (...a: unknown[]) => remoteUndeploy(...a),
 }))
 
 import MobilePairingPanel from '../MobilePairingPanel.vue'
@@ -182,5 +188,74 @@ describe('MobilePairingPanel — 连接方式（档一）', () => {
     const result = w.find('[data-testid="preflight-result"]')
     expect(result.classes()).toContain('is-ok')
     expect(result.text()).toContain('12.5')
+  })
+})
+
+describe('MobilePairingPanel — 代部署（档三）', () => {
+  async function openedRelay() {
+    getConnectionConfig.mockResolvedValue(config({
+      mode: 'relay', relay_url: 'http://pair.example.com:8443',
+    }))
+    return await opened()
+  }
+
+  it('部署：把服务器与凭据草稿交给 remoteDeploy，轮询成功后重读配置', async () => {
+    remoteDeploy.mockResolvedValue({ data: { task_id: 'deploy-1' } })
+    getRemoteDeployStatus.mockResolvedValue({ data: {
+      task_id: 'deploy-1', state: 'success',
+      steps: [{ name: '上传中继文件集', ok: true, detail: '' }],
+      relay_url: 'http://pair.example.com:8443', enrollment_token_masked: '••••1234',
+      error: '',
+    } })
+    const w = await openedRelay()
+    await w.find('[data-testid="deploy-host"]').setValue('192.0.2.10')
+    await w.find('[data-testid="deploy-cred-value"]').setValue('pw-1')
+    await w.find('[data-testid="deploy-run"]').trigger('click')
+    await flushPromises()
+    expect(remoteDeploy).toHaveBeenCalledTimes(1)
+    expect(remoteDeploy).toHaveBeenCalledWith(expect.objectContaining({
+      host: '192.0.2.10', username: 'root', password: 'pw-1', relay_port: 8443,
+    }))
+    vi.advanceTimersByTime(1600)
+    await flushPromises()
+    expect(getRemoteDeployStatus).toHaveBeenCalledWith('deploy-1')
+    expect(w.find('[data-testid="connection-notice"]').text()).toContain('pair.example.com')
+    expect(getConnectionConfig).toHaveBeenCalledTimes(2)
+  })
+
+  it('部署失败：步骤如实渲染为失败，不改写配置', async () => {
+    remoteDeploy.mockResolvedValue({ data: { task_id: 'deploy-2' } })
+    getRemoteDeployStatus.mockResolvedValue({ data: {
+      task_id: 'deploy-2', state: 'failed',
+      steps: [{ name: '安装运行依赖', ok: false, detail: 'no network' }],
+      relay_url: '', enrollment_token_masked: '', error: '安装依赖 失败',
+    } })
+    const w = await openedRelay()
+    await w.find('[data-testid="deploy-host"]').setValue('192.0.2.10')
+    await w.find('[data-testid="deploy-cred-value"]').setValue('pw-1')
+    await w.find('[data-testid="deploy-run"]').trigger('click')
+    await flushPromises()
+    vi.advanceTimersByTime(1600)
+    await flushPromises()
+    const steps = w.find('[data-testid="deploy-steps"]')
+    expect(steps.exists()).toBe(true)
+    expect(steps.text()).toContain('no network')
+    expect(w.find('[data-testid="connection-config"]').text()).not.toContain('已保存')
+  })
+
+  it('代卸载：调用 remoteUndeploy 并把连接方式退回 auto', async () => {
+    remoteUndeploy.mockResolvedValue({ data: {
+      state: 'success',
+      steps: [{ name: '停止并禁用服务', ok: true, detail: '' }],
+      relay_url: '', enrollment_token_masked: '', error: '',
+    } })
+    const w = await openedRelay()
+    await w.find('[data-testid="deploy-host"]').setValue('192.0.2.10')
+    await w.find('[data-testid="deploy-cred-value"]').setValue('pw-1')
+    await w.find('[data-testid="deploy-undo"]').trigger('click')
+    await flushPromises()
+    expect(remoteUndeploy).toHaveBeenCalledTimes(1)
+    expect(getConnectionConfig).toHaveBeenCalledTimes(2)
+    expect(w.find('[data-testid="connection-notice"]').text()).toContain('直连')
   })
 })

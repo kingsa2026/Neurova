@@ -68,6 +68,62 @@
         </span>
       </div>
       <p v-if="connNotice" class="nr-mpp-connnotice" data-testid="connection-notice">{{ connNotice }}</p>
+
+      <!-- 代部署（档三）：agent 以所给 SSH 凭据登录用户服务器，代装自建中继。
+           触发即确认（核心原则第 9 条：涉及用户资产须显式确认）；凭据加密落盘、
+           只写不读；部署幂等，失败逐步骤如实回报，另有代卸载撤销。 -->
+      <div v-if="connDraft.mode === 'relay'" class="nr-mpp-deploy" data-testid="remote-deploy">
+        <p class="nr-mpp-sub">{{ t('channel.deployTitle') }}</p>
+        <p class="nr-mpp-desc">{{ t('channel.deployDesc') }}</p>
+        <div class="nr-mpp-field">
+          <span class="nr-mpp-label">{{ t('channel.deployHost') }}</span>
+          <a-input v-model:value="deployDraft.host" size="small" data-testid="deploy-host" />
+        </div>
+        <div class="nr-mpp-field">
+          <span class="nr-mpp-label">{{ t('channel.deploySshPort') }}</span>
+          <a-input v-model:value="deployDraft.ssh_port" size="small" data-testid="deploy-ssh-port" />
+        </div>
+        <div class="nr-mpp-field">
+          <span class="nr-mpp-label">{{ t('channel.deployUsername') }}</span>
+          <a-input v-model:value="deployDraft.username" size="small" data-testid="deploy-username" />
+        </div>
+        <div class="nr-mpp-field">
+          <span class="nr-mpp-label">{{ t('channel.deployCredType') }}</span>
+          <a-radio-group v-model:value="deployDraft.cred_type" data-testid="deploy-cred-type">
+            <a-radio value="password">{{ t('channel.deployCredPassword') }}</a-radio>
+            <a-radio value="key">{{ t('channel.deployCredKeyText') }}</a-radio>
+          </a-radio-group>
+        </div>
+        <div class="nr-mpp-field">
+          <span class="nr-mpp-label">{{ deployDraft.cred_type === 'key'
+            ? t('channel.deployCredKeyText') : t('channel.deployCredPassword') }}</span>
+          <a-input-password v-model:value="deployDraft.cred_value" size="small"
+            data-testid="deploy-cred-value" />
+        </div>
+        <div class="nr-mpp-field">
+          <span class="nr-mpp-label">{{ t('channel.deployRelayPort') }}</span>
+          <a-input v-model:value="deployDraft.relay_port" size="small" data-testid="deploy-relay-port" />
+        </div>
+        <div class="nr-mpp-field">
+          <span class="nr-mpp-label">{{ t('channel.deployDomain') }}</span>
+          <a-input v-model:value="deployDraft.domain" size="small" data-testid="deploy-domain" />
+        </div>
+        <div class="nr-mpp-actions">
+          <GlassButton size="sm" variant="primary" :disabled="deployRunning || !deployReady"
+            data-testid="deploy-run" @click="runRemoteDeploy">
+            {{ t('channel.deployRun') }}
+          </GlassButton>
+          <GlassButton size="sm" variant="danger" :disabled="deployRunning || !deployDraft.host"
+            data-testid="deploy-undo" @click="runRemoteUndeploy">
+            {{ t('channel.deployUndo') }}
+          </GlassButton>
+        </div>
+        <ul v-if="deploySteps.length" class="nr-mpp-steps" data-testid="deploy-steps">
+          <li v-for="(s, i) in deploySteps" :key="i" :class="s.ok ? 'is-ok' : 'is-fail'">
+            {{ s.name }} — {{ s.ok ? '✓' : '✗ ' + s.detail }}
+          </li>
+        </ul>
+      </div>
     </div>
 
     <!-- 终态提示位：码收摊之后屏上不能什么都不留。`revoked`（有人解除了设备）与
@@ -163,10 +219,10 @@ import { identityFailureOf } from '@/utils/authIdentity'
 import GlassButton from '@/components/GlassButton.vue'
 import {
   cancelPairing, generatePairing, getConnectionConfig, getPairedDevices, getPairingQrcodeBlob,
-  getPairingStatus, getTunnelStatus, preflightConnectionConfig, revokePairing,
-  updateConnectionConfig,
-  type ConnectionConfigUpdate, type PairedDevice, type PairingCode, type PairingStatus,
-  type PreflightResult, type TunnelConnectionConfig, type TunnelStatus,
+  getPairingStatus, getRemoteDeployStatus, getTunnelStatus, preflightConnectionConfig,
+  remoteDeploy, remoteUndeploy, revokePairing, updateConnectionConfig,
+  type ConnectionConfigUpdate, type DeployTaskView, type PairedDevice, type PairingCode,
+  type PairingStatus, type PreflightResult, type TunnelConnectionConfig, type TunnelStatus,
 } from '@/api/modules/mobile'
 import { CONNECTION_MODES, type ConnectionMode } from '@/api/contracts/pairingStates'
 
@@ -516,6 +572,119 @@ async function runPreflight() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 代部署（档三）：agent 以用户提供的 SSH 凭据登录其服务器，代装自建中继。
+// 触发即确认（核心原则第 9 条）；凭据加密落盘、只写不读；部署幂等；
+// 进度按步骤轮询，成功后自动重读连接配置与通道徽标。
+// ---------------------------------------------------------------------------
+
+const deployDraft = ref({
+  host: '', ssh_port: '22', username: 'root', cred_type: 'password' as 'password' | 'key',
+  cred_value: '', relay_port: '8443', domain: '',
+})
+const deployRunning = ref(false)
+const deployTaskId = ref('')
+const deployState = ref('')
+const deploySteps = ref<Array<{ name: string; ok: boolean; detail: string }>>([])
+let deployPollTimer: ReturnType<typeof setInterval> | null = null
+
+const deployReady = computed(() => {
+  const d = deployDraft.value
+  return !!(d.host.trim() && d.username.trim() && d.cred_value.trim())
+})
+
+function stopDeployPolling() {
+  if (deployPollTimer) {
+    clearInterval(deployPollTimer)
+    deployPollTimer = null
+  }
+}
+
+async function runRemoteDeploy() {
+  if (deployRunning.value || !deployReady.value) return
+  deployRunning.value = true
+  deploySteps.value = []
+  deployState.value = 'running'
+  connNotice.value = ''
+  try {
+    const payload: Parameters<typeof remoteDeploy>[0] = {
+      host: deployDraft.value.host.trim(),
+      ssh_port: Number(deployDraft.value.ssh_port) || 22,
+      username: deployDraft.value.username.trim() || 'root',
+      relay_port: Number(deployDraft.value.relay_port) || 8443,
+    }
+    if (deployDraft.value.cred_type === 'key') {
+      payload.key_text = deployDraft.value.cred_value
+    } else {
+      payload.password = deployDraft.value.cred_value
+    }
+    if (deployDraft.value.domain.trim()) payload.domain = deployDraft.value.domain.trim()
+    const res: any = await remoteDeploy(payload)
+    deployTaskId.value = (res?.data ?? res)?.task_id ?? ''
+    deployPollTimer = setInterval(pollDeployStatus, 1500)
+  } catch (e: any) {
+    deploySteps.value = [{
+      name: t('channel.deployRun'), ok: false,
+      detail: String(e?.response?.data?.detail || e?.message || ''),
+    }]
+  } finally {
+    deployRunning.value = false
+  }
+}
+
+async function pollDeployStatus() {
+  if (!deployTaskId.value) return
+  try {
+    const res: any = await getRemoteDeployStatus(deployTaskId.value)
+    const body = (res?.data ?? res) as DeployTaskView & { state?: string }
+    deploySteps.value = Array.isArray(body?.steps) ? body.steps : []
+    deployState.value = body?.state ?? 'running'
+    if (body?.state === 'success') {
+      stopDeployPolling()
+      connNotice.value = t('channel.deployDone', { url: body?.relay_url ?? '' })
+      await loadConnConfig()
+      await loadTunnel()
+    } else if (body?.state === 'failed') {
+      stopDeployPolling()
+    }
+  } catch {
+    // 单拍读不到就等下一拍；最终态以后到的结果为准
+  }
+}
+
+async function runRemoteUndeploy() {
+  if (deployRunning.value || !deployDraft.value.host.trim()) return
+  deployRunning.value = true
+  connNotice.value = ''
+  try {
+    const payload: Parameters<typeof remoteUndeploy>[0] = {
+      host: deployDraft.value.host.trim(),
+      ssh_port: Number(deployDraft.value.ssh_port) || 22,
+      username: deployDraft.value.username.trim() || 'root',
+    }
+    if (deployDraft.value.cred_type === 'key') {
+      payload.key_text = deployDraft.value.cred_value
+    } else {
+      payload.password = deployDraft.value.cred_value
+    }
+    const res: any = await remoteUndeploy(payload)
+    const body = (res?.data ?? res) as DeployTaskView & { state?: string }
+    deploySteps.value = Array.isArray(body?.steps) ? body.steps : []
+    deployState.value = body?.state ?? ''
+    connNotice.value = body?.state === 'success'
+      ? t('channel.deployUndoDone')
+      : t('channel.deployFailed', { error: body?.error || '' })
+    await loadConnConfig()
+    await loadTunnel()
+  } catch (e: any) {
+    connNotice.value = t('channel.deployFailed', {
+      error: String(e?.response?.data?.detail || e?.message || ''),
+    })
+  } finally {
+    deployRunning.value = false
+  }
+}
+
 // 先问通道再列设备：面板打开的第一拍就得知道"现在能不能发码"
 loadConnConfig()
 loadTunnel()
@@ -524,6 +693,7 @@ startPanelPolling(IDLE_POLL_MS)
 
 onBeforeUnmount(() => {
   stopPairingPolling()
+  stopDeployPolling()
   releaseQr()
 })
 </script>
@@ -565,4 +735,9 @@ onBeforeUnmount(() => {
 .nr-mpp-preflight.is-ok { font-size: 12px; color: var(--nr-success); }
 .nr-mpp-preflight.is-fail { font-size: 12px; color: var(--nr-error); }
 .nr-mpp-connnotice { margin: var(--nr-space-xs) 0 0; font-size: 12px; color: var(--nr-text-secondary); }
+.nr-mpp-deploy { margin-top: var(--nr-space-md); padding: var(--nr-space-sm) 0 0; border-top: 1px dashed var(--nr-border-subtle, rgba(255, 255, 255, 0.12)); }
+.nr-mpp-steps { margin: var(--nr-space-xs) 0 0; padding: 0; list-style: none; font-size: 12px; }
+.nr-mpp-steps li { padding: 2px 0; }
+.nr-mpp-steps li.is-ok { color: var(--nr-success); }
+.nr-mpp-steps li.is-fail { color: var(--nr-error); }
 </style>
