@@ -8,10 +8,18 @@
   crash_after_init 握手后立即退出（模拟进程崩溃/EOF）
   oversize         握手后推送一行超过 1MB 的帧
   push_notify      握手后主动推送一条 session/update 通知
+  acp_flow         完整会话流：session/new → prompt 期推 content/thought chunk → end_of_turn
+  acp_cancelled    prompt 直接回 cancelled
+  acp_permission   prompt 期发 session/request_permission，按客户端裁决继续/中止
 """
 import json
 import os
 import sys
+
+
+def send(out, obj):
+    out.write((json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
+    out.flush()
 
 
 def main():
@@ -39,25 +47,49 @@ def main():
                 result = {"serverCapabilities": {}}
             else:
                 result = {"protocolVersion": "1", "serverCapabilities": {"tools": {}}}
-            out.write((json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": result}, ensure_ascii=False) + "\n").encode("utf-8"))
-            out.flush()
+            send(out, {"jsonrpc": "2.0", "id": msg_id, "result": result})
             if mode == "crash_after_init":
                 sys.exit(3)
             if mode == "oversize":
                 out.write(b"x" * 1_050_000 + b"\n")
                 out.flush()
             if mode == "push_notify":
-                note = {"jsonrpc": "2.0", "method": "session/update", "params": {"update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "你好 Neuacp"}}}}
-                out.write((json.dumps(note, ensure_ascii=False) + "\n").encode("utf-8"))
-                out.flush()
+                send(out, {"jsonrpc": "2.0", "method": "session/update", "params": {"update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "你好 Neuacp"}}}})
             continue
 
         if method == "ping":
-            out.write((json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": {"pong": True, "echo": params}}, ensure_ascii=False) + "\n").encode("utf-8"))
-            out.flush()
+            send(out, {"jsonrpc": "2.0", "id": msg_id, "result": {"pong": True, "echo": params}})
             continue
 
-        out.write((json.dumps({"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": "method not found"}}, ensure_ascii=False) + "\n").encode("utf-8"))
+        if method == "session/new":
+            send(out, {"jsonrpc": "2.0", "id": msg_id, "result": {"sessionId": "sess-1"}})
+            continue
+
+        if method == "session/prompt":
+            if mode in ("acp_flow", "acp_permission"):
+                send(out, {"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "sess-1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "你好 Neuacp"}}}})
+                send(out, {"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "sess-1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"text": "思考中"}}}})
+                if mode == "acp_permission":
+                    send(out, {"jsonrpc": "2.0", "id": 9001, "method": "session/request_permission", "params": {"toolCall": {"title": "写入 src/app.py"}, "options": [{"kind": "allow"}]}})
+                    resp_line = sys.stdin.buffer.readline()
+                    try:
+                        resp = json.loads(resp_line.decode("utf-8"))
+                    except Exception:
+                        resp = {}
+                    choice = ((resp.get("result") or {}).get("outcome") or {}).get("choice")
+                    if choice != "allow":
+                        send(out, {"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "sess-1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "权限被拒，任务中止"}}}})
+                        send(out, {"jsonrpc": "2.0", "id": msg_id, "result": {"stopReason": "end_of_turn"}})
+                        continue
+                send(out, {"jsonrpc": "2.0", "id": msg_id, "result": {"stopReason": "end_of_turn"}})
+                continue
+            if mode == "acp_cancelled":
+                send(out, {"jsonrpc": "2.0", "id": msg_id, "result": {"stopReason": "cancelled"}})
+                continue
+            send(out, {"jsonrpc": "2.0", "id": msg_id, "result": {"stopReason": "end_of_turn"}})
+            continue
+
+        send(out, {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": "method not found"}})
         out.flush()
 
 

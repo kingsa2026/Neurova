@@ -86,6 +86,8 @@ class NeuacpClient:
         self._closed = False
         self._crash_reported = False
         self._stderr_tail: deque = deque(maxlen=50)
+        self._write_lock = threading.Lock()
+        self._request_handlers: Dict[str, Callable[[dict], dict]] = {}
 
     # ---------- 生命周期 ----------
 
@@ -192,6 +194,14 @@ class NeuacpClient:
     def notify(self, method: str, params: Optional[dict] = None) -> None:
         self._sendFrame({"jsonrpc": "2.0", "method": method, "params": params or {}})
 
+    def setRequestHandler(self, method: str, handler: Callable[[dict], dict]) -> None:
+        """注册 agent→client 方向的请求处理器（如 session/request_permission）。
+
+        handler 在泵线程内同步调用，返回值作为 JSON-RPC result 回给 agent。
+        """
+        with self._lock:
+            self._request_handlers[method] = handler
+
     # ---------- 内部实现 ----------
 
     def _sendFrame(self, message: dict) -> None:
@@ -200,8 +210,9 @@ class NeuacpClient:
             raise NeuacpError("neuacp client not running")
         payload = json.dumps(message, ensure_ascii=False) + "\n"
         try:
-            proc.stdin.write(payload.encode("utf-8"))
-            proc.stdin.flush()
+            with self._write_lock:
+                proc.stdin.write(payload.encode("utf-8"))
+                proc.stdin.flush()
         except OSError as exc:
             raise NeuacpError(f"写入外部代理失败: {exc}") from exc
 
@@ -245,19 +256,33 @@ class NeuacpClient:
 
     def _dispatch(self, message: dict) -> None:
         msg_id = message.get("id")
-        waiter = None
+        method = message.get("method")
         if msg_id is not None:
             with self._lock:
                 waiter = self._waiters.pop(msg_id, None)
-        if waiter is not None:
-            if message.get("error"):
-                error = message["error"]
-                waiter.put(NeuacpError(f"ACP error {error.get('code')}: {error.get('message')}"))
-            else:
-                waiter.put(message.get("result") or {})
+            if waiter is not None:
+                if message.get("error"):
+                    error = message["error"]
+                    waiter.put(NeuacpError(f"ACP error {error.get('code')}: {error.get('message')}"))
+                else:
+                    waiter.put(message.get("result") or {})
+                return
+        if not method:
             return
-        method = message.get("method")
-        if method and self._on_event is not None:
+        with self._lock:
+            handler = self._request_handlers.get(method)
+        if handler is not None and msg_id is not None:
+            try:
+                result = handler(message.get("params") or {})
+                response = {"jsonrpc": "2.0", "id": msg_id, "result": result}
+            except Exception as exc:
+                response = {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32000, "message": str(exc)}}
+            try:
+                self._sendFrame(response)
+            except NeuacpError:
+                pass
+            return
+        if self._on_event is not None:
             try:
                 self._on_event(method, message.get("params") or {})
             except Exception:
