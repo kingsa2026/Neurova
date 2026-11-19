@@ -84,13 +84,12 @@ export struct GlassStatCard {
       .width('100%')
       .alignItems(VerticalAlign.Top)
 
-      // 趋势行：仅在 trend 非空时渲染
-      if (this.trend) {
-        Text(this.trend)
-          .fontSize(12)
-          .fontColor(this.getTrendColor())
-          .margin({ top: sm.getSpacing('sm') })
-      }
+      // 趋势行：恒渲染占位（无趋势时透明空格），保证并排卡片等高对齐——
+      // 工作台 2×2 里仅右下卡有「共 N 个」，此前有值才渲染导致两列底边不齐
+      Text(this.trend.length > 0 ? this.trend : ' ')
+        .fontSize(12)
+        .fontColor(this.trend.length > 0 ? this.getTrendColor() : 'rgba(0,0,0,0)')
+        .margin({ top: sm.getSpacing('sm') })
     }
     .padding(sm.getSpacing('md'))
     .width('100%')
