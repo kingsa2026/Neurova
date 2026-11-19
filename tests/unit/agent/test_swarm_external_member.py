@@ -100,12 +100,16 @@ def test_missingCommandRejected(swarm, monkeypatch):
     assert error and "启动命令" in error
 
 
-def test_pluginKindRejectedUntilExecutorAvailable(swarm, monkeypatch):
+def test_pluginKindResolvesToPluginExecutor(swarm, monkeypatch):
+    """A8 落地后：kind=plugin 走 NeuacpPluginExecutor（ZCode 插件形态）。"""
     monkeypatch.setenv("NEUROVA_EXTERNAL_AGENTS_ENABLED", "on")
     patchTeams(monkeypatch, rosterWithExecutor(kind="plugin", tool="zcode"))
     adapter, error = swarm._resolveExternalMember("ext-1", "team-1")
-    assert adapter is None
-    assert error and "插件" in error
+    assert error is None
+    assert adapter is not None
+    from neurova.agent.neuacp import NeuacpPluginExecutor
+
+    assert isinstance(adapter._executor, NeuacpPluginExecutor)
 
 
 def test_spawnRejectsWhenExternalUnavailable(swarm, monkeypatch):

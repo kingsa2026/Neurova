@@ -18,6 +18,7 @@ from neurova.agent.neuacp.executor import (
     NeuacpExecutor,
     NeuacpSessionContext,
 )
+from neurova.agent.neuacp.plugin_executor import NeuacpPluginExecutor
 
 __all__ = [
     "NeuacpClient",
@@ -26,6 +27,7 @@ __all__ = [
     "NeuacpTimeoutError",
     "NeuacpStdioExecutor",
     "NeuacpMemberAdapter",
+    "NeuacpPluginExecutor",
     "NeuacpExecResult",
     "NeuacpExecutor",
     "NeuacpSessionContext",

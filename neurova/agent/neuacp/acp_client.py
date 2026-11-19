@@ -7,37 +7,17 @@ terminate）、request 按 id 配对、通知回调（session/update 等）、�
 回调、terminate。帧内协议是 ACP；帧层/监督骨架对齐 channels/runner_bridge。
 """
 import json
-import os
 import queue
 import subprocess
 import threading
 from collections import deque
 from typing import Any, Callable, Dict, List, Optional
 
+from neurova.agent.neuacp.child_env import buildChildEnvironment
+
 _DEFAULT_FRAME_LIMIT = 1_000_000
 _DEFAULT_REQUEST_TIMEOUT = 30.0
 _TERMINATE_WAIT_S = 5.0
-
-# 子进程环境白名单：只带运行必需键，宿主代理变量（HTTP_PROXY 等）天然被排除。
-_BASE_ENV_KEYS = (
-    "PATH",
-    "LANG",
-    "LC_ALL",
-    "SYSTEMROOT",
-    "SYSTEMDRIVE",
-    "WINDIR",
-    "COMSPEC",
-    "PATHEXT",
-    "TEMP",
-    "TMP",
-    "APPDATA",
-    "LOCALAPPDATA",
-    "USERPROFILE",
-    "PROGRAMFILES",
-    "ALLUSERSPROFILE",
-    "HOME",
-    "PYTHONIOENCODING",
-)
 
 
 class NeuacpError(Exception):
@@ -309,12 +289,4 @@ class NeuacpClient:
             waiter.put(error)
 
     def _childEnvironment(self) -> dict:
-        env = {}
-        for key in _BASE_ENV_KEYS:
-            value = os.environ.get(key)
-            if value is not None:
-                env[key] = value
-        env["PYTHONIOENCODING"] = "utf-8"
-        for key, value in self._env_extra.items():
-            env[key] = value
-        return env
+        return buildChildEnvironment(self._env_extra)
