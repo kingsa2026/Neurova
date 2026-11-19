@@ -331,14 +331,12 @@ export struct RegisterPage {
                 })
                   .margin({ top: 24 })
 
-                // 去登录按钮：ghost + block
-                GlassButton({
-                  text: '已有账号？去登录',
-                  type: 'ghost',
-                  block: true,
-                  disabled: this.loading,
-                  onTap: () => { this.handleGotoLogin(); }
-                })
+                // 去登录：纯文字链接（与登录页底部链接同款，无背景无边框）
+                Text('已有账号？去登录')
+                  .fontSize(this.sm.getFontSize('body_sm'))
+                  .fontColor(this.sm.getColor('primary'))
+                  .padding({ left: 8, right: 8, top: 10, bottom: 10 })
+                  .onClick(() => { this.handleGotoLogin(); })
                   .margin({ top: 12 })
               }
               .width('100%')
