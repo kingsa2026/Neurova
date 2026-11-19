@@ -18,7 +18,7 @@ import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
 import { GlassCard, GlassButton, GlassPanel } from '../components/glass';
 import { IconBtn } from '../components/common/IconBtn';
-import { KnowledgeItem, KnowledgeStatus } from '../libs/types';
+import { KnowledgeItem, KnowledgeStatus, Agent } from '../libs/types';
 
 /** 日志标签 */
 const TAG = 'KnowledgePage';
@@ -88,6 +88,9 @@ export struct KnowledgePage {
   // 共享弹层：目标条目 + 用户名输入（逗号分隔多个）
   @State shareTarget: KnowledgeItem | null = null;
   @State shareUsernames: string = '';
+  // Agent 切换（按 agent 读取知识；空 = 全部）
+  @State agents: Agent[] = [];
+  @State selectedAgentId: string = '';
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -98,6 +101,16 @@ export struct KnowledgePage {
 
   aboutToAppear() {
     this.loadKnowledge();
+    this.loadAgents();
+  }
+
+  /** Agent 切换源列表（admin 全量、普通用户自有） */
+  private async loadAgents(): Promise<void> {
+    try {
+      this.agents = await this.api.agents.list();
+    } catch (e) {
+      this.logger.error(TAG, 'Agent 列表加载失败', e as Error);
+    }
   }
 
   /** 加载当前库分类的知识列表 */
@@ -108,6 +121,7 @@ export struct KnowledgePage {
         scope: this.scope,
         page: 1,
         pageSize: 50,
+        agentId: this.selectedAgentId,
       });
       if (res.code === 0 && res.data) {
         this.knowledgeList = res.data.items;
@@ -272,6 +286,47 @@ export struct KnowledgePage {
       .width('100%')
       .padding({ left: 20, right: 20, top: 8, bottom: 10 })
       .alignItems(VerticalAlign.Center)
+
+      // Agent 切换胶囊（按 agent 读取知识；空 = 全部）
+      Scroll() {
+        Row({ space: 8 }) {
+          Text('全部')
+            .fontSize(12)
+            .fontColor(this.selectedAgentId === ''
+              ? this.sm.getColor('text_on_primary')
+              : this.sm.getColor('text_secondary'))
+            .backgroundColor(this.selectedAgentId === ''
+              ? this.sm.getColor('primary')
+              : this.sm.getColor('surface'))
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .borderRadius(14)
+            .onClick(() => {
+              this.selectedAgentId = '';
+              this.loadKnowledge();
+            })
+          ForEach(this.agents, (a: Agent) => {
+            Text(a.name)
+              .fontSize(12)
+              .fontColor(this.selectedAgentId === a.id
+                ? this.sm.getColor('text_on_primary')
+                : this.sm.getColor('text_secondary'))
+              .backgroundColor(this.selectedAgentId === a.id
+                ? this.sm.getColor('primary')
+                : this.sm.getColor('surface'))
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(14)
+              .onClick(() => {
+                this.selectedAgentId = a.id;
+                this.loadKnowledge();
+              })
+          }, (a: Agent) => a.id)
+        }
+        .padding({ left: 20, right: 20 })
+      }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Off)
+      .width('100%')
+      .margin({ bottom: 10 })
 
       // 搜索栏
       Row() {

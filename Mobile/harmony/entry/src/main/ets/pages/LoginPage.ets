@@ -44,6 +44,10 @@ export struct LoginPage {
   @State loading: boolean = false;
   // 当前服务器档案（F1 服务器胶囊：当前服务器 xxx）
   @State serverLabel: string = '';
+  // 服务器档案编辑（胶囊点击呼出：改名称/URL，保存后立即重连装配点）
+  @State showServerEdit: boolean = false;
+  @State editServerName: string = '';
+  @State editServerUrl: string = '';
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -220,6 +224,14 @@ export struct LoginPage {
                 .border({ width: 1, color: this.sm.getColor('border') })
                 .margin({ top: 22 })
                 .alignItems(VerticalAlign.Center)
+                .onClick(() => {
+                  const active = ServerProfiles.getInstance().getActive();
+                  if (active) {
+                    this.editServerName = active.name;
+                    this.editServerUrl = active.baseUrl;
+                    this.showServerEdit = true;
+                  }
+                })
               }
 
               // 注册 / 忘记密码链接：居中（44 触控热区）
@@ -252,8 +264,109 @@ export struct LoginPage {
       .height('100%')
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
+
+      // 服务器档案编辑弹层（F1 胶囊点击呼出）
+      this.buildServerEditDialog()
     }
     .width('100%')
     .height('100%')
+  }
+
+  /** 服务器档案编辑弹层（F1 胶囊点击呼出：改名称/URL，保存后立即重连装配点） */
+  @Builder
+  buildServerEditDialog() {
+    if (this.showServerEdit) {
+      Stack({ alignContent: Alignment.Center }) {
+        // 背景遮罩层：点击空白处关闭
+        Column()
+          .width('100%')
+          .height('100%')
+          .backgroundColor(this.sm.getColor('overlay_mask'))
+          .onClick(() => { this.showServerEdit = false; })
+
+        // 面板层（GlassPanel 尾闭包后不可链属性——外包 Column 承接宽度）
+        Column() {
+          GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
+            Column() {
+              Text('编辑服务器档案')
+                .fontSize(this.sm.getFontSize('subtitle'))
+                .fontWeight(FontWeight.Bold)
+                .fontColor(this.sm.getColor('text_primary'))
+                .width('100%')
+
+              Text('名称')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .width('100%')
+                .margin({ top: this.sm.getSpacing('sm') })
+              GlassInput({
+                placeholder: '如：家里 / VPS',
+                value: this.editServerName,
+                type: 'text',
+                onChange: (v: string) => { this.editServerName = v; }
+              })
+
+              Text('地址（http(s)://host:port）')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .width('100%')
+                .margin({ top: this.sm.getSpacing('sm') })
+              GlassInput({
+                placeholder: 'https://www.neurova.top',
+                value: this.editServerUrl,
+                type: 'text',
+                onChange: (v: string) => { this.editServerUrl = v; }
+              })
+
+              Row() {
+                GlassButton({
+                  text: '取消',
+                  type: 'default',
+                  btnSize: 'medium',
+                  onTap: () => { this.showServerEdit = false; }
+                })
+                GlassButton({
+                  text: '保存',
+                  type: 'primary',
+                  btnSize: 'medium',
+                  onTap: () => { this.saveServerEdit(); }
+                })
+                  .margin({ left: this.sm.getSpacing('sm') })
+              }
+              .width('100%')
+              .justifyContent(FlexAlign.End)
+              .margin({ top: this.sm.getSpacing('md') })
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+          }
+        }
+        .width('90%')
+      }
+      .width('100%')
+      .height('100%')
+    }
+  }
+
+  /** 保存服务器档案编辑：更新档案 → 重连 HTTP 装配点 → 刷新胶囊文案 */
+  private async saveServerEdit(): Promise<void> {
+    const url = this.editServerUrl.trim();
+    if (url.length === 0) {
+      this.msg.warning('请填写服务器地址');
+      return;
+    }
+    const profiles = ServerProfiles.getInstance();
+    const active = profiles.getActive();
+    if (!active) {
+      return;
+    }
+    await profiles.update(active.id, this.editServerName.trim(), url);
+    const updated = profiles.getActive();
+    if (updated) {
+      this.serverLabel = `${updated.name} · ${updated.baseUrl}`;
+    }
+    await this.cm.applyServerProfile(profiles.getActiveApiBase(), getContext(this) as Context);
+    this.showServerEdit = false;
+    this.msg.success('服务器档案已更新');
   }
 }

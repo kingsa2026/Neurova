@@ -118,6 +118,20 @@ export class ServerProfiles {
     return false;
   }
 
+  /** 编辑档案（名称/地址）；地址变更后由调用方重连 HttpClient 装配点（applyServerProfile） */
+  async update(id: string, name: string, baseUrl: string): Promise<boolean> {
+    for (const p of this.list) {
+      if (p.id === id) {
+        p.name = name.trim() || normalizeBaseUrl(baseUrl);
+        p.baseUrl = normalizeBaseUrl(baseUrl);
+        p.entryMode = p.baseUrl.indexOf('/t/') >= 0 ? 'relay' : 'direct';
+        await this.save();
+        return true;
+      }
+    }
+    return false;
+  }
+
   async markConnected(account: string): Promise<void> {
     const active = this.getActive();
     if (active) {

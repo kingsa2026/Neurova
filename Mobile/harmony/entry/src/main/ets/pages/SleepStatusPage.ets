@@ -381,13 +381,13 @@ export struct SleepStatusPage {
     .margin({ bottom: this.sm.getSpacing('md') })
   }
 
-  /** 区块2：模式切换按钮组 + 唤醒按钮 */
+  /** 区块2：模式切换按钮组 + 唤醒按钮（2×2 网格，任意分辨率不换行错位） */
   @Builder
   buildActionSection() {
     Column() {
     GlassCard({ title: '休眠模式切换' }) {
       Column() {
-        // 模式按钮组（横向排列）
+        // 第一行：空闲 / 浅睡
         Row({ space: 8 }) {
           GlassButton({
             text: `${SleepStatusViewHelper.getModeIcon('idle')} ${SleepStatusViewHelper.getModeLabel('idle')}`,
@@ -395,35 +395,42 @@ export struct SleepStatusPage {
             btnSize: 'small',
             onTap: () => { this.switchMode('idle'); }
           })
+            .layoutWeight(1)
           GlassButton({
             text: `${SleepStatusViewHelper.getModeIcon('light')} ${SleepStatusViewHelper.getModeLabel('light')}`,
             type: this.status!.mode === 'light' ? 'primary' : 'default',
             btnSize: 'small',
             onTap: () => { this.switchMode('light'); }
           })
+            .layoutWeight(1)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        // 第二行：深睡 / 唤醒
+        Row({ space: 8 }) {
           GlassButton({
             text: `${SleepStatusViewHelper.getModeIcon('deep')} ${SleepStatusViewHelper.getModeLabel('deep')}`,
             type: this.status!.mode === 'deep' ? 'primary' : 'default',
             btnSize: 'small',
             onTap: () => { this.switchMode('deep'); }
           })
+            .layoutWeight(1)
+          GlassButton({
+            text: SleepStatusViewHelper.isAwakeable(this.status!) ? '唤醒 Agent' : '已唤醒',
+            type: SleepStatusViewHelper.isAwakeable(this.status!) ? 'primary' : 'default',
+            btnSize: 'small',
+            onTap: () => {
+              if (SleepStatusViewHelper.isAwakeable(this.status!)) {
+                this.awakenAgent();
+              }
+            }
+          })
+            .layoutWeight(1)
         }
         .width('100%')
-        .justifyContent(FlexAlign.SpaceBetween)
-
-        // 唤醒按钮（仅当 isSleeping=true 时启用）
-        GlassButton({
-          text: SleepStatusViewHelper.isAwakeable(this.status!) ? '唤醒 Agent' : '已唤醒',
-          type: SleepStatusViewHelper.isAwakeable(this.status!) ? 'primary' : 'default',
-          btnSize: 'medium',
-          onTap: () => {
-            if (SleepStatusViewHelper.isAwakeable(this.status!)) {
-              this.awakenAgent();
-            }
-          }
-        })
-          .width('100%')
-          .margin({ top: this.sm.getSpacing('md') })
+        .margin({ top: 8 })
+        .alignItems(VerticalAlign.Center)
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)

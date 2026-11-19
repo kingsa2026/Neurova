@@ -168,6 +168,11 @@ export struct TeamPage {
   @State loading: boolean = true;
   // 新建弹窗显示状态
   @State showCreateDialog: boolean = false;
+  // 编辑团队弹窗（PUT /teams/{id} 真实接线）
+  @State showEditDialog: boolean = false;
+  @State editTeamId: string = '';
+  @State editName: string = '';
+  @State editDescription: string = '';
   // 新建表单数据（@State 嵌套属性变更整体重新赋值）
   @State formData: TeamFormData = {
     name: '',
@@ -257,9 +262,35 @@ export struct TeamPage {
     this.selectedTeam = null;
   }
 
-  /** 编辑团队（占位，提示开发中） */
+  /** 编辑团队（真实接线：PUT /teams/{id}，名称/描述） */
   private handleEdit(team: Team): void {
-    this.msg.info('功能开发中');
+    this.editTeamId = team.id;
+    this.editName = team.name;
+    this.editDescription = team.description ?? '';
+    this.showEditDialog = true;
+  }
+
+  /** 提交团队编辑 */
+  private async submitEdit(): Promise<void> {
+    if (this.editName.trim() === '') {
+      this.msg.warning('请填写团队名称');
+      return;
+    }
+    try {
+      const res = await this.api.collaboration.updateTeam(this.editTeamId, {
+        name: this.editName.trim(),
+        description: this.editDescription.trim(),
+      });
+      if (res.code === 0) {
+        this.msg.success('团队已更新');
+        this.showEditDialog = false;
+        this.loadTeams();
+      } else {
+        this.msg.error(res.message || '团队更新失败');
+      }
+    } catch (e) {
+      this.msg.error('团队更新失败：' + (e as Error).message);
+    }
   }
 
   /**
@@ -373,6 +404,9 @@ export struct TeamPage {
       // 新建弹窗：内嵌 Stack 条件渲染
       if (this.showCreateDialog) {
         this.buildCreateDialog()
+      }
+      if (this.showEditDialog) {
+        this.buildEditDialog()
       }
     }
     .width('100%')
@@ -620,6 +654,89 @@ export struct TeamPage {
               type: 'primary',
               btnSize: 'medium',
               onTap: () => { this.submitCreate(); }
+            })
+              .margin({ left: this.sm.getSpacing('sm') })
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.End)
+          .margin({ top: this.sm.getSpacing('md') })
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+      }
+      }
+      .width('90%')
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  // ===========================================================================
+  // 编辑弹窗构建器（PUT /teams/{id}）
+  // ===========================================================================
+
+  /** 编辑团队弹窗：name 输入 + description 输入（预填当前值） */
+  @Builder
+  buildEditDialog() {
+    Stack({ alignContent: Alignment.Center }) {
+      // 背景遮罩层
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.sm.getColor('overlay_mask'))
+        .onClick(() => { this.showEditDialog = false; })
+
+      // 面板层
+      Column() {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
+        Column() {
+          Text('编辑团队')
+            .fontSize(this.sm.getFontSize('subtitle'))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+            .width('100%')
+
+          // 名称
+          Text('名称')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .width('100%')
+            .margin({ top: this.sm.getSpacing('sm') })
+          GlassInput({
+            placeholder: '请输入团队名称',
+            value: this.editName,
+            type: 'text',
+            onChange: (v: string) => { this.editName = v; }
+          })
+            .margin({ top: 4 })
+
+          // 描述
+          Text('描述')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .width('100%')
+            .margin({ top: this.sm.getSpacing('sm') })
+          GlassInput({
+            placeholder: '请输入描述',
+            value: this.editDescription,
+            type: 'text',
+            onChange: (v: string) => { this.editDescription = v; }
+          })
+            .margin({ top: 4 })
+
+          // 操作按钮
+          Row() {
+            GlassButton({
+              text: '取消',
+              type: 'default',
+              btnSize: 'medium',
+              onTap: () => { this.showEditDialog = false; }
+            })
+            GlassButton({
+              text: '保存',
+              type: 'primary',
+              btnSize: 'medium',
+              onTap: () => { this.submitEdit(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }

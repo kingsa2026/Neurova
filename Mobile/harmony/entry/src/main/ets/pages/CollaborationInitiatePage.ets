@@ -39,6 +39,8 @@ import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
 import { CollaborationSessionDto, CollaborationStartBody } from '../libs/api/modules/CollaborationApi';
+import { Agent } from '../libs/types';
+import { AdminUserDto } from '../libs/api/modules/AdminApi';
 
 /** 日志标签 */
 const TAG = 'CollaborationInitiatePage';
@@ -153,6 +155,11 @@ export struct CollaborationInitiatePage {
     status: 'pending',
     message: '',
   };
+  // 参与者选择：类型（用户 / Agent 单选）+ 现有候选（下拉）+ 当前选中
+  @State participantKind: string = 'agent';
+  @State agents: Agent[] = [];
+  @State users: AdminUserDto[] = [];
+  @State selectedParticipantId: string = '';
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -163,6 +170,96 @@ export struct CollaborationInitiatePage {
 
   aboutToAppear() {
     this.loadInitiated();
+    this.loadParticipantCandidates();
+  }
+
+  /** 加载参与者候选：现有 Agent（按账号）+ 用户列表（非管理员可能 403，诚实降级为空） */
+  private async loadParticipantCandidates(): Promise<void> {
+    try {
+      this.agents = await this.api.agents.list();
+    } catch (e) {
+      this.logger.error(TAG, 'Agent 候选加载失败', e as Error);
+    }
+    try {
+      const res = await this.api.admin.listUsers();
+      this.users = res.items;
+    } catch (e) {
+      this.logger.error(TAG, '用户候选加载失败（需要管理员权限）', e as Error);
+    }
+  }
+
+  /** 参与者下拉选项（随类型切换：Agent 名 / 用户名） */
+  private participantOptions(): SelectOption[] {
+    const out: SelectOption[] = [];
+    if (this.participantKind === 'user') {
+      for (const u of this.users) {
+        const so: SelectOption = { value: u.username };
+        out.push(so);
+      }
+      return out;
+    }
+    for (const a of this.agents) {
+      const so: SelectOption = { value: a.name };
+      out.push(so);
+    }
+    return out;
+  }
+
+  /** 参与者下拉选项对应的 ID（与 participantOptions 同序） */
+  private participantOptionIds(): string[] {
+    const out: string[] = [];
+    if (this.participantKind === 'user') {
+      for (const u of this.users) {
+        out.push(String(u.id));
+      }
+      return out;
+    }
+    for (const a of this.agents) {
+      out.push(a.id);
+    }
+    return out;
+  }
+
+  /** 当前选中下标（未选择返回 0，展示占位文案） */
+  private selectedParticipantIndex(): number {
+    const ids = this.participantOptionIds();
+    for (let i = 0; i < ids.length; i++) {
+      if (ids[i] === this.selectedParticipantId) {
+        return i;
+      }
+    }
+    return 0;
+  }
+
+  /** 下拉框展示文案（未选择时为占位提示） */
+  private selectedParticipantLabel(): string {
+    if (this.selectedParticipantId === '') {
+      return '请选择参与者';
+    }
+    const ids = this.participantOptionIds();
+    const opts = this.participantOptions();
+    for (let i = 0; i < ids.length; i++) {
+      if (ids[i] === this.selectedParticipantId && i < opts.length) {
+        return opts[i].value as string;
+      }
+    }
+    return '请选择参与者';
+  }
+
+  /** 把下拉选中的参与者加入列表 */
+  private addSelectedParticipant(): void {
+    if (this.selectedParticipantId === '') {
+      this.msg.warning('请先在下拉菜单选择参与者');
+      return;
+    }
+    if (this.formData.participants.includes(this.selectedParticipantId)) {
+      this.msg.warning('参与者已存在');
+      return;
+    }
+    const next = this.formData.participants.slice();
+    next.push(this.selectedParticipantId);
+    this.formData = { name: this.formData.name, description: this.formData.description, participants: next, participantInput: '' };
+    this.selectedParticipantId = '';
   }
 
   /**
@@ -189,24 +286,6 @@ export struct CollaborationInitiatePage {
   /** 输入描述（嵌套属性变更：整体重新赋值） */
   private inputDescription(v: string): void {
     this.formData = { name: this.formData.name, description: v, participants: this.formData.participants, participantInput: this.formData.participantInput };
-  }
-
-  /** 输入参与者 ID（嵌套属性变更：整体重新赋值） */
-  private inputParticipant(v: string): void {
-    this.formData = { name: this.formData.name, description: this.formData.description, participants: this.formData.participants, participantInput: v };
-  }
-
-  /** 添加参与者（回车或点击添加按钮触发，嵌套属性变更：整体重新赋值） */
-  private addParticipant(): void {
-    const v = this.formData.participantInput.trim();
-    if (!v) return;
-    if (this.formData.participants.includes(v)) {
-      this.msg.warning('参与者已存在');
-      return;
-    }
-    const next = this.formData.participants.slice();
-    next.push(v);
-    this.formData = { name: this.formData.name, description: this.formData.description, participants: next, participantInput: '' };
   }
 
   /** 移除参与者（嵌套属性变更：整体重新赋值） */
@@ -373,26 +452,72 @@ export struct CollaborationInitiatePage {
         })
           .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
 
-        // 参与者输入
-        Text('参与者')
+        // 参与者：类型单选（用户 / Agent）+ 按类型下拉选现有用户/Agent
+        Text('参与者类型')
           .fontSize(this.sm.getFontSize('caption'))
           .fontColor(this.sm.getColor('text_secondary'))
           .width('100%')
-        Row() {
-          GlassInput({
-            placeholder: '输入 userId 或 agentId',
-            value: this.formData.participantInput,
-            type: 'text',
-            onChange: (v: string) => { this.inputParticipant(v); },
+        Row({ space: 8 }) {
+          Text('Agent')
+            .fontSize(this.sm.getFontSize('body_sm'))
+            .fontColor(this.participantKind === 'agent'
+              ? this.sm.getColor('text_on_primary')
+              : this.sm.getColor('text_secondary'))
+            .backgroundColor(this.participantKind === 'agent'
+              ? this.sm.getColor('primary')
+              : this.sm.getColor('surface'))
+            .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+            .borderRadius(14)
+            .onClick(() => {
+              this.participantKind = 'agent';
+              this.selectedParticipantId = '';
+            })
+          Text('用户')
+            .fontSize(this.sm.getFontSize('body_sm'))
+            .fontColor(this.participantKind === 'user'
+              ? this.sm.getColor('text_on_primary')
+              : this.sm.getColor('text_secondary'))
+            .backgroundColor(this.participantKind === 'user'
+              ? this.sm.getColor('primary')
+              : this.sm.getColor('surface'))
+            .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+            .borderRadius(14)
+            .onClick(() => {
+              this.participantKind = 'user';
+              this.selectedParticipantId = '';
+            })
+        }
+        .width('100%')
+        .margin({ top: 4 })
+
+        Text('选择参与者')
+          .fontSize(this.sm.getFontSize('caption'))
+          .fontColor(this.sm.getColor('text_secondary'))
+          .width('100%')
+          .margin({ top: this.sm.getSpacing('xs') })
+        Select(this.participantOptions())
+          .selected(this.selectedParticipantIndex())
+          .value(this.selectedParticipantLabel())
+          .font({ size: this.sm.getFontSize('body_sm') })
+          .fontColor(this.sm.getColor('text_primary'))
+          .selectedOptionFont({ size: this.sm.getFontSize('body_sm') })
+          .optionFont({ size: this.sm.getFontSize('body_sm') })
+          .width('100%')
+          .margin({ top: 4 })
+          .onSelect((index: number) => {
+            const ids = this.participantOptionIds();
+            if (index >= 0 && index < ids.length) {
+              this.selectedParticipantId = ids[index];
+            }
           })
-            .layoutWeight(1)
+
+        Row() {
           GlassButton({
             text: '添加',
             type: 'default',
             btnSize: 'small',
-            onTap: () => { this.addParticipant(); }
+            onTap: () => { this.addSelectedParticipant(); }
           })
-            .margin({ left: this.sm.getSpacing('xs') })
         }
         .width('100%')
         .margin({ top: 4 })

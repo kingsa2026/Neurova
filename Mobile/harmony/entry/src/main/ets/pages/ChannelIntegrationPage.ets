@@ -40,6 +40,7 @@ import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
 import { ChannelConfigDto, ChannelConfigUpsertBody, emptyExtra } from '../libs/api/modules/ChannelIntegrationApi';
+import { Agent } from '../libs/types';
 
 /** 日志标签 */
 const TAG = 'ChannelIntegrationPage';
@@ -172,9 +173,22 @@ export struct ChannelIntegrationPage {
   private sm = StyleManager.getInstance();
   private logger = Logger.getInstance();
   private msg = MessageManager.getInstance();
+  // Agent 切换（渠道配置按 agent 隔离；默认 default）
+  @State agents: Agent[] = [];
+  @State selectedAgentId: string = DEFAULT_AGENT_ID;
 
   aboutToAppear() {
     this.loadIntegrations();
+    this.loadAgents();
+  }
+
+  /** Agent 切换源列表（admin 全量、普通用户自有） */
+  private async loadAgents(): Promise<void> {
+    try {
+      this.agents = await this.api.agents.list();
+    } catch (e) {
+      this.logger.error(TAG, 'Agent 列表加载失败', e as Error);
+    }
   }
 
   /**
@@ -186,7 +200,7 @@ export struct ChannelIntegrationPage {
     this.loading = true;
     this.errorMsg = '';
     try {
-      const res = await this.api.channelIntegration.list(DEFAULT_AGENT_ID, undefined);
+      const res = await this.api.channelIntegration.list(this.selectedAgentId, undefined);
       if (res.code === 0 && res.data) {
         this.integrations = res.data.items;
       }
@@ -266,7 +280,7 @@ export struct ChannelIntegrationPage {
       return;
     }
     try {
-      const res = await this.api.channelIntegration.saveConfig(DEFAULT_AGENT_ID, this.buildUpsertBody());
+      const res = await this.api.channelIntegration.saveConfig(this.selectedAgentId, this.buildUpsertBody());
       if (res.data.success) {
         if (res.data.needs_scan) {
           this.msg.warning('配置已保存：该渠道需扫码确认后生效');
@@ -294,7 +308,7 @@ export struct ChannelIntegrationPage {
       return;
     }
     try {
-      const res = await this.api.channelIntegration.saveConfig(DEFAULT_AGENT_ID, this.buildUpsertBody());
+      const res = await this.api.channelIntegration.saveConfig(this.selectedAgentId, this.buildUpsertBody());
       if (res.data.success) {
         this.msg.success('更新成功');
         this.showDialog = false;
@@ -335,7 +349,7 @@ export struct ChannelIntegrationPage {
         verification_token: '',
         extra: emptyExtra(),
       };
-      const res = await this.api.channelIntegration.testConfig(DEFAULT_AGENT_ID, item.channel_type, body);
+      const res = await this.api.channelIntegration.testConfig(this.selectedAgentId, item.channel_type, body);
       if (res.data.success) {
         this.msg.success(res.data.message.length > 0 ? res.data.message : '连接正常');
       } else {
@@ -399,6 +413,33 @@ export struct ChannelIntegrationPage {
             onTap: () => { this.openCreateDialog(); }
           })
         }
+
+        // Agent 切换胶囊（渠道配置按 agent 隔离）
+        Scroll() {
+          Row({ space: 8 }) {
+            ForEach(this.agents, (a: Agent) => {
+              Text(a.name)
+                .fontSize(12)
+                .fontColor(this.selectedAgentId === a.id
+                  ? this.sm.getColor('text_on_primary')
+                  : this.sm.getColor('text_secondary'))
+                .backgroundColor(this.selectedAgentId === a.id
+                  ? this.sm.getColor('primary')
+                  : this.sm.getColor('surface'))
+                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                .borderRadius(14)
+                .onClick(() => {
+                  this.selectedAgentId = a.id;
+                  this.loadIntegrations();
+                })
+            }, (a: Agent) => a.id)
+          }
+          .padding({ left: 20, right: 20 })
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .margin({ bottom: this.sm.getSpacing('sm') })
 
         // 搜索框：按 channel_type 过滤
         GlassInput({

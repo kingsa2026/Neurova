@@ -685,19 +685,23 @@ export struct AIGCPage {
             .fontColor(this.sm.getColor('text_secondary'))
             .width('100%')
             .margin({ top: this.sm.getSpacing('sm') })
-          Row() {
-            ForEach(this.getTypeOptions(), (opt: AIGCTypeOption) => {
-              GlassButton({
-                text: `${opt.icon} ${opt.label}`,
-                type: this.formData.type === opt.type ? 'primary' : 'default',
-                btnSize: 'small',
-                onTap: () => { this.selectType(opt.type); }
-              })
-                .margin({ right: this.sm.getSpacing('xs') })
-            }, (opt: AIGCTypeOption) => opt.type)
-          }
-          .width('100%')
-          .margin({ top: this.sm.getSpacing('xs'), bottom: this.sm.getSpacing('sm') })
+          // 类型下拉（按钮排布在窄屏会超出面板宽度产生错位——改系统下拉菜单）
+          Select(this.createTypeSelectOptions())
+            .selected(this.getCurrentTypeIndex())
+            .value(this.getCurrentTypeLabel())
+            .font({ size: this.sm.getFontSize('body_sm') })
+            .fontColor(this.sm.getColor('text_primary'))
+            .selectedOptionFont({ size: this.sm.getFontSize('body_sm') })
+            .optionFont({ size: this.sm.getFontSize('body_sm') })
+            .selectedOptionFontColor(this.sm.getColor('primary'))
+            .width('100%')
+            .margin({ top: this.sm.getSpacing('xs'), bottom: this.sm.getSpacing('sm') })
+            .onSelect((index: number) => {
+              const opts = this.getTypeOptions();
+              if (index >= 0 && index < opts.length) {
+                this.selectType(opts[index].type);
+              }
+            })
 
           // prompt 文本域（用 GlassInput 模拟多行输入）
           Text('Prompt')
@@ -749,5 +753,30 @@ export struct AIGCPage {
       label: AIGCViewHelper.getTypeLabel(t),
       icon: AIGCViewHelper.getTypeIcon(t),
     }));
+  }
+
+  /** 任务类型下拉选项（SelectOption 形） */
+  private createTypeSelectOptions(): SelectOption[] {
+    return this.getTypeOptions().map((opt: AIGCTypeOption) => {
+      const so: SelectOption = { value: `${opt.icon} ${opt.label}` };
+      return so;
+    });
+  }
+
+  /** 当前选中类型的下标 */
+  private getCurrentTypeIndex(): number {
+    const opts = this.getTypeOptions();
+    for (let i = 0; i < opts.length; i++) {
+      if (opts[i].type === this.formData.type) {
+        return i;
+      }
+    }
+    return 0;
+  }
+
+  /** 当前选中类型的展示文案 */
+  private getCurrentTypeLabel(): string {
+    const opt = this.getTypeOptions()[this.getCurrentTypeIndex()];
+    return `${opt.icon} ${opt.label}`;
   }
 }

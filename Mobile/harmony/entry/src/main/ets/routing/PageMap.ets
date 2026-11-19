@@ -63,6 +63,7 @@ import { CollaborationPage } from '../pages/CollaborationPage';
 import { ProjectPage } from '../pages/ProjectPage';
 import { TeamPage } from '../pages/TeamPage';
 import { WorkflowPage } from '../pages/WorkflowPage';
+import { WorkflowEditPage } from '../pages/WorkflowEditPage';
 // M5 P3 协作扩展
 import { CollaborationTemplatePage } from '../pages/CollaborationTemplatePage';
 import { CollaborationHistoryPage } from '../pages/CollaborationHistoryPage';
@@ -182,6 +183,8 @@ export function pageMap(name: string) {
     NavDestination() { TeamPage() }.hideTitleBar(true)
   } else if (name === RouteNames.WORKFLOW) {
     NavDestination() { WorkflowPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.WORKFLOW_EDIT) {
+    NavDestination() { WorkflowEditPage() }.hideTitleBar(true)
   } else if (name === RouteNames.COLLABORATION_TEMPLATE) {
     NavDestination() { CollaborationTemplatePage() }.hideTitleBar(true)
   } else if (name === RouteNames.COLLABORATION_HISTORY) {

@@ -614,4 +614,13 @@ export class CollaborationApi {
     const res = await this.client.delete<Object>(`/neurflow/workflows/${id}`);
     return asEnvelope<Object>(res, ['message']) as ApiResponse<Object>;
   }
+
+  /**
+   * 执行工作流（POST /v1/neurflow/workflows/{id}/execute，body 即 inputs dict）。
+   * 响应含 execution_id（裸 dict）→ 边界归一；页面据 code/data 判定结果。
+   */
+  async executeWorkflow(id: string, inputs: Record<string, Object>): Promise<ApiResponse<Object>> {
+    const res = await this.client.post<Object>(`/neurflow/workflows/${id}/execute`, inputs);
+    return asEnvelope<Object>(res, ['execution_id']) as ApiResponse<Object>;
+  }
 }

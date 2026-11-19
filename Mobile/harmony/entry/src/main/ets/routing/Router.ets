@@ -68,6 +68,7 @@ export class RouteNames {
   static readonly AIGC: string = 'AIGCPage';
   // M4 P2 协作与工作流
   static readonly WORKFLOW: string = 'WorkflowPage';
+  static readonly WORKFLOW_EDIT: string = 'WorkflowEditPage';
   static readonly COLLABORATION: string = 'CollaborationPage';
   static readonly PROJECT: string = 'ProjectPage';
   static readonly TEAM: string = 'TeamPage';

@@ -25,7 +25,7 @@ export struct AppIcon {
 
   build() {
     Path()
-      .commands(this.commands())
+      .commands(this.scaledCommands())
       .fillOpacity(this.isFilled() ? 1 : 0)
       .fill(this.color)
       .stroke(this.color)
@@ -34,6 +34,30 @@ export struct AppIcon {
       .strokeLineJoin(LineJoinStyle.Round)
       .width(this.iconSize)
       .height(this.iconSize)
+  }
+
+  /**
+   * 24 网格绝对坐标整体缩放到目标画布。
+   * Path commands 是绝对 vp 坐标：容器缩到 15/16vp 而坐标仍按 24vp 画，
+   * 图标会溢出/裁切（真机反馈「所有图标大小不适配」的根因）——按 iconSize/24 等比缩放。
+   */
+  private scaledCommands(): string {
+    const raw = this.commands();
+    if (this.iconSize === 24) {
+      return raw;
+    }
+    const s = this.iconSize / 24;
+    const parts = raw.split(' ');
+    const out: string[] = [];
+    for (const p of parts) {
+      const n = parseFloat(p);
+      if (!isNaN(n)) {
+        out.push((n * s).toFixed(3));
+      } else {
+        out.push(p);
+      }
+    }
+    return out.join(' ');
   }
 
   private commands(): string {

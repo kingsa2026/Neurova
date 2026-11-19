@@ -41,7 +41,8 @@
 
 import { TopNavMenu, GlassCard, GlassButton, GlassInput, GlassPanel } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
-import { Router } from '../routing/Router';
+import { Router, RouteNames } from '../routing/Router';
+import { StateManager } from '../libs/state/StateManager';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
@@ -263,9 +264,10 @@ export struct WorkflowPage {
     }
   }
 
-  /** 编辑工作流（M5 实现，当前提示） */
+  /** 编辑工作流（M5：跳转工作流编辑器页） */
   private handleEdit(workflow: Workflow): void {
-    this.msg.info('工作流编辑器 M5 实现');
+    StateManager.getInstance().set('workflow:edit_id', workflow.id);
+    this.router.push(RouteNames.WORKFLOW_EDIT);
   }
 
   /**

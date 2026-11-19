@@ -82,12 +82,28 @@ export class MemoryViewHelper {
   }
 
   /**
+   * 归一化温度到 0-1。后端实测给 0-100 刻度（真机显示 10000% 即原始值 100），
+   * 兼容两种刻度：>1 视为 0-100 刻度除以 100，再夹紧到 [0,1]。
+   */
+  static normalizeTemperature(t: number): number {
+    const v = t > 1 ? t / 100 : t;
+    return Math.max(0, Math.min(1, v));
+  }
+
+  /**
    * 格式化温度为百分比字符串
-   * @param t 温度值 0-1
+   * @param t 温度值 0-1（兼容 0-100 刻度，见 normalizeTemperature）
    * @return 百分比字符串，如 0.5 → "50%"
    */
   static formatTemperature(t: number): string {
-    return `${Math.round(t * 100)}%`;
+    return `${Math.round(MemoryViewHelper.normalizeTemperature(t) * 100)}%`;
+  }
+
+  /**
+   * 温度条填充宽度（0-100 的百分数，已夹紧）——与 formatTemperature 同一刻度口径
+   */
+  static temperaturePercent(t: number): number {
+    return Math.round(MemoryViewHelper.normalizeTemperature(t) * 100);
   }
 
   /**
@@ -448,7 +464,8 @@ export struct MemoryPage {
           left: this.sm.getSpacing('md'),
           right: this.sm.getSpacing('md'),
           top: this.sm.getSpacing('sm'),
-          bottom: this.sm.getSpacing('sm'),
+          // 底部加大净空：真机手势条/屏幕圆角会吃掉末尾卡片（用户反馈列表显示不全）
+          bottom: 28,
         })
       }
     }
@@ -491,10 +508,10 @@ export struct MemoryPage {
 
           // 底部行：温度条 + 重要性 + 创建时间
           Row() {
-            // 温度条容器（固定宽度 60，内部按温度填充）
+            // 温度条容器（固定宽度 60，内部按温度填充；宽度夹紧防溢出压到相邻文字）
             Row() {
               Row()
-                .width(`${Math.round((memory.temperature ?? 0) * 100)}%`)
+                .width(`${MemoryViewHelper.temperaturePercent(memory.temperature ?? 0)}%`)
                 .height(4)
                 .borderRadius(2)
                 .backgroundColor(this.sm.getColor('primary'))

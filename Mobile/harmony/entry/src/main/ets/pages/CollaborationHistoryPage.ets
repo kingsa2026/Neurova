@@ -24,7 +24,8 @@
 import { TopNavMenu, GlassCard, GlassButton } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { CollaborationHistoryDto } from '../libs/api/modules/CollaborationApi';
-import { Router } from '../routing/Router';
+import { Router, RouteNames } from '../routing/Router';
+import { StateManager } from '../libs/state/StateManager';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
@@ -218,6 +219,17 @@ export struct CollaborationHistoryPage {
     });
   }
 
+  /**
+   * 进入协作会话聊天窗口：新开会话（标题带协作名），可查看/发送内容。
+   * 移动端聊天面暂不支持协作房间通道——先以命名会话承接查看/发送诉求。
+   */
+  private openCollabChat(h: CollaborationHistoryDto): void {
+    const state = StateManager.getInstance();
+    state.set('chat:active_session_id', '');
+    state.set('chat:active_session_title', '协作 · ' + h.name);
+    this.router.push(RouteNames.CHAT);
+  }
+
   build() {
     Column() {
       // 顶部导航栏：标题"协作历史" + 返回
@@ -353,14 +365,21 @@ export struct CollaborationHistoryPage {
           .margin({ top: this.sm.getSpacing('xs') })
           .width('100%')
 
-        // 操作按钮：查看详情（右对齐）
+        // 操作按钮：进入会话聊天 + 查看详情（右对齐）
         Row() {
+          GlassButton({
+            text: '进入',
+            type: 'primary',
+            btnSize: 'small',
+            onTap: () => { this.openCollabChat(h); }
+          })
           GlassButton({
             text: '详情',
             type: 'default',
             btnSize: 'small',
             onTap: () => { this.showDetail(h); }
           })
+            .margin({ left: this.sm.getSpacing('sm') })
         }
         .width('100%')
         .justifyContent(FlexAlign.End)
