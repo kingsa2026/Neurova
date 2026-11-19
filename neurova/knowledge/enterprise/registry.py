@@ -29,6 +29,106 @@ _RUN_ONCE_MAX_BATCHES = 20
 #: fetchBatch 单批行数上限（方案 §4：具名常量、默认温和）
 _FETCH_BATCH_LIMIT = 200
 
+#: v56（可靠性方案 D1，2026-11-19）：企业源同步历史——每轮拉取（手动/interval，
+#: 成功/失败/跳过）落一行，回答「上次同步何时、拉了多少、为何失败」。
+#: 只追加不删（审计纪律）；写入单点 = runOnceAsync（三条拉取链的公共必经路）。
+_SCHEMA_V56_SYNC_HISTORY = """
+CREATE TABLE IF NOT EXISTS enterprise_sync_history (
+    history_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    trigger_kind TEXT NOT NULL DEFAULT 'manual',
+    status TEXT NOT NULL DEFAULT 'ok',
+    reason TEXT NOT NULL DEFAULT '',
+    batches INTEGER NOT NULL DEFAULT 0,
+    admitted INTEGER NOT NULL DEFAULT 0,
+    rejected INTEGER NOT NULL DEFAULT 0,
+    rows_skipped INTEGER NOT NULL DEFAULT 0,
+    entries_written INTEGER NOT NULL DEFAULT 0,
+    truncated INTEGER NOT NULL DEFAULT 0,
+    cursor_before TEXT NOT NULL DEFAULT '',
+    cursor_after TEXT NOT NULL DEFAULT '',
+    duration_ms INTEGER,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_enterprise_sync_history
+    ON enterprise_sync_history(tenant_id, source_id, started_at);
+"""
+
+#: D3 单源单飞：`(tenant_id, source_id)` → 进程内锁。非阻塞 try-acquire，
+#: 拿不到＝同源已有一轮在跑，第二轮如实 `already_running` 跳过（不排队、不并发双拉）。
+#: 进程内锁覆盖单体单进程部署；多 worker 互斥不在本批（方案 §2 非目标）。
+_syncLocks: Dict[tuple, threading.Lock] = {}
+_syncLocksGuard = threading.Lock()
+
+#: 运行时单源跟随（D2）用的调度器引用：registerIntervalSyncs 注册时记下，
+#: setSyncInterval/saveConfig 改间隔或启停时据此即时注册/摘除单源 job。
+_activeScheduler: Optional[Any] = None
+
+
+def _syncLockFor(tenantId: str, sourceId: str) -> threading.Lock:
+    key = (str(tenantId or "default"), str(sourceId or ""))
+    with _syncLocksGuard:
+        if key not in _syncLocks:
+            _syncLocks[key] = threading.Lock()
+        return _syncLocks[key]
+
+
+def _recordSyncHistory(store: Any, tenantId: str, sourceId: str, triggerKind: str,
+                       status: str, startedAt: str, reason: str = "",
+                       batches: int = 0, admitted: int = 0, rejected: int = 0,
+                       rowsSkipped: int = 0, entriesWritten: int = 0,
+                       truncated: bool = False, cursorBefore: str = "",
+                       cursorAfter: str = "") -> None:
+    """同步历史落一行（D1，fail-soft）：写失败只记日志，绝不影响同步主流程。"""
+    import uuid as _uuid
+
+    from neurova.core.time_utils import nowIso as _now
+
+    try:
+        finished = _now()
+        with store._lock, store._conn:
+            store._conn.execute(
+                "INSERT INTO enterprise_sync_history (history_id, tenant_id, source_id,"
+                " trigger_kind, status, reason, batches, admitted, rejected,"
+                " rows_skipped, entries_written, truncated, cursor_before, cursor_after,"
+                " duration_ms, started_at, finished_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("esync_%s" % _uuid.uuid4().hex[:12], str(tenantId or "default"),
+                 str(sourceId or ""), str(triggerKind or "manual"), str(status),
+                 str(reason or "")[:500], int(batches), int(admitted), int(rejected),
+                 int(rowsSkipped), int(entriesWritten), 1 if truncated else 0,
+                 str(cursorBefore or ""), str(cursorAfter or ""),
+                 int((__import__("datetime").datetime
+                      .fromisoformat(finished)
+                      - __import__("datetime").datetime.fromisoformat(startedAt))
+                     .total_seconds() * 1000) if startedAt else None,
+                 str(startedAt or finished), finished),
+            )
+    except Exception as exc:  # noqa: BLE001 - 历史落账失败不拖垮同步主流程
+        try:
+            from neurova.core.logger import get_logger
+
+            get_logger(__name__).warning(
+                "同步历史落账失败（%s/%s）：%s", tenantId, sourceId, exc)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def listSyncTenants(store: Any = None) -> List[str]:
+    """D2：声明了 interval（enabled 且 seconds>0）的全部租户——调度覆盖不再限 default。"""
+    if store is None:
+        from ..foundation import get_knowledge_fact_store
+
+        store = get_knowledge_fact_store()
+    with store._lock:
+        rows = store._conn.execute(
+            "SELECT DISTINCT tenant_id FROM enterprise_source_configs"
+            " WHERE enabled = 1 AND sync_interval_seconds > 0 ORDER BY tenant_id"
+        ).fetchall()
+    return [str(r["tenant_id"]) for r in rows]
+
 
 def buildAdapter(descriptor: Dict[str, Any], sourceId: str,
                  tenantId: str = "default") -> EnterpriseSourceAdapter:
@@ -234,15 +334,22 @@ class EnterpriseIngestor:
                  "", 1 if enabled else 0,
                  existing["created_at"] if existing else stamp, stamp),
             )
+        # D2 运行时跟随：按落库后的 enabled/间隔现值即时注册/摘除单源 job
+        # （INSERT OR REPLACE 会把未声明列清零，故以现值而非入参为准）。
+        _followUpSyncJob(tenantId, sourceId, store=self._store)
 
     def setSyncInterval(self, tenantId: str, sourceId: str, seconds: int) -> None:
-        """W3：声明源的 interval 同步间隔（v44 列；0＝不持续同步）。"""
+        """W3：声明源的 interval 同步间隔（v44 列；0＝不持续同步）。
+
+        D2 运行时跟随：落库后即时注册/摘除单源 job（调度器可用时），改完即生效。
+        """
         with self._store._lock, self._store._conn:
             self._store._conn.execute(
                 "UPDATE enterprise_source_configs SET sync_interval_seconds = ?,"
                 " updated_at = ? WHERE tenant_id = ? AND source_id = ?",
                 (max(0, int(seconds)), self._now(),
                  str(tenantId or "default"), str(sourceId or "")))
+        _followUpSyncJob(tenantId, sourceId, store=self._store)
 
     def listConfigs(self, tenantId: str = "default") -> List[Dict[str, Any]]:
         """本租户已提交过的源配置（描述符 + 游标 + 启用态）——读面，不触发任何网络。"""
@@ -321,22 +428,48 @@ class EnterpriseIngestor:
                  str(tenantId or "default"), str(sourceId or "")),
             )
 
-    async def runOnceAsync(self, tenantId: str, sourceId: str) -> Dict[str, Any]:
-        """手动触发一轮拉取（拍板项 2A）：loadConfig → 适配器 → fetchBatch 循环
-        → ingestBatch → 游标逐批持久化。
+    async def runOnceAsync(self, tenantId: str, sourceId: str,
+                           triggerKind: str = "manual") -> Dict[str, Any]:
+        """手动/interval 触发一轮拉取（拍板项 2A）：loadConfig → 适配器 →
+        fetchBatch 循环 → ingestBatch → 游标逐批持久化。
 
+        - triggerKind（D1）：manual | interval——历史落账的触发来源；
+        - 单飞（D3）：同源已有一轮在跑 → `already_running` 如实跳过（不排队）；
         - enabled=False 或配置不存在 → skipped（零读取零网络，关闸语义原样）；
         - 适配器未注册则经唯一工厂 buildAdapter 构造并注册（配置存了 ≠ 源能连了，
           两者仍是分开的读数；工厂抛错如实冒泡，不吞成空轮）；
         - 游标在 source batch **成功后**逐批推进（ingestBatch 抛错 → 本轮中止 →
           游标停在上一成功批 → 下轮必然重试，方案 §4 失败不推进语义）；
-        - 超过 _RUN_ONCE_MAX_BATCHES 批仍 hasMore → 如实报 truncated=True。
+        - 超过 _RUN_ONCE_MAX_BATCHES 批仍 hasMore → 如实报 truncated=True；
+        - 每轮结果落 `enterprise_sync_history`（D1，fail-soft）。
         """
+        tenant = str(tenantId or "default")
+        source = str(sourceId or "")
+        startedAt = self._now()
+        cursorBefore = ""
+        lock = _syncLockFor(tenant, source)
+        if not lock.acquire(blocking=False):
+            self._recordHistorySafe(tenant, source, triggerKind, "skipped",
+                                    startedAt, reason="already_running")
+            return {"skipped": True, "reason": "already_running"}
+        try:
+            return await self._runOnceLocked(
+                tenant, source, triggerKind, startedAt, cursorBefore)
+        finally:
+            lock.release()
+
+    async def _runOnceLocked(self, tenantId: str, sourceId: str, triggerKind: str,
+                             startedAt: str, cursorBefore: str) -> Dict[str, Any]:
         config = self.loadConfig(tenantId, sourceId)
         if config is None:
+            self._recordHistorySafe(tenantId, sourceId, triggerKind, "skipped",
+                                    startedAt, reason="source 配置不存在")
             return {"skipped": True, "reason": "source 配置不存在"}
         if not config.get("enabled"):
+            self._recordHistorySafe(tenantId, sourceId, triggerKind, "skipped",
+                                    startedAt, reason="source 未启用（默认关）")
             return {"skipped": True, "reason": "source 未启用（默认关）"}
+        cursorBefore = str(config.get("cursor") or "")
         descriptor = dict(config["descriptor"])
         descriptor["tenantId"] = tenantId
         descriptor["sourceId"] = sourceId
@@ -349,38 +482,69 @@ class EnterpriseIngestor:
         cursor = SourceCursor(str(config.get("cursor") or ""))
         admitted = 0
         rejected = 0
+        rowsSkipped = 0
         entries = {"written": 0, "duplicated": 0, "skipped": 0}
         batches = 0
         truncated = False
-        while batches < _RUN_ONCE_MAX_BATCHES:
-            change = await adapter.fetchBatch(cursor or None, _FETCH_BATCH_LIMIT)
-            batches += 1
-            if change.rows:
-                result = self.ingestBatch(
-                    descriptor, change.rows, cursorToken=str(cursor.token or ""))
-                admitted += int(result.get("admitted") or 0)
-                rejected += int(result.get("rejected") or 0)
-                # 正文分档能力钩子（批 C7c，§14-C）：适配器若提供 writeArchiveEntries
-                # （现仅存档面聊天源），行集在 facts 之外另承正文进条目链——
-                # registry 不感知 chat 细节，只认能力面。
-                entryWriter = getattr(adapter, "writeArchiveEntries", None)
-                if entryWriter is not None:
-                    entryOutcome = await entryWriter(change.rows, tenantId=tenantId)
-                    if entryOutcome.get("applied", True):
-                        for key in ("written", "duplicated", "skipped"):
-                            entries[key] += int(entryOutcome.get(key) or 0)
-            if change.nextCursor is not None and not change.nextCursor.isEmpty():
-                cursor = change.nextCursor
-                self.saveCursor(tenantId, sourceId, str(cursor.token))
-            if not change.hasMore:
-                truncated = False
-                break
-        else:
-            truncated = True
+        try:
+            while batches < _RUN_ONCE_MAX_BATCHES:
+                change = await adapter.fetchBatch(cursor or None, _FETCH_BATCH_LIMIT)
+                batches += 1
+                if change.rows:
+                    result = self.ingestBatch(
+                        descriptor, change.rows, cursorToken=str(cursor.token or ""))
+                    admitted += int(result.get("admitted") or 0)
+                    rejected += int(result.get("rejected") or 0)
+                    rowsSkipped += len(result.get("skipped") or [])
+                    # 正文分档能力钩子（批 C7c，§14-C）：适配器若提供 writeArchiveEntries
+                    # （现仅存档面聊天源），行集在 facts 之外另承正文进条目链——
+                    # registry 不感知 chat 细节，只认能力面。
+                    entryWriter = getattr(adapter, "writeArchiveEntries", None)
+                    if entryWriter is not None:
+                        entryOutcome = await entryWriter(change.rows, tenantId=tenantId)
+                        if entryOutcome.get("applied", True):
+                            for key in ("written", "duplicated", "skipped"):
+                                entries[key] += int(entryOutcome.get(key) or 0)
+                if change.nextCursor is not None and not change.nextCursor.isEmpty():
+                    cursor = change.nextCursor
+                    self.saveCursor(tenantId, sourceId, str(cursor.token))
+                if not change.hasMore:
+                    truncated = False
+                    break
+            else:
+                truncated = True
+        except Exception as exc:
+            self._recordHistorySafe(tenantId, sourceId, triggerKind, "error",
+                                    startedAt, reason=str(exc), batches=batches,
+                                    admitted=admitted, rejected=rejected,
+                                    rowsSkipped=rowsSkipped,
+                                    entriesWritten=entries.get("written", 0),
+                                    truncated=truncated, cursorBefore=cursorBefore,
+                                    cursorAfter=str(cursor.token or ""))
+            raise
+        self._recordHistorySafe(tenantId, sourceId, triggerKind, "ok", startedAt,
+                                batches=batches, admitted=admitted, rejected=rejected,
+                                rowsSkipped=rowsSkipped,
+                                entriesWritten=entries.get("written", 0),
+                                truncated=truncated, cursorBefore=cursorBefore,
+                                cursorAfter=str(cursor.token or ""))
         return {"admitted": admitted, "rejected": rejected,
                 "entries": entries,
                 "batches": batches, "truncated": truncated,
                 "cursor": str(cursor.token or "")}
+
+    def _recordHistorySafe(self, tenantId: str, sourceId: str, triggerKind: str,
+                           status: str, startedAt: str, reason: str = "",
+                           batches: int = 0, admitted: int = 0, rejected: int = 0,
+                           rowsSkipped: int = 0, entriesWritten: int = 0,
+                           truncated: bool = False, cursorBefore: str = "",
+                           cursorAfter: str = "") -> None:
+        _recordSyncHistory(self._store, tenantId, sourceId, triggerKind, status,
+                           startedAt, reason=reason, batches=batches,
+                           admitted=admitted, rejected=rejected,
+                           rowsSkipped=rowsSkipped, entriesWritten=entriesWritten,
+                           truncated=truncated, cursorBefore=cursorBefore,
+                           cursorAfter=cursorAfter)
 
     def runOnce(self, tenantId: str, sourceId: str) -> Dict[str, Any]:
         """同步壳：无事件循环的调用方（测试/worker 线程）用；循环内请 await runOnceAsync。"""
@@ -417,18 +581,32 @@ class EnterpriseIngestor:
 
 
 def registerIntervalSyncs(scheduler: Any, store: Any = None,
-                          tenantId: str = "default") -> int:
-    """W3 持续同步（specs/2026-11-12 §5；D3 interval 最小闭合）：为声明了
-    sync_interval_seconds>0 的启用源向既有调度器注册 interval job——job 触发
-    调既有 runOnceAsync 处理函数，零新同步逻辑；不新造调度器（scheduler 需带
-    addSystemJob 公开面）。返回注册条数。"""
+                          tenantId: Optional[str] = None) -> int:
+    """W3 持续同步 + D2 全租户覆盖：为声明了 sync_interval_seconds>0 的启用源
+    向既有调度器注册 interval job——job 触发调既有 runOnceAsync（trigger=interval），
+    零新同步逻辑；不新造调度器（scheduler 需带 addSystemJob 公开面）。
+
+    tenantId 缺省 = 遍历 `listSyncTenants()` 的**全部租户**（修复只覆盖 default
+    的隔离缺口）；显式传租户则只注册该租户（既有测试语义不变）。返回注册条数。
+    """
+    global _activeScheduler
     if scheduler is None or not hasattr(scheduler, "addSystemJob"):
         return 0
+    _activeScheduler = scheduler
     factStore = store
     if factStore is None:
         from ..foundation import get_knowledge_fact_store
 
         factStore = get_knowledge_fact_store()
+    tenants = [str(tenantId or "default")] if tenantId else listSyncTenants(factStore)
+    registered = 0
+    for tenant in tenants:
+        registered += _registerTenantJobs(scheduler, factStore, tenant)
+    return registered
+
+
+def _registerTenantJobs(scheduler: Any, factStore: Any, tenantId: str) -> int:
+    """单租户的启用源逐个注册 interval job（jobId 带租户段，跨租户不互顶）。"""
     ingestor = EnterpriseIngestor(factStore)
     registered = 0
     for config in ingestor.listConfigs(tenantId=tenantId):
@@ -436,18 +614,68 @@ def registerIntervalSyncs(scheduler: Any, store: Any = None,
         if not config.get("enabled") or seconds <= 0:
             continue
         sourceId = str(config.get("source_id") or "")
-
-        def _job(sourceId=sourceId, tenantId=tenantId):
-            import asyncio
-
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(
-                    EnterpriseIngestor(factStore).runOnceAsync(tenantId, sourceId))
-            finally:
-                loop.close()
-
-        scheduler.addSystemJob(_job, jobId="kb_enterprise_sync_%s" % sourceId,
-                               seconds=seconds)
+        _registerOneJob(scheduler, factStore, tenantId, sourceId, seconds)
         registered += 1
     return registered
+
+
+def _registerOneJob(scheduler: Any, factStore: Any, tenantId: str, sourceId: str,
+                    seconds: int) -> None:
+    def _job(tenantId=tenantId, sourceId=sourceId, factStore=factStore):
+        import asyncio
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(
+                EnterpriseIngestor(factStore).runOnceAsync(
+                    tenantId, sourceId, triggerKind="interval"))
+        finally:
+            loop.close()
+
+    scheduler.addSystemJob(_job, jobId="kb_enterprise_sync_%s_%s" % (tenantId, sourceId),
+                           seconds=seconds)
+
+
+def syncSourceJob(scheduler: Any, tenantId: str, sourceId: str,
+                  store: Any = None) -> bool:
+    """D2 运行时跟随：按当前配置**注册或摘除**单源 interval job。
+
+    enabled 且 seconds>0 → 注册（replace_existing 幂等）；否则摘除（无此 job
+    时幂等静默）。返回注册与否。同时把调度器记入模块引用，供后续跟随复用。
+    """
+    global _activeScheduler
+    _activeScheduler = scheduler
+    factStore = store
+    if factStore is None:
+        from ..foundation import get_knowledge_fact_store
+
+        factStore = get_knowledge_fact_store()
+    jobId = "kb_enterprise_sync_%s_%s" % (tenantId, sourceId)
+    config = EnterpriseIngestor(factStore).loadConfig(tenantId, sourceId) or {}
+    seconds = int(config.get("sync_interval_seconds") or 0)
+    if not config.get("enabled") or seconds <= 0:
+        if hasattr(scheduler, "removeSystemJob"):
+            scheduler.removeSystemJob(jobId)
+        return False
+    _registerOneJob(scheduler, factStore, tenantId, sourceId, seconds)
+    return True
+
+
+def _followUpSyncJob(tenantId: str, sourceId: str, store: Any = None) -> None:
+    """D2 运行时跟随入口：调度器在场时按**落库现值**即时注册/摘除单源 job。
+
+    fail-soft：跟随失败只记日志，绝不影响配置写面。
+    """
+    scheduler = _activeScheduler
+    if scheduler is None:
+        return
+    try:
+        syncSourceJob(scheduler, tenantId, sourceId, store=store)
+    except Exception as exc:  # noqa: BLE001 - 跟随失败点名，不拖垮配置写面
+        try:
+            from neurova.core.logger import get_logger
+
+            get_logger(__name__).warning(
+                "单源同步 job 跟随失败（%s/%s）：%s", tenantId, sourceId, exc)
+        except Exception:  # noqa: BLE001
+            pass

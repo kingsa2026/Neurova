@@ -178,6 +178,86 @@ async def triggerEnterpriseIngest(
             "data": {"result": result, "source": _view(sourceId, config, adapters, store)}}
 
 
+class SyncIntervalRequest(BaseModel):
+    seconds: int = Field(ge=0, le=86400,
+                         description="interval 同步间隔秒；0＝关闭持续同步")
+
+
+@router.get("/enterprise/sources/{source_id}/sync-interval")
+async def getSyncInterval(
+    source_id: str,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """同步间隔读面（可靠性方案 D2，仅管理员）：回显当前间隔秒与启用态。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403,
+                            detail="企业源同步间隔是治理配置，仅管理员可读")
+    ingestor, _adapters, _store = _parts()
+    tenant = _tenantOf(current_user)
+    config = ingestor.loadConfig(tenant, str(source_id or "").strip()) or {}
+    if not config:
+        raise HTTPException(status_code=404, detail="source 配置不存在")
+    return {"code": 0, "message": "success",
+            "data": {"source_id": str(source_id or "").strip(),
+                     "seconds": int(config.get("sync_interval_seconds") or 0),
+                     "enabled": bool(config.get("enabled"))}}
+
+
+@router.put("/enterprise/sources/{source_id}/sync-interval")
+async def putSyncInterval(
+    source_id: str,
+    body: SyncIntervalRequest,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """同步间隔写面（可靠性方案 D2，仅管理员）：落库 + 运行时单源跟随。
+
+    seconds>0 且启用 → 即时注册 interval job；0 或停用 → 即时摘除。
+    """
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403,
+                            detail="企业源同步间隔是治理配置，仅管理员可写")
+    ingestor, _adapters, _store = _parts()
+    tenant = _tenantOf(current_user)
+    sourceId = str(source_id or "").strip()
+    if not sourceId or ingestor.loadConfig(tenant, sourceId) is None:
+        raise HTTPException(status_code=404, detail="source 配置不存在")
+    ingestor.setSyncInterval(tenant, sourceId, body.seconds)
+    config = ingestor.loadConfig(tenant, sourceId) or {}
+    return {"code": 0, "message": "success",
+            "data": {"source_id": sourceId,
+                     "seconds": int(config.get("sync_interval_seconds") or 0),
+                     "enabled": bool(config.get("enabled"))}}
+
+
+@router.get("/enterprise/sources/{source_id}/sync-history")
+async def getSyncHistory(
+    source_id: str,
+    limit: int = 50,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """同步历史读面（可靠性方案 D1，仅管理员）：每轮拉取一行，按时间倒序。
+
+    回答「上次同步何时、拉了多少、为何失败」——trigger/status/计数/游标前后。
+    判据单源 `enterprise_sync_history` 表（v56），写入单点 runOnceAsync。
+    """
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403,
+                            detail="企业源同步历史是治理读数面，仅管理员可读")
+    _ingestor, _adapters, store = _parts()
+    tenant = _tenantOf(current_user)
+    sourceId = str(source_id or "").strip()
+    with store._lock:
+        rows = store._conn.execute(
+            "SELECT trigger_kind, status, reason, batches, admitted, rejected,"
+            " rows_skipped, entries_written, truncated, cursor_before, cursor_after,"
+            " duration_ms, started_at, finished_at FROM enterprise_sync_history"
+            " WHERE tenant_id = ? AND source_id = ? ORDER BY started_at DESC,"
+            " history_id LIMIT ?", (tenant, sourceId, max(1, min(int(limit), 200)))
+        ).fetchall()
+    return {"code": 0, "message": "success",
+            "data": {"source_id": sourceId, "items": [dict(r) for r in rows]}}
+
+
 @router.post("/enterprise/sources/{source_id}/media")
 async def triggerEnterpriseMediaFetch(
     source_id: str,

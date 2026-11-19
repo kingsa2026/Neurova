@@ -48,6 +48,7 @@ from ..community_graph import _SCHEMA_V48_COMMUNITIES
 from ..enterprise.webhook_receiver import _SCHEMA_V49_WEBHOOK_DEDUP
 from ..enterprise.schema_catalog import _SCHEMA_V51_CATALOG
 from ..enterprise.nl2sql import _SCHEMA_V53_QUERY_HISTORY
+from ..enterprise.registry import _SCHEMA_V56_SYNC_HISTORY
 from ..ontology.relation_candidates import _SCHEMA_V54_CANDIDATE_EVIDENCE
 from ..ontology.schema_suggester import _SCHEMA_V54_SUGGESTION_EVIDENCE
 from ..ontology.artifact_store import _SCHEMA_V50_ARTIFACTS
@@ -205,6 +206,10 @@ _STEPS: List[tuple] = [
     #      knowledge_assertions 加 source_span_json（可选 {"start","end"}；
     #      存储与溯源读面透出，写入方按需接线）
     (55, _SCHEMA_V55_ASSERTION_SPAN),
+    # v56：企业源同步历史（可靠性方案 D1，2026-11-19）——
+    #      enterprise_sync_history：每轮拉取（手动/interval，成功/失败/跳过）
+    #      落一行；写入单点 = runOnceAsync，回答「上次同步何时/拉了多少/为何失败」
+    (56, _SCHEMA_V56_SYNC_HISTORY),
 ]
 
 _registered = False

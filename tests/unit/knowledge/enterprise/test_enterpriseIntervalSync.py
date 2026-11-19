@@ -60,7 +60,7 @@ class TestIntervalSync:
         fake = FakeScheduler()
         registerIntervalSyncs(fake, store=kb)
         assert len(fake.jobs) == 1
-        assert fake.jobs[0]["jobId"] == "kb_enterprise_sync_src_a"
+        assert fake.jobs[0]["jobId"] == "kb_enterprise_sync_default_src_a"
         assert fake.jobs[0]["seconds"] == 300
         assert callable(fake.jobs[0]["func"])
 
@@ -78,7 +78,7 @@ class TestIntervalSync:
         registerIntervalSyncs(fake, store=kb)
         called = []
 
-        async def fakeRunOnce(self, tenant, sourceId):
+        async def fakeRunOnce(self, tenant, sourceId, **kw):
             called.append((tenant, sourceId))
             return {"admitted": 0, "rejected": 0, "rejections": [], "cursor": ""}
 

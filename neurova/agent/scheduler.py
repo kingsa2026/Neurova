@@ -799,6 +799,14 @@ class TaskScheduler:
                 misfire_grace_time=60,
             )
 
+    def removeSystemJob(self, jobId: str) -> None:
+        """摘除系统级周期 job（D2 运行时跟随的摘除半边）；不存在时幂等静默。"""
+        with self._task_lock:
+            try:
+                self._apscheduler.remove_job(str(jobId))
+            except Exception:
+                pass  # job 本就不在 = 已摘除，幂等返回
+
     def add_task(self, task: AutomationTask) -> bool:
         """添加任务"""
         with self._task_lock:
