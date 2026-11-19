@@ -38,15 +38,13 @@ export struct AppIcon {
 
   /**
    * 24 网格绝对坐标整体缩放到目标画布。
-   * Path commands 是绝对 vp 坐标：容器缩到 15/16vp 而坐标仍按 24vp 画，
-   * 图标会溢出/裁切（真机反馈「所有图标大小不适配」的根因）——按 iconSize/24 等比缩放。
+   * Path commands 的坐标单位是 px（非 vp）：按 iconSize/24 缩放只会画出
+   * iconSize 个 px（约为期望的 1/密度）——真机反馈「图标还是小」的根因。
+   * 必须换算成 px：按 vp2px(iconSize)/24 等比缩放，图形才铺满 iconSize vp 画布。
    */
   private scaledCommands(): string {
     const raw = this.commands();
-    if (this.iconSize === 24) {
-      return raw;
-    }
-    const s = this.iconSize / 24;
+    const s = vp2px(this.iconSize) / 24;
     const parts = raw.split(' ');
     const out: string[] = [];
     for (const p of parts) {

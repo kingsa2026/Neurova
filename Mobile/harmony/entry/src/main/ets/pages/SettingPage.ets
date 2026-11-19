@@ -747,7 +747,7 @@ export struct SettingPage {
 
       // 退出登录（设计 F10 .me-out：独立红色卡；与隐私组内 logout 动作同一处理单源）
       Row() {
-        AppIcon({ name: 'logout', iconSize: 15, color: this.sm.getColor('error') })
+        AppIcon({ name: 'logout', iconSize: 18, color: this.sm.getColor('error') })
         Text('退出登录')
           .fontSize(this.sm.getFontSize('body_sm'))
           .fontColor(this.sm.getColor('error'))
@@ -778,7 +778,7 @@ export struct SettingPage {
   entryRow(icon: string, title: string, badge: string, value: string, route: string) {
     Row() {
       Column() {
-        AppIcon({ name: icon, iconSize: 15, color: this.sm.getColor('primary') })
+        AppIcon({ name: icon, iconSize: 18, color: this.sm.getColor('primary') })
       }
       .width(30)
       .height(30)

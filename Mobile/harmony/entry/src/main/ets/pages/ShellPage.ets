@@ -117,7 +117,7 @@ export struct ShellPage {
             .borderRadius(16)
             .backgroundColor(this.sm.getColor('primary_soft'))
         }
-        TabIcon({ kind: kind, color: this.activeTab === idx ? this.sm.getColor('primary') : this.sm.getColor('text_tertiary') })
+        TabIcon({ kind: kind, color: this.activeTab === idx ? this.sm.getColor('primary') : this.sm.getColor('text_tertiary'), iconSize: 28 })
       }
       .height(38)
 

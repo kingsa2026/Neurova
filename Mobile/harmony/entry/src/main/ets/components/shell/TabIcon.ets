@@ -12,18 +12,41 @@ export struct TabIcon {
   @Prop kind: string = 'chat';
   /** 线条颜色（调用方传 token 色）——@Prop 随激活态刷新 */
   @Prop color: string = '#FFFFFF';
+  /** 画布边长（vp），坐标与线宽按比例缩放 */
+  @Prop iconSize: number = 24;
 
   build() {
-    // 单 Path 多子路径（24 网格坐标与画布 1:1，C 曲线替代 A 弧——渲染确定性最高）
+    // 单 Path 多子路径（24 网格坐标按 iconSize 等比缩放，C 曲线替代 A 弧——渲染确定性最高）
     Path()
-      .commands(this.commands())
+      .commands(this.scaledCommands())
       .fillOpacity(0)
       .stroke(this.color)
-      .strokeWidth(1.7)
+      .strokeWidth(1.7 * this.iconSize / 24)
       .strokeLineCap(LineCapStyle.Round)
       .strokeLineJoin(LineJoinStyle.Round)
-      .width(24)
-      .height(24)
+      .width(this.iconSize)
+      .height(this.iconSize)
+  }
+
+  /**
+   * 24 网格绝对坐标整体缩放到目标画布（同 AppIcon）。
+   * Path commands 坐标单位是 px（非 vp）：按 iconSize/24 缩放只画出 iconSize px，
+   * 视觉约为期望的 1/密度——按 vp2px(iconSize)/24 缩放才铺满 iconSize vp 画布。
+   */
+  private scaledCommands(): string {
+    const raw = this.commands();
+    const s = vp2px(this.iconSize) / 24;
+    const parts = raw.split(' ');
+    const out: string[] = [];
+    for (const p of parts) {
+      const n = parseFloat(p);
+      if (!isNaN(n)) {
+        out.push((n * s).toFixed(3));
+      } else {
+        out.push(p);
+      }
+    }
+    return out.join(' ');
   }
 
   private commands(): string {

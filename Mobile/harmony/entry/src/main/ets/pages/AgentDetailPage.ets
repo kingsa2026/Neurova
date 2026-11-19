@@ -234,7 +234,7 @@ export struct AgentDetailPage {
             // 操作行：渐变发消息（flex）+ 玻璃编辑方钮（设计 .deth .btns）
             Row() {
               Row() {
-                AppIcon({ name: 'chat', iconSize: 15, color: this.sm.getColor('text_on_primary') })
+                AppIcon({ name: 'chat', iconSize: 18, color: this.sm.getColor('text_on_primary') })
                 Text('发消息')
                   .fontSize(13)
                   .fontWeight(FontWeight.Medium)
@@ -251,7 +251,7 @@ export struct AgentDetailPage {
               })
 
               Column() {
-                AppIcon({ name: 'edit', iconSize: 16, color: this.sm.getColor('text_secondary') })
+                AppIcon({ name: 'edit', iconSize: 18, color: this.sm.getColor('text_secondary') })
               }
               .width(40)
               .height(40)
@@ -298,7 +298,7 @@ export struct AgentDetailPage {
           // 概览分节
           Column() {
             Row() {
-              AppIcon({ name: 'spark', iconSize: 14, color: this.sm.getColor('primary') })
+              AppIcon({ name: 'spark', iconSize: 16, color: this.sm.getColor('primary') })
               Text('概览')
                 .fontSize(this.sm.getFontSize('caption'))
                 .fontWeight(FontWeight.Medium)
@@ -360,7 +360,7 @@ export struct AgentDetailPage {
           // 记忆分节（含「查看全部 N 条 ›」）
           Column() {
             Row() {
-              AppIcon({ name: 'book', iconSize: 14, color: this.sm.getColor('primary') })
+              AppIcon({ name: 'book', iconSize: 16, color: this.sm.getColor('primary') })
               Text('记忆')
                 .fontSize(this.sm.getFontSize('caption'))
                 .fontWeight(FontWeight.Medium)
@@ -393,7 +393,7 @@ export struct AgentDetailPage {
           // 睡眠分节
           Column() {
             Row() {
-              AppIcon({ name: 'moon', iconSize: 14, color: this.sm.getColor('primary') })
+              AppIcon({ name: 'moon', iconSize: 16, color: this.sm.getColor('primary') })
               Text('睡眠')
                 .fontSize(this.sm.getFontSize('caption'))
                 .fontWeight(FontWeight.Medium)

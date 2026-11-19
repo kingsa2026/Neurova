@@ -375,7 +375,7 @@ export struct DashboardPage {
 
             Row() {
               Column() {
-                AppIcon({ name: 'chat', iconSize: 19, color: this.sm.getColor('primary') })
+                AppIcon({ name: 'chat', iconSize: 24, color: this.sm.getColor('primary') })
                 Text('新建对话')
                   .fontSize(this.sm.getFontSize('badge'))
                   .fontColor(this.sm.getColor('text_secondary'))
@@ -392,7 +392,7 @@ export struct DashboardPage {
               })
 
               Column() {
-                AppIcon({ name: 'agent', iconSize: 19, color: this.sm.getColor('primary') })
+                AppIcon({ name: 'agent', iconSize: 24, color: this.sm.getColor('primary') })
                 Text('创建智能体')
                   .fontSize(this.sm.getFontSize('badge'))
                   .fontColor(this.sm.getColor('text_secondary'))
@@ -409,7 +409,7 @@ export struct DashboardPage {
               })
 
               Column() {
-                AppIcon({ name: 'clip', iconSize: 19, color: this.sm.getColor('primary') })
+                AppIcon({ name: 'clip', iconSize: 24, color: this.sm.getColor('primary') })
                 Text('上传文件')
                   .fontSize(this.sm.getFontSize('badge'))
                   .fontColor(this.sm.getColor('text_secondary'))
@@ -426,7 +426,7 @@ export struct DashboardPage {
               })
 
               Column() {
-                AppIcon({ name: 'scan', iconSize: 19, color: this.sm.getColor('primary') })
+                AppIcon({ name: 'scan', iconSize: 24, color: this.sm.getColor('primary') })
                 Text('扫码配对')
                   .fontSize(this.sm.getFontSize('badge'))
                   .fontColor(this.sm.getColor('text_secondary'))
