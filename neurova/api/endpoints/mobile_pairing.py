@@ -973,7 +973,7 @@ class ConnectionConfigRequest(BaseModel):
 
 
 class PreflightRequest(BaseModel):
-    url: str = Field(..., description="待探测的对外地址（http/https）")
+    url: str = Field(default="", description="待探测的对外地址；留空＝探测入站来源（auto/direct 模式）")
     path: str = Field(default="/health", description="探测路径；自建中继用 /healthz")
 
 
@@ -1006,12 +1006,15 @@ async def put_connection_config(body: ConnectionConfigRequest,
 
 @router.post("/pairing/connection-config/preflight")
 async def preflight_connection_config(body: PreflightRequest,
+                                      request: Request,
                                       _admin: Dict[str, Any] = Depends(_requireAdminDep)):
     """对外地址连通性预检（admin）：对 `{url}{path}` 发一次真 GET，结果如实回。
 
-    任何 HTTP 应答都算"可达"（状态码原样给，404 也算通——那是主机可达、路径没有）；
-    连接类失败 ok=False + 原因。预检是**建议读数**不是门：generate 的阻断判据
-    在通道判定里（§8-S0.5），这里不替它做主。
+    `url` 留空＝auto/direct 模式：探测**入站来源**（本次请求到达后端的那个地址，
+    也是同网段手机直连会用到的地址）。任何 HTTP 应答都算"可达"（状态码原样给，
+    404 也算通——那是主机可达、路径没有）；连接类失败 ok=False + 原因。
+    预检是**建议读数**不是门：generate 的阻断判据在通道判定里（§8-S0.5），
+    这里不替它做主。
     """
     import httpx
 
@@ -1019,6 +1022,9 @@ async def preflight_connection_config(body: PreflightRequest,
     probePath = (body.path or "/health").strip() or "/health"
     if not probePath.startswith("/"):
         raise HTTPException(status_code=422, detail="path 必须以 / 开头")
+    if not url:
+        # auto/direct：探入站来源（管理端浏览器到达后端的地址）
+        url = str(request.base_url).rstrip("/")
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https") or not parts.netloc:
         raise HTTPException(status_code=422, detail="url 必须是 http/https 的完整地址")

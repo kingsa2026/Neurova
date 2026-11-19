@@ -53,6 +53,11 @@ def api(monkeypatch):
     setTunnelAgent(TunnelAgent())
 
     app = FastAPI()
+
+    @app.get("/health")
+    async def _health():  # 探针目标：预检（无 url）会打这个入站来源
+        return {"status": "ok"}
+
     app.include_router(MP.router, prefix=PREFIX)
     current = {"identity": ADMIN}
     app.dependency_overrides[apiDeps.strictIdentityGate] = lambda: current["identity"]
@@ -215,6 +220,21 @@ class TestPreflight:
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_empty_url_probes_the_inbound_origin(self, api):
+        """auto/direct 模式（不填 url）＝ 探入站来源——管理端到达后端的那个地址，
+        也是同网段手机直连会用到的地址。预检按钮因此**任何模式都可点**。
+
+        TestClient 的 base_url（testserver）不是真实可解析主机 ⇒ 探测走诚实失败
+        路径；"可达"那一半由上面显式 url 的用例（本地 http.server）覆盖。
+        """
+        c = api["client"]
+        res = c.post(f"{PREFIX}/pairing/connection-config/preflight", json={})
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["url"] == "http://testserver", body
+        assert body["ok"] is False
+        assert body["error"], "连不上必须带原因"
 
 
 class _HealthHandler(BaseHTTPRequestHandler):

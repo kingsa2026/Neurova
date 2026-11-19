@@ -259,3 +259,20 @@ describe('MobilePairingPanel — 代部署（档三）', () => {
     expect(w.find('[data-testid="connection-notice"]').text()).toContain('直连')
   })
 })
+
+describe('MobilePairingPanel — 预检在 auto 模式也可点', () => {
+  it('auto 模式：预检按钮可点，空 url 交给后端探入站来源', async () => {
+    preflightConnectionConfig.mockResolvedValue({ data: {
+      ok: true, url: 'http://testserver', status_code: 200, latency_ms: 3, error: '',
+    } })
+    const w = await opened()   // 默认配置 = auto
+    const btn = w.find('[data-testid="connection-preflight"]')
+    expect(btn.attributes('disabled')).toBeUndefined()
+    await btn.trigger('click')
+    await flushPromises()
+    expect(preflightConnectionConfig).toHaveBeenCalledWith('', '/health')
+    const result = w.find('[data-testid="preflight-result"]')
+    expect(result.classes()).toContain('is-ok')
+    expect(result.text()).toContain('http://testserver')
+  })
+})

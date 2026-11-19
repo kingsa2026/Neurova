@@ -56,7 +56,7 @@
           @click="saveConnConfig">
           {{ t('channel.connSave') }}
         </GlassButton>
-        <GlassButton size="sm" variant="ghost" :disabled="preflightRunning || !preflightUrl"
+        <GlassButton size="sm" variant="ghost" :disabled="preflightRunning"
           data-testid="connection-preflight" @click="runPreflight">
           {{ t('channel.connPreflight') }}
         </GlassButton>
@@ -65,6 +65,7 @@
           {{ preflightResult.ok
             ? t('channel.connPreflightOk', { ms: preflightResult.latency_ms ?? '?' })
             : t('channel.connPreflightFail', { error: preflightResult.error }) }}
+          <span class="nr-mpp-preflight-url" data-testid="preflight-url">{{ preflightResult.url }}</span>
         </span>
       </div>
       <p v-if="connNotice" class="nr-mpp-connnotice" data-testid="connection-notice">{{ connNotice }}</p>
@@ -553,13 +554,13 @@ async function saveConnConfig() {
 }
 
 async function runPreflight() {
+  if (preflightRunning.value) return
+  // custom/relay 探各自地址；auto/direct 传空串 ⇒ 后端探入站来源（手机同网段直连的地址）
   const url = preflightUrl.value
-  if (!url || preflightRunning.value) return
+  const probePath = connDraft.value.mode === 'relay' ? '/healthz' : '/health'
   preflightRunning.value = true
   preflightResult.value = null
   try {
-    // 自建中继的健康口是 /healthz（neurova/relay），其余探 /health
-    const probePath = connDraft.value.mode === 'relay' ? '/healthz' : '/health'
     const res: any = await preflightConnectionConfig(url, probePath)
     preflightResult.value = (res?.data ?? res) as PreflightResult
   } catch (e: any) {
@@ -734,6 +735,7 @@ onBeforeUnmount(() => {
 .nr-mpp-actions { display: flex; align-items: center; gap: var(--nr-space-sm); margin-top: var(--nr-space-sm); }
 .nr-mpp-preflight.is-ok { font-size: 12px; color: var(--nr-success); }
 .nr-mpp-preflight.is-fail { font-size: 12px; color: var(--nr-error); }
+.nr-mpp-preflight-url { margin-left: 6px; color: var(--nr-text-muted); font-family: var(--nr-font-mono); }
 .nr-mpp-connnotice { margin: var(--nr-space-xs) 0 0; font-size: 12px; color: var(--nr-text-secondary); }
 .nr-mpp-deploy { margin-top: var(--nr-space-md); padding: var(--nr-space-sm) 0 0; border-top: 1px dashed var(--nr-border-subtle, rgba(255, 255, 255, 0.12)); }
 .nr-mpp-steps { margin: var(--nr-space-xs) 0 0; padding: 0; list-style: none; font-size: 12px; }
