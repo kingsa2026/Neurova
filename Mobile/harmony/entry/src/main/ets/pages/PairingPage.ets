@@ -173,7 +173,7 @@ export struct PairingPage {
   /** 配对载荷统一入口（扫码与深链共用，C7 收口）：ref=新流程，code=旧兼容 */
   private async applyPairingPayload(parsed: ParsedPairingPayload): Promise<void> {
     if (parsed.kind === 'ref') {
-      // 一扫配全：载荷带对外地址时，先确保服务器档案存在并激活（扫码即完成连接配置）
+      // 一扫配全：载荷带对外地址时，先确保终端档案存在并激活（扫码即完成连接配置）
       if (parsed.host) {
         await this.ensureServerProfile(parsed.host);
       }
@@ -188,14 +188,14 @@ export struct PairingPage {
     await this.confirmPairing();
   }
 
-  /** 一扫配全：按二维码里的对外地址确保服务器档案存在并激活（已存在则复用） */
+  /** 一扫配全：按二维码里的对外地址确保终端档案存在并激活（已存在则复用） */
   private async ensureServerProfile(host: string): Promise<void> {
     const store = ServerProfiles.getInstance();
     const existing = store.getList().find((p: ServerProfile) => p.baseUrl === host);
     const target = existing ?? await store.add('扫码配对', host);
     await store.switchTo(target.id);
     await ConfigManager.getInstance().applyServerProfile(`${target.baseUrl}/api/v1`, getContext(this) as Context);
-    this.logger.info(TAG, `服务器档案就绪：${target.baseUrl}`);
+    this.logger.info(TAG, `终端档案就绪：${target.baseUrl}`);
   }
 
   /**
@@ -251,7 +251,7 @@ export struct PairingPage {
         this.msg.success('配对成功');
         // 延迟跳转，让用户看到"配对成功"反馈
         setTimeout(() => {
-          // 已登录（换服务器重配对）回仪表盘；首次配对先去登录
+          // 已登录（换终端重配对）回仪表盘；首次配对先去登录
           if (this.authStore.isAuthenticated) {
             this.router.replace(RouteNames.SHELL);
           } else {
@@ -464,7 +464,7 @@ export struct PairingPage {
               .textAlign(TextAlign.Center)
               .margin({ top: 20 })
 
-            Text('扫码即完成 服务器建档 + 设备配对，无需手动录入地址\n配对后本机获得长期设备身份，重连免扫码')
+            Text('扫码即完成 终端建档 + 设备配对，无需手动录入地址\n配对后本机获得长期设备身份，重连免扫码')
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_secondary'))
               .textAlign(TextAlign.Center)

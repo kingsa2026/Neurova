@@ -26,11 +26,11 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 
 function buildDefaults(): Map<string, Object> {
   const m = new Map<string, Object>();
-  // 服务器地址**不在编译期写死**（原值是一台开发机的局域网 IP，换网络即全体失联，
-  // 且打包后改不了）。默认留空 = 尚未配对过任何服务器；地址只来自两条真路：
+  // 终端地址**不在编译期写死**（原值是一台开发机的局域网 IP，换网络即全体失联，
+  // 且打包后改不了）。默认留空 = 尚未配对过任何终端；地址只来自两条真路：
   //   1) 扫码后 resolve 换回来的那一条（PairingPage 写入并持久化）
-  //   2) 用户在「连接」页自己填的服务器档案
-  // 空值在这里是**信息**，不是兜底：读它的人会明确报"还没有服务器可连"，不会蒙着连。
+  //   2) 用户在「连接」页自己填的终端档案
+  // 空值在这里是**信息**，不是兜底：读它的人会明确报"还没有终端可连"，不会蒙着连。
   m.set('api_base_url', '');
   m.set('ws_base_url', '');
   m.set('request_timeout', DEFAULT_REQUEST_TIMEOUT_MS);
@@ -61,14 +61,14 @@ export class ConfigManager {
    *
    * `HttpClient.setBaseUrl()` 与 `saveToPreferences()` 都早已实装，但**生产代码里无人调用**
    * ——于是换过地址后重开 App 又回落到默认值（AGENTS §2 的"写了没人读"断点）。
-   * 这一条就是那个缺失的调用者：配对成功、切换服务器档案、启动恢复，三处都走它。
+   * 这一条就是那个缺失的调用者：配对成功、切换终端档案、启动恢复，三处都走它。
    */
   async applyServerProfile(apiBaseUrl: string, context: Context): Promise<void> {
     this.set<string>('api_base_url', apiBaseUrl);
     // 落到 HTTP 真装配点：不调用 setBaseUrl 的话 HttpClient 的 baseUrl 恒为空，
-    // 所有请求都会在 buildUrl 处抛"尚未配置服务器地址"（此前正是这个断链）
+    // 所有请求都会在 buildUrl 处抛"尚未配置终端地址"（此前正是这个断链）
     HttpClient.getInstance().setBaseUrl(apiBaseUrl);
-    // ws_base_url 不在这里猜：它由配对流程 resolve 回来后写进 AuthStore——服务器地址会漂，
+    // ws_base_url 不在这里猜：它由配对流程 resolve 回来后写进 AuthStore——终端地址会漂，
     // 存成一份配置就会陈旧（正是本案要摆脱的那个形状）。这里只落 HTTP 侧那条稳定前缀。
     if (!this.prefs) {
       this.prefs = await preferences.getPreferences(context, PREFERENCES_NAME);

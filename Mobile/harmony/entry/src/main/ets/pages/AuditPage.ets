@@ -263,7 +263,7 @@ export struct AuditPage {
     try {
       const res = await this.api.audit.exportAudit();
       if (res.code === 0 && res.data) {
-        this.msg.success(`已从服务器取回 ${res.data.length} 条审计日志`);
+        this.msg.success(`已从终端取回 ${res.data.length} 条审计日志`);
       } else {
         this.msg.error(res.message && res.message.length > 0 ? res.message : '导出审计日志失败');
       }

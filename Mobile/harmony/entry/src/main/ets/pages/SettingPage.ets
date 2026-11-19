@@ -290,7 +290,7 @@ export struct SettingPage {
     this.loadEntryCounts();
   }
 
-  /** F10 分组一徽标：服务器档案数 + 未读通知数（真端点，失败置 0 不阻塞页面） */
+  /** F10 分组一徽标：终端档案数 + 未读通知数（真端点，失败置 0 不阻塞页面） */
   private async loadEntryCounts(): Promise<void> {
     try {
       this.serverCount = ServerProfiles.getInstance().getList().length;
@@ -669,7 +669,7 @@ export struct SettingPage {
 
       // 分组一（原型 F10：功能入口行 = 圆角图标 + 标题(+徽标) + 数值 + 箭头）
       Column() {
-        this.entryRow('server', '服务器与配对', this.serverCount > 0 ? this.serverCount.toString() + ' 台档案' : '', '', RouteNames.CONNECTION)
+        this.entryRow('server', 'PC 终端与配对', this.serverCount > 0 ? this.serverCount.toString() + ' 台档案' : '', '', RouteNames.CONNECTION)
         this.entryRow('model', '模型管理', '', '', RouteNames.MODEL)
         this.entryRow('bell', '通知中心', this.unreadCount > 0 ? this.unreadCount.toString() : '', '', RouteNames.NOTIFICATION)
         this.entryRow('task', '任务看板', '', '', RouteNames.TASK)

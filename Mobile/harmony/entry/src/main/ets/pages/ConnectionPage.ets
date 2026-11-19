@@ -1,11 +1,11 @@
 /**
- * ConnectionPage - 服务器档案「连接」页（设计方案 §6.4 第 2 条，已裁 D4 多档案）
+ * ConnectionPage - 终端档案「连接」页（设计方案 §6.4 第 2 条，已裁 D4 多档案）
  *
- * 职责：列出/新增/切换/删除服务器档案；切换后把地址落到 HTTP 装配点
- *       （ConfigManager.applyServerProfile），并要求以该服务器账号重新登录。
+ * 职责：列出/新增/切换/删除终端档案；切换后把地址落到 HTTP 装配点
+ *       （ConfigManager.applyServerProfile），并要求以该终端账号重新登录。
  *
  * 设计：简化 ArkUI 列表页（List + TextInput），样式 token 走 StyleManager；
- *       服务器地址不写死，全部来自本页档案。
+ *       终端地址不写死，全部来自本页档案。
  */
 
 import { ServerProfiles, ServerProfile } from '../libs/config/ServerProfiles';
@@ -48,7 +48,7 @@ export struct ConnectionPage {
     this.activeId = active ? active.id : '';
   }
 
-  /** 切换档案：地址落 HTTP 装配点；要求以该服务器账号重新登录 */
+  /** 切换档案：地址落 HTTP 装配点；要求以该终端账号重新登录 */
   private async useProfile(p: ServerProfile): Promise<void> {
     this.busy = true;
     try {
@@ -67,7 +67,7 @@ export struct ConnectionPage {
 
   private async addProfile(): Promise<void> {
     if (!this.newUrl || this.newUrl.length < 7) {
-      this.msg.warning('请输入有效的服务器地址');
+      this.msg.warning('请输入有效的终端地址');
       return;
     }
     this.busy = true;
@@ -106,7 +106,7 @@ export struct ConnectionPage {
         // 页头：返回 + 标题（21/700，设计 .phead）
         Row() {
           IconBtn({ name: 'back', onTap: () => { this.router.back(); } })
-          Text('服务器档案')
+          Text('PC 终端')
             .fontSize(this.sm.getFontSize('page_title'))
             .fontWeight(FontWeight.Bold)
             .fontColor(this.sm.getColor('text_primary'))
@@ -172,14 +172,14 @@ export struct ConnectionPage {
               })
                 .margin({ bottom: 8 })
               GlassInput({
-                placeholder: 'http://192.168.x.x:9527 或 https://中继/t/routeId',
+                placeholder: 'http://192.168.x.x:9527 或 中继转发地址',
                 value: this.newUrl,
                 iconName: 'link',
                 onChange: (v: string) => { this.newUrl = v; }
               })
                 .margin({ bottom: 8 })
               GlassButton({
-                text: '添加服务器档案',
+                text: '添加 PC 终端',
                 type: 'gradient',
                 block: true,
                 disabled: this.busy,
@@ -192,7 +192,7 @@ export struct ConnectionPage {
             .backgroundColor(this.sm.getColor('glass'))
             .border({ width: 1, color: this.sm.getColor('border') })
 
-            Text('切换档案后需用该服务器的账号重新登录（账号与令牌不跨服务器共享）。')
+            Text('切换档案后需用该终端的账号重新登录（账号与令牌不跨终端共享）。')
               .fontSize(this.sm.getFontSize('badge'))
               .fontColor(this.sm.getColor('text_tertiary'))
               .padding(8)

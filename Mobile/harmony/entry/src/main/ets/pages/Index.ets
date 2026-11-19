@@ -65,12 +65,12 @@ struct Index {
     // 键盘避让改 RESIZE：默认 OFFSET 会把整页上移（聊天页键盘弹起时头部/消息被顶出
     // 屏幕外）；RESIZE 让页面收缩、输入条上浮，头部与消息保持可见
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
-    // 冷启动先恢复服务器档案并把地址落到 HTTP 装配点（设计方案 §4.5，S0 接线）
+    // 冷启动先恢复终端档案并把地址落到 HTTP 装配点（设计方案 §4.5，S0 接线）
     await ServerProfiles.getInstance().load(getContext(this) as Context);
     const apiBase = ServerProfiles.getInstance().getActiveApiBase();
     if (!apiBase) {
-      // 无可用服务器档案：先去连接页录入，否则登录无从发起（登录按钮空转的根因）
-      this.logger.info('Index', '冷启动：无服务器档案，跳转连接页');
+      // 无可用终端档案：先去连接页录入，否则登录无从发起（登录按钮空转的根因）
+      this.logger.info('Index', '冷启动：无终端档案，跳转连接页');
       await this.dispatch(RouteNames.CONNECTION);
       return;
     }

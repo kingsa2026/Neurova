@@ -42,9 +42,9 @@ export struct LoginPage {
   @State remember: boolean = true;
   // 登录中加载态（禁用按钮并显示"登录中..."）
   @State loading: boolean = false;
-  // 当前服务器档案（F1 服务器胶囊：当前服务器 xxx）
+  // 当前 PC 终端档案（F1 终端胶囊：当前 PC 终端 xxx）
   @State serverLabel: string = '';
-  // 服务器档案编辑（胶囊点击呼出：改名称/URL，保存后立即重连装配点）
+  // 终端档案编辑（胶囊点击呼出：改名称/URL，保存后立即重连装配点）
   @State showServerEdit: boolean = false;
   @State editServerName: string = '';
   @State editServerUrl: string = '';
@@ -120,7 +120,7 @@ export struct LoginPage {
   }
 
   aboutToAppear(): void {
-    // F1 服务器胶囊：展示当前活动档案（Index 冷启动已 load，此处只读）
+    // F1 终端胶囊：展示当前活动档案（Index 冷启动已 load，此处只读）
     const active = ServerProfiles.getInstance().getActive();
     if (active) {
       this.serverLabel = `${active.name} · ${active.baseUrl}`;
@@ -203,11 +203,11 @@ export struct LoginPage {
               })
                 .margin({ top: 24 })
 
-              // 服务器档案胶囊（F1 .srv-chip：当前服务器 xxx）
+              // 终端档案胶囊（F1 .srv-chip：当前 PC 终端 xxx）
               if (this.serverLabel !== '') {
                 Row() {
                   AppIcon({ name: 'server', iconSize: 14, color: this.sm.getColor('success') })
-                  Text('当前服务器 ')
+                  Text('当前 PC 终端 ')
                     .fontSize(this.sm.getFontSize('badge'))
                     .fontColor(this.sm.getColor('text_secondary'))
                   Text(this.serverLabel)
@@ -265,14 +265,14 @@ export struct LoginPage {
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
 
-      // 服务器档案编辑弹层（F1 胶囊点击呼出）
+      // 终端档案编辑弹层（F1 胶囊点击呼出）
       this.buildServerEditDialog()
     }
     .width('100%')
     .height('100%')
   }
 
-  /** 服务器档案编辑弹层（F1 胶囊点击呼出：改名称/URL，保存后立即重连装配点） */
+  /** 终端档案编辑弹层（F1 胶囊点击呼出：改名称/URL，保存后立即重连装配点） */
   @Builder
   buildServerEditDialog() {
     if (this.showServerEdit) {
@@ -288,7 +288,7 @@ export struct LoginPage {
         Column() {
           GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
             Column() {
-              Text('编辑服务器档案')
+              Text('编辑终端档案')
                 .fontSize(this.sm.getFontSize('subtitle'))
                 .fontWeight(FontWeight.Bold)
                 .fontColor(this.sm.getColor('text_primary'))
@@ -348,11 +348,11 @@ export struct LoginPage {
     }
   }
 
-  /** 保存服务器档案编辑：更新档案 → 重连 HTTP 装配点 → 刷新胶囊文案 */
+  /** 保存终端档案编辑：更新档案 → 重连 HTTP 装配点 → 刷新胶囊文案 */
   private async saveServerEdit(): Promise<void> {
     const url = this.editServerUrl.trim();
     if (url.length === 0) {
-      this.msg.warning('请填写服务器地址');
+      this.msg.warning('请填写终端地址');
       return;
     }
     const profiles = ServerProfiles.getInstance();
@@ -367,6 +367,6 @@ export struct LoginPage {
     }
     await this.cm.applyServerProfile(profiles.getActiveApiBase(), getContext(this) as Context);
     this.showServerEdit = false;
-    this.msg.success('服务器档案已更新');
+    this.msg.success('终端档案已更新');
   }
 }

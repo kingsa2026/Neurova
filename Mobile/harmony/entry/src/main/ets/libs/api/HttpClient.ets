@@ -264,11 +264,11 @@ export class HttpClient {
    *
    * `baseUrl` 为空时**明确报错**，不拼出一条没有主机的相对路径：静默拼出一个
    * 看起来像 `/v1/...` 的 URL 交给网络层，失败点会落在与根因无关的地方
-   * （根因是"还没配服务器"，表现却是一堆 404/网络异常）。
+   * （根因是"还没配终端"，表现却是一堆 404/网络异常）。
    */
   private buildUrl(path: string, params?: Record<string, Object>): string {
     if (!path.startsWith('http') && !this.baseUrl) {
-      throw new Error('尚未配置服务器地址：请先扫码配对或在「连接」页添加服务器档案');
+      throw new Error('尚未配置终端地址：请先扫码配对或在「连接」页添加 PC 终端');
     }
     let url = path.startsWith('http') ? path : `${this.baseUrl}${path.startsWith('/') ? path : '/' + path}`;
     if (params && Object.keys(params).length > 0) {

@@ -1,9 +1,9 @@
 /**
- * ServerProfiles - 服务器档案（多服务器，设计方案 §4.5，已裁 D4）
+ * ServerProfiles - 终端档案（多终端，设计方案 §4.5，已裁 D4）
  *
  * 每台 Neurova 服务端一条档案；切换档案后须重新登录（账号与 token 不跨档案共享）。
  * 持久化：@kit.ArkData preferences（单条 JSON 串）。
- * 与 ConfigManager 的关系：本库只管"有哪些服务器、当前用哪台"；
+ * 与 ConfigManager 的关系：本库只管"有哪些终端、当前用哪台"；
  * 切换后由调用方把 active.baseUrl 经 ConfigManager.applyServerProfile() 落到 HTTP 装配点。
  */
 
@@ -13,11 +13,11 @@ const PREFERENCES_NAME = 'neurova_server_profiles';
 const KEY_PROFILES = 'profiles_json';
 const KEY_ACTIVE_ID = 'active_id';
 
-/** 一台服务器的档案 */
+/** 一台终端的档案 */
 export interface ServerProfile {
   id: string;
   name: string;
-  /** 直连：http(s)://host:port；中继：https://<relay>/t/<routeId> */
+  /** 直连：http(s)://host:port；中继转发地址：https://<relay>/t/<routeId> */
   baseUrl: string;
   /** direct=内网/反代直连；relay=经自研中继 */
   entryMode: string;

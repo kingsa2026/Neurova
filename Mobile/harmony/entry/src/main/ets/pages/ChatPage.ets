@@ -221,7 +221,7 @@ export struct ChatPage {
     const ticket = this.authStore.wsToken;
     if (!wsUrl || !ticket) {
       this.logger.warn(TAG, '未配对或凭证已失效，不发起连接');
-      this.msg.warning('还没有可连的服务器：请先扫码配对');
+      this.msg.warning('还没有可连的终端：请先扫码配对');
       return;
     }
     try {
