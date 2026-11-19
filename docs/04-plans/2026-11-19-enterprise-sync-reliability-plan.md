@@ -1,6 +1,6 @@
 # 企业源持续同步可靠性方案：同步历史落账 · 全租户调度 · 单源单飞
 
-> 状态：待实施（本文档为实施依据，完成后在 §7 回填执行记录）。
+> 状态：已实施（2026-11-19 当日完工，执行记录见 §7）。
 > 来源：2026-11-19 企业连接器主动取数机制分析（结论：拉取是「显式触发 + 游标增量 +
 > 咽喉幂等」模型；定时已接统一调度器但仅 default 租户、无单飞与退避、结果不落账）。
 > 关联：`docs/04-plans/2026-11-19-enterprise-datasource-mcp-plan.md`（企业数据源接入总案）。
@@ -136,4 +136,19 @@ CREATE INDEX IF NOT EXISTS idx_enterprise_sync_history
 
 ## 7. 执行记录
 
-（实施完成后回填：逐卡提交号、红绿证据、live-verify 输出、偏离说明。）
+2026-11-19 当日实施完毕，A–D 卡全清，另修复一块实施中暴露的调度器断点。
+
+| 卡 | 提交 | 结果 |
+|---|---|---|
+| A（v56 + runOnceAsync 落账/单飞 + 读面） | `3c234791d` | `enterprise_sync_history` v56 落地；`runOnceAsync(tenantId, sourceId, triggerKind)` 统一写点，manual/interval/skipped/error 全落账；`GET /enterprise/sources/{id}/sync-history`（admin，倒序+limit） |
+| B（全租户注册 + 运行时跟随） | `3c234791d` | `listSyncTenants` 全租户遍历；jobId=`kb_enterprise_sync_<tenant>_<source>`；`setSyncInterval`/`saveConfig` 尾部跟随；`GET/PUT /enterprise/sources/{id}/sync-interval`（admin） |
+| C（测试三件套红→绿） | `3c234791d` / `50898bdbc` | 新增 `test_enterpriseSyncHistory.py` 13 用例先红后绿；enterprise 域 202 passed；knowledge 全域 2031 passed 零新增失败 |
+| D（live-verify） | — | 9681 真后端 + 临时数据根 + jsonl file 源：PUT interval=2s 后 sync-history 出现 3 条 `trigger=interval` 行（首轮 admitted=3、游标推进 `off=3`，后续轮游标未动拉 0 行），PUT 0s 后 interval 行停止新增；启动日志 `TaskScheduler started`、`[ERROR]` 计数 0 |
+| 计划外：调度器断点修复 | `14850e854` | 实施中发现的真断点——`TaskScheduler` 惰性单例全仓无 `start()` 调用，`addSystemJob` 在 `_apscheduler=None` 上必炸且被 fail-soft 吞掉（PUT 返回 success 但 job 从未存在）。根修：`addSystemJob` 面内自保证前置（未跑先 start）+ 启动钩子改 `init_scheduler()` |
+
+前端适配（间隔编辑 + 同步历史抽屉，11 语言 12 键）：`a8f6fe2b9`；同刻写入的叙述行裁决悬置（rowid tie-break，仅叙述行、三元组置信并列仍留人工）：`3c50d25bc`。
+
+**偏离说明**：
+1. D3 单飞在 file 源上表现为串行执行而非 `already_running` 跳过——file 适配器 `fetchBatch` 无 await 让出点，单事件循环内两请求天然串行；单飞锁语义由带让出点的 fake adapter 测试覆盖，真实 HTTP/ERP 源（有 IO 让出）防线有效。
+2. 验收标准 3 的「已注册 N 个 job」启动日志仅在「启动时已存在启用 interval 的源」场景打印；运行时经 PUT 注册的源走跟随路径，不重打该行。
+3. TaskScheduler 启动后，任务台账 `agent_scheduler_tasks.json` 中 enabled+schedule 的 Agent 定时任务将开始按计划执行（此前调度器从未启动、它们从未真正跑过）——这是断点接活的伴生影响，执行走既有 executor/审计链。
