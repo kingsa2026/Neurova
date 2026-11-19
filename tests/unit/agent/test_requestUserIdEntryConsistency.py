@@ -132,6 +132,16 @@ ENTRY_POINTS: Dict[str, Dict[str, object]] = {
         "carrierSource": "同一个 owner 进 metadata['user_id']（dict 字面量）",
         "feedsVia": "owner",
     },
+    "neurova/mcp_agent_tools_server.py": {
+        "kind": "notATurnEntry",
+        "requestSource": "user['user_id'] —— MCP 工具服务端 ASGI 入口每请求由 "
+                         "`_resolveIdentity`（服务令牌/API key/JWT）解出发送者，"
+                         "401 闸之后写唯一通道（§3 条款「工具与 MCP 侧各自的边界」，"
+                         "与 `endpoints/mcp_server_api.py` 同族管理/工具面）",
+        "carrierSource": "不产生 metadata 载体；user 本体进 scope.state['neurova_user'] "
+                         "供 `_currentUserFromContext(ctx)` 读（tenant/role 随对象走），"
+                         "回合身份由执行链从同一条通道取",
+    },
     "neurova/tool_executor.py": {
         "kind": "derivedFromFacadeRead",
         "requestSource": "self._agent_identity()[0]",
