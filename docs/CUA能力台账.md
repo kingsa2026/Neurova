@@ -74,4 +74,4 @@ refused 结果由 `REFUSAL_RETRY_ADVICE`（`action_result.py`，单一事实源�
 | browser: playwright | fill_role + click_role | playwright_role | `__submitted`+值回读 | 同上 ::form-fill |
 | browser: camofox | click_role ref 解析 | camofox_ref | — | gap（camofox 服务未在 CI 常驻） |
 | desktop: pyautogui | click/type/scroll | global_input | — | gap（只读探测，无注入测试） |
-| desktop: uia | snapshot/click_element/set_value | uia/app_post | — | gap（单测用 Fake 后端；真 UIA 冒烟待 fixture） |
+| desktop: uia | snapshot（depth 诚实上报）/drill-down/click_element | uia/app_post | 真窗口 Notepad UIA 活体：max_depth=1 报 depth_truncated+被切元素自标；root_index 下钻子树 index 续接；「文件」菜单点击 confirmed | 2026-11-19 live-verify（AD-2/AD-3，e5bad7a07）；set_value 真机仍 gap |

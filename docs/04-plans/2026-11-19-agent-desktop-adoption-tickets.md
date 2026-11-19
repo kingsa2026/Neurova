@@ -138,3 +138,19 @@ AD-2 落地后，`subtree_truncated` 标记正好给模型指出「该从哪个�
 `computer_dom_snapshot → computer_click_element` 真链路自证（真窗口可用记事本/资源
 管理器），证据进提交说明。`uiautomation` 为可选依赖（未入 requirements），活体验证前
 先确认本机可导入，否则如实降级为档 B 并登记。
+
+## 4. 执行记录（2026-11-19，全部完成）
+
+| 单 | commit | 结果 |
+|---|---|---|
+| AD-1 | `d40f57a4c` | 删 `NEVER_RETRY_REFUSAL_CODES` 死码（-5）；台账补登 retry 词表（14 码全表）并顺带补齐 route 4 项/拒绝码 3 项（test_capability_ledger 两个预存失败转绿，15 passed）；新增反向钉子 test_never_advice_non_empty（retry 守卫 8 passed） |
+| AD-2 | `a31d46ead` | walk 返回 (elements, stats)：depth_truncated/observed_max_depth，被切元素自标 subtree_truncated；snapshot truncated 升义、未超限不加键；computer_dom_snapshot 描述补截断语义。红灯 1 failed→绿灯 53 passed，全域 786 passed 零新增 |
+| AD-3 | `e5bad7a07` | drill-down（root_index/root_runtime_id，ref 归属快照、index 续接、代次不递增、标记解除）；同签名扫荡 remote_backend + guest server。红灯 5 failed→绿灯 5 passed，全域 791 passed 零新增 |
+
+**live-verify（真 UIA 活体，真窗口 `API资料.txt - Notepad`）**：max_depth=1 →
+truncated=True / depth_truncated=True / observed_max_depth=1、7 元素自标被切；
+root_index=1 下钻 → drilled_from={index:1, runtime_id:42.11339896}、子树 [7][8][9]
+index 续接；max_depth=32 完整树 truncated=False 无噪声键；click_element("文件") →
+success=True / route=uia / effect=confirmed。台账 desktop:uia 行 gap 已按此更新
+（set_value 真机仍 gap）。验证期间临时安装 `uiautomation`（仅本机环境，未入 requirements）。
+
