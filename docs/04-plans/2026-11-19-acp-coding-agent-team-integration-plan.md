@@ -12,6 +12,7 @@
 2. **生态现实**：ACP v1 稳定（传输仅 stdio），v2 草案中；官方 registry 已收录 46 个 agent。目标工具中，**OpenCode / Gemini CLI / Qoder / CodeBuddy 原生支持 ACP**，**Claude Code / Codex 经官方组织适配器接入**，**ZCode 无 ACP 支持（2026-11-19 四处核实：registry / llms.txt / CLI 文档 / CLI 源码目录均无）但 headless CLI 成熟（`--prompt` + `--output-format stream-json` NDJSON 事件流 + `--resume` 续跑）→ 插件形态首批落地对象**。**Trae 经用户裁定暂不接入（2026-11-19）**——其 ACP 能力（`traecli acp serve`，未进 registry，仅 TRAE 企业旗舰版可用）已核实并留档 §4.10，后续需要时可随时启用。
 3. **角色模型**：Neurova 扮演 **ACP Client**（编排方/授权方），外部编码代理扮演 **ACP Agent**（被驱动的子进程/远端进程）。这与 Zed/JetBrains 把 ACP agent 接给「单个用户在编辑器里用」不同——本仓把它们编入**受治理的多代理团队**（任务书、验收门、审批链、房间协作、全量台账），是 ACP 生态尚无的编排层玩法。
 4. **撞名澄清（必读）**：仓内已有 `neurova/agent/protocols/acp_runtime.py` + `team.py AgentTeam` + `acp_api.py`，那是**进程内 AgentMessage 消息总线**（自研 Agent Communication Protocol），与 Zed 的 Agent Client Protocol **同名不同物**，且该路线绕过 Swarm 治理/台账/验收——**不作为本方案主路径**。新模块命名经用户拍板（2026-11-19）：**统一以 `neuacp` 为准**，落 `neurova/agent/neuacp/`，类名以 `Neuacp` 前缀（`NeuacpMemberAdapter` 等），与仓内 `acp_runtime` 总线划清界限。
+5. **拍板状态（2026-11-19，D1–D6 全部裁定，见 §10）**：P0 一次接入 **OpenCode + Gemini CLI + Claude Code** 三家；外部成员**提供判定模型通道**（验收/评审不降级）；**允许主代理自主派活**给外部成员；**开放 `permission_mode=auto`（admin 专属）**；Trae 暂不接入；成本**不计 token**（`cost_source=external`）。方案可进入 P0 实施。
 
 ---
 
@@ -56,7 +57,7 @@
 |------|--------------|----------------------------------|------|
 | Gemini CLI | **原生**（首个参考实现） | `gemini --acp`，stdio JSON-RPC | P0 |
 | OpenCode | **原生** | `opencode acp` 子命令，stdio ACP v1 | P0 |
-| Claude Code | **官方组织适配器** | npm `@agentclientprotocol/claude-agent-acp`（基于 Claude Agent SDK，内置 Claude CLI） | P1 |
+| Claude Code | **官方组织适配器** | npm `@agentclientprotocol/claude-agent-acp`（基于 Claude Agent SDK，内置 Claude CLI） | **P0**（D1 裁定三家同批） |
 | Codex | **官方组织适配器** | npm `@agentclientprotocol/codex-acp`（内部翻译 Codex App Server 协议） | P1 |
 | Qoder | **原生** | `qoder --acp`（官方文档 "Qoder CLI implements this protocol standard"） | P2 |
 | CodeBuddy | **原生** | npm `@tencent-ai/codebuddy-code`，启动参数 `--acp`（registry 官方条目，Tencent Cloud） | P2 |
@@ -169,7 +170,7 @@ tests/unit/agent/neuacp/   # 单元测试（假 ACP agent 用测试内 stdio 子
    - 失败要么抛异常、要么返回 `"[LLM Error] ..."` 前缀文本（`swarm.py:2314` 按失败处理）；
    - 不支持 temperature/max_tokens 等生成参数（签名约束，swarm.py:2256-2259）。
 2. `.config.name` → 事件/台账/审批卡的 `agent_name`（swarm.py:758/:791）。
-3. `.llm_client.chat(messages) -> 带 .content（建议带 .model）`：验收门/评审的受限判定通道（`callSubSessionChannel`，sub_session.py:25-41）。外部成员默认**不提供**（验收/评审诚实降级 skipped，不阻断）；如需提供，由适配器以目录内声明的「判定用小模型」实现。
+3. `.llm_client.chat(messages) -> 带 .content（建议带 .model）`：验收门/评审的受限判定通道（`callSubSessionChannel`，sub_session.py:25-41）。**已裁定提供（D2，2026-11-19）**：适配器以本仓 provider 体系实现该通道（与内置成员验收同源），外部成员交付物同样过验收门/评审，不降级 skipped；通道本身失败时诚实降级 skipped 并在 run 记录原因，不阻断主链路。
 4. `current_session_id` 语义 = `run.member_session_id`（递归 spawn 治理阀门依赖，swarm.py:2260-2265）。
 5. 审批面：适配器内部直接调 `requestRunApproval(run, action, reason, level, context)`（approval_chain.py:267），run 对象字段已齐备。
 
@@ -371,7 +372,7 @@ class NeuacpExecutor(Protocol):
 
 > 每卡交付定义：红灯测试先行（断言缺失行为且实证红）→ 最小实现转绿 → A/B 自证零新增失败 → live-verify 证据 → `git commit --only -- <paths>` 单任务单提交。
 
-### P0 最小闭环（OpenCode / Gemini CLI 原生接入）
+### P0 最小闭环（OpenCode / Gemini CLI / Claude Code，D1 裁定三家同批）
 
 | 卡 | 内容 | 主要落点 | 红灯测试点 | live-verify 判据 |
 |----|------|----------|------------|------------------|
@@ -380,7 +381,8 @@ class NeuacpExecutor(Protocol):
 | A3 | `NeuacpMemberAdapter` 鸭子面（chat/config.name/超时/错误文本约定） | `neuacp/acp_member.py` | 适配器对 `_run_member` 调用形态的契约测试（stream=True、metadata.event_emitter、budget 内返回） | — |
 | A4 | `_resolve_agent` 切口：名册 executor 成员返回适配器；`NEUROVA_EXTERNAL_AGENTS_ENABLED` off 时拒绝并诚实报错 | `swarm.py:1931` 前置分支 | 开关 off→spawn 拒绝；on→解析出适配器；内置成员路径零变化（A/B） | — |
 | A5 | 名册 executor 字段 + admin 门 + 移除成员端点 | `teams_api.py` | executor 字段落盘回读；非 admin 加外部成员 403；移除成员后名册更新 | — |
-| A6 | 端到端：建队→加 opencode 外部成员→spawn 派小任务→流式→候选→台账 completed | 全链 | 集成测试（真 opencode 子进程，标记 e2e） | 真后端 9527（.venv、清代理变量）+ 真 `opencode acp`：subagent_chunk 上屏、台账 completed、无 [ERROR] |
+| A6 | 端到端：建队→加 opencode 外部成员→spawn 派小任务→流式→候选→台账 completed | 全链 | 集成测试（真 opencode 子进程，标记 e2e） | 真后端 9527（.venv、清代理变量）+ 真 `opencode acp`：subagent_chunk 上屏、台账 completed、无 [ERROR]；gemini/claude-code 以测试连接握手通过为准 |
+| A7 | Claude Code 接入（npx `@agentclientprotocol/claude-agent-acp`；catalog 预设；**Node 运行时进部署依赖说明**） | `neuacp/catalog.py` | 真适配器握手 + 小任务 e2e（本机无 Node 时 skip 并如实标注） | 测试连接返回版本/能力 |
 
 ### P1 治理完备 + Claude Code / Codex
 
@@ -390,7 +392,7 @@ class NeuacpExecutor(Protocol):
 | B2 | 工具调用事件镜像进 span 轨迹 + H-4 账本 | `acp_executor.py` + `swarm.py _logRunEvent` | update(tool_call) 后账本/轨迹出现对应事件行 |
 | B3 | `session/cancel` 对接 cancelRun；进程池上限/空闲回收/崩溃重启 | `process_pool.py` | 取消后 agent 进程 session 终止；超限排队；崩溃后有限重启计数 |
 | B4 | catalog + test + status 三个 admin 端点（内置预设 + registry 缓存 + which 探测） | `neuacp/catalog.py` + `api/endpoints/neuacp_admin_api.py` | registry 失联降级内置清单；test 端点对假命令返回握手错误原文 |
-| B5 | Claude Code / Codex 接入（npx 适配器；catalog 预设 + 文档 + 测试连接实测） | `catalog.py` | 各自真适配器握手测试（标记 e2e，本机无 Node 时 skip 并如实标注） |
+| B5 | Codex 接入（npx `@agentclientprotocol/codex-acp`；catalog 预设 + 测试连接实测） | `neuacp/catalog.py` | 真适配器握手测试（标记 e2e，本机无 Node 时 skip 并如实标注） |
 | B6 | 前端：TeamPage 名册增强 + TeamNeuacpMemberForm + neuacp API 模块 + admin 门 | `TeamPage.vue`、`TeamNeuacpMemberForm.vue`、`api/modules/neuacp.ts`、`types/agent.ts` | vitest：表单校验/提交 payload/徽标渲染；vue-tsc 0 错 |
 | B7 | i18n 25-35 键 ×11 locale | `src/i18n/locales/*.ts` | locale-consistency 全绿 |
 
@@ -426,16 +428,16 @@ class NeuacpExecutor(Protocol):
 
 ---
 
-## 10. 待拍板项
+## 10. 拍板记录（2026-11-19 全部裁定）
 
-| # | 问题 | 选项与影响面 | 建议 |
-|---|------|--------------|------|
-| D1 | 首批接入顺序 | 甲：P0=OpenCode+Gemini CLI（零适配器、最快闭环）；乙：P0 直接上 Claude Code（生态最常用，但引入 npm 适配器 + Node 运行时依赖） | **甲**。影响面：P0 交付时间、Node 是否进部署依赖 |
-| D2 | 外部成员判定模型（验收/评审通道） | 甲：不提供 llm_client，验收/评审 skipped（诚实降级，交付物无第二道机审）；乙：适配器提供判定小模型通道（多一层质量闸，增加成本与复杂度） | **甲先行**，乙挂 P2 按需。影响面：验收门有效性 vs 成本 |
-| D3 | 外部成员可否入「固定团队」被主代理自主 dispatch | 甲：可以（名册即团队，统一待遇）；乙：仅限用户显式派活（主代理不能自发把任务交给外部代理） | **甲**（名册/审批/围栏已兜住）。影响面：spawn_subagent/dispatch_team 工具描述与治理面 |
-| D4 | `permission_mode=auto` 是否开放 | 甲：开放（admin 专属，仅 L0）；乙：首版只留 `chain`（全部过审批链，打扰多但零风险） | **乙**首版，甲视使用反馈再放。影响面：表单字段、审批打扰频率 |
-| D5 | 特殊工具接入口径（ZCode 无 ACP / Trae 企业版门槛） | **已裁定（2026-11-19）：Trae 暂不接入**——其 ACP 能力已核实并留档 §4.10，后续需要时随时启用；ZCode 走插件形态（已核实可接，§4.10 专项） | 影响：`NeuacpPluginExecutor` 首版随 ZCode 真落地；P2 不含 Trae |
-| D6 | 外部代理用量/成本呈现 | 甲：台账标 `cost_source=external`、不计费不展示 token；乙：接各工具本地会话日志估算 token（各格式不一，成本高） | **甲**。影响面：成本台账口径 |
+| # | 问题 | 裁定 | 关键影响 |
+|---|------|------|----------|
+| D1 | 首批接入顺序 | **P0 一次接入 OpenCode + Gemini CLI + Claude Code 三家**；Codex 留 P1 | Node（npx 适配器）进 P0 部署依赖；新增任务卡 A7；A6 端到端以 opencode 真跑为准，gemini/claude-code 握手级验证 |
+| D2 | 验收/评审判定通道 | **提供判定模型通道**：适配器以本仓 provider 体系实现 `llm_client.chat`，外部成员交付物同样过验收门/评审，不降级 skipped；通道失败时诚实降级并记录原因 | 外部成员多一道机审质量闸；增加判定 token 成本；§4.2 鸭子面第 3 点已同步 |
+| D3 | 主代理自主派活 | **允许**：主代理可经 spawn_subagent/dispatch_team 自主把任务派给外部成员，与内置成员同待遇（名册/审批链/数据围栏已兜住） | spawn_subagent/dispatch_team 工具描述覆盖外部成员；编排流不断 |
+| D4 | `permission_mode=auto` | **开放（admin 专属）**：admin 建成员时可勾选「低危自动放行」（仅 L0，危险命令正则仍升档），需二次确认 | 表单含 auto 选项（admin 可见+二次确认）；审批打扰减少；首版多一块治理面 |
+| D5 | Trae/ZCode 接入口径 | **Trae 暂不接入**（结论留档 §4.10，后续需要时随时启用）；ZCode 走插件形态（已核实可接） | P2 不含 Trae；`NeuacpPluginExecutor` 首版随 ZCode 落地 |
+| D6 | 用量/成本呈现 | **不计 token**：台账标 `cost_source=external`，只记「跑过/结果/时长」，不估算不展示 token | 成本台账对外部成员无费用读数；实现最简 |
 
 ---
 
@@ -456,4 +458,5 @@ class NeuacpExecutor(Protocol):
 
 - 2026-11-19：方案备稿入库（05196e759）；模块命名拍板为 neuacp（4e009aad9）；ZCode 专项核实回填（66c83f280）；Trae 专项核实回填（09ec9b239）。
 - 2026-11-19：**用户裁定 D5——Trae 暂不接入**（本 commit）：目标清单收敛为 Claude Code、Codex、OpenCode、Gemini CLI、Qoder、CodeBuddy（ACP）+ ZCode（插件）；Trae 核实结论留档 §4.10，后续需要时随时启用。
+- 2026-11-19：**D1–D6 全部拍板**（交互选项逐项确认）：P0 三家同批（OpenCode+Gemini CLI+Claude Code，新增 A7 卡）；提供判定模型通道（D2）；允许主代理自主派活（D3）；开放 auto 模式 admin 专属（D4）；成本不计 token（D6）。方案具备 P0 开工条件。
 - （实施时逐卡继续回填：commit 号、红→绿实测输出摘要、A/B 失败集合比对、live-verify 证据、偏离说明。）
