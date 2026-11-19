@@ -85,8 +85,15 @@ class DesktopUIAManager:
         window_title: Optional[str] = None,
         max_nodes: int = DEFAULT_MAX_NODES,
         max_depth: int = DEFAULT_MAX_DEPTH,
+        root_index: Optional[int] = None,
+        root_runtime_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """枚举窗口控件树（观察，无投递语义 → 不带 action_result）"""
+        """枚举窗口控件树（观察，无投递语义 → 不带 action_result）。
+
+        root_index/root_runtime_id（AD-3 drill-down）：从已有快照的某元素下钻其子树，
+        避免密集树反复全量重枚举。root 必须来自当前会话已有快照（ref 归属 snapshot）；
+        下钻结果 index 续接并入缓存（不动既有 index），观察刷新不递增 generation。
+        """
         if self._backend is None:
             return self._refused("桌面 UIA 层不可用（非 Windows 或缺少 uiautomation）", "unsupported_method")
         max_nodes = max(int(max_nodes or DEFAULT_MAX_NODES), 1)
@@ -97,38 +104,93 @@ class DesktopUIAManager:
                 return self._refused(
                     f"未找到目标窗口（window_title={window_title!r}，缺省为前台窗口）", "ref_not_found"
                 )
+
+            session_key = self._session_key(window_title, window)
+            root_element: Optional[Dict[str, Any]] = None
+            if root_index is not None or root_runtime_id is not None:
+                session = self._sessions.get(session_key)
+                if session is None and not window_title:
+                    session = self._sessions.get("__foreground__")
+                if session is None:
+                    return self._refused(
+                        "下钻前须先全量 computer_dom_snapshot（root 元素必须来自已有快照）",
+                        "ref_not_found",
+                    )
+                root_element, err = self._lookup_element(session, root_index, root_runtime_id)
+                if err is not None:
+                    return err
+                window = dict(window)
+                window["_control"] = root_element.get("_control")
+
             try:
                 stored_elements, walk_stats = self._backend.walk(window, max_nodes, max_depth)
             except Exception as e:
                 return self._refused(f"控件树枚举失败: {e}", "backend_error")
 
-            session_key = self._session_key(window_title, window)
-            public_elements = []
-            for i, el in enumerate(stored_elements):
-                el["index"] = i
-                public_elements.append(
-                    {k: v for k, v in el.items() if not k.startswith("_")}
-                )
-            self._sessions[session_key] = {
-                "generation": self._sessions.get(session_key, {}).get("generation", 1),
-                "window": {k: v for k, v in window.items() if not k.startswith("_")},
-                "elements": stored_elements,
-            }
-            # truncated 升义（AD-2）：节点数或深度任一不完整都算截断；
-            # depth 截断细节仅在确有剪枝时附带（未超限不加噪声字段）
             depth_truncated = bool(walk_stats.get("depth_truncated"))
-            result = {
-                "success": True,
-                "generation": self._sessions[session_key]["generation"],
-                "window": self._sessions[session_key]["window"],
-                "elements": public_elements,
-                "truncated": len(stored_elements) >= max_nodes or depth_truncated,
-                "max_nodes": max_nodes,
-                "max_depth": max_depth,
-            }
+            observed_max_depth = int(walk_stats.get("observed_max_depth", 0))
+
+            if root_element is None:
+                public_elements = []
+                for i, el in enumerate(stored_elements):
+                    el["index"] = i
+                    public_elements.append(
+                        {k: v for k, v in el.items() if not k.startswith("_")}
+                    )
+                self._sessions[session_key] = {
+                    "generation": self._sessions.get(session_key, {}).get("generation", 1),
+                    "window": {k: v for k, v in window.items() if not k.startswith("_")},
+                    "elements": stored_elements,
+                }
+                result = {
+                    "success": True,
+                    "generation": self._sessions[session_key]["generation"],
+                    "window": self._sessions[session_key]["window"],
+                    "elements": public_elements,
+                    # truncated 升义（AD-2）：节点数或深度任一不完整都算截断
+                    "truncated": len(stored_elements) >= max_nodes or depth_truncated,
+                    "max_nodes": max_nodes,
+                    "max_depth": max_depth,
+                }
+            else:
+                # drill-down：并入缓存（index 续接、runtime_id 去重），返回子树清单
+                session = self._sessions[session_key]
+                root_element.pop("subtree_truncated", None)  # 子树补齐后解除被切标记
+                cached = session["elements"]
+                existing_rids = {str(el.get("runtime_id")) for el in cached}
+                public_elements = []
+                for el in stored_elements:
+                    rid = str(el.get("runtime_id"))
+                    if rid in existing_rids:
+                        for old in cached:
+                            if str(old.get("runtime_id")) == rid:
+                                public_elements.append(
+                                    {k: v for k, v in old.items() if not k.startswith("_")}
+                                )
+                                break
+                        continue
+                    el["index"] = len(cached)
+                    cached.append(el)
+                    existing_rids.add(rid)
+                    public_elements.append(
+                        {k: v for k, v in el.items() if not k.startswith("_")}
+                    )
+                result = {
+                    "success": True,
+                    "generation": session["generation"],
+                    "window": {k: v for k, v in window.items() if not k.startswith("_")},
+                    "elements": public_elements,
+                    "drilled_from": {
+                        "index": root_element.get("index"),
+                        "runtime_id": root_element.get("runtime_id"),
+                    },
+                    "truncated": len(stored_elements) >= max_nodes or depth_truncated,
+                    "max_nodes": max_nodes,
+                    "max_depth": max_depth,
+                }
             if depth_truncated:
                 result["depth_truncated"] = True
-                result["observed_max_depth"] = int(walk_stats.get("observed_max_depth", 0))
+                result["observed_max_depth"] = observed_max_depth
             return result
 
     # ── 窗口枚举（P2-6）────────────────────────────────

@@ -45,10 +45,18 @@ class RemoteComputerUseManager:
         out = self._client.action("scroll", {"x": x, "y": y, "scroll_x": horizontal, "scroll_y": vertical})
         return bool(out.get("success"))
 
-    def snapshot(self, window_title=None, max_nodes=None, max_depth=None) -> Dict[str, Any]:
+    def snapshot(
+        self,
+        window_title=None,
+        max_nodes=None,
+        max_depth=None,
+        root_index=None,
+        root_runtime_id=None,
+    ) -> Dict[str, Any]:
         # 与本地 DesktopUIAManager.snapshot 同签名（wire kind 仍为 dom_snapshot）
         return self._client.action("dom_snapshot", {
             "window_title": window_title, "max_nodes": max_nodes, "max_depth": max_depth,
+            "root_index": root_index, "root_runtime_id": root_runtime_id,
         })
 
     def click_element(self, index=None, runtime_id=None, window_title=None, button="left", generation=None) -> Dict[str, Any]:

@@ -7598,6 +7598,8 @@ class ToolExecutor:
                 params.get("window_title"),
                 int(params["max_nodes"]) if params.get("max_nodes") else None,
                 int(params["max_depth"]) if params.get("max_depth") else None,
+                int(params["root_index"]) if params.get("root_index") is not None else None,
+                params.get("root_runtime_id"),
             )
             await self._emit_computer_event("computer_dom_snapshot", params, result)
             return result
