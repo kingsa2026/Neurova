@@ -754,7 +754,9 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
             return
 
         turnMetadata = {"user_id": user_id, "role": "user", "tenant_id": "default",
-                        "event_emitter": _emit, "emit_status_events": True}
+                        "event_emitter": _emit, "emit_status_events": True,
+                        # 移动端对齐 PC：工具调用/结果事件透传到会话页卡片
+                        "emit_tool_events": True}
 
         async def _runTurn():
             try:
@@ -793,6 +795,10 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
                     elif kind == "reasoning":
                         await ws.send_json({"type": "chat:reasoning", "content": str(payloadData or ""),
                                             "session_id": session_id})
+                    elif kind in ("tool_call", "tool_result"):
+                        # 移动端对齐 PC：工具调用/结果透传（emit_tool_events 门控在管线侧）
+                        await ws.send_json({"type": f"chat:{kind}", "session_id": session_id,
+                                            "data": payloadData if isinstance(payloadData, dict) else {"text": str(payloadData or "")}})
                     elif kind == "retry":
                         retryData = payloadData if isinstance(payloadData, dict) else {}
                         if retryData:
