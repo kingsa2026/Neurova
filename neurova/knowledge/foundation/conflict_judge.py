@@ -137,7 +137,10 @@ class KnowledgeConflictJudge:
         if declared == "manual":
             return {"policy": "manual", "winner": None,
                     "basis": "谓词声明 manual（W8 conflict_policy 数据化）"}
-        ordered = sorted(members, key=lambda m: (_recencyClock(m)[0], m["fact_id"]))
+        # rowid 进排序键只为同刻并列时稳定取"后写入者"（rowid 单调递增），
+        # 不参与下面的可分性阶梯——断言支持数/置信仍可胜过新近（K-09 语义不松）。
+        ordered = sorted(members, key=lambda m: (_recencyClock(m)[0],
+                                                 int(m.get("_rowid") or 0), m["fact_id"]))
         if declared == "most_recent":
             winner = ordered[-1]
             return {"policy": "most_recent", "winner": winner["fact_id"],
@@ -175,6 +178,21 @@ class KnowledgeConflictJudge:
             return {"policy": "highest_confidence", "winner": winner["fact_id"],
                     "basis": "按置信裁决：%s（confidence=%s）高于其余成员"
                              % (winner["fact_id"], winner.get("confidence"))}
+
+        # 同刻写入（Windows 时钟 ~15ms 精度下常见）且支持/置信全并列时：
+        # 叙述行（同一条目的先后说法）按写入序定先后——rowid 大者后写，胜出
+        # （019b-2：条目改正文必须留下被取代的旧说法，不能悬着不裁）；
+        # 三元组是同一 slot 的竞争主张，置信并列仍留人工，不静默挑选。
+        # rowid 全同（手工成员字典）同样退回 manual。
+        rowids = {int(m.get("_rowid") or 0) for m in members}
+        narrative = all(m.get("record_kind") == NARRATIVE_RECORD_KIND for m in members)
+        if narrative and len(rowids) > 1:
+            winner = ordered[-1]
+            return {"policy": "most_recent", "winner": winner["fact_id"],
+                    "basis": "同刻并列按写入序裁决：%s 后写入（rowid=%s）晚于 %s"
+                             % (winner["fact_id"], winner.get("_rowid"),
+                                ", ".join("%s(rowid=%s)" % (m["fact_id"], m.get("_rowid"))
+                                          for m in ordered[:-1]))}
 
         return {"policy": "manual", "winner": None,
                 "basis": "新近、置信、断言支持三项均无差异，无区分依据可依"}

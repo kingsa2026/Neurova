@@ -2027,7 +2027,7 @@ class KnowledgeFactStore:
         placeholders = ",".join("?" * len(factIds))
         with self._lock:
             rows = self._conn.execute(
-                "SELECT f.*, s.agent_id AS agent_id FROM knowledge_facts f"
+                "SELECT f.*, f.rowid AS _rowid, s.agent_id AS agent_id FROM knowledge_facts f"
                 " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
                 " WHERE f.fact_id IN (%s) ORDER BY f.recorded_at, f.fact_id" % placeholders,
                 list(factIds),
@@ -2104,7 +2104,7 @@ class KnowledgeFactStore:
         """
         with self._lock:
             rows = self._conn.execute(
-                "SELECT f.*, s.agent_id AS subject_agent_id, s.canonical_label,"
+                "SELECT f.*, f.rowid AS _rowid, s.agent_id AS subject_agent_id, s.canonical_label,"
                 " s.normalized_label FROM knowledge_facts f"
                 " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
                 " WHERE s.normalized_label = ? AND f.predicate_term_id = ?"
