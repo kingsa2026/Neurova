@@ -113,6 +113,10 @@ mcp>=2.0.0
 Pillow>=13.0.0
 prometheus-client
 pyautogui>=0.9.54
+# Windows UIA 语义层（desktop_uia/computer_dom_snapshot/click_element/set_value 的
+# 真实后端；非 Windows 上 availabilityDetail 探测为 not-configured，不影响安装）。
+# 2026-11-19 AD 批拍板：从「可选探测」收进运行时依赖，消除缺库静默降级。
+uiautomation>=2.0.29
 playwright>=1.40.0
 cryptography>=41.0
 paramiko>=3.4.0
