@@ -145,6 +145,23 @@ def _migrateToV5(conn: sqlite3.Connection) -> None:
 
 register_migration(5, _migrateToV5, domain="agent_runs")
 
+
+def _migrateToV6(conn: sqlite3.Connection) -> None:
+    """v6：run 台账补租户列（§6.4 租户隔离红线，ACP 外部成员 P0-A9）。
+
+    - `tenant_id`：发起者租户（JWT 部门根，缺省 default）。蜂群路径经
+      `openSubagentRun(tenantId=...)` 落发起者租户；普通回合留空（语义与
+      改前一致，主回合租户落列登记为关联缺口另批）。
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(agent_runs)")}
+    if "tenant_id" not in columns:
+        conn.execute("ALTER TABLE agent_runs ADD COLUMN tenant_id TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_runs_tenant ON agent_runs(tenant_id, seq)")
+
+
+register_migration(6, _migrateToV6, domain="agent_runs")
+
 TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 
 # 挂起态：非终态。它的存在意义就是"活过进程、等人点续跑"，因此
@@ -231,7 +248,7 @@ class AgentRunStore:
     def intake(
         self, session_id: str, user_id: str = "", agent_id: str = "", message: str = "",
         subagent_id: str = "", parent_session_id: str = "", trace_id: str = "",
-        project_id: str = "", team_id: str = "",
+        project_id: str = "", team_id: str = "", tenant_id: str = "",
     ) -> str:
         """请求落库（queued）。返回 run_id。message 只存摘要（正文真相在会话）。
 
@@ -240,6 +257,8 @@ class AgentRunStore:
         轨迹 span 树；回合入口留空，语义与改前一致。
         `project_id`/`team_id`（S12/S10）：协作归属标——房间发起按
         ``room_id=project_id`` 等式打标，团队派活带 team_id；普通回合留空。
+        `tenant_id`（A9a/§6.4）：发起者租户（部门根）；蜂群路径经
+        `openSubagentRun(tenantId=...)` 透传，普通回合留空。
         """
         run_id = f"run_{uuid.uuid4().hex[:16]}"
         now = time.time()
@@ -247,9 +266,9 @@ class AgentRunStore:
             self._conn.execute(
                 "INSERT INTO agent_runs (run_id, session_id, user_id, agent_id,"
                 " subagent_id, parent_session_id, trace_id, project_id, team_id,"
-                " message_digest, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,'queued',?)",
+                " tenant_id, message_digest, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'queued',?)",
                 (run_id, session_id, user_id, agent_id, subagent_id, parent_session_id,
-                 trace_id, str(project_id or ""), str(team_id or ""),
+                 trace_id, str(project_id or ""), str(team_id or ""), str(tenant_id or ""),
                  (message or "")[:200], now),
             )
         return run_id

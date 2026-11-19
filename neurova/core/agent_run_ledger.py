@@ -359,7 +359,7 @@ def subagentTerminalRow(runStatus: str, cause: str) -> typing.Tuple[str, str]:
 def openSubagentRun(
     *, memberSessionId: str, subagentId: str, parentSessionId: str,
     userId: str, agentId: str, task: str, traceId: str = "",
-    projectId: str = "", teamId: str = "",
+    projectId: str = "", teamId: str = "", tenantId: str = "",
 ) -> Optional[str]:
     """子任务进台账：`intake` → 晋升 `running`。返回 run_id，失败返回 None。
 
@@ -386,7 +386,7 @@ def openSubagentRun(
         store = _ars.get_agent_run_store()
         run_id = store.intake(memberSessionId, userId, agentId, task,
                               subagentId, parentSessionId, traceId,
-                              project_id=projectId, team_id=teamId)
+                              project_id=projectId, team_id=teamId, tenant_id=tenantId)
         claimed = store.claim_next(memberSessionId)
         if claimed != run_id:
             # 没晋升（同 member 会话已有 running 行）→ 弃 queued 行，绝不留幽灵 running

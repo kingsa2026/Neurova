@@ -2309,6 +2309,7 @@ class SwarmManager:
             traceId=run.trace_id,
             projectId=run.project_id,
             teamId=run.team_id,
+            tenantId=self._currentTenantId(),
         )
         # H-4：started 事件入账（因果链接在 spawned 之后）
         self._logRunEvent(run, "started", {
