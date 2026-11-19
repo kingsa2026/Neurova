@@ -71,42 +71,10 @@ def test_pipelineExecuteHasExactlyOneProductionCallSite():
     assert "agent_core.py" in sites[0], f"唯一收口不该换地方：{sites[0]}"
 
 
-def testChatStreamDelegatesToChatInsteadOfOpeningASecondPipeline():
-    """`Agent.chat_stream` 必须是委托，不是第二条管线（移动配对用的就是它）。
-
-    本仓有**两个** `chat_stream`：`AgentLLMClient.chat_stream` 是 LLM 传输壳，
-    与回合无关；判据只认 `class Agent` 里那一个（初版用 `next(...)` 抓到了前者，
-    假红一场——选取范围本身也得精确）。
-    """
-    src = pathlib.Path("neurova/agent_core.py").read_text(encoding="utf-8")
-    tree = parseSource(src)
-    agentCls = next(
-        (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == "Agent"),
-        None,
-    )
-    assert agentCls is not None, "`class Agent` 不在了"
-    fn = next(
-        (n for n in agentCls.body
-         if isinstance(n, ast.AsyncFunctionDef) and n.name == "chat_stream"),
-        None,
-    )
-    assert fn is not None, "`Agent.chat_stream` 不在了——它去哪儿了？绕过落点的旁路？"
-    delegates, opensOwn = False, False
-    for node in ast.walk(fn):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-            continue
-        base = node.func.value
-        if isinstance(base, ast.Name) and base.id == "self":
-            if node.func.attr == "chat":
-                delegates = True
-            if node.func.attr in {"execute", "chat_stream"}:
-                opensOwn = True
-        if isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "chat_pipeline":
-            opensOwn = True
-    assert delegates and not opensOwn, (
-        f"`Agent.chat_stream` 不再单纯委托 `self.chat()`（委托={delegates}、自起={opensOwn}）"
-        "——它会绕开 `execute` 的失败落点，移动配对入口的失败轮就此又看不见终态"
-    )
+# `Agent.chat_stream` 已于 a334ffb05 退役（句切假流式死码收编进
+# `agent.chat(stream=True)` 的真流式事件源），其"委托不旁路"守卫随之退役——
+# 单一落点纪律由 `test_pipelineExecuteHasExactlyOneProductionCallSite` 与
+# 下面的 `testStreamModeFailureStillLandsAssistant`（现役流式分支）继续钉住。
 
 
 def _landingImpl() -> ast.AsyncFunctionDef:
@@ -148,26 +116,34 @@ def testFailedTurnLandingDoesNotOpenASecondSessionWriter():
 
 
 @pytest.mark.asyncio
-async def testChatStreamFailureStillLandsAssistant(loop_probe):
+async def testStreamModeFailureStillLandsAssistant(loop_probe):
+    """现役流式分支（`agent.chat(..., stream=True)` 真流式）失败同样落 assistant。"""
     agent = loop_probe.agent
     model = loop_probe.bind([[text_chunk("不会被用到的回复")]])
 
     async def failingChat(messages, **kwargs):
         raise RuntimeError(ERROR_TEXT)
 
-    model.chat = failingChat
+    def failingStream(messages, **kwargs):
+        async def _gen():
+            raise RuntimeError(ERROR_TEXT)
+            yield None
+        return _gen()
 
-    chunks: list = []
+    model.chat = failingChat
+    # 现役流式分支走 llm_client.chat_stream(...)（openai_loop._predict_stream_once），
+    # 两个入口都注入失败，确保异常来自流式分支本身而不是 fallback legacy
+    model.chat_stream = failingStream
+
     with pytest.raises(RuntimeError):
-        async for piece in agent.chat_stream(USER_TEXT, session_id=SESSION):
-            chunks.append(piece)
+        await agent.chat(USER_TEXT, session_id=SESSION, stream=True)
 
     history = get_session_repository().get_history(agent_id=agent.config.agent_id,
                                                    session_id=SESSION) or []
     assistants = [str(m.get("content") or "") for m in history if m.get("role") == "assistant"]
     assert any("未能生成回复" in t for t in assistants), (
-        f"`chat_stream` 这一支失败后没有落点（实得 {assistants}）——"
-        "移动配对入口的会话将和网页一样，只剩用户那句"
+        f"流式分支失败后没有落点（实得 {assistants}）——"
+        "流式入口的会话将和网页一样，只剩用户那句"
     )
 
 

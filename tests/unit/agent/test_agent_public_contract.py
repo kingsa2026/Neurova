@@ -206,7 +206,9 @@ class TestPatchTargets:
     @pytest.mark.parametrize("target", [
         "AgentLLMClient", "get_session_manager",  # patch("neurova.agent_core.X")
         "_load_identity", "_init_memory_modules",  # patch.object(Agent, "X")
-        "chat", "chat_stream", "_on_skill_post_execute", "rebuild_loop",
+        # chat_stream 已退役（a334ffb05：假流式收编进 agent.chat(stream=True)），
+        # 不再是合法 patch 目标——快照 agent_members/patch_targets 同步移除。
+        "chat", "_on_skill_post_execute", "rebuild_loop",
         "process_multimodal",
     ])
     def test_patchable(self, agent_module, target):
