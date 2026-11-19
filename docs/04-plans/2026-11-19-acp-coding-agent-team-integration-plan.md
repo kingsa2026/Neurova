@@ -217,7 +217,7 @@ tests/unit/agent/neuacp/   # 单元测试（假 ACP agent 用测试内 stdio 子
 
 ### 4.7 管理面 API（新增端点，挂 `/api/v1/external-agents`，admin 门）
 
-- `GET /api/v1/external-agents/catalog`：目录 = 内置七家预设（含默认 command、是否需 npm、支持 transport）∪ 官方 registry 拉取缓存（TTL 24h，拉取失败降级内置清单）∪ 本地命令探测（shutil.which 标注「本机可用」）。
+- `GET /api/v1/external-agents/catalog`：目录 = 内置预设（含默认 command、是否需 npm、支持 transport）∪ 官方 registry 拉取缓存（TTL 24h，拉取失败降级内置清单）∪ 本地命令探测（shutil.which 标注「本机可用」）。**CLI 安装检查发生在「用户启用连接时」**（查看目录 / 添加成员 / 测试连接的实时探测），部署期不做强校验、不要求预装；探测未命中返回 `installed=false` + `install_hint`（qoder→官方安装文档、codebuddy→`npm i -g @tencent-ai/codebuddy-code`），前端据此展示安装指引。
 - `POST /api/v1/external-agents/test`：对给定 executor 配置做一次握手级连通测试（initialize 往返），返回能力/版本/错误——供前端「测试连接」按钮。
 - `GET /api/v1/external-agents/status`：进程池状态（存活进程、活跃 session、近端崩溃计数）。
 - 鉴权：`requireAdmin`（对齐 webhook 管理面教训——外部执行面必须有属主/角色门）。
@@ -305,7 +305,7 @@ class NeuacpExecutor(Protocol):
 
 字段（与 §4.1 契约一一对应）：
 
-- 工具类型：下拉（catalog 接口返回；每项含原生/适配器标注、本机可用探测结果、需 Node 提示）；
+- 工具类型：下拉（catalog 接口返回；每项含原生/适配器标注、**本机可用探测结果——启用连接时实时检查，未安装展示安装指引**、需 Node 提示）；
 - 成员名称 / 团队角色（coder/reviewer/...，沿角色语义）；
 - 职责 prompt（进任务书拼装）；
 - 工作目录 `cwd`（必填，路径选择/输入）；
@@ -385,7 +385,7 @@ class NeuacpExecutor(Protocol):
 | A4 | `_resolve_agent` 切口：名册 executor 成员返回适配器；`NEUROVA_EXTERNAL_AGENTS_ENABLED` off 时拒绝并诚实报错 | `swarm.py:1931` 前置分支 | 开关 off→spawn 拒绝；on→解析出适配器；内置成员路径零变化（A/B） | — |
 | A5 | 名册 executor 字段 + admin 门 + 移除成员端点 | `teams_api.py` | executor 字段落盘回读；非 admin 加外部成员 403；移除成员后名册更新 | — |
 | A6 | 端到端：建队→加 opencode 外部成员→spawn 派小任务→流式→候选→台账 completed | 全链 | 集成测试（真 opencode 子进程，标记 e2e） | 真后端 9527（.venv、清代理变量）+ 真 `opencode acp`：subagent_chunk 上屏、台账 completed、无 [ERROR]；qoder/codebuddy 以测试连接握手通过为准；zcode 以插件通道小任务真跑为准 |
-| A7 | **Qoder / CodeBuddy 接入**（均原生 ACP：`qoder --acp`、npx `@tencent-ai/codebuddy-code --acp`；catalog 预设 + 测试连接实测；codebuddy 需 Node） | `neuacp/catalog.py` | 各自真握手测试 + 小任务 e2e（本机缺 CLI/Node 时 skip 并如实标注） | 测试连接返回版本/能力 |
+| A7 | **Qoder / CodeBuddy 接入**（均原生 ACP：`qoder --acp`、npx `@tencent-ai/codebuddy-code --acp`；catalog 预设；codebuddy 需 Node）。**CLI 安装检查在用户启用连接时进行**（catalog 探测 / 测试连接返回 `installed`+`install_hint`），不要求实施期预装 | `neuacp/catalog.py` | 假 CLI 桩测握手/事件流；测试连接对本机未装 CLI 返回 `installed=false`+`install_hint` | 用户启用且本机已装 CLI 时：测试连接返回版本/能力 |
 | A8 | **ZCode 插件接入**（`NeuacpPluginExecutor` 首个实现：stream-json NDJSON 解析/`type:"result"` 终行/`--resume` 续跑/隔离红线四件套：独立 cwd + 独立 `ZCODE_DATA_BASE_DIR` + 环境白名单 + `--disallowed-tools` 收权；事件流+文件产物双核验） | `neuacp/plugin_executor.py`、`neuacp/catalog.py` | 假 ZCode CLI（测试内子进程）回放事件流断言 emitter 序列；隔离红线缺一即拒启 | 真 `zcode --prompt` 小任务：流式上屏、产物在 cwd、台账 completed |
 
 ### P1 治理完备 + Gemini CLI / Claude Code / Codex
@@ -464,4 +464,5 @@ class NeuacpExecutor(Protocol):
 - 2026-11-19：**用户裁定 D5——Trae 暂不接入**（本 commit）：目标清单收敛为 Claude Code、Codex、OpenCode、Gemini CLI、Qoder、CodeBuddy（ACP）+ ZCode（插件）；Trae 核实结论留档 §4.10，后续需要时随时启用。
 - 2026-11-19：**D1–D6 全部拍板**（交互选项逐项确认）：P0 三家同批（OpenCode+Gemini CLI+Claude Code，新增 A7 卡）；提供判定模型通道（D2）；允许主代理自主派活（D3）；开放 auto 模式 admin 专属（D4）；成本不计 token（D6）。方案具备 P0 开工条件。
 - 2026-11-19：**D1 裁定更新（用户改定）——首批接入改为 OpenCode / Qoder / CodeBuddy / ZCode 四家**（本 commit）：Qoder/CodeBuddy 由 P2 提前至 P0（A7）、ZCode 插件由 P2 提前至 P0（A8）；Gemini CLI / Claude Code / Codex 移 P1（B5）；catalog 增 zcode 插件预设；P2 剩 SSH 远程/反向 MCP/远程 HTTP。
+- 2026-11-19：**Qoder/CodeBuddy 的 CLI 安装检查时机定为「用户启用连接时」**（用户拍板）：catalog/测试连接实时探测（`installed`+`install_hint`，未装展示安装指引），部署期不预装不强校验；A7 卡与 §5.2 表单同步。
 - （实施时逐卡继续回填：commit 号、红→绿实测输出摘要、A/B 失败集合比对、live-verify 证据、偏离说明。）
