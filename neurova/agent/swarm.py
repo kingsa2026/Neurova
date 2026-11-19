@@ -660,7 +660,23 @@ class SwarmManager:
                 active_children=active_children,
             )
 
-        agent, resolved_id, fallback = self._resolve_agent(agent_id)
+        # 外部编码代理（名册 executor 成员）：显式 agent_id 点名优先，
+        # 其次团队自动选人命中的成员；两处都未命中 executor 才走内置解析。
+        externalAdapter, externalError, externalId = None, None, ""
+        for externalCandidate in (agent_id, str((teamMember or {}).get("user_id") or "")):
+            if not externalCandidate:
+                continue
+            externalAdapter, externalError = self._resolveExternalMember(externalCandidate, team_id)
+            if externalAdapter is not None or externalError:
+                externalId = externalCandidate
+                break
+        if externalError:
+            return self._rejection("EXTERNAL_AGENT_UNAVAILABLE", externalError)
+        if externalAdapter is not None:
+            # chat 兼容适配器直接作为 member 执行体（设计文档 §4.2）
+            agent, resolved_id, fallback = externalAdapter, externalId, False
+        else:
+            agent, resolved_id, fallback = self._resolve_agent(agent_id)
         if agent is None:
             return {"error": f"未找到可用的子 Agent（请求: {agent_id or 'default'}）"}
 
@@ -1966,6 +1982,92 @@ class SwarmManager:
         except ImportError:
             logger.warning("Swarm: Agent 注册中心不可用（neurova.api.endpoints 未初始化）")
         return None, agent_id or "default", True
+
+    # ── 外部编码代理成员（neuacp，设计文档 §4.2/§6.4） ─────────────
+
+    def _externalAgentsEnabled(self) -> bool:
+        raw = (os.environ.get("NEUROVA_EXTERNAL_AGENTS_ENABLED") or "").strip().lower()
+        return raw in ("on", "1", "true", "yes")
+
+    def _currentTenantId(self) -> str:
+        """发起者租户（JWT 部门根，§6.4）；无身份/解析失败回落 default。"""
+        try:
+            from neurova.core.identity_context import get_request_user_id
+
+            user_id = get_request_user_id()
+        except Exception:
+            return "default"
+        if not user_id:
+            return "default"
+        try:
+            from neurova.auth.user_group_model import resolveUserDepartment
+
+            info = resolveUserDepartment(user_id) or {}
+            return str(info.get("tenant_id") or "default")
+        except Exception:
+            return "default"
+
+    def _resolveExternalMember(self, agent_id: Optional[str], team_id: Optional[str]) -> tuple:
+        """名册成员带 executor 标记时构造外部成员适配器。
+
+        Returns:
+            (NeuacpMemberAdapter 或 None, 拒绝原因或 None)
+            - 成员不存在 / 未配 executor → (None, None)：走内置解析路径。
+            - 开关关闭 / 跨租户 / 配置缺失 → (None, 拒绝原因)：spawn 侧结构化拒绝。
+        """
+        if not agent_id or not team_id:
+            return None, None
+        try:
+            from neurova.api.endpoints.teams_api import getTeamRoster
+
+            team = getTeamRoster(team_id)
+        except Exception:
+            return None, None
+        if not isinstance(team, dict):
+            return None, None
+        member = None
+        for item in (team.get("members_detail") or []):
+            if str(item.get("user_id")) == str(agent_id):
+                member = item
+                break
+        if member is None:
+            return None, None
+        spec = member.get("executor")
+        if not isinstance(spec, dict) or not spec:
+            return None, None
+        if not self._externalAgentsEnabled():
+            return None, (
+                "外部代理接入未启用（NEUROVA_EXTERNAL_AGENTS_ENABLED=off）——"
+                f"名册成员 {agent_id} 配置了外部执行体，无法派活"
+            )
+        initiator_tenant = self._currentTenantId()
+        team_tenant = str(team.get("tenant_id") or "default")
+        if initiator_tenant != team_tenant:
+            return None, (
+                f"跨租户派活被拒：发起者租户 {initiator_tenant!r} != "
+                f"团队租户 {team_tenant!r}（§6.4 租户隔离红线）"
+            )
+        kind = str(spec.get("kind", "acp"))
+        command = [str(part) for part in (spec.get("command") or [])]
+        if not command:
+            return None, f"外部成员 {agent_id} 缺少启动命令（executor.command）"
+        cwd = str(spec.get("cwd") or "")
+        name = str(member.get("name") or agent_id)
+        try:
+            if kind == "acp":
+                from neurova.agent.neuacp import NeuacpMemberAdapter, NeuacpStdioExecutor
+
+                executor = NeuacpStdioExecutor(command, cwd=cwd)
+            elif kind == "plugin":
+                from neurova.agent.neuacp import NeuacpMemberAdapter, NeuacpPluginExecutor
+
+                executor = NeuacpPluginExecutor(command, cwd=cwd)
+            else:
+                return None, f"外部成员 {agent_id} 的执行体类型未知：{kind!r}"
+        except ImportError:
+            return None, f"外部成员 {agent_id} 的插件执行体尚未可用（kind=plugin 待 A8 落地）"
+        return NeuacpMemberAdapter(executor, name=name, cwd=cwd), None
+
 
     async def _execute(
         self,
