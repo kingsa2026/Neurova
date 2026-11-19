@@ -9,7 +9,7 @@
 ## 0. 结论摘要
 
 1. **方向成立**：本仓成员模型是「名册 `user_id` → 进程内 Agent 实例 → `_run_member` 里一句 `agent.chat()`」。接入外部编码代理的最小切口，是让 `SwarmManager._resolve_agent` 对带外部执行体标记的名册成员返回一个 **chat 兼容适配器**；事件回灌、审批、台账、轨迹、数据围栏、进度流经现有 spawn 主链路自动生效，**不建第二套编排管线**（修复教义第 6 条）。
-2. **生态现实**：ACP v1 稳定（传输仅 stdio），v2 草案中；官方 registry 已收录 46 个 agent。目标工具中，**OpenCode / Gemini CLI / Qoder / CodeBuddy 原生支持 ACP**，**Claude Code / Codex 经官方组织适配器接入**，**ZCode 无 ACP 支持（2026-11-19 四处核实：registry / llms.txt / CLI 文档 / CLI 源码目录均无）但 headless CLI 成熟（`--prompt` + `--output-format stream-json` NDJSON 事件流 + `--resume` 续跑）→ 插件形态首批落地对象**，**Trae 暂无可核验的公开支持**（插件形态预留 + 调研卡，见 §4.10）。
+2. **生态现实**：ACP v1 稳定（传输仅 stdio），v2 草案中；官方 registry 已收录 46 个 agent。目标工具中，**OpenCode / Gemini CLI / Qoder / CodeBuddy 原生支持 ACP**，**Claude Code / Codex 经官方组织适配器接入**，**Trae 官方文档支持 ACP（`traecli acp serve`，未进 ACP registry；仅 TRAE 企业旗舰版可用、须 PAT 登录，见 §4.10 专项）**，**ZCode 无 ACP 支持（2026-11-19 四处核实：registry / llms.txt / CLI 文档 / CLI 源码目录均无）但 headless CLI 成熟（`--prompt` + `--output-format stream-json` NDJSON 事件流 + `--resume` 续跑）→ 插件形态首批落地对象**。
 3. **角色模型**：Neurova 扮演 **ACP Client**（编排方/授权方），外部编码代理扮演 **ACP Agent**（被驱动的子进程/远端进程）。这与 Zed/JetBrains 把 ACP agent 接给「单个用户在编辑器里用」不同——本仓把它们编入**受治理的多代理团队**（任务书、验收门、审批链、房间协作、全量台账），是 ACP 生态尚无的编排层玩法。
 4. **撞名澄清（必读）**：仓内已有 `neurova/agent/protocols/acp_runtime.py` + `team.py AgentTeam` + `acp_api.py`，那是**进程内 AgentMessage 消息总线**（自研 Agent Communication Protocol），与 Zed 的 Agent Client Protocol **同名不同物**，且该路线绕过 Swarm 治理/台账/验收——**不作为本方案主路径**。新模块命名经用户拍板（2026-11-19）：**统一以 `neuacp` 为准**，落 `neurova/agent/neuacp/`，类名以 `Neuacp` 前缀（`NeuacpMemberAdapter` 等），与仓内 `acp_runtime` 总线划清界限。
 
@@ -34,7 +34,7 @@
 
 - **不建第二套编排/验收/存储体系**：外部成员必须走 `SwarmManager.spawn` 单管道；仓内 `acp_runtime/AgentTeam` 进程内总线不承载外部代理。
 - **不做 ACP v2 适配**：v2 仍是草案（官方明示"will change"），锁 v1 稳定面；v2 定稿后另批。
-- **不自制伪 ACP 硬接 Trae/ZCode**：无公开 ACP 支持的工具走 §4.10 插件形态（ZCode 已核实可接、为插件首批落地对象；Trae 待调研），以其实际 CLI 能力为准，不臆造协议。
+- **不自制伪 ACP 硬接**：ZCode 无 ACP，走 §4.10 插件形态（已核实可接，插件首批落地对象）；Trae 走其官方 ACP（`traecli acp serve`）；均以工具实际能力为准，不臆造协议。
 - **不默认开放**：新增能力以环境开关灰度（默认关），对齐 `NEUROVA_SWARM_ACCEPTANCE` 惯例。
 
 ---
@@ -61,9 +61,9 @@
 | Qoder | **原生** | `qoder --acp`（官方文档 "Qoder CLI implements this protocol standard"） | P2 |
 | CodeBuddy | **原生** | npm `@tencent-ai/codebuddy-code`，启动参数 `--acp`（registry 官方条目，Tencent Cloud） | P2 |
 | ZCode | **无 ACP 支持**（2026-11-19 四处核实） | ACP registry / 官方 llms.txt / CLI 文档（quickstart、cli-reference）/ CLI 源码目录均无 ACP；但 **headless CLI 可插接**：`zcode --prompt <任务> --cwd <目录> --output-format stream-json --no-color`（NDJSON 事件流，`type:"result"` 终行，`--resume` 续跑），详见 §4.10 专项 | P2（**插件形态首批**） |
-| Trae | **查不到公开支持证据** | 官方文档/registry/agents 页均无 ACP；走 §4.10 插件形态预留，接入前须查证其 CLI headless 能力 | P2（调研前置） |
+| Trae | **ACP 支持（官方文档核实，未进 registry）** | `docs.trae.cn/cli_agent-client-protocol`：`traecli acp serve`（亦 `traecli --acp`）以 subprocess+stdio 供 ACP 客户端拉起（Zed 为官方集成示例）；`--permission-mode <default\|auto\|bypass_permissions>`；**硬门槛：仅 TRAE 企业版旗舰版可用，须 PAT 登录**；headless 降级通道 `traecli exec --json`（JSONL 事件流，schema 无公开文档须实测），详见 §4.10 专项 | P2（企业版前置） |
 
-> 备注：registry 另收录 Cursor、GitHub Copilot（public preview）、Cline、Goose、Kimi CLI、Qwen Code 等 51 个 agent，可作为后续扩编池。ZCode 虽不在 ACP registry，但其 headless CLI 已核实可插接（见上表与 §4.10 专项）。
+> 备注：registry 另收录 Cursor、GitHub Copilot（public preview）、Cline、Goose、Kimi CLI、Qwen Code 等 51 个 agent，可作为后续扩编池。ZCode 虽不在 ACP registry，但其 headless CLI 已核实可插接（见上表与 §4.10 专项）；Trae 支持 ACP 但未进 registry，且有企业旗舰版门槛（见 §4.10 专项）。
 
 ---
 
@@ -90,7 +90,7 @@ NeuacpMemberAdapter（新，neurova/agent/neuacp/）
    │    initialize → session/new → session/prompt（任务书文本）
    │    ← session/update（流式块/工具调用）→ emitter("content"/"reasoning")
    │    ← session/request_permission → requestRunApproval（审批链）
-   ├─ NeuacpPluginExecutor：行协议文本插件（ZCode 首批落地；Trae 待调研）
+   ├─ NeuacpPluginExecutor：行协议文本插件（ZCode，已核实可接）
    ▼
 session/prompt 返回 → 适配器返回 {"text": ...} → _extract_text
    ▼
@@ -110,7 +110,7 @@ neurova/agent/neuacp/     # 模块名经用户拍板（2026-11-19）：统一以
 ├── acp_client.py        # NeuacpClient：ACP v1 JSON-RPC over stdio 客户端（帧层复用 runner_bridge 骨架）
 ├── acp_executor.py      # NeuacpStdioExecutor：session/prompt/update/permission 映射
 ├── acp_member.py        # NeuacpMemberAdapter：swarm 成员鸭子面（chat/config.name/llm_client）
-├── plugin_executor.py   # NeuacpPluginExecutor：通用 CLI 行协议插件（P2，ZCode 首批；Trae 待调研）
+├── plugin_executor.py   # NeuacpPluginExecutor：通用 CLI 行协议插件（P2，ZCode）
 ├── catalog.py           # NeuacpCatalog：工具目录（内置七家预设 + 官方 registry 拉取缓存 + 本地命令探测）
 └── process_pool.py      # NeuacpProcessPool：外部代理进程池（按 tool+command+cwd 复用进程；session 每 run 一个）
 tests/unit/agent/neuacp/   # 单元测试（假 ACP agent 用测试内 stdio 子进程）
@@ -237,12 +237,12 @@ claude-code: ["npx", "@agentclientprotocol/claude-agent-acp"]   # 适配器，�
 codex      : ["npx", "@agentclientprotocol/codex-acp"]          # 适配器，需 Node
 qoder      : ["qoder", "--acp"]                 # 原生
 codebuddy  : ["npx", "@tencent-ai/codebuddy-code", "--acp"]    # 原生（npm 包启动参数 --acp）
-trae       : 未收录（插件形态预留，catalog 中标注 unsupported_acp=true）
+trae       : ["traecli", "acp", "serve"]     # ACP（官方文档核实；仅 TRAE 企业旗舰版，须 PAT 登录；未进 ACP registry）
 ```
 
 registry 拉取仅作**扩编发现**（新工具浮现时提示可加），不作为运行时事实源——运行时以名册 `executor.command` 为准（单一事实源：目录给默认值，名册给生效值）。
 
-### 4.10 插件形态（plugin_executor.py，ZCode 首批 / Trae 待调研）
+### 4.10 插件形态（plugin_executor.py，ZCode）与 Trae ACP 专项
 
 `NeuacpExecutor` 协议统一两种形态：
 
@@ -254,7 +254,7 @@ class NeuacpExecutor(Protocol):
     async def close(self) -> None: ...
 ```
 
-`NeuacpPluginExecutor` 约定（对无 ACP 但有 headless CLI 的工具）：spawn CLI 子进程，stdin 写任务文本，stdout 按行读 JSON 事件（`{"type":"chunk"|"tool"|"permission"|"done"|"error", ...}`），语义与 ACP 映射表（§4.4）一致。**这是接口预留，不是承诺**：Trae 具体接入前必须查证其 CLI 是否具备非交互/headless 模式与事件输出能力（P2 调研卡 T0）；查证不具备则如实登记「无法接入原因」，不硬造。
+`NeuacpPluginExecutor` 约定（对 ACP 不可用但有 headless CLI 的工具）：spawn CLI 子进程，stdin 写任务文本，stdout 按行读 JSON 事件（`{"type":"chunk"|"tool"|"permission"|"done"|"error", ...}`），语义与 ACP 映射表（§4.4）一致。插件形态现有一个已核实落地对象（ZCode，见下）与一个 ACP 降级备选（Trae，见 Trae 专项）。
 
 **ZCode 专项（插件形态首个落地对象，2026-11-19 官方文档与源码核实）**：
 
@@ -263,6 +263,12 @@ class NeuacpExecutor(Protocol):
 - 隔离红线（必须，因 headless `-p` 缺省即 `yolo` 权限档——非只读、非沙箱，且运行中无审批客户端，`ask` 类工具直接失败）：独立工作目录 + 每成员独立 `ZCODE_DATA_BASE_DIR` 数据根 + 环境变量白名单（复用 §4.3 机制）+ `--disallowed-tools` 收权；交互授权型 MCP 服务视为不批处理就绪，禁入。
 - 局限（诚实登记）：单向管道（prompt→事件流→result），**无运行中双向控制通道**——无法像 ACP 那样中途审批/改参。故 ZCode 成员若 `permission_mode=chain`，审批发生在**派活前**（任务书级审批），运行中不再逐工具打扰；其高风险性由隔离红线 + 产物核验 + 事后审计兜底。
 - 无官方 agent SDK / HTTP API：`@zcode/rpc`、app-server 为内部 IPC（无对外契约文档）；docs.z.ai 的 SDK 是 GLM 模型 API，与驱动 ZCode agent 无关，勿混淆。若未来 ACP registry 收录 ZCode 或官方发布 agent SDK，再升级接入形态（届时以本次核实的五处无证据点为基线复验）。
+
+**Trae 专项（2026-11-19 官方文档核实：ACP 可用，企业版门槛）**：
+
+- **主通道 = ACP**：`traecli acp serve`（等价 `traecli --acp`）以 subprocess+stdio 供本仓 ACP 客户端拉起，直接复用 §4.3/§4.4 的 `NeuacpClient`/`NeuacpStdioExecutor` 链路，**无需单独适配器**；权限经 `--permission-mode <default|auto|bypass_permissions>` 传入，本仓默认 `default`（`session/request_permission` 照映射审批链）。
+- **降级通道 = headless exec**：`traecli exec --json --sandbox workspace-write --ask-for-approval never -C <executor.cwd> "<任务>"`，stdout 收 JSONL 事件流、`-o` 落最终结果、`--output-schema` 约束结构化产出、`resume/fork` 续会话。**JSONL 事件 schema 与退出码均无公开文档**——接入前必须实测采样真实事件流，适配层对未知字段容错，不臆造字段。
+- **门槛与红线**：① TRAE CLI 2.0 / ACP **仅企业版旗舰版套餐可用**，且须 `TRAECLI_PERSONAL_ACCESS_TOKEN` + `traecli login --with-trae-pat` 登录（PAT 走凭据面按 `env_keys` 注入，不落名册）；② `-y/--yolo` 会同时跳过审批并**关闭沙箱**（文档自警仅限外部隔离环境）——本仓默认禁用，沙箱由 `-s/--sandbox workspace-write` 档位承担；③ headless 下审批必须显式落旗标（`-a never` + 沙箱档位），否则卡在人工审批；④ 未信任目录会**静默禁用**项目级配置/Hooks——`cwd` 须先过目录信任流程；⑤ 企业 OpenAPI 仅覆盖成员/用量/审计管理面，无任务驱动接口，不可作为接入面；⑥ `TRAECLI_HOST`/代理变量按 §4.3 白名单治理。
 
 ### 4.11 配置开关
 
@@ -287,7 +293,7 @@ class NeuacpExecutor(Protocol):
 
 改动：
 
-1. 名册列表改为读 `members_detail`（后端已返回），每行呈现：名称、角色、**执行体徽标**（内置 / `ACP·OpenCode` / `插件·Trae`；外部成员用主色描边徽标，颜色走 `var(--nr-primary-light)` 等令牌，禁硬编码色值）。
+1. 名册列表改为读 `members_detail`（后端已返回），每行呈现：名称、角色、**执行体徽标**（内置 / `ACP·OpenCode` / `ACP·Trae` / `插件·ZCode`；外部成员用主色描边徽标，颜色走 `var(--nr-primary-light)` 等令牌，禁硬编码色值）。
 2. 新增「移除成员」按钮 → `DELETE /teams/{id}/members/{member_id}`（后端 §4.1 同步新增）。
 3. 「添加成员」弹窗拆两档：**内置成员**（现状交互不变）与**外部编码代理**（新增表单，见 5.2）。
 
@@ -394,7 +400,7 @@ class NeuacpExecutor(Protocol):
 |----|------|------|
 | C1 | Qoder / CodeBuddy 接入（原生 `--acp`，catalog 预设 + 实测） | 本机安装对应 CLI |
 | C2 | SSH 远程 transport（隧道跑 stdio；key_ref 凭据面接线；remote 字段） | 凭据面按 agent_id 作用域取 SSH key |
-| C3 | **ZCode 插件接入**（`NeuacpPluginExecutor` 首个实现：stream-json NDJSON 解析/`type:"result"` 终行/`--resume` 续跑/隔离红线四件套）+ Trae 插件形态调研 | **ZCode 协议已核实可接（§4.10 专项）**；Trae **T0 调研先行**：Trae CLI 是否有 headless/非交互模式与结构化输出；无则登记不可接入原因 |
+| C3 | **ZCode 插件接入**（`NeuacpPluginExecutor` 首个实现：stream-json NDJSON 解析/`type:"result"` 终行/`--resume` 续跑/隔离红线四件套）+ **Trae ACP 接入**（`traecli acp serve` 复用 `NeuacpStdioExecutor` 链路；`exec --json` 作降级通道，事件 schema 实测采样后写适配） | ZCode 协议已核实（§4.10 专项）；Trae ACP 已核实但**仅企业旗舰版可用**——无账号则挂台账等条件成熟，凭据经 `env_keys` 注入 PAT |
 | C4 | 反向 MCP：本仓工具面经自建 MCP server 暴露给外部编码代理（复用 `mcp_ontology_server.py` 双鉴权先例） | 另批细化 |
 | C5 | ACP 远程 HTTP transport（RFD 定稿后） | 上游 v1 纳入远程传输 |
 
@@ -428,7 +434,7 @@ class NeuacpExecutor(Protocol):
 | D2 | 外部成员判定模型（验收/评审通道） | 甲：不提供 llm_client，验收/评审 skipped（诚实降级，交付物无第二道机审）；乙：适配器提供判定小模型通道（多一层质量闸，增加成本与复杂度） | **甲先行**，乙挂 P2 按需。影响面：验收门有效性 vs 成本 |
 | D3 | 外部成员可否入「固定团队」被主代理自主 dispatch | 甲：可以（名册即团队，统一待遇）；乙：仅限用户显式派活（主代理不能自发把任务交给外部代理） | **甲**（名册/审批/围栏已兜住）。影响面：spawn_subagent/dispatch_team 工具描述与治理面 |
 | D4 | `permission_mode=auto` 是否开放 | 甲：开放（admin 专属，仅 L0）；乙：首版只留 `chain`（全部过审批链，打扰多但零风险） | **乙**首版，甲视使用反馈再放。影响面：表单字段、审批打扰频率 |
-| D5 | 无 ACP 工具（ZCode/Trae）的接入口径 | 甲：插件形态接入——**ZCode 协议已核实可接**（`--prompt` + `stream-json`，§4.10 专项），Trae 仍待 T0 调研；乙：仅接 ACP 工具，ZCode/Trae 移除 | **甲**。影响面：`NeuacpPluginExecutor` 首版即需真落地（ZCode 为首个实践对象，含隔离红线），Trae 视调研结论 |
+| D5 | 特殊工具接入口径（ZCode 无 ACP / Trae 有企业版门槛） | 甲：ZCode 走插件形态（已核实可接，§4.10 专项）、Trae 走 ACP（已核实，`traecli acp serve`，仅企业旗舰版，无账号则挂台账）；乙：ZCode/Trae 均移出目标清单 | **甲**。影响面：`NeuacpPluginExecutor` 首版随 ZCode 真落地；Trae 是否进 P2 取决于企业旗舰版账号可用性 |
 | D6 | 外部代理用量/成本呈现 | 甲：台账标 `cost_source=external`、不计费不展示 token；乙：接各工具本地会话日志估算 token（各格式不一，成本高） | **甲**。影响面：成本台账口径 |
 
 ---
