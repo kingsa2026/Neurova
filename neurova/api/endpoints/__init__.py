@@ -266,6 +266,8 @@ ENDPOINT_MODULES = [
     ("neurova.api.endpoints.artifacts_api", "/v1/artifacts", "Artifacts API"),
     ("neurova.api.endpoints.tool_schema", "/v1/tools", "Tool Schema API"),
     ("neurova.api.endpoints.tool_layers", "/v1/tool-layers", "Tool Layers API"),
+    # B4：外部编码代理管理面（catalog / test / status，admin 门；设计文档 §4.7）
+    ("neurova.api.endpoints.external_agents_api", "/v1/external-agents", "External Agents API"),
     ("neurova.api.endpoints.skill_pool_api", "/v1/skill-pool", "Skill Pool API"),
     ("neurova.api.endpoints.skill_version_api", "/v1/skill-versions", "Skill Version API"),
     ("neurova.api.endpoints.text_evolution_api", "/v1/evolution", "Text Evolution API"),
