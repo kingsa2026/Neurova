@@ -22,6 +22,8 @@ import { ConfigManager } from '../libs/config/ConfigManager';
 import { pageMap } from '../routing/PageMap';
 import { ToastHost } from '../components/system/ToastHost';
 import { StarBackground } from '../components/glass';
+import { ShellPage } from './ShellPage';
+import { LoginPage } from './LoginPage';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 
 @Entry
@@ -33,6 +35,10 @@ struct Index {
   // 系统栏避让高度（EntryAbility 按设备实况写入 px；不同分辨率/挖孔/导航栏形态自适应）
   @StorageProp('appTopInsetPx') private topInsetPx: number = 0;
   @StorageProp('appBottomInsetPx') private bottomInsetPx: number = 0;
+  // Navigation 首页内容是否可见（栈空时可见）。真机反馈：任意页面按返回、
+  // 栈被弹空后会落到占位文本"空页面"——首页内容改为真实根页（Shell/Login），
+  // 系统返回把栈弹空时落到根页而不是占位符
+  @State homeActive: boolean = false;
 
   /**
    * 分发并确认落位。冷启动的 replace 可能早于 Navigation 装配完成而被静默丢弃
@@ -110,16 +116,33 @@ struct Index {
       // 星野铺满全窗（含状态栏/导航栏带）——边到边，上下不留白带
       StarBackground({ starCount: 80, twinkle: true })
       Navigation(this.router.getNavStack()) {
-        Column() {
-          Text('Neurova')
-            .fontSize(18)
-            .opacity(0.6)
+        if (this.homeActive) {
+          // 首页内容 = 真实根页：栈被系统返回弹空时落到这里，不再出现无导航的空页面
+          Column() {
+            if (this.authStore.isAuthenticated) {
+              ShellPage()
+            } else {
+              LoginPage()
+            }
+          }
+          .width('100%')
+          .height('100%')
+        } else {
+          // 栈非空时首页不可见；保留品牌占位（冷启动 dispatch 落位前的短暂窗口）
+          Column() {
+            Text('Neurova')
+              .fontSize(18)
+              .opacity(0.6)
+          }
+          .width('100%')
+          .height('100%')
+          .justifyContent(FlexAlign.Center)
         }
-        .width('100%')
-        .height('100%')
-        .justifyContent(FlexAlign.Center)
       }
       .navDestination(this.destBuilder)
+      .onNavBarStateChange((visible: boolean) => {
+        this.homeActive = visible;
+      })
       .hideTitleBar(true)
       .mode(NavigationMode.Stack)
       .width('100%')

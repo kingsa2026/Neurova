@@ -231,8 +231,12 @@ export class Router {
     return true;
   }
 
-  /** 返回上一页 */
+  /** 返回上一页（栈仅剩根页时不再弹出——防弹空落到无导航占位页） */
   back(): void {
+    if (this.navStack.size() <= 1) {
+      this.logger.info('Router', 'back at root — no-op');
+      return;
+    }
     this.navStack.pop();
     this.logger.info('Router', 'back');
   }
