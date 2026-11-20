@@ -10,12 +10,24 @@ Audio API - 音频端点
 """
 
 import base64
+import json
 from neurova.core.logger import get_logger
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -479,6 +491,7 @@ async def audio_status(current_user: Dict[str, Any] = Depends(get_current_user))
         "data": {
             "tts": tts_stats,
             "asr": asr_stats,
+            "streaming_asr": _streaming_asr_status(),
             "timestamp": time.time(),
         },
     }
@@ -577,3 +590,190 @@ async def local_whisper_consent(
             "status": asr_manager.get_consent_status(),
         },
     }
+
+
+# ── 流式 ASR WebSocket（B4-1：实时听写通道，turn 终结在服务端） ──────────
+
+_ASR_STREAM_MAX_FRAME_BYTES = 1 << 20        # 单帧上限 1MiB（20ms@16k 仅 640B，余量大）
+_ASR_STREAM_MAX_TOTAL_MS = 15 * 60 * 1000    # 单连接累计音频上限 15 分钟
+_ASR_STREAM_LANGUAGES = ("zh", "en")         # 流式引擎支持的语言（paraformer-zh-streaming 中英混合）
+
+
+def _streaming_asr_status() -> Dict[str, Any]:
+    """流式 ASR 可用性轻探测（不实际加载模型，status 面不做重活）。
+
+    funasr 在依赖里 → 真流式可用；否则看批式引擎链是否就绪（滑窗适配）。
+    """
+    import importlib.util
+
+    try:
+        funasr_available = importlib.util.find_spec("funasr") is not None
+    except Exception:
+        funasr_available = False
+    asr_manager = _get_asr_manager()
+    batch_ready = bool(asr_manager) and bool(getattr(asr_manager, "is_initialized", False))
+    return {
+        "available": bool(funasr_available or batch_ready),
+        "funasr": funasr_available,
+        "batch_ready": batch_ready,
+    }
+
+
+def _create_streaming_session(language: str) -> Tuple[Any, str]:
+    """选流式会话引擎：FunASR 流式优先；否则批式引擎滑窗适配。
+
+    返回 (session|None, engine_label|None)；无任何可用引擎 → (None, None)。
+    """
+    try:
+        from neurova.asr import streaming
+    except Exception as e:
+        logger.warning("流式 ASR 模块加载失败: %s", e)
+        return None, ""
+
+    funasr_session = streaming.create_funasr_streaming_session(language)
+    if funasr_session is not None:
+        return funasr_session, "funasr-streaming"
+
+    asr_manager = _get_asr_manager()
+    if asr_manager is not None and getattr(asr_manager, "is_initialized", False):
+        label = "batch:" + (asr_manager.get_engine_name() or "unknown")
+        return (
+            streaming.BatchTranscribeStreamingTurnSession(
+                asr_manager.transcribe, language=language
+            ),
+            label,
+        )
+    return None, ""
+
+
+@router.websocket("/asr/stream")
+async def asr_stream(websocket: WebSocket, token: str = Query(default=""), language: str = Query(default="zh")):
+    """实时听写 WebSocket。
+
+    鉴权与收尾对齐 session_sync/console 的 WS 惯例：?token=<JWT>，失败
+    accept 后 close 4401——未 accept 直接 close 会被 uvicorn 以握手 403
+    拒绝，客户端无法区分鉴权失败与网络故障。
+    ?language=zh|en 选择识别语言（缺省 zh；非法值回落 zh）。
+
+    协议：
+    - 客户端→服务端：二进制帧 = PCM16LE 单声道 16kHz 原始字节；
+      文本帧 JSON 控制指令 {"type":"finish"}（终结当前轮）、
+      {"type":"stop"}（终结并关闭）、{"type":"ping"}。
+    - 服务端→客户端：{"type":"ready","engine":...}、
+      {"type":"partial","text":...,"turn_id":n}、
+      {"type":"final","text":...,"turn_id":n,"reason":"silence|max_duration|finish|stop"}、
+      {"type":"error","code":...,"message":...}、{"type":"pong"}。
+    - 服务端 turn 终结：说话 ≥300ms 后静默 ≥700ms 自动切轮；单轮 ≥60s 强切。
+    """
+    from neurova.api.auth import verify_access_token
+
+    payload = verify_access_token(token) if token else None
+    if not payload:
+        await websocket.accept()
+        await websocket.close(code=4401, reason="unauthorized")
+        return
+    lang = language if language in _ASR_STREAM_LANGUAGES else "zh"
+
+    await websocket.accept()
+    session = None
+    detector = None
+    engine_label = ""
+    turn_id = 0
+    last_partial = ""
+    total_ms = 0.0
+
+    async def _end_turn(reason: str) -> None:
+        nonlocal session, detector, last_partial, turn_id
+        if session is None:
+            return
+        final_text = await session.finish()
+        await websocket.send_json(
+            {"type": "final", "text": final_text, "turn_id": turn_id, "reason": reason}
+        )
+        session.close()
+        session = None
+        detector.reset()
+        last_partial = ""
+        turn_id += 1
+
+    try:
+        session, engine_label = _create_streaming_session(lang)
+        if session is None:
+            await websocket.send_json(
+                {"type": "error", "code": "asr_unavailable", "message": "ASR 引擎未就绪"}
+            )
+            await websocket.close(code=1000, reason="asr unavailable")
+            return
+        from neurova.asr import streaming
+
+        detector = streaming.TurnEndpointDetector()
+        await websocket.send_json({"type": "ready", "engine": engine_label})
+
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+
+            data = message.get("bytes")
+            if data:
+                if len(data) > _ASR_STREAM_MAX_FRAME_BYTES:
+                    await websocket.send_json(
+                        {"type": "error", "code": "frame_too_large", "message": "音频帧过大"}
+                    )
+                    break
+                total_ms += (len(data) // 2) / 16.0
+                if total_ms > _ASR_STREAM_MAX_TOTAL_MS:
+                    await websocket.send_json(
+                        {"type": "error", "code": "too_long", "message": "单连接音频超上限"}
+                    )
+                    break
+                if session is None:
+                    # 轮间重建（引擎可能恢复）；仍不可用则如实报错
+                    session, engine_label = _create_streaming_session(lang)
+                    if session is None:
+                        await websocket.send_json(
+                            {"type": "error", "code": "asr_unavailable", "message": "ASR 引擎未就绪"}
+                        )
+                        break
+                text = await session.feed(data)
+                if text and text != last_partial:
+                    last_partial = text
+                    await websocket.send_json(
+                        {"type": "partial", "text": text, "turn_id": turn_id}
+                    )
+                if detector.feed(data):
+                    await _end_turn(detector.end_reason or "silence")
+                continue
+
+            text_frame = message.get("text")
+            if text_frame:
+                try:
+                    control = json.loads(text_frame)
+                except json.JSONDecodeError:
+                    await websocket.send_json(
+                        {"type": "error", "code": "bad_frame", "message": "控制帧不是合法 JSON"}
+                    )
+                    continue
+                ctype = control.get("type")
+                if ctype == "finish":
+                    await _end_turn("finish")
+                elif ctype == "stop":
+                    await _end_turn("stop")
+                    break
+                elif ctype == "ping":
+                    await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.warning("流式 ASR 连接异常: %s", e)
+        try:
+            await websocket.send_json({"type": "error", "code": "internal", "message": str(e)})
+        except Exception:
+            pass
+    finally:
+        if session is not None:
+            session.close()
+        try:
+            await websocket.close()
+        except Exception:
+            pass

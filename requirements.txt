@@ -68,6 +68,12 @@ sentencepiece>=0.2.0
 # Edge TTS (online fallback)
 edge-tts>=6.1.0
 
+# FunASR ASR (local batch + streaming inference; neurova/asr/funasr_engine.py、
+# neurova/asr/streaming.py)。funasr 无 torchaudio 时需 kaldi-native-fbank 作
+# fbank 后端（缺任一则 generate 期报错，流式/批式识别整链不可用）
+funasr>=1.4.27
+kaldi-native-fbank>=1.23.3
+
 # Embedding (ONNX-based local inference)
 sentence-transformers>=2.2.0
 transformers>=4.20.0
