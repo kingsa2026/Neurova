@@ -6,8 +6,8 @@
 
 | 文档术语 | 实际代码类/方法 | 文件位置 |
 |---------|---------------|---------|
-| `TimePatternDetector`（时间模式识别） | `TemporalKnowledgeGraph`（时序知识图谱引擎，管理带时间窗口的事实） | `neurova/cognitive_layers/memory_layer/temporal_knowledge_graph.py` |
-| `TimeEventPredictor`（时间事件预测） | `TemporalKGMemoryBridge`（时序知识图谱与记忆系统的桥梁，负责事实提取与关联） | `neurova/cognitive_layers/memory_layer/temporal_knowledge_graph.py` |
+| `TimePatternDetector`（时间模式识别） | `TemporalReasoner`（:112，时序推理） | `neurova/cognitive_layers/memory_layer/temporal_reasoner.py` |
+| `TimeEventPredictor`（时间事件预测） | 时效事实的权威在知识底座侧 `TemporalFactReader`（:65）；`agent/chat_pipeline.py:334-336` 注明旧装配 `TemporalKGMemoryBridge(TemporalKnowledgeGraph())` 已替换（旧类与 `temporal_knowledge_graph.py` 均已不存在） | `neurova/knowledge/foundation/temporal_facts.py`、`neurova/agent/chat_pipeline.py` |
 
 实际实现以代码为准。
 
@@ -643,6 +643,8 @@ class TimeAwareRetriever:
 ## 6. 数据库设计
 
 ### 6.1 时间相关表
+
+> ⚠️ 2026-11-19 核对：`time_patterns`（init_db.py:286）与 `time_event_reminders`（init_db.py:301）在种子蓝图有 DDL，但当前无任何运行时消费方（全仓仅 init_db.py 自身引用）；`memory_time_tags` 表不存在（蓝图与运行时均无）。以下 DDL 为设计稿。
 
 ```sql
 -- 时间模式表

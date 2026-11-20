@@ -6,9 +6,9 @@
 
 | 文档术语 | 实际代码类/方法 | 文件位置 |
 |---------|---------------|---------|
-| `SQLiteVectorStore` / `FAISSVectorStore` | `TFIDFBackend`（TF-IDF后备）/ `FaissBackend`（FAISS加速）/ `ChromaDBBackend`（ChromaDB） | `neurova/cognitive_layers/memory_layer/vector_search_advanced.py` |
-| 统一向量存储接口 | `VectorSearchBackend`（抽象基类） | `neurova/cognitive_layers/memory_layer/vector_search_advanced.py` |
-| 检索协调器 (Retrieval Coordinator) | `AdvancedVectorSearch`（统一接口，自动选择最优后端） | `neurova/cognitive_layers/memory_layer/vector_search_advanced.py` |
+| `SQLiteVectorStore` / `FAISSVectorStore` / `ChromaDBBackend` / `TFIDFBackend` / `FaissBackend` / `VectorSearchAdvanced` 等分后端类 | **未实现**——实际为单一 `UnifiedVectorStore`（:193），内置后端 tfidf/fastembed/faiss/onnx，`auto` 时按 faiss→fastembed→onnx→tfidf 顺序探测（`_select_backend` :242-269） | `neurova/cognitive_layers/memory_layer/unified_vector_store.py` |
+| 统一向量存储接口 | `UnifiedVectorStore`（:193） | `neurova/cognitive_layers/memory_layer/unified_vector_store.py` |
+| 检索协调器 (Retrieval Coordinator) | `SemanticSearch`（:21）；向量嵌入用 `ONNXEmbeddingEngine`（:239） | `neurova/cognitive_layers/memory_layer/semantic_search.py`、`neurova/embedding/onnx_embedding.py` |
 
 实际实现以代码为准。
 
@@ -753,6 +753,8 @@ class RetrievalCoordinator:
 ## 6. 数据库设计
 
 ### 6.1 向量存储表
+
+> ⚠️ `retrieval_logs` 表未建表（2026-11-19 核对：全仓代码零命中，无该表 DDL 与读写）。以下 DDL 为设计稿。
 
 ```sql
 -- 向量嵌入表

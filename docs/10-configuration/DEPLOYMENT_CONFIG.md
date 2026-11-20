@@ -18,7 +18,8 @@ Neurova 同一套后端服务有三种交付形态，它们必须共享同一份
 - **后端资源**：requests `500m` / `1Gi`，limits `2000m` / `4Gi`
 - **运行时**：Python 3.12（受保护子集自 Issue #301 起只跑这一腿，跑的就是本镜像的
   解释器；版本事实源是 `Dockerfile` 的 `FROM python:`，判据见
-  `tests/unit/ci/test_unit_tests_single_leg.py`）、Node 20（与 CI 一致）
+  `tests/unit/ci/test_unit_tests_single_leg.py`）、Node 22（与 CI 一致；2026-11-19 核对：
+  `.github/workflows/ci.yml` 与 `.github/workflows/cost-guards.yml` 均 pin `22`）
 - **版本**：`Chart.appVersion` == `neurova/__init__.py::__version__`；
   镜像 `tag` 留空跟随 appVersion（不要写死 `latest`）
 - **持久化**：`database.persistence.enabled=true` 时数据卷必须是 PVC

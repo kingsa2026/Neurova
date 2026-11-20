@@ -1,5 +1,7 @@
 # 记忆温度机制架构设计
 
+> ⚠️ **2026-11-19 核对**：新记忆默认温度实际为 **65.0**（`cognitive_layers/memory_layer/manager.py:1848`，`settings_config.py:142` 同值；运行时 DDL 列默认仍为 100.0，见 `manager.py:603`）。§2 公式为早期版本，现实现含饱和因子/连击倍率/关联保护等（`temperature.py:179-353`），以代码为准。
+
 ## 1. 概述
 
 ### 1.1 设计理念
@@ -70,7 +72,7 @@ T(t) = T_base + ΔT_hit + ΔT_emotion + ΔT_relation + ΔT_decay
 
 其中:
   T(t)        = 当前温度
-  T_base      = 基础温度 (默认 50°C)
+  T_base      = 基础温度 (默认 65.0)
   ΔT_hit      = 命中升温
   ΔT_emotion  = 情感加成
   ΔT_relation = 关联加成
@@ -111,7 +113,7 @@ def on_access(cls, current_temp: float,
 
 **升温示例**:
 ```
-初始温度: 50°C，重要性: 0.5，回忆次数: 0
+初始温度: 50°C（示例按旧稿 50°C 演示；现行新记忆默认 65.0），重要性: 0.5，回忆次数: 0
 第 1 次访问: 50 + 10 * 0.5 + 0 = 55°C
 第 2 次访问: 55 + 10 * 0.5 + 0 = 60°C
 第 3 次访问 (回忆次数+1): 60 + 10 * 0.5 + 2 = 67°C
@@ -485,7 +487,7 @@ class TemperatureEngine:
 ```
                 ┌─────────────────────────────────────┐
                 │                                     │
-                ▼  创建 (默认50°C)                    │
+                ▼  创建 (默认65.0)                    │
             ┌────────┐                                │
             │ ACTIVE │                                │
             │ ≥60°C  │                                │
@@ -513,6 +515,8 @@ class TemperatureEngine:
 ```
 
 ### 3.2 自动衰减调度器
+
+> ⚠️ `TemperatureDecayScheduler` 类未实现。实际衰减由 `cognitive_layers/memory_layer/manager.py:3712` 的 `run_decay_cycle()` 执行，内部走 `TemperatureEngine.on_decay`（`temperature.py:203`）。以下为设计稿。
 
 ```python
 class TemperatureDecayScheduler:
@@ -825,6 +829,8 @@ def apply_relation_protection(memory: Memory) -> float:
 ```
 
 ### 6.3 用户手动标记
+
+> ⚠️ `is_pinned` 未实现（2026-11-19 核对：全仓无该列/字段）。以下为设计稿。
 
 ```sql
 -- 用户可手动标记重要记忆 (永久保护)

@@ -1,5 +1,7 @@
 # 数据读写缓存机制架构设计
 
+> ⚠️ **状态说明（2026-11-19 核对）**：本文档为早期设计稿，文中多数机制未按此实现或已由其他架构取代。现行实际实现见：`neurova/core/cache.py`（`MemoryCache` :74）、`neurova/cognitive_layers/memory_layer/conversation_buffer.py`（`MemoryWriteQueue` :224，写入阈值 128KB/180s，见 :58）、`neurova/cognitive_layers/memory_layer/muscle_memory.py`（L1/L2 肌肉记忆，`MuscleMemory` :181）。逐节修订前请以代码为准。
+
 ## 1. 概述
 
 ### 1.1 设计目标
@@ -9,7 +11,7 @@
 - **减少数据库写操作**: 通过内存缓存批量写入,降低 I/O 频率
 - **加速上下文读取**: 优先从内存缓存加载,避免重复数据库查询
 - **保证数据完整性**: 确保会话内容完整写入,不截断关键对话
-- **智能触发写入**: 基于容量阈值(256KB)或时间超时(180秒)自动批量写入
+- **智能触发写入**: 基于容量阈值(128KB)或时间超时(180秒)自动批量写入
 - **高效缓存淘汰**: 自动清理过期/低优先级缓存,控制内存占用
 
 ### 1.2 缓存架构定位
@@ -278,7 +280,7 @@ class FlushBatch:
         return 0
     
     def should_flush_by_size(self, threshold_bytes: int = 262144) -> bool:
-        """检查是否达到大小阈值 (256KB = 262144 bytes)"""
+        """检查是否达到大小阈值 (128KB = 131072 bytes)"""
         return self.total_size_bytes >= threshold_bytes
     
     def should_flush_by_timeout(self, timeout_seconds: int = 180) -> bool:
@@ -328,7 +330,7 @@ class WriteCacheManager:
         self.config = config or {}
         
         # 配置参数
-        self.size_threshold = self.config.get('size_threshold', 262144)  # 256KB
+        self.size_threshold = self.config.get('size_threshold', 131072)  # 128KB
         self.timeout_seconds = self.config.get('timeout_seconds', 180)  # 180秒
         
         # 当前批次
@@ -1628,7 +1630,7 @@ cache:
     enabled: true
     
     # 触发阈值
-    size_threshold: 262144  # 256KB
+    size_threshold: 131072  # 128KB
     timeout_seconds: 180    # 180秒
     
     # 强制刷入限制
@@ -1714,7 +1716,7 @@ agent:
    添加到当前批次
         ↓
    检查触发条件
-   ├─ 大小 >= 256KB?
+   ├─ 大小 >= 128KB?
    ├─ 空闲 >= 180秒?
    └─ 会话完整?
         ↓

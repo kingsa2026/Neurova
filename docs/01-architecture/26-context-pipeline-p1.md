@@ -1,6 +1,6 @@
 # 上下文管线 P1-1
 
-> 状态: 🟡 部分实现 · 版本: v1.0.0-beta1 · 代码: `neurova/context/` + `context_pool.py`
+> 状态: ✅ 已实现 · 版本: v1.0.0-beta1 · 代码: `neurova/context/` + `context_pool.py`
 
 ## 概述
 

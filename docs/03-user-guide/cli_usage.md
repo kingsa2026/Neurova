@@ -16,7 +16,7 @@ Neurova REPL 是智星（Neurova）的命令行交互客户端，直连后端 `/
 - **记忆与知识库**：查看/保存记忆、知识条目的增查删、混合检索
 - **系统诊断**：健康检查、资源统计、系统事件日志、进程概览
 - **Agent / LLM**：管理 Agent、切换服务商与模型
-- **输入体验**：方向键上下历史回填（持久化到 `~/.neurova_repl_history`）、Tab 前缀补全、行尾 `\` 续行
+- **输入体验**：方向键上下历史回填（持久化到数据根 `cli/repl_history` 落点；旧家目录文件 `~/.neurova_repl_history` 在存在时自动收养迁移，见 `cli.py:69-87`）、Tab 前缀补全、行尾 `\` 续行
 
 ## 2. 启动
 
@@ -110,4 +110,4 @@ $ python cli.py
 - **登录失败**：默认用户不生效（admin/admin 不通用），用你自己的账号或 `/login`；普通用户对未配置的 provider 显示空列表是设计行为，不是故障。
 - **`/logs` 显示 NORMAL 级别**：后端事件日志的级别字段为业务 NORMAL，用 `/logs level ERROR` 无法过滤到业务行时属预期（`/api/v1/logs/levels` 查询全量级别）。
 - **磁盘占用提示**：命令执行报 "No space left on device" 时，先清理磁盘（如删除大缓存/安装镜像），否则 REPL 与测试都会受影响。
-- **无 rich**：运行 `pip install "rich>=15"`（requirements.txt 已声明）。
+- **无 rich**：运行 `pip install "rich>=13.0"`（requirements.txt:145 已声明）。

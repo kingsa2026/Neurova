@@ -9,7 +9,7 @@
 - ✅ **Universal Cost Ledger**: 所有 LLM 调用必须记账
 - ✅ **Big-brain Model Guard**: 仅允许 agent turn 使用昂贵模型
 - ✅ **Hourly Rollup**: 性能优化的成本聚合表
-- ✅ **Budget & Alerting**: 实时预算监控和告警
+- ⏳ **Budget & Alerting**: 未实施（Phase 3）——实时预算监控和告警为设计目标（2026-11-19 核对）
 
 ---
 
@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS llm_calls_daily_agg (
 
 **Purpose**: 防止在非关键路径使用昂贵模型（如 gpt-4, claude-3-opus）
 
-**Implementation Location**: `scripts/guard-big-brain.mjs`
+**Implementation Location**: `scripts/guard-big-brain.cjs`（2026-11-19 核对）
 
 **Rules**:
 ```javascript
@@ -186,7 +186,7 @@ def classify_message(message):
 
 **Purpose**: 确保所有 LLM 调用都记录到 `llm_calls` 表
 
-**Implementation Location**: `scripts/guard-llm-tracked.mjs`
+**Implementation Location**: `scripts/guard-llm-tracked.cjs`（2026-11-19 核对）
 
 **Rules**:
 ```javascript
@@ -261,6 +261,11 @@ CREATE INDEX CONCURRENTLY idx_messages_created_at ON messages(created_at);
 ---
 
 ### 3. Cost Budget & Alerting System
+
+> **状态（2026-11-19 核对）：Phase 3 未实施。** 下述 `neurova/config/cost_budgets.py`
+> 与 `neurova/services/cost_monitor.py` 均未创建，本节是设计稿而非已落地代码；
+> 已落地的只有记账表（`llm_calls` / `llm_calls_rollup`，见 `neurova/models/cost_store.py`）
+> 与 CI 门禁（`.github/workflows/cost-guards.yml`）。
 
 #### Budget Configuration
 
@@ -363,8 +368,8 @@ class CostMonitor:
 
 ### Phase 2: Architecture Guards (2 人日)
 
-- [ ] Implement `guard-big-brain.mjs`
-- [ ] Implement `guard-llm-tracked.mjs`
+- [ ] Implement `guard-big-brain.cjs`
+- [ ] Implement `guard-llm-tracked.cjs`
 - [ ] Integrate with CI pipeline
 - [ ] Add pre-commit hooks
 - [ ] Write tests

@@ -27,7 +27,7 @@ neurova/collaboration/neurflow/
 ├── subflow.py                # 子工作流（深度限制 + 防环）
 ├── storage.py                # 工作流存储（定义级版本快照）
 ├── triggers.py               # 触发器（Cron + Webhook）
-├── webhook_security.py       # Webhook HMAC-SHA256 签名验证
+├── webhook_ingress.py        # Webhook 入站触发（HMAC-SHA256 校验实现在 neurova/core/webhook_security.py）
 ├── agent_manager.py          # Agent 编译与派发
 ├── adapters.py               # 适配器
 ├── nl_designer.py            # 自然语言设计（DSL 解析）

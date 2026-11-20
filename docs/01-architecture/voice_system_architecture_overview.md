@@ -154,22 +154,38 @@ ASRMemoryRecord:
 ```
 
 #### 记忆检索通道权重
+
+> （2026-11-19 核对）通道权重**不是固定一张表**：NeurovaRecallEngine 按
+> `INTENT_CHANNEL_WEIGHTS[查询意图][通道]` 随查询意图动态取值，
+> 具体数值以 `neurova/cognitive_layers/memory_layer/neurova_recall.py` 为准。
+
 ```python
-# NeurovaRecallEngine 通道权重
-_channel_weights = {
-    RecallChannel.SEMANTIC: 0.30,    # 语义检索
-    RecallChannel.EPISODIC: 0.25,    # 情景检索
-    RecallChannel.PROCEDURAL: 0.20,  # 程序检索
-    RecallChannel.VOICE: 0.10,       # 语音检索 ← 新增
-    RecallChannel.TEMPORAL: 0.15,    # 时序检索
+# NeurovaRecallEngine.INTENT_CHANNEL_WEIGHTS（按查询意图动态取值，全量照抄）
+INTENT_CHANNEL_WEIGHTS = {
+    QueryIntent.FACTUAL:     {TEMPERATURE: 0.20, TEXT: 0.40, CATEGORY: 0.20, GRAPH: 0.10, EMOTION: 0.05, VOICE: 0.05},
+    QueryIntent.TEMPORAL:    {TEMPERATURE: 0.50, TEXT: 0.15, CATEGORY: 0.10, GRAPH: 0.10, EMOTION: 0.10, VOICE: 0.05},
+    QueryIntent.CAUSAL:      {TEMPERATURE: 0.10, TEXT: 0.15, CATEGORY: 0.10, GRAPH: 0.50, EMOTION: 0.10, VOICE: 0.05},
+    QueryIntent.COMPARATIVE: {TEMPERATURE: 0.10, TEXT: 0.25, CATEGORY: 0.35, GRAPH: 0.15, EMOTION: 0.10, VOICE: 0.05},
+    QueryIntent.EXPLORATORY: {TEMPERATURE: 0.20, TEXT: 0.25, CATEGORY: 0.15, GRAPH: 0.20, EMOTION: 0.10, VOICE: 0.10},
+    QueryIntent.UNKNOWN:     {TEMPERATURE: 0.25, TEXT: 0.30, CATEGORY: 0.15, GRAPH: 0.10, EMOTION: 0.10, VOICE: 0.10},
 }
+# 通道枚举 RecallChannel：TEMPERATURE(温度/热记忆) TEXT(文本语义) CATEGORY(同类别)
+#                     GRAPH(关系图谱) EMOTION(情感) VOICE(语音转写)
 ```
+
+早期设计稿的概念通道说明（保留）：SEMANTIC（语义检索）/ EPISODIC（情景检索）/
+PROCEDURAL（程序检索）/ TEMPORAL（时序检索）为概念层划分；现实现 `RecallChannel`
+为 TEMPERATURE / TEXT / CATEGORY / GRAPH / EMOTION / VOICE 六通道，概念通道的检索
+能力由这些通道按意图加权组合承担。原 TEMPORAL 通道已更名为 `TEMPERATURE`
+（TEMPORAL 在现实现中是查询意图 `QueryIntent.TEMPORAL`，不再是通道名）。
+VOICE 通道权重：多数意图下 0.05，EXPLORATORY / UNKNOWN 意图下 0.10
+（每个意图下六通道权重总和为 1.0）。
 
 ### 3.2 与工具层的集成
 
 #### 工具 Schema 注册
 ```python
-# builtin_tools.py 中的语音工具
+# builtin_tools.py 中的语音工具（2026-11-19 核对：engine 为自由字符串，无 enum 约束）
 _BUILTIN_SCHEMAS = {
     "asr_transcribe": {
         "description": "将音频转写为文本",
@@ -177,7 +193,7 @@ _BUILTIN_SCHEMAS = {
             "properties": {
                 "audio_data": {"type": "string", "description": "Base64编码的音频数据"},
                 "language": {"type": "string", "description": "语言代码，默认zh"},
-                "engine": {"type": "string", "enum": ["whisper", "google", "azure"], "description": "ASR引擎"},
+                "engine": {"type": "string", "description": "ASR 引擎（如 funasr, whisper, auto），默认 auto"},
             },
             "required": ["audio_data"],
         },
@@ -188,7 +204,7 @@ _BUILTIN_SCHEMAS = {
             "properties": {
                 "text": {"type": "string", "description": "要合成的文本"},
                 "voice": {"type": "string", "description": "音色名称"},
-                "engine": {"type": "string", "enum": ["edge", "azure", "openai"], "description": "TTS引擎"},
+                "engine": {"type": "string", "description": "TTS 引擎（如 edge-tts, moss-nano, auto），默认 auto"},
             },
             "required": ["text"],
         },
@@ -282,7 +298,7 @@ emotion_content = f"语音情感状态: {primary_emotion} (强度: {confidence:.
 | **情感感知进化** | 3 | ✅ 通过 | 情感记录、中性情感处理、上下文注入 |
 | **端到端语音对话** | 5 | ✅ 通过 | 模块导入、方法存在、数据类、统计、单例 |
 
-**总计：22/22 测试通过**
+语音域测试见 `tests/unit/voice/` 与 `tests/unit/test_voice_pipeline_assembly_honest.py`（2026-11-19 核对）。
 
 ### 4.2 闭环验证数据流
 

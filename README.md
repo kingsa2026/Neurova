@@ -1344,7 +1344,7 @@ GET /api/v1/context/inject/hot
 #### 边界（诚实声明）
 
 - 企业源 NL2SQL 问数由 `NEUROVA_NL2SQL_ENABLED` 门控，默认关（403）；
-- 企业源真实连接器（DB/ERP API/事件流）另行立项，当前仅有描述符校验；
+- 企业源连接器已落地：SQL 只读直连（PostgreSQL/MySQL/MSSQL/Oracle/SQLite）、金蝶/用友 ERP REST、文件（csv/tsv/json/jsonl）、湖仓（Unity Catalog/Snowflake/SAP OData）、HTTP 拉取、企微/微信聊天存档；默认逐源关闸（`enabled` 缺省关，仅 admin 可启），`event_stream` 连接器与 MES/CRM 专属适配另行立项（见 `docs/04-plans/2026-11-19-enterprise-datasource-mcp-plan.md`）；
 - SPARQL/rdflib 互操作为可选测试对拍，生产路径惰性 + fail-soft，零第三方运行时依赖。
 
 > **设计理念**：让 Agent 的业务知识"有 schema、有版本、有审计、可推理"——不是一个装三元组的桶，而是一个可查询、可校验、可推演、可追溯的**可运行世界模型**。

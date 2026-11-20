@@ -8,13 +8,15 @@ Neurova 是一个功能完整的 AI Agent 框架，版本 v1.0.0-beta1 (CogArch 
 |------|-----|
 | 后端语言 | Python 3.10+ |
 | 前端框架 | Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue |
-| Python 文件数 | ~700 |
-| 测试文件数 | 846 |
-| 前端页面组件 | 60 |
-| API 端点 | 82 |
+| Python 文件数 | 1188（2026-11-19 现读） |
+| 测试文件数 | 2817（2026-11-19 现读） |
+| 前端页面组件 | 67（`NeurUI/src/pages/*.vue` 顶层，2026-11-19 现读） |
+| API 端点 | 122 个文件（`neurova/api/endpoints/*.py`，其中路由模块 121） |
 | 通信渠道 | 14 种 |
 
 ## 当前项目结构
+
+> ⚠️ 以下目录树为 2026-05 快照，个别文件已移址或不存在（如 `context/orchestrator.py`、`evolution/genetic_engine.py`、`tool_lifecycle.py`、`nl_synthesizer.py`；`channels/` 下并无 `websocket.py` 与 `mobile_pairing.py`，移动配对实际在 `channels/qrcode_auth.py`，见 03 号文档），以仓库现状为准。
 
 ```
 Neurova/
@@ -96,7 +98,7 @@ Neurova/
 ├── neurova/security/                 # 安全模块
 ├── neurova/admin/                    # 管理模块
 ├── neurova/auth/                     # 认证授权
-├── neurova/api/                      # RESTful API (115 个路由模块，2026-11-19 现读)
+├── neurova/api/                      # RESTful API (endpoints/ 下 122 个 .py，其中路由模块 121，2026-11-19 现读)
 │   ├── app.py                        # FastAPI 应用
 │   └── endpoints/                    # API 端点实现
 │       ├── agent.py                  # Agent 管理
@@ -112,7 +114,7 @@ Neurova/
 │
 ├── neuUI/                            # 前端 (Vue 3 + TypeScript)
 │   ├── src/
-│   │   ├── pages/                    # 82 个页面组件
+│   │   ├── pages/                    # 67 个页面组件（顶层 .vue）
 │   │   │   ├── ChatPage.vue          # 聊天页面 (47KB)
 │   │   │   ├── DashboardPage.vue     # 仪表盘
 │   │   │   ├── SettingPage.vue       # 设置页面
@@ -218,7 +220,7 @@ Agent 类是系统的心脏，通过深度模块化模式逐步拆分：
 支持 14 种平台接入：飞书、钉钉、企业微信、微信、Telegram、Discord、QQ、MQTT、WebSocket、SIP、Webhook、移动设备（QR码配对）
 
 ### 前端 (`neuUI/`)
-Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue，82 个页面组件：
+Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue，67 个页面组件：
 - **核心**: ChatPage (47KB), DashboardPage, SettingPage, WorkflowPage (50KB)
 - **Agent 管理**: 15 个页面 (Form/List/Skill/Sleep/Channel/...)
 - **运维**: Monitor, Health, Audit, Security, Firewall

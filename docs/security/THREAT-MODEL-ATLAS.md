@@ -84,7 +84,7 @@
 |----|------|--------|------|-----------|
 | T-401 | SQLite 并发损坏（跨进程/线程写） | M | ✅ | threading.RLock 咽喉 + tmp+os.replace 原子写（session JSON）+ .corrupt-*.bak 隔离 |
 | T-402 | 渠道入站消息重启丢失（可用性） | M | 🚫 | 入站内存态 |
-| T-403 | 备份/恢复引入恶意产物 | M | ✅ | BackupOrchestrator Ed25519 签名 + trust.py 校验 |
+| T-403 | 备份/恢复引入恶意产物 | M | ✅ | BackupOrchestrator HMAC-SHA256 签名（signature 格式 `hmac-sha256-v1:<hex>`，见 neurova/backup/trust.py）+ trust.py 校验（2026-11-19 核对） |
 | T-404 | agent 应用包导入携带恶意载荷 | H | ✅ | 本日落地（P2-16）：manifest 结构 fail-closed 校验（kind/版本/agent 面缺一即 422）；MCP 只出引用面（id/name/transport），env/headers/command/args/url 凭据与宿主拓扑**永不离开宿主**；技能只登记清单不执行代码体；agent_id 白名单正则 + 冲突 409 + 失败全量回滚 |
 | T-405 | 桌面版安装包供应链（NSIS 2GB/解压损坏类） | M | ✅ | 打包暂存排除 __pycache__（pyc 225MB 红线案）+ 签名入 tauri.conf |
 

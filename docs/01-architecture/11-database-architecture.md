@@ -1,5 +1,7 @@
 # 数据库架构设计（主副表与索引机制）
 
+> ⚠️ **Schema 来源说明（2026-11-19 核对）**：本文 DDL 对应 `neurova/memory/scripts/init_db.py` 种子蓝图；运行时在线 schema 由 `neurova/cognitive_layers/memory_layer/manager.py` 的 `_init_persistence_db()`（:562 起，memories 主表 DDL 约 :594-617；旧注释仍称 `_initPersistDb`）自建，并经 `neurova/core/db_migration.py` 迁移，两者存在差异。逐节修订前请以代码为准。
+
 ## 1. 概述
 
 ### 1.1 设计目标
@@ -7,7 +9,7 @@
 数据库采用**主副表分离架构**，核心目标:
 - **核心与扩展分离**: 主表存储高频访问的核心字段，副表存储低频/扩展字段，保持主表轻量
 - **索引驱动查询**: 通过精心设计的关联索引、复合索引、覆盖索引，将复杂查询延迟控制在 `<10ms`
-- **批量写入友好**: 适配缓存层 256KB/180秒 批量刷入机制，避免索引频繁更新导致的性能抖动
+- **批量写入友好**: 适配缓存层 128KB/180秒 批量刷入机制，避免索引频繁更新导致的性能抖动
 - **数据完整性**: 严格的外键约束、级联策略、软删除机制
 - **记忆温度机制**: 模拟人类遗忘曲线，通过温度维度实现记忆的升温、降温、次要、归档、删除全生命周期管理
 
@@ -91,6 +93,8 @@ CREATE INDEX idx_memories_weight_hot ON memories(agent_id, weight DESC, access_c
 ```
 
 ### 2.2 会话主表 (`sessions`)
+
+> ⚠️ 孤儿表，已删除（`init_db.py:79-81` 注释：仅有 CREATE TABLE、无任何读写引用）。会话持久化由 SessionManager 文件层负责（`sessions/<agent_id>/session_<sid>_<date>.json`）。以下 DDL 仅作设计稿留存。
 
 管理会话生命周期与统计信息。
 
@@ -202,6 +206,8 @@ CREATE INDEX idx_keywords_memory ON memory_keywords(memory_id);
 
 ### 3.4 会话消息副表 (`session_messages`)
 
+> ⚠️ 孤儿表，已删除（`init_db.py:79-81` 注释）。会话逐轮内容由 SessionManager 文件层持久化。以下 DDL 仅作设计稿留存。
+
 记录会话内的逐轮对话，与 `sessions` 1:N 关联。
 
 ```sql
@@ -308,6 +314,8 @@ CREATE INDEX idx_social_memory_entity ON memory_social_links(entity_id, importan
 
 ### 3.6 上下文快照副表 (`session_context_snapshots`)
 
+> ⚠️ 孤儿表，已删除（`init_db.py:79-81` 注释）。以下 DDL 仅作设计稿留存。
+
 缓存上下文构建结果，加速重复查询。
 
 ```sql
@@ -339,6 +347,8 @@ SQLite 外键默认不自动创建索引，需显式创建以优化 JOIN 和级�
 ```
 
 ### 4.2 逻辑关联映射表 (`entity_associations`)
+
+> ⚠️ 未实现（2026-11-19 核对：`entity_associations` 全仓代码零命中，init_db.py 亦无此表 DDL）。以下为设计稿。
 
 处理跨主表的灵活关联 (如: 会话 ↔ 记忆 ↔ Agent)。
 
@@ -491,7 +501,7 @@ FROM sqlite_master WHERE type='index';
 
 ### 7.1 批量写入索引优化
 
-缓存层 256KB/180秒 批量刷入时，采用以下策略减少索引更新开销:
+缓存层 128KB/180秒 批量刷入时，采用以下策略减少索引更新开销:
 
 ```sql
 -- 1. 临时关闭外键检查 (批量插入时)
@@ -808,7 +818,7 @@ FROM memory_emotions;
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │  缓存层 (Cache) │───▶│  数据库主副表    │◀───│  上下文构建器   │
-│  256KB/180s     │    │  memories/sessions│    │  ContextBuilder │
+│  128KB/180s     │    │  memories/sessions│    │  ContextBuilder │
 │  批量刷入       │    │  副表+索引       │    │  读取缓存优先   │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
          │                       │                       │

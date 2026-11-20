@@ -1,7 +1,8 @@
 # 消息路由和通信系统设计
 
-> **状态**: 已实现（对照代码核实） · 版本: v1.0.0-beta1
-> **说明**: 本文档描述的功能已在 `neurova/` 对应模块实现，详见 [功能模块矩阵](../0-index/README.md)
+> ⚠️ **状态说明（2026-11-19 核对）**：本文档为早期设计稿，文中多数机制未按此实现或已由其他架构取代。现行实际实现见：`neurova/router.py`（`MessageRouter.route` / `register_handler`，:76/:112/:120）、`neurova/channels/channel_router.py`（`make_handler` :127 / `install_channel_router` :406）、`neurova/channels/manager.py`。逐节修订前请以代码为准。
+>
+> 版本: v1.0.0-beta1 · 详见 [功能模块矩阵](../0-index/README.md)
 
 
 ## 1. 概述
@@ -26,10 +27,10 @@
 | Discord | `discord.py` | WebSocket | `discord.py` |
 | QQ | `qq.py` | WebSocket | QQ 机器人 |
 | MQTT | `mqtt.py` | MQTT | IoT 设备接入 |
-| WebSocket | `websocket.py` | WebSocket | 原生 WebSocket |
+| WebSocket | -（无独立适配器文件） | WebSocket | 原生 WebSocket 接入未单设 `websocket.py`；长连接由各渠道 SDK 适配器承载（如飞书 Stream、`qq_ws.py`） |
 | SIP | `sip.py` | SIP | 语音通话 |
 | Webhook | `base.py` | HTTP | 通用 Webhook |
-| 移动设备 | `mobile_pairing.py` | QR 码配对 | 手机 App 对接 |
+| 移动设备 | `qrcode_auth.py` | QR 码配对 | 手机 App 对接；配对 REST 端点在 `api/endpoints/mobile_pairing.py` |
 | CLI | - | STDIN | 命令行交互 |
 | API | - | HTTP | REST API 直接调用 |
 
@@ -66,10 +67,9 @@
     ├── discord.py (Discord)
     ├── qq.py (QQ)
     ├── mqtt.py (MQTT)
-    ├── websocket.py (WebSocket)
+    ├── qrcode_auth.py (移动设备 QR 配对)
     ├── sip.py (SIP)
     ├── webhook.py (Webhook)
-    ├── mobile_pairing.py (移动设备)
     └── ...
 ```
 
@@ -103,15 +103,15 @@ class MessageChannel(str, Enum):
     XIAOYI = "xiaoyi"
 
 class MessageType(str, Enum):
-    TEXT = "text"
-    IMAGE = "image"
-    VOICE = "voice"
-    VIDEO = "video"
-    FILE = "file"
-    LOCATION = "location"
-    LINK = "link"
-    ACTION = "action"
+    """消息类型——实际值域以 neurova/router.py:24 为准。
+    本设计稿原列的 TEXT/IMAGE/VOICE/... 实为
+    neurova/channels/models.py:42 的 ContentType（渠道内容类型）。"""
+    CHAT = "chat"
+    COMMAND = "command"
+    SKILL_REQUEST = "skill_request"
+    MEMORY_REQUEST = "memory_request"
     SYSTEM = "system"
+    UNKNOWN = "unknown"
 
 class MessageSource(str, Enum):
     USER = "user"

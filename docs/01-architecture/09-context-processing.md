@@ -1,7 +1,8 @@
 # 上下文处理架构设计
 
-> **状态**: 已实现（对照代码核实） · 版本: v1.0.0-beta1
-> **说明**: 本文档描述的功能已在 `neurova/` 对应模块实现，详见 [功能模块矩阵](../0-index/README.md)
+> ⚠️ **状态说明（2026-11-19 核对）**：本文档为早期设计稿，文中多数机制未按此实现或已由其他架构取代。现行实际实现见：`neurova/context/orchestrator.py`（`ContextOrchestrator` :96、`build_context` :1365）、`neurova/context/window_compactor.py`、`neurova/context/envelope.py`、`neurova/context/injector.py`（`UnifiedContextInjector` :82）、`neurova/context/token_estimator.py`（`TokenEstimator` :60）。逐节修订前请以代码为准。
+>
+> 版本: v1.0.0-beta1 · 详见 [功能模块矩阵](../0-index/README.md)
 
 
 ## 1. 概述

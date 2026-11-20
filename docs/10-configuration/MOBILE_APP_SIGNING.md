@@ -13,11 +13,11 @@
 | 鸿蒙发布密钥对 | `Mobile/signing/harmony-release.p12`（PKCS12，别名 `neurova-harmony-release`，RSA 2048，30 年） | ✅ 已生成（本机 keytool） |
 | 鸿蒙 CSR | `Mobile/signing/harmony-release.csr`（PKCS#10） | ✅ 已生成，待上传 AGC |
 | 密码 | `Mobile/signing/passwords.local.md` | ✅ 本机存放，**不入 git**（已 `.gitignore`） |
-| 鸿蒙发布证书 `.cer` + Profile `.p7b` | 约定落 `Mobile/signing/harmony/` | ⬜ 需华为 AGC 办理（§2） |
+| 鸿蒙发布证书 `.cer` + Profile `.p7b` | `Mobile/signing/` 根目录（无 `harmony/` 子目录；2026-11-19 核对） | ✅ 已签发到手（AGC 办理结果见 §4；本地留存，不入 git） |
 | 安卓包名（applicationId） | `top.neurova.mobile`（原生工程 `Mobile/android-native/`） | ✅ 已定（2026-11-16；已退役的 Capacitor 工程曾建议 `com.neurova.app`） |
 
 工具链现状：JDK 17（keytool）✅；Node 24 ✅；Android SDK 未安装（打包时需装）；
-DevEco Studio 未安装（鸿蒙打包需装）。本指南的"生成密钥"部分不依赖后两者。
+DevEco Studio 已安装并完成鸿蒙构建（DevEco 26.0.0.865 / hvigor 6.26.9，见 §2.4；2026-11-19 核对）。本指南的"生成密钥"部分不依赖后两者。
 
 ---
 
@@ -82,7 +82,7 @@ HarmonyOS 应用签名的本地材料 = **密钥对（.p12）+ CSR**，已用 ke
 
 1. **开发者账号**：注册华为开发者账号并完成实名认证（个人或企业；上架应用市场建议企业）。
 2. **创建应用**：AppGallery Connect（现已并入 HarmonyOS 开发者中心）→ 创建 APP ID：
-   - 包名（实际注册）：**`com.neurova.mobile`**（安卓侧登记 `com.neurova.app`；`harmony`/`ohos` 是 AGC 包名保留词，不可用）；
+   - 包名（实际注册）：**`com.neurova.mobile`**（安卓侧为 `top.neurova.mobile`，见 `Mobile/android-native/app/build.gradle.kts` 的 namespace/applicationId，2026-11-19 核对；`harmony`/`ohos` 是 AGC 包名保留词，不可用）；
    - 应用类型选 App（HarmonyOS应用），分类"应用"，支持设备按需勾选。
 3. **申请发布证书**：AGC → 证书、APP ID 与 Profile → 证书 → 新增证书 →
    上传 `Mobile/signing/harmony-release.csr` → 下载发布证书 **`.cer`**。
@@ -97,8 +97,9 @@ HarmonyOS 应用签名的本地材料 = **密钥对（.p12）+ CSR**，已用 ke
    最终可用组合：**ECC P-256 + 标准 PEM 头 CSR + 包名 `com.neurova.mobile`**。
 4. **申请 Profile**：同页 → Profile → 新增（发布 Profile，绑定第 2 步的包名）→
    下载 **`.p7b`**。
-5. **材料归置**：`.cer` 与 `.p7b` 放 `Mobile/signing/harmony/`
-   （这两个文件不含私钥，可提交；`.p12` 永远只在 `Mobile/signing/` 本地）。
+5. **材料归置**：`.cer` 与 `.p7b` 放 `Mobile/signing/` 根目录（无 `harmony/` 子目录；2026-11-19 核对）。
+   这两个文件不含私钥，但 `.gitignore` 已忽略 `Mobile/signing/*.cer`、`*.p7b`——本地留存，不入库；
+   `.p12` 永远只在 `Mobile/signing/` 本地。
 6. **执行签名**（工程建成后任选其一）：
    - DevEco Studio：`File → Project Structure → Signing Configs` 配置
      （或直接填 `build-profile.json5`）；
@@ -164,8 +165,8 @@ java -jar <SDK>/toolchains/lib/hap-sign-tool.jar sign-app -mode localSign \
 - 参数名为**全小写 keystoreFile/keystorePwd**（`-keyStoreFile` 大写 S 报 11011005 Param is not trusted）。
 - **密码密文体系**：build-profile 的 storePassword/keyPassword 必须是 **≥32 位偶数长度的密文**
   （明文密码不可用），且 keystore 同目录需有 `material/{fd,ac,ce}` 三个材料目录
-  （fd 内 3 个 16 字节文件、ac/ce 各 1 个）——hvigor 解密密文时校验。材料由
-  `gen-harmony-material.cjs` 生成（含自洽验证）。
+  （fd 内 3 个 16 字节文件、ac/ce 各 1 个）——hvigor 解密密文时校验
+  （2026-11-19 核对：生成该材料的工具未随仓交付）。
 - 校验：`verify-app -inFile <signed.hap> -outCertChain <out.cer> -outProfile <out.p7b> -inForm zip`。
 
 ### 2.5 调试 vs 发布
@@ -187,11 +188,14 @@ java -jar <SDK>/toolchains/lib/hap-sign-tool.jar sign-app -mode localSign \
 - 密码请从 `passwords.local.md` 转存到你的密码管理器；该文件本身只作本机过渡。
 - keystore 丢失/泄露的后果：安卓换签=应用市场视为新应用；鸿蒙证书由 AGC 吊销重发，
   但已分发版本不可补签。**先备份再使用**。
-- CSR（`.csr`）与 AGC 下发的 `.cer`/`.p7b` 不含私钥，可以入库留存。
+- CSR（`.csr`）不含私钥且未被 `.gitignore` 排除，可入库留存（2026-11-19 核对：`Mobile/signing/`
+  下当前仅 `INFO.md` 与 `harmony-release.csr` 被跟踪）；AGC 下发的 `.cer`/`.p7b` 虽也不含私钥，
+  但 `.gitignore` 已忽略 `Mobile/signing/*.cer`、`*.p7b`——**本地留存，不入库**。
 
 ## 4. 待办清单（2026-11-15 办理结果）
 
-- [x] 包名已确认：**安卓 `com.neurova.app`**（建议值，工程创建时登记）；**鸿蒙 `com.neurova.mobile`**
+- [x] 包名已确认：**安卓 `top.neurova.mobile`**（原生工程 `Mobile/android-native/app/build.gradle.kts`
+      的 namespace/applicationId，2026-11-19 核对）；**鸿蒙 `com.neurova.mobile`**
       （`harmony`/`ohos` 均为 AGC 包名保留词，不可用——实测被拒）
 - [x] 华为 AGC：应用 **Neurova / APP ID 6917621864918782165** 已创建；
       CSR 上传后发布证书已签发（**ECC P-256**，见 §2.2 格式坑）；
