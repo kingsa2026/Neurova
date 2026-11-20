@@ -117,6 +117,31 @@ def test_executorPermissionModeValidated():
     assert "422" in str(exc.value)
 
 
+# ── F1 线乙：能力声明配置期闸（打开前拒绝，违规 422） ─────────────────────
+
+
+def test_executorSpecViolatingCapabilityRejected422():
+    team = makeTeam("u1", "t1", "甲队")
+    admin = user("admin1", "t1", role="admin")
+    # transport 非法：pigeon 不在 opencode 声明 transports（stdio/ssh）内
+    bad_transport = NeuacpExecutorSpec(
+        kind="acp", tool="opencode", transport="pigeon", command=["opencode", "acp"], cwd="E:/ws/demo"
+    )
+    with pytest.raises(Exception) as exc:
+        asyncio.run(teams_api.add_members(team.id, MemberBatchAdd(members=["ext-t"], executor=bad_transport), admin))
+    assert "422" in str(exc.value)
+    # plugin + auto 拒：plugin 家无运行中审批交互，auto 无意义
+    plugin_auto = NeuacpExecutorSpec(
+        kind="plugin", tool="zcode", command=["zcode"], cwd="E:/ws/demo", permission_mode="auto"
+    )
+    with pytest.raises(Exception) as exc:
+        asyncio.run(teams_api.add_members(team.id, MemberBatchAdd(members=["ext-a"], executor=plugin_auto), admin))
+    assert "422" in str(exc.value)
+    # 被拒成员不得入名册
+    view = asyncio.run(teams_api.get_team(team.id, admin))
+    assert all(m["user_id"] not in ("ext-t", "ext-a") for m in view.members_detail)
+
+
 def test_removeMemberGatedByTenant():
     team = makeTeam("u1", "t1", "甲队")
     asyncio.run(teams_api.add_members(team.id, MemberBatchAdd(members=["m1"]), user("u1", "t1")))

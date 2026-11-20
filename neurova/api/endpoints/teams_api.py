@@ -31,6 +31,7 @@ from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 from neurova.core.atomic_io import loadJsonStore, saveJsonStore
 from neurova.core.data_root import dataPath
+from neurova.agent.neuacp.catalog import refuseExecutorSpec
 
 logger = get_logger(__name__)
 
@@ -397,6 +398,11 @@ async def add_members(team_id: str, body: MemberBatchAdd, current_user: Dict[str
         if str(body.executor.permission_mode or "chain") not in ("chain", "auto"):
             raise HTTPException(status_code=422, detail="executor.permission_mode 仅支持 chain/auto")
         executor_spec = body.executor.model_dump()
+        # F1 配置期闸（双闸之一）：能力违规在名册写入前结构化拒绝（422），
+        # 判据单源 catalog.refuseExecutorSpec（与派活期闸同函数）
+        capability_reasons = refuseExecutorSpec(executor_spec)
+        if capability_reasons:
+            raise HTTPException(status_code=422, detail="; ".join(capability_reasons))
     existing = {m["user_id"] for m in team["members_detail"]}
     for uid in body.members:
         if not uid or uid in existing:
