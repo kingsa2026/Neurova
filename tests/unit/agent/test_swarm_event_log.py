@@ -142,3 +142,88 @@ class TestStatusEventsView:
         assert view["subagent_id"] == "swarm_evt9"
         assert view["count"] == 1
         assert view["events"][0]["type"] == "spawned"
+
+
+class TestSeqAndLineage:
+    """F2/F5：H-4 账本补 per-run 单调 seq 与 lineage 谱系（设计文档 §3.2/§3.5）。
+
+    seq 语义：同一路径（同一 run 的账本文件）内从 1 起单调递增；写入在既有
+    全局锁内完成，文件序与 seq 序一致；旧文件无 seq 行容错，新事件从最大值续起。
+    """
+
+    def test_seqStrictlyIncreasesForSameRun(self):
+        for _ in range(3):
+            appendRunEvent("swarm_seq1", "member_chunk", {"n": 1})
+        events = readRunEvents("swarm_seq1")
+        seqs = [e["seq"] for e in events]
+        assert len(seqs) == 3
+        assert all(isinstance(s, int) for s in seqs)
+        assert seqs == sorted(seqs), "账本文件序应与 seq 序一致"
+        assert len(set(seqs)) == len(seqs), "seq 不得重复"
+        assert seqs == [1, 2, 3], f"同 run 连续追加应从 1 严格递增，实际 {seqs}"
+
+    def test_concurrentAppendsSeqUniqueAndIncreasing(self):
+        import threading
+
+        run_id = "swarm_seq2"
+        workers = 8
+        per_worker = 5
+        barrier = threading.Barrier(workers)
+        failures = []
+
+        def worker(index: int):
+            barrier.wait()
+            try:
+                for i in range(per_worker):
+                    appendRunEvent(run_id, "member_chunk", {"worker": index, "i": i})
+            except Exception as exc:  # pragma: no cover - 失败要显性化
+                failures.append(repr(exc))
+
+        threads = [threading.Thread(target=worker, args=(n,)) for n in range(workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert not failures, f"并发追加抛错：{failures}"
+        events = readRunEvents(run_id)
+        assert len(events) == workers * per_worker
+        seqs = [e["seq"] for e in events]
+        assert len(set(seqs)) == workers * per_worker, "并发写入 seq 不得重复"
+        assert seqs == sorted(seqs), "并发写入后文件序仍应与 seq 序一致（写入在全局锁内）"
+
+    def test_lineageLandsInRecord(self):
+        lineage = {"tenant_id": "t-1", "team_id": "team-9", "agent_path": ["p", "c"]}
+        appendRunEvent("swarm_lin1", "spawned", {}, lineage=lineage)
+        record = readRunEvents("swarm_lin1")[0]
+        assert record["lineage"] == lineage
+
+    def test_lineageOmittedWhenEmpty(self):
+        appendRunEvent("swarm_lin2", "spawned", {})
+        record = readRunEvents("swarm_lin2")[0]
+        assert "lineage" not in record, "lineage 非空才放入 record"
+
+    def test_seqContinuesAfterLegacyLinesWithoutSeq(self):
+        from pathlib import Path
+
+        from neurova.core.data_root import dataPath
+
+        run_id = "swarm_seq3"
+        path = Path(dataPath("swarm_runs")) / f"{run_id}.events.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # 旧形态行：无 seq 字段。先于本进程任何 append 落盘，命中"首次扫描"路径。
+        legacy = {
+            "event_id": "evt_legacy",
+            "type": "started",
+            "subagent_id": run_id,
+            "causation_id": "",
+            "payload": {},
+            "occurred_at": "2026-01-01T00:00:00+00:00",
+        }
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(legacy, ensure_ascii=False) + "\n")
+        appendRunEvent(run_id, "spawned", {})
+        appendRunEvent(run_id, "terminal", {})
+        events = readRunEvents(run_id)
+        assert len(events) == 3
+        assert "seq" not in events[0], "旧文件无 seq 行须容错（原样读出）"
+        assert events[1]["seq"] == 1 and events[2]["seq"] == 2, "新事件从扫描到的最大 seq 续起"

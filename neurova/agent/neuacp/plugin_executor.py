@@ -17,6 +17,10 @@ from typing import Any, Callable, List, Optional
 from neurova.agent.neuacp.child_env import buildChildEnvironment
 from neurova.agent.neuacp.acp_client import NeuacpError
 from neurova.agent.neuacp.executor import NeuacpExecResult, NeuacpSessionContext
+from neurova.agent.neuacp.redaction import redactFrame
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 _DEFAULT_FRAME_LIMIT = 1_000_000
 _TERMINATE_WAIT_S = 5.0
@@ -46,10 +50,14 @@ class NeuacpPluginExecutor:
         self._remote = remote if isinstance(remote, dict) else None
         self._process: Optional[subprocess.Popen] = None
         self._lock = threading.RLock()
+        # F2 帧留痕键（§3.2）：start(ctx) 时从 metadata["subagent_id"] 取；
+        # 未绑定（空）一律不落盘——无主会话（如管理面 /test）不留痕。
+        self._frame_key: Optional[str] = None
 
     async def start(self, ctx: NeuacpSessionContext) -> None:
         if ctx.cwd:
             self._cwd = ctx.cwd
+        self._frame_key = str((ctx.metadata or {}).get("subagent_id") or "").strip() or None
 
     async def prompt(self, task_text: str, emitter: Callable[[str, Any], None], on_permission: Callable[[str, str, str], dict]) -> NeuacpExecResult:
         command = self._command + [self._prompt_arg, task_text]
@@ -76,9 +84,12 @@ class NeuacpPluginExecutor:
             raise NeuacpError(f"无法启动插件 CLI 进程: {exc}") from exc
         with self._lock:
             self._process = proc
+        # spawn 成功后留痕（§3.2）：命令不含凭据（凭据走 env 白名单 child_env.py）。
+        self._recordFrame("out", {"type": "argv", "command": list(command)})
 
-        accumulated: List[str] = []
         result_text = ""
+        result_frame: Optional[dict] = None
+        saw_result = False
         exit_code: Optional[int] = None
         try:
             for raw in proc.stdout:
@@ -93,27 +104,41 @@ class NeuacpPluginExecutor:
                     continue  # 事件 schema 无公开文档：无法解析的行忽略（宽容容错）
                 if not isinstance(message, dict):
                     continue
+                # 入站帧留痕（§3.2）：解析成功的 NDJSON 行，fail-open 不阻断消费。
+                self._recordFrame("in", message)
                 event_type = str(message.get("type") or "")
                 if event_type == "assistant":
                     for chunk, kind in self._contentBlocks(message):
-                        accumulated.append(chunk)
                         if emitter is not None:
                             try:
                                 emitter(kind, chunk)
                             except Exception:
                                 pass
                 elif event_type == "result":
+                    saw_result = True
+                    result_frame = message
                     result_text = str(message.get("result") or message.get("text") or "")
             exit_code = proc.wait()
+            # 退出观测点（§3.2）：退出码先进 frames 流，再走非零退出报错；不猜不补。
+            self._recordFrame("observed", {"type": "exited", "exit_code": exit_code})
         finally:
             self._terminateProcess(proc)
 
         if exit_code not in (0, None):
             raise NeuacpError(f"plugin CLI exited with code {exit_code}")
-        text = result_text or "".join(accumulated)
-        if not text.strip():
+        if not saw_result:
+            # F3 拍板 D-B：无 result 帧 = runtime 未报告结果 = 诚实失败。
+            # 禁止用累积 chunk 拼接冒充结果（chunk 已实时经 emitter 进 contentBuffer，
+            # 失败交接链路自会取尾部作部分报告）。
+            raise NeuacpError("plugin CLI ended without result frame")
+        if not result_text.strip():
             raise NeuacpError("plugin CLI produced no result")
-        return NeuacpExecResult(text=text, stop_reason="end_of_turn", raw=None)
+        # raw 回填 result 帧原文（写盘/出口同口径脱敏，拍板 D-A）。
+        return NeuacpExecResult(
+            text=result_text,
+            stop_reason="end_of_turn",
+            raw=redactFrame(result_frame) if result_frame is not None else None,
+        )
 
     async def cancel(self) -> None:
         with self._lock:
@@ -129,6 +154,18 @@ class NeuacpPluginExecutor:
             self._terminateProcess(proc)
 
     # ---------- 内部 ----------
+
+    def _recordFrame(self, direction: str, frame: dict) -> None:
+        """帧留痕钩子（§3.2）：fail-open，绝不阻断 prompt 主流程；未绑定不落盘。"""
+        key = self._frame_key
+        if not key:
+            return
+        try:
+            from neurova.agent.neuacp.frame_log import appendFrame
+
+            appendFrame(key, direction, frame)
+        except Exception as exc:  # noqa: BLE001 - 留痕故障只记日志，不上抛
+            logger.debug("帧留痕失败（fail-open）: %s", exc)
 
     @staticmethod
     def _contentBlocks(message: dict):

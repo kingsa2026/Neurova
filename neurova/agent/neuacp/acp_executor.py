@@ -52,6 +52,9 @@ class NeuacpStdioExecutor:
         self._pool: Optional[Any] = None
         self._pool_key: Optional[tuple] = None
         self._pool_entry: Optional[Any] = None
+        # F2 帧留痕键（§3.2/F5）：start(ctx) 时从 metadata["subagent_id"] 取；
+        # 未绑定（空）一律不落盘——无主会话（如管理面 /test）不留痕。
+        self._frame_key: Optional[str] = None
         self._client = self._newClient()
 
     # ---------- NeuacpExecutor 协议 ----------
@@ -71,8 +74,21 @@ class NeuacpStdioExecutor:
         self._crash_reason = None
         if ctx.cwd:
             self._cwd = ctx.cwd
+        self._frame_key = str((ctx.metadata or {}).get("subagent_id") or "").strip() or None
         # 幂等：已启动（握手完成且进程存活）则复用同一进程，不重复 initialize。
         await asyncio.to_thread(self._ensureClient)
+        # 池复用件每次 start 重设帧留痕键（随取用方切换；无主=空键不留痕）。
+        self._applyFrameKey()
+
+    def _applyFrameKey(self) -> None:
+        """把本执行体的帧留痕键绑到生效中的 ACP 客户端（fail-open）。"""
+        client = self._client
+        if client is None:
+            return
+        try:
+            client.setFrameKey(self._frame_key)
+        except Exception as exc:  # noqa: BLE001 - 绑定失败不阻断派活
+            logger.debug("帧留痕键绑定失败（fail-open）: %s", exc)
 
     async def prompt(self, task_text: str, emitter: Callable[[str, Any], None], on_permission: Callable[[str, str, str], dict]) -> NeuacpExecResult:
         self._emitter = emitter
@@ -152,6 +168,10 @@ class NeuacpStdioExecutor:
             request_timeout=self._request_timeout,
         )
         client.setRequestHandler("session/request_permission", self._handlePermissionRequest)
+        # 构造期即绑帧留痕键：直启路径的 initialize 握手帧也归入本 run 的帧流
+        # （start(ctx) 已先设 self._frame_key）；池复用件随后由 _applyFrameKey 重绑。
+        if self._frame_key:
+            client.setFrameKey(self._frame_key)
         return client
 
     def _newStartedClient(self) -> NeuacpClient:

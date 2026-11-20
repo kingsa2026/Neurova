@@ -15,6 +15,9 @@ from collections import deque
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.agent.neuacp.child_env import buildChildEnvironment
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 _DEFAULT_FRAME_LIMIT = 1_000_000
 _DEFAULT_REQUEST_TIMEOUT = 30.0
@@ -78,6 +81,10 @@ class NeuacpClient:
         # start 序列互斥锁（握手期不持 self._lock，泵线程可正常派发应答）。
         self._handshake: Optional[dict] = None
         self._start_lock = threading.Lock()
+        # F2 帧留痕（§3.2）：frame_key 未绑定（None）一律不落盘（无主会话不留痕）；
+        # _exit_observed 保证每个进程代际只记一条 observed/exited（不猜退出码）。
+        self._frame_key: Optional[str] = None
+        self._exit_observed = False
 
     # ---------- 生命周期 ----------
 
@@ -102,10 +109,20 @@ class NeuacpClient:
                 return handshake
             return self._startLocked(protocol_version, client_capabilities)
 
+    def setFrameKey(self, key: Optional[str]) -> None:
+        """绑定帧账本键（通常为 subagent_id，§3.2/F5）。
+
+        未绑定（None/空串）时一律不落盘——管理面 /test 握手等无主会话不留痕。
+        池复用件每次 start 重设，随取用方切换。
+        """
+        text = str(key or "").strip()
+        self._frame_key = text or None
+
     def _startLocked(self, protocol_version: str, client_capabilities: Optional[dict]) -> dict:
         self._handshake = None
         self._closed = False
         self._crash_reported = False
+        self._exit_observed = False
         env = self._childEnvironment()
         # Windows：PATH 里的 npx/qoder 等实为 .cmd/.bat，Popen 不做 PATHEXT
         # 解析——用 shutil.which 把首词解析成可执行全路径（解析不到原样保留）。
@@ -177,6 +194,8 @@ class NeuacpClient:
                         pass
         finally:
             self._failWaiters(NeuacpError("neuacp client terminated"))
+        # 退出观测点（§3.2）：EOF/terminate/失败收口都经这里，落 observed/exited。
+        self._observeExit(proc)
 
     @property
     def is_alive(self) -> bool:
@@ -263,6 +282,9 @@ class NeuacpClient:
         try:
             with self._write_lock:
                 proc.stdin.write(payload.encode("utf-8"))
+                # 先记 out 再 flush（§3.2 保序）：泵线程最早也要等 flush 后才可能
+                # 读到应答，保证 out 的 seq 恒早于其应答 in，时序可判定。
+                self._recordFrame("out", message)
                 proc.stdin.flush()
         except OSError as exc:
             raise NeuacpError(f"写入外部代理失败: {exc}") from exc
@@ -288,6 +310,8 @@ class NeuacpClient:
                 except json.JSONDecodeError:
                     self._failClosed("invalid JSON-RPC frame")
                     return
+                # 入站消息在派发前留痕（§3.2）；超限/坏帧不入账本（honest fail-closed）。
+                self._recordFrame("in", message)
                 self._dispatch(message)
             self._failClosed(f"agent exited (code={proc.poll()})")
         except Exception as exc:  # 泵线程兜底：任何异常都按 fail-closed 上报
@@ -358,6 +382,41 @@ class NeuacpClient:
             self._waiters.clear()
         for waiter in waiters:
             waiter.put(error)
+
+    # ---------- F2 帧留痕（§3.2） ----------
+
+    def _recordFrame(self, direction: str, frame: dict) -> None:
+        """帧留痕钩子：fail-open，绝不阻断泵/发送；未绑定 frame_key 一律不落盘。"""
+        key = self._frame_key
+        if not key:
+            return
+        try:
+            from neurova.agent.neuacp.frame_log import appendFrame
+
+            appendFrame(key, direction, frame)
+        except Exception as exc:  # noqa: BLE001 - 留痕故障只记日志，不进协议链路
+            logger.debug("帧留痕失败（fail-open）: %s", exc)
+
+    def _observeExit(self, proc: Optional[subprocess.Popen]) -> None:
+        """进程退出观测点：能拿到 exit_code 就带，拿不到只记 type，不猜。
+
+        每个进程代际只记一条（_exit_observed 旗标，_startLocked 重置）；
+        EOF/terminate/失败收口都汇聚到 terminate → 这里。
+        """
+        if proc is None:
+            return
+        with self._lock:
+            if self._exit_observed:
+                return
+            self._exit_observed = True
+        payload: dict = {"type": "exited"}
+        try:
+            code = proc.poll()
+        except Exception:  # noqa: BLE001 - 观测失败不猜测退出码
+            code = None
+        if code is not None:
+            payload["exit_code"] = code
+        self._recordFrame("observed", payload)
 
     def _childEnvironment(self) -> dict:
         return buildChildEnvironment(self._env_extra)
