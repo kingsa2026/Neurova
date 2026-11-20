@@ -57,6 +57,19 @@
     { "name": "settings_theme_light", "value": "فاتح" },
     { "name": "settings_theme_dark", "value": "داكن" },
     { "name": "settings_about", "value": "حول" },
-    { "name": "settings_logout", "value": "تسجيل الخروج" }
+    { "name": "settings_logout", "value": "تسجيل الخروج" },
+    { "name": "swarm_title", "value": "طوبولوجيا السرب" },
+    { "name": "swarm_empty", "value": "لا توجد تشغيلات سرب في هذه الجلسة" },
+    { "name": "swarm_legend_spawn", "value": "تكليف" },
+    { "name": "swarm_legend_dependency", "value": "اعتمادية" },
+    { "name": "swarm_legend_approval", "value": "موافقة" },
+    { "name": "swarm_legend_candidate", "value": "مرشح" },
+    { "name": "swarm_truncated_hint", "value": "عدد التشغيلات يتجاوز الحد؛ يتم عرض أحدثها فقط" },
+    { "name": "swarm_incomplete_hint", "value": "سجل أحداث المرشحين غير مكتمل؛ يتم عرض الجزء القابل لإعادة التشغيل فقط" },
+    { "name": "swarm_external_badge", "value": "خارجي" },
+    { "name": "swarm_load_failed", "value": "فشل تحميل طوبولوجيا السرب" },
+    { "name": "swarm_members_unit", "value": "أعضاء" },
+    { "name": "swarm_edges_unit", "value": "روابط" },
+    { "name": "swarm_revision_label", "value": "إصدار التكامل" }
   ]
 }

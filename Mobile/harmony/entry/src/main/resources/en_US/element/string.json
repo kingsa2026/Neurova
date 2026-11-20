@@ -57,6 +57,19 @@
     { "name": "settings_theme_light", "value": "Light" },
     { "name": "settings_theme_dark", "value": "Dark" },
     { "name": "settings_about", "value": "About" },
-    { "name": "settings_logout", "value": "Logout" }
+    { "name": "settings_logout", "value": "Logout" },
+    { "name": "swarm_title", "value": "Collaboration graph" },
+    { "name": "swarm_empty", "value": "No swarm runs in this session" },
+    { "name": "swarm_legend_spawn", "value": "Spawn" },
+    { "name": "swarm_legend_dependency", "value": "Dependency" },
+    { "name": "swarm_legend_approval", "value": "Approval" },
+    { "name": "swarm_legend_candidate", "value": "Candidate" },
+    { "name": "swarm_truncated_hint", "value": "Run count exceeds the cap; only the latest are shown" },
+    { "name": "swarm_incomplete_hint", "value": "Candidate event ledger is incomplete; showing only the replayable part" },
+    { "name": "swarm_external_badge", "value": "external" },
+    { "name": "swarm_load_failed", "value": "Failed to load collaboration graph" },
+    { "name": "swarm_members_unit", "value": "members" },
+    { "name": "swarm_edges_unit", "value": "links" },
+    { "name": "swarm_revision_label", "value": "revision" }
   ]
 }

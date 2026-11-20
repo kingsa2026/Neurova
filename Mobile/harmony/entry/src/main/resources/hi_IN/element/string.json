@@ -57,6 +57,19 @@
     { "name": "settings_theme_light", "value": "लाइट" },
     { "name": "settings_theme_dark", "value": "डार्क" },
     { "name": "settings_about", "value": "परिचय" },
-    { "name": "settings_logout", "value": "लॉगआउट" }
+    { "name": "settings_logout", "value": "लॉगआउट" },
+    { "name": "swarm_title", "value": "स्वार्म टोपोलॉजी" },
+    { "name": "swarm_empty", "value": "इस सत्र में कोई स्वार्म रन नहीं" },
+    { "name": "swarm_legend_spawn", "value": "प्रत्यायोजन" },
+    { "name": "swarm_legend_dependency", "value": "निर्भरता" },
+    { "name": "swarm_legend_approval", "value": "अनुमोदन" },
+    { "name": "swarm_legend_candidate", "value": "कैंडिडेट" },
+    { "name": "swarm_truncated_hint", "value": "रन संख्या सीमा से अधिक है; केवल नवीनतम दिखाए जा रहे हैं" },
+    { "name": "swarm_incomplete_hint", "value": "कैंडिडेट इवेंट लेजर अपूर्ण है; केवल पुनःप्ले योग्य भाग दिखाया जा रहा है" },
+    { "name": "swarm_external_badge", "value": "बाहरी" },
+    { "name": "swarm_load_failed", "value": "स्वार्म टोपोलॉजी लोड करने में विफल" },
+    { "name": "swarm_members_unit", "value": "सदस्य" },
+    { "name": "swarm_edges_unit", "value": "लिंक" },
+    { "name": "swarm_revision_label", "value": "संस्करण" }
   ]
 }

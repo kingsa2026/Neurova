@@ -57,6 +57,19 @@
     { "name": "settings_theme_light", "value": "라이트" },
     { "name": "settings_theme_dark", "value": "다크" },
     { "name": "settings_about", "value": "정보" },
-    { "name": "settings_logout", "value": "로그아웃" }
+    { "name": "settings_logout", "value": "로그아웃" },
+    { "name": "swarm_title", "value": "협업 토폴로지" },
+    { "name": "swarm_empty", "value": "이 세션에는 협업 실행이 없습니다" },
+    { "name": "swarm_legend_spawn", "value": "위임" },
+    { "name": "swarm_legend_dependency", "value": "의존" },
+    { "name": "swarm_legend_approval", "value": "승인" },
+    { "name": "swarm_legend_candidate", "value": "후보" },
+    { "name": "swarm_truncated_hint", "value": "실행 수가 상한을 초과하여 최근 항목만 표시" },
+    { "name": "swarm_incomplete_hint", "value": "후보 이벤트 장부가 불완전하여 재생 가능한 부분만 표시" },
+    { "name": "swarm_external_badge", "value": "외부" },
+    { "name": "swarm_load_failed", "value": "협업 그래프 로드 실패" },
+    { "name": "swarm_members_unit", "value": "멤버" },
+    { "name": "swarm_edges_unit", "value": "연결" },
+    { "name": "swarm_revision_label", "value": "통합 리비전" }
   ]
 }

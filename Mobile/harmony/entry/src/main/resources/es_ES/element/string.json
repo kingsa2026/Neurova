@@ -57,6 +57,19 @@
     { "name": "settings_theme_light", "value": "Claro" },
     { "name": "settings_theme_dark", "value": "Oscuro" },
     { "name": "settings_about", "value": "Acerca de" },
-    { "name": "settings_logout", "value": "Cerrar sesión" }
+    { "name": "settings_logout", "value": "Cerrar sesión" },
+    { "name": "swarm_title", "value": "Topología del enjambre" },
+    { "name": "swarm_empty", "value": "No hay ejecuciones de enjambre en esta sesión" },
+    { "name": "swarm_legend_spawn", "value": "Delegación" },
+    { "name": "swarm_legend_dependency", "value": "Dependencia" },
+    { "name": "swarm_legend_approval", "value": "Aprobación" },
+    { "name": "swarm_legend_candidate", "value": "Candidato" },
+    { "name": "swarm_truncated_hint", "value": "El número de ejecuciones supera el límite; se muestran las últimas" },
+    { "name": "swarm_incomplete_hint", "value": "Registro de eventos de candidatos incompleto; solo se muestra la parte reproducible" },
+    { "name": "swarm_external_badge", "value": "externo" },
+    { "name": "swarm_load_failed", "value": "Error al cargar la topología del enjambre" },
+    { "name": "swarm_members_unit", "value": "miembros" },
+    { "name": "swarm_edges_unit", "value": "enlaces" },
+    { "name": "swarm_revision_label", "value": "revisión" }
   ]
 }

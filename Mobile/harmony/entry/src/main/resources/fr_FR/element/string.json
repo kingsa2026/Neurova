@@ -57,6 +57,19 @@
     { "name": "settings_theme_light", "value": "Clair" },
     { "name": "settings_theme_dark", "value": "Sombre" },
     { "name": "settings_about", "value": "À propos" },
-    { "name": "settings_logout", "value": "Déconnexion" }
+    { "name": "settings_logout", "value": "Déconnexion" },
+    { "name": "swarm_title", "value": "Topologie de l'essaim" },
+    { "name": "swarm_empty", "value": "Aucune exécution d'essaim dans cette session" },
+    { "name": "swarm_legend_spawn", "value": "Délégation" },
+    { "name": "swarm_legend_dependency", "value": "Dépendance" },
+    { "name": "swarm_legend_approval", "value": "Approbation" },
+    { "name": "swarm_legend_candidate", "value": "Candidat" },
+    { "name": "swarm_truncated_hint", "value": "Nombre d'exécutions au-delà de la limite ; seules les plus récentes sont affichées" },
+    { "name": "swarm_incomplete_hint", "value": "Registre d'événements candidats incomplet ; seule la partie rejouable est affichée" },
+    { "name": "swarm_external_badge", "value": "externe" },
+    { "name": "swarm_load_failed", "value": "Échec du chargement de la topologie" },
+    { "name": "swarm_members_unit", "value": "membres" },
+    { "name": "swarm_edges_unit", "value": "liens" },
+    { "name": "swarm_revision_label", "value": "révision" }
   ]
 }

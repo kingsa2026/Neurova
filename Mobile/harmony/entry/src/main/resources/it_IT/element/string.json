@@ -57,6 +57,19 @@
     { "name": "settings_theme_light", "value": "Chiaro" },
     { "name": "settings_theme_dark", "value": "Scuro" },
     { "name": "settings_about", "value": "Informazioni" },
-    { "name": "settings_logout", "value": "Esci" }
+    { "name": "settings_logout", "value": "Esci" },
+    { "name": "swarm_title", "value": "Topologia dello sciame" },
+    { "name": "swarm_empty", "value": "Nessuna esecuzione dello sciame in questa sessione" },
+    { "name": "swarm_legend_spawn", "value": "Delega" },
+    { "name": "swarm_legend_dependency", "value": "Dipendenza" },
+    { "name": "swarm_legend_approval", "value": "Approvazione" },
+    { "name": "swarm_legend_candidate", "value": "Candidato" },
+    { "name": "swarm_truncated_hint", "value": "Il numero di esecuzioni supera il limite; mostrate le ultime" },
+    { "name": "swarm_incomplete_hint", "value": "Registro eventi candidati incompleto; mostrata solo la parte riproducibile" },
+    { "name": "swarm_external_badge", "value": "esterno" },
+    { "name": "swarm_load_failed", "value": "Caricamento della topologia dello sciame non riuscito" },
+    { "name": "swarm_members_unit", "value": "membri" },
+    { "name": "swarm_edges_unit", "value": "collegamenti" },
+    { "name": "swarm_revision_label", "value": "revisione" }
   ]
 }

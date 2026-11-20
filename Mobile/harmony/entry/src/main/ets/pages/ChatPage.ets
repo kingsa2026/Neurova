@@ -45,6 +45,7 @@ import { ChunkBatcher } from '../libs/perf/ChunkBatcher';
 import { SimpleDataSource } from '../libs/perf/SimpleDataSource';
 import { ChatSession, ChatHistoryMessage } from '../libs/api/modules/SessionsApi';
 import { MarkdownText } from '../components/chat/MarkdownText';
+import { SwarmFlowPanel } from '../components/chat/SwarmFlowPanel';
 import { speechRecognizer } from '@kit.CoreSpeechKit';
 import { audio } from '@kit.AudioKit';
 import { abilityAccessCtrl, Permissions } from '@kit.AbilityKit';
@@ -120,6 +121,9 @@ export struct ChatPage {
   @State agents: Agent[] = [];
   // 排队态（chat:queued 事件置位，done/error 清除；设计 F5 .queued 卡）
   @State queued: boolean = false;
+  // 蜂群协作图增量信号（车道F）：chat:done（回合终结）自增，触发 SwarmFlowPanel 静默重拉。
+  // 移动端 WS 帧型不含 subagent_started/completed（那是 PC /sync 通道词汇），故借道回合终态。
+  @State swarmRefreshTick: number = 0;
   // 会话是否来自列表（可置顶/归档；新会话未落库，操作会 404）
   private fromList: boolean = false;
   // F6 会话抽屉开关（聊天页右上角 ⋯ 呼出，右缘滑出）
@@ -668,6 +672,8 @@ export struct ChatPage {
       }
       this.isGenerating = false;
       this.queued = false;
+      // 蜂群协作图增量（车道F）：回合终结时子任务 run 可能已出生/到终态，触发面板重拉
+      this.swarmRefreshTick++;
       // 清理 batcher 以备下次会话
       this.batcher.reset();
       // 会话摘要已变（新会话落库/最新消息预览）——广播列表页刷新（会话与 PC 同源可见）
@@ -1586,6 +1592,11 @@ export struct ChatPage {
             bottom: this.sm.getSpacing('sm'),
           })
         }
+
+        // 蜂群协作过程视图（车道F，对齐 PC ChatPage 消息区底部的 SwarmFlowPanel 位）：
+        // 本会话子任务 run 的委派/依赖分层拓扑 + 审批/候选徽标卡；无协作运行显示诚实
+        // 空态；读面失败 fail-soft（错误态 + 重试），不崩聊天页。
+        SwarmFlowPanel({ sessionId: this.sessionId, refreshTick: this.swarmRefreshTick })
 
         // 会话进度卡（设计 F5 .prog：流式生成中展示；步骤数后端未下发，不做假进度）
         if (this.isGenerating) {

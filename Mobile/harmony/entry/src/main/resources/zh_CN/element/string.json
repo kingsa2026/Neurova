@@ -57,6 +57,19 @@
     { "name": "settings_theme_light", "value": "亮色" },
     { "name": "settings_theme_dark", "value": "暗色" },
     { "name": "settings_about", "value": "关于" },
-    { "name": "settings_logout", "value": "退出登录" }
+    { "name": "settings_logout", "value": "退出登录" },
+    { "name": "swarm_title", "value": "协作拓扑" },
+    { "name": "swarm_empty", "value": "本会话暂无协作运行" },
+    { "name": "swarm_legend_spawn", "value": "委派" },
+    { "name": "swarm_legend_dependency", "value": "依赖" },
+    { "name": "swarm_legend_approval", "value": "审批" },
+    { "name": "swarm_legend_candidate", "value": "候选" },
+    { "name": "swarm_truncated_hint", "value": "子任务数超上限，仅显示最近一部分" },
+    { "name": "swarm_incomplete_hint", "value": "候选事件账本不完整，图形仅含可重放部分" },
+    { "name": "swarm_external_badge", "value": "外部" },
+    { "name": "swarm_load_failed", "value": "协作图加载失败" },
+    { "name": "swarm_members_unit", "value": "个成员" },
+    { "name": "swarm_edges_unit", "value": "条关系" },
+    { "name": "swarm_revision_label", "value": "集成版本" }
   ]
 }

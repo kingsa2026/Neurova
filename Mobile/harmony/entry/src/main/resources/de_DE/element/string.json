@@ -57,6 +57,19 @@
     { "name": "settings_theme_light", "value": "Hell" },
     { "name": "settings_theme_dark", "value": "Dunkel" },
     { "name": "settings_about", "value": "Über" },
-    { "name": "settings_logout", "value": "Abmelden" }
+    { "name": "settings_logout", "value": "Abmelden" },
+    { "name": "swarm_title", "value": "Schwarm-Topologie" },
+    { "name": "swarm_empty", "value": "Keine Schwarm-Läufe in dieser Sitzung" },
+    { "name": "swarm_legend_spawn", "value": "Delegation" },
+    { "name": "swarm_legend_dependency", "value": "Abhängigkeit" },
+    { "name": "swarm_legend_approval", "value": "Genehmigung" },
+    { "name": "swarm_legend_candidate", "value": "Kandidat" },
+    { "name": "swarm_truncated_hint", "value": "Anzahl der Läufe über dem Limit; nur die letzten werden angezeigt" },
+    { "name": "swarm_incomplete_hint", "value": "Kandidaten-Ereignisprotokoll unvollständig; nur der wiedergebbare Teil wird angezeigt" },
+    { "name": "swarm_external_badge", "value": "extern" },
+    { "name": "swarm_load_failed", "value": "Schwarm-Topologie konnte nicht geladen werden" },
+    { "name": "swarm_members_unit", "value": "Mitglieder" },
+    { "name": "swarm_edges_unit", "value": "Verbindungen" },
+    { "name": "swarm_revision_label", "value": "Integrationsversion" }
   ]
 }

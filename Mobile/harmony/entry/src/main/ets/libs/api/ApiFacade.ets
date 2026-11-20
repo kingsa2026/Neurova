@@ -43,6 +43,7 @@ import { MarketplaceApi } from './modules/MarketplaceApi';
 import { SandboxApi } from './modules/SandboxApi';
 import { ProvidersApi } from './modules/ProvidersApi';
 import { AudioApi } from './modules/AudioApi';
+import { ConsoleApi } from './modules/ConsoleApi';
 
 export class ApiFacade {
   private static instance: ApiFacade;
@@ -89,6 +90,8 @@ export class ApiFacade {
   public providers: ProvidersApi;
   // 音频域（录音纪要链 B4-8）
   public audio: AudioApi;
+  // Console 域（车道F：蜂群协作图/候选板读面，对齐 PC console.ts）
+  public console: ConsoleApi;
 
   private constructor() {
     this.client = HttpClient.getInstance();
@@ -129,6 +132,7 @@ export class ApiFacade {
     this.sandbox = new SandboxApi(this.client);
     this.providers = new ProvidersApi(this.client);
     this.audio = new AudioApi(this.client);
+    this.console = new ConsoleApi(this.client);
   }
 
   static getInstance(): ApiFacade {

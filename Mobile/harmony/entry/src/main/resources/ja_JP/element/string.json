@@ -57,6 +57,19 @@
     { "name": "settings_theme_light", "value": "ライト" },
     { "name": "settings_theme_dark", "value": "ダーク" },
     { "name": "settings_about", "value": "について" },
-    { "name": "settings_logout", "value": "ログアウト" }
+    { "name": "settings_logout", "value": "ログアウト" },
+    { "name": "swarm_title", "value": "協調トポロジ" },
+    { "name": "swarm_empty", "value": "このセッションには協調実行がありません" },
+    { "name": "swarm_legend_spawn", "value": "派生" },
+    { "name": "swarm_legend_dependency", "value": "依存" },
+    { "name": "swarm_legend_approval", "value": "承認" },
+    { "name": "swarm_legend_candidate", "value": "候補" },
+    { "name": "swarm_truncated_hint", "value": "実行数が上限を超えたため、最新のもののみ表示" },
+    { "name": "swarm_incomplete_hint", "value": "候補イベント台帳が不完全です。再生可能な部分のみ表示" },
+    { "name": "swarm_external_badge", "value": "外部" },
+    { "name": "swarm_load_failed", "value": "協作図の読み込みに失敗しました" },
+    { "name": "swarm_members_unit", "value": "メンバー" },
+    { "name": "swarm_edges_unit", "value": "リンク" },
+    { "name": "swarm_revision_label", "value": "統合リビジョン" }
   ]
 }

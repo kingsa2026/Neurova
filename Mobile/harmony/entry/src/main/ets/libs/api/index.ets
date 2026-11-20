@@ -34,3 +34,6 @@ export { AuditApi, AuditRecordDto, AuditPageDto, AuditPageStatsDto, AuditSearchH
 export { BenchmarkApi, BenchmarkSuiteDto, BenchmarkRunDto, BenchmarkRunsPageDto, BenchmarkRunBody } from './modules/BenchmarkApi';
 export { MarketplaceApi, MarketSkillDto, MarketSkillPageDto, MarketListParams, MarketInstallBody } from './modules/MarketplaceApi';
 export { SandboxApi, SandboxViewDto, SandboxStartBody, SandboxExecDto } from './modules/SandboxApi';
+// 车道F 新增模块（蜂群协作过程视图：协作图/候选板读面，对齐 PC console.ts）
+export { ConsoleApi } from './modules/ConsoleApi';
+export { SwarmGraphResult, SwarmGraphNode, SwarmGraphEdge, SwarmGraphMeta, CandidateBoardResult, CandidateEntry } from './modules/ConsoleApi';

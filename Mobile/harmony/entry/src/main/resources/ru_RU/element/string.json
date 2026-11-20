@@ -57,6 +57,19 @@
     { "name": "settings_theme_light", "value": "Светлая" },
     { "name": "settings_theme_dark", "value": "Тёмная" },
     { "name": "settings_about", "value": "О приложении" },
-    { "name": "settings_logout", "value": "Выйти" }
+    { "name": "settings_logout", "value": "Выйти" },
+    { "name": "swarm_title", "value": "Топология роя" },
+    { "name": "swarm_empty", "value": "В этой сессии нет запусков роя" },
+    { "name": "swarm_legend_spawn", "value": "Поручение" },
+    { "name": "swarm_legend_dependency", "value": "Зависимость" },
+    { "name": "swarm_legend_approval", "value": "Согласование" },
+    { "name": "swarm_legend_candidate", "value": "Кандидат" },
+    { "name": "swarm_truncated_hint", "value": "Число запусков превышает лимит, показаны последние" },
+    { "name": "swarm_incomplete_hint", "value": "Журнал событий кандидатов неполон; показана только воспроизводимая часть" },
+    { "name": "swarm_external_badge", "value": "внешний" },
+    { "name": "swarm_load_failed", "value": "Не удалось загрузить топологию роя" },
+    { "name": "swarm_members_unit", "value": "участников" },
+    { "name": "swarm_edges_unit", "value": "связей" },
+    { "name": "swarm_revision_label", "value": "версия интеграции" }
   ]
 }
