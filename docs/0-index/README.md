@@ -260,7 +260,7 @@
 
 ### 08-research 研究
 
-- [reference_o_vs_neurova_acp_access_comparison_2026-11-20.md](../08-research/reference_o_vs_neurova_acp_access_comparison_2026-11-20.md) — 与 botiverse/oar（Open Agent Runtime，自研 record-stream 归一层驱动 14 个编码 agent runtime）的接入方式专项对比：单流全序事件保真/能力显式声明+打开前拒绝/会话外管理面为 OAR 强项，治理与多租户/多 agent 编排/ACP 标准生态为本仓强项，评分卡 OAR 74 vs neuacp 73（接入层专项）；借鉴三条（能力声明+打开前拒绝/控制与事实同流全序/事件保真不推断）待拍板（竞品/外部对标，研究参考）
+- [reference_o_vs_neurova_acp_access_comparison_2026-11-20.md](../08-research/reference_o_vs_neurova_acp_access_comparison_2026-11-20.md) — 与 botiverse/oar（Open Agent Runtime，自研 record-stream 归一层驱动 14 个编码 agent runtime，5.4 万行核心+6.7 万行测试）的接入方式专项对比（v2 含源码级走读）：单流全序事件保真/能力显式声明+打开前拒绝/会话外管理面/内核级同构测试桩为 OAR 强项，治理与多租户/多 agent 编排/ACP 标准生态为本仓强项，评分卡 v2 OAR 76 vs neuacp 73；借鉴五条（能力声明+打开前拒绝/控制与事实同流全序/事件保真不推断/内核级同构桩/谱系归因进事件流）待拍板（竞品/外部对标，研究参考）
 - [agent-memory-cutting-edge-research-2026.md](../08-research/agent-memory-cutting-edge-research-2026.md) — Agent 记忆前沿研究
 - [agent_memory_consciousness_research_20260511.md](../08-research/agent_memory_consciousness_research_20260511.md) — 记忆与意识调研
 - [neurova_memory_consciousness_enhancement_20260511.md](../08-research/neurova_memory_consciousness_enhancement_20260511.md) — 记忆意识增强方案
