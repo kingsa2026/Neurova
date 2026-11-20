@@ -1,6 +1,6 @@
 # reference_ab 借鉴机制实施细则（除 P2-1 外六项）
 
-> **性质**：实施计划（备稿待拍板 → 按批实施）。
+> **性质**：实施计划（**已拍板 2026-11-21 → 按批实施**，拍板记录见 §7）。
 > **来源**：`docs/08-research/reference_ab_vs_neurova_managed_agent_orchestration_evaluation_2026-11-20.md` §6 借鉴清单。按 2026-11-20 拍板：**P2-1（成本透明表进文档）不纳入本批**，其余六项（P1-1/P1-2/P1-3/P2-2/P2-3/P2-4）细化如下。
 > **纪律**：每项给出现状锚点（file:line 实测）、实施方案、红绿测试设计与验收判据；不建第二套编排/事实源；外部代理判定不记 token；第三方物仅以功能依赖形态出现。
 
@@ -8,16 +8,16 @@
 
 ## 0. 总览
 
-| # | 项 | 优先级 | 主要落点 | 依赖 | 待拍板 |
+| # | 项 | 优先级 | 主要落点 | 依赖 | 拍板结论 |
 |---|-----|--------|----------|------|--------|
-| P1-2 | 外部成员验收/评审判定通道补线 | P1（正确性缺口，最先） | `swarm.py:1985`、`acp_member.py` | 无 | D-B |
-| P1-1 | 蜂群协作拓扑图可视化 | P1 | `console.py` 新投影端点 + NeurUI 新面板 | P2-4 同批 | D-A |
-| P2-4 | 服务端投影契约钉子 | P2（与 P1-1 同批） | 投影 schema + 对齐钉子测试 | — | 无 |
-| P1-3 | 企业源摄取「启动钩子+巡检补跑」双保险 | P1 | `app.py` lifespan + `agent/scheduler.py` + `knowledge/enterprise/registry.py` | 无 | D-E |
-| P2-3 | 候选板 H-4 事件重放投影（重启可查） | P2 | 新模块 `agent/candidate_projection.py` + console 读面 | 无 | D-C |
-| P2-2 | 企业源 text2SQL 只读分析档接蜂群面 | P2 | `builtin_tools.py`/`tool_executor.py` + `mcp_agent_tools_server.py` | 无 | D-D |
+| P1-2 | 外部成员验收/评审判定通道补线 | P1（正确性缺口，最先） | `swarm.py:1985`、`acp_member.py` | 无 | D-B ✅ 独立 ACP 判定会话 |
+| P2-3 | 候选板 H-4 事件重放投影（重启可查） | P2（**提前至批2**，供图 v2 候选边消费） | 新模块 `agent/candidate_projection.py` + console 读面 | 无 | D-C ✅ H-4 重放投影 |
+| P1-1 | 蜂群协作拓扑图可视化（**v2 全边集**） | P1 | `console.py` 新投影端点 + NeurUI 新面板 | P2-3、P2-4 同批 | D-A ✅ v2：含审批/候选边 |
+| P2-4 | 服务端投影契约钉子 | P2（与 P1-1 同批） | 投影 schema + 对齐钉子测试 | — | — |
+| P1-3 | 企业源摄取「启动钩子+巡检补跑」双保险 | P1 | `app.py` lifespan + `agent/scheduler.py` + `knowledge/enterprise/registry.py` | 无 | D-E ✅ 24h 可配 + 仅 admin 读面 |
+| P2-2 | 企业源 text2SQL 只读分析档接蜂群面 | P2 | `builtin_tools.py`/`tool_executor.py` + `mcp_agent_tools_server.py` | 无 | D-D ✅ 成员工具面+反向 MCP 都接 |
 
-建议批次：**批1 = P1-2**（最小、堵正确性缺口）→ **批2 = P1-1 + P2-4**（投影端点、图、契约钉子同批交付）→ **批3 = P1-3** → **批4 = P2-3** → **批5 = P2-2**。每批按仓内纪律执行：红灯先行 → 最小实现转绿 → A/B 零新增失败 → live-verify 真链路 → `--only` 逐文件提交。
+已拍板批次（2026-11-21）：**批1 = P1-2**（最小、堵正确性缺口）→ **批2 = P2-3 + P1-1 + P2-4**（候选重放投影先行，图的 v2 候选/审批边直接消费它；投影端点、图、契约钉子同批交付）→ **批3 = P1-3** → **批4 = P2-2**。每批按仓内纪律执行：红灯先行 → 最小实现转绿 → A/B 零新增失败 → live-verify 真链路 → `--only` 逐文件提交。
 
 ---
 
@@ -82,11 +82,14 @@
    - `meta`：`{revision, generated_at, truncated}`（runs 超 `MAX_FINISHED_RUNS` 上限时诚实标注截断）。
 2. 投影函数落新模块 `agent/swarm_graph_projection.py`（不回填 `agent_core.py`，尺寸棘轮纪律），输入=台账行+事件，输出=纯结构；**不落新表、不写新账**（读投影，事实源仍是台账+H-4）。
 3. 前端新组件 `SwarmFlowPanel.vue`（vue-flow）：节点按 status 着色（复用既有状态词汇表，`LEDGER_TO_WINDOW_STATUS` 对齐），spawn 边实线、依赖边虚线；运行中经既有 `useSessionSync` 事件增量刷新（started→建节点、completed/failed→定色）；入口挂运行详情区与 TeamPage。
-4. v1 边集 = spawn + dependency；审批/候选边留 v2（见待拍板 D-A）。
+4. 边集（**D-A 已拍板 = v2 全边集**）：`spawn`（parent→child，取 `parent_subagent_id`/lineage）+ `dependency`（TaskUnit.dependencies 解析，`swarm.py:759-791` 同源映射）+ `approval`（审批边）+ `candidate`（候选边）：
+   - **审批边**：run → 审批卡 → 裁决结果。数据源=审批链审计（`approval_chain.py:158-245 _emitApprovalAudit` 落盘）+ ApprovalManager 单源读面（`metadata.source="swarm"` 的单）；图中以审批卡节点（特殊形态）挂到发起 run 与裁决人两侧，带 level（L0/L1/L2）与裁决态。
+   - **候选边**：run → 候选卡 → 合入去向。数据源=**P2-3 候选重放投影**（同批先行交付，`candidate_projection.py` 折叠六类 candidate_* 事件，`swarm.py:1138-1224`），边带 candidate status（submitted/merged/conflict/reviseRequired）。
+   - 图例与节点形态实施时取更简者（审批/候选做带标注的从属节点，不引入第二套布局算法）。
 
 ### 2.3 红绿测试设计
 
-- **红灯**：投影函数单测先写——给定固定台账行+事件序列，断言 nodes/edges；端点不存在先 404（红）。
+- **红灯**：投影函数单测先写——给定固定台账行+事件序列（含审批审计与候选事件），断言 nodes/edges（v2 四类边都要有断言）；端点不存在先 404（红）。
 - **绿灯**：实现端点与投影函数转绿；契约钉子测试同批落（P2-4，§7）。
 - **前端**：SwarmFlowPanel 桩测试——给固定投影 JSON，断言节点/边渲染数量与状态着色；事件增量（started/completed）驱动更新。
 
@@ -220,15 +223,15 @@
 
 ---
 
-## 7. 待拍板项（均附推荐与影响面；如无异议，实施时按推荐执行并在执行记录注明）
+## 7. 拍板记录（2026-11-21，用户逐项交互拍板）
 
-| # | 问题 | 选项与影响面 | 推荐 |
-|---|------|--------------|------|
-| D-A | P1-1 图边集范围 | v1=spawn+依赖（端点 schema 小、前端简）；v2 增审批/候选边（需 join approval 审计与候选投影，端点与图例复杂度上升，但一张图看全治理链） | **先 v1**，v2 视使用反馈再议 |
-| D-B | P1-2 判定通道形态 | 独立 ACP 判定会话（上下文零污染、多一次会话开销）；复用成员工作会话（省资源，但判定 prompt 污染成员上下文、可能带偏后续交付） | **独立判定会话**（正确性优先） |
-| D-C | P2-3 形态 | H-4 重放投影（单一事实源、无新表；大历史重放有读放大）；落 SQLite 新表 candidate_board（查询快，但与账本双写易漂移、违背单一事实源风险） | **重放投影**；若日后读放大实测显著，再议物化 |
-| D-D | P2-2 开放范围 | 仅成员工具面 / 仅反向 MCP / 两者（均可独立关断） | **两者都接**，MCP 面跟随总闸默认关 |
-| D-E | P1-3 巡检窗口与告警 | 窗口 24h（对齐对方）/12h/可配；告警仅 admin 台账读面 vs 叠加房间通知 | **窗口 env 可配默认 24h，告警先只进 admin 读面**（通知面另批） |
+| # | 问题 | 结论 | 影响落实 |
+|---|------|------|----------|
+| D-A | P1-1 图边集范围 | **v2：spawn+依赖+审批+候选边**（未取推荐的 v1） | P2-3 候选投影**提前至批2** 与图同批；投影端点增 approvals/candidates 结构与图例；交付变慢换治理链全景，见 §2.2-4 |
+| D-B | P1-2 判定通道形态 | **独立 ACP 判定会话**（推荐） | 按 §1.2 实施：判定会话与工作会话隔离，权限请求恒 fail-closed deny，不记 token |
+| D-C | P2-3 候选板形态 | **H-4 重放投影**（推荐） | 按 §5 实施：不落新表，账本仍是唯一持久层，读放大按会话缓存缓解 |
+| D-D | P2-2 text2SQL 开放范围 | **成员工具面+反向 MCP 都接**（推荐） | 按 §6 实施：两面可独立关断，MCP 面跟随 `NEUROVA_NL2SQL_ENABLED` 总闸默认关 |
+| D-E | P1-3 巡检窗口与告警 | **24h 可配 + 仅 admin 读面**（推荐） | `NEUROVA_ENTERPRISE_SYNC_STALE_HOURS` 默认 24；告警先只进同步历史 admin 读面，房间/渠道通知面另批 |
 
 ---
 
