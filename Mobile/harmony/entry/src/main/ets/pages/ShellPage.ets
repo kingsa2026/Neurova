@@ -200,6 +200,9 @@ export struct ShellPage {
         }
         .barOverlap(true)
         .barFloatingStyle({ systemMaterial: this.tabMaterial, maskColor: Color.Transparent })
+        // barOverlap 自带整条页签栏的半透明底+模糊（胶囊后面那层全宽暗带），关掉只留悬浮胶囊
+        .barBackgroundColor(Color.Transparent)
+        .barBackgroundBlurStyle(BlurStyle.NONE)
         .onChange((idx: number) => {
           this.currentTabIndex = idx;
           if (this.activeTab !== idx) {
