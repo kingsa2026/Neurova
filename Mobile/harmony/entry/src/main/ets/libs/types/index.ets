@@ -227,12 +227,16 @@ export type WSMessageType =
   | 'session:create'      // 客户端 → 服务端：创建会话
   | 'session:created'     // 服务端 → 客户端：创建确认
   | 'error'               // 服务端 → 客户端：通用错误
+  | 'sync_resume'         // 客户端 → 服务端：断线重连按游标补拉（远程驾驶可靠性）
   | 'ping'                // 心跳
   | 'pong';               // 心跳响应
 
 /** WS 通用消息信封 */
 export interface WSMessage {
   type: WSMessageType;
+  seq?: number;      // 服务端账本单调序号（先落账再发送，断线重连按游标补拉）
+  epoch?: number;    // 连接代际（每次重连递增，客户端据此识别新连接）
+  replay?: boolean;  // sync_resume 重放标记（true=补发的历史帧，非新执行）
 }
 
 /** chat:send 消息 */
@@ -241,6 +245,11 @@ export interface WSChatSend {
   content: string;
   session_id: string;
   agent_id?: string;
+  command_id?: string;   // 客户端生成的指令幂等 id（服务端按设备+指令 id 去重/回放）
+  model?: string;             // 回合模型热切换（对齐 PC 对话页）
+  thinking_effort?: string;   // 思考力度 light/standard/deep
+  permission_mode?: string;   // 权限模式
+  task_profile?: string;      // 任务画像
   attachments?: ChatAttachment[];
 }
 

@@ -1877,6 +1877,14 @@ async def mobile_websocket(websocket: WebSocket):
 
     _ws_connections[pairing_id] = websocket
 
+    # 远程驾驶可靠性（实施计划项 1）：连接 epoch 发号 + 出站帧账本化——
+    # 先落账再发送（帧内注入 seq/epoch），断线重连按游标 sync_resume 补发。
+    from neurova.api import mobile_ws_ledger as wsledger_module
+
+    wsLedger = wsledger_module.getMobileWsLedger()
+    connEpoch = wsLedger.nextEpoch(pairing_id)
+    ledgerWs = wsledger_module.LedgerWs(websocket, wsLedger, pairing_id, connEpoch)
+
     # 在线读数由 `_ws_connections` 叠出来（唯一的活连接源），这里只写活动时间。
     # 原实现把 `is_online` 写进一份内存 dict 又从那份 dict 读——那份 dict 现已退役。
     getDeviceRegistry().recordActivity(pairing_id)
@@ -1893,7 +1901,20 @@ async def mobile_websocket(websocket: WebSocket):
 
             # 处理心跳
             if message.get("type") == "ping":
-                await websocket.send_json({"type": "pong", "timestamp": time.time()})
+                await ledgerWs.send_json({"type": "pong", "timestamp": time.time()})
+                continue
+
+            # 远程驾驶（项 1）：断线重连后按游标补发缺失帧（带 replay 标记）
+            if message.get("type") == "sync_resume":
+                try:
+                    resumeCursor = int(message.get("last_seq") or 0)
+                except (TypeError, ValueError):
+                    resumeCursor = 0
+                for row in wsLedger.replaySince(pairing_id, resumeCursor):
+                    replayFrame = dict(row["frame"])
+                    replayFrame["seq"] = row["seq"]
+                    replayFrame["replay"] = True
+                    await websocket.send_json(replayFrame)
                 continue
 
             # 最近活动时间：按**节流**落库，不逐条消息写盘（WAL 下也只是少写，但聊天
@@ -1909,17 +1930,32 @@ async def mobile_websocket(websocket: WebSocket):
             if msg_type == "chat:send":
                 if current_chat_task is not None and not current_chat_task.done():
                     # 同一连接同时只允许一条在流回复：流式中新 send 拒绝
-                    await websocket.send_json({
+                    await ledgerWs.send_json({
                         "type": "error",
                         "code": "chat_busy",
                         "message": "当前连接已有回复进行中，请等待完成或先取消",
                     })
                     continue
+                # 远程驾驶（项 1）：指令先记账——同 command_id 的重复发送
+                # 回放原终态（replayed=true），不再产生第二次真实执行。
+                command_id = str(message.get("command_id") or "") or uuid.uuid4().hex
+                priorFrame = ledgerWs.commandPriorFrame(command_id, "chat:send", message)
+                if priorFrame is not None:
+                    await websocket.send_json(priorFrame)
+                    continue
+                ledgerWs.markCommandStart()
                 current_chat_task = asyncio.create_task(
-                    _run_chat_stream(websocket, message, user_id)
+                    _run_chat_stream(ledgerWs, message, user_id)
                 )
                 current_chat_sid = message.get("session_id", "")
                 _chat_tasks.add(current_chat_task)
+
+                def _settleCommandFromTask(_task, _proxy=ledgerWs, _cid=command_id):
+                    outcome = _proxy.commandOutcomeFrame()
+                    if outcome is not None:
+                        _proxy.settleCommand(_cid, outcome)
+
+                current_chat_task.add_done_callback(_settleCommandFromTask)
                 current_chat_task.add_done_callback(_chat_tasks.discard)
                 continue
 
@@ -1933,28 +1969,30 @@ async def mobile_websocket(websocket: WebSocket):
                     and sid == current_chat_sid
                 ):
                     current_chat_task.cancel()
-                await _handle_chat_cancel(websocket, message)
+                await _handle_chat_cancel(ledgerWs, message)
                 continue
 
             # 移动端对齐 PC 对话页：模型列表/上下文面板/产出物内容经 WS 代理
             # （/v1/models、/v1/context/*、/v1/artifacts/* 是 JWT 面，WS 凭证不可直调）
             if msg_type == "model:list":
-                await _handle_model_list(websocket, user_id)
+                await _handle_model_list(ledgerWs, user_id)
                 continue
             if msg_type == "context:composition":
-                await _handle_context_composition(websocket, message)
+                await _handle_context_composition(ledgerWs, message)
                 continue
             if msg_type == "artifact:get":
-                await _handle_artifact_content(websocket, message, user_id)
+                await _handle_artifact_content(ledgerWs, message, user_id)
                 continue
 
             # 分发消息到处理函数
-            await _handle_ws_message(websocket, message, user_id, pairing_id)
+            await _handle_ws_message(ledgerWs, message, user_id, pairing_id)
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected: %s", connection_id)
     except Exception as e:
-        logger.error("WebSocket error: %s", e)
+        # exc_info：此前只记 %s 消息，KeyError 这类无消息内容的异常（如
+        # "No item with that key"）事后完全无法定位——诚实报错要带栈。
+        logger.error("WebSocket error: %s", e, exc_info=True)
     finally:
         # B-6: 连接断开 → 收尸在流 task（wrapper 补发 chat:cancelled）
         if current_chat_task is not None and not current_chat_task.done():

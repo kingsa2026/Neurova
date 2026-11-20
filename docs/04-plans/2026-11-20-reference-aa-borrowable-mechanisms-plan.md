@@ -221,10 +221,10 @@ Linger 在三处（连接器执行、屏幕操作 journal、decision 执行器�
 ### 现状锚点
 - `mobile_pairing.py:1817` `/ws`（手机遥控 PC 的既有通道）、`session_sync.py:114` `/ws/{session_id}`。
 
-### 实施步骤（仅在远程驾驶需求立项时启动）
-1. 为移动遥控指令加"先记账再执行"（复用项 2 journal）。
-2. 断线重放：事件账本按 connection epoch 保留未确认帧，重连补发。
-3. media/流类操作加 epoch 发号，防旧进程复用覆盖流。
+### 实施步骤（已按本节落地，进度见 §10 项 1）
+1. 为移动遥控指令加"先记账再执行"（指令账本按 (设备, 指令 id) 幂等，独立于项 2 的工具账本——遥控指令的重复判定在 WS 入口，不在工具执行咽喉）。
+2. 断线重放：出站事件账本按设备保留最近 500 帧（单调 seq），重连 `sync_resume` 按游标补发；连接 epoch 按设备发号递增，帧内携带供客户端识别新连接。
+3. media/流类操作的 epoch 发号：移动 WS 通道暂无 media 复用场景，待出现时按同一 epoch 语义扩展（不预造无消费方代码）。
 
 ### 验收判据
 手机断网 30s 内的遥控指令不丟、不重复执行；重连后状态一致。
@@ -237,7 +237,7 @@ Linger 在三处（连接器执行、屏幕操作 journal、decision 执行器�
 - 完成后在本文档对应小节标注提交号与日期，并同步 `docs/0-index/README.md`。
 - 项 2/8 落地后，回填对照报告 §10 的"落地记录"。
 
-## 10. 实施进度（2026-11-20，均待提交）
+## 10. 实施进度（2026-11-20）
 
 - **项 2 已实施**：新增 `neurova/core/tool_call_journal.py`（begin/settle/run 编排 + computeKey + classifyFailure，SQLite 数据根落盘、RLock+WAL、`NEUROVA_TOOL_JOURNAL=0` 直通）；`tool_executor.py` 的 `execute` 单管道全部经 `_executeJournaled`（只读能力声明工具不记账）。测试 13 绿；并修掉 `object.__new__` 构造路径的 `_agent` 缺属性问题。**测试隔离**：`tests/conftest.py` 新增 autouse 夹具按用例隔离账本库（防跨用例回放污染）。
 - **项 8 已实施**：新增 `computer_use/guardrail.py`（只读白名单/同站免审/LLM 复核失败即拒，`NEUROVA_CUA_GUARDRAIL=off` 直通）与 `computer_use/lane_mutex.py`（desktop/browser 车道互斥 + unknown 封道）；`browser_manager.navigate`、`actions` 前台输入族挂钩。新增 38 测试，computer_use 全量 857 绿。
@@ -246,5 +246,5 @@ Linger 在三处（连接器执行、屏幕操作 journal、decision 执行器�
 - **项 3 已实施（第一步）**：新增 `neurova/tools/catalog.py`（137 工具全量投影：name/description/schema/read_only/external_write/agent_scope）+ `scripts/check_tool_catalog.py` 快照门 + `contracts/tool_catalog.json`；`context/orchestrator.py` 的 `render_tools_description` 以 catalog 渲染样例工具。23 测试绿，tools 1345 绿、context 1250 绿。
 - **项 6 部分由既有机制覆盖**：移动配对已实现"设备身份摘要存储 + 短时效 connect_ticket + 长身份幂等续签"（mobile_pairing.py），与 Linger 纪律同构；剩余增量仅"换绑即吊销"语义，待 pairing registry 专项小批处理（不造无消费方代码）。
 - **项 7 已实施（最小闭环）**：新增 `cognitive_layers/dreaming.py`（rule_clues 聚合计数 / behavior_rules 候选→active / dreamSweep 转正 / activeRules 只读 active；转正闸接 S16 `screenMemoryContent` 敏感筛查 fail-closed；`NEUROVA_DREAMING` 门控），夜间接线挂 `core/idle_tracker.py` 既有睡眠巩固漏斗。13 新测试绿 + cognitive_layers 626 绿 + A/B 自证零新增失败。未尽：反馈采集点（post_chat 链）与判定面注入（proactive/审批提示）待后续批次。
-- **项 1 维持条件项**（远程驾驶立项后启动）。
+- **项 1 已实施（2026-11-20 晚，远程驾驶可靠性通道）**：新增 `neurova/api/mobile_ws_ledger.py`——连接 epoch 按设备发号递增、出站帧**先落账再发送**（设备级单调 seq 注入帧内）、`sync_resume {last_seq}` 按游标补发（带 `replay:true`）、遥控指令按 **(pairing_id, command_id) 复合主键**先记账再执行（同 id 重放原终态 `replayed:true`/运行中报 `command_already_running`，不二次执行；**失败回合同样收敛终态**，不留永挂 running）；schema 接入 `db_migration` 域隔离版本化迁移（domain=mobile_ws，v1 基线 + v2 把存量单列主键表重建为复合主键——真后端持久库实测触发并修复）。`mobile_pairing.py` WS 全出站帧过 `LedgerWs` 账本代理、新增 `sync_resume` 重放分支、`chat:send` 指令记账/去重/终态收敛回调。鸿蒙端配对适配：`WebSocketAdapter` 记 seq 游标（仅内存，防重启双份渲染）+ 重连自动 `sync_resume` 补拉；`ChatPage` 每条 `chat:send` 带客户端 `util.generateRandomUUID` 的 `command_id`、在途记账，`ws:connected` 时未收敛即同 id 重发（服务端幂等三走向：回放终态/报 running/首次执行），终态帧清账。测试：新增 13 用例绿（存储 9 + WS 集成 4，含存量库迁移红绿）；移动端既有 74+88 零回归；身份/失败着陆守卫 31 绿；hvigor assembleHap BUILD SUCCESSFUL；**真后端 live-verify 全过**（真 LLM 回合 23 帧全带 seq/epoch；第二连接 `sync_resume` 逐帧补齐原 seq；同 `command_id` 重发仅回放 1 帧 `replayed:true`）。
 - **附带收口（预存违规）**：`agent/swarm.py` 3136 行超硬上限 3000 属 HEAD 既有违规（非本批引入），已纯搬移"run 生命周期族"（状态词汇/迁移表/谱系投影/启动收敛/SubAgentRun，8 段共 312 行）至新模块 `agent/swarm_support.py`，swarm.py 降至 2824 行，架构守卫由红转绿（违规 0），agent 域 2337 测试零新增失败。

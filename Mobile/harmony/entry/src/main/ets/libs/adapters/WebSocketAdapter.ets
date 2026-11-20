@@ -81,6 +81,12 @@ interface WsMessagePayload {
   data: string;
 }
 
+/** sync_resume 请求（远程驾驶可靠性：断线重连按游标补拉缺失帧） */
+interface SyncResumeRequest {
+  type: string;
+  last_seq: number;
+}
+
 export class WebSocketAdapter {
   private static instance: WebSocketAdapter;
   private logger: Logger = Logger.getInstance();
@@ -110,6 +116,8 @@ export class WebSocketAdapter {
   private manualClose: boolean = false;
   /** 外部注册的原始消息处理器列表 */
   private messageHandlers: Array<(data: string) => void> = [];
+  /** 服务端账本游标：已收到的最大帧 seq（远程驾驶可靠性，重连补拉用；仅内存，不跨启动） */
+  private lastServerSeq: number = 0;
 
   private constructor() {}
 
@@ -269,6 +277,8 @@ export class WebSocketAdapter {
       this.bus.emit('ws:connected', payload);
       // 启动心跳保活
       this.startHeartbeat();
+      // 远程驾驶可靠性：重连后按游标补拉断线期间错过的帧（首次连接游标为 0 不发）
+      this.resumeMissedFrames();
     });
 
     // 收到消息：SDK 签名为 AsyncCallback<string | ArrayBuffer>，即 (err, data) 两参回调；
@@ -366,6 +376,10 @@ export class WebSocketAdapter {
       this.logger.warn(TAG, '消息缺少 type 字段');
       return;
     }
+    // 服务端帧带单调 seq（先落账再发送）：推进游标（重放帧按原 seq 计，幂等）
+    if (parsed.seq !== undefined && parsed.seq > this.lastServerSeq) {
+      this.lastServerSeq = parsed.seq;
+    }
 
     const event: string = this.typeToEvent(type);
     if (event.length === 0) {
@@ -427,6 +441,24 @@ export class WebSocketAdapter {
       default:
         return '';
     }
+  }
+
+  // ===========================================================================
+  // 断线重连补拉（远程驾驶可靠性）
+  // ===========================================================================
+
+  /** 重连后按游标补拉：服务端出站帧先落账再发送（带单调 seq），发 sync_resume
+   * 让服务端补发 lastServerSeq 之后的帧（带 replay 标记）。首次连接游标为 0
+   * 不发——不注入额外首帧，保持既有契约。游标仅存内存：应用重启后走会话
+   * 历史恢复，不重放旧帧（避免与历史加载双份渲染）。 */
+  private resumeMissedFrames(): void {
+    if (this.lastServerSeq <= 0) {
+      return;
+    }
+    const req: SyncResumeRequest = { type: 'sync_resume', last_seq: this.lastServerSeq };
+    this.send(JSON.stringify(req)).catch((e: Error) => {
+      this.logger.warn(TAG, 'sync_resume 补拉发送失败（连接可能再次断开）', e);
+    });
   }
 
   // ===========================================================================

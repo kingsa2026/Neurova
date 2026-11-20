@@ -39,7 +39,7 @@ import { ConfigManager } from '../libs/config/ConfigManager';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { WSChatChunk, WSChatDone, WSChatReasoning, WSChatToolCall, WSChatToolResult, WSChatArtifact, WSChatPlanUpdate, WSChatUsage, WSChatApprovalRequired, WSModelListResult, WSContextCompositionResult, WSArtifactContentResult, Agent } from '../libs/types';
+import { WSChatChunk, WSChatDone, WSChatReasoning, WSChatSend, WSChatToolCall, WSChatToolResult, WSChatArtifact, WSChatPlanUpdate, WSChatUsage, WSChatApprovalRequired, WSModelListResult, WSContextCompositionResult, WSArtifactContentResult, Agent } from '../libs/types';
 import { Router } from '../routing/Router';
 import { ChunkBatcher } from '../libs/perf/ChunkBatcher';
 import { SimpleDataSource } from '../libs/perf/SimpleDataSource';
@@ -50,6 +50,7 @@ import { audio } from '@kit.AudioKit';
 import { abilityAccessCtrl, Permissions } from '@kit.AbilityKit';
 import { AsrStreamClient } from '../libs/adapters/AsrStreamClient';
 import { HttpClient } from '../libs/api/HttpClient';
+import { util } from '@kit.ArkTS';
 
 /** 对话消息视图模型（仅用于本页渲染） */
 interface ChatMessageView {
@@ -175,6 +176,10 @@ export struct ChatPage {
   private authStore = new AuthStore();
   private agentsStore = new AgentsStore();
   private ws = WebSocketAdapter.getInstance();
+  // 远程驾驶可靠性（服务端指令记账的客户端配对）：在途指令记账，断线重连后
+  // 以同一 command_id 重发——服务端按 (设备, 指令 id) 幂等，不会二次执行
+  private inFlightCommandId: string = '';
+  private inFlightPayload: string = '';
   private bus = EventBus.getInstance();
   private config = ConfigManager.getInstance();
   private sm = StyleManager.getInstance();
@@ -199,6 +204,7 @@ export struct ChatPage {
   private modelListHandler: EventHandler = () => {};
   private compositionHandler: EventHandler = () => {};
   private artifactContentHandler: EventHandler = () => {};
+  private connectedHandler: EventHandler = () => {};
   // 语音输入（CoreSpeechKit 端侧识别 + AudioCapturer 采集喂入）
   @State voiceListening: boolean = false;
   private voiceEngine: speechRecognizer.SpeechRecognitionEngine | null = null;
@@ -254,6 +260,7 @@ export struct ChatPage {
     this.bus.off('model:list_result', this.modelListHandler);
     this.bus.off('context:composition_result', this.compositionHandler);
     this.bus.off('artifact:content_result', this.artifactContentHandler);
+    this.bus.off('ws:connected', this.connectedHandler);
     // 语音资源收尾（识别引擎/采集器可能仍在运行）
     this.stopVoice();
     // 断开 WS（adapter 内部会清理心跳与重连定时器）
@@ -642,6 +649,9 @@ export struct ChatPage {
     this.bus.on('chat:chunk', this.chunkHandler);
 
     this.doneHandler = (data: Object) => {
+      // 回合终态（直播或重放到达皆同）：在途指令已收敛，清除断线重发记账
+      this.inFlightCommandId = '';
+      this.inFlightPayload = '';
       // 服务端对未知/缺省会话 id 会当场铸真记录——先采纳权威 id 再收尾
       this.adoptServerSession((data as WSChatDone).session_id);
       // M5.2.1 流结束，强制刷新剩余缓冲
@@ -666,6 +676,9 @@ export struct ChatPage {
     this.bus.on('chat:done', this.doneHandler);
 
     this.errorHandler = (data: Object) => {
+      // 回合终态：在途指令已收敛（失败也是终态），清除断线重发记账
+      this.inFlightCommandId = '';
+      this.inFlightPayload = '';
       this.isGenerating = false;
       this.queued = false;
       // M5.2.1 错误时丢弃缓冲（避免显示半截内容）
@@ -680,6 +693,20 @@ export struct ChatPage {
       this.logger.error(TAG, '聊天错误', undefined, data);
     };
     this.bus.on('chat:error', this.errorHandler);
+
+    // 重连补发（远程驾驶可靠性）：断线期间发出的指令若尚未收敛，重连成功后
+    // 以同一 command_id 重发——服务端要么回放原终态（replayed=true）、要么
+    // 报 running（其结果帧随后经重放/直播到达）、要么首次真正执行（发送本身
+    // 在断线中丢失的情形）。三种走向都收敛到同一个回合，不会二次执行。
+    this.connectedHandler = () => {
+      if (this.inFlightCommandId !== '' && this.inFlightPayload !== '') {
+        this.logger.info(TAG, `重连后重发在途指令 ${this.inFlightCommandId}`);
+        this.ws.send(this.inFlightPayload).catch((e: Error) => {
+          this.logger.warn(TAG, '在途指令重发失败', e);
+        });
+      }
+    };
+    this.bus.on('ws:connected', this.connectedHandler);
 
     // 排队事件（后端 chat:queued）：展示排队卡（设计 F5 .queued）
     this.queuedHandler = () => {
@@ -1128,19 +1155,28 @@ export struct ChatPage {
     this.isGenerating = true;
     this.scrollToBottom();
 
-    // 通过 WS 下发 chat:send（对齐 PC：回合控制四字段随请求下发）
+    // 通过 WS 下发 chat:send（对齐 PC：回合控制四字段随请求下发）。
+    // 远程驾驶可靠性：客户端生成 command_id（服务端按 设备+指令 id 记账幂等），
+    // 在途记账供断线重连后重发——同 id 不会产生第二次真实执行。
+    const commandId = util.generateRandomUUID(true);
+    this.inFlightCommandId = commandId;
+    this.inFlightPayload = JSON.stringify({
+      type: 'chat:send',
+      command_id: commandId,
+      content: text,
+      session_id: this.sessionId,
+      agent_id: this.currentAgentId,
+      model: this.selectedModel !== '' ? this.selectedModel : undefined,
+      thinking_effort: this.thinkingEffort !== '' ? this.thinkingEffort : undefined,
+      permission_mode: this.permissionMode !== '' ? this.permissionMode : undefined,
+      task_profile: this.taskProfile !== '' ? this.taskProfile : undefined,
+    } as WSChatSend);
     try {
-      await this.ws.send(JSON.stringify({
-        type: 'chat:send',
-        content: text,
-        session_id: this.sessionId,
-        agent_id: this.currentAgentId,
-        model: this.selectedModel !== '' ? this.selectedModel : undefined,
-        thinking_effort: this.thinkingEffort !== '' ? this.thinkingEffort : undefined,
-        permission_mode: this.permissionMode !== '' ? this.permissionMode : undefined,
-        task_profile: this.taskProfile !== '' ? this.taskProfile : undefined,
-      }));
+      await this.ws.send(this.inFlightPayload);
     } catch (e) {
+      // send 抛错＝指令确定未发出（WS 死态），清在途记账（重连后不重发）
+      this.inFlightCommandId = '';
+      this.inFlightPayload = '';
       this.logger.error(TAG, '发送消息失败', e as Error);
       this.isGenerating = false;
       const last = this.messages[this.messages.length - 1];
@@ -1170,6 +1206,9 @@ export struct ChatPage {
     } catch (e) {
       this.logger.error(TAG, '停止生成失败', e as Error);
     }
+    // 用户已主动放弃本回合：清在途记账（重连后不重发被取消的指令）
+    this.inFlightCommandId = '';
+    this.inFlightPayload = '';
     this.isGenerating = false;
   }
 
