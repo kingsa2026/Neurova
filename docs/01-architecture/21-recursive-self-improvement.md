@@ -3,6 +3,12 @@
 > **版本**: v1.3  
 > **日期**: 2026-06-08  
 > **状态**: 已实现（RSI 八组件 + 进化域 E1–E5 修复闭环——宪法死端点修复与规则注入、动机行动生成按 E3 裁定退役改道、人格特质注入、反思 lessons 补池；2026-11-19 按代码核对更新；2026-11-20 §6.3/§14.3/§15/§16 收敛与监控接口按 neurova/evolution/rsi/ 现实现二次对齐：六态词表、evidenced 失明防护、trend_slope 判据、RSIMetrics 12 指标与 ALERT_THRESHOLDS、check_alerts 六条）  
+>
+> **实现对照（2026-11-20 全文按代码核对）**：本文档是"设计蓝图 + 实现现状"混合体。已按现实现逐条核对的章节：§2.2 参数表、§6.3 收敛检测、§9 集成清单、§14.2/§14.3、§15 收敛性分析、§16 监控。以下设计期类名**未作为独立类实现**，阅读 §5/§6/§8/§13 的伪代码时按此对照：
+> - `MetaParameterOptimizer` / `MetaCognitionRSI` / `StrategyEffectTracker` / `ArchitectureEvolver` / `GoalEvolver` / `LearningStrategyEvolver` / `IntegratedRSI` / `RSICoordinator` / `RatchetRSI` / `RSISafetyArchitecture` —— 未实现（设计稿保留）
+> - `RatchetValidator` / `RatchetPruner` / `NestedRatchetPruner` / `RatchetNesting` / `RecursivePruneConfig` —— 棘轮剪枝/验证以 `RecursiveRatchetPruner`、`EnhancedRatchetPruner` 落地（`neurova/evolution/rsi/recursive_ratchet_pruner.py`），门禁裁决见 `rsi/gate_verdict.py`
+> - `SemanticAnchor` / `ImmutableSafetyLayer` / `ImprovementBudget` —— 未实现（设计稿保留）
+> - `ToolLayerRSI` / `ToolEvolutionHierarchy` / `ToolParameterEvolver` / `ToolCompositionEvolver` / `ToolCodeEvolver` / `ToolRatchetValidator` / `ToolRSISafety` / `ToolRSIIntegration` —— 工具层进化由 `ToolGeneticEngine`（`evolution/genetic_engine.py`）、`ToolLifecycleManager`（`evolution/tool_lifecycle.py`）、`AdaptiveToolWeights`（`evolution/closed_loop.py`）承担，未设同名独立类
 
 ---
 
@@ -44,7 +50,7 @@ Neurova已具备完整的单层进化基础设施，为RSI提供坚实基础：
 
 ```
 EvolutionOrchestrator (neurova/evolution/closed_loop.py)
-├── AdaptiveToolWeights (neurova/evolution/tool_weights.py)
+├── AdaptiveToolWeights (neurova/evolution/closed_loop.py)
 │   ├── 成功激励：bonus = success_bonus / (1 + success_count * 0.1)
 │   ├── 失败惩罚：adaptive_multiplier *= failure_penalty
 │   └── 时间衰减：decay = exp(-decay_rate * hours_since_use)
@@ -54,7 +60,7 @@ EvolutionOrchestrator (neurova/evolution/closed_loop.py)
 ├── ToolGeneticEngine (neurova/evolution/genetic_engine.py)
 │   ├── 工具组合进化
 │   └── 适应度评估
-├── NLToolSynthesizer (neurova/evolution/nl_tool_synthesizer.py)
+├── NLToolSynthesizer (neurova/evolution/nl_synthesizer.py)
 │   ├── 自然语言工具合成
 │   └── 模式到工具模板转换
 ├── ExperienceFeedback (neurova/evolution/experience_feedback.py)
@@ -71,19 +77,19 @@ EvolutionOrchestrator (neurova/evolution/closed_loop.py)
 
 | 组件 | 参数 | 当前值 | 位置 |
 |------|------|--------|------|
-| AdaptiveToolWeights | success_bonus | 0.1 | tool_weights.py:73 |
-| AdaptiveToolWeights | failure_penalty | 0.9 | tool_weights.py:74 |
-| AdaptiveToolWeights | decay_rate | 0.01 | tool_weights.py:75 |
-| AdaptiveToolWeights | min_multiplier | 0.1 | tool_weights.py:77 |
-| AdaptiveToolWeights | max_multiplier | 5.0 | tool_weights.py:78 |
-| EvolutionOrchestrator | lifecycle_eval_interval | 3600.0秒 | closed_loop.py:198 |
-| EvolutionOrchestrator | degraded_weight_factor | 0.7 | closed_loop.py:259 |
-| PatternMiner | min_support | 0.1 | pattern_miner.py |
-| PatternMiner | max_pattern_length | 5 | pattern_miner.py |
-| TemperatureEngine | base_decay_rate | 0.1 | temperature.py |
-| TemperatureEngine | active_threshold | 60.0°C | temperature.py |
-| TemperatureEngine | secondary_threshold | 20.0°C | temperature.py |
-| TemperatureEngine | archived_threshold | 5.0°C | temperature.py |
+| AdaptiveToolWeights | success_bonus | 0.1 | closed_loop.py:75 |
+| AdaptiveToolWeights | failure_penalty | 0.05 | closed_loop.py:76 |
+| AdaptiveToolWeights | decay_rate | 0.01 | closed_loop.py:77 |
+| AdaptiveToolWeights | min_multiplier | 0.3 | closed_loop.py:79 |
+| AdaptiveToolWeights | max_multiplier | 1.5 | closed_loop.py:80 |
+| EvolutionOrchestrator | lifecycle_eval_interval | 3600.0秒 | closed_loop.py:425 |
+| EvolutionOrchestrator | degraded 降级权重因子（内联常量） | 0.7 | closed_loop.py:503 |
+| PatternMiner | min_support | 2 | pattern_miner.py:48 |
+| PatternMiner | min_length / max_length | 2 / 10 | pattern_miner.py:48 |
+| TemperatureEngine | base_decay_rate | 0.1 | temperature.py:108 |
+| TemperatureEngine | THRESHOLD_SECONDARY（转次级阈值） | 60.0 | temperature.py:92 |
+| TemperatureEngine | THRESHOLD_ARCHIVED（转归档阈值） | 20.0 | temperature.py:93 |
+| TemperatureEngine | THRESHOLD_DELETED（转删除阈值） | 5.0 | temperature.py:94 |
 
 ### 2.3 现有进化机制
 
@@ -136,9 +142,9 @@ EvolutionOrchestrator (neurova/evolution/closed_loop.py)
 | 组件 | 功能 | 文件位置 |
 |------|------|---------|
 | `Agent.chat()` | 对话执行 | `neurova/agent_core.py` |
-| `ToolExecutor` | 工具执行 | `neurova/agent/tool_executor.py` |
+| `ToolExecutor` | 工具执行 | `neurova/tool_executor.py` |
 | `NeurovaRecallEngine` | 记忆检索 | `neurova/cognitive_layers/memory_layer/neurova_recall.py` |
-| `ContextOrchestrator` | 上下文构建 | `neurova/agent/context_orchestrator.py` |
+| `ContextOrchestrator` | 上下文构建 | `neurova/context/orchestrator.py` |
 
 #### L1: 元认知 — 改进自身的能力
 
@@ -147,12 +153,12 @@ EvolutionOrchestrator (neurova/evolution/closed_loop.py)
 | 组件 | 功能 | 文件位置 |
 |------|------|---------|
 | `EvolutionOrchestrator` | 进化编排 | `neurova/evolution/closed_loop.py` |
-| `AdaptiveToolWeights` | 自适应权重 | `neurova/evolution/tool_weights.py` |
+| `AdaptiveToolWeights` | 自适应权重 | `neurova/evolution/closed_loop.py` |
 | `PatternMiner` | 模式挖掘 | `neurova/evolution/pattern_miner.py` |
 | `PatternCrystallizer` | 经验结晶 | `neurova/cognitive_layers/memory_layer/pattern_crystallizer.py` |
 | `ToolLifecycleManager` | 工具生命周期 | `neurova/evolution/tool_lifecycle.py` |
 | `EKICognitiveOptimizer` | 认知优化 | `neurova/cognitive_layers/memory_layer/bayesian_eki/cognitive_optimizer.py` |
-| `MetaCognition` | 元认知模块 | `neurova/cognitive_layers/meta_cognition_layer/meta_cognition.py` |
+| `MetaCognition` | 元认知模块 | `neurova/cognitive_layers/memory_layer/meta_cognition.py` |
 
 #### L2: 元元认知 — 改进改进能力的能力
 
@@ -226,6 +232,7 @@ RSI需要闭合以下五个递归回路：
 ---
 
 ## 5. 详细设计
+> 实现状态：本节五回路为设计蓝图，伪代码类名多为设计期命名（对照见头部"实现对照"）；参数级回路的现役实现见 `neurova/evolution/rsi/orchestrator.py` 及同目录模块。
 
 ### 5.1 回路1: 策略进化 (Parameter-Level RSI)
 
@@ -235,7 +242,7 @@ RSI需要闭合以下五个递归回路：
 
 #### 当前问题
 
-`AdaptiveToolWeights` 的更新规则参数是硬编码的（来自 `neurova/evolution/tool_weights.py`）：
+（来自 `neurova/evolution/closed_loop.py`）
 
 ```python
 # 当前：硬编码的更新规则参数
@@ -243,11 +250,11 @@ class AdaptiveToolWeights:
     def __init__(
         self,
         success_bonus: float = 0.1,       # 成功激励基数
-        failure_penalty: float = 0.9,     # 失败惩罚系数
+        failure_penalty: float = 0.05,    # 失败惩罚系数（与 closed_loop.py:76 一致）
         decay_rate: float = 0.01,         # 时间衰减率
         window_size: int = 100,           # 滑动窗口大小
-        min_multiplier: float = 0.1,      # 最小乘数下限
-        max_multiplier: float = 5.0,      # 最大乘数上限
+        min_multiplier: float = 0.3,      # 最小乘数下限
+        max_multiplier: float = 1.5,      # 最大乘数上限
         default_base_weight: float = 1.0, # 默认基础权重
     ):
 
@@ -273,14 +280,14 @@ class MetaParameterOptimizer:
     def __init__(self, storage_path: str = None):
         # 被优化的元参数（基于实际代码参数）
         self.meta_params = {
-            # AdaptiveToolWeights 的参数（来自 tool_weights.py）
+            # AdaptiveToolWeights 的参数（来自 closed_loop.py，2026-11-20 对齐）
             'tool_weights': {
                 'success_bonus': 0.1,        # 成功激励基数（实际默认值）
-                'failure_penalty': 0.9,      # 失败惩罚系数（实际默认值）
+                'failure_penalty': 0.05,     # 失败惩罚系数（实际默认值）
                 'decay_rate': 0.01,          # 时间衰减率（实际默认值）
                 'window_size': 100,          # 滑动窗口大小
-                'min_multiplier': 0.1,       # 最小乘数下限
-                'max_multiplier': 5.0,       # 最大乘数上限
+                'min_multiplier': 0.3,       # 最小乘数下限
+                'max_multiplier': 1.5,       # 最大乘数上限
                 'default_base_weight': 1.0,  # 默认基础权重
             },
             # TemperatureEngine 的参数（来自 temperature.py）
@@ -668,6 +675,7 @@ class GoalEvolver:
 ---
 
 ## 6. 安全边界设计
+> 实现状态：§6.3 收敛检测、§6.8 递归棘轮剪枝已落地（`rsi/convergence_analyzer.py`、`rsi/recursive_ratchet_pruner.py`）；§6.4 棘轮验证器、§6.5 语义锚点、§6.7 不可变安全层为设计稿。
 
 ### 6.1 多层安全架构
 
@@ -1428,6 +1436,7 @@ class RatchetNesting:
 ---
 
 ## 8. 风险与缓解：棘轮论证机制
+> 实现状态：本节为设计蓝图；剪枝器已以 `rsi/recursive_ratchet_pruner.py` 落地，棘轮锁/语义锚点/不可变安全层的独立类未实现。
 
 ### 8.1 核心思想：棘轮论证（Ratchet Mechanism）
 
@@ -1751,45 +1760,41 @@ class RatchetRSI:
 
 ### 9.1 需要修改的文件
 
-| 文件 | 修改内容 |
+| 文件 | 集成内容 |
 |------|---------|
-| `neurova/evolution/closed_loop.py` | 集成 MetaParameterOptimizer |
-| `neurova/evolution/tool_weights.py` | 参数化更新规则 |
-| `neurova/cognitive_layers/meta_cognition_layer/meta_cognition.py` | 集成 MetaCognitionRSI |
-| `neurova/agent_core.py` | RSI组件初始化和集成 |
-| `neurova/api/endpoints/memory/metacognition.py` | RSI API端点 |
+| `neurova/evolution/rsi/orchestrator.py` | RSI 编排器（`RSIOrchestrator`）：post-chat 阶段按节拍跑迭代，已收敛/度量失明时退避巡检 |
+| `neurova/evolution/rsi/integration_manager.py` | `RSIIntegrationManager`：RSI 与四大闭环的信号采集/参数更新接合 |
+| `neurova/evolution/rsi/deployment_controller.py` | `RSIDeploymentController`：五阶段渐进自治与晋升判据 |
+| `neurova/api/endpoints/governance.py` | RSI 治理读面与人工审批端点（见 §9.3） |
+| `neurova/agent_core.py` | `muscle_memory_threshold` 等可进化参数的配置单源 |
 
-### 9.2 新增文件
+### 9.2 新增文件（设计期计划 vs 实际落地）
 
-| 文件 | 功能 |
+| 设计期计划文件 | 实际落地 |
 |------|------|
-| `neurova/evolution/rsi/meta_param_optimizer.py` | 元参数优化器 |
-| `neurova/evolution/rsi/meta_cognition_rsi.py` | 元认知RSI |
-| `neurova/evolution/rsi/architecture_evolver.py` | 架构进化器 |
-| `neurova/evolution/rsi/convergence_detector.py` | 收敛检测器 |
-| `neurova/evolution/rsi/improvement_budget.py` | 改进预算管理 |
-| `neurova/evolution/rsi/ratchet_validator.py` | 棘轮验证器 |
-| `neurova/evolution/rsi/ratchet_pruner.py` | 棘轮剪枝器 |
-| `neurova/evolution/rsi/recursive_ratchet_pruner.py` | 递归棘轮剪枝器 |
-| `neurova/evolution/rsi/semantic_anchor.py` | 语义锚点 |
-| `neurova/evolution/rsi/immutable_safety.py` | 不可变安全层 |
-| `neurova/evolution/rsi/tool_rsi.py` | 工具层RSI |
-| `neurova/evolution/rsi/tool_ratchet_validator.py` | 工具棘轮验证器 |
-| `neurova/evolution/rsi/tool_evolution_hierarchy.py` | 工具进化层次 |
-| `neurova/evolution/rsi/__init__.py` | RSI模块导出 |
-| `tests/unit/test_rsi_*.py` | RSI测试套件 |
-| `tests/unit/test_tool_rsi.py` | 工具层RSI测试 |
+| `rsi/convergence_detector.py` | 已落地为 `rsi/convergence_analyzer.py`（`ConvergenceAnalyzer`） |
+| `rsi/ratchet_pruner.py`、`rsi/recursive_ratchet_pruner.py` | 已落地为 `rsi/recursive_ratchet_pruner.py`（`RecursiveRatchetPruner` / `EnhancedRatchetPruner`） |
+| `rsi/tool_weights.py`（独立权重文件） | 已并入 `evolution/closed_loop.py`（`AdaptiveToolWeights`） |
+| `rsi/tool_rsi.py`、`rsi/tool_evolution_hierarchy.py`、`rsi/tool_ratchet_validator.py` | 工具层进化由 `evolution/genetic_engine.py`（`ToolGeneticEngine`）、`evolution/tool_lifecycle.py`（`ToolLifecycleManager`）、`evolution/closed_loop.py` 承担，未设同名独立类 |
+| `rsi/meta_param_optimizer.py`、`rsi/meta_cognition_rsi.py`、`rsi/architecture_evolver.py` | 未实现（设计稿保留；元认知基础件见 `cognitive_layers/memory_layer/meta_cognition.py` 的 `MetaCognition`） |
+| `rsi/improvement_budget.py`、`rsi/ratchet_validator.py` | 未设同名文件；门禁/预算以 `rsi/gate_verdict.py`（`GateVerdict`）、`rsi/candidate_policy.py`（`CandidatePolicy`）、`rsi/debt_ledger.py`（`RsiDebtLedger`）、`rsi/audit_schedule.py`（`AuditSchedule`）承担 |
+| `rsi/semantic_anchor.py`、`rsi/immutable_safety.py` | 未实现（设计稿保留） |
+| `rsi/__init__.py` | 已落地（`neurova/evolution/rsi/`） |
+| `tests/unit/test_rsi_*.py`、`tests/unit/test_tool_rsi.py` | RSI/工具层测试落 `tests/unit/`（按模块分目录） |
+
 
 ### 9.3 API端点
 
+真实路由（`neurova/api/endpoints/governance.py`，挂载于 `/api/v1/governance`）：
+
 ```
-POST /rsi/evaluate      - 评估RSI效果
-POST /rsi/evolve        - 触发RSI循环
-GET  /rsi/status        - 获取RSI状态
-GET  /rsi/history       - 获取RSI历史
-POST /rsi/configure     - 配置RSI参数
-POST /rsi/rollback      - 回滚RSI改进
-GET  /rsi/convergence   - 获取收敛状态
+GET  /rsi/status                     - RSI 状态与指标读面
+GET  /rsi/proposals                  - 改进提案列表
+GET  /rsi/proposals/pending          - 待审提案
+POST /rsi/proposals/{id}/approve     - 批准改进提案
+POST /rsi/proposals/{id}/reject      - 拒绝改进提案
+POST /rsi/improver-upgrade/approve   - 改进器升级（I_t -> I_{t+1}）人工批准
+```
 ```
 
 ---
@@ -1843,6 +1848,7 @@ GET  /rsi/convergence   - 获取收敛状态
 ---
 
 ## 13. 工具层RSI（Tool Layer RSI）
+> 实现状态：本节为设计蓝图；现役工具进化由 `evolution/genetic_engine.py`、`evolution/tool_lifecycle.py`、`evolution/closed_loop.py`（`AdaptiveToolWeights`）承担，本节独立类未实现（对照见头部）。
 
 ### 13.1 核心思想
 
@@ -2512,22 +2518,16 @@ class ToolRSISafety:
 
 | 文件 | 修改内容 |
 |------|---------|
-| `neurova/evolution/tool_weights.py` | 集成参数进化 |
-| `neurova/agent/tool_executor.py` | 集成工具层RSI |
-| `neurova/evolution/closed_loop.py` | 协调工具进化与主进化 |
+| `neurova/evolution/closed_loop.py` | 集成参数进化 + 协调工具进化与主进化（`AdaptiveToolWeights` 实际在此） |
+| `neurova/tool_executor.py` | 集成工具层 RSI（真实路径在 `neurova/` 根，非 `neurova/agent/`） |
 
 #### 新增文件
 
-| 文件 | 功能 |
+| 设计期计划文件 | 实际落地 |
 |------|------|
-| `neurova/evolution/rsi/tool_rsi.py` | 工具层RSI主类 |
-| `neurova/evolution/rsi/tool_ratchet_validator.py` | 工具棘轮验证器 |
-| `neurova/evolution/rsi/tool_evolution_hierarchy.py` | 工具进化层次 |
-| `neurova/evolution/rsi/tool_parameter_evolver.py` | 参数进化器 |
-| `neurova/evolution/rsi/tool_composition_evolver.py` | 组合进化器 |
-| `neurova/evolution/rsi/tool_code_evolver.py` | 代码进化器 |
-| `neurova/evolution/rsi/tool_rsi_safety.py` | 工具RSI安全机制 |
-| `tests/unit/test_tool_rsi.py` | 工具层RSI测试 |
+| `rsi/tool_rsi.py`、`rsi/tool_evolution_hierarchy.py`、`rsi/tool_ratchet_validator.py`、`rsi/tool_parameter_evolver.py` | 未设同名独立类；工具层进化由 `evolution/genetic_engine.py`（`ToolGeneticEngine`）、`evolution/tool_lifecycle.py`（`ToolLifecycleManager`）、`evolution/closed_loop.py`（`AdaptiveToolWeights`）承担（见头部实现对照） |
+| `rsi/tool_composition_evolver.py`、`rsi/tool_code_evolver.py`、`rsi/tool_rsi_safety.py` | 未实现（设计稿保留；组合/代码进化与安全机制未设独立类） |
+| `tests/unit/test_tool_rsi.py` | RSI/工具层测试落 `tests/unit/`（按模块分目录） |
 
 ### 13.10 工具层RSI的优势
 
@@ -2657,13 +2657,14 @@ Neurova已有四大闭环系统，RSI不是替换它们，而是在它们之上�
 | | `emotional_protection_factor` | 0.6 | 保护力度 |
 | **经验闭环** | `crystallize_min_observations` | 3 | 结晶时机 |
 | | `crystallize_min_success_rate` | 0.6 | 结晶质量 |
-| | `pattern_min_support` | 0.1 | 模式发现灵敏度 |
+| | `pattern_min_support` | 2（int，最小支持次数） | 模式发现灵敏度 |
 | **工具记忆闭环** | `success_bonus` | 0.1 | 权重更新速度 |
-| | `failure_penalty` | 0.9 | 惩罚力度 |
+| | `failure_penalty` | 0.05 | 惩罚力度 |
 | | `decay_rate` | 0.01 | 权重衰减 |
-| | `muscle_memory_threshold` | 0.7 | 自动执行置信度 |
+| | `muscle_memory_threshold` | 0.85（agent_core.py:237 配置单源） | 自动执行置信度 |
 
 ### 14.3 RSI集成架构
+> 实现状态：`RSIIntegrationManager` 真实存在（`rsi/integration_manager.py`）；下方伪代码为设计期形状，接口以真实实现为准。
 
 ```python
 class RSIIntegrationManager:
