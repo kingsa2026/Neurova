@@ -39,7 +39,7 @@
 | `NeurUI/src/api/modules/generation.ts` | `/generation` | 是 | 6 |
 | `NeurUI/src/api/modules/governance.ts` | `/channel-adapters`, `/governance` | **否** | 4 |
 | `NeurUI/src/api/modules/groups.ts` | `/groups` | 是 | 5 |
-| `NeurUI/src/api/modules/growth.ts` | `/growth` | 是 | 8 |
+| `NeurUI/src/api/modules/growth.ts` | `/growth` | 是 | 9 |
 | `NeurUI/src/api/modules/health.ts` | `/health` | 是 | 5 |
 | `NeurUI/src/api/modules/home.ts` | `/home` | 是 | 3 |
 | `NeurUI/src/api/modules/image.ts` | `/image` | 是 | 1 |

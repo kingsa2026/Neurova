@@ -57,7 +57,13 @@ class TestSigningKey:
         real = tmp_path / "real.key"
         real.write_bytes(b"x" * 32)
         key_path.parent.mkdir(parents=True, exist_ok=True)
-        os.symlink(real, key_path)
+        try:
+            os.symlink(real, key_path)
+        except OSError:
+            # Windows 无 SeCreateSymbolicLinkPrivilege（非管理员/未开开发者模式）时
+            # 建不了 symlink——与 tests/unit/core/test_safe_paths.py 的 _make_link 同款
+            # 诚实跳过；junction 不行（is_symlink() 对 junction 为 False，测不到该分支）。
+            pytest.skip("本机无创建符号链权限（Windows 需开发者模式/管理员）")
         with pytest.raises(BackupTrustError, match="symlink"):
             SigningKey(key_path)
 
