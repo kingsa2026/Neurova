@@ -316,6 +316,10 @@ dispatch→核验 frames/seq/lineage/capability 拒绝/脱敏落盘；启动日�
 
 ## 8. 待拍板项（影响面均已列，推荐项置首）
 
+> **拍板记录（2026-11-20 用户裁定）：D-A/D-B/D-C/D-D 全部按推荐项执行**——
+> D-A=帧账本留正文（脱敏前置）；D-B=plugin 无 result 帧诚实失败；
+> D-C=admin 门独立端点 `/v1/external-agents/runs/{id}/frames`；D-D=配置期 422 + 派活期拒绝双闸。
+
 | # | 问题 | 选项与影响 | 推荐 |
 |---|------|-----------|------|
 | D-A | 帧账本是否留 chunk/工具结果**正文**？ | ①留正文（脱敏前置）：回放/审计完整，代价=磁盘占用与隐私面扩大；②只留元数据（type/length/seq）：磁盘小、隐私面小，但帧流不可完整回放，保真目标打折 | ① 留正文（脱敏前置）——帧账本的存在意义即一手事实 |
@@ -325,4 +329,13 @@ dispatch→核验 frames/seq/lineage/capability 拒绝/脱敏落盘；启动日�
 
 ## 9. 执行记录
 
-（开工后逐卡回填：提交号、红→绿实测、净 LOC、live-verify 证据。）
+- 2026-11-20：**拍板 D-A/D-B/D-C/D-D 全按推荐执行**（用户裁定），当日开工。
+- 2026-11-20：**波次 1（三并行子代理分线，主会话统一提交）**：
+  - 线甲 F2+F3 底座 `e6a395992`——swarm_event_log 补 per-run 单调 seq 与 lineage 参数；新建 frame_log.py（frames.jsonl 一手帧账本，in/out/observed 三向、游标回放、写盘前强制脱敏；实现期根修"write→record out→flush"保序，杜绝应答 in 帧抢先落账）；新建 redaction.py（结构级凭据字段名单+值级复用 sensitive_info 单源，排除 *_tokens 计数与 key_ref 引用名）；acp_client/acp_executor/plugin_executor 帧观察钩子（fail-open，frame_key 未设不落盘）；plugin 删"无 result 帧拼累积文本"推断兜底改诚实失败（D-B）、raw 回填 result 帧。红灯 4+3 failed→绿灯 146 passed 5 skipped。
+  - 线乙 F1 `367f62dd0`——catalog 八家 capabilities + capabilitiesFor/refuseExecutorSpec 判据单源（拒因并列返回）；teams_api 配置期 422 闸（D-D 之一）。红灯 ImportError/DID NOT RAISE→绿灯 40 passed 3 skipped。
+  - 线丙 F4 `b29d06d28`——NeuacpScriptedExecutor 同构桩（声明式剧本、帧与 wire 同形、frame_key 三来源）+ 契约测试同剧本双桩。红灯 ModuleNotFoundError→绿灯 22 passed×3。
+- 2026-11-20：**波次 2（两并行子代理）**：
+  - 线丁 F5+接线 `a76dc8f8f`——SubAgentRun 增 tenant_id/parent_subagent_id（4 构造点 spawn 时刻落租户单源）；buildRunLineage 模块级单源（agent_path 限深防环）；_logRunEvent 全事件带谱系；emitter 镜像 member_chunk（只记元数据）；spawn_metadata 注入 lineage、广播补字段；runFrames；_resolveExternalMember 派活期闸（D-D 之二）；acp_member permission_decided（脱敏前置）+镜像脱敏。43 passed。
+  - 线戊 读面 `e40eaa4b2`——GET /v1/external-agents/runs/{id}/frames（admin+同租户，不符一律 404 不泄露存在性；after_seq 游标、limit 夹取 [1,1000]）；VALID_KINDS 收口 catalog.EXECUTOR_KINDS 单源；身份守卫登记表补 external_agents_api 写点行；鉴权面机器段重跑生成器（路由 1031→1032）。红灯 8 failed→绿灯 23 passed。
+- 2026-11-20：**合并回归与 live-verify**：agent 域全量 **2311 passed 16 skipped 0 failed**（复跑确认；首跑一条 TestFrameHooks ERROR 系负载偶发，隔离与复跑均绿）；api 域 3388 passed 4 skipped，唯一失败 test_full_router_snapshot 系**他会话在途** console.py 新增 timeline 路由未刷新其快照（预存，非本批引入，不越界代改）。真后端 9527 live-verify **21/21 PASS**（桩 CLI 真链路）：建队租户戳印/加外部成员/能力 422 双拒（transport 非法、plugin+auto）/catalog capabilities/全事件 lineage（含 status_changed）/member_chunk 入账/帧 seq 严格递增且 in-out-observed 全向/argv-system-assistant-result-exited 帧型齐/脱敏 api_key→[redacted] 且 usage 保留/台账行 completed+tenant+team/frames 端点 admin 200·user 403·anon 401·unknown 404/console 事件谱系。**偏离说明**：dispatch_team 无独立 REST 路由（工具面经 LLM 非确定），真链路验证沿 A6 先例在同数据根驱动进程走真 `SwarmManager.dispatchTeam(background=False)`+真桩 CLI 子进程，HTTP 面以管理面/读面实测；后端进程以脱离作业对象方式常驻（会话 shell 生命周期曾两次连带终止后台 uvicorn，已用 `start /b` 规避）。身份守卫登记表与鉴权面机器段按"新增写点/路由必须登记"流程同步。
+- （遗留：三家真 CLI 启用验收、C3 远程 HTTP 待上游 RFD 定稿；帧账本留存治理随数据根生命周期策略另批。）
