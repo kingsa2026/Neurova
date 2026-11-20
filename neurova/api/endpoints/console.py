@@ -1656,12 +1656,14 @@ async def get_console_session_timeline(
     session_id: str,
     request: Request,
     limit: int = Query(default=0, ge=0, le=5000),
+    offset: int = Query(default=0, ge=0),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """会话时间线。
 
     SSE 事件的 append-only JSONL 只读重放面：断线重连/审计回放按行取回，
     limit>0 取最近 N 条。归属校验与 history 端点同规。
+    offset：跳过前 N 条（移动端按已缓存条数增量拉取；total 恒为全量条数）。
     """
     user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
@@ -1669,10 +1671,13 @@ async def get_console_session_timeline(
     agent_id = str(target.get("agent_id", ""))
     read_tl = getattr(repo, "read_timeline", None)
     events = read_tl(agent_id, session_id, limit=limit) if callable(read_tl) else []
+    total = len(events)
+    if offset > 0:
+        events = events[offset:]
     return {
         "code": 0,
         "message": "success",
-        "data": {"session_id": session_id, "events": events, "total": len(events)},
+        "data": {"session_id": session_id, "events": events, "total": total},
     }
 
 

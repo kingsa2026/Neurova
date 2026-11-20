@@ -48,6 +48,13 @@ export interface ChatHistoryPayload {
   session_id: string;
 }
 
+/** GET /console/chat/sessions/{id}/timeline 的 data 载荷（事件为 JSONL 行投影） */
+export interface ChatTimelinePayload {
+  session_id: string;
+  events: Array<Record<string, Object>>;
+  total: number;
+}
+
 /** 重命名请求体（ArkTS 禁非空对象字面量直接标注 Record，走接口声明） */
 export interface RenameRequest {
   title: string;
@@ -137,5 +144,11 @@ export class SessionsApi {
   /** 历史（返回 {role,content} 列表，旧→新） */
   async history(sessionId: string): Promise<ApiResponse<ChatHistoryPayload>> {
     return this.client.get<ChatHistoryPayload>(`/console/chat/history?session_id=${sessionId}`);
+  }
+
+  /** 会话时间线（append-only 事件重放；offset=已缓存条数做增量同步，total 恒为全量条数） */
+  async timeline(sessionId: string, offset: number): Promise<ApiResponse<ChatTimelinePayload>> {
+    return this.client.get<ChatTimelinePayload>(
+      `/console/chat/sessions/${sessionId}/timeline?offset=${offset}`);
   }
 }

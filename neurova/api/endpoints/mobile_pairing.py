@@ -633,6 +633,21 @@ class MobileConnectionManager:
 # ---------------------------------------------------------------------------
 
 
+def _appendTurnTimeline(agent_id: str, session_id: str, event: Dict[str, Any]) -> None:
+    """移动回合事件落会话时间线（append-only JSONL，与 console 对话面同仓）。
+
+    卡片（思考/工具/产出物/计划/审批）与用户消息借此可从历史重放——否则
+    只活在当轮 WS 推送里，重开会话即消失。fail-soft：时间线是增强面，
+    任何失败只丢增强、绝不阻断对话主链路。
+    """
+    try:
+        from neurova.session_repository import get_session_repository
+
+        get_session_repository().append_timeline_event(agent_id, session_id, event)
+    except Exception:  # noqa: BLE001 — 时间线是增强，不翻案本轮
+        pass
+
+
 async def _sendToolResultDerivedEvents(ws, payload: dict, session_id: str,
                                        agent_id: str, user_id: str) -> None:
     """console 对话面从 tool_result 派生的三类增强事件 → 移动 WS（对齐 PC）。
@@ -652,9 +667,11 @@ async def _sendToolResultDerivedEvents(ws, payload: dict, session_id: str,
 
         planEvent = _extract_plan_update(content if isinstance(content, (dict, str)) else contentText)
         if planEvent:
+            planPayload = {"plan": planEvent.get("plan", []),
+                           "explanation": planEvent.get("explanation", "")}
             await ws.send_json({"type": "chat:plan_update", "session_id": session_id,
-                                "data": {"plan": planEvent.get("plan", []),
-                                         "explanation": planEvent.get("explanation", "")}})
+                                "data": planPayload})
+            _appendTurnTimeline(agent_id, session_id, {"type": "plan_update", "data": planPayload})
     except Exception:  # noqa: BLE001 — 派生增强失败不影响本体
         pass
     try:
@@ -664,6 +681,8 @@ async def _sendToolResultDerivedEvents(ws, payload: dict, session_id: str,
         if approvalPayload:
             await ws.send_json({"type": "chat:approval_required", "session_id": session_id,
                                 "data": approvalPayload})
+            _appendTurnTimeline(agent_id, session_id,
+                                {"type": "approval_required", "data": approvalPayload})
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -671,9 +690,12 @@ async def _sendToolResultDerivedEvents(ws, payload: dict, session_id: str,
 
         for artifactEvent in extract_tool_artifacts(name, contentText,
                                                     agent_id=agent_id, user_id=user_id):
+            artifactPayload = {key: artifactEvent.get(key)
+                               for key in ("artifact_id", "kind", "name", "size", "path")}
             await ws.send_json({"type": "chat:artifact", "session_id": session_id,
-                                "data": {key: artifactEvent.get(key)
-                                         for key in ("artifact_id", "kind", "name", "size", "path")}})
+                                "data": artifactPayload})
+            _appendTurnTimeline(agent_id, session_id,
+                                {"type": "artifact", "data": artifactPayload})
     except Exception:  # noqa: BLE001
         pass
 
@@ -852,6 +874,9 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
 
     # 孤儿取消标记只对在流会话生效：新流开始即消费残留标记
     _cancelled_sessions.pop(session_id, None)
+    # 用户消息落时间线：与后续 chunk/reasoning/tool*/artifact 一起构成可重放
+    # 的完整回合（历史恢复 + 端上增量同步的基准）
+    _appendTurnTimeline(agent_id, session_id, {"type": "user_message", "content": content})
 
     agent = None
     agentLookupFailed = False
@@ -996,13 +1021,35 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
                         await ws.send_json({"type": "chat:chunk", "content": str(payloadData or ""),
                                             "session_id": session_id, "index": index})
                         index += 1
+                        _appendTurnTimeline(agent_id, session_id,
+                                            {"type": "chunk", "content": str(payloadData or "")})
                     elif kind == "reasoning":
                         await ws.send_json({"type": "chat:reasoning", "content": str(payloadData or ""),
                                             "session_id": session_id})
+                        _appendTurnTimeline(agent_id, session_id,
+                                            {"type": "reasoning", "content": str(payloadData or "")})
                     elif kind in ("tool_call", "tool_result"):
                         # 移动端对齐 PC：工具调用/结果透传（emit_tool_events 门控在管线侧）
                         await ws.send_json({"type": f"chat:{kind}", "session_id": session_id,
                                             "data": payloadData if isinstance(payloadData, dict) else {"text": str(payloadData or "")}})
+                        if isinstance(payloadData, dict):
+                            if kind == "tool_call":
+                                callFn = payloadData.get("function") or {}
+                                _appendTurnTimeline(agent_id, session_id, {
+                                    "type": "tool_call",
+                                    "name": str(callFn.get("name") or ""),
+                                    "arguments": str(callFn.get("arguments", "{}")),
+                                })
+                            else:
+                                resultContent = payloadData.get("content")
+                                resultText = resultContent if isinstance(resultContent, str) else (
+                                    json.dumps(resultContent, ensure_ascii=False, default=str)
+                                    if resultContent is not None else "")
+                                _appendTurnTimeline(agent_id, session_id, {
+                                    "type": "tool_result",
+                                    "name": str(payloadData.get("name") or ""),
+                                    "content": resultText,
+                                })
                         # console 对话面同款增强派生：plan_update / approval_required /
                         # artifact（产出物列表数据源）
                         if kind == "tool_result" and isinstance(payloadData, dict):
@@ -1027,6 +1074,7 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
                                     "parked": True, "reason": response.get("park_reason"),
                                     "run_id": response.get("run_id")})
                 await ws.send_json({"type": "chat:done", "session_id": session_id})
+                _appendTurnTimeline(agent_id, session_id, {"type": "done"})
                 return
             if isinstance(response, dict):
                 replyText = response.get("text", "") or ""
@@ -1053,6 +1101,7 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
                 pass
             await ws.send_json({"type": "chat:done", "session_id": session_id,
                                 "message_id": f"msg-{uuid.uuid4().hex[:8]}"})
+            _appendTurnTimeline(agent_id, session_id, {"type": "done"})
 
         pumpTask = asyncio.create_task(_pump())
         if register is not None:

@@ -33,6 +33,7 @@ import { AuthStore } from '../libs/state/stores/AuthStore';
 import { AgentsStore } from '../libs/state/stores/AgentsStore';
 import { StateManager } from '../libs/state/StateManager';
 import { WebSocketAdapter } from '../libs/adapters/WebSocketAdapter';
+import { StorageAdapter } from '../libs/adapters/StorageAdapter';
 import { EventBus, EventHandler } from '../libs/bus/EventBus';
 import { ConfigManager } from '../libs/config/ConfigManager';
 import { StyleManager } from '../libs/style/StyleManager';
@@ -42,7 +43,7 @@ import { WSChatChunk, WSChatDone, WSChatReasoning, WSChatToolCall, WSChatToolRes
 import { Router } from '../routing/Router';
 import { ChunkBatcher } from '../libs/perf/ChunkBatcher';
 import { SimpleDataSource } from '../libs/perf/SimpleDataSource';
-import { ChatSession } from '../libs/api/modules/SessionsApi';
+import { ChatSession, ChatHistoryMessage } from '../libs/api/modules/SessionsApi';
 import { MarkdownText } from '../components/chat/MarkdownText';
 import { speechRecognizer } from '@kit.CoreSpeechKit';
 import { audio } from '@kit.AudioKit';
@@ -278,36 +279,307 @@ export struct ChatPage {
    * 失败静默（不影响流式输入），toast 提示由 MessageManager 统一
    */
   private async loadHistory(): Promise<void> {
+    // 终端侧缓存 + 时间线增量同步：进页先上屏缓存，再只拉未加载的事件
+    // （offset=已缓存条数），不再每次全量拉历史。时间线为空的旧会话退回
+    // 纯文本历史（那之后产生的回合才有卡片可重放）。
+    const cacheKey = 'chat_tl_cache_' + this.sessionId;
+    const storage = StorageAdapter.getInstance();
+    let views: ChatMessageView[] = [];
+    let cachedCount = 0;
+    try {
+      const raw = await storage.get<string>(cacheKey, '');
+      if (raw.length > 0) {
+        const parsed = JSON.parse(raw) as Record<string, Object>;
+        cachedCount = Number(parsed['eventCount'] ?? 0);
+        const rawViews = (parsed['views'] ?? []) as Object[];
+        for (const v of rawViews) {
+          views.push(this.reviveView(v as Record<string, Object>));
+        }
+      }
+    } catch (e) {
+      this.logger.warn(TAG, '会话缓存解析失败，忽略缓存', e as Error);
+      views = [];
+      cachedCount = 0;
+    }
+    let newEvents: Array<Record<string, Object>> = [];
+    let total = cachedCount;
+    let timelineOk = false;
+    try {
+      const res = await this.api.sessions.timeline(this.sessionId, cachedCount);
+      if (res.code === 0 && res.data) {
+        newEvents = res.data.events ?? [];
+        total = Number(res.data.total ?? cachedCount);
+        timelineOk = true;
+      }
+    } catch (e) {
+      this.logger.warn(TAG, '时间线增量拉取失败', e as Error);
+    }
+    if (!timelineOk && views.length === 0) {
+      // 时间线不可用且无缓存：退回纯文本历史（旧会话兼容）
+      await this.loadHistoryTextOnly();
+      return;
+    }
+    if (views.length === 0) {
+      if (newEvents.length === 0) {
+        // 时间线为空（功能上线前的旧会话）：文本历史 + 空缓存
+        await this.loadHistoryTextOnly();
+        await this.persistHistoryCache(cacheKey, 0, this.messages);
+        return;
+      }
+      const historyViews = await this.fetchHistoryViews();
+      const first = newEvents[0];
+      const coversAll = String(first['type'] ?? '') === 'user_message'
+        && historyViews.length > 0
+        && historyViews[0].role === 'user'
+        && historyViews[0].content === String(first['content'] ?? '');
+      if (coversAll) {
+        // 时间线覆盖全会话：直接重放（含用户消息与全部卡片）
+        this.appendEventsToViews(views, newEvents);
+      } else {
+        // 旧会话中途接入：文本历史打底，时间线卡片按文本匹配回贴尾部
+        for (const v of historyViews) {
+          views.push(v);
+        }
+        this.attachTailCards(views, newEvents);
+      }
+    } else if (newEvents.length > 0) {
+      this.appendEventsToViews(views, newEvents);
+    }
+    this.messages = views;
+    this.messagesDs.setData(views);
+    this.scrollToBottom();
+    await this.persistHistoryCache(cacheKey, total, views);
+  }
+
+  /** 旧路径兜底：仅文本历史（无卡片可重放） */
+  private async loadHistoryTextOnly(): Promise<void> {
     try {
       const res = await this.api.sessions.history(this.sessionId);
       if (res.code === 0 && res.data) {
-        const views: ChatMessageView[] = [];
-        const raw = res.data.messages;
-        for (let i = 0; i < raw.length; i++) {
-          const m = raw[i];
-          const content = m.content;
-          if (content.length === 0) {
-            continue;
-          }
-          views.push({
-            id: 'h-' + i.toString(),
-            role: m.role === 'user' ? 'user' : 'assistant',
-            content: content,
-            timestamp: 0,
-            isStreaming: false,
-            reasoning: '',
-            toolCalls: [],
-            artifacts: [],
-            plan: [],
-            approval: '',
-          });
-        }
-        this.messages = views;
-        this.messagesDs.setData(views);
+        this.messages = this.fetchViewsFromHistory(res.data.messages);
+        this.messagesDs.setData(this.messages);
         this.scrollToBottom();
       }
     } catch (e) {
       this.logger.warn(TAG, '拉取会话历史失败', e as Error);
+    }
+  }
+
+  private fetchViewsFromHistory(raw: ChatHistoryMessage[]): ChatMessageView[] {
+    const views: ChatMessageView[] = [];
+    for (let i = 0; i < raw.length; i++) {
+      const m = raw[i];
+      if (m.content.length === 0) {
+        continue;
+      }
+      views.push(this.newHistoryView(m.role === 'user' ? 'user' : 'assistant', m.content, i));
+    }
+    return views;
+  }
+
+  private async fetchHistoryViews(): Promise<ChatMessageView[]> {
+    try {
+      const res = await this.api.sessions.history(this.sessionId);
+      if (res.code === 0 && res.data) {
+        return this.fetchViewsFromHistory(res.data.messages);
+      }
+    } catch (e) {
+      this.logger.warn(TAG, '拉取会话历史失败', e as Error);
+    }
+    return [];
+  }
+
+  /** 时间线事件 → 视图（就地追加/合并到 views 尾部；chunk 归并到在写助手消息） */
+  private appendEventsToViews(views: ChatMessageView[], events: Array<Record<string, Object>>): void {
+    for (const ev of events) {
+      const type = String(ev['type'] ?? '');
+      if (type === 'user_message') {
+        views.push(this.newHistoryView('user', String(ev['content'] ?? ''), views.length));
+        continue;
+      }
+      if (type === 'chunk') {
+        const text = String(ev['content'] ?? '');
+        const last = views[views.length - 1];
+        if (last && last.role === 'assistant') {
+          last.content = last.content + text;
+        } else {
+          views.push(this.newHistoryView('assistant', text, views.length));
+        }
+        continue;
+      }
+      if (type === 'reasoning') {
+        const last = this.ensureAssistant(views);
+        last.reasoning = last.reasoning + String(ev['content'] ?? '');
+        continue;
+      }
+      if (type === 'tool_call') {
+        const last = this.ensureAssistant(views);
+        const call: ToolCallView = {
+          name: String(ev['name'] ?? '工具'),
+          args: String(ev['arguments'] ?? ''),
+          result: '',
+        };
+        last.toolCalls = [...(last.toolCalls ?? []), call];
+        continue;
+      }
+      if (type === 'tool_result') {
+        const last = this.ensureAssistant(views);
+        const calls = last.toolCalls ?? [];
+        if (calls.length > 0) {
+          calls[calls.length - 1].result = String(ev['content'] ?? '');
+          last.toolCalls = [...calls];
+        }
+        continue;
+      }
+      if (type === 'artifact') {
+        const last = this.ensureAssistant(views);
+        const d = (ev['data'] ?? {}) as Record<string, Object>;
+        const artifactId = String(d['artifact_id'] ?? '');
+        if (artifactId === '') {
+          continue;
+        }
+        const view: ArtifactView = {
+          artifactId: artifactId,
+          name: String(d['name'] ?? ''),
+          kind: String(d['kind'] ?? ''),
+          size: Number(d['size'] ?? 0),
+        };
+        last.artifacts = [...(last.artifacts ?? []), view];
+        continue;
+      }
+      if (type === 'plan_update') {
+        const last = this.ensureAssistant(views);
+        const d = (ev['data'] ?? {}) as Record<string, Object>;
+        const rawPlan = (d['plan'] ?? []) as Object[];
+        const steps: PlanStepView[] = [];
+        for (const item of rawPlan) {
+          const step = item as Record<string, Object>;
+          steps.push({ step: String(step['step'] ?? ''), status: String(step['status'] ?? '') });
+        }
+        if (steps.length > 0) {
+          last.plan = steps;
+        }
+        continue;
+      }
+      if (type === 'approval_required') {
+        const last = this.ensureAssistant(views);
+        const d = (ev['data'] ?? {}) as Record<string, Object>;
+        const toolName = String(d['tool_name'] ?? '');
+        const reason = String(d['reason'] ?? '');
+        last.approval = `工具「${toolName}」等待审批${reason === '' ? '' : '：' + reason}（请在 PC 端裁决）`;
+        continue;
+      }
+      // done/usage/其他：回合边界或记账事件，不产生视图
+    }
+  }
+
+  /** 取最后一条助手消息，没有则现开一条（卡片事件总是挂在助手消息上） */
+  private ensureAssistant(views: ChatMessageView[]): ChatMessageView {
+    const last = views[views.length - 1];
+    if (last && last.role === 'assistant') {
+      return last;
+    }
+    const fresh = this.newHistoryView('assistant', '', views.length);
+    views.push(fresh);
+    return fresh;
+  }
+
+  private newHistoryView(role: 'user' | 'assistant', content: string, index: number): ChatMessageView {
+    return {
+      id: 'h-' + Date.now().toString() + '-' + index.toString(),
+      role: role,
+      content: content,
+      timestamp: 0,
+      isStreaming: false,
+      reasoning: '',
+      toolCalls: [],
+      artifacts: [],
+      plan: [],
+      approval: '',
+    };
+  }
+
+  /** 缓存 JSON → 视图（字段逐个归一，缺省不崩） */
+  private reviveView(o: Record<string, Object>): ChatMessageView {
+    const toolCalls: ToolCallView[] = [];
+    const rawCalls = (o['toolCalls'] ?? []) as Object[];
+    for (const c of rawCalls) {
+      const rec = c as Record<string, Object>;
+      toolCalls.push({
+        name: String(rec['name'] ?? ''),
+        args: String(rec['args'] ?? ''),
+        result: String(rec['result'] ?? ''),
+      });
+    }
+    const artifacts: ArtifactView[] = [];
+    const rawArtifacts = (o['artifacts'] ?? []) as Object[];
+    for (const a of rawArtifacts) {
+      const rec = a as Record<string, Object>;
+      artifacts.push({
+        artifactId: String(rec['artifactId'] ?? ''),
+        name: String(rec['name'] ?? ''),
+        kind: String(rec['kind'] ?? ''),
+        size: Number(rec['size'] ?? 0),
+      });
+    }
+    const plan: PlanStepView[] = [];
+    const rawPlan = (o['plan'] ?? []) as Object[];
+    for (const p of rawPlan) {
+      const rec = p as Record<string, Object>;
+      plan.push({ step: String(rec['step'] ?? ''), status: String(rec['status'] ?? '') });
+    }
+    return {
+      id: String(o['id'] ?? ''),
+      role: o['role'] === 'user' ? 'user' : 'assistant',
+      content: String(o['content'] ?? ''),
+      timestamp: Number(o['timestamp'] ?? 0),
+      isStreaming: false,
+      reasoning: String(o['reasoning'] ?? ''),
+      toolCalls: toolCalls,
+      artifacts: artifacts,
+      plan: plan,
+      approval: String(o['approval'] ?? ''),
+    };
+  }
+
+  /** 旧会话中途接入：时间线卡片按「助手文本完全一致」回贴到文本历史尾部 */
+  private attachTailCards(views: ChatMessageView[], events: Array<Record<string, Object>>): void {
+    const rebuilt: ChatMessageView[] = [];
+    this.appendEventsToViews(rebuilt, events);
+    for (let i = rebuilt.length - 1; i >= 0; i--) {
+      const src = rebuilt[i];
+      if (src.role !== 'assistant') {
+        continue;
+      }
+      const hasCards = src.reasoning.length > 0 || (src.toolCalls?.length ?? 0) > 0
+        || (src.artifacts?.length ?? 0) > 0 || (src.plan?.length ?? 0) > 0 || src.approval.length > 0;
+      if (!hasCards) {
+        continue;
+      }
+      for (let j = views.length - 1; j >= 0; j--) {
+        const dst = views[j];
+        if (dst.role === 'assistant' && dst.content === src.content) {
+          dst.reasoning = src.reasoning;
+          dst.toolCalls = src.toolCalls;
+          dst.artifacts = src.artifacts;
+          dst.plan = src.plan;
+          dst.approval = src.approval;
+          break;
+        }
+      }
+    }
+  }
+
+  private async persistHistoryCache(key: string, eventCount: number, views: ChatMessageView[]): Promise<void> {
+    try {
+      const trimmed = views.length > 400 ? views.slice(views.length - 400) : views;
+      const payload = JSON.stringify({ eventCount: eventCount, views: trimmed });
+      if (payload.length > 2000000) {
+        return; // 超限弃缓存：下次全量重建，不挡主链路
+      }
+      await StorageAdapter.getInstance().set(key, payload);
+    } catch (e) {
+      this.logger.warn(TAG, '会话缓存写入失败（忽略）', e as Error);
     }
   }
 
