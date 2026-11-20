@@ -37,6 +37,8 @@ const approvalModal = reactive({
   fingerprintTail: '',
   // P0-6 分段审批：多段命令的候选段（后端 governance.segments）
   segments: [] as ApprovalSegment[],
+  // Dreaming 判定面（项 7）：历史反馈的建议性提示（后端审批单 metadata.dreamingHint）
+  dreamingHint: '',
 })
 const approvalAddWhitelist = ref(false)
 /** 审批记忆档位：'' = 仅本次 / exact / similar（补课 3.2，后端 approval_manager 记忆规则） */
@@ -50,6 +52,7 @@ function openApprovalModal(event: Record<string, any>): void {
   approvalModal.command = params !== '{}' ? params : event.command || ''
   approvalModal.reason = event.reason || ''
   approvalModal.fingerprintTail = String(event.fingerprint_tail || '')
+  approvalModal.dreamingHint = String(event.dreaming_hint || '')
   const govSegments = event.governance?.segments
   approvalModal.segments = Array.isArray(govSegments)
     ? govSegments.map((s: any) => ({

@@ -963,10 +963,13 @@ def _mirror_approval_notification(kind: str, payload: Dict[str, Any]) -> None:
         )
     else:
         result_label = {"approved": "已批准", "rejected": "已拒绝"}.get(status, status)
+        # 语音口令确认（B4-9）徽标：note 以 voice: 开头即经口头确认——文案后缀
+        # 让通知中心/审计读面无需改前端即可见"这一单是人嘴说的'好'"。
+        voiceBadge = "（经语音口令确认）" if str(payload.get("approval_note") or "").startswith("voice:") else ""
         nm.add_notification(
             user_id=payload.get("user_id") or "admin",
             title="审批已完成",
-            message=f"审批 {request_id[:8]} {result_label}: {command}",
+            message=f"审批 {request_id[:8]} {result_label}: {command}{voiceBadge}",
             notification_type="approval_result",
             data=payload,
         )

@@ -80,6 +80,7 @@ import { BenchmarkPage } from '../pages/BenchmarkPage';
 import { SandboxPage } from '../pages/SandboxPage';
 import { FirewallPage } from '../pages/FirewallPage';
 import { MarketplacePage } from '../pages/MarketplacePage';
+import { VoiceMinutesPage } from '../pages/VoiceMinutesPage';
 
 @Builder
 export function pageMap(name: string) {
@@ -211,6 +212,8 @@ export function pageMap(name: string) {
     NavDestination() { FirewallPage() }.hideTitleBar(true)
   } else if (name === RouteNames.MARKETPLACE) {
     NavDestination() { MarketplacePage() }.hideTitleBar(true)
+  } else if (name === RouteNames.VOICE_MINUTES) {
+    NavDestination() { VoiceMinutesPage() }.hideTitleBar(true)
   } else {
     NavDestination() {
       Column() {

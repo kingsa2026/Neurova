@@ -614,7 +614,7 @@ def _extract_approval_payload(result_text, tm: dict) -> dict:
                     "reason": "",
                 }
     if parsed and parsed.get("pending_approval"):
-        return {
+        payload = {
             "approval_id": parsed.get("approval_id"),
             "tool_name": parsed.get("tool_name") or tm.get("tool_name", ""),
             "params": parsed.get("params") or {},
@@ -623,6 +623,18 @@ def _extract_approval_payload(result_text, tm: dict) -> dict:
             # P1-2a：执行入参指纹尾（审批卡展示，核验批准对象=执行对象）
             "fingerprint_tail": parsed.get("fingerprint_tail") or "",
         }
+        # Dreaming 判定面（项 7）：审批单上的建议性提示随事件下发——web 弹窗与
+        # 移动审批卡同源消费；查不到/无提示不带键（前端零改动兼容）。
+        try:
+            from neurova.security.approval_manager import get_approval_manager
+
+            req = get_approval_manager().get_request(str(parsed.get("approval_id") or ""))
+            hint = str(((req.metadata or {}).get("dreamingHint")) or "") if req else ""
+            if hint:
+                payload["dreaming_hint"] = hint
+        except Exception:  # noqa: BLE001 - 提示注入失败不影响审批事件本体
+            pass
+        return payload
     return {}
 
 

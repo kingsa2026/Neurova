@@ -53,6 +53,8 @@ export const TOP_NAV_CATEGORIES: TopNavCategory[] = [
       // 移动端配对（2026-11-16 用户裁定）：账号级能力按登录用户隔离，
       // 从 Agent 渠道页迁出挂顶部「模型与工具」；后端配对七口吃 _get_current_user_id。
       { to: '/tools/mobile-pairing', labelKey: 'nav.mobilePairing', icon: MobileOutlined },
+      // 录音纪要（B4-8）：录音 → 纪要 → 问题/办事判定 → 办事落任务看板
+      { to: '/tools/voice-minutes', labelKey: 'nav.voiceMinutes', icon: AudioOutlined },
       {
         labelKey: 'nav.aigcTools',
         icon: RobotOutlined,

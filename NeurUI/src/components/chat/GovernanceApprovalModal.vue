@@ -32,6 +32,11 @@
         <span class="approval-label">{{ t('ui.reason') }}</span>
         <span class="approval-reason">{{ approvalModal.reason }}</span>
       </div>
+      <!-- Dreaming 判定面（项 7）：历史反馈的建议性提示（只改文案，不自动裁决） -->
+      <div v-if="approvalModal.dreamingHint" class="approval-field">
+        <span class="approval-label">{{ t('ui.dreamingHint') }}</span>
+        <span class="approval-reason">{{ approvalModal.dreamingHint }}</span>
+      </div>
       <!-- P1-2a：执行入参指纹尾——核验「批准对象=执行对象」（与后端审批单 metadata 同源） -->
       <div v-if="approvalModal.fingerprintTail" class="approval-field">
         <span class="approval-label">{{ t('ui.fingerprintTail') }}</span>

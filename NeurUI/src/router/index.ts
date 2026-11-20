@@ -350,6 +350,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/ExternalAgentFramesPage.vue'),
       },
       {
+        // 录音纪要（B4-8：录音 → 纪要 → 问题/办事判定 → 办事落任务看板）
+        path: 'tools/voice-minutes',
+        name: 'VoiceMinutes',
+        component: () => import('@/pages/VoiceMinutesPage.vue'),
+      },
+      {
         // 数据中台总览：知识库/图谱/本体/事实/互操作/企业源/评测的统一入口。
         // 只做入口聚合与可见性概览，不新造第二套数据页（页面仍归各域）。
         path: 'data-hub',

@@ -42,6 +42,7 @@ import { BenchmarkApi } from './modules/BenchmarkApi';
 import { MarketplaceApi } from './modules/MarketplaceApi';
 import { SandboxApi } from './modules/SandboxApi';
 import { ProvidersApi } from './modules/ProvidersApi';
+import { AudioApi } from './modules/AudioApi';
 
 export class ApiFacade {
   private static instance: ApiFacade;
@@ -86,6 +87,8 @@ export class ApiFacade {
   public sandbox: SandboxApi;
   // 服务商/模型域（对话页模型菜单与 PC ModelPage 同源）
   public providers: ProvidersApi;
+  // 音频域（录音纪要链 B4-8）
+  public audio: AudioApi;
 
   private constructor() {
     this.client = HttpClient.getInstance();
@@ -125,6 +128,7 @@ export class ApiFacade {
     this.marketplace = new MarketplaceApi(this.client);
     this.sandbox = new SandboxApi(this.client);
     this.providers = new ProvidersApi(this.client);
+    this.audio = new AudioApi(this.client);
   }
 
   static getInstance(): ApiFacade {

@@ -26,3 +26,19 @@ export function transcribeAudio(formData: FormData) {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
+
+// ---------------------------------------------------------------------------
+// 录音纪要链（B4-8：录音 → 纪要 → Ask 判定问题/办事 → 办事落任务看板）
+// ---------------------------------------------------------------------------
+
+/** 上传录音入队（有界队列；满时后端 429 + input_gap 证据，不静默丢）。 */
+export function createVoiceMinutes(formData: FormData) {
+  return api.post<ApiResponse<Record<string, unknown>>>('/audio/minutes', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
+/** 轮询纪要作业状态/结果（transcript/summary/kind/task_id/error）。 */
+export function getVoiceMinutesStatus(jobId: string) {
+  return api.get<ApiResponse<Record<string, unknown>>>(`/audio/minutes/${jobId}`)
+}

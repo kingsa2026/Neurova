@@ -34,6 +34,8 @@ const TOP_MODULES: ModuleItem[] = [
   // (/agent/:id/channel) 迁出——原入口要选 Agent 且受 channel 模块权限门控，
   // 普通账号看不见；后端配对七口本就吃 _get_current_user_id。
   { key: '/tools/mobile-pairing', labelKey: 'mobilePairing' },
+  // 录音纪要（B4-8）：与 navigation.ts 模型与工具区同步登记
+  { key: '/tools/voice-minutes', labelKey: 'voiceMinutes' },
   { key: '/aigc/text', labelKey: 'aigcText' },
   { key: '/aigc/image', labelKey: 'aigcImage' },
   { key: '/aigc/audio', labelKey: 'aigcAudio' },

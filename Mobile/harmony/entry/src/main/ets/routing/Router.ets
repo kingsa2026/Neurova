@@ -95,6 +95,8 @@ export class RouteNames {
   static readonly SANDBOX: string = 'SandboxPage';
   static readonly FIREWALL: string = 'FirewallPage';
   // M5 P3 用户与记忆扩展
+  // 录音纪要（B4-8：录音 → 纪要 → 问题/办事判定 → 办事落任务看板）
+  static readonly VOICE_MINUTES: string = 'VoiceMinutesPage';
 }
 
 /** 需要登录才能访问的受保护路由 */

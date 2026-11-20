@@ -817,9 +817,12 @@ export struct ChatPage {
       const rec = (data as WSChatApprovalRequired).data;
       const toolName = typeof rec['tool_name'] === 'string' ? rec['tool_name'] as string : '';
       const reason = typeof rec['reason'] === 'string' ? rec['reason'] as string : '';
+      // Dreaming 判定面（项 7）：历史反馈的建议性提示随审批卡展示（只读转正规则）
+      const hint = typeof rec['dreaming_hint'] === 'string' ? rec['dreaming_hint'] as string : '';
       const last = this.messages[this.messages.length - 1];
       if (last && last.role === 'assistant') {
-        last.approval = `工具「${toolName}」等待审批${reason === '' ? '' : '：' + reason}（请在 PC 端裁决）`;
+        last.approval = `工具「${toolName}」等待审批${reason === '' ? '' : '：' + reason}（请在 PC 端裁决）`
+          + (hint === '' ? '' : `\n${hint}`);
         this.messages = [...this.messages];
         this.messagesDs.setData(this.messages);
       }
