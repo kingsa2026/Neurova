@@ -1424,26 +1424,12 @@ class ToolExecutor:
         Returns:
             执行结果 dict（成功含 success/result 字段，失败含 error 字段）
         """
-        # A6 Tool Search（P2）：控制工具拦截。tool_call 解包后走完整
-        # _execute_single_tool 管道（治理预检/审批/肌肉记忆全链路生效）；
-        # tool_search/tool_describe 读进程内活动目录（build_tools_for_llm 构建时刷新）。
-        if tool_name in ("tool_search", "tool_describe", "tool_call"):
-            from neurova.context import tool_search as _ts
+        # A6 Tool Search（P2）：控制工具拦截与工具调用账本（先记账再执行、
+        # unknown 不重放）的完整编排收口在 core/tool_call_journal
+        # （尺寸棘轮：本文件只减不增，编排逻辑不回填）。
+        from neurova.core import tool_call_journal
 
-            if tool_name == "tool_call":
-                real_name = str((params or {}).get("name", ""))
-                arguments = (params or {}).get("arguments") or {}
-                if not real_name:
-                    return {"error": "tool_call 缺少 name 参数"}
-                if real_name in _ts.CONTROL_TOOL_NAMES:
-                    return {"error": "tool_call 不能调用控制工具自身"}
-                catalog_names = {e["name"] for e in _ts.get_active_catalog()}
-                if real_name not in catalog_names:
-                    return {"error": f"工具 {real_name} 不在隐藏目录中（可能为直连工具，直接调用即可）"}
-                return await self._execute_single_tool(real_name, arguments)
-            return _ts.handle_control_tool(tool_name, params)
-
-        return await self._execute_single_tool(tool_name, params)
+        return await tool_call_journal.executeWithJournal(self, tool_name, params)
 
     async def execute_tool(self, tool_name: str, params: Dict, user_input: str = "") -> Dict:
         """ToolExecutionManager 三条超时策略（strict/elastic/infinite）的执行契约名。

@@ -1098,3 +1098,20 @@ def _isolateArtifactAnchors(monkeypatch):
                         lambda: ANCHOR_SESSION_DIR / "artifact_anchors.json")
 
 
+
+
+# ── 工具调用账本按用例隔离（对照报告 B4-2 / 实施计划项 2）────────────────
+# 账本是有意跨进程持久的（重启后仍拦截同 key 重试），但这会让测试间吃到彼此的
+# replayed 结果：同参同作用域的第二次执行被账本拦下，断言"执行了/记录了"的用例
+# 即红。这里按用例把库指到临时文件并重置单例与请求身份，保证用例间互不回放。
+@pytest.fixture(autouse=True)
+def _isolateToolCallJournal(tmp_path, monkeypatch):
+    from neurova.core import tool_call_journal
+    from neurova.core.identity_context import set_request_user_id
+
+    monkeypatch.setenv("NEUROVA_TOOL_JOURNAL_DB", str(tmp_path / "tool_call_journal.db"))
+    tool_call_journal.reset_tool_call_journal()
+    set_request_user_id(None)
+    yield
+    tool_call_journal.reset_tool_call_journal()
+    set_request_user_id(None)
