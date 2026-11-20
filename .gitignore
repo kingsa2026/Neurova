@@ -346,6 +346,8 @@ secret_*.json
 # 名字以 check_ 开头命中上方 check*.py，这里显式豁免。
 !scripts/check_openapi_snapshot.py
 !scripts/check_frontend_api_paths.py
+# 工具目录三投影快照门（实施计划项 3）同上，常驻 CI 门显式豁免。
+!scripts/check_tool_catalog.py
 
 # ==================== 运行时/调试临时文件 ====================
 # SSE 抓包等诊断输出（youtube/webreach 调试残留）

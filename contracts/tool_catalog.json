@@ -1,0 +1,4232 @@
+{
+  "schema": 1,
+  "source": "neurova.builtin_tools._BUILTIN_SCHEMAS",
+  "tool_count": 137,
+  "tools": [
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "action": {
+            "description": "mode=action：动作名（如 search/read/quote/transcribe/subtitle）",
+            "type": "string"
+          },
+          "channel": {
+            "description": "mode=action：渠道名（先用 mode=channels 查可用渠道）",
+            "type": "string"
+          },
+          "extra_args": {
+            "description": "mode=action：额外 flags（如 [\"--lang\", \"zh\"]），逐元素原样直传",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "description": "mode=action：返回条数上限 1..100（映射 --limit，部分动作支持）",
+            "type": "integer"
+          },
+          "mode": {
+            "description": "channels=列渠道语法；read=读链接；action=调渠道动作",
+            "enum": [
+              "channels",
+              "read",
+              "action"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "description": "mode=action：位置参数（搜索词/仓库/股票代码/链接等，不能以 - 开头）",
+            "type": "string"
+          },
+          "url": {
+            "description": "mode=read：完整链接（http/https，自动选渠道）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
+      "description": "【跨平台内容直达】经本机 agent-reach CLI 读取/搜索 GitHub、雪球、Boss直聘/LinkedIn、小宇宙、B站/YouTube/V2EX、小红书/Reddit 等。mode=channels 列渠道与动作语法；mode=read 按链接自动选渠道读取；mode=action 调渠道动作。普通网页用 web_fetch；垂直内容优先专用工具。需本机装有该 CLI，缺失时返回安装指引。",
+      "external_write": false,
+      "min_role": null,
+      "name": "agent_reach",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "allow_custom": {
+            "description": "是否允许自由补充",
+            "type": "boolean"
+          },
+          "build_session_id": {
+            "description": "构建会话 ID；缺省读当前请求的构建上下文（通常不用手填）",
+            "type": "string"
+          },
+          "impact": {
+            "description": "回答会影响什么（给用户看）",
+            "type": "string"
+          },
+          "kind": {
+            "description": "choice 单选 / multi 多选 / text 文本 / secret 凭据 / confirm 确认",
+            "enum": [
+              "choice",
+              "multi",
+              "text",
+              "secret",
+              "confirm"
+            ],
+            "type": "string"
+          },
+          "multi": {
+            "description": "是否多选（kind=multi 时自动为真）",
+            "type": "boolean"
+          },
+          "options": {
+            "description": "选项列表；元素为字符串或 {label, description, recommended}",
+            "items": {},
+            "type": "array"
+          },
+          "question": {
+            "description": "问题文本；必须写清楚要用户决定什么",
+            "type": "string"
+          },
+          "secret_key": {
+            "description": "kind=secret 时必填：写入 SecretStore 的键名",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "description": "面板等待超时；超时只暂停不失败",
+            "type": "integer"
+          },
+          "why": {
+            "description": "为什么问（给用户看）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "type": "object"
+      },
+      "description": "【向用户提问】构建/修复工作流遇不明确、需选择、需补参数或凭据时，弹交互面板并暂停当前步，回答后恢复。凭据用 kind=secret + secret_key（入 SecretStore），禁止聊天正文粘贴。",
+      "external_write": true,
+      "min_role": null,
+      "name": "ask_user",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "audio_data": {
+            "description": "Base64编码的音频数据",
+            "type": "string"
+          },
+          "engine": {
+            "default": "auto",
+            "description": "ASR 引擎（如 funasr, whisper, auto）",
+            "type": "string"
+          },
+          "language": {
+            "default": "zh",
+            "description": "语言代码（如 zh, en）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "audio_data"
+        ],
+        "type": "object"
+      },
+      "description": "将音频转写为文本（语音识别）",
+      "external_write": false,
+      "min_role": null,
+      "name": "asr_transcribe",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "limit": {
+            "description": "返回条数（默认 5）",
+            "type": "integer"
+          },
+          "query": {
+            "description": "搜索关键词",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "description": "【B站搜索】搜索 B 站视频，返回标题与链接。用于查找中文视频教程、评测、讲解等内容。【何时不用】仅限 B 站内容；通用搜索/其他平台改用 web_search，拿到视频链接后要字幕内容用 youtube_transcript（仅限 YouTube）。",
+      "external_write": false,
+      "min_role": null,
+      "name": "bilibili_search",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。当前页代数；页面已被外部改变时拒绝",
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【浏览器后退】回退到本次会话的上一个页面（等价浏览器后退键）。导航使当前页快照事实失效（generation 递增），后续交互前需重新 browser_dom_snapshot。已在会话第一个页面时诚实报错「无后退历史」。【何时不用】刚 browser_navigate 打开的第一个页面没有可退历史。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_back",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "checked": {
+            "description": "true=勾选，false=取消勾选",
+            "type": "boolean"
+          },
+          "generation": {
+            "description": "可选。最近一次快照返回的 generation；跨代即拒绝",
+            "type": "integer"
+          },
+          "name": {
+            "description": "可访问名称（来自快照，如选项文字）",
+            "type": "string"
+          },
+          "role": {
+            "description": "ARIA 角色（checkbox/radio，来自快照）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "checked"
+        ],
+        "type": "object"
+      },
+      "description": "【勾选/取消勾选】勾选（checked=true）或取消勾选（checked=false）指定 ARIA role+name 的复选框/单选框。改写页面表单状态，快照事实随之失效（generation 递增）。参数必须来自最近一次快照事实。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_check",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "selector": {
+            "description": "CSS 选择器（如 #submit-btn、a.login）",
+            "type": "string"
+          },
+          "text": {
+            "description": "按可见文本匹配元素（selector 的替代方案）",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【浏览器点击】点击当前页面上的元素。selector 支持 CSS 选择器或 Playwright 的 text= 文本定位；也可只传 text 按可见文本查找（如'登录'按钮）。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_click",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。该快照返回的 generation；跨代即拒绝并提示重新快照",
+            "type": "integer"
+          },
+          "ref": {
+            "description": "快照行尾的编号（形如 e3，必须来自最近一次 browser_dom_snapshot）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "type": "object"
+      },
+      "description": "【按快照编号点击】点击快照正文标 `[eN]` 的元素（role+name 无法唯一化、smart-click 回 409 列候选时用）。编号仅本次快照内有效，页面一变即失效；自证不符时拒绝发动作。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_click_ref",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。最近一次快照返回的 generation；页面被外部操作导航过后会拒绝并提示重新快照",
+            "type": "integer"
+          },
+          "name": {
+            "description": "可访问名称（来自快照，如按钮文字）",
+            "type": "string"
+          },
+          "role": {
+            "description": "ARIA 角色（button/link/textbox/checkbox 等，来自快照）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "type": "object"
+      },
+      "description": "【按角色点击】通过 ARIA 角色和可访问名称点击页面元素（如 role=button, name=登录）。参数必须来自 browser_dom_snapshot 快照中的事实，不要编造。元素不可点击或页面已变化（generation 过期）时返回错误说明。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_click_role",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "limit": {
+            "description": "返回最近多少条（默认 50，上限 200）",
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【控制台读数】读取本次浏览器会话累积的 console 输出与页面错误（pageerror），返回最近的 limit 条（type=console/pageerror）。用于交互后检查报错、验证页面行为。缓冲上限 200 条、只保留最近记录。",
+      "external_write": false,
+      "min_role": null,
+      "name": "browser_console",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "action": {
+            "description": "get=读取 / set=写入 / clear=清空",
+            "enum": [
+              "get",
+              "set",
+              "clear"
+            ],
+            "type": "string"
+          },
+          "domain": {
+            "description": "Cookie 域（set 定位用）",
+            "type": "string"
+          },
+          "generation": {
+            "description": "可选。当前页代数；页面已被外部改变时拒绝",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Cookie 名（set 必填）",
+            "type": "string"
+          },
+          "path": {
+            "description": "Cookie 路径（set 定位用）",
+            "type": "string"
+          },
+          "url": {
+            "description": "Cookie 关联 URL（set 时与 domain+path 二选一；get 时可作过滤）",
+            "type": "string"
+          },
+          "value": {
+            "description": "Cookie 值（set 必填，可为空串）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "description": "【Cookie 管理】读取（get，可按 url 过滤）、写入（set，需 name+value，定位用 url 或 domain+path）、清空（clear）当前浏览器会话的 Cookie。用于登录态检查与保持。【何时不用】只是查看页面内容不需要动 Cookie；set 前先 get 确认现有值，避免误覆盖登录态。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_cookies",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "chunk_size": {
+            "description": "可选。单次返回的快照正文长度上限（默认 8000）",
+            "type": "integer"
+          },
+          "offset": {
+            "description": "可选。续读起始偏移（默认按上次位置顺序续读）",
+            "type": "integer"
+          },
+          "session_id": {
+            "description": "可选。续读会话 ID（首读返回的 session_id）",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【页面快照分片读取】取 aria 树正文，长快照分片：首读前 8,000 字符＋session_id/can_continue/next_offset，续读至 can_continue=false；快照未截断时直接消费 browser_dom_snapshot。【何时不用】交互定位用 browser_dom_snapshot；未开页面先 browser_navigate。",
+      "external_write": false,
+      "min_role": null,
+      "name": "browser_dom_read",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。持有的页面代数；页面已变化时返回过期错误提示重新快照",
+            "type": "integer"
+          },
+          "max_depth": {
+            "description": "可选。快照树最大深度；**不传则不限深度**（无默认值）",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_nodes": {
+            "description": "可选。最多保留的快照节点数；**不传则不裁剪**（无默认值）",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【页面可访问性快照】取当前页面 aria 树（角色/名称）。交互前必先调用，从快照拿 role/name 再 click_role/fill_role 定位，勿盲猜选择器。超上限时跨全树等距折叠并如实上报 folded 计数；要完整正文用 browser_dom_read。",
+      "external_write": false,
+      "min_role": null,
+      "name": "browser_dom_snapshot",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "filename": {
+            "description": "可选。产物文件名前缀（扩展名从 URL 自动推断）",
+            "type": "string"
+          },
+          "generation": {
+            "description": "可选。当前页代数；页面已被外部改变时拒绝",
+            "type": "integer"
+          },
+          "url": {
+            "description": "要下载的文件 URL（http/https）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "description": "【文件下载】用浏览器会话的网络栈拉取 URL 的原始字节并落产物目录（二进制保真），返回文件路径、字节数与 HTTP 状态。适合下载 zip/csv/图片等二进制文件；非 2xx 诚实报错。【何时不用】纯文本/API JSON 读取用 web_fetch（更轻）；需要登录态的下载本工具会带上会话 Cookie。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_download",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。最近一次快照返回的 generation；跨代即拒绝",
+            "type": "integer"
+          },
+          "source_name": {
+            "description": "拖拽起点的可访问名称",
+            "type": "string"
+          },
+          "source_role": {
+            "description": "拖拽起点的 ARIA 角色（来自快照）",
+            "type": "string"
+          },
+          "target_name": {
+            "description": "拖拽落点的可访问名称",
+            "type": "string"
+          },
+          "target_role": {
+            "description": "拖拽落点的 ARIA 角色（来自快照）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_role",
+          "target_role"
+        ],
+        "type": "object"
+      },
+      "description": "【拖拽元素】把 source（ARIA role+name 定位）拖拽到 target 上。用于拖拽排序、滑块、看板移动等交互。拖拽改页面状态，快照事实随之失效（generation 递增）。参数必须来自最近一次快照事实。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_drag",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "script": {
+            "description": "要执行的 JavaScript 表达式或函数体（在页面上下文中 evaluate）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "script"
+        ],
+        "type": "object"
+      },
+      "description": "【执行页面脚本】在当前页面执行 JavaScript 并返回 JSON 可序列化结果，用于快照协议覆盖不到的读取（localStorage/页面变量）。【何时不用】优先 dom_snapshot＋role/ref 定位；抓正文用 browser_read/web_fetch。脚本出错如实返回。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_eval",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "description": "【浏览器提取文本】提取当前页面正文文字（阅读/总结/搜索结果）。先 browser_navigate 打开页面。【何时不用】长文分片用 browser_dom_read；静态页直接 web_fetch。",
+      "external_write": false,
+      "min_role": null,
+      "name": "browser_extract_text",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。该快照返回的 generation；跨代即拒绝并提示重新快照",
+            "type": "integer"
+          },
+          "ref": {
+            "description": "快照行尾的编号（形如 e5，须指向 textbox/searchbox 一类可输入元素）",
+            "type": "string"
+          },
+          "text": {
+            "description": "要填写的文本（空串=清空）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "text"
+        ],
+        "type": "object"
+      },
+      "description": "【按快照编号输入】在 browser_dom_snapshot 正文里标了 `[eN]` 的输入元素中填写文本。失效、自证与拒绝语义同 browser_click_ref；text 传空串表示清空。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_fill_ref",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。最近一次快照返回的 generation；页面已变化时会拒绝并提示重新快照",
+            "type": "integer"
+          },
+          "name": {
+            "description": "可访问名称（来自快照，如输入框标签）",
+            "type": "string"
+          },
+          "role": {
+            "description": "ARIA 角色（textbox/searchbox 等，来自快照）",
+            "type": "string"
+          },
+          "text": {
+            "description": "要填写的文本（空串=清空）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "text"
+        ],
+        "type": "object"
+      },
+      "description": "【按角色输入】通过 ARIA 角色和可访问名称定位输入框并填写文本（如 role=textbox, name=用户名）。参数必须来自 browser_dom_snapshot 快照；text 传空串表示清空输入框。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_fill_role",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。当前页代数；页面已被外部改变时拒绝",
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【浏览器前进】前进到本次会话退回前的下一个页面（等价浏览器前进键）。失效语义同 browser_back；已在最新页面时诚实报错「无前进历史」。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_forward",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。最近一次快照返回的 generation；跨代即拒绝",
+            "type": "integer"
+          },
+          "name": {
+            "description": "可访问名称（来自快照）",
+            "type": "string"
+          },
+          "role": {
+            "description": "ARIA 角色（button/link/menuitem 等，来自快照）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "type": "object"
+      },
+      "description": "【悬停元素】把鼠标悬停到指定 ARIA role+name 的元素上，触发悬停类交互（下拉菜单展开、tooltip 显示等）。悬停可能使页面结构变化（菜单展开），快照事实随之失效（generation 递增），后续交互前需重新 browser_dom_snapshot。参数必须来自最近一次快照事实。",
+      "external_write": false,
+      "min_role": null,
+      "name": "browser_hover",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "browser": {
+            "description": "要安装的内核（当前仅 chromium）",
+            "enum": [
+              "chromium"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【安装浏览器内核】当 browser_* 工具报「浏览器内核缺失」时，安装 Playwright 管理的 Chromium 内核并自动重探恢复。这是环境变更动作：会下载数百 MB 到本机 Playwright 缓存目录——**调用前必须先向用户说明并征得同意**（用 ask_user），不得静默安装。仅支持 chromium；playwright 库本身未安装时会报错并指引 pip install playwright。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_install",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "url": {
+            "description": "要访问的完整 URL（含 https://）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "description": "【浏览器导航】在内置自动化浏览器打开 URL——工具阶梯最重档，仅当 web_search/web_fetch 搞不定（交互/登录/JS 渲染）才用。打开后可 extract_text/click/type/screenshot。【何时不用】静态页直接 web_fetch；站内搜索用 web_search 等垂直工具。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_navigate",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。当前页代数；页面已被外部改变时拒绝",
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【页面转 PDF】把当前活动页打印成 PDF 并落产物目录，返回文件路径与字节数。用于网页存档、报表出件。【何时不用】只要正文文字用 browser_extract_text；要排版文档用 write_pdf（Markdown→PDF）。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_pdf",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "delay": {
+            "description": "可选。按下到抬起的间隔毫秒",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "generation": {
+            "description": "可选。当前页代数；页面已被外部改变时拒绝",
+            "type": "integer"
+          },
+          "key": {
+            "description": "键名（如 Enter/Escape/Tab/ArrowDown/a；组合键用 + 连接，如 Control+a）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "type": "object"
+      },
+      "description": "【键盘按键】向当前页面派发单个按键（Enter/Escape/Tab/ArrowDown/a 等，组合键用 + 连接如 Control+a）。用于提交表单、关闭弹层、键盘导航。按键可能触发页面行为，快照事实随之失效（generation 递增）。【何时不用】向输入框填文本用 browser_fill_role/fill_ref（更精确）；按键后要继续交互先重新 browser_dom_snapshot。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_press",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "chunk_size": {
+            "description": "可选。单次返回的文本长度上限（默认 60000）",
+            "type": "integer"
+          },
+          "offset": {
+            "description": "可选。续读起始偏移（默认按上次位置顺序续读）；传 0 可回看首片",
+            "type": "integer"
+          },
+          "session_id": {
+            "description": "可选。续读会话 ID（首读返回的 session_id）；传入后从缓存切片，不再访问网络",
+            "type": "string"
+          },
+          "timeout": {
+            "description": "超时秒数（默认 30，单次读取建议 ≤60）",
+            "type": "number"
+          },
+          "url": {
+            "description": "要读取的网页 URL（http/https）；续读时可省略",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【浏览器读取】Playwright 渲染 JS 密集页（SPA/客户端渲染）并提取为 Markdown（静态页直接 web_fetch）。首次使用需 playwright install chromium。长文自动分片：首读返回前 60,000 字符＋session_id/can_continue/next_offset，未读完带 session_id 续读至 can_continue=false。【何时不用】已开页面提正文用 browser_extract_text。",
+      "external_write": false,
+      "min_role": null,
+      "name": "browser_read",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。当前页代数；页面已被外部改变时拒绝",
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【刷新页面】重新加载当前活动页（等价浏览器刷新键）。页面内未保存的表单输入会丢失；导航使快照事实失效（generation 递增），交互前需重新 browser_dom_snapshot。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_reload",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "description": "【浏览器截图】截取当前浏览器页面的画面。截图会实时显示在聊天页的电脑操作面板中，并返回页面标题和 URL。",
+      "external_write": false,
+      "min_role": null,
+      "name": "browser_screenshot",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。当前页代数；页面已被外部改变时拒绝滚动",
+            "type": "integer"
+          },
+          "scroll_x": {
+            "description": "横向滚动像素（正=右，负=左）",
+            "type": "integer"
+          },
+          "scroll_y": {
+            "description": "纵向滚动像素（正=下，负=上）",
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【滚动页面】按像素相对滚动当前页（正=右/下，负=左/上），返回滚动后的绝对位置。用于触发懒加载、查看长页下方内容。滚动不改变 aria 快照的可交互结构，但两个滚动量全为 0 时拒绝。【何时不用】要读页面正文用 browser_extract_text/browser_read。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_scroll",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。最近一次快照返回的 generation；跨代即拒绝",
+            "type": "integer"
+          },
+          "name": {
+            "description": "可访问名称（来自快照，如字段标签）",
+            "type": "string"
+          },
+          "role": {
+            "description": "ARIA 角色（combobox/select，来自快照）",
+            "type": "string"
+          },
+          "values": {
+            "description": "要选中的 option 值或可见标签（多选框可给多个）",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "role",
+          "values"
+        ],
+        "type": "object"
+      },
+      "description": "【下拉选择】在指定 ARIA role+name 的下拉框（combobox/select）中选中一个或多个选项（values 为 option 的 value 或可见标签）。改写页面表单状态，快照事实随之失效（generation 递增）。参数必须来自最近一次快照事实；选完表单未提交时用 browser_press(key=Enter) 或点击提交按钮。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_select",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "action": {
+            "description": "读/写/删/清",
+            "enum": [
+              "get",
+              "set",
+              "remove",
+              "clear"
+            ],
+            "type": "string"
+          },
+          "generation": {
+            "description": "可选。当前页代数；页面已被外部改变时拒绝",
+            "type": "integer"
+          },
+          "key": {
+            "description": "存储键（set/remove 必填；get 省略则取全部）",
+            "type": "string"
+          },
+          "kind": {
+            "description": "localStorage 或 sessionStorage",
+            "enum": [
+              "local",
+              "session"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "description": "存储值（set 必填，可为空串）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "action"
+        ],
+        "type": "object"
+      },
+      "description": "【页面存储】读写 localStorage/sessionStorage（kind=local/session）：get（给 key 取单键，省略取全部）、set（key+value）、remove（key）、clear。用于检查页面本地状态、注入测试令牌等。set/remove/clear 会使快照事实失效（generation 递增）。【何时不用】大体积数据读写不要走本工具（受工具结果字符预算约束）。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_storage",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。该标签页的代数；与当前不符时拒绝关闭",
+            "type": "integer"
+          },
+          "target_id": {
+            "description": "要关闭的标签页 ID（来自 browser_tab_list）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_id"
+        ],
+        "type": "object"
+      },
+      "description": "【关闭标签页】关闭指定 target_id 的标签页。关闭活动页时自动回落到剩余的第一个标签页；全部关闭后需重新 browser_navigate 或 browser_tab_open。可携带 generation 做新旧校验。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_tab_close",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "description": "【列出标签页】列出当前浏览器的全部标签页（target_id、URL、是否活动、generation）。需要切换或关闭某个标签页时，先用本工具拿 target_id，再调 browser_tab_switch / browser_tab_close。",
+      "external_write": false,
+      "min_role": null,
+      "name": "browser_tab_list",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "url": {
+            "description": "可选。新标签页要打开的 URL；省略则打开空白页",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【新开标签页】新开并激活一个浏览器标签页，可顺带导航。用于需同时保持多页面的任务；每标签页独立 generation，交互前仍需 dom_snapshot。【何时不用】单页任务直接 browser_navigate；静态读取 web_fetch。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_tab_open",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。该标签页的代数；与当前不符时拒绝切换",
+            "type": "integer"
+          },
+          "target_id": {
+            "description": "目标标签页 ID（来自 browser_tab_list）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_id"
+        ],
+        "type": "object"
+      },
+      "description": "【切换标签页】把指定 target_id 的标签页设为活动页，此后 browser_* 交互都作用于它；可带 generation 校验。切换后需重新 browser_dom_snapshot。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_tab_switch",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "selector": {
+            "description": "目标输入框的 CSS 选择器",
+            "type": "string"
+          },
+          "text": {
+            "description": "要输入的文本",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector",
+          "text"
+        ],
+        "type": "object"
+      },
+      "description": "【浏览器输入】向页面输入框填写文本。先清空原内容再输入，适合搜索框、表单、登录框等。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_type",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。最近一次快照返回的 generation；跨代即拒绝",
+            "type": "integer"
+          },
+          "name": {
+            "description": "可访问名称（来自快照）",
+            "type": "string"
+          },
+          "paths": {
+            "description": "要上传的本地文件绝对路径列表（须存在）",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "role": {
+            "description": "文件输入元素的 ARIA 角色（来自快照）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "paths"
+        ],
+        "type": "object"
+      },
+      "description": "【文件上传】向指定 ARIA role+name 的文件输入元素（input[type=file]）上传一个或多个本地文件（paths 须为存在的绝对路径）。上传改页面状态，快照事实随之失效（generation 递增）。",
+      "external_write": true,
+      "min_role": null,
+      "name": "browser_upload",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。当前页代数；页面已被外部改变时拒绝等待",
+            "type": "integer"
+          },
+          "ms": {
+            "description": "固定等待毫秒数（上限 30000，超出按 30000 计）",
+            "maximum": 30000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "selector": {
+            "description": "等待该 CSS 选择器匹配的元素出现",
+            "type": "string"
+          },
+          "state": {
+            "description": "等待页面加载状态",
+            "enum": [
+              "load",
+              "domcontentloaded",
+              "networkidle"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【等待条件】等待页面达到指定条件再继续，三种条件可组合、至少给一个：固定毫秒（≤30000）、等待某 CSS 选择器的元素出现、等待加载状态（load/domcontentloaded/networkidle）。用于 SPA 异步渲染后的时序对齐——先等元素出现再 browser_dom_snapshot，不要靠盲等硬凑。",
+      "external_write": false,
+      "min_role": null,
+      "name": "browser_wait",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "batch_id": {
+            "description": "构建批次 ID；缺省取当前构建会话批次",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【批次补偿】按构建批次补偿日志逆序回滚画布快照/新建画布/自定义节点激活/工作流定义版本。用于一次任务里后一个 surface 失败、需要回收前面已提交变更的场景；已补偿条目不重放。缺省使用当前构建会话的 batch_id。",
+      "external_write": true,
+      "min_role": null,
+      "name": "build_batch_compensate",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "expression": {
+            "description": "数学表达式，如 (1+2)*3、sqrt(16)、round(pi*2, 2)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expression"
+        ],
+        "type": "object"
+      },
+      "description": "【计算器】精确计算数学表达式。支持 + - * / // % **、括号，以及 sqrt/abs/round/min/max/sin/cos/tan/log/floor/ceil 函数和 pi/e 常量。涉及数值计算时应调用此工具，不要心算，避免算术错误。",
+      "external_write": false,
+      "min_role": null,
+      "name": "calculator",
+      "read_only": true
+    },
+    {
+      "agent_scope": "main_only",
+      "args_schema": {
+        "properties": {
+          "reason": {
+            "description": "叫停原因（留痕进事件账本与失败交接文案）",
+            "type": "string"
+          },
+          "subagent_id": {
+            "description": "要叫停的子代理 ID（spawn_subagent/subagent_status 返回的 subagent_id）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subagent_id"
+        ],
+        "type": "object"
+      },
+      "description": "【叫停子代理】取消一个运行中的子代理：终态以 failed(subagent_cancelled) 落账，已产出的部分报告随失败交接保留，派生槽立即释放；依赖等待中的派生件被叫停后不再被拉起。已终态的运行无需叫停（幂等失败）。仅主代理可用（子代理不得叫停自己/兄弟）。",
+      "external_write": true,
+      "min_role": null,
+      "name": "cancel_subagent",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "base_version": {
+            "description": "读取画布时的版本号（可选，用于并发冲突检测）",
+            "type": "integer"
+          },
+          "canvas_id": {
+            "description": "画布 ID",
+            "type": "string"
+          },
+          "config": {
+            "description": "节点初始配置（键为节点表单字段 id，可选）",
+            "type": "object"
+          },
+          "label": {
+            "description": "节点显示名称（可选，默认用节点库名称）",
+            "type": "string"
+          },
+          "node_type": {
+            "description": "节点类型（如 builtin:start、builtin:llm_chat），用 canvas_list_nodes 查询可用类型",
+            "type": "string"
+          },
+          "position": {
+            "description": "坐标 {x, y}（可选，缺省自动落位）",
+            "type": "object"
+          }
+        },
+        "required": [
+          "canvas_id",
+          "node_type"
+        ],
+        "type": "object"
+      },
+      "description": "【添加节点】向画布添加一个节点。node_type 必须是节点库中已注册的类型（不确定时先用 canvas_list_nodes 查询）。返回新节点（含自动生成的 id 与自动落位）。可选携带 base_version 做乐观锁校验。",
+      "external_write": true,
+      "min_role": null,
+      "name": "canvas_add_node",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "base_version": {
+            "description": "读取画布时的版本号（乐观锁）",
+            "type": "integer"
+          },
+          "canvas_id": {
+            "description": "画布 ID",
+            "type": "string"
+          },
+          "operations": {
+            "description": "按顺序执行的 op 列表；元素含 op 及该 op 的参数（add_node 可带 id，后续 connect/set_config 可直接引用）",
+            "items": {
+              "properties": {
+                "config": {
+                  "type": "object"
+                },
+                "edge_id": {
+                  "type": "string"
+                },
+                "id": {
+                  "description": "add_node：可选节点 id，供同批后续 op 引用",
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "node_id": {
+                  "type": "string"
+                },
+                "node_type": {
+                  "type": "string"
+                },
+                "op": {
+                  "enum": [
+                    "add_node",
+                    "connect",
+                    "set_config",
+                    "move_node",
+                    "remove_node",
+                    "remove_edge",
+                    "layout"
+                  ],
+                  "type": "string"
+                },
+                "position": {
+                  "type": "object"
+                },
+                "replace": {
+                  "type": "boolean"
+                },
+                "source_node": {
+                  "type": "string"
+                },
+                "source_port": {
+                  "type": "string"
+                },
+                "target_node": {
+                  "type": "string"
+                },
+                "target_port": {
+                  "type": "string"
+                },
+                "values": {
+                  "type": "object"
+                },
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "canvas_id",
+          "operations"
+        ],
+        "type": "object"
+      },
+      "description": "【批量画布操作·原子提交】多条操作一个事务：任一步失败整批不落盘；成功只出一个新版本。构建批次内优先于逐条 add_node/connect/set_config。支持 add_node/connect/set_config/move_node/remove_node/remove_edge/layout。",
+      "external_write": true,
+      "min_role": null,
+      "name": "canvas_apply_batch",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "base_version": {
+            "description": "读取画布时的版本号（可选，用于并发冲突检测）",
+            "type": "integer"
+          },
+          "canvas_id": {
+            "description": "画布 ID",
+            "type": "string"
+          },
+          "source_node": {
+            "description": "上游节点 id",
+            "type": "string"
+          },
+          "source_port": {
+            "description": "上游输出端口 id（可选，默认第一个输出）",
+            "type": "string"
+          },
+          "target_node": {
+            "description": "下游节点 id",
+            "type": "string"
+          },
+          "target_port": {
+            "description": "下游输入端口 id（可选，默认第一个输入）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canvas_id",
+          "source_node",
+          "target_node"
+        ],
+        "type": "object"
+      },
+      "description": "【连接节点】在画布上把两个节点用连线接起来（source_node 的输出 → target_node 的输入）。端口 id 缺省时使用默认端口。重复连线会返回 duplicate_edge 错误。",
+      "external_write": true,
+      "min_role": null,
+      "name": "canvas_connect",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "description": {
+            "description": "画布用途说明（可选）",
+            "type": "string"
+          },
+          "name": {
+            "description": "画布名称（简洁描述工作流用途）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "description": "【创建画布】新建一张空白工作流画布，返回 canvas_id（后续所有 canvas_* 操作都需要它）。当用户希望你搭建/设计/制作一个工作流、流水线、流程图时先调用本工具。画布会实时显示在前端协作画布页。",
+      "external_write": true,
+      "min_role": null,
+      "name": "canvas_create",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "base_version": {
+            "description": "读取画布时的版本号（可选，用于并发冲突检测）",
+            "type": "integer"
+          },
+          "canvas_id": {
+            "description": "画布 ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canvas_id"
+        ],
+        "type": "object"
+      },
+      "description": "【自动布局】按拓扑分层对画布全部节点自动排版（上游在左、下游在右）。建议在添加完节点和连线后调用一次，让画布整齐可读。",
+      "external_write": true,
+      "min_role": null,
+      "name": "canvas_layout",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "category": {
+            "description": "按分类过滤（可选）",
+            "type": "string"
+          },
+          "limit": {
+            "description": "最多返回条数（默认 20）",
+            "type": "integer"
+          },
+          "query": {
+            "description": "按名称/类型/描述模糊搜索（可选，缺省列出全部）",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【查询节点库】列出/搜索可用节点类型，返回参数表单（sub_blocks/默认值/必填）、输入输出端口、环境变量需求与来源。添加节点前先查本工具；搜索无果说明节点库缺少该能力，可考虑建自定义节点（draft）或先调 sync_nodes。",
+      "external_write": false,
+      "min_role": null,
+      "name": "canvas_list_nodes",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "base_version": {
+            "description": "读取画布时的版本号（可选，用于并发冲突检测）",
+            "type": "integer"
+          },
+          "canvas_id": {
+            "description": "画布 ID",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "节点 id",
+            "type": "string"
+          },
+          "x": {
+            "description": "横坐标",
+            "type": "number"
+          },
+          "y": {
+            "description": "纵坐标",
+            "type": "number"
+          }
+        },
+        "required": [
+          "canvas_id",
+          "node_id",
+          "x",
+          "y"
+        ],
+        "type": "object"
+      },
+      "description": "【移动节点】调整画布上某节点的坐标位置。一般搭完流程后直接用 canvas_layout 自动布局即可，仅在需要微调时使用。",
+      "external_write": true,
+      "min_role": null,
+      "name": "canvas_move_node",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "canvas_id": {
+            "description": "画布 ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canvas_id"
+        ],
+        "type": "object"
+      },
+      "description": "【读取画布】读取画布完整快照（节点、连线、各节点配置和当前 version）。用于：了解画布现状、version_conflict 后重新获取最新版本再重试。返回的 version 应作为后续修改操作的 base_version。",
+      "external_write": false,
+      "min_role": null,
+      "name": "canvas_read",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "base_version": {
+            "description": "读取画布时的版本号（可选，用于并发冲突检测）",
+            "type": "integer"
+          },
+          "canvas_id": {
+            "description": "画布 ID",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "要删除的节点 id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canvas_id",
+          "node_id"
+        ],
+        "type": "object"
+      },
+      "description": "【删除节点】从画布删除某节点，与其相连的连线会一并删除（返回删除的连线数）。",
+      "external_write": true,
+      "min_role": null,
+      "name": "canvas_remove_node",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "canvas_id": {
+            "description": "画布 ID",
+            "type": "string"
+          },
+          "inputs": {
+            "description": "工作流全局输入（可选，键值对）",
+            "type": "object"
+          }
+        },
+        "required": [
+          "canvas_id"
+        ],
+        "type": "object"
+      },
+      "description": "【运行画布】把画布编译为工作流并同步执行，返回整体状态与每个节点的结果（状态/输出/错误/耗时）。搭完工作流用它验证跑通。【何时不用】长期执行交 spawn_subagent；一次性简单任务直接用对应工具。",
+      "external_write": true,
+      "min_role": null,
+      "name": "canvas_run",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "base_version": {
+            "description": "读取画布时的版本号（可选，用于并发冲突检测）",
+            "type": "integer"
+          },
+          "canvas_id": {
+            "description": "画布 ID",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "节点 id",
+            "type": "string"
+          },
+          "values": {
+            "description": "要合并进节点配置的键值对",
+            "type": "object"
+          }
+        },
+        "required": [
+          "canvas_id",
+          "node_id",
+          "values"
+        ],
+        "type": "object"
+      },
+      "description": "【配置节点】修改画布上某节点的配置项（浅合并：只覆盖传入的键，其余保留）。values 的键是节点表单字段 id（可通过 canvas_read 查看节点现有 config）。",
+      "external_write": true,
+      "min_role": null,
+      "name": "canvas_set_config",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "button": {
+            "default": "left",
+            "description": "鼠标按钮",
+            "type": "string"
+          },
+          "frame_id": {
+            "description": "可选。最近一次 computer_screenshot/computer_som_snapshot 返回的帧 id；携带时校验帧新鲜度，画面已变则拒绝（stale_frame）并要求重新观察",
+            "type": "string"
+          },
+          "x": {
+            "description": "X 坐标",
+            "type": "number"
+          },
+          "y": {
+            "description": "Y 坐标",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "type": "object"
+      },
+      "description": "点击屏幕指定位置",
+      "external_write": true,
+      "min_role": null,
+      "name": "computer_click",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "button": {
+            "default": "left",
+            "description": "鼠标按钮 left/right/middle",
+            "type": "string"
+          },
+          "generation": {
+            "description": "可选。最近一次快照返回的 generation；过期会被拒绝",
+            "type": "integer"
+          },
+          "index": {
+            "description": "元素序号（来自 computer_dom_snapshot 快照）",
+            "type": "integer"
+          },
+          "runtime_id": {
+            "description": "可选。UIA runtime id（跨快照更稳，优先于 index）",
+            "type": "string"
+          },
+          "window_title": {
+            "description": "可选。目标窗口标题；缺省为最近快照的前台窗口",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【按元素点击】通过快照元素 index 点击桌面控件（来自 computer_dom_snapshot 快照事实）。内部走语义动作→消息直投的递降链，默认不抢用户焦点、不移动真实光标。快照过期（generation 不符）会被拒绝并提示重新快照。",
+      "external_write": true,
+      "min_role": null,
+      "name": "computer_click_element",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "button": {
+            "default": "left",
+            "description": "鼠标按钮 left/right/middle",
+            "type": "string"
+          },
+          "frame_id": {
+            "description": "可选。最近一次 computer_som_snapshot 返回的帧 id；携带时校验帧新鲜度，画面已变则拒绝（stale_frame）并要求重新快照",
+            "type": "string"
+          },
+          "index": {
+            "description": "SOM 编号（来自 computer_som_snapshot 的 marks.id）",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index"
+        ],
+        "type": "object"
+      },
+      "description": "【按 SOM 编号点击】点击 computer_som_snapshot 返回的某个编号区域中心（内部经 id2xy 解算像素坐标并走 DPI/多屏换算的点击链）。编号来自最近一次 SOM 快照，过期需重新快照。",
+      "external_write": true,
+      "min_role": null,
+      "name": "computer_click_mark",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "max_depth": {
+            "description": "可选。控件树最大深度（默认 32）",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_nodes": {
+            "description": "可选。最多枚举的控件节点数（默认 400）",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "root_index": {
+            "description": "可选。下钻根元素序号（drill-down，必须来自本窗口已有快照）；提供后只枚举该元素子树，新元素 index 续接进缓存。root 不在已有快照中会被拒绝（ref_not_found）",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "root_runtime_id": {
+            "description": "可选。下钻根元素 runtime_id（优先于 root_index）",
+            "type": "string"
+          },
+          "skeleton": {
+            "description": "可选。骨架概览模式：折叠无名且不可交互的容器/文本（返回 omitted_count），保留结构根/有名/可交互元素；配合 root_index 下钻使用",
+            "type": "boolean"
+          },
+          "window_title": {
+            "description": "可选。目标窗口标题（包含匹配，不区分大小写）；缺省为当前前台窗口",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【桌面可访问性快照】枚举前台（或指定标题）窗口控件树（index/角色/名称/矩形/可交互/层级）。桌面交互前必先调用，按快照 index 用 computer_click_element/computer_set_value 语义操作，勿盲猜坐标；窗口变化后 generation 递增需重快照。truncated=true 表示节点数或深度任一不完整；出现 depth_truncated 时树被深度剪枝（observed_max_depth=实际走到的深度，被切元素带 subtree_truncated 标记）——勿把残树当全貌，可对 subtree_truncated 元素用 root_index/root_runtime_id 下钻其子树（新元素 index 续接进缓存），或提高 max_depth/max_nodes 重新观察。skeleton=true 为骨架概览：折叠无名且不可交互的容器（omitted_count 计数），适合密集树先看骨架再下钻。",
+      "external_write": false,
+      "min_role": null,
+      "name": "computer_dom_snapshot",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "button": {
+            "default": "left",
+            "description": "鼠标按钮 left/right/middle",
+            "type": "string"
+          },
+          "duration": {
+            "description": "拖拽时长秒（默认 0.5，过快可能丢事件）",
+            "type": "number"
+          },
+          "end_x": {
+            "description": "终点 X（截图像素坐标）",
+            "type": "number"
+          },
+          "end_y": {
+            "description": "终点 Y（截图像素坐标）",
+            "type": "number"
+          },
+          "start_x": {
+            "description": "起点 X（截图像素坐标）",
+            "type": "number"
+          },
+          "start_y": {
+            "description": "起点 Y（截图像素坐标）",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start_x",
+          "start_y",
+          "end_x",
+          "end_y"
+        ],
+        "type": "object"
+      },
+      "description": "【拖拽】按截图像素坐标把鼠标从起点拖到终点（默认左键拖拽，时长可调）。坐标口径同 computer_click（截图像素坐标，DPI/多屏换算已内置）。适合滑块/拖放排序/画布类交互。",
+      "external_write": true,
+      "min_role": null,
+      "name": "computer_drag",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "interval": {
+            "description": "重复间隔秒（默认 0.05）",
+            "type": "number"
+          },
+          "key": {
+            "description": "按键名或 + 组合键，如 enter / ctrl+s / alt+f4",
+            "type": "string"
+          },
+          "repeat": {
+            "description": "重复次数（默认 1）",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "type": "object"
+      },
+      "description": "【按键】向桌面发送按键或组合键（如 enter、ctrl+s、alt+f4），repeat 可重复。用于快捷键/确认框/切窗口；别名自动归一（cmd→win、esc→escape 等），键表外键名会被拒绝。",
+      "external_write": true,
+      "min_role": null,
+      "name": "computer_key",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "description": "【窗口清单】枚举桌面顶层窗口（标题/类名/PID/矩形/是否前台）。用于定位目标窗口（配合 computer_dom_snapshot 的 window_title 参数）或确认某应用是否在跑。只读动作，无副作用。",
+      "external_write": false,
+      "min_role": null,
+      "name": "computer_list_windows",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "text": {
+            "description": "要粘贴的文本",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "description": "【粘贴】把文本写入系统剪贴板并派发 ctrl+v 到当前焦点控件（比逐字符键入快，适合长文本/特殊字符）。目标控件需已聚焦（可先 computer_click/computer_click_element 聚焦）；粘贴后剪贴板内容即为本文本。",
+      "external_write": true,
+      "min_role": null,
+      "name": "computer_paste",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "description": "截取屏幕截图。结果回带 screen 元数据（宽高/DPI scale/虚拟屏原点）与引导信息；UI 元素事实（按钮/输入框/菜单）不要靠反复截图观察，用 computer_dom_snapshot 获取。",
+      "external_write": false,
+      "min_role": null,
+      "name": "computer_screenshot",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "scroll_x": {
+            "default": 0,
+            "description": "水平滚动量",
+            "type": "integer"
+          },
+          "scroll_y": {
+            "default": 0,
+            "description": "垂直滚动量",
+            "type": "integer"
+          },
+          "x": {
+            "description": "滚动位置横坐标（可选，不传则在当前指针位置滚动）",
+            "type": "integer"
+          },
+          "y": {
+            "description": "滚动位置纵坐标（可选，不传则在当前指针位置滚动）",
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "滚动屏幕",
+      "external_write": true,
+      "min_role": null,
+      "name": "computer_scroll",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "generation": {
+            "description": "可选。快照 generation",
+            "type": "integer"
+          },
+          "index": {
+            "description": "元素序号（来自 computer_dom_snapshot 快照）",
+            "type": "integer"
+          },
+          "runtime_id": {
+            "description": "可选。UIA runtime id",
+            "type": "string"
+          },
+          "value": {
+            "description": "要写入的文本",
+            "type": "string"
+          },
+          "window_title": {
+            "description": "可选。目标窗口标题",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
+      },
+      "description": "【按元素赋值】通过快照元素 index 向桌面输入框/可编辑控件直接写入文本（UIA ValuePattern，比逐键敲入更快更可靠，且不依赖焦点位置）。参数必须来自 computer_dom_snapshot 快照。",
+      "external_write": true,
+      "min_role": null,
+      "name": "computer_set_value",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "command": {
+            "description": "shell 命令（Windows 下为 cmd.exe 语法，字符串参数用双引号包裹）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "description": "【Shell 命令】在用户计算机执行 shell 命令（Windows 经 cmd.exe /c）：进程/服务、环境变量、批量文件整理、装依赖。cmd 不认单引号，含空格/特殊字符的路径参数必须双引号；【何时不用】数据处理/计算用 run_code（数值禁止心算），抓网页用 web_fetch。",
+      "external_write": true,
+      "min_role": null,
+      "name": "computer_shell",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "description": "【SOM 视觉快照】对无 UIA 树的目标（自绘 UI/游戏/像素流）把截图标注成编号可交互区域图（marks：id/中心/label），用 computer_click_mark 点击。【何时不用】有 UIA 树先 computer_dom_snapshot。",
+      "external_write": false,
+      "min_role": null,
+      "name": "computer_som_snapshot",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "command": {
+            "description": "要在远端执行的命令",
+            "type": "string"
+          },
+          "host": {
+            "description": "目标主机（IP 或域名）",
+            "type": "string"
+          },
+          "port": {
+            "description": "可选。SSH 端口，默认 22",
+            "type": "integer"
+          },
+          "timeout": {
+            "description": "可选。命令超时秒，默认 60",
+            "type": "number"
+          },
+          "user": {
+            "description": "可选。SSH 用户名（缺省用凭据配置）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "host",
+          "command"
+        ],
+        "type": "object"
+      },
+      "description": "【SSH 远程命令】经 SSH 在远程 Linux/macOS 执行命令，返回 stdout/stderr/退出码，操作在终端窗口展示。host 必填，凭据从 SSH 配置读取（platform=ssh）。【何时不用】本机 computer_shell；数据处理 run_code。",
+      "external_write": true,
+      "min_role": null,
+      "name": "computer_ssh_exec",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "interval": {
+            "description": "每字符输入间隔秒数（仅像素兜底路径生效，默认 0.05）",
+            "type": "number"
+          },
+          "text": {
+            "description": "输入文本",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "description": "键盘输入文本",
+      "external_write": true,
+      "min_role": null,
+      "name": "computer_type",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "reason": {
+            "description": "折叠原因（进读数，便于归因），如“阶段完成”“切换话题前清理”",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "description": "【上下文主动折叠】把窗口里较老的消息折叠成摘要（原文仍在归档池，可经 recall_history 找回）。折叠成功的回执附 recall_guide：covers_ref 引用与三条找回路径（recall_history / pool_search / recall_context_span）。【何时用】任务步骤完成、早期内容短期不再需要时。【何时不用】调试/推理中途；只查历史用 recall_history。",
+      "external_write": true,
+      "min_role": null,
+      "name": "context_compress",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {},
+        "type": "object"
+      },
+      "description": "【上下文盘点】返回窗口 token 估算/预算、折叠代际与最近触发原因、池归档规模、取水读数，并附折叠时机判读 fold_timing：增长门四判据读数与当前该不该折叠的判定、元认知状态（未编译事件/距上次反思/活跃教训）。【何时用】决定是否 context_compress 前。",
+      "external_write": false,
+      "min_role": null,
+      "name": "context_status",
+      "read_only": true
+    },
+    {
+      "agent_scope": "main_only",
+      "args_schema": {
+        "properties": {
+          "background": {
+            "description": "是否后台执行（默认 false，前台等结果；仅终态续跑时有效）",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "续跑/修正指令：接着做什么/修正什么/补充什么约束",
+            "type": "string"
+          },
+          "mode": {
+            "description": "运行中子代理的改需求方式：steer 注入会话（下一工具轮生效，尽力而为，默认）/ restart 先叫停再按新指令重派（保留溯源）。已终态的子代理忽略本参数，直接走续跑链",
+            "enum": [
+              "steer",
+              "restart"
+            ],
+            "type": "string"
+          },
+          "subagent_id": {
+            "description": "要续跑/改需求的子代理 ID（spawn_subagent/subagent_status 返回的 subagent_id）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subagent_id",
+          "message"
+        ],
+        "type": "object"
+      },
+      "description": "【续跑/改需求子代理】对子代理下达追加指令。已结束（completed/failed）的子代理被复活：member 会话历史保留（不是从零重派），上一段产出自动附带衔接。运行中（running/in_review）的子代理也可改需求：mode=steer 把新指令注入其会话（下一工具轮生效，尽力而为——若成员已不再调用工具则不会送达）；mode=restart 先叫停再按新指令重派（保留溯源）。适用：失败续跑、追加分析、修正方向。仅主代理可用（子代理不得续跑兄弟——与递归派生同禁）。",
+      "external_write": true,
+      "min_role": null,
+      "name": "continue_subagent",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "description": {
+            "description": "技能的功能与触发场景说明，LLM 用此判断是否调用",
+            "type": "string"
+          },
+          "name": {
+            "description": "技能唯一标识（小写下划线），例：weather_then_save",
+            "type": "string"
+          },
+          "steps": {
+            "description": "按顺序执行的工具步骤列表",
+            "items": {
+              "properties": {
+                "name": {
+                  "description": "被调用的内置工具名，如 web_search / browser_screenshot / file_write",
+                  "type": "string"
+                },
+                "params": {
+                  "description": "传给该工具的参数字典（支持 `{step_<idx>.<field>}` 占位符引用前序步骤输出）",
+                  "type": "object"
+                }
+              },
+              "required": [
+                "name",
+                "params"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "steps"
+        ],
+        "type": "object"
+      },
+      "description": "【创建可执行技能】把反复出现的工具调用组合成持久化技能，之后经 `name` 一键调用。技能＝有序工具调用＋可选步间占位符（{step_<idx>.<field>} 引用前序输出）。创建后本会话与 SkillRegistry 立即可调。",
+      "external_write": true,
+      "min_role": null,
+      "name": "create_skill",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "node_type": {
+            "description": "自定义节点类型",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_type"
+        ],
+        "type": "object"
+      },
+      "description": "【激活自定义节点】把本构建批次内创建的 draft 节点提升为 active；节点 batch_id 必须与当前 BuildSession 批次一致。",
+      "external_write": true,
+      "min_role": null,
+      "name": "custom_node_activate",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "spec": {
+            "description": "节点 spec：type/label/description/tier/executor_body/form_schema/inputs/outputs/env_requirements",
+            "type": "object"
+          }
+        },
+        "required": [
+          "spec"
+        ],
+        "type": "object"
+      },
+      "description": "【创建自定义节点·草稿】在已批准构建批次内创建 L1/L2 自定义节点，默认 draft 不可被画布引用，需 custom_node_activate 激活。tier=declarative 需 executor_body.template；composite 需 steps。",
+      "external_write": true,
+      "min_role": null,
+      "name": "custom_node_create",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "node_type": {
+            "description": "自定义节点类型",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_type"
+        ],
+        "type": "object"
+      },
+      "description": "【删除自定义节点·草稿】只允许删除 draft 节点；active 节点需先停用/新批次处理，本工具拒绝。",
+      "external_write": true,
+      "min_role": null,
+      "name": "custom_node_delete",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "node_type": {
+            "description": "自定义节点类型，如 custom:campaign_audit",
+            "type": "string"
+          },
+          "spec": {
+            "description": "要更新的字段（label/description/tier/executor_body/form_schema/inputs/outputs/env_requirements）",
+            "type": "object"
+          }
+        },
+        "required": [
+          "node_type",
+          "spec"
+        ],
+        "type": "object"
+      },
+      "description": "【更新自定义节点·草稿】只允许更新 draft 节点；active 节点需新批次/审批，本工具拒绝。",
+      "external_write": true,
+      "min_role": null,
+      "name": "custom_node_update",
+      "read_only": false
+    },
+    {
+      "agent_scope": "main_only",
+      "args_schema": {
+        "properties": {
+          "decision": {
+            "description": "approve 批准 / reject 拒绝",
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "type": "string"
+          },
+          "note": {
+            "description": "裁决备注（会随结果回传给子代理）",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "审批单 ID（邮箱审批信封/审批记录中的 request_id）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "decision"
+        ],
+        "type": "object"
+      },
+      "description": "【裁决子代理审批】对子代理发起的审批单（request_approval 创建）做批准/拒绝。只受理蜂群审批单；已裁决的幂等失败。仅主代理可用（子代理工具面已剔除本工具）。",
+      "external_write": true,
+      "min_role": null,
+      "name": "decide_subagent_approval",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "max_sources": {
+            "default": 6,
+            "description": "去重后最多抓取正文的源数（默认 6，上限 15）",
+            "type": "integer"
+          },
+          "query": {
+            "description": "研究主题",
+            "type": "string"
+          },
+          "sub_queries": {
+            "description": "可选：拆解的检索角度/子问题（不传则仅用 query）",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "description": "【深度研究采集】对主题多源检索＋摘录，返回带 [n] 引用的源料包（title/url/excerpt），你据此写带引用的报告；比逐条 search+fetch 省往返。可传 sub_queries 拆角度。单链接用 web_fetch；简单事实用 web_search；本工具不写结论。",
+      "external_write": false,
+      "min_role": null,
+      "name": "deep_research",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "limit": {
+            "description": "最多返回条数，默认 5",
+            "type": "integer"
+          },
+          "query": {
+            "description": "能力关键词或自然语言描述",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "description": "【技能发现】按查询词检索已安装技能库，返回候选技能的元数据清单（名称/描述/何时用）。当你判断需要某个已有技能、但它不在当前工具面时调用；确认要用后，通过 $技能名 加载完整指令执行。",
+      "external_write": false,
+      "min_role": null,
+      "name": "discover_skills",
+      "read_only": true
+    },
+    {
+      "agent_scope": "main_only",
+      "args_schema": {
+        "properties": {
+          "background": {
+            "description": "是否后台执行（默认 true=立即返回各成员 subagent_id；false=等待全部完成）",
+            "type": "boolean"
+          },
+          "task": {
+            "description": "交给团队的完整、自包含任务描述（每个成员都会收到，成员职责段按名册自动注入）",
+            "type": "string"
+          },
+          "task_unit": {
+            "description": "结构化任务单元（可选，同 spawn_subagent.task_unit）；dependencies 按名册序号/成员 id/成员名声明步间依赖（如 [\"0\"] = 等名册第 1 个成员的产出）",
+            "properties": {
+              "acceptanceCriteria": {
+                "description": "验收条件逐条列出",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "artifactOwnership": {
+                "description": "产物归属与后续用途",
+                "type": "string"
+              },
+              "dependencies": {
+                "description": "依赖的名册成员（序号如 \"0\"，或成员 id/名）；派生时映射为该成员的 subagent_id",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "expectedResult": {
+                "description": "预期产物",
+                "type": "string"
+              },
+              "goal": {
+                "description": "任务目标（必填）",
+                "type": "string"
+              },
+              "requiredInputs": {
+                "description": "所需输入",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "reviewMode": {
+                "description": "评审方式：none（默认）/ supervisor",
+                "enum": [
+                  "none",
+                  "supervisor"
+                ],
+                "type": "string"
+              },
+              "untrustedPayload": {
+                "description": "不可信外部内容槽位（数据面围栏）",
+                "type": "string"
+              }
+            },
+            "required": [
+              "goal"
+            ],
+            "type": "object"
+          },
+          "team_id": {
+            "description": "固定团队 ID（先用 list_teams 查看可用团队与成员职责）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id",
+          "task"
+        ],
+        "type": "object"
+      },
+      "description": "【派活固定团队】把一个固定团队整体派活：按名册为每个成员各派一路子任务（成员职责 prompt 自动注入任务书角色段）；task_unit.dependencies 可按名册序号（\"0\"/\"1\"…）或成员 id/名声明步间依赖，派生时映射为对应成员的 subagent_id。每一路都走完整治理三明治（广度/预算/冷却照算），默认后台执行，用 subagent_status 轮询。【何时不用】只需单个成员时直接 spawn_subagent；自由临时组队也用 spawn_subagent（本工具只按既有固定团队名册派活）。",
+      "external_write": true,
+      "min_role": null,
+      "name": "dispatch_team",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "text": {
+            "description": "待分析文本",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "description": "分析文本情感",
+      "external_write": false,
+      "min_role": null,
+      "name": "emotion_analyze",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "action_note": {
+            "description": "对建议处置的补充说明（改派给谁、依赖哪里要修订等）",
+            "type": "string"
+          },
+          "question": {
+            "description": "需要用户/主代理决策的问题（可选）",
+            "type": "string"
+          },
+          "reason": {
+            "description": "升级原因：卡点是什么、为什么自己解决不了",
+            "type": "string"
+          },
+          "severity": {
+            "description": "严重程度，默认 normal",
+            "enum": [
+              "normal",
+              "urgent"
+            ],
+            "type": "string"
+          },
+          "suggested_action": {
+            "description": "建议主代理采取的处置：澄清/改派/修订依赖/重试/无需动作（P2-5 升级闭环）",
+            "enum": [
+              "clarify",
+              "reassign",
+              "revise_dependency",
+              "retry",
+              "none"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "description": "【子代理升级】子代理遇阻时把问题升级给主代理/用户：说明卡点、已尝试与需要的决策。仅子代理运行内可用；升级后请在最终回复说明已升级并结束本轮。",
+      "external_write": false,
+      "min_role": null,
+      "name": "escalate",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "command": {
+            "description": "要执行的 shell 命令",
+            "type": "string"
+          },
+          "max_output_tokens": {
+            "description": "返回输出 token 上限（超出保留首尾并标注，默认 10000）",
+            "type": "integer"
+          },
+          "workdir": {
+            "description": "工作目录（相对路径锚定 agent 工作区，缺省为工作区根）",
+            "format": "path",
+            "type": "string"
+          },
+          "yield_time_ms": {
+            "description": "等待毫秒数（250-30000，超时未结束则返回 session_id 继续后台运行，默认 1000）",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "description": "【会话式命令执行】启动常驻 shell 进程并等 yield_time_ms 毫秒：完成返回输出与退出码；未结束返回 session_id（running），用 write_stdin 写入/轮询。适合构建/测试/dev server。【何时不用】一次性命令用 computer_shell；Python 处理用 run_code。",
+      "external_write": true,
+      "min_role": null,
+      "name": "exec_command",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "content": {
+            "description": "初始内容",
+            "type": "string"
+          },
+          "file_path": {
+            "description": "文件路径",
+            "format": "path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "type": "object"
+      },
+      "description": "创建新文件",
+      "external_write": true,
+      "min_role": null,
+      "name": "file_create",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "file_path": {
+            "description": "文件路径",
+            "format": "path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "type": "object"
+      },
+      "description": "删除文件",
+      "external_write": true,
+      "min_role": null,
+      "name": "file_delete",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "file_path": {
+            "description": "文件路径",
+            "format": "path",
+            "type": "string"
+          },
+          "new_str": {
+            "description": "替换后文本",
+            "type": "string"
+          },
+          "old_str": {
+            "description": "待替换文本（须逐字符一致且唯一，建议带前后各几行上下文）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_path",
+          "old_str",
+          "new_str"
+        ],
+        "type": "object"
+      },
+      "description": "【文件编辑】查找替换方式修改已有文件：old_str 必须与文件内容逐字符一致且在文件中唯一（含足够上下文行），不唯一则不执行替换。对已有文件的局部修改一律用本工具。【何时不用】整体重写文件用 file_write；新建文件用 file_create。",
+      "external_write": true,
+      "min_role": null,
+      "name": "file_edit",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "max_results": {
+            "default": 500,
+            "description": "本页返回的最大条目数（默认 500，上限 2000）",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "description": "跳过前 N 条后再返回（翻页用，配合响应的 next_offset）",
+            "type": "integer"
+          },
+          "path": {
+            "description": "搜索的根目录（默认当前工作目录）",
+            "format": "path",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "glob 匹配模式，如 *.py、*.json",
+            "type": "string"
+          },
+          "recursive": {
+            "description": "是否递归子目录（默认 true）",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "description": "【文件枚举】按 glob 列出文件（如 *.py、docs/**/*.md），支持递归。找到后用 file_read 读、file_search 按内容搜；截断时带 next_offset 续拉。",
+      "external_write": false,
+      "min_role": null,
+      "name": "file_list",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "file_path": {
+            "description": "文档路径（相对锚定工作区，绝对路径按原语义）",
+            "format": "path",
+            "type": "string"
+          },
+          "max_chars": {
+            "default": 50000,
+            "description": "返回文本上限（默认 50000，超出截断并标 truncated）",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "type": "object"
+      },
+      "description": "【文档解析】把 PDF/Word/Excel/PPT/RTF/ODF 等二进制文档抽取为纯文本。【何时不用】纯文本/代码/markdown/json 用 file_read；网页用 web_fetch；图片/音频/视频走 vision/asr。",
+      "external_write": false,
+      "min_role": null,
+      "name": "file_parse",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "encoding": {
+            "default": "utf-8",
+            "description": "文件编码",
+            "type": "string"
+          },
+          "file_path": {
+            "description": "文件路径",
+            "format": "path",
+            "type": "string"
+          },
+          "offset": {
+            "description": "起始行号",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "type": "object"
+      },
+      "description": "【文件读取】读取指定路径文件的内容。已知确切路径时用本工具；还不知道路径先用 file_list 枚举、按内容找用 file_search。【何时不用】大文件建议带 offset 分段读；网页内容不要用本工具（用 web_fetch）。",
+      "external_write": false,
+      "min_role": null,
+      "name": "file_read",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "include": {
+            "description": "搜索目录时的文件名过滤，如 *.py（可选）",
+            "type": "string"
+          },
+          "max_results": {
+            "default": 50,
+            "description": "返回的最大匹配条数",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "description": "跳过前 N 条匹配后再返回（翻页用，配合响应的 next_offset）",
+            "type": "integer"
+          },
+          "path": {
+            "description": "要搜索的文件或目录路径",
+            "format": "path",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "搜索模式（支持正则；非法正则自动降级为字面量匹配）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern",
+          "path"
+        ],
+        "type": "object"
+      },
+      "description": "【文件内容搜索】按关键词或正则搜文件内容（类 grep），返回文件/行号/行内容，可搜单文件或目录。截断时带 truncated=true 与 next_offset 续拉，勿改写 pattern 猜剩余。",
+      "external_write": false,
+      "min_role": null,
+      "name": "file_search",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "content": {
+            "description": "写入内容",
+            "type": "string"
+          },
+          "encoding": {
+            "default": "utf-8",
+            "description": "文件编码",
+            "type": "string"
+          },
+          "file_path": {
+            "description": "文件路径",
+            "format": "path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_path",
+          "content"
+        ],
+        "type": "object"
+      },
+      "description": "【文件写入】写入（整体覆盖）指定路径文件的内容。【何时不用】对已有文件做局部修改改用 file_edit（查找替换，避免整文件重写）；创建全新文件用 file_create。",
+      "external_write": true,
+      "min_role": null,
+      "name": "file_write",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "timestamp": {
+            "description": "Unix 时间戳（秒）；提供时换算该时间戳而非当前时间",
+            "type": "number"
+          },
+          "timezone": {
+            "description": "时区名（如 Asia/Shanghai、UTC）或偏移（如 +08:00），默认系统本地时区",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【日期时间】获取当前日期时间（含星期、ISO 格式、Unix 时间戳），或将 Unix 时间戳换算为指定时区的日期时间。用于需要当前时间、时区换算、时间戳换算的场合。",
+      "external_write": false,
+      "min_role": null,
+      "name": "get_datetime",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "command": {
+            "description": "完整 git 命令行，必须以 git 开头（如 git log --oneline -10）",
+            "type": "string"
+          },
+          "path": {
+            "default": ".",
+            "description": "仓库目录（相对锚定 agent 工作区；缺省为工作区根）",
+            "format": "path",
+            "type": "string"
+          },
+          "timeout": {
+            "default": 60,
+            "description": "超时秒数",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "description": "【Git 仓库操作】在指定仓库执行 git 命令（command 含 git 前缀，如 'git status --short'）；目录由 path 锚定，禁止 --git-dir/-C/--work-tree 逃逸。读操作直接执行，写操作（add/commit/push/checkout/reset…）触发人工确认。GitHub 远程操作用 github MCP；通用 shell 用 run_code/computer_shell。",
+      "external_write": true,
+      "min_role": null,
+      "name": "git",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "limit": {
+            "default": 8,
+            "description": "返回数量上限（默认 8，上界 50）",
+            "type": "integer"
+          },
+          "max_hops": {
+            "default": 2,
+            "description": "walk 模式最大跳数（2-4，默认 2，超出钳位）",
+            "type": "integer"
+          },
+          "mode": {
+            "default": "walk",
+            "description": "检索模式",
+            "enum": [
+              "walk",
+              "global",
+              "drift"
+            ],
+            "type": "string"
+          },
+          "query": {
+            "description": "查询文本（walk 提取主体锚点；global 匹配社区摘要；drift 为实体标签）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "description": "【知识图谱检索】查本 Agent 知识图谱的结构化关系。walk：从主体多跳走查（A 与 B 什么关系）；global：社区摘要匹配；drift：实体邻域＋社区图景。记忆原文用 memory_search；网页用 web_search；术语/本体走 ontology 管理面。",
+      "external_write": false,
+      "min_role": null,
+      "name": "graph_search",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "description": "【列出可用Agent】列出系统中所有可用的 Agent（含各自的名字、职责描述、模型配置）。在蜂群派生（spawn_subagent）前调用，以便为子任务挑选最合适的执行者。",
+      "external_write": false,
+      "min_role": null,
+      "name": "list_agents",
+      "read_only": true
+    },
+    {
+      "agent_scope": "main_only",
+      "args_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "description": "【列出固定团队】列出可派活的固定团队（id/名称/成员与职责摘要）。在 dispatch_team 前调用，以便挑选合适的团队。把本次蜂群组合沉淀为新团队用 propose_team（需人批准）。",
+      "external_write": false,
+      "min_role": null,
+      "name": "list_teams",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "category": {
+            "description": "记忆类别过滤",
+            "type": "string"
+          },
+          "limit": {
+            "default": 5,
+            "description": "返回数量上限",
+            "type": "integer"
+          },
+          "query": {
+            "description": "搜索关键词（在自身记忆库中匹配）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "description": "【内部记忆检索】仅搜本 Agent 自身的历史对话与记忆条目；不能搜互联网/天气/新闻等外部实时信息。【何时不用】外部信息 web_search；本会话折叠对话 recall_history；语音内容 voice_memory_search。",
+      "external_write": false,
+      "min_role": null,
+      "name": "memory_search",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "types": {
+            "description": "节点类型列表，如 builtin:ad-streaming、custom:campaign_audit",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "types"
+        ],
+        "type": "object"
+      },
+      "description": "【环境预检】检查节点类型声明的环境变量/凭据是否可用，返回缺失变量名与配置来源提示。只读键名，不读取、不回显任何凭据值。缺凭据时先用本工具确认缺哪些，再用 ask_user(kind=secret) 向用户索取。",
+      "external_write": false,
+      "min_role": null,
+      "name": "node_env_preflight",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "node_type": {
+            "description": "精确节点类型，如 builtin:ad-streaming、tool:web_search",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_type"
+        ],
+        "type": "object"
+      },
+      "description": "【节点完整契约】按精确 type 查询一个节点的参数表单、默认值、必填项、输入/输出端口、环境变量需求与版本。添加节点前用它确认要填哪些参数；找不到时返回候选类型。",
+      "external_write": false,
+      "min_role": null,
+      "name": "node_schema",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "goal": {
+            "description": "用一句目标描述让编排器自己规划步骤（与 steps 二选一；两者都给时以 steps 为准）",
+            "type": "string"
+          },
+          "steps": {
+            "description": "按声明执行的步骤表；同层（互不依赖）并行，声明 depends_on 的步进等前置完成",
+            "items": {
+              "properties": {
+                "depends_on": {
+                  "description": "本步依赖的前置工具名列表（缺省时按能力图取该工具的前置）",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "params": {
+                  "description": "传给该工具的参数（支持 {step_<idx>.<field>} 占位符引用前序步骤输出字段）",
+                  "type": "object"
+                },
+                "tool": {
+                  "description": "被编排的工具名（必须真实存在，如 web_search / file_write / get_datetime）",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool"
+              ],
+              "type": "object"
+            },
+            "maxItems": 12,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "description": "【多步编排】按显式步骤表一次跑完工具链：层内无依赖并行、有依赖按序，失败跳过下游并点名原因。已知确切顺序且要一次拿到整链成败时用。【何时不用】固化复用用 create_skill；单工具直调；可视化编排用画布。",
+      "external_write": true,
+      "min_role": null,
+      "name": "orchestrate_tools",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "command": {
+            "description": "子命令：create 建计划 / update 改标题或步骤 / list 列出全部 / get 查看计划全文（含进度）/ set_active 设为当前活跃计划 / mark_step 标记步骤状态 / delete 删除",
+            "enum": [
+              "create",
+              "update",
+              "list",
+              "get",
+              "set_active",
+              "mark_step",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "plan_id": {
+            "description": "计划 ID；create 必填，get/mark_step 缺省时取当前活跃计划",
+            "type": "string"
+          },
+          "step_index": {
+            "description": "mark_step：目标步骤下标（0 起）",
+            "type": "integer"
+          },
+          "step_notes": {
+            "description": "mark_step：可选的步骤备注（如完成摘要）",
+            "type": "string"
+          },
+          "step_status": {
+            "description": "mark_step：要设置的状态",
+            "enum": [
+              "not_started",
+              "in_progress",
+              "completed",
+              "blocked"
+            ],
+            "type": "string"
+          },
+          "steps": {
+            "description": "步骤文本列表（create 必填；update 传入时替换步骤清单，已有状态保留）",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "description": "计划标题（create 必填）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "description": "【任务计划】创建/管理结构化任务计划（多步骤长任务）：create 建清单，mark_step 标状态，持久化可续推。纪律：同时至多一个 in_progress；完成立即标记不攒批；探索/阅读不登记为步骤；大改先说明理由。",
+      "external_write": true,
+      "min_role": null,
+      "name": "planning",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "limit": {
+            "default": 8,
+            "description": "返回条数上限",
+            "type": "integer"
+          },
+          "query": {
+            "description": "检索需求（自然语言，同义表达即可命中）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "description": "【归档语义检索】对归档池做向量语义检索（含被折叠原文），按相关性排序。【何时用】按语义找历史原文。【何时不用】精确指针直取 recall_history；分层下钻 recall_context_span；跨会话记忆 memory_search。",
+      "external_write": false,
+      "min_role": null,
+      "name": "pool_search",
+      "read_only": true
+    },
+    {
+      "agent_scope": "main_only",
+      "args_schema": {
+        "properties": {
+          "description": {
+            "description": "项目描述",
+            "type": "string"
+          },
+          "memberAgentIds": {
+            "description": "直接加入的 agent 成员 id 列表（可选）",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "memberUserIds": {
+            "description": "拟加入的人类用户 id 列表（可选）——影响人必须过人：走 L1 审批，未批准不生效",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "项目名称（必填）",
+            "type": "string"
+          },
+          "visibility": {
+            "description": "可见性：private 仅成员可见（默认）；team 团队可见（需 L1 审批）。public 对外分享不开放给 agent（L2 保留给人）",
+            "enum": [
+              "private",
+              "team"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "description": "【发起项目】agent 发起创建一个协作项目（创建即建协作房间：project_id=room_id）。直接可建，但强制审计与预算入账；项目所有者记为发起 agent 的属主用户，发起 agent 自动成为项目成员。治理约束：新增人类成员（memberUserIds）或把可见性放宽为 team 走审批链 L1（人批准才生效，未批准不生效）；对外公开（public）不开放给 agent——L2 判定保留给人。名称/描述过数据面围栏扫描（命中只标记不阻断）。",
+      "external_write": true,
+      "min_role": null,
+      "name": "project_create",
+      "read_only": false
+    },
+    {
+      "agent_scope": "main_only",
+      "args_schema": {
+        "properties": {
+          "project_id": {
+            "description": "项目 ID（project_list 返回的 project_id，同时是协作房间 room_id）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "description": "【项目详情】查看单个项目的成员、可见性、状态、团队/任务计数与 initiator 标。仅对当前 agent 可见的项目返回（非成员且非公开一律拒绝）。",
+      "external_write": false,
+      "min_role": null,
+      "name": "project_detail",
+      "read_only": true
+    },
+    {
+      "agent_scope": "main_only",
+      "args_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "description": "【列出项目】列出当前 agent 可见的项目：自己是成员的、属主用户参与的、以及公开项目。返回项目 id（同时是协作房间 room_id）、名称、可见性、initiator 标（agent 发起的项目带 initiator=agent）。配合 project_detail 查看详情。",
+      "external_write": false,
+      "min_role": null,
+      "name": "project_list",
+      "read_only": true
+    },
+    {
+      "agent_scope": "main_only",
+      "args_schema": {
+        "properties": {
+          "description": {
+            "description": "团队职责说明",
+            "type": "string"
+          },
+          "members": {
+            "description": "成员与职责快照（来自本次蜂群 run 的实际组合，至少一名成员）",
+            "items": {
+              "properties": {
+                "name": {
+                  "description": "成员显示名",
+                  "type": "string"
+                },
+                "prompt": {
+                  "description": "成员职责描述",
+                  "type": "string"
+                },
+                "role": {
+                  "description": "团队角色（author/reviewer/…）",
+                  "type": "string"
+                },
+                "userId": {
+                  "description": "成员 Agent ID",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "userId"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "提议的团队名称",
+            "type": "string"
+          },
+          "promoted_from_run": {
+            "description": "来源 subagent_id（本次成功 run 的溯源标，可选）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "members"
+        ],
+        "type": "object"
+      },
+      "description": "【提议沉淀团队】把一次成功的蜂群组合（成员+职责快照）提议沉淀为固定团队。走治理审批（L1）：人批准后才写入团队列表——团队是用户资产，agent 不得自行立队；未经批准不会生效。批准后新团队可用 list_teams 查到、可用 dispatch_team 派活。",
+      "external_write": true,
+      "min_role": null,
+      "name": "propose_team",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "file_id": {
+            "description": "【数据集查询】按附件句柄只读查询用户上传的 SQLite 数据集：缺省列表结构/行数/样例，给 sql 执行只读查询。附件通道报「未能抽取文本」的 .db/.sqlite 用它。文本/代码用 file_read；PDF/Office 用 file_parse；不认平台自有库与任意路径。",
+            "type": "string"
+          },
+          "row_limit": {
+            "description": "最多返回行数（可选，默认 200，上界 1000；超限截断并在结果里标 truncated）",
+            "type": "integer"
+          },
+          "sql": {
+            "description": "只读 SQL（可选，缺省=列 schema 与样例）。只允许 SELECT / WITH … SELECT / 只读 PRAGMA；写型语句、ATTACH、多语句一律拒绝。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id"
+        ],
+        "type": "object"
+      },
+      "description": "【数据集查询】按附件句柄只读查询用户上传的 SQLite 数据集（.db/.sqlite）：缺省列全部表、每表列定义、行数与样例行；给了 sql 则执行该只读查询。当附件抽取通道报「未能抽取文本内容」而扩展名是 .db/.sqlite 时用本工具——那是原始二进制容器，只有它读得出。【何时不用】纯文本/代码用 file_read；PDF/Office 文档用 file_parse；平台自有库（users.db 等）与任意路径都不在本工具范围内，它只认附件句柄。",
+      "external_write": false,
+      "min_role": null,
+      "name": "query_database",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "covers_ref": {
+            "description": "摘要行尾部的引用串（如 covers_ref=fold:2@sess-A）；可直接整行粘贴，本工具自行解析",
+            "type": "string"
+          },
+          "limit": {
+            "default": 200,
+            "description": "返回原文条数上限",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "covers_ref"
+        ],
+        "type": "object"
+      },
+      "description": "【分层摘要下钻】按『[早期对话摘要]』尾部 covers_ref=fold:<层序>@<会话> 引用，确定性取回该档摘要覆盖的全部原文（不受相关性门槛影响）。【何时不用】无 covers_ref 的旧摘要不调用；按词搜索用 recall_history；跨会话用 memory_search。",
+      "external_write": false,
+      "min_role": null,
+      "name": "recall_context_span",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "agent_id": {
+            "description": "整取模式必填：目标会话的属主 agent_id（取终态信封 transcript.agent_id 的值）。给了它就按 (agent_id, session_id) 整取该会话原文；不给时既有语义不变（按当前 Agent 的属主读台账）",
+            "type": "string"
+          },
+          "limit": {
+            "default": 10,
+            "description": "返回数量上限",
+            "type": "integer"
+          },
+          "query": {
+            "description": "召回关键词（在折叠台账中匹配，留空返回最近折叠的内容）",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "目标会话 id：直取模式可选（缺省用当前会话）；整取模式（带 agent_id）必填",
+            "type": "string"
+          },
+          "tool_call_id": {
+            "description": "直取模式：占位指针里的 call= 值（如 tc-123），与 session_id 联用精确取回该次工具结果全文",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "description": "【历史召回】取回被移出上下文窗口的原文。①见『[工具输出已移出上下文…call=<id>]』占位时传 tool_call_id 直取该次结果全文；②子 Agent 会话整取须同时传 agent_id 与 session_id；③用户提“之前说的”用 query 模糊匹配折叠台账。【何时不用】跨会话记忆用 memory_search；语音用 voice_memory_search；上下文还找得到的不召回。",
+      "external_write": false,
+      "min_role": null,
+      "name": "recall_history",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "expression": {
+            "description": "单个 Python 表达式，如 [i['content'][:30] for i in items if '报错' in i['content']]",
+            "type": "string"
+          },
+          "limit": {
+            "default": 200,
+            "description": "预取召回条数上限",
+            "type": "integer"
+          },
+          "query": {
+            "description": "预取召回条目的关键词（同 recall_history 的 query）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expression"
+        ],
+        "type": "object"
+      },
+      "description": "【受限 Python 查询】对当前会话的召回条目做组合/统计/过滤等纯计算。可用变量：items（召回条目列表，每条含 content/turn_id/recalled_from）。仅支持单个表达式；禁止 import、赋值、下划线属性、I/O。【何时用】recall_history 的模糊匹配不够、需要对召回内容做再加工时。【何时不用】精确指针直取 recall_history；语义检索 memory_search。",
+      "external_write": false,
+      "min_role": null,
+      "name": "recall_query",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "action": {
+            "description": "要请求执行的具体操作（做什么、对哪个对象；会做危险命令检测，命中将至少按 L1 处理）",
+            "type": "string"
+          },
+          "context": {
+            "description": "补充上下文（影响范围、备选方案等）",
+            "type": "string"
+          },
+          "level": {
+            "description": "自评危险等级：L0 可逆低危 / L1 中危 / L2 高危不可逆（默认 L1）",
+            "enum": [
+              "L0",
+              "L1",
+              "L2"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "description": "为什么需要这个操作（给裁决人看）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "description": "【请求审批】子代理要执行超出自身授权的操作时，向父代理/用户发起审批请求（跨 agent 审批链）。等级：L0 低危可逆（自动放行+记账）/ L1 中危（请父代理裁决）/ L2 高危不可逆（强制人工确认）。返回 approved=true 才可执行；pending/denied 都不得执行。",
+      "external_write": true,
+      "min_role": null,
+      "name": "request_approval",
+      "read_only": false
+    },
+    {
+      "agent_scope": "main_only",
+      "args_schema": {
+        "properties": {
+          "kind": {
+            "description": "消息种类：report 进展汇报 / question 提问 / note 备注（默认 note）",
+            "enum": [
+              "report",
+              "question",
+              "note"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "description": "消息内容（非空）",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "项目/房间 ID（project_id=room_id）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "message"
+        ],
+        "type": "object"
+      },
+      "description": "【房间发言】向自己所在的项目协作房间发一条消息（kind=report 进展汇报 / question 提问 / note 备注）。仅限自己为成员的房间（非成员一律拒绝）；治理限频防刷屏（超频被拒）。审批/升级/候选请走既有专用通道（request_approval / escalate / submit_result），本工具是通用发言面。",
+      "external_write": true,
+      "min_role": null,
+      "name": "room_post",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "limit": {
+            "description": "返回条数（默认 10）",
+            "type": "integer"
+          },
+          "url": {
+            "description": "RSS/Atom 源地址",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "description": "【RSS 阅读】读取 RSS/Atom 订阅源最新条目（标题/链接/摘要）。【何时不用】要全文拿链接用 web_fetch；源失效/非 RSS 地址用 web_search；搜未知站点不用本工具。",
+      "external_write": false,
+      "min_role": null,
+      "name": "rss_read",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "code": {
+            "description": "要执行的代码字符串",
+            "type": "string"
+          },
+          "cwd": {
+            "description": "工作目录（可选，默认执行器当前目录）",
+            "type": "string"
+          },
+          "env": {
+            "description": "附加环境变量字典（可选，如 {\"KEY\": \"value\"}）",
+            "type": "object"
+          },
+          "language": {
+            "description": "代码语言：python（默认）/ shell / javascript（经 node -e 执行，node 缺席时诚实报错）",
+            "type": "string"
+          },
+          "runtime_type": {
+            "default": "local",
+            "description": "运行时类型：local（默认）或 docker",
+            "enum": [
+              "local",
+              "docker"
+            ],
+            "type": "string"
+          },
+          "timeout": {
+            "description": "执行超时秒数（默认 60）",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "description": "【代码执行】运行 Python 或 shell 代码，返回 stdout/stderr/退出码。用于数据处理、算法计算、文本批量处理、验证逻辑。【何时不用】系统操作类命令用 computer_shell；纯数值计算禁止心算，一律本工具跑 Python。",
+      "external_write": true,
+      "min_role": null,
+      "name": "run_code",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "name": {
+            "description": "工作流名（run_id 前缀，默认 scripted）",
+            "type": "string"
+          },
+          "resume_run_id": {
+            "description": "续跑的 run_id（从中断点继续，已执行调用复用结果）",
+            "type": "string"
+          },
+          "script": {
+            "description": "受限 Python 脚本：必须定义 async def main(ctx)；禁 import/eval/exec/open/getattr 等危险调用与 __dunder__ 属性",
+            "type": "string"
+          },
+          "timeout": {
+            "description": "执行超时秒（5-600，默认 120）",
+            "type": "number"
+          }
+        },
+        "required": [
+          "script"
+        ],
+        "type": "object"
+      },
+      "description": "【脚本化工作流】把一段受限 Python 脚本（必须定义 async def main(ctx)）交给沙箱执行：ctx.callTool(工具名, 参数) 走完整治理管线（审批/审计不旁路），ctx.log/setVar/getVar 管理过程状态，ctx.sleep 有限等待。脚本禁 import/eval/exec/open 等危险调用与 dunder 属性；journal 逐调用落盘，传 resume_run_id 可从中断处续跑（已执行调用复用结果不重复执行）。适合多步骤确定性编排；探索性任务请用 planning。",
+      "external_write": true,
+      "min_role": null,
+      "name": "run_scripted_workflow",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "action": {
+            "description": "create 新建；list 查看自己 Agent 的任务；update 修改任务（cron/间隔/名称/描述/最大次数）；pause 暂停；resume 恢复；cancel 取消（留痕可查）；delete 删除",
+            "enum": [
+              "create",
+              "list",
+              "update",
+              "pause",
+              "resume",
+              "cancel",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "agent_id": {
+            "description": "执行任务的 Agent；缺省=当前 Agent。只能给自己建任务",
+            "type": "string"
+          },
+          "canvas_id": {
+            "description": "改为运行已保存画布（canvas_* 创建），每次触发按当时版本编译执行",
+            "type": "string"
+          },
+          "cron_expression": {
+            "description": "5 段 cron（分 时 日 月 周，0=周一）。与 interval_seconds 二选一",
+            "type": "string"
+          },
+          "description": {
+            "description": "任务说明（create 时可选）",
+            "type": "string"
+          },
+          "interval_seconds": {
+            "description": "重复间隔（秒）。与 cron_expression 二选一",
+            "type": "integer"
+          },
+          "max_runs": {
+            "description": "最多执行次数；缺省不限",
+            "type": "integer"
+          },
+          "message": {
+            "description": "到点让 Agent 执行的提示词；没有 workflow_id / canvas_id 时必填",
+            "type": "string"
+          },
+          "name": {
+            "description": "任务名称（create 时建议填写）",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "cancel 时必填：任务 ID",
+            "type": "string"
+          },
+          "workflow_id": {
+            "description": "改为运行已发布工作流（NeurFlow workflow id）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "description": "【定时任务】定时任务全生命周期：create 新建 / list 查看 / update 修改（cron、间隔、名称、次数）/ pause 暂停 / resume 恢复 / cancel 取消（留痕）/ delete 删除。到点让指定 Agent 执行消息或跑工作流/画布。cron 5 段（分 时 日 月 周，0=周一）或固定间隔；重启后自动恢复。【何时不用】只跑一次用普通工具；需人盯的流程用审批节点。",
+      "external_write": true,
+      "min_role": null,
+      "name": "schedule_task",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "platform": {
+            "description": "平台名（twitter/reddit/xiaohongshu/facebook/instagram/linkedin）",
+            "type": "string"
+          },
+          "query": {
+            "description": "搜索关键词",
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform",
+          "query"
+        ],
+        "type": "object"
+      },
+      "description": "【社交平台搜索】查询 twitter/reddit/xiaohongshu/facebook/instagram/linkedin 的搜索接入状态（已配置返回后端与命令，未配置返回引导）；不自动登录。【何时不用】通用搜索 web_search；未配置勿重试。",
+      "external_write": false,
+      "min_role": null,
+      "name": "social_search",
+      "read_only": true
+    },
+    {
+      "agent_scope": "main_only",
+      "args_schema": {
+        "properties": {
+          "agent_id": {
+            "description": "目标子 Agent ID（可选，留空使用默认 Agent；建议先用 list_agents 查看可用 Agent 及其专长）",
+            "type": "string"
+          },
+          "background": {
+            "description": "是否后台执行（true=立即返回，稍后用 subagent_status 查询；false=等待完成直接返回报告）",
+            "type": "boolean"
+          },
+          "subagent_type": {
+            "description": "子代理类型：general（全工具面，默认）/ explore（只读检索型——工具面收窄为只读白名单，适合信息搜集与侦察，不能写）",
+            "enum": [
+              "general",
+              "explore"
+            ],
+            "type": "string"
+          },
+          "task": {
+            "description": "交给子 Agent 的完整、自包含的任务描述（子 Agent 看不到当前对话历史，任务描述必须包含它需要的全部上下文）",
+            "type": "string"
+          },
+          "task_unit": {
+            "description": "结构化任务单元（可选，P1-1）：把目标/预期产物/验收条件结构化交给蜂群——验收条件用于终态验收门与（reviewMode=supervisor 时的）提交前评审；dependencies 声明依赖的前置 subagent_id",
+            "properties": {
+              "acceptanceCriteria": {
+                "description": "验收条件逐条列出（可执行、可核对；未满足将被验收门打回）",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "artifactOwnership": {
+                "description": "产物归属与后续用途",
+                "type": "string"
+              },
+              "dependencies": {
+                "description": "依赖的前置 subagent_id 列表（全部验收通过后本任务才启动）",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "expectedResult": {
+                "description": "预期产物（交付物形态与内容要求）",
+                "type": "string"
+              },
+              "goal": {
+                "description": "任务目标（必填，与 task 描述一致或更精炼）",
+                "type": "string"
+              },
+              "requiredInputs": {
+                "description": "完成任务所需的输入",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "reviewMode": {
+                "description": "评审方式：none 不评审（默认）/ supervisor 回流前由发起方按验收条件评审",
+                "enum": [
+                  "none",
+                  "supervisor"
+                ],
+                "type": "string"
+              },
+              "untrustedPayload": {
+                "description": "不可信外部内容槽位（P3-4 数据面围栏）：来自外部检索/用户材料的原文放这里，渲染时被隔离进显式不可信段并做注入特征扫描（命中只标记告警，不改写不阻断）；不要把任务指令混进这个字段",
+                "type": "string"
+              }
+            },
+            "required": [
+              "goal"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "description": "【蜂群派生子Agent】把子任务派交给另一 Agent 执行（蜂群编排）；子任务可拆时每任务各调一次并行执行，子 Agent 有独立人设/记忆/模型。background=true 立即返回 subagent_id（用 subagent_status 查询），前台等完成返回报告。纪律：N 个子任务只调 N 次；每层默认 1-3 个；禁重复/无关/嵌套派生；并发上限 5。【何时不用】固定步骤序列用 canvas_run；单步能完成的不派生。",
+      "external_write": true,
+      "min_role": null,
+      "name": "spawn_subagent",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "subagent_id": {
+            "description": "spawn_subagent 返回的 subagent_id；省略时返回最近派生列表",
+            "type": "string"
+          },
+          "view": {
+            "description": "runs（默认）按 run 查询；integration（P2-4）返回集成前核对面：integration_ready + blockers + 各子任务验收/评审状态——主任务汇总前用它确认无未验收挂账；events（H-4）返回该 run 的事件账本（需 subagent_id）",
+            "enum": [
+              "runs",
+              "integration",
+              "events"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【查询子Agent状态】查蜂群子 Agent 的执行状态与最终报告；配合 background=true 或前台转后台后的轮询。subagent_id 省略时返回最近派生列表（新→旧，report 截断）。view=integration 返回集成前核对面（各子任务验收/评审/依赖状态与 blockers）。view=events 返回该 run 的事件账本（spawned/started/stalled/escalated/terminal 全程 + 因果链，H-4）。",
+      "external_write": false,
+      "min_role": null,
+      "name": "subagent_status",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "status": {
+            "description": "结果状态，默认 success",
+            "enum": [
+              "success",
+              "partial",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "description": "结果摘要（结论/关键数据/未尽事项）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary"
+        ],
+        "type": "object"
+      },
+      "description": "【子代理结果提交】子代理以结构化形态提交最终结果（摘要/状态），主代理与用户会收到通知。仅子代理运行内可用；提交后请在最终回复中重述要点。",
+      "external_write": false,
+      "min_role": null,
+      "name": "submit_result",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "scope": {
+            "description": "同步范围，默认 all",
+            "enum": [
+              "all",
+              "tools",
+              "skills",
+              "mcp",
+              "custom",
+              "commerce",
+              "drama",
+              "comfyui"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "description": "【同步节点库】把工具、技能、MCP、电商、短剧、ComfyUI、自定义节点重新注册进当前进程的节点注册表，让刚创建的技能/自定义节点马上能被 canvas_add_node 使用。幂等；不写持久化数据。add_node 报未知类型但确认能力已存在时先调用本工具。",
+      "external_write": true,
+      "min_role": null,
+      "name": "sync_nodes",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "engine": {
+            "default": "auto",
+            "description": "TTS 引擎（如 edge-tts, moss-nano, auto）",
+            "type": "string"
+          },
+          "text": {
+            "description": "要合成的文本",
+            "type": "string"
+          },
+          "voice": {
+            "default": "default",
+            "description": "音色名称（如 zh-CN-XiaoxiaoNeural）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "description": "将文本合成为语音",
+      "external_write": false,
+      "min_role": null,
+      "name": "tts_synthesize",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "explanation": {
+            "description": "计划或状态变化的简要说明（可选）",
+            "type": "string"
+          },
+          "plan": {
+            "description": "步骤清单（全量提交，覆盖上一版计划）",
+            "items": {
+              "properties": {
+                "status": {
+                  "description": "pending / in_progress / completed",
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "completed"
+                  ],
+                  "type": "string"
+                },
+                "step": {
+                  "description": "步骤内容",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "step",
+                "status"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "type": "object"
+      },
+      "description": "【任务计划】维护当前任务的步骤清单（todo list）：复杂/多阶段任务开工前建立计划，每完成一步立即更新状态，计划变化时说明原因。约束：同一时刻至多一个 in_progress。【何时不用】简单单步任务不要建计划。",
+      "external_write": false,
+      "min_role": null,
+      "name": "update_plan",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "limit": {
+            "description": "返回条数（默认 10）",
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【V2EX 热门】获取 V2EX 社区当前热门帖子（标题/链接/回复数/作者）。用于了解开发者社区热议话题。【何时不用】仅限 V2EX 站点；查帖子全文拿链接用 web_fetch；通用技术搜索改用 web_search。",
+      "external_write": false,
+      "min_role": null,
+      "name": "v2ex_hot",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "limit": {
+            "default": 5,
+            "description": "返回数量上限",
+            "type": "integer"
+          },
+          "query": {
+            "description": "搜索关键词（在语音记忆中匹配）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "description": "【内部语音记忆检索】仅搜用户之前通过语音说过的内容（语音转写记录）。不能搜互联网、不能查天气/外部信息。仅用于回忆用户语音对话历史。【何时不用】打字/文字对话记忆用 memory_search；本会话折叠内容用 recall_history；两者都不足再回退本工具，不要每次查三路。",
+      "external_write": false,
+      "min_role": null,
+      "name": "voice_memory_search",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "anyOf": [
+          {
+            "required": [
+              "location"
+            ]
+          },
+          {
+            "required": [
+              "city"
+            ]
+          },
+          {
+            "required": [
+              "query"
+            ]
+          }
+        ],
+        "properties": {
+          "city": {
+            "description": "城市名（location 的别名，二选一即可）",
+            "type": "string"
+          },
+          "location": {
+            "description": "查询地点（城市名，如'许昌'、'北京'、'Shanghai'）",
+            "type": "string"
+          },
+          "query": {
+            "description": "地点查询字符串（location 的别名，二选一即可）",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "description": "【实时天气查询】通过 wttr.in 服务获取指定地点的实时天气信息。可查询当前天气、温度、降水、风力等。支持中文城市名（如'许昌'、'北京'）或英文地名。需要实时天气信息时必须调用此工具，不要回复'无法获取'。",
+      "external_write": false,
+      "min_role": null,
+      "name": "weather",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "max_chars": {
+            "description": "返回内容最大字符数（默认 8000，超出截断）",
+            "type": "integer"
+          },
+          "url": {
+            "description": "要抓取的完整 URL（含 https://）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "description": "【网页抓取】抓取 URL 内容转纯文本（文章/文档/API 响应）。已知网址时用；仅 http/https。结果空或不完整（JS 动态页）再升级 browser_*。【何时不用】没 URL 先 web_search；JS/登录页 browser_read；本地文件 file_read。",
+      "external_write": false,
+      "min_role": null,
+      "name": "web_fetch",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "anyOf": [
+          {
+            "required": [
+              "query"
+            ]
+          },
+          {
+            "required": [
+              "q"
+            ]
+          },
+          {
+            "required": [
+              "keywords"
+            ]
+          }
+        ],
+        "properties": {
+          "keywords": {
+            "description": "搜索关键词（query 的别名，二选一即可）",
+            "type": "string"
+          },
+          "q": {
+            "description": "搜索查询词（query 的别名，二选一即可）",
+            "type": "string"
+          },
+          "query": {
+            "description": "搜索查询词",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "description": "【实时网络搜索】查互联网实时信息（新闻/股价/百科/文档）。工具选择阶梯（最轻优先）：先搜索拿网址 → web_fetch 读取 → 需交互/登录/动态渲染才升级 browser_*。【何时不用】已知 URL 直接 web_fetch；站点限定用垂直工具；内部记忆问题用 memory_search。",
+      "external_write": false,
+      "min_role": null,
+      "name": "web_search",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "batch_id": {
+            "description": "构建批次 ID（可选，写入草稿元数据）",
+            "type": "string"
+          },
+          "name": {
+            "description": "草稿名称（可选）",
+            "type": "string"
+          },
+          "workflow_id": {
+            "description": "源工作流 ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow_id"
+        ],
+        "type": "object"
+      },
+      "description": "【复制为草稿】把工作流复制成 DRAFT 草稿副本（修复循环的暂存落点）。草稿试跑通过后再发布或回滚，避免直接打断正在运行的已发布流程。",
+      "external_write": true,
+      "min_role": null,
+      "name": "workflow_definition_duplicate",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "workflow_id": {
+            "description": "工作流 ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow_id"
+        ],
+        "type": "object"
+      },
+      "description": "【读取工作流定义】返回节点/边/变量、当前版本、状态与安全版本。修改已发布工作流前先用本工具拿 base_version；已发布但无有效安全版本时会先为当前内容建立基线。",
+      "external_write": true,
+      "min_role": null,
+      "name": "workflow_definition_get",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "base_version": {
+            "description": "读取到的当前定义版本（乐观锁）",
+            "type": "integer"
+          },
+          "batch_id": {
+            "description": "构建批次 ID；构建会话内缺省取会话批次",
+            "type": "string"
+          },
+          "edges": {
+            "description": "完整边列表；元素含 id/source/target/source_handle/target_handle。缺省表示不改边。",
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "nodes": {
+            "description": "完整节点列表；元素含 id/type/position/config/label。缺省表示不改节点。",
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "note": {
+            "description": "本次变更摘要（写入审计）",
+            "type": "string"
+          },
+          "workflow_id": {
+            "description": "工作流 ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow_id",
+          "base_version"
+        ],
+        "type": "object"
+      },
+      "description": "【修改工作流定义】直接修改已发布或草稿工作流（无需先复制）。必须带 base_version 乐观锁；已发布会先确保安全版本；DAG/节点类型/端口/草稿自定义节点校验失败时不写入。整个任务批次一次审批、逐条审计。",
+      "external_write": true,
+      "min_role": null,
+      "name": "workflow_definition_update",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "allow_draft": {
+            "description": "允许执行 DRAFT 草稿（修复试跑用，默认 false）",
+            "type": "boolean"
+          },
+          "inputs": {
+            "description": "工作流输入（可选）",
+            "type": "object"
+          },
+          "workflow_id": {
+            "description": "工作流 ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow_id"
+        ],
+        "type": "object"
+      },
+      "description": "【执行工作流定义】执行并返回节点级结果；默认只允许已发布工作流，草稿试跑需 allow_draft=true。已发布执行成功会把当前版本提升为安全版本（执行校验凭据）。",
+      "external_write": true,
+      "min_role": null,
+      "name": "workflow_execute",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "batch_id": {
+            "description": "构建批次 ID（可选，写入审计）",
+            "type": "string"
+          },
+          "note": {
+            "description": "发布说明（可选）",
+            "type": "string"
+          },
+          "workflow_id": {
+            "description": "工作流 ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow_id"
+        ],
+        "type": "object"
+      },
+      "description": "【发布工作流】校验并发布（DRAFT→PUBLISHED），同时编译工作流 Agent。发布动作把当前版本设为安全基线；校验或编译失败不改变状态。",
+      "external_write": true,
+      "min_role": null,
+      "name": "workflow_publish",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "allow_replacements": {
+            "description": "显式批准换节点候选（语义不保证等价；默认 false）",
+            "type": "boolean"
+          },
+          "batch_id": {
+            "description": "构建批次 ID（可选，构建会话内缺省取会话批次）",
+            "type": "string"
+          },
+          "canvas_id": {
+            "description": "要修复的画布 ID（先编译为工作流草稿）",
+            "type": "string"
+          },
+          "commit": {
+            "description": "草稿通过后是否提交目标（默认 true）",
+            "type": "boolean"
+          },
+          "inputs": {
+            "description": "每次试跑的输入（可选）",
+            "type": "object"
+          },
+          "max_rounds": {
+            "description": "最大修复轮次（1-5，默认 5）",
+            "type": "integer"
+          },
+          "workflow_id": {
+            "description": "要修复的工作流 ID",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【工作流自愈】对失败工作流/画布做最多 5 轮修复：DRAFT 副本执行、读 failed 节点、查 EKB 经验、生成补丁并重跑评估，通过才提交。需 NEUROVA_NODE_REPAIR=1；提交已发布面需批次审批；换节点需 allow_replacements=true。workflow_id/canvas_id 二选一。",
+      "external_write": true,
+      "min_role": null,
+      "name": "workflow_repair",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "batch_id": {
+            "description": "构建批次 ID（可选，写入审计）",
+            "type": "string"
+          },
+          "target_version": {
+            "description": "目标版本号（可选，缺省用安全版本）",
+            "type": "integer"
+          },
+          "workflow_id": {
+            "description": "工作流 ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow_id"
+        ],
+        "type": "object"
+      },
+      "description": "【回滚工作流】回滚到指定版本；不传 target_version 时回到安全版本。回滚本身产生新版本（undo-friendly），安全版本标记不变。",
+      "external_write": true,
+      "min_role": null,
+      "name": "workflow_rollback",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "content": {
+            "description": "Markdown 正文（子集：# 标题、段落、- 与 1. 列表、**粗体**、*斜体*、`行内码`、| 表格 |、![说明](图片路径或 http(s) 链接)、--- 分隔线）。与 content_html 二选一",
+            "type": "string"
+          },
+          "content_html": {
+            "description": "HTML 正文（子集：h1-h6/p/ul/ol/li/table/tr/th/td/img/b/strong/i/em/code/pre/hr/br）。script/style/link/iframe 会被丢弃并在 warnings 点名，href 不进 PDF。与 content 二选一",
+            "type": "string"
+          },
+          "footer_text": {
+            "description": "页脚文字，覆盖模板默认（传空串是「关掉页脚」）",
+            "type": "string"
+          },
+          "header_text": {
+            "description": "页眉文字，覆盖模板默认（传空串是「关掉页眉」，不是「没填」）",
+            "type": "string"
+          },
+          "margin_mm": {
+            "description": "四边页边距（毫米，默认 18）",
+            "type": "number"
+          },
+          "page_number": {
+            "description": "是否画页码（缺省跟随模板：report/cover 开，blank 关）",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "落到工作区内的指定路径（必须以 .pdf 结尾，越出工作区会被拒）；省略则落产物目录并返回鉴权 download_url",
+            "format": "path",
+            "type": "string"
+          },
+          "template": {
+            "description": "模板预设：blank 无页眉页脚无页码；report（默认）页眉=标题、页脚=日期、带页码；cover 在 report 前加一页封面",
+            "enum": [
+              "blank",
+              "report",
+              "cover"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "文档标题（进 PDF 元数据与页眉；不参与文件名）",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【PDF 出件】把 Markdown 渲染为 PDF 产物，返回文件名/产物目录/鉴权下载地址（报告、归档、交付清单）。【何时不用】读 file_read；写文本 file_write；网页另存 browser_*。warnings 非空（如字体降级）必须如实转达。",
+      "external_write": true,
+      "min_role": null,
+      "name": "write_pdf",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "chars": {
+            "description": "要写入的文本（空串=纯轮询；写命令时以 \\n 结尾或自动补）",
+            "type": "string"
+          },
+          "max_output_tokens": {
+            "description": "返回输出 token 上限（默认 10000）",
+            "type": "integer"
+          },
+          "session_id": {
+            "description": "exec_command 返回的会话 id",
+            "type": "integer"
+          },
+          "yield_time_ms": {
+            "description": "等待毫秒数（250-30000，默认 1000）",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "description": "【会话输入/轮询】向 exec_command 返回的 session_id 会话写入文本（自动补换行）并等待新输出；chars 传空串表示纯轮询输出。进程结束后返回 exit_code。【何时不用】没有进行中的 exec_command 会话时不要调用。",
+      "external_write": true,
+      "min_role": null,
+      "name": "write_stdin",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "url": {
+            "description": "YouTube 视频链接",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "description": "【YouTube 字幕】提取 YouTube 视频的字幕/自动字幕文本，用于总结视频内容、翻译、要点提取。仅支持 youtube.com/watch 或 youtu.be 链接。",
+      "external_write": false,
+      "min_role": null,
+      "name": "youtube_transcript",
+      "read_only": true
+    }
+  ]
+}
