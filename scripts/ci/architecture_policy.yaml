@@ -21,6 +21,7 @@ layers:
     - models
     - error_logger
     - language
+    - ci  # 2026-11-20 批入册：CI 预算/棘轮核心，仓内零模块级依赖，归基础层
   # L1 领域服务：安全、沙箱、模型接入、上下文、记忆、知识、技能、媒体与语音。
   L1_services:
     - security
@@ -34,6 +35,8 @@ layers:
     - cognitive
     - cognitive_layers
     - memory_ingest
+    - memory_admission  # 2026-11-20 批入册：记忆准入（import core/security，被 memory/mem_core 消费）
+    - memory_discipline  # 2026-11-20 批入册：记忆纪律（import core，被 mem_core 消费）
     - skill_system
     - skills
     - plugins
@@ -94,6 +97,7 @@ layers:
     - shared_core
     - mem_core
     - mcp_ontology_server
+    - mcp_agent_tools_server  # 2026-11-20 批入册：agent 工具 MCP 服务面（import mcp_ontology_server，同层）
     - router
   # L3 交付面：HTTP API、管理台、渠道接入与对外工作室。
   L3_delivery:

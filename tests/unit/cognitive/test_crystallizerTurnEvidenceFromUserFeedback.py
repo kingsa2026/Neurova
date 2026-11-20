@@ -177,8 +177,13 @@ class TestEndpointFanOutRoutesTheVerdictToTheCrystallizer:
 
         body = consoleModule.FeedbackRequest(session_id="s1", timestamp="2026-10-14T10:00:00",
                                              feedback=feedback)
+        # P1-1 属主门（console.post_chat_feedback → _gate_agent_instance）：
+        # 桩 agent 对属主单源不可见（owner 解析走真实 state 面），本档只关心
+        # 结晶器第四面扇出，按生产身份字典形状（auth._user_identity 的
+        # user_id/role 键）以 admin 过门——同族档 test_feedback_purpose_signal.py 同款。
         return asyncio.run(consoleModule.post_chat_feedback(
-            body, _fakeRequest(), {"id": "u1", "username": "u1"}))
+            body, _fakeRequest(), {"user_id": "u1", "username": "u1",
+                                   "role": "admin", "neuser_id": "u1"}))
 
     def test_likeReachesCrystallizerAndSkipsTheChatEntry(self, tmp_path, monkeypatch):
         CHAT_PSEUDO_TOOL, PatternCrystallizer = _symbols()

@@ -140,16 +140,16 @@
     "path": "/executions",
     "name": "list_executions",
     "decorator": "router.get('/executions')",
-    "signature": "workflow_id: Optional[str]=Query(None), status: Optional[str]=Query(None), limit: int=Query(100, ge=1, le=1000), offset: int=Query(0, ge=0)",
-    "doc": "列出执行记录"
+    "signature": "workflow_id: Optional[str]=Query(None), status: Optional[str]=Query(None), limit: int=Query(100, ge=1, le=1000), offset: int=Query(0, ge=0), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "列出执行记录（§3.1-P2：非 admin 仅见本人执行记录）"
   },
   {
     "method": "GET",
     "path": "/executions/{execution_id}",
     "name": "get_execution",
     "decorator": "router.get('/executions/{execution_id}')",
-    "signature": "execution_id: str",
-    "doc": "获取执行详情"
+    "signature": "execution_id: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "获取执行详情（§3.1-P2：属主门）"
   },
   {
     "method": "GET",
@@ -212,8 +212,8 @@
     "path": "/nodes/sync",
     "name": "sync_nodes",
     "decorator": "router.post('/nodes/sync')",
-    "signature": "",
-    "doc": "同步所有节点（工具/技能/MCP）"
+    "signature": "admin: Dict[str, Any]=Depends(require_admin())",
+    "doc": "同步所有节点（工具/技能/MCP）— 仅管理员"
   },
   {
     "method": "GET",
@@ -276,8 +276,8 @@
     "path": "/executions/{execution_id}/cancel",
     "name": "cancel_execution",
     "decorator": "router.post('/executions/{execution_id}/cancel')",
-    "signature": "execution_id: str",
-    "doc": "取消执行"
+    "signature": "execution_id: str, admin: Dict[str, Any]=Depends(require_admin())",
+    "doc": "取消执行 — 仅管理员"
   },
   {
     "method": "POST",
@@ -300,24 +300,24 @@
     "path": "/agents",
     "name": "create_agent",
     "decorator": "router.post('/agents')",
-    "signature": "data: Dict[str, Any]=Body(...)",
-    "doc": "创建临时团队 Agent"
+    "signature": "data: Dict[str, Any]=Body(...), admin: Dict[str, Any]=Depends(require_admin())",
+    "doc": "创建临时团队 Agent — 仅管理员"
   },
   {
     "method": "POST",
     "path": "/agents/{agent_id}/archive",
     "name": "archive_agent",
     "decorator": "router.post('/agents/{agent_id}/archive')",
-    "signature": "agent_id: str",
-    "doc": "归档 Agent"
+    "signature": "agent_id: str, admin: Dict[str, Any]=Depends(require_admin())",
+    "doc": "归档 Agent — 仅管理员"
   },
   {
     "method": "POST",
     "path": "/agents/{agent_id}/restore",
     "name": "restore_agent",
     "decorator": "router.post('/agents/{agent_id}/restore')",
-    "signature": "agent_id: str",
-    "doc": "恢复 Agent"
+    "signature": "agent_id: str, admin: Dict[str, Any]=Depends(require_admin())",
+    "doc": "恢复 Agent — 仅管理员"
   },
   {
     "method": "GET",
@@ -364,8 +364,8 @@
     "path": "/comfyui/execute",
     "name": "execute_comfyui_node_endpoint",
     "decorator": "router.post('/comfyui/execute')",
-    "signature": "request: ComfyUIExecuteRequest",
-    "doc": "直接执行单个 ComfyUI 节点（提交 prompt 到 ComfyUI /prompt）"
+    "signature": "request: ComfyUIExecuteRequest, admin: Dict[str, Any]=Depends(require_admin())",
+    "doc": "直接执行单个 ComfyUI 节点（提交 prompt 到 ComfyUI /prompt）— 仅管理员"
   },
   {
     "method": "POST",
@@ -373,7 +373,7 @@
     "name": "set_breakpoints",
     "decorator": "router.post('/executions/{execution_id}/breakpoint')",
     "signature": "execution_id: str, body: BreakpointRequest, current_user: Dict[str, Any]=Depends(get_current_user)",
-    "doc": "为指定 execution 设置/追加断点集合。"
+    "doc": "为指定 execution 设置/追加断点集合。\n\n§R1（2026-11-16 审计 S1 移交，总控裁定：调试会话归属＝执行记录属主）：\n先取执行记录过属主门（deny≡404，与执行记录面同构），再动 _DEBUG_SESSIONS——\n未落库 execution 不再凭空建会话。"
   },
   {
     "method": "POST",
@@ -381,7 +381,7 @@
     "name": "resume_debug_execution",
     "decorator": "router.post('/executions/{execution_id}/debug/resume')",
     "signature": "execution_id: str, body: ResumeRequest, current_user: Dict[str, Any]=Depends(get_current_user)",
-    "doc": "恢复调试暂停中的执行；可选 step 模式（in/over/out）。\n\n路径区分于 /executions/{id}/resume（人工审批恢复）——两者同名会导致\nFastAPI 路由遮蔽（先注册者独占，调试恢复成死代码）。"
+    "doc": "恢复调试暂停中的执行；可选 step 模式（in/over/out）。\n\n路径区分于 /executions/{id}/resume（人工审批恢复）——两者同名会导致\nFastAPI 路由遮蔽（先注册者独占，调试恢复成死代码）。\n\n§R1：同 breakpoint——先过执行记录属主门（调试会话归属＝执行记录属主），\n再查 _DEBUG_SESSIONS；执行不存在/非属主/无会话统一 404。"
   },
   {
     "method": "GET",

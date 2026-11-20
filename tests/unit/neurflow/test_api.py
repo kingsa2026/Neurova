@@ -354,11 +354,13 @@ class TestExecutionAPI:
 
         app = FastAPI()
         app.include_router(router, prefix="/api/v1/neurflow")
-        # resume 走严格鉴权（58acbb3f 审计修复）——测试直接注入身份
+        # resume 走严格鉴权（58acbb3f 审计修复），cancel/agents 等写面收 admin
+        # （50e74df1a 鉴权收口批，守卫 test_authCoverageGaps_2026_11_14）——
+        # 测试直接注入 admin 身份过角色门
         app.dependency_overrides[get_current_user] = lambda: {
             "user_id": "test_user",
             "username": "tester",
-            "role": "user",
+            "role": "admin",
         }
         return TestClient(app)
 

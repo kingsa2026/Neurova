@@ -16,7 +16,6 @@ import uuid
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
-from neurova.agent.effort_inference import resolveQueryEffort
 from neurova.benchmark.multi_agent.tasks import BenchmarkTask, TaskOutcome, getTask
 from neurova.core.logger import get_logger
 
@@ -212,7 +211,11 @@ class BenchRunner:
             logger.warning("[bench] 任务执行异常 task=%s mode=%s: %s", task.task_id, mode, exc)
 
         elapsed = round(time.time() - started, 3)
-        # P3-3：思考档位变量（effort_inference 单源）——逐任务随事实记录，报告按档聚合
+        # P3-3：思考档位变量（effort_inference 单源）——逐任务随事实记录，报告按档聚合。
+        # 惰性 import（AGENTS.md §3，与上方 swarm 分支同款）：agent 包 __init__ 链回
+        # tool_executor，模块级直连会把整包拖进本模块的 import 期。
+        from neurova.agent.effort_inference import resolveQueryEffort
+
         effort, effortSource = resolveQueryEffort(task.prompt)
         outcome = TaskOutcome(
             task_id=task.task_id,

@@ -63,6 +63,26 @@ class _FakeStore:
 
 
 class TestCanvasRunPublishesInMemory:
+    def _client(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from neurova.api.auth import get_current_user, get_current_user_or_default
+        from neurova.api.endpoints import collaboration_api
+
+        app = FastAPI()
+        app.include_router(collaboration_api.router)
+        # P1-5 路由级登录门（50e74df1a 鉴权收口批）——按仓内 dependency_overrides
+        # 模式注入固定身份；替身 store 不设属主门槛，身份仅供 _canvas_identity 取值
+        identity = {
+            "user_id": "owner",
+            "username": "owner",
+            "role": "user",
+            "neuser_id": "owner",
+        }
+        app.dependency_overrides[get_current_user] = lambda: identity
+        app.dependency_overrides[get_current_user_or_default] = lambda: identity
+        return TestClient(app)
+
     def test_canvas_to_workflow_is_draft_by_default(self):
         """基线：canvas_bridge 产出 DRAFT（既有行为锚定）"""
         from neurova.collaboration.canvas_bridge import canvas_to_workflow
@@ -108,7 +128,6 @@ class TestCanvasRunPublishesInMemory:
                 captured["status_at_execute"] = workflow.status
                 return kwargs.get("instance")
 
-        import neurova.api.endpoints.collaboration_api as capi
         import neurova.collaboration.neurflow.execution_engine as ee
 
         # run_canvas_workflow 内部 `from ...execution_engine import get_workflow_executor`
@@ -116,12 +135,7 @@ class TestCanvasRunPublishesInMemory:
         orig_get = ee.get_workflow_executor
         ee.get_workflow_executor = lambda: _SpyExecutor()
 
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-
-        app = FastAPI()
-        app.include_router(capi.router)
-        client = TestClient(app)
+        client = self._client()
         try:
             r = client.post("/canvas/cv_1/run", json={})
         finally:
@@ -139,7 +153,6 @@ class TestCanvasRunPublishesInMemory:
     @pytest.mark.asyncio
     async def test_run_endpoint_rejects_bad_node_configs(self, run_env):
         """节点配置异常：400 + 字段级清单 + executor 不被调用（停止执行）"""
-        from neurova.api.endpoints import collaboration_api
         import neurova.collaboration.neurflow.execution_engine as ee
 
         called = {"execute": 0}
@@ -162,12 +175,7 @@ class TestCanvasRunPublishesInMemory:
         orig_get = ee.get_workflow_executor
         ee.get_workflow_executor = lambda: _SpyExecutor()
 
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-
-        app = FastAPI()
-        app.include_router(collaboration_api.router)
-        client = TestClient(app)
+        client = self._client()
         try:
             r = client.post("/canvas/cv_bad/run", json={})
         finally:

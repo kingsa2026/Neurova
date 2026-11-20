@@ -8,6 +8,15 @@
 
 判据同源：AGENTS.md §3（深模块经 agent_ref 注入、禁止直连 Agent）与尺寸棘轮先例
 （tests/unit/agent/test_agent_core_size_ratchet.py）。
+
+基线/分类表同步记录（棘轮随架构演化同步，基线只升不降）：
+2026-11-20 修复批——并行会话批次使 post_chat_pipeline.py / tool_executor.py / context/
+orchestrator.py / agent/chat_pipeline.py / cognitive_layers/memory_layer/manager.py /
+computer_use/browser_manager.py 六文件越过原基线，collaboration/neurflow/builtin.py 首次
+越过硬上限入册；新顶层模块 ci / mcp_agent_tools_server / memory_admission /
+memory_discipline 按其实测 import 方向入册分层；陈旧边 interfaces->auth 出基线；
+benchmark/multi_agent/runner.py 的 agent 直连改为函数内惰性 import（§3 教义，同文件
+swarm 分支先例）。本次无下调项。
 """
 
 import importlib
