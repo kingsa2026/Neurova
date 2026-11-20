@@ -34,7 +34,70 @@
 
 ---
 
-### 2. NeRF 增强的记忆检索系统 — 六通道体积渲染融合
+### 2. 记忆机制 — 七类记忆 · 温度引擎 · NeRF 六通道检索
+
+#### 记忆模型：7 种记忆类型 × 7 种记忆分类
+
+| 维度 | 取值 |
+|------|------|
+| **记忆类型**（MemoryType） | 语义（semantic）、情景（episodic）、程序（procedural）、模式（pattern）、情感（emotional）、工作记忆（working）、工作流经验（workflow_experience） |
+| **记忆分类**（MemoryCategory） | 通用、对话、知识、经验、工具使用、反思、用户偏好 |
+| **生命周期**（LifecycleStage） | active → consolidated → archived → forgotten / crystallized |
+| **来源信任**（MemoryOrigin） | owner / agent / untrusted / system，检索时按来源降权 |
+| **视角标记**（MemoryPerspective） | 第一/第二/第三人称、系统视角 |
+
+核心实现位于 `neurova/cognitive_layers/memory_layer/`（`neurova/memory/` 为兼容层），门面为 `neurova/mem_core.py` 的 `MemCore`。
+
+#### 写入链路：准入闸 → 重纪律 → 双写落库
+
+```
+对话/工具结果 → 记忆准入闸（敏感信息拦截）
+    → 记忆重纪律（候选 → 3-Task 转正 / 世代失效）
+    → MemCore 双写（MemoryManager + 会话缓冲）
+    → 轮末蒸馏（LLM 归纳"值得长期记住的事实"，人工审阅落库）
+```
+
+- **记忆准入闸**（`memory_admission.py`）：10 组敏感信息正则（私钥、API Key、token、JWT、凭据标签）命中即拒收并审计；策略 `NEUROVA_MEMORY_ADMISSION` = enforce（默认）/ audit / off，支持人工放行令牌。
+- **记忆重纪律**（`memory_discipline.py`）：新写入先标 `candidate`，跨 ≥3 个独立任务被引用才转正 `promoted`；矛盾断言经裁决判 `superseded` 并进入遗忘。门控 `NEUROVA_MEMORY_DISCIPLINE` 默认关。
+- **外部记忆导入**（`memory_ingest/`）：以 Ingest Bundle 导入外部 agent 的会话记录——probe 识别格式 → plan 预览 → apply 落库 → undo 可回滚，单次上限 20 万条。
+
+#### 温度引擎（0–100°C）
+
+每条记忆带温度：访问升温、时间衰减、反馈调节。
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| 温度域 | 0–100 | 0 = 完全遗忘，100 = 高度活跃 |
+| 访问升温 | +10 | 每次命中 `touch()` 升温，封顶 100 |
+| 不衰减条件 | — | 已固化（crystallized）、温度 ≥80、24h 内访问过 |
+| 遗忘曲线锚点 | 1/7/30/90 天 | 对数-对数幂律插值（模仿人类遗忘曲线） |
+| 用户反馈 | like +10 / dislike −15 | 反馈直接作用于温度 |
+
+衰减率 = 曲线因子 × 情感保护(0.6) × 饱和效应 × 重要性权重 × 关联保护，封顶 0.95。
+
+#### 检索栈总览：MoE 路由 → 六通道召回 → 融合
+
+```
+查询 → 统一检索器 UnifiedRetriever
+    ├── MoE 专家路由（见第 3 节）          ← 按记忆类别稀疏激活
+    ├── 六通道召回 NeurovaRecallEngine      ← 温度/文本/分类/图谱/情感/语音
+    │       └── NeRF 体渲染融合（legacy/nerf 可切）
+    ├── 认知存储直查（CognitiveStorageEngine）
+    └── 知识库检索（FTS5 trigram + 向量 RRF 融合，权重 0.7/0.3，联想线索 +0.25）
+    → 去重排序 → 注入上下文池
+```
+
+向量后端四档自适应：TF-IDF → ONNX（bge-small-zh-v1.5，默认推荐）→ fastembed → FAISS，按环境自动降级。
+
+#### 睡眠整理与压缩
+
+- **睡眠整理**（`sleep.py`）：语义聚类合并相似记忆、衰减归档低价值记忆；LLM 归纳式整理由 `NEUROVA_SLEEP_INDUCTION` 门控（默认关）。
+- **记忆压缩**（`compression.py`）五种策略：TIER（按温度/生命周期分层：固化全保留、中温压缩为摘要、低温归档）、SEMANTIC（语义聚类合并）、AGGREGATION（同主题聚合）、LLM（合并摘要）、RULE_BASED（规则确定性压缩）；工作记忆另有轮级压缩端点（`/api/v1/memory/wm/compress`）。
+- **贝叶斯 EKI 优化器**（第 10 节）：以集合卡尔曼反演（简化版）评估任务信息增益、预测记忆衰减、推荐强化。
+
+---
+
+#### NeRF 增强检索：六通道体积渲染融合
 
 > **核心创新**：将 NeRF（Neural Radiance Fields）的体渲染理论迁移到记忆检索，实现从离散搜索到连续语义场渲染的范式转变。
 
@@ -202,27 +265,22 @@ API 响应 → 前端展示
     └── 通道可视化条
 ```
 
-#### 与旧系统的对比
-
-| 维度 | 旧系统 (第2-3节) | 新系统 (NeRF 增强) |
-|------|------------------|-------------------|
-| **检索维度** | 6种记忆类型 + 4种分类 | 6个检索通道 |
-| **融合方式** | 简单加权求和 | NeRF 体积渲染 |
-| **时间处理** | 温度机制 (0-100°C) | 位置编码 + 温度通道 |
-| **情感处理** | 情感保护机制 | 情感通道 + 情感位置编码 |
-| **意图感知** | 无 | 查询意图自适应 |
-| **密度控制** | 无 | 通道密度配置 |
-| **可视化** | 温度曲线 | 通道贡献条形图 |
-
 #### 核心文件结构
 
 ```
 neurova/cognitive_layers/memory_layer/
-├── neurova_recall.py          # 检索引擎（含 NeRF 融合）
-├── volume_renderer.py         # 体积渲染器
+├── manager.py                 # MemoryManager 门面（CRUD + FTS5/RRF 混合召回）
+├── neurova_recall.py          # 六通道检索引擎（含 NeRF 融合）
+├── moe_router.py              # MoE 专家混合记忆路由（见第 3 节）
+├── muscle_memory.py           # 工具肌肉记忆 L1/L2/L3（见第 8 节）
+├── unified_retriever.py       # 统一检索器（CSE 直查 + MoE + 六通道三路融合）
+├── unified_vector_store.py    # 四档自适应向量库（TF-IDF/ONNX/fastembed/FAISS）
+├── volume_renderer.py         # NeRF 体积渲染器
 ├── positional_encoding.py     # 位置编码
-├── temperature.py             # 温度机制（保留）
-└── unified_retriever.py       # 统一检索器
+├── temperature.py             # 温度引擎（0–100°C 贝叶斯遗忘曲线）
+├── compression.py             # 记忆压缩（五种策略）
+├── sleep.py                   # 睡眠整理（聚类合并/衰减归档）
+└── bayesian_eki/              # 贝叶斯 EKI 认知优化器（见第 10 节）
 
 neurova/api/endpoints/
 └── enhanced_memory_search_api.py  # NeRF 设置 API
@@ -233,6 +291,69 @@ NeurUI/src/pages/
 ```
 
 > **设计理念**：将 NeRF 的"连续场渲染"思想引入记忆检索，从离散的"搜索-排序"范式转变为连续的"语义场渲染"范式。通过六通道并行检索、位置编码、查询意图自适应、体积渲染融合，实现更自然、更平滑、更智能的记忆检索体验。
+
+---
+
+### 3. 独创检索 — MoE 专家混合记忆路由
+
+> **核心理念**：把"检索哪些记忆"变成一个可学习的路由问题——4 个按记忆类别特化的专家、向量门控稀疏激活、专家内四级递进下钻。热记忆毫秒级命中，冷记忆向量兜底，绝不静默返回空。
+
+实现位于 `neurova/cognitive_layers/memory_layer/moe_router.py`（`MoEMemoryRouter`），由 `MemCore.init_moe_router` 装配，是聊天管线记忆检索责任链的第二级检索器（UnifiedRetriever → **MoERetriever** → KnowledgeRetriever）。
+
+#### 专家划分（4 个，按记忆类别）
+
+| 专家 | 覆盖的记忆 | centroid 初始化 |
+|------|-----------|----------------|
+| **conversation_episodic** | 对话情景记忆 | 专家描述文本编码 |
+| **factual_knowledge** | 事实知识 | 同上 |
+| **tool_muscle** | 工具肌肉记忆 | 同上 |
+| **experience_lesson** | 经验教训 | 同上 |
+
+#### 向量门控网络（VectorGatingNetwork）
+
+```
+activation_i = cosine(query_vec, centroid_i)
+activated = { i | activation_i ≥ threshold(默认 0.3)，取 Top-3 稀疏激活 }
+```
+
+只有被激活的专家参与本轮检索——无关专家零开销。
+
+#### 专家内 L0→L3 递进下钻（ExpertDrilldownRetriever）
+
+| 层级 | 手段 | 延迟 |
+|------|------|------|
+| **L0** | SQL 精确索引（按类别/生命周期/温度排序，带 FIFO 缓存） | <1ms |
+| **L1** | 结构化过滤（情感/温度） | 1–10ms |
+| **L2** | TF-IDF 关键词重排 | 10–50ms |
+| **L3** | 向量相似度兜底（UnifiedVectorStore） | 100–500ms |
+
+#### 得分融合与诚实兜底
+
+```
+score = 专家原始分 × 激活权重 activation × 来源信任权重(origin)
+```
+
+- 按作用域 fail-closed 过滤后排序取 top；
+- 专家结果不足（<3 条或最高分 <0.4）→ 全库向量搜索兜底；
+- 仍无结果 → 返回 `NO_MEMORY_HINT` 系统提示（score=1.0），**诚实告知"没有相关记忆"，而不是沉默或编造**。
+
+#### 质心可塑性与后台索引
+
+- **质心漂移**：专家质心支持 LTP/LTD 式更新（`update_centroid` / `touch_centroid`），随使用分布缓慢演化；
+- **后台渐进索引**：全库按温度优先渐进建立语义索引（上限 `vector_search.moe_index_limit`，默认 2 万条），状态落盘支持重启跳扫；
+- **运行期同步**：写入/删除实时镜像进 MoE 向量库。
+
+#### 与 NeRF 六通道的关系：两套机制，一条链
+
+| | MoE 专家路由 | NeRF 六通道 |
+|---|---|---|
+| 划分对象 | **记忆类别**（4 个专家桶） | **检索维度**（温度/文本/分类/图谱/情感/语音） |
+| 融合方式 | 激活权重 × 来源信任 | 通道密度 × 透射率（体渲染） |
+| 交汇点 | 同一条检索责任链 + UnifiedRetriever 三路融合 | 同左 |
+
+> **注意**：`neurova/llm/llm_router.py` 的 LLMRouter 是按能力/优先级/健康度的**规则路由器**（请求类型 → 模型能力 → 选模型），不是 MoE。
+
+> **设计理念**：检索的瓶颈往往不是"算得不够多"，而是"查错了地方"。MoE 用极 cheap 的向量门控决定"去哪个专家找"，再用分层下钻控制每次查询的成本曲线——快慢结合，且对"查不到"保持诚实。
 
 ---
 
@@ -281,7 +402,7 @@ Neurova 采用 **CogArch 2.0 认知架构**，模拟人类大脑的信息处理�
 | **脑干** | 行动输出 | 工具调用、工作流执行、资源调度、执行监控 |
 | **脊髓** | 信息通路 | 事件分发、模块通信、外部渠道接入 |
 
-**完整认知循环（5 阶段）**：
+**完整认知循环**：
 
 ```
 输入 → 观察 → 回忆 → 推理 → 决策 → 编排 → 执行 → 反思 → 巩固 → 学习进化
@@ -303,74 +424,120 @@ Neurova 的 Agent **会成长**。每一次对话、每一次任务、每一次�
 
 | 系统 | 功能 | 效果 |
 |------|------|------|
-|  **人格系统** | Big Five 人格特质定义与进化 | Agent 性格随着与你的互动不断调整 |
-|  **动机系统** | 好奇心、成就、社交三大内驱力 | Agent 会主动学习、主动提问、主动关心 |
-|  **宪法系统** | 行为准则和伦理约束 | 确保 Agent 始终保持善良和正直 |
-|  **反思系统** | 自我评价、经验提取、主动提问 | 定期反思"我做的对吗？""我能更好吗？" |
-|  **元认知** | 自我监控、健康检查、自动优化 | Agent 意识到自己的状态，自我调节 |
+|  **人格系统** | 人格特质定义与持久化（GET/PUT `/api/v1/personality`） | Agent 性格随互动调整；自动进化端点预留未开放 |
+|  **动机系统** | 自我决定论四内驱力：胜任、自主、成长、意义 | 经动机台账调制主动提问节奏——会主动学习、主动关心 |
+|  **宪法系统** | 行为准则和伦理约束，编译进系统指令 | 确保 Agent 始终保持善良和正直 |
+|  **反思系统** | 五算子自模型（漂移/序列/对比/校准/预算） | 定期反思"我做的对吗？""我能更好吗？" |
+|  **元认知** | 自我监控、健康检查、成长日志 | Agent 意识到自己的状态，自我调节 |
 
 **自主进化机制**：
-1. **意图图谱构建** — 自主构建意图理解图谱
-2. **反馈闭环** — 形成"行动→反馈→学习"闭环
-3. **梦境整理（Dream Processing）** — 模拟人类睡眠时的记忆整理
-4. **能力自主扩展** — 通过 Skill 系统动态加载新能力
-5. **记忆升华** — 经验记忆升华为"教训记忆"或"技能记忆"
+1. **反馈闭环** — 形成"行动→反馈→工具权重调整→再行动"闭环（AdaptiveToolWeights）
+2. **梦境整理** — 夜间 sweep 把候选行为规则升格为生效规则（dreaming.py）；睡眠记忆整合见第 2 节
+3. **能力自主扩展** — 通过 Skill 系统动态加载新能力
+4. **记忆升华** — 经验记忆升华为"教训记忆"或"技能记忆"
+5. **递归自我改进（RSI）** — 见第 13 节：以实测增益与回滚门约束的参数级自进化
 
 ---
 
-### 7. 多 Agent 团队协作 — 让多颗星星一起闪耀
+### 7. 多智能体协作 — 蜂群编排 · 团队 · 群聊房间 · IDE 外部代理接入
 
-Neurova 支持**多 Agent 团队协作**，你可以组建自己的"星星团队"，让不同专长的 Agent 分工合作，完成复杂任务。
+Neurova 的多 Agent 协作不是简单的"任务分发"，而是一套带治理、审批、候选合并与租户隔离的**蜂群编排系统**（Swarm，`neurova/agent/swarm.py`），并支持把 IDE 里的外部编码代理（ACP 协议）编入同一套协作体系。
 
-#### 四种协作模式：
+#### 7.1 蜂群编排（Swarm）
 
-| 模式 | 工作方式 | 适用场景 |
-|------|---------|---------|
-| **顺序执行** | Agent 按流水线依次处理 | 内容创作 → 审核 → 发布 |
-| **并行执行** | 多个 Agent 同时处理不同子任务 | 多维度数据同时分析 |
-| **主从模式** | 一个主 Agent 指挥多个从 Agent | 项目管理，任务分配与汇总 |
-| **共识模式** | 多个 Agent 独立判断后投票 | 风险决策，多视角验证 |
+主 Agent 通过 `spawn_subagent` 动态派生子 Agent，后台执行、终态回灌父会话邮箱：
 
-#### 功能清单（ 全部 100% 完成）
+- **治理硬限**：单 Agent 并发子任务 ≤5、任务书 ≤8000 字符、递归深度上限、每模型并发帽与派生错峰——超限返回结构化拒绝（`rejected` + 拒绝码），不静默吞掉；
+- **Run 状态机**：`pending → running → in_review → completed / failed`，迁移收口单点（非法迁移直接抛错），每次迁移落事件账本，可回放、可追溯；
+- **结果候选制**：成员产出先落**候选报告**，经验收门 + 评审门双门后按 CAS（乐观并发）合入；同基准撞车双保留并升级人工裁决；
+- **全生命周期管理**：`subagent_status`（查岗/集成报告/事件流）、`continue_subagent`（运行中 steer 插话或 restart 重派）、`cancel_subagent`（叫停并落账）、`escalate`（升级）、`submit_result`（提交）。
 
-| 模块 | 完成度 | 说明 |
-|------|--------|------|
-| **项目管理** |  100% | 项目规则配置、多规则支持、团队关联 |
-| **团队管理** |  100% | Agent 职责描述、工作时间、联系信息 |
-| **工作流** |  100% | LLM 生成工作流、节点配置、拖拽编辑器 |
-| **群组聊天** |  100% | Agent @功能、防信息风暴、SSE 实时推送 |
-| **任务看板** |  100% | React 看板组件、拖拽卡片、自定义列、实时更新 |
+#### 7.2 团队与审批链
+
+| 能力 | 说明 |
+|------|------|
+| **固定团队** | `/api/v1/teams` 创建团队名册，成员带角色（member/coder/reviewer…）与职责 prompt |
+| **整队派活** | `dispatch_team` 按名册每成员一路 spawn，支持按名册声明步间依赖 |
+| **审批链 L0/L1/L2** | 危险动作只升不降（`NEUROVA_SWARM_APPROVAL_MODE`）；外部代理的每次工具/命令请求映射到审批链，fail-closed |
+| **团队沉淀** | Agent 可 `propose_team` 提议新团队，需人批准后写入名册 |
+
+#### 7.3 群聊房间（协作房间）
+
+房间即协作项目（`room_id = project_id`），人与 Agent 同群协作：
+
+- **@点名应答**：`@成员` 触发指定 Agent 应答，未@时回落默认应答者；@全体成员判定为协作指令，触发多 Agent 协作编排；
+- **主从接力**：主执行者（lead）先行，支援成员依赖 lead 的产出接力执行；统一任务书含分工、近史摘要与产出要求；
+- **审批上墙**：swarm 审批单、升级、候选报告实时推送到房间消息流，群主/管理员可在房间里直接裁决、拦截或采纳；
+- **防信息风暴**：Agent 发言滑动窗口限频（10 条/60 秒），超限结构化拒绝并审计；
+- **实时推送**：房间事件经 WebSocket/SSE 广播（复用会话同步通道）。
+
+#### 7.4 IDE / 外部编码代理接入（ACP）
+
+通过 **Agent Client Protocol（ACP，JSON-RPC over stdio）** 把外部编码代理编入团队名册，作为 swarm 成员被派活——为团队补上"编码执行域"（`neurova/agent/neuacp/`）：
+
+| 外部代理 | 接入方式 |
+|----------|----------|
+| **OpenCode / Qoder / CodeBuddy / Gemini CLI** | ACP 原生（stdio 子进程） |
+| **Claude Code / Codex** | 经 ACP 适配器（npx）接入 |
+| **ZCode** | 插件形态（headless CLI + stream-json，支持 `--resume` 续跑） |
+
+- **能力双闸**：配置期与派活期各校验一次能力声明（传输方式/审批模式/流式/会话复用），未知工具保守档 fail-closed；
+- **审批映射**：外部代理的 `session/request_permission` 同步映射到本仓审批链（读/搜/想 → L0，写/执行 → L1），裁决结果回传代理；
+- **全量镜像**：代理的工具调用、思考、消息 chunk 全量镜像进轨迹与事件账本（帧账本可回放），但不纳管其内部执行；
+- **进程池复用**：按 `(租户, 工具, 命令, cwd, transport)` 复用子进程，全局上限默认 4、空闲 600 秒回收、崩溃踢出；亦支持 SSH 隧道远程接入；
+- **租户隔离红线**：名册、派活、进程池、审批、运行台账全链按 JWT 租户隔离，跨租户派活直接拒绝；
+- **管理面**：`/api/v1/external-agents`（catalog / test 握手连通 / status 进程池 / frames 帧回放，admin 门）；总开关 `NEUROVA_EXTERNAL_AGENTS_ENABLED`（默认关）；
+- **前端**：团队成员表单内直接配置外部代理（工具目录 + 本机安装探测 + 测试连接），帧账本页可回放代理执行过程。
+
+#### 7.5 项目与任务看板
+
+- **项目治理**：`/api/v1/projects`——Agent 发起项目即自动建协作房间；新增人类成员、放宽可见性走 L1 审批；项目档案（dossier）聚合协作轨迹；
+- **任务看板**：`/api/v1/tasks/boards`——Vue 3 三列拖拽看板（todo / in-progress / done），与项目、团队联动。
+
+> **设计理念**：多 Agent 协作的关键不是"能派任务"，而是**派得出去、收得回来、改得了需求、叫得停**——每个环节都有治理、审批与账本兜底。外部编码代理的接入让"会话型 Agent"与"IDE 里的编码 Agent"在同一个协作体系里分工。
 
 ---
 
-### 8. ToolMemory 闭环学习 — 肌肉记忆系统（Neurova 核心特性）
+### 8. 肌肉记忆（Muscle Memory）— 工具调用的闭环学习（Neurova 核心特性）
 
-> **核心理念**：像人类肌肉记忆一样 — 看到问题 → 条件反射 → 直接执行（无需思考）
+> **核心理念**：像人类肌肉记忆一样 — 看到问题 → 条件反射 → 直接执行（无需思考）。实现位于 `neurova/cognitive_layers/memory_layer/muscle_memory.py`，已替代早期基于检索的 ToolMemory。
 
 #### 完整闭环：
 
 ```
-用户输入 → 肌肉记忆匹配(L1/L2/L3) → 命中→直接执行
-   │                                                          │
-   └────────── 传统检索兜底 ─────────→ record_tool_usage()
-                                                   │
-                                                   ↓
-                                           肌肉记忆固化（连续成功→升级层级）
+用户输入 → 肌肉记忆匹配（混合置信度，分层阈值）
+    ├── 命中且 ≥ 动态阈值 → 自动执行（毫秒级条件反射）
+    ├── 命中但置信度不足 → 作为建议呈现（suggest）
+    └── 未命中 → 传统检索 / LLM 决策兜底
+任意路径执行后 → record_tool_usage()
+    ├── 成功 → 连胜 +1，连续成功 2 次晋升一层（L3→L2→L1）
+    └── 失败 → 连胜清零（同样入账，供工具权重与反思使用）
+治理拒绝不计失败，避免污染记忆
 ```
 
 #### 三层记忆架构：
 
-| 层级 | 匹配方式 | 响应速度 | 固化条件 | 遗忘条件 |
+| 层级 | 命中阈值 | 响应速度 | 晋升条件 | 遗忘条件 |
 |------|---------|---------|---------|----------|
-| **L1 肌肉记忆** | 关键词精确匹配 | 毫秒级（条件反射） | 连续成功2次 | 30天未用→L2 |
-| **L2 热路径** | 向量相似度匹配 | 秒级（快速检索） | 累计成功5次 | 30天未用→L3 |
-| **L3 工具记忆** | 关键词模糊匹配 | 需完整检索 | 初始创建 | 永不删除 |
+| **L1 肌肉记忆** | 置信度 > 0.7 | 毫秒级（条件反射） | 连续 3 次成功抵达 | 30 天未用 → L2 |
+| **L2 热路径** | 置信度 > 0.5 | 秒级（快速检索） | 连续 2 次成功晋升 | 30 天未用 → L3 |
+| **L3 工具记忆** | 置信度 > 0.3 | 需完整检索 | 新记忆由此起步 | 90 天未用 → 删除 |
+
+**置信度打分**（三层同一公式，仅阈值不同）：
+
+```
+confidence = 关键词指纹匹配（全等 +0.6 / 部分匹配按 F1）
+           + 语义余弦相似度（+0.3，本地 bge ONNX 嵌入，NEUROVA_MUSCLE_SEMANTIC 可关）
+           + 历史成功率（+0.1）
+```
 
 **关键特性**：
-- **条件反射**：L1 级别实现毫秒级响应，像人类肌肉记忆一样
-- **自动固化**：连续成功2次→L1，累计5次→L2
-- **智能遗忘**：30天未用自动降级，保持记忆系统高效
-- **Skill 联动**：Skill 封装成功后自动创建 L1 肌肉记忆
+- **条件反射**：L1 级别毫秒级响应，像人类肌肉记忆一样
+- **自动固化**：新记忆从 L3 起步，连续成功逐级晋升至 L1
+- **智能遗忘**：30 天未用逐级降级、90 天未用删除，保持记忆系统高效
+- **动态置信度阈值**：按工具权重自适应（见第 11 节），高权重工具更易自动执行
+- **安全阀**：命中参数形状不可执行时封顶为"建议"，不盲目自动执行
+- **Skill 联动**：Skill 执行成功/失败都记入肌肉记忆，成功经验逐级固化
 
 ---
 
@@ -387,115 +554,83 @@ Neurova 的 Computer Use 能力支持**真实模式**和**模拟模式**，并�
 | 能力 | 实现方式 | 说明 |
 |------|---------|------|
 | **桌面截图** | Pillow (真实) / 模拟 | 全屏或区域截图，返回 base64 图像 |
-| **鼠标操作** | pyautogui (真实) / 模拟 | 点击、拖拽、滚动 |
+| **鼠标操作** | pyautogui (真实) / 模拟 | 点击、拖拽、滚动（DPI/多屏换算） |
 | **键盘输入** | pyautogui (真实) / 模拟 | 文本输入、快捷键 |
-| **文件操作** | 真实实现 | 读写文件，受 L2 防火墙保护 |
-| **Shell 命令** | subprocess | 执行系统命令，受 L2 防火墙保护 |
-| **视觉解析** | YOLOv8 + EasyOCR | 截图 → UI 元素检测 → 返回结构化数据 |
-| **智能点击** | 视觉理解 + pyautogui | `smart_click("登录按钮")` → 自动找到并点击 |
+| **文件操作** | 真实实现 | 读写文件，受治理引擎保护 |
+| **Shell 命令** | subprocess | 执行系统命令，受治理引擎保护 |
+| **控件树快照** | UIAutomation（UIA） | dom-snapshot 拿到控件树，支持骨架概览与按节点下钻 |
+| **语义元素操作** | UIA + 快照索引 | `click-element` / `set-value` 按快照元素定位，不抢焦点、不依赖像素坐标 |
+| **SoM 视觉标注** | Set-of-Marks 编号区域图 | 截图打标编号区域 + `computer_click_mark`（scipy 启发式检测器，可注入替换） |
+| **智能点击** | 语义定位 + 坐标兜底 | REST `POST /api/v1/computer/smart-click` 或工具 `computer_click_element`，按语义目标定位元素 |
 
-**视觉理解工作流程**：
+**语义操作工作流程**：
 ```
-截图 → YOLOv8 检测 UI 元素 → EasyOCR 识别文本 → 
-生成标注图像 → 返回结构化数据 (elements, bbox, content)
+dom-snapshot 控件树 → 按名称/类型/索引定位元素 → 
+click-element / set-value 语义操作 → 失败回落像素级 pyautogui
 ```
 
 **智能点击示例**：
-```python
-# 传统方式：需要精确坐标
-computer_use.click(agent_id, x=500, y=300)
+```bash
+# 拿到控件树快照（含元素 index/runtime_id）
+python -m neurova.computer_use dom-snapshot --window-title "记事本" --skeleton
 
-# Neurova 智能方式：基于语义目标
-computer_use.smart_click(agent_id, target="登录按钮")
-# → 自动截图 → 视觉解析 → 找到"登录"文本/图标 → 点击中心坐标
+# 按快照元素语义点击/写值（不抢焦点）
+python -m neurova.computer_use click-element --index 3
+python -m neurova.computer_use set-value --index 5 --value "Hello, World!"
 ```
 
-**安全机制**（L1/L2 防火墙）：
-- L1：检查 Agent 是否有权访问 Computer Use
-- L2：文件操作受路径白名单保护、Shell 命令黑名单过滤、输出内容脱敏
+**安全机制**（治理四级裁决）：
+- 每次工具调用经治理引擎裁决：allow / deny / ask（转人工审批）/ sandbox
+- 文件操作受路径白名单保护、Shell 命令白名单 + 分段审批、输出内容脱敏
+- 全局键鼠输入需显式开启（`NEUROVA_ALLOW_GLOBAL_INPUT=1`），并有前台租约互斥
 
 ---
 
-#### CLI 命令库 — 完整的命令行管理工具
+#### CLI 命令库 — 交互式 REPL + 专用模块入口
 
-`neurova` CLI 提供**20+ 子命令**，覆盖服务管理、配置管理、Agent 管理、认知调试等全场景：
+`cli.py` 是**交互式 REPL 聊天客户端**（基于后端 REST/SSE 契约），命令以 `/` 前缀交互：
 
-**服务管理**：
-```bash
-neurova start          # 启动前后端所有服务
-neurova stop          # 停止前后端所有服务
-neurova restart       # 重启服务
-neurova status        # 查看服务状态（后端/前端/日志）
-neurova logs         # 查看服务日志（--service, --lines）
+```
+/agent switch|add|del|list       # Agent 切换与管理
+/llm switch|add|del|list         # LLM 提供商切换与管理
+/session del|archive  /new  /history   # 会话管理
+/think 简单|标准|深度|off         # 思考档位
+/file clear  /approval list  /reject   # 附件与审批
+/memory save|stats|del  /memories del  # 记忆管理
+/knowledge list|find|add|del  /search memory|knowledge  # 知识与搜索
+/health /stats /logs /monitor /status  # 诊断与监控
+/login /help /clear /stop /stream /exit
 ```
 
-**配置管理**：
+服务编排与 Computer Use 走专用入口：
+
 ```bash
-neurova config show          # 显示所有配置（API地址、Token、UI配置）
-neurova config validate     # 验证配置是否正确
-neurova config set-api-base <url>   # 设置 API 基础地址
-neurova config clear-token # 清除 Token
+python start.py --backend              # 启动后端（9527）
+python start.py --chat                 # 前后端一起启动
+python -m neurova.computer_use status  # Computer Use 能力探测（真入口）
 ```
 
-**LLM 配置**：
-```bash
-neurova llm list                  # 列出所有 LLM 提供商
-neurova llm add --name "OpenAI" --provider openai --url <url> --api-key <key>
-neurova llm test <provider_id>  # 测试连接
-neurova llm set-default <provider_id>
-```
-
-**Agent 管理**：
-```bash
-neurova agent list              # 列出所有 Agent
-neurova agent add --agent-id <id> --name <name>
-neurova agent show <agent_id>  # 查看详情
-neurova agent delete <agent_id>
-```
-
-**认知调试**（v1.0.0-beta1 新增）：
-```bash
-neurova memory   # 记忆管理（搜索、添加、删除、统计）
-neurova emotion  # 情感调试（查看状态、设置情感、测试传导）
-neurova skill    # 技能管理（注册、执行、列出、卸载）
-neurova evolution # 进化监控（查看人格、动机、宪法、反思）
-neurova mcp      # MCP 工具管理（列出、调用、安装）
-neurova dev      # 开发调试（数据库检查、缓存清理、事件监控）
-neurova benchmark # 基准测试（记忆、情感、Skill 性能测试）
-neurova model    # 模型适配器管理（列出、测试、设置默认）
-neurova computer # Computer Use 管理（真入口：`python -m neurova.computer_use`，2026-11-19 AD-5 起可用；本清单的 `neurova <子命令>` 形态未实现，勿按此操作）
-neurova runtime  # 运行时管理（进程查看、资源监控）
-neurova image    # Image 管道管理（列出、测试、预处理）
-```
-
-**其他命令**：
-```bash
-neurova chat            # 启动命令行聊天窗口
-neurova message        # 配置接入消息渠道（WeChat/Telegram/Email/Slack）
-neurova ui             # 配置 UI 服务端口
-neurova user           # 配置用户账户
-neurova admin          # 配置管理员账户（login/logout/whoami/change-password）
-neurova update         # 检查版本更新（--auto 自动升级）
-```
+> 其余管理操作（MCP Server 连接、工具市场、技能池、外部代理目录、进化治理等）统一走 REST API（见下方 API 端点表），不设 `neurova <子命令>` 形态。
 
 ---
 
 #### Skill 生态 — 完善的技能系统
 
-Neurova 的 Skill 系统支持**动态注册**、**事件触发**、**权限控制**、**沙箱执行**
+Neurova 的 Skill 系统支持**动态注册**、**事件触发**、**权限控制**、**治理审批**
 
 **核心架构**：
 
 ```
 Skill 系统
 ├── 内置 Skill
-│   ├── 记忆管理 (memory_manage) — 添加、查询、删除记忆
+│   ├── 记忆管理 (memory) — 添加、查询、删除记忆
 │   ├── 网络搜索 (web_search) — 搜索网络信息
 │   ├── 文件操作 (file_operation) — 读写文件（受路径保护）
+│   ├── 知识库构建 (kb_builder) — 知识库导入与构建
 │   └── GitHub 推送 (github_push) — Git 操作封装，支持直接推送到 main 分支
 │
 ├── 外部 Skill
-│   └── 自定义 Skill
+│   └── 自定义 Skill（技能市场 / 技能池分发）
 │
 └── 复合 Skill
     ├── 链式 Skill (多 Skill 串联)
@@ -544,17 +679,17 @@ class Skill:
 
 **SkillRegistry（注册中心）**：
 - 注册/注销 Skill
-- 别名支持（`memory` → `memory_manage`）
+- 别名支持（为长名技能配置简称）
 - 执行前后事件触发（`PRE_EXECUTE`, `POST_EXECUTE`）
 - 使用统计（execution_count, last_used）
 - 权限控制（按 Agent 隔离）
 
-**事件系统**（与 ToolMemory 联动）：
+**事件系统**（与肌肉记忆联动）：
 ```python
 # 执行前事件
 registry._emit_event(SkillEvent.PRE_EXECUTE, skill=skill, kwargs=kwargs)
 
-# 执行后事件 → ToolMemory 记录成功经验
+# 执行后事件 → 肌肉记忆记录执行经验（成功/失败都入账）
 registry._emit_event(SkillEvent.POST_EXECUTE, skill=skill, result=result)
 ```
 
@@ -562,18 +697,16 @@ registry._emit_event(SkillEvent.POST_EXECUTE, skill=skill, result=result)
 ```
 注册 Skill → 触发 PRE_EXECUTE 事件 → 执行 Skill → 
 更新统计 (usage_count, last_used) → 触发 POST_EXECUTE 事件 → 
-ToolMemory 记录成功经验 → 下次相似问题直接复用
+肌肉记忆记录成功/失败经验 → 下次相似问题命中即条件反射复用
 ```
 
 **协议兼容**：
 - 统一的 Skill 接口抽象
 
-**沙箱执行**（可选）：
-- 内存限制（默认 256MB）
-- CPU 限制（默认 50%）
-- 超时控制（默认 30 秒）
-- 网络访问控制
-- 文件访问控制
+**治理与审批**：
+- 每次执行经治理引擎四级裁决（allow / deny / ask / sandbox）
+- 高危操作转人工审批（ASK），审批通过可铸造持久授权
+- 每次裁决落审计账（SQLite），可回溯
 
 ---
 
@@ -581,187 +714,68 @@ ToolMemory 记录成功经验 → 下次相似问题直接复用
 
 | 能力 | 实现状态 | 关键特性 |
 |------|---------|---------|
-| **Computer Use** |  真实+模拟 | 视觉理解、智能点击、L1/L2 防火墙 |
-| **CLI 命令库** |  20+ 子命令 | 服务管理、认知调试、配置管理 |
-| **Skill 生态** |  完整实现 | 动态注册、事件触发、协议兼容、沙箱执行 |
+| **Computer Use** |  真实+模拟 | UIA 控件树语义操作、SoM 视觉标注、像素级兜底、治理四级裁决 |
+| **CLI 命令库** |  交互式 REPL | `/agent` `/llm` `/memory` 等会话命令 + `python -m neurova.computer_use` 模块入口 |
+| **Skill 生态** |  内置 5 技能 + 市场/技能池 | 动态注册、事件触发、治理审批、肌肉记忆联动 |
 
 > **设计理念**：工具不是附加功能，而是 Agent 的"手"和"工具箱"。Computer Use 让 Agent 能操作电脑，CLI 让管理员能高效管理，Skill 让 Agent 能动态扩展能力——三者共同构建了一个**开放、安全、可扩展**的工具生态系统。
 
 ---
 
-### 10. 贝叶斯 EKI 认知优化器 — 无梯度的贝叶斯记忆优化
+### 10. 贝叶斯 EKI 认知优化器 — 无梯度的记忆认知优化
 
-> **EKI = Ensemble Kalman Inversion（集合卡尔曼反演）**，一种**无梯度的贝叶斯推断方法**，用蒙特卡洛采样近似参数后验分布。
+> **EKI = Ensemble Kalman Inversion（集合卡尔曼反演）**，一种**无梯度的贝叶斯推断方法**：用一组参数粒子（集合）近似后验分布，靠观测残差驱动集合更新，不需要对目标函数求梯度。实现位于 `neurova/cognitive_layers/memory_layer/bayesian_eki/`。
 
-#### 核心算法原理
+#### 组成（4 个模块）
 
-**EKI 更新公式**：
-```
-θ_{k+1}^(i) = θ_k^(i) + C_θy (C_yy + R)^{-1} (y - h(θ_k^(i)))
-```
+| 模块 | 职责 |
+|------|------|
+| `inversion.py` | `ekiUpdate` 一步随机集合更新（扰动观测 + 协方差膨胀）+ `EnsembleKalmanInversion` 完整求解器（GP 代理辅助、自适应步长、集合高斯重采样、GP 后验 Metropolis-Hastings 精修、LCB/Thompson 选点、精英替换） |
+| `gp_surrogate.py` | `GaussianProcessSurrogate` 高斯过程代理模型（RBF/Matérn 核、边缘似然调参、后验预测/采样） |
+| `cognitive_optimizer.py` | `EKICognitiveOptimizer` 认知优化器门面：任务价值评估、强化决策、衰减预测 |
+| 数据类 | `TaskValue`（trivial/low/medium/high/critical）、`ReinforcementAction`（none/review/consolidate/compress/discard）、`TaskResult`、`MemoryState` |
 
-其中：
-- `θ` = 参数向量（记忆的认知参数）
-- `y` = 观测值（用户反馈、访问频率等）
-- `h(θ)` = 前向模型（预测记忆强度）
-- `C_θy` = 参数与观测的协方差
-- `R` = 观测噪声协方差
-
-**优势**：
-- 无需梯度信息
-- 用集合（ensemble）近似后验分布
-- 支持高维参数空间
-
----
-
-#### 12 维认知参数（每记忆）
-
-| 参数 | 说明 | 作用 |
-|------|------|------|
-| `initial_strength` | 初始强度 | 记忆创建时的初始强度 |
-| `decay_rate` | 衰减率 | 控制遗忘速度 |
-| `reinforcement_rate` | 强化率 | 访问时的升温速度 |
-| `emotion_weight` | 情感权重 | 情感对记忆的影响程度 |
-| `access_count` | 访问次数 | 使用频率统计 |
-| `importance` | 重要性 | 记忆的重要程度 |
-| `confidence` | 置信度 | 对记忆的确定程度 |
-| `reliability` | 可靠性 | 记忆的可信度 |
-| `novelty` | 新颖度 | 记忆的新颖程度 |
-| `relevance` | 相关性 | 与当前任务的相关性 |
-| `last_access_days` | 上次访问（天） | 时间衰减计算 |
-| `reinforcement_count` | 强化次数 | 被强化的总次数 |
-
----
-
-#### 核心功能
-
-##### 1. 任务价值评估（信息增益）
+#### 核心 API（EKICognitiveOptimizer）
 
 ```python
-result = optimizer.process_task(
-    task_embedding=task_vector,      # 任务嵌入向量
-    memory_context=['mem_1', 'mem_2'],  # 相关记忆
-    user_feedback=0.8                # 用户反馈（可选）
-)
+optimizer = get_cognitive_optimizer()   # 集合规模默认 50，学习率 0.1
 
-# 返回：
-{
-    'value_score': 0.85,           # 信息增益（KL散度）
-    'priority': 'high',             # 任务优先级（high/medium/low）
-    'uncertainty_reduction': 0.12, # 不确定性降低
-    'confidence': 0.92,            # 置信度
-    'reinforcement_needed': True     # 是否需要强化
-}
+# 任务价值评估：输入任务内容，返回价值等级/得分/置信度/强化动作建议
+result = optimizer.process_task(task_id="t1", content="帮我整理周报")
+# TaskResult: value=HIGH | score | confidence | information_gain
+#             reinforcement ∈ {REVIEW, CONSOLIDATE, COMPRESS, DISCARD, NONE}
+
+# 记忆登记与衰减预测
+optimizer.register_memory("mem_1", importance=50.0, access_count=3)
+retention = optimizer.predict_memory_decay("mem_1", hours_ahead=24.0)  # 预测保留率
+
+# 强化决策与批量回写
+action = optimizer.recommend_reinforcement(score=0.8, information_gain=0.3)
+optimizer.batch_update([("mem_1", True, 0.9), ("mem_2", False, 0.2)])  # (id, 命中, 强度)
+
+# 高斯过程代理：训练后可对任意内容做价值预测
+optimizer.train_surrogate(training_data)
+est = optimizer.surrogatePredict("会议纪要要点")
 ```
 
-**优先级分类**（基于信息增益）：
-- `high`：信息增益 > 0.7 → 推荐强化相关记忆
-- `medium`：信息增益 0.3-0.7
-- `low`：信息增益 < 0.3 → 降低记忆优先级
-
-##### 2. 记忆强度估计
-
-```python
-strength, uncertainty = optimizer.get_memory_strength('mem_123')
-# 返回：
-# strength = 75.3 (强度均值)
-# uncertainty = 8.2 (强度标准差)
-```
-
-##### 3. 衰减预测
-
-```python
-decay_curve = optimizer.predict_decay('mem_123', horizon=7)
-# 返回未来7天的衰减曲线：
-[
-    {'day': 0, 'strength': 75.3, 'uncertainty': 8.2, 'needs_reinforcement': False},
-    {'day': 1, 'strength': 71.5, 'uncertainty': 9.1, 'needs_reinforcement': False},
-    ...
-    {'day': 7, 'strength': 58.2, 'uncertainty': 12.3, 'needs_reinforcement': True}
-]
-```
-
-##### 4. 强化推荐
-
-```python
-recommendations = optimizer.recommend_reinforcement(top_k=10)
-# 返回强度最低的10个记忆：
-[
-    {'memory_id': 'mem_456', 'strength': 25.3, 'priority': 'high', ...},
-    ...
-]
-```
-
----
-
-#### 完整工作流程
+#### 与记忆系统的协同
 
 ```
-用户查询
+任务/查询 → process_task 价值评估（价值等级 + 强化动作建议）
     ↓
-1. 任务嵌入 (task_embedding)
+记忆温度引擎（第 2 节）按强化动作执行：
+    review 升温 / consolidate 固化 / compress 压缩 / discard 丢弃
     ↓
-2. EKI处理任务 (process_task)
-    ├── 计算信息增益 (KL散度）
-    ├── 评估任务优先级 (high/medium/low)
-    └── 更新认知状态 (贝叶斯推断）
-    ↓
-3. 记忆召回 (根据相关性）
-    ↓
-4. 强化推荐 (推荐低强度记忆）
-    ↓
-5. 衰减预测 (预测未来衰减）
-    ↓
-6. 批量更新 (异步更新认知参数）
+predict_memory_decay 预测保留率 → 提前强化临期高价值记忆
 ```
 
----
+#### 诚实边界
 
-#### 与 NeRF 增强记忆系统的关系
+- `_compute_information_gain` 目前为**词汇启发式**，不是真正的信息增益（KL 散度）；
+- `_flush_updates` 未实现（显式抛 `NotImplementedError`）；
+- GP 代理需先 `train_surrogate` 训练，`surrogatePredict` 才可用。
 
-| 维度 | NeRF 增强记忆系统 | 贝叶斯EKI优化器 |
-|------|-------------------|----------------|
-| **核心** | 六通道体积渲染融合 | 贝叶斯推断优化 |
-| **参数** | 6个通道密度 + 位置编码 | 12维认知参数 |
-| **更新** | 通道分数 + 透射率衰减 | 数学严谨的贝叶斯更新 |
-| **预测** | 渲染分数 + 通道贡献 | 不确定性量化的衰减曲线 |
-| **决策** | 意图自适应 + 密度配置 | 信息增益 + KL散度 |
-
-**协同工作**：
-```
-NeRF 增强系统（六通道渲染） → EKI优化器（精确决策）
-     ↓                               ↓
-  体积渲染融合记忆分数        评估任务价值、推荐强化
-     ↓                               ↓
-  通道贡献可视化              记忆强度预测与巩固
-```
-
----
-
-#### 实际应用场景
-
-1. **智能记忆巩固**：预测哪些记忆即将衰减，提前强化
-2. **任务价值评估**：优先处理高信息增益的任务
-3. **个性化记忆管理**：每个Agent独立的认知参数
-4. **不确定性量化**：知道"哪些记忆不可靠"
-
----
-
-#### 核心文件结构
-
-```
-neurova/cognitive_layers/memory_layer/bayesian_eki/
-├── __init__.py
-├── ensemble_kalman_inversion.py      # 核心EKI算法
-├── cognitive_optimizer.py             # 认知优化器（主编排器）
-├── information_gain.py               # 信息增益计算（KL散度）
-├── representative_sampler.py          # 嵌入式代表性采样
-├── surrogate_model.py                # 高斯过程代理模型
-├── memory_state.py                   # 记忆认知状态管理
-└── EKI_UPGRADE_GUIDE.md          # 升级指南
-```
-
-> **设计理念**：NeRF 增强系统是"快速筛选器"，EKI是"精确决策器"——前者通过六通道体积渲染快速融合记忆分数，后者用严谨数学优化记忆管理决策，两者协同构建完整的认知优化系统。
+> **设计理念**：记忆管理的大量决策（强化谁、压缩谁、丢弃谁）本质是"在噪声观测下估计不可直接测量的记忆价值"——这正是贝叶斯推断的用武之地。EKI 让这件事可以无梯度地在线进行，同时诚实标注哪些部分还是启发式。
 
 ---
 
@@ -806,7 +820,7 @@ result = router.select_model(request_type)
 
 #### Context Pool — 统一上下文管理
 
-> 10种上下文来源、4层压缩策略、多模型格式自动转换
+> 即第 12 节「活水上下文池」的组件面：10 种上下文来源、多级压缩、多模型格式自动转换
 
 **上下文来源**：
 ```python
@@ -838,54 +852,47 @@ context = pool.build_context_for_model("claude-3-opus")  # → Anthropic格式
 
 #### Tool Memory — 肌肉记忆系统
 
-> 三层记忆架构，实现毫秒级工具调用响应
+> 三层记忆架构（L1/L2/L3），实现毫秒级工具调用响应——机制详情见第 8 节。
 
-**三层架构**：
-| 层级 | 匹配方式 | 响应速度 | 固化条件 | 遗忘条件 |
-|------|---------|---------|---------|----------|
-| **L1 肌肉记忆** | 关键词精确匹配 | 毫秒级 | 连续成功2次 | 30天未用→L2 |
-| **L2 热路径** | 向量相似度匹配 | 秒级 | 累计成功5次 | 30天未用→L3 |
-| **L3 工具记忆** | 关键词模糊匹配 | 需完整检索 | 初始创建 | 永不删除 |
-
-**闭环学习**：
-```
-用户输入 → 肌肉记忆匹配(L1/L2/L3) → 命中→直接执行
-   │                                                          │
-   └────────── 传统检索兜底 ─────────→ record_tool_usage()
-                                                   │
-                                                   ↓
-                                           肌肉记忆固化（连续成功→升级层级）
-```
+- 三层共用同一**混合置信度打分**（关键词指纹 F1 + 语义余弦 + 成功率），按层阈值 0.7 / 0.5 / 0.3 取候选；
+- 新记忆从 L3 起步，连续成功 2 次晋升一层（L3→L2→L1）；L1/L2 30 天未用逐级降级，L3 90 天未用删除；
+- 执行成功与失败都入账：成功养肌肉记忆，失败清零连胜并反馈工具权重。
 
 **动态置信度阈值**：
 ```python
-# 根据工具权重动态计算置信度阈值
-threshold = base_confidence / sqrt(weight_factor)
+# 根据工具权重动态计算置信度阈值（夹取到 [0.3, 1.0]）
+threshold = clamp(muscle_memory_threshold / sqrt(effective_multiplier), 0.3, 1.0)
 
-# 高权重工具(2.5) → 阈值0.51 (更容易自动执行)
-# 低权重工具(0.3) → 阈值1.0 (更难自动执行)
+# 基准阈值 0.85（RSI 可调）：高权重工具(2.5) → 阈值≈0.54（更容易自动执行）
+# 低权重工具(0.3) → 阈值 1.0（更难自动执行，趋于人工确认）
 ```
 
 #### MCP 集成 — 外部工具无缝接入
 
 > 支持 Model Context Protocol，连接外部工具服务器
 
-**使用方式**：
+**使用方式**（REST API，`/api/v1/tool-layers`）：
 ```bash
 # 列出已连接的 MCP Server
-neurova mcp list
+curl http://localhost:9527/api/v1/tool-layers/mcp-servers -H "Authorization: Bearer $JWT"
 
-# 连接新的 MCP Server
-neurova mcp connect my-server --command "python server.py" --args "--port 8080"
+# 连接新的 MCP Server（stdio / sse / streamable_http 三种传输）
+curl -X POST http://localhost:9527/api/v1/tool-layers/mcp-servers \
+  -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" \
+  -d '{"name":"my-server","transport":"stdio","command":"python","args":["server.py"]}'
 
-# 查看 MCP Server 提供的工具
-neurova mcp tools my-server
+# 查看某个 MCP Server 提供的工具
+curl http://localhost:9527/api/v1/tool-layers/mcp-servers/{id}/tools -H "Authorization: Bearer $JWT"
+
+# 精选目录（github / context7 / dbhub）与一键安装
+curl http://localhost:9527/api/v1/tool-layers/mcp-catalog -H "Authorization: Bearer $JWT"
 ```
 
 **安全机制**：
-- 用户层隔离：每个用户的 MCP 配置独立
-- 工具权限控制：按 Agent 隔离工具访问权限
-- 沙箱执行：MCP 工具在沙箱环境中执行
+- 用户层隔离：每个用户的 MCP 配置独立，跨用户单例问题已修复（防火墙身份按请求穿透）
+- 工具权限控制：per-user 防火墙 `check_permission`，按 Agent 隔离工具访问权限
+- 审批与持久授权：高危 MCP 工具转人工审批，审批通过可铸造持久授权免审
+- 治理收敛：MCP 工具与原生工具走同一条治理/审计管道，无旁路
 
 #### 统一工具编排 — Tool Orchestrator
 
@@ -894,12 +901,13 @@ neurova mcp tools my-server
 **工具类别**：
 | 类别 | 工具 | 说明 |
 |------|------|------|
-| **搜索类** | web_search, knowledge_search | 网络搜索、知识库检索 |
-| **计算类** | calculator, code_executor | 计算器、代码执行器 |
+| **搜索类** | web_search, knowledge_search, deep_research | 网络搜索、知识库检索、深度研究 |
+| **计算类** | calculator, run_code | 计算器、代码执行 |
 | **文件类** | file_read, file_write | 文件读写、知识库管理 |
-| **通信类** | message_send, notification_push | 消息发送、通知推送 |
-| **数据分析类** | data_visualization, report_generator | 数据可视化、报表生成 |
-| **Computer Use** | screenshot, click, type, scroll | 桌面操作、视觉理解 |
+| **图谱类** | graph_search | 知识图谱多跳走查（walk/global/drift） |
+| **协作类** | spawn_subagent, dispatch_team, subagent_status, continue_subagent, cancel_subagent | 蜂群派活与全生命周期管理 |
+| **Computer Use** | computer_* 工具族 | 桌面截图、控件树语义操作、像素级兜底 |
+| **浏览器** | browser_* 工具族 | Camofox/浏览器自动化 |
 
 **编排能力**：
 - **链式调用**：多工具串联执行（A → B → C）
@@ -1046,169 +1054,102 @@ def preserve_key_context(drops, query):
 
 #### API 集成
 
-```python
-# 获取上下文池设置
-GET /api/v1/context/pool-settings
+```bash
+# 构建上下文（v2 支持压缩/预算控制）
+POST /api/v1/context/build/v2
 
-# 更新上下文池设置
-PUT /api/v1/context/pool-settings
+# 池统计 / 构成 / 预算读数
+GET /api/v1/context/stats
+GET /api/v1/context/composition
+GET /api/v1/context/budget
 
-# 获取特定模型的Token预算
-GET /api/v1/context/pool-settings/token-budget/{model_name}
+# 指定上下文预览与压缩
+GET  /api/v1/context/{context_id}/preview
+POST /api/v1/context/{context_id}/compress
 
-# 测试Token预算计算
-POST /api/v1/context/pool-settings/test-budget
+# 按需注入：反思 / 记忆 / 热点
+GET /api/v1/context/inject/reflection
+GET /api/v1/context/inject/memories
+GET /api/v1/context/inject/hot
 ```
 
 > **设计理念**：活水上下文池不是简单的上下文缓存，而是一个**智能的上下文生态系统**。它像活水一样流动，像大脑一样思考，像水库一样调节——通过语义匹配理解用户需求，通过多阶段去重保持纯净，通过Token预算管理资源，通过防漂移机制保证质量。这是Neurova独有的上下文管理创新。
 
 ---
 
-### 13. 递归自我进化系统（RSI）— 棘轮剪枝的无限进化
+### 13. 递归自我进化系统（RSI）— 棘轮剪枝的自进化
 
-> **核心理念**：让 AI 不仅能改进自己，还能改进"改进自己的能力"——形成正反馈递归循环
+> **核心理念**：让系统具备"自我改进的元能力"——但每一分改进都必须**实测有效**才允许保留：应用 → 实测 → 有效保留 / 有害回滚，像棘轮一样只进不退。实现位于 `neurova/evolution/rsi/`（27 个模块），主流程由 `RSIOrchestrator` 编排。
 
-#### 三层递归架构
+#### 三层递归架构（设计愿景 × 当前落地）
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  L2: 元元认知 (Meta-Meta-Cognition)                          │
-│  "改进'改进能力'的能力"                                       │
-│  职责：评估和优化元认知策略本身                                │
-│  例如：反思的深度、监控的粒度、优化的激进程度                   │
+│  L2: 元元认知 — 改进"改进能力"的能力                          │
+│  当前落地：改进器版本化 I_t + 被拒史派生升级（人工批准）        │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │  L1: 元认知 (Meta-Cognition)                           │  │
-│  │  "改进自身的能力"                                       │  │
-│  │  职责：评估和优化对象层系统                              │  │
-│  │  例如：工具权重更新规则、记忆衰减参数、检索策略           │  │
+│  │  L1: 元认知 — 改进自身的能力                            │  │
+│  │  当前落地：参数级策略进化——5 族 15 个认知参数自动寻优    │  │
 │  │  ┌───────────────────────────────────────────────┐    │  │
-│  │  │  L0: 对象层 (Object Level)                    │    │  │
-│  │  │  "解决问题的能力"                               │    │  │
-│  │  │  职责：执行具体任务                              │    │  │
-│  │  │  例如：工具执行、记忆检索、对话回答              │    │  │
+│  │  │  L0: 对象层 — 解决问题的能力                    │    │  │
+│  │  │  工具执行、记忆检索、对话回答、技能调用          │    │  │
 │  │  └───────────────────────────────────────────────┘    │  │
 │  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-#### 五个递归回路
+#### 棘轮剪枝器（RecursiveRatchetPruner）
 
-| 回路 | 功能 | 优先级 | 难度 |
-|------|------|--------|------|
-| **策略进化** | 优化各组件的更新规则参数 | P0 | 低 |
-| **元认知进化** | 优化反思策略和监控粒度 | P1 | 中 |
-| **学习进化** | 优化探索/利用平衡、遗忘参数 | P2 | 中 |
-| **架构进化** | 发现瓶颈并重构系统架构 | P3 | 高 |
-| **目标进化** | 优化"什么算好"的标准本身 | P4 | 极高 |
+三轮漏斗式剪枝，每轮保留数可配（默认 50 → 10 → 3）：
 
-#### 核心组件
-
-```python
-# RSI 核心组件架构
-RSIComponents = {
-    'RecursiveRatchetPruner': '棘轮剪枝器 - 递归优化参数',
-    'RSIIntegrationManager': 'RSI集成管理器 - 协调递归回路',
-    'ConvergenceAnalyzer': '收敛性分析器 - 确保递归过程收敛',
-    'RSIMetrics': 'RSI监控指标 - 跟踪递归改进效果',
-    'RSIRollbackManager': '回滚管理器 - 安全边界和恢复',
-    'RSIDeploymentController': '部署控制器 - 渐进式部署',
-    'RSIDashboard': 'RSI仪表板 - 可视化递归进化',
-    'RSIOrchestrator': 'RSI编排器 - 整体协调',
-}
+```
+候选参数集（按 setpoint 分级步进 5/10/15/20%）
+    ↓ 粗筛：启发式快筛（50 个）
+    ↓ 中筛：快速评估（10 个）
+    ↓ 细筛：完整验证（3 个）——得分 ≤0 直接拒绝，无效候选一个不放行
+    ↓ 应用最优候选 → 前后实测性能
+    ↓ 回滚管理器裁决：有害即回滚快照、增益归零
 ```
 
-#### 棘轮剪枝机制
+**"只进不退"的真实机制**（keep-or-rollback 棘轮）：
+1. **细筛零分拒绝**——无效候选在进入生产前就被挡住；
+2. **应用后前后实测**——不是"声称改进"就算数；
+3. **回滚判据五条**：发散 / ROI<0 / 增益配对置信区间上界<0 / 真实结局对齐增益<0 / 例级退化清单非空。
 
-```python
-class RecursiveRatchetPruner:
-    """递归棘轮剪枝器
-    
-    核心思想：像棘轮一样只能向前转动，不能后退
-    - 参数优化只能朝更好的方向
-    - 通过剪枝确保递归过程收敛
-    - 防止参数无限膨胀
-    """
-    
-    def prune_and_optimize(self, component: str, 
-                          current_params: Dict,
-                          performance_history: List) -> Dict:
-        """剪枝并优化参数
-        
-        1. 分析历史性能趋势
-        2. 识别无效或有害的参数变化
-        3. 应用棘轮约束（只能改进，不能退化）
-        4. 生成优化后的参数
-        """
-        pass
+#### 可优化参数（5 族 15 个，带硬边界）
+
+| 参数族 | 数量 | 覆盖 |
+|--------|------|------|
+| 睡眠 | 2 | 基础衰减率、相似度阈值 |
+| 情感 | 2 | 情感保护阈值、情感保护因子 |
+| 经验 | 3 | 最小观察次数、最小成功率、模式最小支持度 |
+| 工具记忆 | 4 | 成功奖励、失败惩罚、衰减率、肌肉记忆阈值 |
+| 上下文 | 4 | 总 token 预算、记忆/对话历史/经验知识保留窗口 |
+
+所有参数受 `PARAMETER_BOUNDS` 硬边界约束，步进有档（5/10/15/20%），不会无限膨胀。
+
+#### 触发机制：事件驱动，不是定时器
+
+- **每轮对话后**：post-chat 阶段按节奏跑迭代（`asyncio.to_thread` 不阻塞事件循环）；已收敛/度量失明时退避为每 20 轮巡检一次；
+- **经验事件触发**：经验记录后按节流（默认 60s）触发；
+- **反思触发**：轮次门 + 未编译事件门（≥20）+ 间隔门并联。
+
+#### 渐进式自治（5 阶段档位）
+
+```
+0 观察 → 1 手动 → 2 半自动 → 3 有条件自动 → 4 全自动
 ```
 
-#### 收敛性保障
+晋升判据：无回滚天数、非负 ROI、收敛白名单、经验质量与自动化前置证据——不达标就地停留，绝不跳级。
 
-**收敛性分析**（ConvergenceAnalyzer）：
-- **递增收益检测**：确保每次改进都有正向收益
-- **边际收益递减**：当改进收益递减时自动停止
-- **稳定性检测**：参数波动小于阈值时视为收敛
-- **安全边界**：参数变化不超过预设范围
+#### 监控与人工监督
 
-**监控体系**（RSIMetrics）：
-- **递归深度**：跟踪递归层数
-- **改进效率**：每层递归的改进幅度
-- **收敛速度**：参数收敛到最优的速度
-- **资源消耗**：递归过程的计算成本
+- **指标**（RSIMetrics，Prometheus）：迭代次数、改进率、收敛 ROI、回滚次数、候选生成/剪枝数、门禁失败数 + 经验族 5 指标；
+- **读数面**：`GET /api/v1/governance/rsi/status`；
+- **人工审批**：改进提案经 `/api/v1/governance/rsi/proposals` 批准/拒绝；改进器升级（I_t → I_{t+1}）必须人工批准；
+- **审计与反向闸**：审计预定表 + 债务账本反向闸（欠账未清不允许晋升档位）。
 
-#### 渐进式部署
-
-```python
-class RSIDeploymentController:
-    """渐进式部署控制器
-    
-    确保RSI安全上线：
-    1. 影子模式：只监控不执行
-    2. 金丝雀发布：小流量验证
-    3. 渐进式扩展：逐步扩大范围
-    4. 全量发布：稳定后全面启用
-    """
-    
-    def deploy_with_safety(self, rsi_version: str) -> DeploymentResult:
-        """安全部署RSI
-        
-        步骤：
-        1. 创建回滚快照
-        2. 影子模式运行24小时
-        3. 分析影子模式结果
-        4. 金丝雀发布（5%流量）
-        5. 监控关键指标
-        6. 渐进式扩展到100%
-        """
-        pass
-```
-
-#### 与现有系统的集成
-
-| 现有组件 | RSI增强 | 改进效果 |
-|----------|---------|----------|
-| **AdaptiveToolWeights** | 元参数优化 | 工具选择准确率提升15-20% |
-| **TemperatureEngine** | 衰减参数优化 | 记忆巩固效率提升10-15% |
-| **PatternMiner** | 模式挖掘策略优化 | 模式发现准确率提升20-25% |
-| **EvolutionOrchestrator** | 进化策略优化 | 进化速度提升25-30% |
-| **EKICognitiveOptimizer** | 认知参数优化 | 认知优化效果提升30-35% |
-
-#### 安全机制
-
-**多层安全边界**：
-1. **参数边界**：每个参数有最小/最大值限制
-2. **变化率限制**：单次参数变化不超过10%
-3. **回滚机制**：异常时自动回滚到安全状态
-4. **人类监督**：关键决策需要人类确认
-5. **审计日志**：所有递归操作可追溯
-
-**回滚管理器**（RSIRollbackManager）：
-- **自动回滚**：性能下降超过阈值时自动回滚
-- **手动回滚**：人类可随时手动回滚
-- **快照管理**：保存每个稳定版本的快照
-- **回滚测试**：回滚后自动运行验证测试
-
-> **设计理念**：RSI不是简单的参数调优，而是让系统具备"自我改进的元能力"。通过棘轮剪枝确保递归过程只进不退，通过收敛性分析确保系统不会无限膨胀，通过多层安全边界确保人类始终可控。这是Neurova迈向真正自主进化的关键一步。
+> **设计理念**：RSI 不是"无人值守的参数调优"，而是**以实测增益与回滚门约束的自改进**——无效改进在细筛就被拒绝，有害改进上线即被回滚，越权改进必须人工批准。棘轮的意义不是"永远前进"，而是"绝不后退"。
 
 ---
 
@@ -1300,13 +1241,7 @@ class RSIDeploymentController:
 
 #### 智能路由
 
-```
-请求类型检测（CHAT / VISION / TTS / STT / IMAGE_GENERATION …）
-    ↓
-能力匹配 → 健康检查 → 优先级排序 → 响应时间优化 → 权重评分
-    ↓
-最佳模型选择
-```
+按请求类型（CHAT / VISION / TTS / STT / IMAGE_GENERATION …）自动选模型：能力匹配 → 健康检查 → 优先级排序 → 响应时间优化 → 权重评分。请求类型 × 能力对照表与选择算法详见第 11 节「LLM Router」。
 
 > **设计理念**：LLM 不是"一个 API 密钥"，而是"一个生态"。元数据化让系统自动理解每个模型的能力，智能路由确保每次请求都使用最合适的模型。
 
@@ -1359,27 +1294,85 @@ class RSIDeploymentController:
 
 ---
 
+### 19. Ontology 语义层 — Agent 的可运行世界模型
+
+> **定位**：本体不是"又一个知识图谱"，而是 Agent 的**业务语义底座**——术语（概念/关系/属性）、SHACL 式形状约束、Datalog 式前向链规则、函数、状态机、动作、决策台账、推演，全部落在同一个按租户分区的 SQLite 事实库上。Agent 回答业务问题前，先对齐词义、再查事实、必要时推理。
+
+#### 语义栈组成
+
+| 组件 | 能力 |
+|------|------|
+| **术语注册表** | 概念/关系/属性的统一命名与定义，schema 一致性来源 |
+| **形状约束** | SHACL 式断言校验（dry-run 提交前自查） |
+| **规则引擎** | Datalog 式前向链推导，带推导账本与精确撤销 |
+| **函数层** | 主体的登记函数只读求值 |
+| **状态机** | 主体状态与合法迁移查询 |
+| **动作** | 本体动作经 ToolExecutor 与治理链执行 |
+| **决策台账** | 决策作为一等对象：记录、因果链接、追溯、判例检索 |
+| **推演** | 克隆世界做零生产写推演，输出 diff 影响报告 |
+| **溯因** | 反向搜索"什么前提能解释这个结论" |
+| **GraphRAG** | 社区分簇检索（global/drift） |
+
+#### 事实库：双时态三元组
+
+- 核心表：`knowledge_subjects`（实体）、`knowledge_facts`（三元组，带 `valid_from / valid_until / recorded_at / retracted_at` 双时态列）、`ontology_terms`、`ontology_rules`（按租户分区）；
+- **双时态查询**：既能问"现在是什么"，也能问"当时是什么"；
+- 图谱双轨：权威图 = 事实库三元组（多跳走查读它）；JSON 投影图仅供可视化，不持写权。
+
+#### 与 Agent 的集成
+
+- **对话检索链**：时效事实读面 + 多跳图走查（递归 CTE）直接挂入 chat 管线；
+- **内置工具**：`graph_search`（walk/global/drift）供主 Agent 原生调用；
+- **知识导入**：知识条目经 LLM 抽取自动落三元组 + 实体类型（`is_a`），节点 id 回写知识条目。
+
+#### 两个开放面
+
+| 面 | 说明 |
+|----|------|
+| **MCP** | `/v1/mcp` 挂 22 个精选工具（ontology_query/validate、fact_submit、graph_search、ontology_derive、ontology_simulate、ontology_act、决策四件、团队四件等），三段鉴权（Service Token / API Key / JWT）fail-closed |
+| **REST** | `/api/v1/knowledge/ontology/*` 78 个端点 + 治理四动词 `/access/{query,analyze,validate,use}`；管理员可导出 Turtle / JSON-LD / OWL 2 RL / SHACL / PROV / GraphML / GEXF / Cypher / CSV |
+
+#### 写入治理
+
+一切事实写入经 **admission 唯一咽喉**：逐字可核闸 + 未知谓词候选审批 + 冲突三态票异步人审。决策走决策台账，不经事实门。
+
+#### 前端
+
+- **Ontology Studio**（`/agent/:id/ontology-studio`）：术语 / 关系 / 形状 / 运行时 / 推理 / CQ / 发布 / 设置分区；
+- **Graph Workbench**（`/agent/:id/graph-workbench`）：子图浏览与实例编辑。
+
+#### 边界（诚实声明）
+
+- 企业源 NL2SQL 问数由 `NEUROVA_NL2SQL_ENABLED` 门控，默认关（403）；
+- 企业源真实连接器（DB/ERP API/事件流）另行立项，当前仅有描述符校验；
+- SPARQL/rdflib 互操作为可选测试对拍，生产路径惰性 + fail-soft，零第三方运行时依赖。
+
+> **设计理念**：让 Agent 的业务知识"有 schema、有版本、有审计、可推理"——不是一个装三元组的桶，而是一个可查询、可校验、可推演、可追溯的**可运行世界模型**。
+
+---
+
 ## 目录
 
 - [Neurova 独特特点](#neurova-独特特点)
   - [1. 每一颗 Agent 都是独特的星星](#1-每一颗-agent-都是独特的星星)
-  - [2. NeRF 增强的记忆检索系统](#2-nerf-增强的记忆检索系统--六通道体积渲染融合)
-  - [3. NeRF 体积渲染融合](#2-nerf-增强的记忆检索系统--六通道体积渲染融合)
+  - [2. 记忆机制 — 七类记忆 · 温度引擎 · NeRF 六通道检索](#2-记忆机制--七类记忆--温度引擎--nerf-六通道检索)
+  - [3. 独创检索 — MoE 专家混合记忆路由](#3-独创检索--moe-专家混合记忆路由)
   - [4. 情感中枢引擎](#4-情感中枢引擎-v30--四层17种情感体系)
   - [5. CogArch 2.0 认知架构](#5-cogarch-20-认知架构--类脑的思考方式)
   - [6. 持续进化能力](#6-持续进化能力--会成长的智能伙伴)
-  - [7. 多 Agent 团队协作](#7-多-agent-团队协作--让多颗星星一起闪耀)
-  - [8. ToolMemory 闭环学习](#8-toolmemory-闭环学习--肌肉记忆系统neurova-核心特性)
+  - [7. 多智能体协作 — 蜂群 · 团队 · 群聊房间 · IDE 接入](#7-多智能体协作--蜂群--团队--群聊房间--ide-外部代理接入)
+  - [8. 肌肉记忆（Muscle Memory）](#8-肌肉记忆muscle-memory--工具调用的闭环学习neurova-核心特性)
   - [9. 强大的工具系统](#9-强大的工具系统--computer-use--cli--skill-生态)
   - [10. 贝叶斯 EKI 认知优化器](#10-贝叶斯-eki-认知优化器--无梯度的贝叶斯记忆优化)
   - [11. 工具层架构 — LLM Router + Context Pool + Tool Memory](#11-工具层架构--llm-router--context-pool--tool-memory)
   - [12. 活水上下文池 — 语义匹配的智能上下文管理](#12-活水上下文池--语义匹配的智能上下文管理)
-  - [13. 递归自我进化系统（RSI）— 棘轮剪枝的无限进化](#13-递归自我进化系统rsi-棘轮剪枝的无限进化)
+  - [13. 递归自我进化系统（RSI）— 棘轮剪枝的自进化](#13-递归自我进化系统rsi-棘轮剪枝的自进化)
   - [14. NeurFlow 工作流引擎 — IDE 化编排与调试](#14-neurflow-工作流引擎--ide-化编排与调试)
   - [15. 知识库隔离共享与 RAG 演进](#15-知识库隔离共享与-rag-演进)
   - [16. LLM 服务商管理 — 元数据化与智能路由](#16-llm-服务商管理--元数据化与智能路由)
   - [17. 上下文管线 P1-1 — 活水上下文池短板补齐](#17-上下文管线-p1-1--活水上下文池短板补齐)
   - [18. MCP 治理与安全加固](#18-mcp-治理与安全加固)
+  - [19. Ontology 语义层 — Agent 的可运行世界模型](#19-ontology-语义层--agent-的可运行世界模型)
 - [测试体系](#测试体系)
   - [测试规模统计](#测试规模统计)
   - [快速运行测试](#快速运行测试)
@@ -1387,12 +1380,10 @@ class RSIDeploymentController:
   - [更新日志](#更新日志)
 - [核心能力详解](#核心能力详解)
   - [记忆智能增强层](#记忆智能增强层--9-大认知机制)
-  - [主动回忆机制](#主动回忆机制--突然想起来)
-  - [记忆压缩机制](#记忆压缩机制--应对记忆膨胀)
-  - [向量 + FTS5 混合检索](#向量--fts5-混合检索)
+  - [联想与情感触发回忆](#联想与情感触发回忆--突然想起来)
+  - [记忆工程特色机制](#记忆工程特色机制)
   - [经验总结 — 越用越聪明](#经验总结--越用越聪明)
   - [智能体创造性工作](#智能体创造性工作--让-agent-为你创作)
-  - [工作编排](#工作编排--复杂任务的自动化指挥)
 - [安全守护](#安全守护)
 - [多平台连接](#多平台连接)
 - [v1.0.0 beta1 升级功能（历史）](#v100-beta1-升级功能历史)
@@ -1457,7 +1448,7 @@ NeurUI/src/                     # 前端测试（42 个 Vitest 文件）
 └── **/*.test.ts / *.spec.ts    # 组件、Store、API 模块测试
 ```
 
-详细文档请查看 [)
+详细测试说明见 [docs 文档总索引](docs/INDEX.md)
 
 ### 更新日志
 
@@ -1485,41 +1476,29 @@ NeurUI/src/                     # 前端测试（42 个 Vitest 文件）
 | **睡眠整理** | 定期提炼洞察、发现规律、生成摘要 |
 | **联想能力** | 基于关联图谱实现"突然想到"的联想链式回忆 |
 | **元认知** | 知道自己"记得什么"和"不记得什么" |
-| **情感衰减** | 情感强度独立于内容衰减，避免 AI "记仇" |
-| **视角标记** | 区分"事实"/"观点"/"推断"，避免混淆 |
+| **情感衰减** | 情感传导随距离衰减 + 情感保护减缓记忆衰减，避免 AI "记仇" |
+| **视角标记** | 第一/第二/第三人称、系统视角（MemoryPerspective），区分"谁说的" |
 | **可解释性** | 能解释"为什么我记得这个"（触发链追溯） |
 | **遗忘恢复** | 从归档/删除状态恢复记忆 |
 | **记忆合并** | 相似记忆自动聚类去重，生成智能摘要 |
 
-### 主动回忆机制 — "突然想起来"
+### 联想与情感触发回忆 — "突然想起来"
 
-传统 Agent 只能被动检索，Neurova 实现了 **主动回忆**：
+传统 Agent 只能被动检索，Neurova 在检索链上叠加了联想与情感触发：
 
-- **上下文触发回忆**：当前对话内容触发相关记忆
-- **定时回忆巩固**：在遗忘曲线关键点主动回忆，防止遗忘
-- **联想链式回忆**：A→B→C 的链式联想，发现隐藏关联
-- **情感共鸣触发**：当前情感状态触发相似情感记忆
+- **联想链式回忆**：A→B→C 的链式联想（association cues），作为第三路加分并入 RRF 融合
+- **情感共鸣触发**：情感通道按当前情感状态匹配相似情感记忆
+- **主动行为账本**：记录 Agent 的主动提问行为，随成长日志演进
 
-### 记忆压缩机制 — 应对记忆膨胀
+### 记忆工程特色机制
 
-| 层次 | 说明 | 压缩率 |
-|------|------|--------|
-| 原始层 | 完整对话/内容 | 100% |
-| 摘要层 | 关键信息摘要 | ~10% |
-| 主题层 | 主题/趋势总结 | ~3% |
-
-### 向量 + FTS5 混合检索
-
-- **向量检索**（主）：基于语义相似度（FAISS）
-- **FTS5 全文检索**（辅）：关键词精确匹配
-- **RRF 混合排序**：Reciprocal Rank Fusion 融合结果
-
-**特色机制**：
 - 记忆**自动分类** — 对话结束后智能归类，无需手动整理
-- 记忆**批量持久化** — 20 轮对话或 128KB 内自动触发写入
+- 记忆**批量持久化** — 会话缓冲满（默认 1000 轮或 128KB）自动触发写入
 - 记忆**图谱可视化** — 节点与边的关系一目了然
 - 记忆**版本控制** — 修改记录完整保留，支持历史回溯
-- 记忆**永不丢失** — 每次会话都是上一次的自然延续
+- 记忆**可追溯、可恢复** — 软遗忘可恢复、版本可回溯，配合温度引擎分级淘汰
+
+> 压缩策略与混合检索的技术细节已上收至第 2 节（睡眠整理与压缩 / 检索栈总览），此处不再重复。
 
 ---
 
@@ -1566,37 +1545,6 @@ Neurova 将**对话与创作无缝融合**。你不需要切换到专门的"创�
 - 支持异步任务，大文件生成不影响继续对话
 - 实时进度查询，生成完成后主动通知
 - 结果直接返回图片/视频 URL，无需离开对话界面
-
----
-
-### 工作编排 — 复杂任务的自动化指挥
-
-Neurova 的**工作流引擎**让你可以搭建从简单到复杂的自动化流程，Agent 自动按编排执行。
-
-**工作流节点类型**：
-
-```
-[开始] → [任务A] → [条件判断] ─┬─ 是 → [任务B] → [子流程] → [结束]
-                                │
-                                └─ 否 → [任务C] → [结束]
-```
-
-**节点类型**：
-
-| 节点 | 功能 |
-|------|------|
-|  **开始/结束** | 流程起止点 |
-|  **任务节点** | 单个可执行任务 |
-|  **条件节点** | 根据结果分支路由 |
-|  **并行节点** | 多任务同时执行 |
-|  **子流程** | 嵌套工作流 |
-
-**编排能力**：
-- **可视化 DSL** — 用简洁的语言描述工作流，Agent 自动解析执行
-- **状态追踪** — 每一步的执行状态、耗时、结果全部可查
-- **异常处理** — 失败自动重试或降级，保证流程可靠性
-- **动态调度** — 根据资源状态和优先级动态调整执行顺序
-- **历史回溯** — 每次工作流执行的完整记录
 
 ---
 
@@ -1660,45 +1608,31 @@ Agent 星星可以连接到你使用的各种平台：
 
 ## v1.0.0 beta1 升级功能（历史）
 
-核心特性已在前面章节完整覆盖，此处为 CLI 使用参考
+核心特性已在前面章节完整覆盖。**注意**：本节为历史版本参考——当前版本的管理类操作以 REST API 为准（见上方 API 端点表），`neurova <子命令>` 形态仅 Computer Use 有独立模块入口 `python -m neurova.computer_use`；下文命令形态与当前版本可能不一致，勿直接照抄。
 
 ### P0 - 生态级改进
 
 #### 1. MCP Client 集成（已安全加固）
 - **功能**：支持 Model Context Protocol (MCP)，连接外部工具服务器。已通过 P0-1~P0-6 六项安全治理（鉴权/白名单/防火墙收敛/全参数扫描/用户隔离/配置收敛）
 - **隔离层级**：用户层（已修复跨用户单例）
-- **使用方式**：
+- **使用方式**（当前为 REST API）：
   ```bash
   # 列出已连接的 MCP Server
-  neurova mcp list
-  
-  # 连接新的 MCP Server
-  neurova mcp connect my-server --command "python server.py" --args "--port 8080"
-  
-  # 断开 MCP Server
-  neurova mcp disconnect my-server
-  
+  curl http://localhost:9527/api/v1/tool-layers/mcp-servers -H "Authorization: Bearer $JWT"
+
+  # 连接新的 MCP Server（stdio / sse / streamable_http）
+  curl -X POST http://localhost:9527/api/v1/tool-layers/mcp-servers \
+    -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" \
+    -d '{"name":"my-server","transport":"stdio","command":"python","args":["server.py"]}'
+
   # 查看 MCP Server 提供的工具
-  neurova mcp tools my-server
+  curl http://localhost:9527/api/v1/tool-layers/mcp-servers/{id}/tools -H "Authorization: Bearer $JWT"
   ```
 
 #### 2. 模型适配器工厂
 - **功能**：支持多种 LLM 提供商（OpenAI、Anthropic、Custom 等）
 - **隔离层级**：全局
-- **使用方式**：
-  ```bash
-  # 列出所有模型适配器
-  neurova model list
-  
-  # 添加模型适配器
-  neurova model add my-openai --type openai --endpoint "https://api.openai.com/v1"
-  
-  # 删除模型适配器
-  neurova model remove my-openai
-  
-  # 测试模型适配器
-  neurova model test my-openai --prompt "Hello!"
-  ```
+- **当前入口**：REST `/api/v1/model`（模型适配器）与 `/api/v1/provider`（服务商元数据/智能路由，见第 16 节）。
 
 ### P1 - 体验级改进
 
@@ -1723,25 +1657,10 @@ Agent 星星可以连接到你使用的各种平台：
 #### 4. 思维沙箱
 - **功能**：为 Agent 提供隔离的思考空间，支持假设推理和反思
 - **隔离层级**：Agent 层
-- **使用方式**：
-  ```bash
-  # 创建沙箱会话
-  neurova dev sandbox create my_session
-  
-  # 在沙箱中运行推理
-  neurova dev sandbox run my_session --input "用户问题"
-  
-  # 查看沙箱状态
-  neurova dev sandbox status my_session
-  ```
+- **当前入口**：REST `/api/v1/sandbox`（隔离思考空间）。
 
 #### 5. CLI 工具链增强
-- **记忆管理**：`neurova memory`
-- **情感调试**：`neurova emotion`
-- **技能管理**：`neurova skill`
-- **进化监控**：`neurova evolution`
-- **MCP 工具管理**：`neurova mcp`
-- **开发调试**：`neurova dev`
+- 历史的 `neurova <子命令>` 管理形态未实现；当前为交互式 REPL（`/memory` `/knowledge` `/approval` 等会话命令，见第 9 节）+ REST API。
 
 ### P2 - 能力级突破
 
@@ -1774,52 +1693,19 @@ Agent 星星可以连接到你使用的各种平台：
 #### 7. 运行时抽象
 - **功能**：支持多种运行时（本地、Docker）。HTTP/WebSocket 传输层那一半从未接线，已随票④包 4 退役
 - **隔离层级**：全局
-- **使用方式**：
-  ```bash
-  # 列出所有运行时
-  neurova runtime list
-  
-  # 启动运行时
-  neurova runtime start my_runtime --type local
-  
-  # 停止运行时
-  neurova runtime stop my_runtime
-  
-  # 执行命令
-  neurova runtime execute my_runtime --command "python script.py"
-  ```
+- **当前入口**：REST `/api/v1/runtime`（本地运行时；HTTP/WebSocket 传输层已退役）。
 
 #### 8. Image 定义管道
 - **功能**：支持自定义镜像构建，用于 Agent 运行环境
 - **隔离层级**：全局
-- **使用方式**：
-  ```bash
-  # 列出所有镜像
-  neurova image list
-  
-  # 构建镜像
-  neurova image build my-image --base python:3.11 --python 3.11
-  
-  # 删除镜像
-  neurova image delete my-image
-  ```
+- **当前入口**：REST `/api/v1/image`（镜像构建管理）。
 
 ### P3 - 质量体系
 
 #### 9. 基准测试框架
 - **功能**：对 Agent 进行多维度评测（准确性、响应时间、资源消耗等）
 - **隔离层级**：用户层 + Agent 层
-- **使用方式**：
-  ```bash
-  # 运行基准测试
-  neurova benchmark run --suite recall --agent-id my_agent
-  
-  # 查看测试结果
-  neurova benchmark results --test-id test_123
-  
-  # 对比多个 Agent
-  neurova benchmark compare --agent-ids agent1,agent2,agent3 --metric accuracy
-  ```
+- **当前入口**：REST `/api/v1/benchmark`（Agent 评测框架）。
 
 ### API 端点
 
@@ -1830,7 +1716,7 @@ Agent 星星可以连接到你使用的各种平台：
 | 认证系统 | `/api/v1/auth` | 登录、注册、JWT、用户信息 |
 | Agent 管理 | `/api/v1/agent` | Agent CRUD、状态、配置 |
 | 聊天对话 | `/api/v1/chat` | 对话、流式聊天 |
-| 记忆系统 | `/api/v1/memory` | 记忆管理（17种类型） |
+| 记忆系统 | `/api/v1/memory` | 记忆管理（7 种类型 × 7 种分类，含 EKI/情感/版本/谱系/待审/工作记忆子面） |
 | 记忆设置 | `/api/v1/memory-settings` | 记忆参数配置 |
 | 记忆时间线 | `/api/v1/memory-timeline` | 记忆时间线 |
 | 记忆共享组 | `/api/v1/memory-share-groups` | 记忆共享组管理 |
@@ -1846,7 +1732,11 @@ Agent 星星可以连接到你使用的各种平台：
 | 经验知识库 | `/api/v1/experience-knowledge` | 经验总结与复用 |
 | LLM 模型 | `/api/v1/model` | 模型管理、适配器 |
 | LLM 供应商 | `/api/v1/provider` | 服务商管理、元数据、智能路由 |
-| 协作系统 | `/api/v1/collaboration` | 多 Agent 协作、团队、任务看板 |
+| 协作系统 | `/api/v1/collaboration` | 协作房间、群聊消息、审批裁决、候选合并 |
+| 团队管理 | `/api/v1/teams` | 团队名册、成员角色、外部执行体 |
+| 外部编码代理 | `/api/v1/external-agents` | ACP 目录、连通测试、进程池状态、帧回放 |
+| Ontology 语义层 | `/api/v1/knowledge/ontology` | 本体术语/规则/决策/推演/导出（78 端点） |
+| MCP 本体服务 | `/v1/mcp` | 本体 22 工具 MCP server（Service Token / API Key / JWT） |
 | NeurFlow 工作流 | `/api/v1/neurflow` | 工作流引擎（画布、版本、触发器、subflow） |
 | 计算机操作 | `/api/v1/computer` | Computer Use、浏览器自动化 |
 | 安全防火墙 | `/api/v1/firewall` | 安全防护管理 |
@@ -1854,7 +1744,7 @@ Agent 星星可以连接到你使用的各种平台：
 | MCP 工具层 | `/api/v1/tool-layers` | MCP 工具管理、工具市场 |
 | 审计日志 | `/api/v1/audit` | 操作审计记录 |
 | 插件系统 | `/api/v1/plugin` | 插件管理和执行 |
-| Skill 技能 | `/api/v1/skill` | 技能管理 |
+| Skill 技能 | `/api/v1/skills` | 技能管理、学习、执行 |
 | 技能市场 | `/api/v1/skill-market` | 技能市场 |
 | 技能池 | `/api/v1/skill-pool` | 技能池管理 |
 | 技能版本 | `/api/v1/skill-version` | 技能版本管理 |
@@ -1867,16 +1757,14 @@ Agent 星星可以连接到你使用的各种平台：
 | 通知系统 | `/api/v1/notifications` | 消息通知管理 |
 | 分析系统 | `/api/v1/analytics` | 数据分析和统计 |
 | 统计信息 | `/api/v1/stats` | 系统统计信息 |
-| 项目系统 | `/api/v1/projects` | 项目管理 |
-| 团队系统 | `/api/v1/teams` | 团队管理 |
-| 任务系统 | `/api/v1/tasks` | 任务管理 |
+| 项目系统 | `/api/v1/projects` | 项目管理、项目内团队、协作档案 |
+| 任务系统 | `/api/v1/tasks` | 任务看板管理 |
 | 用户分组 | `/api/v1/user-groups` | 用户组管理 |
 | 文件系统 | `/api/v1/files` | 文件上传下载 |
 | 媒体处理 | `/api/v1/media` | 图片、音频、视频处理 |
 | 音频处理 | `/api/v1/audio` | 语音合成、识别 |
 | 图像生成 | `/api/v1/generation` | 文生图、图生图 |
-| 上下文管理 | `/api/v1/context` | 上下文池和缓存 |
-| 上下文池设置 | `/api/v1/context-pool-settings` | Token 预算、去重配置 |
+| 上下文管理 | `/api/v1/context` | 上下文构建/统计/预算/压缩/按需注入（活水上下文池） |
 | 思维沙箱 | `/api/v1/sandbox` | 隔离思考空间 |
 | 运行时管理 | `/api/v1/runtime` | 执行运行时管理 |
 | Image 管道 | `/api/v1/image` | 镜像构建管理 |
@@ -1897,14 +1785,14 @@ Agent 星星可以连接到你使用的各种平台：
 ```
 Neurova
 ├── 认知层 (Cognitive Layer) ⭐ 核心独创
-│   ├── 记忆系统 (Memory System)         — 17种分类、NeRF 增强检索、9大认知机制
+│   ├── 记忆系统 (Memory System)         — 7 种记忆类型、NeRF 六通道 + MoE 专家路由、9 大认知机制
 │   ├── 情感中枢引擎 (Emotion Hub Engine) — 四层17种情感、情感传导、加权决策
 │   ├── 自我进化引擎 (Evolution Engine)  — 人格系统、动机系统、宪法系统、反思系统
 │   ├── 意图理解 (Intent Understanding)
 │   └── 心流知识库适配器 (Knowledge Adapter)
 │
 ├── 执行层 (Execution Layer)
-│   ├── 多 Agent 协作 (Multi-Agent)      — 四种协作模式、团队管理
+│   ├── 多 Agent 协作 (Multi-Agent)      — 蜂群编排、团队、协作房间、ACP 外部代理接入
 │   ├── 消息路由 (Message Routing)
 │   └── 任务调度 (Task Scheduling)
 │
@@ -1931,33 +1819,19 @@ Neurova
 **压缩策略**：
 
 ```
-记忆压缩:
-  - 固化记忆: 100% 保留
-  - 高温记忆(>70): 保留
-  - 中温记忆(40-70): 压缩为摘要
-  - 低温记忆(<40): 移除
+记忆压缩（compression.py 五种策略，详见第 2 节）:
+  - TIER: 按温度/生命周期分层（固化保留 / 中温摘要 / 低温归档）
+  - SEMANTIC / AGGREGATION / LLM / RULE_BASED
 
-历史压缩:
+上下文历史压缩（context_compressor.py）:
   - 最近 N 轮: 完整保留
   - 较早对话: 压缩为摘要
-  - 保证 user/assistant 对话对完整
+  - 保证 user/assistant 对话对完整、压缩后严格变小
 ```
 
 ### 工具与 Skill 系统
 
-#### Skill 协议兼容层
-
-Neurova 的 Skill 系统支持 **多协议兼容**：
-
-- **自定义 Skill**：开放的 Skill 定义规范
-
-#### Skill Registry 中央注册表
-
-**独创设计**：采用 Singleton 模式 + 线程安全的中央注册表：
-
-- 统一的 Skill 注册/注销管理
-- Hook 系统：支持启动/关闭 Hook，按优先级执行
-- 动态加载/卸载：运行时热加载 Skill，无需重启
+> Skill 的注册中心、事件系统、内置技能与治理审批详见第 9 节；工具类别与统一编排详见第 11 节。此处仅列技能版本管理这一独有面。
 
 #### Skill 版本管理
 
@@ -1972,25 +1846,6 @@ Neurova 的 Skill 系统支持 **多协议兼容**：
   - 公共池更新 → 自动同步到所有用户/Agent 专属池
   - 用户专属池更新（不在公共池）→ 自动同步到该用户的所有 Agent 池
 
-#### 工具模块特点
-
-| 特点 | 说明 |
-|------|------|
-| **热插拔** | 插件/工具可在运行时动态启用/禁用 |
-| **沙箱执行** | Skill 在沙箱环境中执行，保障安全性 |
-| **链式调用** | 支持多 Skill 串联执行（Pipeline） |
-| **并行调用** | 支持多 Skill 并行执行，提升效率 |
-| **版本控制** | Skill 版本管理和回滚 |
-| **依赖管理** | 自动解析和加载 Skill 依赖 |
-
-#### 内置工具类别
-
-- **搜索类**：Web 搜索、知识库检索
-- **计算类**：计算器、代码执行器
-- **文件类**：文件读写、知识库管理
-- **通信类**：消息发送、通知推送
-- **数据分析类**：数据可视化、报表生成
-
 ### 心流知识库 & RAG 增强
 
 Neurova 支持连接**心流知识库**，为 AI 助手提供外部知识接入能力。
@@ -2003,23 +1858,7 @@ Neurova 支持连接**心流知识库**，为 AI 助手提供外部知识接入�
 |  **认知进化** | 自动发现知识盲点，主动学习成长 |
 |  **RAG 增强** | 为 Agent 提供知识增强的上下文 |
 
-**RAG 工作流程**：
-
-```
-用户问题
-   ↓
-┌─────────┐     ┌─────────┐
-│ 知识库  │────►│  检索   │◄── 你的问题
-│  检索   │     │         │
-└─────────┘     └────┬────┘
-                        │
-       ┌───────────────┼───────────────┐
-       ▼               ▼               ▼
-  ┌─────────┐     ┌─────────┐     ┌─────────┐
-  │  记忆   │────►│  合并   │────►│  生成   │
-  │  检索   │     │  上下文 │     │  回答   │
-  └─────────┘     └─────────┘     └─────────┘
-```
+**RAG 工作流程**：知识检索 + 记忆检索 → 合并上下文 → 生成回答。检索管道、混合检索与权限过滤详见第 15 节。
 
 **认知进化系统**：
 自动发现知识盲点并主动学习：
@@ -2082,7 +1921,7 @@ python start.py --chat
 python start.py --check
 ```
 
-> 启动前请将 `.env.example` 复制为 `.env` 并填入 LLM API Key。详细启动/运维说明见 [)。
+> 启动前请将 `.env.example` 复制为 `.env` 并填入 LLM API Key。详细启动/运维说明见 [docs 文档总索引](docs/INDEX.md)。
 
 ---
 
@@ -2091,7 +1930,8 @@ python start.py --check
 ```
 Neurova/
 ├── neurova/                     # 后端核心（Python，约 700 个文件）
-│   ├── agent/                   # Agent 核心实现（ChatPipeline 6 步骤）
+│   ├── agent/                   # Agent 核心实现（ChatPipeline、蜂群 swarm、审批链）
+│   │   └── neuacp/              #   ACP 外部编码代理接入（客户端/执行体/进程池/SSH 隧道）
 │   ├── agent_core.py            # Agent 主类（37 方法，深度模块模式）
 │   ├── api/                     # API 接口（82 个端点模块）
 │   │   └── endpoints/           #   含 auth/agent/chat/memory/emotion/evolution/knowledge 等
@@ -2105,12 +1945,13 @@ Neurova/
 │   ├── context/                 # 上下文管理（活水上下文池、缓存、压缩）
 │   ├── core/                    # 核心模块（模块系统、日志、配置、单例工厂）
 │   ├── embedding/               # 嵌入模型管理（BGE / FAISS / ONNX）
-│   ├── evolution/               # 进化系统（人格、动机、宪法、反思、RSI）
+│   ├── evolution/               # 工具/技能进化与 RSI 棘轮自进化（人格/宪法在 api/endpoints，反思/元认知在 cognitive_layers）
 │   ├── knowledge/               # 知识库适配与 RAG 检索
+│   │   └── ontology/            #   本体语义栈（术语/规则/状态机/推演/决策/GraphRAG）
 │   ├── language/                # 多语言、i18n 后端支持
 │   ├── llm/                     # LLM 管理（多模型客户端、路由器、Provider Manager）
 │   ├── media/                   # 媒体处理（图片、音频、视频）
-│   ├── memory/                  # 记忆系统（核心实现）
+│   ├── memory/                  # 记忆兼容层（核心实现在 cognitive_layers/memory_layer/）
 │   ├── mem_core.py              # 记忆检索/保存/温度引擎
 │   ├── neurflow/                # NeurFlow 工作流引擎（画布、版本、触发器、subflow）
 │   ├── notifications/           # 通知系统
@@ -2180,7 +2021,7 @@ Neurova/
 ├── requirements-ci.lock         # CI 锁定版本
 ├── start.py                     # 统一启动脚本
 ├── install.py                   # 安装脚本
-├── cli.py                       # 命令行管理工具
+├── cli.py                       # 交互式 REPL 聊天客户端
 ├── Dockerfile                   # Docker 构建文件
 └── .env.example                 # 环境变量模板
 ```
@@ -2221,7 +2062,7 @@ Neurova/
 - **Python 3.10+** - 主要编程语言
 - **FastAPI** - 高性能 API 框架
 - **SQLite** - 主数据库（支持 FTS5 全文检索）
-- **FAISS** - 向量检索引擎
+- **向量检索** - FAISS / ONNX（bge-small-zh-v1.5）/ fastembed / TF-IDF 四档自适应
 - **Sentence Transformers** - 语义嵌入模型
 - **Pydantic** - 数据验证和序列化
 - **uvicorn** - ASGI 服务器
