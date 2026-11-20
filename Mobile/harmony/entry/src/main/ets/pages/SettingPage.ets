@@ -872,13 +872,16 @@ export struct SettingPage {
           this.entryRow('gear', '系统设置（治理）', '', '', RouteNames.ADMIN_SETTINGS)
         }
         .width('calc(100% - 32vp)')
-        .margin({ left: 16 })
+        .margin({ left: 16, right: 16 })
         .borderRadius(16)
         .backgroundColor(this.sm.getColor('glass'))
         .border({ width: 1, color: this.sm.getColor('primary') })
         .clip(true)
       }
       .width('100%')
+      // 子项默认水平居中：组标与卡片会整体右漂（卡片左 16+居中=32 起、右缘顶满），
+      // 显式左对齐后与个人卡/入口组/导航菜单卡同缘
+      .alignItems(HorizontalAlign.Start)
       .margin({ bottom: 10 })
     }
   }
