@@ -27,6 +27,8 @@ export interface SubAgentWindowState {
   subagentType?: string
   /** S10：团队溯源标（dispatch_team 派生的 run 带团队徽标） */
   teamId?: string
+  /** F5：谱系归因（派生链根→叶；嵌套派生时显示派生链徽标，台账回填路径缺席属预期降级） */
+  agentPath?: string[]
   /** P2（蜂群对照）：卡死渐进提醒——后端看门狗判 member 连续无产出后携带 */
   stallNotice?: { stalledSeconds: number; reminderCount: number }
 }
@@ -44,6 +46,13 @@ const teamBadge = computed(() => {
   const tid = props.state.teamId || ''
   if (!tid) return ''
   return tid.length > 10 ? `${tid.slice(0, 10)}…` : tid
+})
+
+/** F5：谱系徽标（仅嵌套派生显示——单元素路径是自身，展示为噪音） */
+const lineageBadge = computed(() => {
+  const path = props.state.agentPath || []
+  if (path.length < 2) return ''
+  return path.map((id) => (id.length > 10 ? `${id.slice(0, 10)}…` : id)).join(' › ')
 })
 
 const bodyText = computed(() => {
@@ -176,6 +185,12 @@ function shortTime(iso: string): string {
         class="panel-type-chip team-chip"
         :title="`${t('collab.teams')}: ${state.teamId}`"
       >◈ {{ teamBadge }}</span>
+      <!-- F5：谱系徽标（嵌套派生链根→叶，完整链进 tooltip） -->
+      <span
+        v-if="lineageBadge"
+        class="panel-type-chip lineage-chip"
+        :title="`${t('ui.subagentLineage')}: ${(state.agentPath || []).join(' › ')}`"
+      >⛓ {{ lineageBadge }}</span>
       <button class="panel-btn" :title="t('ui.subagentTimeline')" @click.stop="toggleTimeline">≡</button>
       <button class="panel-btn" :title="minimized ? t('ui.expand') : t('ui.minimize')" @click.stop="toggleMinimize">
         {{ minimized ? '▢' : '—' }}
@@ -260,6 +275,7 @@ function shortTime(iso: string): string {
   letter-spacing: 0.4px;
 }
 .panel-type-chip.team-chip { color: var(--nr-primary-light, #818cf8); text-transform: none; }
+.panel-type-chip.lineage-chip { color: var(--nr-text-secondary, #94a3b8); text-transform: none; }
 .panel-btn {
   border: none;
   background: transparent;

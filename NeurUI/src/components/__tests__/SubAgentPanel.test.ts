@@ -34,6 +34,7 @@ const i18n = createI18n({
     subagent: '子代理', thinking: '思考中',
     subagentTimeline: '事件时间线', subagentTimelineEmpty: '暂无事件',
     subagentEvSpawned: '派生', subagentEvTerminal: '终态',
+    subagentLineage: '谱系（派生链）',
   }, common: { close: '关闭' } } },
 })
 
@@ -136,5 +137,22 @@ describe('SubAgentPanel 事件时间线（H-4 闭环读侧）', () => {
     await w.find('button[title="事件时间线"]').trigger('click')
     await flushPromises()
     expect(w.text()).toContain('暂无事件')
+  })
+})
+
+describe('SubAgentPanel — F5 谱系徽标', () => {
+  it('嵌套派生链显示谱系徽标（id 截短 + › 连接，完整链进 title）', () => {
+    const w = mountPanel({ agentPath: ['swarm_abcdef123456', 'swarm_leaf'] })
+    expect(w.find('.lineage-chip').exists()).toBe(true)
+    expect(w.text()).toContain('swarm_abcd…')
+    expect(w.text()).toContain('swarm_leaf')
+    expect(w.text()).toContain('›')
+  })
+
+  it('单元素/缺省谱系不显示徽标（自身路径是噪音）', () => {
+    const w1 = mountPanel({ agentPath: ['a1'] })
+    expect(w1.find('.lineage-chip').exists()).toBe(false)
+    const w2 = mountPanel({})
+    expect(w2.find('.lineage-chip').exists()).toBe(false)
   })
 })

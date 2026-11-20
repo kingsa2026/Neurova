@@ -50,6 +50,8 @@ function handleSubAgentSyncEvent(event: { event_type: string; payload: Record<st
       subagentType: p.subagent_type || 'general',
       // S10：团队溯源标（dispatch_team 派生的 run 带团队徽标）
       teamId: p.team_id || undefined,
+      // F5：谱系归因（agent_path 根→叶；嵌套派生时面板显示派生链徽标）
+      agentPath: Array.isArray(p.agent_path) ? (p.agent_path as unknown[]).map(String) : undefined,
       // 状态取自事件本身（改前这里硬编码 'running'：那一刻后端确实是 running，
       // 但事件不带事实，竞态或重放时前端只能一直猜）。词值到 UI 态的翻译只有
       // LEDGER_TO_WINDOW_STATUS 一处——事件先于后端扩态也不会渲染成未定义态。

@@ -181,3 +181,15 @@ describe('useSubAgentWindows 状态面回读（H2-6 · §6-78 L 条）', () => {
     expect(Object.keys(subAgentWindows.value)).toEqual([])
   })
 })
+
+describe('useSubAgentWindows — F5 谱系归因', () => {
+  it('started 事件携带 agent_path 时写入窗口（嵌套派生链根→叶）', () => {
+    handleSubAgentSyncEvent(evt('subagent_started', { subagent_id: 'a10', agent_path: ['swarm_p', 'a10'] }))
+    expect(subAgentWindows.value.a10?.agentPath).toEqual(['swarm_p', 'a10'])
+  })
+
+  it('started 事件无 agent_path 时窗口不设谱系（顶层派生无徽标）', () => {
+    handleSubAgentSyncEvent(evt('subagent_started', { subagent_id: 'a11' }))
+    expect(subAgentWindows.value.a11?.agentPath).toBeUndefined()
+  })
+})

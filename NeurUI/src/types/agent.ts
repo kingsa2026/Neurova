@@ -113,6 +113,27 @@ export interface NeuacpTestResult {
   error?: string
 }
 
+/** GET /external-agents/runs/{id}/frames 单条一手帧记录（F2 帧账本读面） */
+export interface NeuacpFrameRecord {
+  /** 流内单调序号（游标回放锚点） */
+  seq: number
+  subagent_id: string
+  /** in=runtime 原话 / out=本仓请求（含 cancel）/ observed=进程退出等观测事实 */
+  direction: 'in' | 'out' | 'observed' | string
+  /** 原生帧（凭据已脱敏） */
+  frame: Record<string, unknown>
+  /** 谱系（tenant/team/agentPath/depth/trace） */
+  lineage?: Record<string, unknown>
+  occurred_at: string
+}
+
+/** frames 读面响应（count=本页条数；游标翻页用末条 seq 作 after_seq） */
+export interface NeuacpFramesPage {
+  subagent_id: string
+  count: number
+  frames: NeuacpFrameRecord[]
+}
+
 /** GET /external-agents/status 进程池状态（进程行字段后端自由扩展，前端按需展示） */
 export interface NeuacpStatusInfo {
   processes: Array<Record<string, unknown>>

@@ -344,6 +344,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/MobilePairingPage.vue'),
       },
       {
+        // 外部代理帧回放（F2 帧账本读面的 admin 调试视图；页面内先验角色，接口 403 兜底）
+        path: 'tools/external-agent-frames',
+        name: 'ExternalAgentFrames',
+        component: () => import('@/pages/ExternalAgentFramesPage.vue'),
+      },
+      {
         // 数据中台总览：知识库/图谱/本体/事实/互操作/企业源/评测的统一入口。
         // 只做入口聚合与可见性概览，不新造第二套数据页（页面仍归各域）。
         path: 'data-hub',

@@ -11,6 +11,7 @@ import api from '@/api'
 import type {
   NeuacpCatalogItem,
   NeuacpExecutorSpec,
+  NeuacpFramesPage,
   NeuacpStatusInfo,
   NeuacpTestResult,
 } from '@/types/agent'
@@ -30,6 +31,20 @@ export function testNeuacpConnection(executor: NeuacpExecutorSpec) {
 /** 拉取外部代理进程池状态。 */
 export function fetchNeuacpStatus() {
   return api.get<NeuacpStatusInfo>(`${BASE}/status`)
+}
+
+/**
+ * 回放外部编码代理的一手帧流（F2 帧账本读面；admin 门+同租户由后端承担）。
+ * after_seq 游标：传上一页末条 seq 翻页；limit 服务端夹取 [1,1000]。
+ */
+export function fetchNeuacpRunFrames(subagentId: string, afterSeq = 0, limit = 200) {
+  const params = new URLSearchParams({
+    after_seq: String(afterSeq),
+    limit: String(limit),
+  })
+  return api.get<NeuacpFramesPage>(
+    `${BASE}/runs/${encodeURIComponent(subagentId)}/frames?${params.toString()}`,
+  )
 }
 
 /** 从团队名册移除成员（内置/外部成员通用；后端 A5 同租户+属主/admin 门）。 */

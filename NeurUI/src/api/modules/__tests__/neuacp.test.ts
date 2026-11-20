@@ -21,6 +21,7 @@ vi.mock('@/api', () => ({
 import api from '@/api'
 import {
   fetchNeuacpCatalog,
+  fetchNeuacpRunFrames,
   testNeuacpConnection,
   fetchNeuacpStatus,
   removeTeamMember,
@@ -78,6 +79,23 @@ describe('neuacp API — 名册移除（A5 DELETE 端点）', () => {
     expect(mockDelete).toHaveBeenCalledTimes(1)
     expect(mockDelete.mock.calls[0][0]).toBe(
       `/teams/team-1/members/${encodeURIComponent('a/b c')}`,
+    )
+  })
+})
+
+describe('neuacp API — 帧回放读面（F2）', () => {
+  it('fetchNeuacpRunFrames calls GET /external-agents/runs/{id}/frames with cursor params', async () => {
+    await fetchNeuacpRunFrames('swarm_abc', 5, 100)
+    expect(mockGet).toHaveBeenCalledTimes(1)
+    expect(mockGet.mock.calls[0][0]).toBe(
+      '/external-agents/runs/swarm_abc/frames?after_seq=5&limit=100',
+    )
+  })
+
+  it('subagent_id 含特殊字符时按路径段转义；缺省游标从 0 起、limit 200', async () => {
+    await fetchNeuacpRunFrames('swarm/x y')
+    expect(mockGet.mock.calls[0][0]).toBe(
+      '/external-agents/runs/swarm%2Fx%20y/frames?after_seq=0&limit=200',
     )
   })
 })
