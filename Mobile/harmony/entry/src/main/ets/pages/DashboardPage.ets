@@ -524,7 +524,13 @@ export struct DashboardPage {
             this.moreFunctionSection()
           }
           .width('100%')
-          .padding(this.sm.getSpacing('md'))
+          // 底部预留 120：满滚时「更多功能」末行停在玻璃页签栏上方，可看可点（内容仍可滚过栏后）
+          .padding({
+            left: this.sm.getSpacing('md'),
+            right: this.sm.getSpacing('md'),
+            top: this.sm.getSpacing('md'),
+            bottom: 120
+          })
           .alignItems(HorizontalAlign.Start)
         }
         .layoutWeight(1)

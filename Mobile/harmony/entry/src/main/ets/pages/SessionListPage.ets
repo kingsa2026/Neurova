@@ -432,6 +432,8 @@ export struct SessionListPage {
             }, (s: ChatSession) => s.id + s.updated_at)
           }
           .width('100%')
+          // 底部预留空位：满滚时末张会话卡停在玻璃页签栏上方，可看可点（内容仍可滚过栏后）
+          .padding({ bottom: 120 })
         }
         .layoutWeight(1)
         .scrollBar(BarState.Off)

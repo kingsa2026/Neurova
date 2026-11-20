@@ -410,6 +410,12 @@ export struct KnowledgePage {
               this.buildKnowledgeCard(item)
             }
           }, (item: KnowledgeItem) => item.id + item.updatedAt)
+          // 底部预留空位：满滚时末张卡停在玻璃页签栏上方，可看可点（内容仍可滚过栏后）
+          ListItem() {
+            Column()
+              .width('100%')
+              .height(120)
+          }
         }
         .layoutWeight(1)
         .width('100%')
