@@ -225,7 +225,9 @@
         <a-table-column :title="t('ontology.entHistColTime')" data-index="started_at" width="170">
           <template #default="{ text }"><span class="mono">{{ formatTime(text) }}</span></template>
         </a-table-column>
-        <a-table-column :title="t('ontology.entHistColTrigger')" data-index="trigger_kind" width="90" />
+        <a-table-column :title="t('ontology.entHistColTrigger')" data-index="trigger_kind" width="90">
+          <template #default="{ text }">{{ triggerKindLabel(text) }}</template>
+        </a-table-column>
         <a-table-column :title="t('ontology.entHistColStatus')" data-index="status" width="90" />
         <a-table-column :title="t('ontology.entHistColAdmitted')" data-index="admitted" width="80" />
         <a-table-column :title="t('ontology.entHistColRejected')" data-index="rejected" width="80" />
@@ -629,6 +631,18 @@ const columns = computed(() => [
 ])
 
 const formatTime = (iso?: string) => (iso ? String(iso).replace('T', ' ').slice(0, 19) : '—')
+
+// 触发来源标签映射（manual/interval/startup/audit 走 i18n；未知值诚实回退原值，不猜标签）
+const TRIGGER_KIND_I18N_KEYS: Record<string, string> = {
+  manual: 'ontology.entTriggerManual',
+  interval: 'ontology.entTriggerInterval',
+  startup: 'ontology.entTriggerStartup',
+  audit: 'ontology.entTriggerAudit',
+}
+const triggerKindLabel = (kind: unknown) => {
+  const labelKey = TRIGGER_KIND_I18N_KEYS[String(kind ?? '')]
+  return labelKey ? t(labelKey) : String(kind ?? '')
+}
 
 const typeLabel = (row: EnterpriseSourceConfig) => {
   const d = row.descriptor as Record<string, string>
