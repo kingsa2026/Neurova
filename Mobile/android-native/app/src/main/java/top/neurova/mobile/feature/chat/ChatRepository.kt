@@ -7,6 +7,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import top.neurova.mobile.core.model.ChatHistoryEntry
 import top.neurova.mobile.core.model.ChatMessage
 import top.neurova.mobile.core.model.ChatSessionItem
+import top.neurova.mobile.core.model.SwarmCandidateBoard
+import top.neurova.mobile.core.model.SwarmGraphProjection
 import top.neurova.mobile.core.net.HttpChannel
 
 /**
@@ -20,10 +22,13 @@ import top.neurova.mobile.core.net.HttpChannel
  *   POST /console/chat/sessions/{id}/pin      置顶 {pinned}
  *   POST /console/chat/sessions/{id}/archive | /unarchive | /fork
  *   DELETE /console/chat/sessions/{id}
+ *   GET  /console/chat/runs/{id}/graph        蜂群协作图投影（车道G，P1-1/P2-4）
+ *   GET  /console/chat/runs/{id}/candidates   候选板重放投影（P2-3）
  */
 class ChatRepository(private val http: HttpChannel) {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    // coerceInputValues：后端显式 null / 未知枚举回落默认值，端上诚实降级不炸解码
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
     suspend fun listSessions(agentId: String? = null): List<ChatSessionItem> =
         listBy(agentId, archived = false)
@@ -81,5 +86,20 @@ class ChatRepository(private val http: HttpChannel) {
 
     suspend fun remove(sessionId: String) {
         http.deleteJson("/console/chat/sessions/$sessionId")
+    }
+
+    /**
+     * 蜂群协作拓扑图投影（车道G，对齐 PC ChatPage 的 SwarmFlowPanel 数据源）：
+     * 服务端只出投影、端上只做渲染；失败（含 503 run 台账关闭）以异常浮出，不吞。
+     */
+    suspend fun getSwarmRunGraph(parentSessionId: String): SwarmGraphProjection {
+        val data = http.unwrapData(http.getJson("/console/chat/runs/$parentSessionId/graph"))
+        return json.decodeFromJsonElement(SwarmGraphProjection.serializer(), data)
+    }
+
+    /** 候选板重放投影快照（revision/candidates/conflicts/incomplete/source）。 */
+    suspend fun getSwarmRunCandidates(parentSessionId: String): SwarmCandidateBoard {
+        val data = http.unwrapData(http.getJson("/console/chat/runs/$parentSessionId/candidates"))
+        return json.decodeFromJsonElement(SwarmCandidateBoard.serializer(), data)
     }
 }

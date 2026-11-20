@@ -108,6 +108,8 @@ fun ChatScreen(sessionId: String, initialTitle: String, onBack: () -> Unit, show
                 generating = controller.isGenerating,
                 chunkCount = controller.chunkCount,
             )
+            // 车道G：蜂群协作过程视图，挂在会话进度条正下方（同一运行详情区）
+            SwarmFlowPanel(parentSessionId = sessionId)
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                 val listState = rememberLazyListState()
                 LaunchedEffect(controller.messages.size) {

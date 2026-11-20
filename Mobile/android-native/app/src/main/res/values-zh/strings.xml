@@ -1,0 +1,27 @@
+<resources>
+    <string name="app_name">Neurova</string>
+
+    <!-- 蜂群协作过程视图（车道G，对齐 PC 端 SwarmFlowPanel.vue） -->
+    <string name="swarm_flow_title">蜂群协作</string>
+    <string name="swarm_flow_summary">%1$d 成员 · %2$d 关系 · 版本 %3$d</string>
+    <string name="swarm_flow_toggle">展开或收起协作视图</string>
+    <string name="swarm_flow_loading">协作图加载中…</string>
+    <string name="swarm_flow_empty">本会话暂无蜂群协作记录</string>
+    <string name="swarm_flow_error">协作图加载失败</string>
+    <string name="swarm_flow_retry">重试</string>
+    <string name="swarm_flow_legend_spawn">委派</string>
+    <string name="swarm_flow_legend_dependency">依赖</string>
+    <string name="swarm_flow_legend_approval">审批</string>
+    <string name="swarm_flow_legend_candidate">候选</string>
+    <string name="swarm_flow_depth_badge">深度 %1$d</string>
+    <string name="swarm_flow_external_badge">外部</string>
+    <string name="swarm_flow_spawned_from">由 %1$s 委派</string>
+    <string name="swarm_flow_depends_on">依赖 %1$s</string>
+    <string name="swarm_flow_approval_badge">审批 %1$s</string>
+    <string name="swarm_flow_candidate_badge">候选</string>
+    <string name="swarm_flow_truncated_hint">仅显示最近 %1$d 个 run（已截断）</string>
+    <string name="swarm_flow_incomplete_hint">候选账本缺事件，候选板可能不完整</string>
+    <string name="swarm_flow_candidates_title">候选板 · 版本 %1$d</string>
+    <string name="swarm_flow_candidates_unavailable">候选板暂不可用（图数据照常展示）</string>
+    <string name="swarm_flow_conflict_with">与 %1$d 个候选冲突</string>
+</resources>

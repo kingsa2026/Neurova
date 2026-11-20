@@ -1,3 +1,27 @@
 <resources>
     <string name="app_name">Neurova</string>
+
+    <!-- Swarm flow panel (lane G, aligned with PC SwarmFlowPanel.vue) -->
+    <string name="swarm_flow_title">Swarm collaboration</string>
+    <string name="swarm_flow_summary">%1$d members · %2$d links · rev %3$d</string>
+    <string name="swarm_flow_toggle">Expand or collapse swarm view</string>
+    <string name="swarm_flow_loading">Loading collaboration graph…</string>
+    <string name="swarm_flow_empty">No swarm activity in this session yet</string>
+    <string name="swarm_flow_error">Failed to load collaboration graph</string>
+    <string name="swarm_flow_retry">Retry</string>
+    <string name="swarm_flow_legend_spawn">Delegation</string>
+    <string name="swarm_flow_legend_dependency">Dependency</string>
+    <string name="swarm_flow_legend_approval">Approval</string>
+    <string name="swarm_flow_legend_candidate">Candidate</string>
+    <string name="swarm_flow_depth_badge">Depth %1$d</string>
+    <string name="swarm_flow_external_badge">External</string>
+    <string name="swarm_flow_spawned_from">Delegated by %1$s</string>
+    <string name="swarm_flow_depends_on">Depends on %1$s</string>
+    <string name="swarm_flow_approval_badge">Approval %1$s</string>
+    <string name="swarm_flow_candidate_badge">Candidate</string>
+    <string name="swarm_flow_truncated_hint">Showing latest %1$d runs only (truncated)</string>
+    <string name="swarm_flow_incomplete_hint">Candidate ledger incomplete — board may be partial</string>
+    <string name="swarm_flow_candidates_title">Candidate board · rev %1$d</string>
+    <string name="swarm_flow_candidates_unavailable">Candidate board unavailable (graph shown as-is)</string>
+    <string name="swarm_flow_conflict_with">Conflicts with %1$d</string>
 </resources>
