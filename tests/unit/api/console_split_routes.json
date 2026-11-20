@@ -711,6 +711,148 @@
  },
  {
   "kind": "APIRoute",
+  "path": "/chat/runs/{parent_session_id}/candidates",
+  "methods": [
+   "GET"
+  ],
+  "name": "get_console_run_candidates",
+  "unique_id": "get_console_run_candidates_chat_runs__parent_session_id__candidates_get",
+  "operation_id": null,
+  "response_model": null,
+  "status_code": null,
+  "parameters": [
+   {
+    "name": "parent_session_id",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "builtins.str",
+    "default": "<empty>"
+   },
+   {
+    "name": "request",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "starlette.requests.Request",
+    "default": "<empty>"
+   },
+   {
+    "name": "limit",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "builtins.int",
+    "default": "annotation=int required=False default=200 alias='limit' json_schema_extra={} metadata=[Ge(ge=1), Le(le=1000)]"
+   },
+   {
+    "name": "current_user",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "typing.Dict[str, typing.Any]",
+    "default": {
+     "dependency": {
+      "name": "neurova.api.auth.get_current_userWithQueryToken",
+      "closure": []
+     },
+     "use_cache": true
+    }
+   }
+  ],
+  "return": "<empty>",
+  "dependencies": {
+   "call": null,
+   "name": null,
+   "use_cache": true,
+   "children": [
+    {
+     "call": {
+      "name": "neurova.api.auth.get_current_userWithQueryToken",
+      "closure": []
+     },
+     "name": "current_user",
+     "use_cache": true,
+     "children": [
+      {
+       "call": {
+        "name": "neurova.api.auth.BearerOrQuery",
+        "closure": []
+       },
+       "name": "credentials",
+       "use_cache": true,
+       "children": []
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "kind": "APIRoute",
+  "path": "/chat/runs/{parent_session_id}/graph",
+  "methods": [
+   "GET"
+  ],
+  "name": "get_console_run_graph",
+  "unique_id": "get_console_run_graph_chat_runs__parent_session_id__graph_get",
+  "operation_id": null,
+  "response_model": null,
+  "status_code": null,
+  "parameters": [
+   {
+    "name": "parent_session_id",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "builtins.str",
+    "default": "<empty>"
+   },
+   {
+    "name": "request",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "starlette.requests.Request",
+    "default": "<empty>"
+   },
+   {
+    "name": "limit",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "builtins.int",
+    "default": "annotation=int required=False default=200 alias='limit' json_schema_extra={} metadata=[Ge(ge=1), Le(le=500)]"
+   },
+   {
+    "name": "current_user",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "typing.Dict[str, typing.Any]",
+    "default": {
+     "dependency": {
+      "name": "neurova.api.auth.get_current_userWithQueryToken",
+      "closure": []
+     },
+     "use_cache": true
+    }
+   }
+  ],
+  "return": "<empty>",
+  "dependencies": {
+   "call": null,
+   "name": null,
+   "use_cache": true,
+   "children": [
+    {
+     "call": {
+      "name": "neurova.api.auth.get_current_userWithQueryToken",
+      "closure": []
+     },
+     "name": "current_user",
+     "use_cache": true,
+     "children": [
+      {
+       "call": {
+        "name": "neurova.api.auth.BearerOrQuery",
+        "closure": []
+       },
+       "name": "credentials",
+       "use_cache": true,
+       "children": []
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "kind": "APIRoute",
   "path": "/chat/history",
   "methods": [
    "GET"
@@ -803,6 +945,12 @@
     "kind": "POSITIONAL_OR_KEYWORD",
     "annotation": "builtins.int",
     "default": "annotation=int required=False default=0 alias='limit' json_schema_extra={} metadata=[Ge(ge=0), Le(le=5000)]"
+   },
+   {
+    "name": "offset",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "builtins.int",
+    "default": "annotation=int required=False default=0 alias='offset' json_schema_extra={} metadata=[Ge(ge=0)]"
    },
    {
     "name": "current_user",

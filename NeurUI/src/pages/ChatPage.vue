@@ -395,6 +395,16 @@
         </button>
       </transition>
 
+      <!-- 蜂群协作拓扑图（P1-1，v2 全边集）：本会话子任务 run 的委派/依赖/审批/候选
+           全景。纯渲染组件（P2-4），投影经 getSwarmGraph 拉取；subagent 结构性事件
+           （started/completed）触发重取实现增量刷新。会话无蜂群活动时不占位 -->
+      <SwarmFlowPanel
+        v-if="swarmGraph || swarmGraphLoading"
+        class="nr-swarm-flow"
+        :projection="swarmGraph"
+        :loading="swarmGraphLoading"
+      />
+
       <!-- 输入区（Composer + 工具条 + 429/事件丢失横幅，2026-09-08 拆分） -->
       <ChatComposerArea
         ref="composerRef"
@@ -507,10 +517,12 @@ import {
   getAudioStatus,
   getConsoleChatRuns,
   getConsoleTasks,
+  getSwarmGraph,
   steerConsoleChat,
   stopConsoleChat,
   autoTitleConsoleSession,
 } from '@/api/modules/console'
+import type { SwarmGraphResult } from '@/types/swarmGraph'
 import { extractUploadedFileId } from '@/api/modules/files'
 import { useGovernanceApproval } from '@/composables/useGovernanceApproval'
 import { readAccessToken } from '@/utils/authSession'
@@ -525,6 +537,7 @@ import { resolveI18nMessage } from '@/utils/i18n'
 import UiIcon from '@/components/UiIcon.vue'
 
 import SubAgentWindowStack from '@/components/chat/SubAgentWindowStack.vue'
+import SwarmFlowPanel from '@/components/chat/SwarmFlowPanel.vue'
 import SessionRenameModal from '@/components/chat/SessionRenameModal.vue'
 import ChatSessionSidebar from '@/components/chat/ChatSessionSidebar.vue'
 import ChatComposerArea from '@/components/chat/ChatComposerArea.vue'
@@ -643,6 +656,36 @@ const { effort: thinkingEffort } = useThinkingEffort()
 // ── 蜂群子 Agent 浮窗（WS subagent_* 事件 → useSubAgentWindows）──
 const { handleSubAgentSyncEvent, clearSubAgentWindows } = useSubAgentWindows()
 
+// ── 蜂群协作拓扑图（P1-1）：服务端投影 → SwarmFlowPanel 纯渲染 ──
+const swarmGraph = ref<SwarmGraphResult | null>(null)
+const swarmGraphLoading = ref(false)
+
+async function refreshSwarmGraph(): Promise<void> {
+  const sid = currentSessionId.value
+  if (!sid) {
+    swarmGraph.value = null
+    return
+  }
+  swarmGraphLoading.value = true
+  try {
+    const res: any = await getSwarmGraph(sid)
+    // 过期响应不写当前视图（与 restoreSubAgentWindows 同一条纪律）：
+    // 切会话后上一条 fetch 才回来，不能把旧会话的图摆到新会话
+    if (currentSessionId.value === sid) {
+      swarmGraph.value = (res?.data ?? res ?? null) as SwarmGraphResult | null
+    }
+  } catch {
+    // 图读面故障（含 run 台账关闭 503）不阻断聊天：保留上次投影
+  } finally {
+    if (currentSessionId.value === sid) swarmGraphLoading.value = false
+  }
+}
+
+/** 结构性 subagent 事件才重取投影（chunk/reminder 高频事件不刷图） */
+function onStructuralSubagentEvent(eventType: string): boolean {
+  return eventType === 'subagent_started' || eventType === 'subagent_completed'
+}
+
 function onSessionSyncEvent(event: { event_type: string; payload: Record<string, unknown> }) {
   const payload = (event.payload || {}) as Record<string, any>
   // 构建交互回答后服务端自动拉起的 Agent 回合：消息已落盘并广播 AGENT_REPLY，
@@ -681,6 +724,10 @@ function onSessionSyncEvent(event: { event_type: string; payload: Record<string,
     return
   }
   handleSubAgentSyncEvent(event)
+  // 协作拓扑图增量刷新：run 出生/终态才重取投影（chunk 类高频事件不刷）
+  if (onStructuralSubagentEvent(event.event_type)) {
+    void refreshSwarmGraph()
+  }
 }
 
 // 实时事件丢失提示：计数入 chatStore（composer 读）
@@ -2854,6 +2901,8 @@ watch(currentSessionId, async (sid) => {
   // §6-78 L 条：回收之后从台账读面把这条会话派出的子任务捡回来——
   // 改前切会话/刷新即整栈清零，而运行中的子任务其实还在跑，只是界面再也看不见它
   await restoreSubAgentWindows(sid ?? '', () => currentSessionId.value === sid)
+  // 协作拓扑图随会话切换重取（无蜂群活动的会话投影为空，面板不占位）
+  void refreshSwarmGraph()
 }, { immediate: true })   // 刷新进页面时 currentSessionId 已有值，不等它也就不回读
 
 onMounted(() => {

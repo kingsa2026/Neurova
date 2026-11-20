@@ -4662,5 +4662,23 @@ studio: {
     statusNote: 'Примечание',
     statusEmpty: 'Нет активных процессов внешних агентов',
     statusLoadFailed: 'Не удалось загрузить состояние',
+  },
+  swarmFlow: {
+    title: 'Топология роя',
+    summary: 'Участников: {runs} · связей: {edges} · версия интеграции {revision}',
+    truncatedHint: 'Число запусков превышает лимит, показаны последние {count}',
+    incompleteHint: 'Журнал событий кандидатов неполон; показана только воспроизводимая часть',
+    legendSpawn: 'Поручение',
+    legendDependency: 'Зависимость',
+    legendApproval: 'Согласование',
+    legendCandidate: 'Кандидат',
+    edgeApproval: 'Согласование {level} · {verdict}',
+    edgeCandidate: 'Кандидат · {status}',
+    verdictApproved: 'одобрено',
+    verdictRejected: 'отклонено',
+    verdictPending: 'ожидает',
+    externalBadge: 'внешний',
+    depthBadge: 'D{depth}',
+    emptyHint: 'В этой сессии нет подзадач',
   }
 }

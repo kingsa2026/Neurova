@@ -4662,5 +4662,23 @@ studio: {
     statusNote: 'Hinweis',
     statusEmpty: 'Keine aktiven externen Agentenprozesse',
     statusLoadFailed: 'Status konnte nicht geladen werden',
+  },
+  swarmFlow: {
+    title: 'Schwarm-Topologie',
+    summary: '{runs} Mitglieder · {edges} Verbindungen · Integrationsversion {revision}',
+    truncatedHint: 'Anzahl der Läufe über dem Limit; nur die letzten {count} werden angezeigt',
+    incompleteHint: 'Kandidaten-Ereignisprotokoll unvollständig; nur der wiedergebbare Teil wird angezeigt',
+    legendSpawn: 'Delegation',
+    legendDependency: 'Abhängigkeit',
+    legendApproval: 'Genehmigung',
+    legendCandidate: 'Kandidat',
+    edgeApproval: 'Genehmigung {level} · {verdict}',
+    edgeCandidate: 'Kandidat · {status}',
+    verdictApproved: 'genehmigt',
+    verdictRejected: 'abgelehnt',
+    verdictPending: 'ausstehend',
+    externalBadge: 'extern',
+    depthBadge: 'D{depth}',
+    emptyHint: 'Keine Unteraufgaben-Läufe in dieser Sitzung',
   }
 }

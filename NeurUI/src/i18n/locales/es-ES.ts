@@ -4640,5 +4640,23 @@ studio: {
     statusNote: 'Nota',
     statusEmpty: 'No hay procesos de agentes externos activos',
     statusLoadFailed: 'No se pudo cargar el estado',
+  },
+  swarmFlow: {
+    title: 'Topología del enjambre',
+    summary: '{runs} miembros · {edges} enlaces · revisión {revision}',
+    truncatedHint: 'El número de ejecuciones supera el límite; se muestran las últimas {count}',
+    incompleteHint: 'Registro de eventos de candidatos incompleto; solo se muestra la parte reproducible',
+    legendSpawn: 'Delegación',
+    legendDependency: 'Dependencia',
+    legendApproval: 'Aprobación',
+    legendCandidate: 'Candidato',
+    edgeApproval: 'Aprobación {level} · {verdict}',
+    edgeCandidate: 'Candidato · {status}',
+    verdictApproved: 'aprobado',
+    verdictRejected: 'rechazado',
+    verdictPending: 'pendiente',
+    externalBadge: 'externo',
+    depthBadge: 'D{depth}',
+    emptyHint: 'No hay ejecuciones de subtareas en esta sesión',
   }
 }

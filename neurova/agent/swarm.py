@@ -1110,6 +1110,25 @@ class SwarmManager:
                 "detail": f"等待依赖: {b.get('deps', [])}",
             })
         board = self._candidates.snapshot()
+        candidatesSource = "live"
+        if not board["candidates"] and not board["conflicts"]:
+            # P2-3 兜底（拍板 D-C）：内存板为空（重启/他进程场景）时以 H-4 账本
+            # 重放投影补齐——账本仍是唯一持久层，这里只读不写、不建第二事实源，
+            # 不改候选板 CAS 语义与判定权（处置仍只认内存板）。
+            try:
+                from neurova.agent.candidate_projection import projectCandidateBoard
+                from neurova.agent.swarm_event_log import readRunEvents
+
+                sids = [r.subagent_id for r in runs]
+                replay = projectCandidateBoard(
+                    {sid: readRunEvents(sid) for sid in sids if sid})
+                if replay["candidates"] or replay["conflicts"]:
+                    board = {"revision": replay["revision"],
+                             "candidates": replay["candidates"],
+                             "conflicts": replay["conflicts"]}
+                    candidatesSource = "replay"
+            except Exception as e:  # noqa: BLE001 - 投影故障不阻断核对面（留 debug 痕）
+                logger.debug("Swarm: 候选重放投影失败（按内存空板报告）: %s", e)
         return {
             "integration_ready": not blockers,
             "blockers": blockers,
@@ -1119,6 +1138,8 @@ class SwarmManager:
             "revision": board["revision"],
             "candidates": board["candidates"],
             "conflicts": board["conflicts"],
+            # P2-3：候选来源——live=内存板单源；replay=H-4 账本重放投影（内存板空时）
+            "candidates_source": candidatesSource,
         }
 
     # ── S4：结果候选制（member 产出先落候选，主侧审批 + CAS 合入）────────

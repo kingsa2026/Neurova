@@ -4662,5 +4662,23 @@ studio: {
     statusNote: 'टिप्पणी',
     statusEmpty: 'कोई सक्रिय बाहरी एजेंट प्रक्रिया नहीं',
     statusLoadFailed: 'स्थिति लोड नहीं हो सकी',
+  },
+  swarmFlow: {
+    title: 'स्वार्म टोपोलॉजी',
+    summary: '{runs} सदस्य · {edges} लिंक · संस्करण {revision}',
+    truncatedHint: 'रन संख्या सीमा से अधिक है; केवल नवीनतम {count} दिखाए जा रहे हैं',
+    incompleteHint: 'कैंडिडेट इवेंट लेजर अपूर्ण है; केवल पुनःप्ले योग्य भाग दिखाया जा रहा है',
+    legendSpawn: 'प्रत्यायोजन',
+    legendDependency: 'निर्भरता',
+    legendApproval: 'अनुमोदन',
+    legendCandidate: 'कैंडिडेट',
+    edgeApproval: 'अनुमोदन {level} · {verdict}',
+    edgeCandidate: 'कैंडिडेट · {status}',
+    verdictApproved: 'स्वीकृत',
+    verdictRejected: 'अस्वीकृत',
+    verdictPending: 'लंबित',
+    externalBadge: 'बाहरी',
+    depthBadge: 'D{depth}',
+    emptyHint: 'इस सत्र में कोई सबटास्क रन नहीं',
   }
 }

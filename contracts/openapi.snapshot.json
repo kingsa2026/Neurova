@@ -1967,6 +1967,20 @@
           "title": "BoardStats",
           "type": "object"
         },
+        "Body_create_voice_minutes_api_v1_audio_minutes_post": {
+          "properties": {
+            "file": {
+              "contentMediaType": "application/octet-stream",
+              "title": "File",
+              "type": "string"
+            }
+          },
+          "required": [
+            "file"
+          ],
+          "title": "Body_create_voice_minutes_api_v1_audio_minutes_post",
+          "type": "object"
+        },
         "Body_execute_workflow_api_v1_neurflow_workflows__workflow_id__execute_post": {
           "properties": {
             "agent_id": {
@@ -22108,6 +22122,97 @@
           ]
         }
       },
+      "/api/v1/audio/minutes": {
+        "post": {
+          "description": "录音 → 纪要 → Ask 判定 → 任务（B4-8）。\n\n上传录音文件入队（有界队列，B4-4：满时记 input_gap 证据并如实 429，\n不静默丢）；处理异步进行，用 GET /minutes/{job_id} 轮询结果。\n判定为\"办事\"的任务自动落任务看板（createTaskFromVoiceMinutes）。",
+          "operationId": "create_voice_minutes_minutes_post",
+          "requestBody": {
+            "content": {
+              "multipart/form-data": {
+                "schema": {
+                  "$ref": "#/components/schemas/Body_create_voice_minutes_api_v1_audio_minutes_post"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Create Voice Minutes",
+          "tags": [
+            "Audio API"
+          ]
+        }
+      },
+      "/api/v1/audio/minutes/{job_id}": {
+        "get": {
+          "description": "查询录音纪要作业状态/结果（transcript/summary/kind/task_id）。",
+          "operationId": "get_voice_minutes_status_minutes__job_id__get",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "job_id",
+              "required": true,
+              "schema": {
+                "title": "Job Id",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Get Voice Minutes Status",
+          "tags": [
+            "Audio API"
+          ]
+        }
+      },
       "/api/v1/audio/status": {
         "get": {
           "description": "音频系统状态\n\n返回 TTS 和 ASR 引擎的状态信息。",
@@ -30567,6 +30672,122 @@
             }
           ],
           "summary": "Get Console Chat Runs",
+          "tags": [
+            "Console API"
+          ]
+        }
+      },
+      "/api/v1/console/chat/runs/{parent_session_id}/candidates": {
+        "get": {
+          "description": "候选板重放投影读面（P2-3，拍板 D-C）：按发起会话取全部子任务 run →\n逐 run 读 H-4 事件账本 → 折叠 candidate_* 事件重建候选板快照。\n\n内存候选板是进程内态（candidate_merge.py 自注不落盘），重启/跨进程后\n「在途候选还在不在、冲突裁决到哪」只有账本知道。本读面不落新表——账本仍是\n唯一持久层；鉴权与归属判定同 ``/chat/runs`` 读面（非管理员逐行过\n``_check_session_ownership``，教义第 6 条同一谓词）。",
+          "operationId": "get_console_run_candidates_chat_runs__parent_session_id__candidates_get",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "parent_session_id",
+              "required": true,
+              "schema": {
+                "title": "Parent Session Id",
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "default": 200,
+                "maximum": 1000,
+                "minimum": 1,
+                "title": "Limit",
+                "type": "integer"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "BearerOrQuery": []
+            }
+          ],
+          "summary": "Get Console Run Candidates",
+          "tags": [
+            "Console API"
+          ]
+        }
+      },
+      "/api/v1/console/chat/runs/{parent_session_id}/graph": {
+        "get": {
+          "description": "蜂群协作拓扑图投影（P1-1，拍板 D-A：v2 全边集 spawn+依赖+审批+候选）。\n\n服务端只出投影、前端只做渲染（P2-4）：语义解析在 ``swarm_graph_projection``\n完成。事实源=agent_runs 台账 + H-4 事件账本 + 审批审计/ApprovalManager +\nP2-3 候选投影；本路由只做读面装配，不落新表、不写新账。鉴权与归属判定同\n``/chat/runs`` 读面。",
+          "operationId": "get_console_run_graph_chat_runs__parent_session_id__graph_get",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "parent_session_id",
+              "required": true,
+              "schema": {
+                "title": "Parent Session Id",
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "default": 200,
+                "maximum": 500,
+                "minimum": 1,
+                "title": "Limit",
+                "type": "integer"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "BearerOrQuery": []
+            }
+          ],
+          "summary": "Get Console Run Graph",
           "tags": [
             "Console API"
           ]

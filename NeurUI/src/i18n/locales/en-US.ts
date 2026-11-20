@@ -4663,5 +4663,23 @@ studio: {
     statusNote: 'Note',
     statusEmpty: 'No live external agent processes',
     statusLoadFailed: 'Failed to load status',
+  },
+  swarmFlow: {
+    title: 'Swarm Topology',
+    summary: '{runs} members · {edges} links · revision {revision}',
+    truncatedHint: 'Run count exceeds the cap; showing the latest {count}',
+    incompleteHint: 'Candidate event ledger is incomplete; showing only the replayable part',
+    legendSpawn: 'Spawn',
+    legendDependency: 'Dependency',
+    legendApproval: 'Approval',
+    legendCandidate: 'Candidate',
+    edgeApproval: 'Approval {level} · {verdict}',
+    edgeCandidate: 'Candidate · {status}',
+    verdictApproved: 'approved',
+    verdictRejected: 'rejected',
+    verdictPending: 'pending',
+    externalBadge: 'external',
+    depthBadge: 'D{depth}',
+    emptyHint: 'No subagent runs in this session',
   }
 }

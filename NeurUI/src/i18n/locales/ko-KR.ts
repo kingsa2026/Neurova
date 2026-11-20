@@ -4662,5 +4662,23 @@ studio: {
     statusNote: '비고',
     statusEmpty: '실행 중인 외부 에이전트 프로세스가 없습니다',
     statusLoadFailed: '상태를 불러오지 못했습니다',
+  },
+  swarmFlow: {
+    title: '협업 토폴로지',
+    summary: '멤버 {runs} · 연결 {edges} · 통합 리비전 {revision}',
+    truncatedHint: '실행 수가 상한을 초과하여 최근 {count}개만 표시',
+    incompleteHint: '후보 이벤트 장부가 불완전하여 재생 가능한 부분만 표시',
+    legendSpawn: '위임',
+    legendDependency: '의존',
+    legendApproval: '승인',
+    legendCandidate: '후보',
+    edgeApproval: '승인 {level} · {verdict}',
+    edgeCandidate: '후보 · {status}',
+    verdictApproved: '승인됨',
+    verdictRejected: '거부됨',
+    verdictPending: '대기 중',
+    externalBadge: '외부',
+    depthBadge: 'D{depth}',
+    emptyHint: '이 세션에는 하위 작업 실행이 없습니다',
   }
 }

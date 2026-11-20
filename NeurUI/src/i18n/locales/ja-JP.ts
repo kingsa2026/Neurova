@@ -4662,5 +4662,23 @@ studio: {
     statusNote: '備考',
     statusEmpty: '稼働中の外部エージェントプロセスはありません',
     statusLoadFailed: '状態の読み込みに失敗しました',
+  },
+  swarmFlow: {
+    title: '協調トポロジ',
+    summary: '{runs} メンバー · {edges} リンク · 統合リビジョン {revision}',
+    truncatedHint: '実行数が上限を超えたため、最新の {count} 件のみ表示',
+    incompleteHint: '候補イベント台帳が不完全です。再生可能な部分のみ表示',
+    legendSpawn: '派生',
+    legendDependency: '依存',
+    legendApproval: '承認',
+    legendCandidate: '候補',
+    edgeApproval: '承認 {level} · {verdict}',
+    edgeCandidate: '候補 · {status}',
+    verdictApproved: '承認済み',
+    verdictRejected: '却下',
+    verdictPending: '待決',
+    externalBadge: '外部',
+    depthBadge: 'D{depth}',
+    emptyHint: 'このセッションにはサブタスク実行がありません',
   }
 }

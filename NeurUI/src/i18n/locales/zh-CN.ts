@@ -4587,5 +4587,23 @@ studio: {
     statusNote: '说明',
     statusEmpty: '暂无存活的外部代理进程',
     statusLoadFailed: '状态加载失败',
+  },
+  swarmFlow: {
+    title: '协作拓扑',
+    summary: '{runs} 个成员 · {edges} 条关系 · 集成版本 {revision}',
+    truncatedHint: '子任务数超上限，仅显示最近 {count} 个',
+    incompleteHint: '候选事件账本不完整，图形仅含可重放部分',
+    legendSpawn: '委派',
+    legendDependency: '依赖',
+    legendApproval: '审批',
+    legendCandidate: '候选',
+    edgeApproval: '审批 {level} · {verdict}',
+    edgeCandidate: '候选 · {status}',
+    verdictApproved: '已批准',
+    verdictRejected: '已否决',
+    verdictPending: '待裁决',
+    externalBadge: '外部',
+    depthBadge: 'D{depth}',
+    emptyHint: '该会话暂无子任务运行',
   }
 }

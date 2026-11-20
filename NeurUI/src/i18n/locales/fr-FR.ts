@@ -4662,5 +4662,23 @@ studio: {
     statusNote: 'Note',
     statusEmpty: 'Aucun processus d’agent externe actif',
     statusLoadFailed: 'Échec du chargement de l’état',
+  },
+  swarmFlow: {
+    title: "Topologie de l'essaim",
+    summary: '{runs} membres · {edges} liens · révision {revision}',
+    truncatedHint: "Nombre d'exécutions au-delà de la limite ; {count} plus récentes affichées",
+    incompleteHint: "Registre d'événements candidats incomplet ; seule la partie rejouable est affichée",
+    legendSpawn: 'Délégation',
+    legendDependency: 'Dépendance',
+    legendApproval: 'Approbation',
+    legendCandidate: 'Candidat',
+    edgeApproval: 'Approbation {level} · {verdict}',
+    edgeCandidate: 'Candidat · {status}',
+    verdictApproved: 'approuvé',
+    verdictRejected: 'rejeté',
+    verdictPending: 'en attente',
+    externalBadge: 'externe',
+    depthBadge: 'D{depth}',
+    emptyHint: 'Aucune exécution de sous-tâche dans cette session',
   }
 }

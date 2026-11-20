@@ -1640,6 +1640,251 @@ async def get_console_subagent_events(
     }
 
 
+def _graphMemberProfiles(rows: typing.List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """图节点成员档案装配（P1-1）：团队名册（用户资产单源）+ 内存 run 态。
+
+    - 团队派活 run：按 team_id 查名册、agent_id=user_id 对位——名册成员带
+      ``executor`` 即外部成员（kind=external，executor_tool=目录标识）；
+    - 非团队 run：内置注册表解析的 agent（kind=internal），显示名回落 agent_id；
+    - 内存 run 在册时补活状态（pending/in_review 等台账看不到的中间态）。
+    """
+    profiles: Dict[str, Dict[str, Any]] = {}
+    rosterCache: Dict[str, Dict[str, Any]] = {}
+    memoryRuns: Dict[str, Any] = {}
+    try:
+        from neurova.agent.swarm import get_swarm_manager
+
+        manager = get_swarm_manager()
+        memoryRuns = getattr(manager, "_runs", {}) or {}  # 仅读（与 external_agents_api 同款）
+    except Exception:  # noqa: BLE001 - 蜂群管理器不可用时按纯台账投影
+        memoryRuns = {}
+    for r in rows:
+        sid = str(r.get("subagent_id") or "")
+        if not sid:
+            continue
+        agentId = str(r.get("agent_id") or "")
+        profile: Dict[str, Any] = {
+            "member_name": agentId or sid, "kind": "internal", "executor_tool": "",
+        }
+        teamId = str(r.get("team_id") or "")
+        if teamId:
+            roster = rosterCache.get(teamId)
+            if roster is None:
+                try:
+                    from neurova.api.endpoints.teams_api import getTeamRoster
+
+                    roster = getTeamRoster(teamId) or {}
+                except Exception:  # noqa: BLE001 - 名册不可用时该 run 按内置成员投影
+                    roster = {}
+                rosterCache[teamId] = roster
+            for member in (roster.get("members_detail") or []):
+                if str(member.get("user_id") or "") != agentId:
+                    continue
+                profile["member_name"] = str(member.get("name") or "") or agentId
+                executor = member.get("executor")
+                if isinstance(executor, dict) and executor:
+                    profile["kind"] = "external"
+                    profile["executor_tool"] = str(executor.get("tool")
+                                                   or executor.get("kind") or "")
+                break
+        liveRun = memoryRuns.get(sid)
+        liveStatus = str(getattr(liveRun, "status", "") or "") if liveRun is not None else ""
+        if liveStatus:
+            profile["status"] = liveStatus
+        profiles[sid] = profile
+    return profiles
+
+
+def _graphTaskUnits(rows: typing.List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """依赖边数据源：内存 run 态里的 TaskUnit（重启/逐出后缺席=如实缺边，不凭空补）。"""
+    taskUnits: Dict[str, Dict[str, Any]] = {}
+    try:
+        from neurova.agent.swarm import get_swarm_manager
+
+        memoryRuns = getattr(get_swarm_manager(), "_runs", {}) or {}
+    except Exception:  # noqa: BLE001
+        return taskUnits
+    for r in rows:
+        sid = str(r.get("subagent_id") or "")
+        if not sid:
+            continue
+        run = memoryRuns.get(sid)
+        unit = getattr(run, "task_unit", None) if run is not None else None
+        if isinstance(unit, dict) and unit.get("dependencies"):
+            taskUnits[sid] = unit
+    return taskUnits
+
+
+def _graphApprovalRecords(subagentIds: typing.List[str]) -> typing.List[Dict[str, Any]]:
+    """审批边数据源装配：审批链审计（S8 单源）按 run 配对请求/裁决，再叠
+    ApprovalManager 在册待审单（审计写失败 fail-open 的那部分不丢边）。
+
+    返回 {request_id, run_id, level, operation, status(pending|decided),
+    decision(approve|reject|''), decided_by, requested_at, decided_at}。
+    """
+    records: Dict[str, Dict[str, Any]] = {}
+    wanted = {str(s or "").strip() for s in subagentIds if str(s or "").strip()}
+    try:
+        from neurova.security.audit_logger import AuditEventType, get_audit_logger
+
+        audit = get_audit_logger()
+        for sid in subagentIds:
+            sid = str(sid or "").strip()
+            if not sid:
+                continue
+            try:
+                entries = audit.query(event_type=AuditEventType.APPROVAL,
+                                      resource_id=sid, limit=50)
+            except Exception:  # noqa: BLE001 - 单 run 审计查询失败不阻断其余
+                continue
+            for entry in sorted(entries, key=lambda e: e.timestamp):
+                details = entry.details or {}
+                requestId = str(details.get("request_id") or "")
+                if not requestId:
+                    continue
+                rec = records.get(requestId)
+                if rec is None:
+                    rec = {"request_id": requestId, "run_id": sid, "level": "",
+                           "operation": "", "status": "pending", "decision": "",
+                           "decided_by": "", "requested_at": 0.0, "decided_at": 0.0}
+                    records[requestId] = rec
+                phase = str(details.get("phase") or "")
+                if phase == "request":
+                    rec["level"] = str(details.get("effective_level")
+                                       or details.get("level") or "")
+                    rec["operation"] = str(details.get("operation") or "")
+                    rec["requested_at"] = float(entry.timestamp or 0.0)
+                elif phase == "decide":
+                    rec["status"] = "decided"
+                    rec["decision"] = str(details.get("decision") or "")
+                    rec["decided_by"] = str(details.get("decided_by")
+                                            or entry.user_id or "")
+                    rec["decided_at"] = float(entry.timestamp or 0.0)
+    except Exception:  # noqa: BLE001 - 审计面不可用：回落 ApprovalManager 在册单
+        pass
+    try:
+        from neurova.security.approval_manager import get_approval_manager
+
+        for req in get_approval_manager().get_pending_requests():
+            meta = req.metadata or {}
+            if meta.get("source") != "swarm":
+                continue
+            sid = str(meta.get("subagent_id") or "")
+            if sid not in wanted:
+                continue
+            rid = str(req.request_id)
+            rec = records.get(rid)
+            if rec is None:
+                rec = {"request_id": rid, "run_id": sid, "level": "",
+                       "operation": "", "status": "pending", "decision": "",
+                       "decided_by": "", "requested_at": 0.0, "decided_at": 0.0}
+                records[rid] = rec
+            rec["level"] = str(meta.get("effective_level")
+                               or meta.get("declared_level") or "") or rec["level"]
+            rec["operation"] = rec["operation"] or str(req.command or "")[:200]
+            try:
+                rec["requested_at"] = rec["requested_at"] or req.created_at.timestamp()
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001 - 审批管理器不可用：审计面有的照常出边
+        pass
+    return list(records.values())
+
+
+@router.get("/chat/runs/{parent_session_id}/candidates")
+async def get_console_run_candidates(
+    parent_session_id: str,
+    request: Request,
+    limit: int = Query(default=200, ge=1, le=1000),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """候选板重放投影读面（P2-3，拍板 D-C）：按发起会话取全部子任务 run →
+    逐 run 读 H-4 事件账本 → 折叠 candidate_* 事件重建候选板快照。
+
+    内存候选板是进程内态（candidate_merge.py 自注不落盘），重启/跨进程后
+    「在途候选还在不在、冲突裁决到哪」只有账本知道。本读面不落新表——账本仍是
+    唯一持久层；鉴权与归属判定同 ``/chat/runs`` 读面（非管理员逐行过
+    ``_check_session_ownership``，教义第 6 条同一谓词）。
+    """
+    from neurova.agent.candidate_projection import projectCandidateBoard
+    from neurova.agent.swarm_event_log import readRunEvents
+    from neurova.core import agent_run_store as _ars
+
+    if not _ars.run_gate_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="run 台账已关闭（NEUROVA_RUN_GATE=off），无候选投影读面",
+        )
+    user_id = _get_user_id(request, current_user)
+    rows = await asyncio.to_thread(
+        _ars.get_agent_run_store().list_subagent_runs, parent_session_id, limit)
+    if not _isAdminIdentity(current_user):
+        for row in rows:
+            _check_session_ownership({"user_id": row.get("user_id") or ""}, user_id)
+    eventsByRun: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        sid = str(row.get("subagent_id") or "")
+        if sid:
+            eventsByRun[sid] = await asyncio.to_thread(readRunEvents, sid)
+    snapshot = projectCandidateBoard(eventsByRun)
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"parent_session_id": parent_session_id, **snapshot},
+    }
+
+
+@router.get("/chat/runs/{parent_session_id}/graph")
+async def get_console_run_graph(
+    parent_session_id: str,
+    request: Request,
+    limit: int = Query(default=200, ge=1, le=500),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """蜂群协作拓扑图投影（P1-1，拍板 D-A：v2 全边集 spawn+依赖+审批+候选）。
+
+    服务端只出投影、前端只做渲染（P2-4）：语义解析在 ``swarm_graph_projection``
+    完成。事实源=agent_runs 台账 + H-4 事件账本 + 审批审计/ApprovalManager +
+    P2-3 候选投影；本路由只做读面装配，不落新表、不写新账。鉴权与归属判定同
+    ``/chat/runs`` 读面。
+    """
+    from neurova.agent.candidate_projection import projectCandidateBoard
+    from neurova.agent.swarm_event_log import readRunEvents
+    from neurova.agent.swarm_graph_projection import buildSwarmGraph
+    from neurova.core import agent_run_store as _ars
+
+    if not _ars.run_gate_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="run 台账已关闭（NEUROVA_RUN_GATE=off），无图投影读面",
+        )
+    user_id = _get_user_id(request, current_user)
+    rows = await asyncio.to_thread(
+        _ars.get_agent_run_store().list_subagent_runs, parent_session_id, limit)
+    if not _isAdminIdentity(current_user):
+        for row in rows:
+            _check_session_ownership({"user_id": row.get("user_id") or ""}, user_id)
+    eventsByRun: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        sid = str(row.get("subagent_id") or "")
+        if sid:
+            eventsByRun[sid] = await asyncio.to_thread(readRunEvents, sid)
+    graph = buildSwarmGraph(
+        runRows=rows,
+        eventsByRun=eventsByRun,
+        memberProfiles=await asyncio.to_thread(_graphMemberProfiles, rows),
+        taskUnits=await asyncio.to_thread(_graphTaskUnits, rows),
+        approvals=await asyncio.to_thread(
+            _graphApprovalRecords, [str(r.get("subagent_id") or "") for r in rows]),
+        candidateBoard=projectCandidateBoard(eventsByRun),
+    )
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"parent_session_id": parent_session_id, **graph},
+    }
+
+
 @router.get("/chat/history")
 async def get_chat_history(
     session_id: str,

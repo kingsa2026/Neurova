@@ -1,5 +1,6 @@
 import api from '@/api'
 import type { ApiResponse } from '@/types/response'
+import type { CandidateBoardResult, SwarmGraphResult } from '@/types/swarmGraph'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -187,6 +188,20 @@ export interface SubagentEventsResult {
 export function getConsoleSubagentEvents(subagentId: string) {
   return api.get<ApiResponse<SubagentEventsResult>>(
     `${BASE}/chat/subagents/${encodeURIComponent(subagentId)}/events`,
+  )
+}
+
+/** 蜂群协作拓扑图投影（P1-1，v2 全边集 spawn+依赖+审批+候选）。 */
+export function getSwarmGraph(parentSessionId: string) {
+  return api.get<ApiResponse<SwarmGraphResult>>(
+    `${BASE}/chat/runs/${encodeURIComponent(parentSessionId)}/graph`,
+  )
+}
+
+/** 候选板重放投影（P2-3：H-4 事件折叠，重启后可查）。 */
+export function getCandidateBoard(parentSessionId: string) {
+  return api.get<ApiResponse<CandidateBoardResult>>(
+    `${BASE}/chat/runs/${encodeURIComponent(parentSessionId)}/candidates`,
   )
 }
 

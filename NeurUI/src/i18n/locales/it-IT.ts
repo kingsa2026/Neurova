@@ -4640,5 +4640,23 @@ studio: {
     statusNote: 'Nota',
     statusEmpty: 'Nessun processo di agente esterno attivo',
     statusLoadFailed: 'Caricamento dello stato non riuscito',
+  },
+  swarmFlow: {
+    title: 'Topologia dello sciame',
+    summary: '{runs} membri · {edges} collegamenti · revisione {revision}',
+    truncatedHint: 'Il numero di esecuzioni supera il limite; mostrate le ultime {count}',
+    incompleteHint: 'Registro eventi candidati incompleto; mostrata solo la parte riproducibile',
+    legendSpawn: 'Delega',
+    legendDependency: 'Dipendenza',
+    legendApproval: 'Approvazione',
+    legendCandidate: 'Candidato',
+    edgeApproval: 'Approvazione {level} · {verdict}',
+    edgeCandidate: 'Candidato · {status}',
+    verdictApproved: 'approvato',
+    verdictRejected: 'respinto',
+    verdictPending: 'in attesa',
+    externalBadge: 'esterno',
+    depthBadge: 'D{depth}',
+    emptyHint: 'Nessuna esecuzione di sottoattività in questa sessione',
   }
 }

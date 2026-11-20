@@ -4662,5 +4662,23 @@ studio: {
     statusNote: 'ملاحظة',
     statusEmpty: 'لا توجد عمليات وكلاء خارجية حية',
     statusLoadFailed: 'فشل تحميل الحالة',
+  },
+  swarmFlow: {
+    title: 'طوبولوجيا السرب',
+    summary: '{runs} أعضاء · {edges} روابط · إصدار التكامل {revision}',
+    truncatedHint: 'عدد التشغيلات يتجاوز الحد؛ يتم عرض أحدث {count} فقط',
+    incompleteHint: 'سجل أحداث المرشحين غير مكتمل؛ يتم عرض الجزء القابل لإعادة التشغيل فقط',
+    legendSpawn: 'تكليف',
+    legendDependency: 'اعتمادية',
+    legendApproval: 'موافقة',
+    legendCandidate: 'مرشح',
+    edgeApproval: 'موافقة {level} · {verdict}',
+    edgeCandidate: 'مرشح · {status}',
+    verdictApproved: 'موافق عليه',
+    verdictRejected: 'مرفوض',
+    verdictPending: 'قيد الانتظار',
+    externalBadge: 'خارجي',
+    depthBadge: 'D{depth}',
+    emptyHint: 'لا توجد تشغيلات مهام فرعية في هذه الجلسة',
   }
 }
