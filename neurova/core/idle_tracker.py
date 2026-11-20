@@ -246,6 +246,23 @@ class IdleTimeTracker(BaseModule):
             self.log_warning("Cannot trigger consolidation: missing consolidation or memory manager")
             return
 
+        # Dreaming 式规则自改进（实施计划项 7）：睡眠窗口内把候选行为规则升格
+        # active（夜间 sweep；次日判定面经 activeRules 只读转正规则）。
+        # 惰性引入（§3 深模块纪律）+ 门控 NEUROVA_DREAMING + fail-soft——
+        # 规则转正故障绝不阻断记忆巩固主流程。
+        try:
+            from neurova.cognitive_layers.dreaming import dreamSweep, dreamingEnabled
+
+            if dreamingEnabled():
+                sweepResult = dreamSweep()
+                if sweepResult.get("promoted"):
+                    self.log_info(
+                        "Dream sweep: %d 条候选规则转正 active",
+                        len(sweepResult["promoted"]),
+                    )
+        except Exception as e:  # noqa: BLE001 - 规则转正不阻断睡眠整理
+            self.log_debug(f"Dream sweep skipped: {e}")
+
         # P0-4 记忆晋升：巩固前置确定性晋升门——
         # 召回/温度达标的 episodic 记忆晋升为重要记忆。晋升是本地确定性
         # 扫描（无 LLM、有界、节流），挂在空闲整理线程，永不阻塞回复路径。
