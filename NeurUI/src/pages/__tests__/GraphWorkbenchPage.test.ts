@@ -76,8 +76,9 @@ const studioFixture = {
   ],
   total_nodes: 3,
   truncated: false,
-  tenant_scoped: false,
-  schema: { terms: [], rules: [], schema_version: 1 },
+  // 对齐后端真形态：studio 响应的 tenant_scoped 在 data.schema 内
+  // （knowledge_graph_api.py /studio → ontologySchemaData 单源），data 顶层无此键。
+  schema: { terms: [], rules: [], schema_version: 1, tenant_scoped: true },
 }
 
 const i18n = createI18n({
@@ -93,6 +94,7 @@ const i18n = createI18n({
         workbenchLayoutSaved: '布局已保存',
         workbenchResetLayout: '重置布局',
         workbenchLayoutReset: '布局已重置',
+        workbenchTenantScoped: '租户隔离',
       },
       canvas: {
         fullscreenEnter: '画布全屏',
@@ -255,5 +257,23 @@ describe('GraphWorkbenchPage 2D 边渲染集契约', () => {
     const wrapper = await mountPage()
     const edges = flowEdgesOf(wrapper)
     expect(edges.map((e) => `${e.source}->${e.target}`).sort()).toEqual(['n1->n2', 'n2->n3'])
+  })
+})
+
+describe('GraphWorkbenchPage 租户隔离蓝标', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.clearAllMocks()
+  })
+
+  // 根因钉子：后端 studio 响应的 tenant_scoped 在 data.schema 内
+  // （knowledge_graph_api.py /studio → ontologySchemaData 单源），data 顶层无此键。
+  // 旧实现读 studio?.tenant_scoped 恒 undefined，蓝标永不显示；旧 mock 曾在
+  // 顶层塞假键掩盖此漂移，现 fixture 已对齐真形态（schema.tenant_scoped=true）。
+  it('蓝标按 schema.tenant_scoped 渲染', async () => {
+    const wrapper = await mountPage()
+    const tag = wrapper.find('.tenant-tag')
+    expect(tag.exists()).toBe(true)
+    expect(tag.text()).toBe('租户隔离')
   })
 })

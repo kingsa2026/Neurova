@@ -5,7 +5,7 @@
         <h2 class="page-title">{{ t('knowledge.workbenchTitle') }}</h2>
         <p class="page-subtitle">
           {{ currentAgent?.name || '' }}
-          <a-tag v-if="studio?.tenant_scoped" color="blue" class="tenant-tag">
+          <a-tag v-if="studio?.schema?.tenant_scoped" color="blue" class="tenant-tag">
             {{ t('knowledge.workbenchTenantScoped') }}
           </a-tag>
         </p>
@@ -384,8 +384,9 @@ interface StudioData {
   edges?: StudioEdge[]
   total_nodes?: number
   truncated?: boolean
-  tenant_scoped?: boolean
-  schema?: { terms?: OntologyTerm[]; rules?: OntologyRule[]; schema_version?: number }
+  // tenant_scoped 在 schema 内（后端 /studio → ontologySchemaData 单源投影），
+  // 不在 data 顶层——与 types/ontology.ts 的 OntologySchemaData 同构。
+  schema?: { terms?: OntologyTerm[]; rules?: OntologyRule[]; schema_version?: number; tenant_scoped?: boolean }
 }
 
 const loading = ref(false)

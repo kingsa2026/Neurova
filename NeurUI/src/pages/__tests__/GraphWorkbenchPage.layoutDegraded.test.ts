@@ -70,8 +70,8 @@ const studioFixture = {
   ],
   total_nodes: 3,
   truncated: false,
-  tenant_scoped: false,
-  schema: { terms: [], rules: [], schema_version: 1 },
+  // 对齐后端真形态：tenant_scoped 在 data.schema 内（/studio → ontologySchemaData）。
+  schema: { terms: [], rules: [], schema_version: 1, tenant_scoped: true },
 }
 
 /** 超出 LAYOUT_NODE_BUDGET(500) 的节点集（501 个星型全连通——默认枢纽邻域
