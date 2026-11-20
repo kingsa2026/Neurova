@@ -16,7 +16,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
+from .gp_surrogate import GaussianProcessSurrogate
+
 logger = get_logger(__name__)
+
+# 任务价值关键词（价值评估与代理特征化共用，单一事实源）
+VALUE_KEYWORDS = {"重要", "关键", "紧急", "critical", "important", "urgent", "核心"}
 
 # E-1: 正确检查 numpy 是否可用
 try:
@@ -119,6 +124,10 @@ class EKICognitiveOptimizer:
         self._task_history: List[TaskResult] = []
         self._max_history = 1000
 
+        # 高斯过程代理（train_surrogate 训练，surrogatePredict 读取）
+        self._surrogate: Optional[GaussianProcessSurrogate] = None
+        self._surrogateData: List[Tuple[List[float], float]] = []
+
         # 统计
         self._total_tasks = 0
         self._total_reinforcements = 0
@@ -217,8 +226,7 @@ class EKICognitiveOptimizer:
         length_factor = min(1.0, len(content) / 500.0) * 0.2
 
         # 关键词因子
-        keywords = {"重要", "关键", "紧急", "critical", "important", "urgent", "核心"}
-        keyword_factor = sum(1 for kw in keywords if kw in content.lower()) * 0.1
+        keyword_factor = sum(1 for kw in VALUE_KEYWORDS if kw in content.lower()) * 0.1
 
         # 上下文因子
         context_factor = 0.0
@@ -407,25 +415,52 @@ class EKICognitiveOptimizer:
         """
         raise NotImplementedError("flush_updates not implemented - real-time updates used")
 
+    @staticmethod
+    def _contentFeatures(content: str) -> List[float]:
+        """内容特征化：词汇丰富度/长度/关键词命中/平均词长，供 GP 代理使用"""
+        words = content.split()
+        total = len(words)
+        lexicalDiversity = len(set(words)) / max(1, total)
+        lengthFactor = min(1.0, len(content) / 500.0)
+        keywordHits = sum(1 for kw in VALUE_KEYWORDS if kw in content.lower())
+        avgWordLen = (sum(len(w) for w in words) / total) if total else 0.0
+        return [lexicalDiversity, lengthFactor, keywordHits / 5.0, min(1.0, avgWordLen / 10.0)]
+
+    @property
+    def surrogate(self) -> Optional[GaussianProcessSurrogate]:
+        """已训练的高斯过程代理（未训练时为 None）"""
+        return self._surrogate
+
     def train_surrogate(self, training_data: List[Tuple[str, float]]):
         """
-        训练代理模型（⚠️ 简化实现：非高斯过程代理模型）
+        训练高斯过程代理模型（GaussianProcessSurrogate）
+
+        以内容特征（词汇丰富度/长度/关键词命中/平均词长）为输入、目标分数为
+        输出拟合 GP；多次调用为增量累积数据并热启动重拟合。
 
         参数:
             training_data: List of (content, target_score)
         """
-        # 简化实现：使用训练数据调整集合参数
+        if not HAS_NUMPY:
+            raise RuntimeError("numpy 未安装，无法训练高斯过程代理")
         for content, target in training_data:
-            words = content.split()
-            complexity = len(set(words)) / max(1, len(words))
+            self._surrogateData.append((self._contentFeatures(content), float(target)))
+        if not self._surrogateData:
+            return
+        X = np.asarray([f for f, _ in self._surrogateData], dtype=float)
+        Y = np.asarray([t for _, t in self._surrogateData], dtype=float)
+        if self._surrogate is None:
+            self._surrogate = GaussianProcessSurrogate(seed=0)
+        self._surrogate.fit(X, Y, refitFrom=self._surrogate.logHp)
+        logger.info("GP surrogate trained on %s samples", len(self._surrogateData))
 
-            for particle in self._ensemble:
-                # 调整参数以匹配目标
-                error = target - complexity
-                particle["novelty_bonus"] += self._learning_rate * error * 0.1
-                particle["novelty_bonus"] = max(0.0, min(0.5, particle["novelty_bonus"]))
-
-        logger.info("Surrogate model trained on %s samples", len(training_data))
+    def surrogatePredict(self, content: str) -> float:
+        """用已训练的高斯过程代理预测内容价值分数（未训练时显式报错）"""
+        if self._surrogate is None or self._surrogate.logHp is None:
+            raise RuntimeError("surrogate not trained: call train_surrogate first")
+        features = np.asarray([self._contentFeatures(content)], dtype=float)
+        prediction = float(self._surrogate.predict(features)[0, 0])
+        return max(0.0, min(1.0, prediction))
 
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""

@@ -1,9 +1,14 @@
-"""阶段3 RED: 验证 bayesian_eki 诚实标注
+"""bayesian_eki 诚实标注守卫（完整 EKI 批次后更新）
 
-TDD 红灯阶段: 测试预期 docstring 诚实标注未实现组件，_flush_updates 抛出 NotImplementedError。
+历史: 本文件原为「阶段3 RED」——钉住当时 docstring 夸大（声称高斯过程、
+嵌入式采样）与 _flush_updates 空方法的诚实缺口。
 
-当前 docstring 夸大功能（声称高斯过程、嵌入式采样），_flush_updates 是空方法。
-GREEN 阶段将修正 docstring 并让 _flush_updates 显式失败。
+2026-11-20 完整 EKI 批次落地（ekiUpdate + EnsembleKalmanInversion +
+GaussianProcessSurrogate，EKIModule/EKICognitiveOptimizer 接线）后，按
+「改规则为准」翻转: 高斯过程代理与嵌入式采样转为**已实现**并钉住存在性；
+仍保留的简化面（_compute_information_gain 词汇启发式、_flush_updates
+未实现）继续钉住诚实标注。train_surrogate 的 GP 化由
+test_eki_complete_inversion.py::TestCognitiveOptimizerSurrogateWiring 钉住。
 """
 from __future__ import annotations
 
@@ -23,10 +28,10 @@ from neurova.cognitive_layers.memory_layer.bayesian_eki.cognitive_optimizer impo
 
 
 class TestHonestDocstring:
-    """验证 docstring 诚实标注未实现组件"""
+    """验证 docstring 诚实标注：已实现组件列全，未实现项仍如实标注"""
 
     def test_init_docstring_marks_unimplemented_components(self):
-        """__init__.py docstring 应标注未实现组件"""
+        """__init__.py docstring 应保留「未实现」诚实标注（剩余简化面）"""
         from neurova.cognitive_layers.memory_layer import bayesian_eki
 
         docstring = bayesian_eki.__doc__ or ""
@@ -43,24 +48,25 @@ class TestHonestDocstring:
         assert "EKICognitiveOptimizer" in docstring
         assert "TaskValue" in docstring
 
-    def test_init_docstring_marks_gaussian_process_unimplemented(self):
-        """__init__.py docstring 应标注高斯过程未实现"""
+    def test_init_docstring_marks_gaussian_process_implemented(self):
+        """高斯过程代理已实现：docstring 应列出 GaussianProcessSurrogate"""
         from neurova.cognitive_layers.memory_layer import bayesian_eki
 
         docstring = bayesian_eki.__doc__ or ""
-        # 高斯过程应标注为未实现
-        assert "高斯过程" in docstring or "gaussian" in docstring.lower(), (
-            "docstring 应提及高斯过程"
+        assert "GaussianProcessSurrogate" in docstring, (
+            "高斯过程代理已实现，docstring 应列出 GaussianProcessSurrogate"
         )
+        assert "高斯过程" in docstring or "gaussian" in docstring.lower()
 
-    def test_init_docstring_marks_embedded_sampling_unimplemented(self):
-        """__init__.py docstring 应标注嵌入式采样未实现"""
+    def test_init_docstring_marks_embedded_sampling_implemented(self):
+        """嵌入式采样已实现：docstring 应列出 EnsembleKalmanInversion 及采样机制"""
         from neurova.cognitive_layers.memory_layer import bayesian_eki
 
         docstring = bayesian_eki.__doc__ or ""
-        assert "嵌入式" in docstring or "embedded" in docstring.lower() or "采样" in docstring, (
-            "docstring 应提及嵌入式采样"
+        assert "EnsembleKalmanInversion" in docstring, (
+            "完整 EKI 求解器已实现，docstring 应列出 EnsembleKalmanInversion"
         )
+        assert "嵌入式" in docstring or "embedded" in docstring.lower() or "采样" in docstring
 
 
 # ────── _flush_updates 显式失败 ──────
@@ -80,14 +86,7 @@ class TestFlushUpdatesRaises:
 
 
 class TestSimplifiedImplementationMarked:
-    """验证简化实现的方法 docstring 包含标注"""
-
-    def test_train_surrogate_docstring_marks_simplified(self):
-        """train_surrogate docstring 应标注'简化实现'"""
-        docstring = EKICognitiveOptimizer.train_surrogate.__doc__ or ""
-        assert "简化" in docstring or "simplified" in docstring.lower(), (
-            "train_surrogate docstring 应标注为简化实现"
-        )
+    """验证仍为简化实现的方法 docstring 包含标注"""
 
     def test_compute_information_gain_docstring_marks_simplified(self):
         """_compute_information_gain docstring 应标注'简化实现'"""

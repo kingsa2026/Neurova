@@ -35,6 +35,7 @@
 | 知识库适配 + RAG | ✅ | `knowledge/`（repository/storage/vector_index） | [24-knowledge-isolation-rag](../01-architecture/24-knowledge-isolation-rag.md) |
 | 知识图谱 | ✅ | `knowledge/graph_bridge.py` `knowledge_graph_api` | [cognitive-graph-storage-architecture](../01-architecture/cognitive-graph-storage-architecture.md) |
 | 元认知监控 | ✅ | `cognitive_layers/meta_cognition_layer/` | [20-retrieval-context-injection](../01-architecture/20-retrieval-context-injection.md) |
+| EKI 完整反演（高斯过程代理 + 嵌入式采样） | ✅ | `cognitive_layers/memory_layer/bayesian_eki/`（`ekiUpdate` 单一事实源 + `EnsembleKalmanInversion` + `GaussianProcessSurrogate`；EKIModule 活链与认知优化器均已接线） | [27-eki-complete-inversion](../01-architecture/27-eki-complete-inversion.md) |
 
 ### 执行层
 

@@ -132,6 +132,11 @@ jieba>=0.42.1
 onnxruntime>=1.16.0
 tokenizers>=0.13.0
 
+# EKI 反演数学面（bayesian_eki/gp_surrogate.py 的 scipy.optimize 超参优化、
+# inversion.py 的 scipy.stats.qmc 先验初始化）——新验收测试走真实导入，
+# CI 薄环境缺席即 ModuleNotFoundError。下界与 requirements.txt 同值。
+scipy>=1.10.0
+
 # CLI 呈现层（`cli.py` 模块级 `from rich import box`）——受保护子集里
 # tests/unit/test_cliFourOhOneSelfRescueHint.py 走真实导入 `from cli import _error_message`，
 # 缺席 rich 即 ModuleNotFoundError: No module named 'rich'（4 个用例全红）。

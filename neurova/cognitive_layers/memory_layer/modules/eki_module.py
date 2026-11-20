@@ -11,6 +11,10 @@ import math
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+
+from neurova.cognitive_layers.memory_layer.bayesian_eki.inversion import ekiUpdate
+
 logger = get_logger(__name__)
 
 
@@ -22,20 +26,29 @@ class EKIModule:
     - 记忆重要性评估
     - 记忆衰减预测
     - 批量更新
+
+    状态更新复用 bayesian_eki.ekiUpdate（单一事实源）：随机 EKI
+    （扰动观测 + 集合经验互协方差增益），不再使用本模块内的简化增益公式。
     """
 
     def __init__(
         self,
         ensemble_size: int = 10,
         inflation_factor: float = 1.01,
+        observation_variance: float = 0.1,
+        seed: Optional[int] = None,
     ):
         """
         Args:
             ensemble_size: 集合大小
             inflation_factor: 膨胀因子
+            observation_variance: 观测噪声方差（增益分母正则项）
+            seed: 扰动观测的随机种子（None 为非确定性）
         """
         self._ensemble_size = ensemble_size
         self._inflation_factor = inflation_factor
+        self._observation_variance = observation_variance
+        self._rng = np.random.default_rng(seed)
 
         self._lock = threading.RLock()
         self._initialized = False
@@ -106,25 +119,24 @@ class EKIModule:
             if memory_id not in self._memory_states:
                 return
 
-            ensemble = self._memory_states[memory_id]
+            ensemble = np.asarray(self._memory_states[memory_id], dtype=float)  # (J, 3)
 
-            # EKI 更新步骤
-            # 1. 计算集合均值
-            mean_state = self._compute_mean(ensemble)
+            # 真随机 EKI 更新（单一事实源：bayesian_eki.ekiUpdate）。
+            # 观测算子 h(theta) = importance 分量，观测噪声方差 observation_variance。
+            responses = ensemble[:, [0]]
+            updated = ekiUpdate(
+                ensemble,
+                responses,
+                np.asarray([float(observation)]),
+                np.asarray([[self._observation_variance]]),
+                self._rng,
+                step=1.0,
+            )
 
-            # 2. 计算协方差
-            covariance = self._compute_covariance(ensemble, mean_state)
-
-            # 3. 计算卡尔曼增益
-            kalman_gain = self._compute_kalman_gain(covariance, observation)
-
-            # 4. 更新集合
-            updated_ensemble = self._update_ensemble(ensemble, mean_state, observation, kalman_gain)
-
-            # 5. 应用膨胀
-            inflated_ensemble = self._inflate(updated_ensemble, mean_state)
-
-            self._memory_states[memory_id] = inflated_ensemble
+            # 应用膨胀（围绕更新后的均值维持实际集合散布，防坍缩）
+            updated_list = updated.tolist()
+            mean_state = self._compute_mean(updated_list)
+            self._memory_states[memory_id] = self._inflate(updated_list, mean_state)
 
     def predict_importance(self, memory_id: str) -> float:
         """
@@ -216,12 +228,11 @@ class EKIModule:
             }
 
     def _generate_ensemble(self, mean_state: List[float]) -> List[List[float]]:
-        """生成集合"""
-        import random
-
+        """生成集合（围绕均值状态的高斯扰动，走模块统一随机源）"""
         ensemble = []
         for _ in range(self._ensemble_size):
-            perturbed = [max(0.0, min(1.0, v + random.gauss(0, 0.05))) for v in mean_state]
+            perturbation = self._rng.standard_normal(len(mean_state)) * 0.05
+            perturbed = [max(0.0, min(1.0, v + e)) for v, e in zip(mean_state, perturbation)]
             ensemble.append(perturbed)
 
         return ensemble
@@ -239,56 +250,6 @@ class EKIModule:
                 mean[i] += state[i]
 
         return [v / len(ensemble) for v in mean]
-
-    def _compute_covariance(
-        self,
-        ensemble: List[List[float]],
-        mean: List[float],
-    ) -> List[List[float]]:
-        """计算协方差矩阵"""
-        n = len(mean)
-        cov = [[0.0] * n for _ in range(n)]
-
-        for state in ensemble:
-            for i in range(n):
-                for j in range(n):
-                    cov[i][j] += (state[i] - mean[i]) * (state[j] - mean[j])
-
-        k = len(ensemble) - 1
-        if k > 0:
-            for i in range(n):
-                for j in range(n):
-                    cov[i][j] /= k
-
-        return cov
-
-    def _compute_kalman_gain(
-        self,
-        covariance: List[List[float]],
-        observation: float,
-    ) -> List[float]:
-        """计算卡尔曼增益"""
-        # 简化实现
-        n = len(covariance)
-        gain = [covariance[0][i] / (covariance[0][0] + 0.1) for i in range(n)]
-        return gain
-
-    def _update_ensemble(
-        self,
-        ensemble: List[List[float]],
-        mean: List[float],
-        observation: float,
-        kalman_gain: List[float],
-    ) -> List[List[float]]:
-        """更新集合"""
-        innovation = observation - mean[0]
-
-        updated = []
-        for state in ensemble:
-            new_state = [state[i] + kalman_gain[i] * innovation for i in range(len(state))]
-            updated.append(new_state)
-
-        return updated
 
     def _inflate(
         self,
