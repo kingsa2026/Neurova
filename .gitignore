@@ -510,3 +510,12 @@ Mobile/**/passwords.local.md
 Mobile/signing/*.cer
 Mobile/signing/*.p7b
 Mobile/signing/harmony/
+
+# 本地工作产物（不入库）：UI 对齐截图 / uitest 布局转储 / graphify 技能输出 / hvigor 增量快照
+/s*.jpeg
+/Mobile/e*.jpeg
+/Mobile/f*.jpeg
+/layout.json
+/layout2.json
+/graphify-out/
+/Mobile/harmony/.merkle-snapshot.json
