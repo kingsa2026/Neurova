@@ -7,8 +7,9 @@
   失败抛异常或返回 "[LLM Error] ..." 前缀文本。
 - ``config.name`` → 事件/台账/审批卡里的 agent_name。
 - ``current_session_id`` = run.member_session_id。
-- ``llm_client.chat`` → 验收/评审判定通道（D2 裁定提供；由装配方注入
-  本仓 provider 通道）。
+- ``llm_client.chat`` → 验收/评审判定通道（D2 裁定提供）：缺省惰性自建
+  ``NeuacpVerifyChannel``（独立判定会话，拍板 D-B）；显式注入优先
+  （本仓 provider 通道/测试替身）。
 - ``bindRun(run, logEvent, recorder=None, spanId=None)``：swarm._run_member
   在调用 chat 前注入运行上下文（B1 审批桥接 + B2 工具镜像的锚点）。
 - ``permission_asker(action, reason, context) -> dict``：同步裁决钩子。
@@ -46,6 +47,70 @@ def acpActionLevel(action: str) -> str:
     return "L0" if parts[2].strip().lower() in ACP_LEVEL_BY_KIND else "L1"
 
 
+# ── P1-2：外部成员验收/评审判定通道（拍板 D-B：独立 ACP 判定会话）─────────
+
+
+def denyVerifyPermission(action: str, reason: str, context: str) -> dict:
+    """判定会话权限裁决：恒 fail-closed deny（判定不需要工具面）。
+
+    形态与 :meth:`NeuacpMemberAdapter._approvalPermissionAsker` 同构（泵线程
+    同步应答的四键裁决 dict），但不开审批、不等裁决——判定子会话只做文本
+    往返，任何工具诉求一律拒绝。
+    """
+    return {
+        "approved": False,
+        "pending": False,
+        "denied": True,
+        "reason": "verify_session_permission_denied",
+    }
+
+
+def renderVerifyPrompt(messages: Any) -> str:
+    """判定子会话消息（``[{role, content}, ...]``）→ 外部代理单段提示词。
+
+    外部代理没有 messages 概念：system 判据与 user 目标/证据都进正文，按
+    role 标注保序拼接；纯字符串容器原样透传。
+    """
+    if isinstance(messages, str):
+        return messages
+    parts: list = []
+    for message in messages or []:
+        if isinstance(message, dict):
+            role = str(message.get("role") or "").strip()
+            content = str(message.get("content") or "")
+            parts.append(f"[{role}]\n{content}" if role else content)
+        else:
+            parts.append(str(message))
+    return "\n\n".join(part for part in parts if part.strip())
+
+
+class NeuacpVerifyChannel:
+    """外部成员验收/评审判定通道（P1-2）。
+
+    ``llm_client`` 鸭子面：``async chat(messages) -> {"content": str}``，供
+    goal_verifier / review 的受限判定子会话单源消费（经 callSubSessionChannel，
+    禁工具、纯文本往返）。每次判定经执行体走**独立会话/独立调用**：
+
+    - ACP 执行体：``session/new`` + ``session/prompt``——与工作会话隔离的
+      独立判定会话，文本收集至回合结束；
+    - plugin 执行体（单向管道）：一次独立 headless CLI 调用。
+
+    判定会话上的 ``session/request_permission`` 一律 fail-closed deny；帧照
+    走 F2 留痕与 tool_call 镜像（随执行体既有钩子）；不记任何 token/usage
+    （外部代理成本纪律）。异常原样上抛——由 goal_verifier 判 ``parse_ok=False``
+    走既有诚实降级（judge_unavailable），不在通道里吞错兜底。
+    """
+
+    def __init__(self, executor) -> None:
+        self._executor = executor
+
+    async def chat(self, messages: Any, **_ignored) -> dict:
+        result = await self._executor.prompt(
+            renderVerifyPrompt(messages), None, denyVerifyPermission,
+        )
+        return {"content": result.text}
+
+
 class NeuacpMemberAdapter:
     """chat 兼容适配器：swarm 名册 executor 成员经此驱动外部执行体。"""
 
@@ -63,7 +128,11 @@ class NeuacpMemberAdapter:
         self._cwd = cwd or ""
         self._prompt_timeout = prompt_timeout
         self.config = SimpleNamespace(name=name)
-        self.llm_client = verify_channel
+        # P1-2：判定通道缺省惰性自建（通道对象随构造就位，独立判定会话在
+        # 首次 chat 才开）；显式注入优先（本仓 provider 通道/测试替身）。
+        self.llm_client = (
+            verify_channel if verify_channel is not None else NeuacpVerifyChannel(executor)
+        )
         self.current_session_id: Optional[str] = None
         # B1/B2 运行绑定：chat 前由 swarm._run_member 经 bindRun 注入。
         self._run: Optional[Any] = None
