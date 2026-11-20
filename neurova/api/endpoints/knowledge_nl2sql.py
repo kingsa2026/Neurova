@@ -44,9 +44,18 @@ def _requireAdmin(current_user: Dict[str, Any]) -> None:
                             detail="问数是数据访问面，仅管理员可执行（批一门控）")
 
 
-def _requireEnabled() -> None:
+def nl2sqlGateOpen() -> bool:
+    """总闸读数（单一事实源）：``NEUROVA_NL2SQL_ENABLED`` ∈ {1,true,on,yes} 即开。
+
+    REST 面（403 点名）与蜂群两面（工具面/MCP 面结构化拒绝）读同一份判定，
+    总闸语义（默认关）不因新增消费方漂移。
+    """
     flag = str(os.environ.get(ENV_NL2SQL_ENABLED) or "").strip().lower()
-    if flag not in ("1", "true", "on", "yes"):
+    return flag in ("1", "true", "on", "yes")
+
+
+def _requireEnabled() -> None:
+    if not nl2sqlGateOpen():
         raise HTTPException(
             status_code=403,
             detail="NL2SQL 未开闸（%s 未置 on）——能力默认关，见对照研究 P1-4 门控"
@@ -60,33 +69,44 @@ def _service():
     return Nl2SqlService(get_knowledge_fact_store())
 
 
+def llmCallFromClients(clients: Optional[Any]) -> Optional[Any]:
+    """llm_client 候选列 → prompt→文本同步桥（蜂群两面与 REST 面共用）。
+
+    逐个尝试：调用异常或 ``[LLM Error]`` 文本换下一个候选；全部失败回
+    最后一次错误文本（管线按不可解析诚实拒答）。空候选列 → None。
+    """
+    usable = [c for c in (clients or []) if c is not None]
+    if not usable:
+        return None
+
+    def _call(prompt: str) -> str:
+        from neurova.mem_core import run_async_safely
+
+        last = ""
+        for client in usable:
+            try:
+                resp = run_async_safely(
+                    client.chat([{"role": "user", "content": prompt}]))
+            except Exception:  # noqa: BLE001 - 换下一个候选
+                continue
+            content = getattr(resp, "content", "") or ""
+            if content.startswith("[LLM Error]"):
+                last = content
+                continue
+            return content
+        return last
+
+    return _call
+
+
 def _llmCallOrNull(request: Request, preferAgentId: str = "") -> Optional[Any]:
     """运行时 Agent 的 llm_client → prompt→文本；不可用回 None（诚实拒答）。"""
     try:
         from neurova.api.endpoints.knowledge_common import resolveAgentLlmClients
-        from neurova.mem_core import run_async_safely
 
         clients = resolveAgentLlmClients(request,
                                          prefer_agent_id=preferAgentId or None)
-        if not clients:
-            return None
-
-        def _call(prompt: str):
-            last = ""
-            for client in clients:
-                try:
-                    resp = run_async_safely(
-                        client.chat([{"role": "user", "content": prompt}]))
-                except Exception:  # noqa: BLE001 - 换下一个候选
-                    continue
-                content = getattr(resp, "content", "") or ""
-                if content.startswith("[LLM Error]"):
-                    last = content
-                    continue
-                return content
-            return last
-
-        return _call
+        return llmCallFromClients(clients)
     except Exception:  # noqa: BLE001 - 解析失败按无 LLM 处理
         return None
 
@@ -119,6 +139,59 @@ def _loadSourceId(source_id: str) -> str:
     if not sourceId:
         raise HTTPException(status_code=400, detail="source_id 不能为空")
     return sourceId
+
+
+# ── 蜂群只读分析档可复用入口（P2-2 车道D）─────────────────────────────────
+
+def _resolveDefaultSourceId(tenant: str, sourceId: str) -> str:
+    """source_id 缺省解析：本租户目录里恰好一个源时自动选定。
+
+    多源要求指名（诚实报可选项）；零源如实报未摄取。显式传入的 source_id
+    原样返回——其租户归属由 ``_executorFor`` 的 loadConfig（按租户查）把关。
+    """
+    sourceId = str(sourceId or "").strip()
+    if sourceId:
+        return sourceId
+    from neurova.knowledge.enterprise.schema_catalog import SchemaCatalogStore
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    sources = SchemaCatalogStore(get_knowledge_fact_store()).sourcesInCatalog(tenant)
+    if len(sources) == 1:
+        return sources[0]
+    if not sources:
+        raise LookupError("本租户暂无可用企业数据源（先完成 schema 目录摄取）")
+    raise LookupError("本租户有多个数据源，需指名 source_id（可选: %s）"
+                      % ", ".join(sources[:10]))
+
+
+def runReadonlyDataQuestion(tenant: str, sourceId: str, question: str,
+                            llmCall: Optional[Any], askedBy: str = "",
+                            maxRows: int = 200) -> Dict[str, Any]:
+    """只读问数可复用入口（成员工具面 / 反向 MCP 面共用，P2-2）。
+
+    - 总闸语义与 REST 面完全一致（``nl2sqlGateOpen`` 单源判定）：关 → 结构化
+      ``capability_disabled``（调用方转译为工具错误，不抛裸异常）；
+    - 租户隔离在源配置层（loadConfig 本租户查无即 source_not_found）；
+    - 只读强制在连接器层（``connectors_sql.assertReadonlySelect``），不靠提示词；
+    - 其余走既有 ask 管线（目录 grounding → 生成 → 校验 → 只读执行 → 落账），
+      LLM 生成照常记 usage（既有 cost 链自动覆盖）。
+    """
+    tenant = str(tenant or "default")
+    if not nl2sqlGateOpen():
+        return {"answerable": False, "status": "capability_disabled",
+                "source_id": str(sourceId or ""),
+                "error": "NL2SQL 未开闸（%s 未置 on）——能力默认关" % ENV_NL2SQL_ENABLED}
+    try:
+        resolvedId = _resolveDefaultSourceId(tenant, sourceId)
+        executor = _executorFor(tenant, resolvedId)
+    except LookupError as exc:
+        return {"answerable": False, "status": "source_not_found",
+                "source_id": str(sourceId or ""), "error": str(exc)}
+    result = _service().answerQuestion(
+        tenant, resolvedId, question, llmCall=llmCall, executor=executor,
+        askedBy=str(askedBy or ""), execute=True, maxRows=maxRows)
+    result["source_id"] = resolvedId
+    return result
 
 
 @router.post("/enterprise/sources/{source_id}/nl2sql")

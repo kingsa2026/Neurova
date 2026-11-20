@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""外部编码代理只读 MCP 工具面（ACP 编码代理团队接入 P2 卡 C2，2026-11-19）。
+"""外部编码代理只读 MCP 工具面（ACP 编码代理团队接入 P2 卡 C2，2026-11-19；
+P2-2 车道D 增只读问数，2026-11-21）。
 
 把本仓只读能力以 MCP tools 开放给 Claude Code / OpenCode 等外部编码代理
-（外部代理以 MCP client 身份调用，即"反向 MCP"）。首批只读三件套：
+（外部代理以 MCP client 身份调用，即"反向 MCP"）。只读四件套：
 
 - team_list：当前凭据可见团队——**转交 teams 单源** `teams_api.list_teams`
   （与 GET /v1/teams 同一租户过滤口径，本壳不复制租户比较式）；
@@ -11,9 +12,13 @@
   全在单源内完成）；
 - memory_search：记忆检索——转交运行 agent 注册表里各 agent 的
   NeurovaRecallEngine.recall_flat（与 /v1/enhanced-memory-search 同一取数链），
-  逐 agent 过平台唯一属主门 `can_access_agent`（admin 全量 / 属主本人 / 其余拒）。
+  逐 agent 过平台唯一属主门 `can_access_agent`（admin 全量 / 属主本人 / 其余拒）；
+- data_query：企业数据只读问数（P2-2 车道D）——转交 nl2sql 可复用入口
+  `runReadonlyDataQuestion`（目录 grounding → 生成 → 只读校验 → 连接器
+  只读执行），数据源按发起者租户段过滤，总闸 `NEUROVA_NL2SQL_ENABLED`
+  关闭时结构化拒绝。
 
-**只读红线**：本面不注册任何写工具；三件工具全零副作用（列表/检索/读数），
+**只读红线**：本面不注册任何写工具；四件工具全零副作用（列表/检索/读数），
 并以 ToolAnnotations(readOnlyHint=True) 向客户端声明。
 **鉴权**：照 mcp_ontology_server.py M0 先例——X-Service-Token / X-API-Key /
 Bearer JWT 任一成立；全不成立 fail-closed 401。身份解析直接复用该模块的
@@ -24,6 +29,7 @@ Bearer JWT 任一成立；全不成立 fail-closed 401。身份解析直接复�
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, Dict, List, Optional
 
@@ -40,7 +46,8 @@ logger = get_logger(__name__)
 
 _MCP_INSTRUCTIONS = (
     "Neurova 面向外部编码代理的只读工具面：查团队名册（team_list）、"
-    "检索知识库（knowledge_search）、检索记忆（memory_search）。"
+    "检索知识库（knowledge_search）、检索记忆（memory_search）、"
+    "企业数据只读问数（data_query）。"
     "全部工具只读无副作用；数据范围按调用凭据的租户/属主隔离。"
 )
 
@@ -87,7 +94,7 @@ def _boundedPayload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if len(text) <= _MAX_PAYLOAD_CHARS:
         return payload
     trimmed = dict(payload)
-    for key in ("teams", "results"):
+    for key in ("teams", "results", "rows"):
         rows = trimmed.get(key)
         if isinstance(rows, list) and rows:
             while len(rows) > 1 and len(
@@ -231,6 +238,75 @@ async def memorySearch(ctx: Context, query: str, limit: int = 10,
         payload["engine_errors"] = engineErrors
     if wanted and enginesQueried == 0 and not engineErrors:
         payload["detail"] = "未查询到可见召回引擎（agent 未注册、无记忆面或不可见）"
+    return _boundedPayload(payload)
+
+
+# ── data_query（只读，P2-2 车道D）────────────────────────────────────────────
+
+@_SERVER.tool(
+    name="data_query",
+    description="企业数据只读问数（NL2SQL）：自然语言 → 只读 SELECT → 本凭据租户"
+                "可见的企业数据源执行。只读无副作用；写意图（INSERT/UPDATE/DELETE/"
+                "DROP 等）被连接器只读断言拒绝；总闸 NEUROVA_NL2SQL_ENABLED 关闭时"
+                "结构化拒绝（capability_disabled）；数据源按调用凭据租户隔离，"
+                "他租户源不可见。",
+    annotations=_READ_ONLY,
+)
+async def dataQuery(ctx: Context, question: str, source_id: str = "",
+                    max_rows: int = 50) -> dict:
+    from neurova.api.endpoints.knowledge_common import resolveAgentLlmClients
+    from neurova.api.endpoints.knowledge_nl2sql import (
+        llmCallFromClients,
+        runReadonlyDataQuestion,
+    )
+
+    rejection = _queryRejection(question)
+    if rejection is not None:
+        return rejection
+    user = _currentUserFromContext(ctx)
+    tenant = str(user.get("tenant_id") or "default")
+    # LLM 候选 = 运行时 agent 注册表（与 REST 面同一解析单源）；生成走本仓
+    # 管线，usage 由既有 cost 链自动记账。
+    llmCall = llmCallFromClients(resolveAgentLlmClients(None))
+    try:
+        maxRows = int(max_rows)
+    except (TypeError, ValueError):
+        maxRows = 50
+    maxRows = max(1, min(maxRows, 200))
+
+    result = await asyncio.to_thread(
+        runReadonlyDataQuestion, tenant, str(source_id or "").strip(),
+        str(question).strip(), llmCall, str(user.get("username") or ""), maxRows)
+
+    status = str(result.get("status") or "")
+    if status == "capability_disabled":
+        return {"rejected": True, "code": "capability_disabled",
+                "detail": str(result.get("error") or "NL2SQL 能力未开启")}
+    if status == "source_not_found":
+        return {"rejected": True, "code": "source_not_found",
+                "detail": str(result.get("error") or "企业源不可见或未提交")}
+
+    # 输出三层截断纪律与既有三工具同款：行数钳位 + 单字段裁剪 + 整体兜底。
+    rows = result.get("rows") or []
+    limit = _clampLimit(maxRows)
+    shown = rows[:limit]
+    payload: Dict[str, Any] = {
+        "question": str(question).strip(),
+        "source_id": result.get("source_id") or "",
+        "status": status,
+        "answerable": result.get("answerable"),
+        "sql": result.get("sql") or "",
+        "explanation": result.get("explanation") or "",
+        "rows": [_clipTexts(dict(row)) if isinstance(row, dict) else _clipText(row)
+                 for row in shown],
+        "row_count": len(rows),
+        "count": len(shown),
+        "truncated": bool(result.get("truncated")) or len(rows) > len(shown),
+    }
+    if status == "refused":
+        payload["reason"] = str(result.get("reason") or "")
+    if result.get("error"):
+        payload["error"] = str(result.get("error"))
     return _boundedPayload(payload)
 
 

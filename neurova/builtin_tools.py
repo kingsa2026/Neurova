@@ -2355,6 +2355,29 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             },
         },
     },
+    # P2-2 车道D（蜂群只读分析档）：企业源 text2SQL 只读问数，成员可用。
+    # 只读强制在连接器层（connectors_sql.assertReadonlySelect），不靠提示词自觉；
+    # 总闸 NEUROVA_NL2SQL_ENABLED 关时返回结构化 capability_disabled。
+    "enterprise_data_query": {
+        # 并行能力声明：SQL 生成走 LLM、执行走连接器只读短连接（每操作开短连接），
+        # 不触共享会话/工作区写态；保守不并行（生成是串行 LLM 往返，扇出无收益）。
+        "capability": {"readOnly": True, "concurrentSafe": False, "writeScopes": ("none",)},
+        "description": "【企业数据只读问数】把自然语言数据问题转成只读 SQL（NL2SQL）"
+                       "在企业数据源上执行，只返回查询结果；任何写意图"
+                       "（INSERT/UPDATE/DELETE/DROP 等）被连接器只读断言拒绝。【何时用】"
+                       "统计/明细/汇总企业数据源里的业务数据，如“最近 10 笔订单”。"
+                       "【何时不用】查本 Agent 记忆 memory_search；知识库 knowledge_search；"
+                       "会话附件数据集 query_database。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "自然语言数据问题，如“最近 10 笔订单”“每个客户的订单总额”"},
+                "source_id": {"type": "string", "description": "企业数据源 id（可选；缺省时本租户目录恰有一个源则自动选定，多源时必须指名）"},
+                "max_rows": {"type": "integer", "description": "返回行数上限（默认 50，上界 200）", "default": 50},
+            },
+            "required": ["question"],
+        },
+    },
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -2516,6 +2539,50 @@ def is_builtin_tool_reproducible(tool_name: str) -> bool:
     if tool_name not in _BUILTIN_SCHEMAS:
         return False
     return tool_name not in _NON_REPRODUCIBLE_TOOLS
+
+
+# ── 动态描述工厂（P2-2 车道D）────────────────────────────────────────────────
+# 工具描述需要在暴露给模型时附加运行态上下文（如本租户可见企业数据源的
+# schema 摘要）。工厂在 BuiltinTool.to_openai_format() 序列化时求值；描述
+# 静态基线仍是 _BUILTIN_SCHEMAS 的唯一一份文案（不因动态化分裂出第二事实源）。
+_DESCRIPTION_FACTORIES: Dict[str, Callable[[], str]] = {}
+
+
+def register_description_factory(tool_name: str, factory: Callable[[], str]) -> None:
+    """登记工具描述工厂（每次序列化求值；同名校覆盖）。"""
+    _DESCRIPTION_FACTORIES[str(tool_name)] = factory
+
+
+def _enterpriseDataQueryDescription() -> str:
+    """enterprise_data_query 描述 = 静态基线 + 本租户可见数据源 schema 摘要。
+
+    schema 摘要读 schema 目录（连接器 describeSchema 的既有落地面，P1-1 摄取），
+    不新造元数据；目录不可用/为空时回退基线（fail-soft，不炸工具暴露面）。
+    """
+    base = str(_BUILTIN_SCHEMAS.get("enterprise_data_query", {}).get("description") or "")
+    try:
+        from neurova.auth.user_group_model import currentUserTenantId
+        from neurova.knowledge.enterprise.schema_catalog import SchemaCatalogStore
+        from neurova.knowledge.foundation import get_knowledge_fact_store
+
+        catalog = SchemaCatalogStore(get_knowledge_fact_store())
+        tables = catalog.listTables(currentUserTenantId(), limit=100)
+        if not tables:
+            return base + "\n（当前租户目录暂无已摄取数据源——先完成企业源 schema 目录摄取）"
+        bySource: Dict[str, List[str]] = {}
+        for row in tables:
+            bySource.setdefault(str(row.get("source_id") or ""), []).append(
+                "%s(%s列)" % (row.get("table_name"), row.get("column_count")))
+        lines = [base, "当前可见数据源 schema 摘要（只读，来自 schema 目录）："]
+        for sourceId in sorted(bySource)[:5]:
+            lines.append("- source_id=%s 表：%s"
+                         % (sourceId, ", ".join(sorted(bySource[sourceId])[:12])))
+        return "\n".join(lines)
+    except Exception:  # noqa: BLE001 - 目录读面故障不炸工具暴露面，回退基线
+        return base
+
+
+register_description_factory("enterprise_data_query", _enterpriseDataQueryDescription)
 
 # B3（v0 启发）：执行摘要参数——模型自述"进行中/完成态"的 2-6 字动作短语，
 # 经 SSE 透传给步骤化时间轴作段标题。单一注入点（to_openai_format），54 个
@@ -2736,6 +2803,9 @@ class BuiltinTool:
     # 不进入 to_openai_format()（模型可见面零变化）；外部注册未声明按
     # False 保守处理（register_tool fail-closed，数据保真优先）。
     reproducible: Optional[bool] = None
+    # P2-2 车道D：动态描述工厂（每次序列化求值，如附数据源 schema 摘要）；
+    # None=纯静态描述。
+    description_factory: Optional[Callable[[], str]] = None
 
     def to_openai_format(self) -> Dict[str, Any]:
         """转换为 OpenAI function calling 格式。
@@ -2754,11 +2824,17 @@ class BuiltinTool:
                 params = {**params, "properties": props}
         except Exception:  # noqa: BLE001 - 注入失败不阻断工具暴露
             pass
+        description = self.description
+        if self.description_factory is not None:
+            try:
+                description = self.description_factory() or self.description
+            except Exception:  # noqa: BLE001 - 工厂故障回退静态基线
+                description = self.description
         return {
             "type": "function",
             "function": {
                 "name": self.name,
-                "description": self.description,
+                "description": description,
                 "parameters": params,
             },
         }
@@ -2781,6 +2857,7 @@ class BuiltinToolRegistry:
                 required=schema["parameters"].get("required", []),
                 sandbox_required=get_builtin_tool_sandbox_declaration(tool_name),
                 reproducible=is_builtin_tool_reproducible(tool_name),
+                description_factory=_DESCRIPTION_FACTORIES.get(tool_name),
             )
             self._tools[tool_name] = tool
 

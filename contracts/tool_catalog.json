@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": "neurova.builtin_tools._BUILTIN_SCHEMAS",
-  "tool_count": 137,
+  "tool_count": 138,
   "tools": [
     {
       "agent_scope": "all",
@@ -2332,6 +2332,35 @@
       "external_write": false,
       "min_role": null,
       "name": "emotion_analyze",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "max_rows": {
+            "default": 50,
+            "description": "返回行数上限（默认 50，上界 200）",
+            "type": "integer"
+          },
+          "question": {
+            "description": "自然语言数据问题，如“最近 10 笔订单”“每个客户的订单总额”",
+            "type": "string"
+          },
+          "source_id": {
+            "description": "企业数据源 id（可选；缺省时本租户目录恰有一个源则自动选定，多源时必须指名）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "type": "object"
+      },
+      "description": "【企业数据只读问数】把自然语言数据问题转成只读 SQL（NL2SQL）在企业数据源上执行，只返回查询结果；任何写意图（INSERT/UPDATE/DELETE/DROP 等）被连接器只读断言拒绝。【何时用】统计/明细/汇总企业数据源里的业务数据，如“最近 10 笔订单”。【何时不用】查本 Agent 记忆 memory_search；知识库 knowledge_search；会话附件数据集 query_database。",
+      "external_write": false,
+      "min_role": null,
+      "name": "enterprise_data_query",
       "read_only": true
     },
     {

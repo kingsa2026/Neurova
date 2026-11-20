@@ -725,6 +725,8 @@ class ToolExecutor:
         # 多步编排入口（DAG 工具编排器的生产消费方）：整条链的每一步都经咽喉，
         # 票据 / on_tool_executed / 治理预检 / hooks / per-tool 超时全链生效。
         "orchestrate_tools": "_execute_orchestrate_tools",
+        # P2-2 车道D（蜂群只读分析档）：企业源 text2SQL 只读问数（成员可用）。
+        "enterprise_data_query": "_execute_enterprise_data_query",
     }
 
     # file_search 跳过的噪音目录（依赖/构建/版本控制）
@@ -6308,6 +6310,64 @@ class ToolExecutor:
     _PARSE_TEXT_EXTS = frozenset({".txt", ".md", ".rst", ".json", ".yaml", ".yml", ".toml", ".log"})
     # 解析前置体积闸门（50MB）——防超大文件拖垮内存；超限诚实报错
     _PARSE_MAX_BYTES = 50 * 1024 * 1024
+
+    async def _execute_enterprise_data_query(self, params: Dict) -> Dict:
+        """企业数据只读问数（P2-2 车道D）：nl2sql 管线生成只读 SQL，连接器只读执行。
+
+        - 总闸 ``NEUROVA_NL2SQL_ENABLED`` 关 → 结构化 ``capability_disabled``
+          工具错误（转译为工具错误，不抛裸异常；总闸语义与 REST 面同源不变）；
+        - 租户隔离在源配置层（loadConfig 本租户查无即 source_not_found）；
+        - 只读硬闸在连接器层（``connectors_sql.assertReadonlySelect``）；
+        - LLM 生成走本仓 llm_client 管线，usage 由既有 cost 链自动记账。
+        """
+        from neurova.api.endpoints.knowledge_nl2sql import (
+            llmCallFromClients,
+            runReadonlyDataQuestion,
+        )
+
+        question = str(params.get("question") or "").strip()
+        if not question:
+            return {"success": False, "code": "invalid_params",
+                    "error": "缺少 question 参数（自然语言数据问题）"}
+        sourceId = str(params.get("source_id") or "").strip()
+        try:
+            maxRows = int(params.get("max_rows") or 50)
+        except (TypeError, ValueError):
+            maxRows = 50
+        maxRows = max(1, min(maxRows, 200))
+
+        # LLM 候选：执行本工具的 agent 自己的 llm_client 优先，回退运行时
+        # 注册表其余活跃 agent（与 REST 面同一解析单源，不新造解析式）。
+        clients = []
+        own = getattr(self._agent, "llm_client", None)
+        if own is not None:
+            clients.append(own)
+        try:
+            from neurova.api.endpoints.knowledge_common import resolveAgentLlmClients
+
+            clients.extend(c for c in resolveAgentLlmClients(None) if c is not own)
+        except Exception:  # noqa: BLE001 - 注册表不可用只剩自身候选
+            pass
+        llmCall = llmCallFromClients(clients)
+
+        from neurova.auth.user_group_model import currentUserTenantId
+
+        tenant = currentUserTenantId()
+        _user_id, agent_id = self._agent_identity()
+        # 管线是同步阻塞段（LLM + SQL 执行），落线程池不拖垮事件循环；
+        # 内部 run_async_safely 桥在 worker 线程自洽（mem_core 既有语义）。
+        result = await asyncio.to_thread(
+            runReadonlyDataQuestion, tenant, sourceId, question,
+            llmCall, str(agent_id or ""), maxRows)
+
+        status = str(result.get("status") or "")
+        if status == "capability_disabled":
+            return {"success": False, "code": "capability_disabled",
+                    "error": str(result.get("error") or "NL2SQL 能力未开启")}
+        if status == "source_not_found":
+            return {"success": False, "code": "source_not_found",
+                    "error": str(result.get("error") or "企业源不可见或未提交")}
+        return result
 
     async def _execute_query_database(self, params: Dict) -> Dict:
         """只读数据集查询（T-05）：附件句柄 → 表结构 / 样例行 / 只读 SQL。
