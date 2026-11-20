@@ -2370,6 +2370,10 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     run: 'تشغيل',
   },
   computerPanel: {
+    snapDepthCut: 'اقتصاص عمق اللقطة (العمق {depth})',
+    snapSkeletonFold: 'طي الهيكل: {n} عنصرًا',
+    snapDrilledFrom: 'تنقيح من #{target}',
+    snapSubtreeCut: '{n} شجرة فرعية غير موسعة',
     title: 'التحكم بالكمبيوتر',
     live: 'قيد التشغيل',
     idle: 'خامل',

@@ -4,6 +4,7 @@ import {
   createComputerPanel,
   describeComputerAction,
   isComputerTool,
+  snapshotMetaText,
 } from '@/composables/useComputerPanel'
 
 describe('isComputerTool', () => {
@@ -422,5 +423,87 @@ describe('增强③：窗口清单进面板状态', () => {
     expect(panel.state.latestWindows).toBeUndefined()
     panel.handleComputerAction({ tool: 'computer_click', params: { x: 1, y: 2 }, success: true })
     expect(panel.state.latestWindows).toBeUndefined()
+  })
+})
+
+describe('AD 批增强：dom_snapshot 快照质量元信息进面板', () => {
+  it('depth 剪枝结果抽取 snapshotMeta', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({
+      tool: 'computer_dom_snapshot',
+      params: { max_depth: 1 },
+      success: true,
+      snapshot_meta: {
+        truncated: true,
+        depth_truncated: true,
+        observed_max_depth: 1,
+        skeleton: false,
+        subtree_truncated_count: 5,
+      },
+    })
+    const meta = panel.state.actions[0].snapshotMeta
+    expect(meta).toBeDefined()
+    expect(meta?.truncated).toBe(true)
+    expect(meta?.depthTruncated).toBe(true)
+    expect(meta?.observedMaxDepth).toBe(1)
+    expect(meta?.skeleton).toBe(false)
+    expect(meta?.subtreeTruncatedCount).toBe(5)
+  })
+
+  it('骨架折叠与下钻来源透传', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({
+      tool: 'computer_dom_snapshot',
+      params: { skeleton: true, root_index: 3 },
+      success: true,
+      snapshot_meta: {
+        truncated: false,
+        depth_truncated: false,
+        skeleton: true,
+        omitted_count: 76,
+        drilled_from: { index: 3, runtime_id: '42.1' },
+        subtree_truncated_count: 0,
+      },
+    })
+    const meta = panel.state.actions[0].snapshotMeta
+    expect(meta?.skeleton).toBe(true)
+    expect(meta?.omittedCount).toBe(76)
+    expect(meta?.drilledFromIndex).toBe(3)
+    expect(meta?.drilledFromRuntimeId).toBe('42.1')
+  })
+
+  it('无 snapshot_meta 的动作不残留该字段', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({ tool: 'computer_click', params: { x: 1, y: 2 }, success: true })
+    expect(panel.state.actions[0].snapshotMeta).toBeUndefined()
+  })
+
+  it('snapshotMetaText 拼装可读摘要（只拼存在的维度）', () => {
+    expect(
+      snapshotMetaText({
+        truncated: true,
+        depthTruncated: true,
+        observedMaxDepth: 8,
+        skeleton: false,
+        subtreeTruncatedCount: 3,
+      }),
+    ).toContain('8')
+    expect(
+      snapshotMetaText({
+        truncated: false,
+        depthTruncated: false,
+        skeleton: true,
+        omittedCount: 76,
+        subtreeTruncatedCount: 0,
+      }),
+    ).toContain('76')
+    expect(
+      snapshotMetaText({
+        truncated: false,
+        depthTruncated: false,
+        skeleton: false,
+        subtreeTruncatedCount: 0,
+      }),
+    ).toBe('')
   })
 })

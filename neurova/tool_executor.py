@@ -348,7 +348,9 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "computer_type": frozenset({"text", "interval"}),
     "computer_scroll": frozenset({"scroll_x", "scroll_y", "x", "y"}),
     "computer_shell": frozenset({"command"}),
-    "computer_dom_snapshot": frozenset({"window_title", "max_nodes", "max_depth"}),
+    "computer_dom_snapshot": frozenset(
+        {"window_title", "max_nodes", "max_depth", "root_index", "root_runtime_id", "skeleton"}
+    ),
     "computer_click_element": frozenset({"index", "runtime_id", "window_title", "button", "generation"}),
     "computer_set_value": frozenset({"value", "index", "runtime_id", "window_title", "generation"}),
     "computer_som_snapshot": frozenset(),
@@ -7909,6 +7911,32 @@ class ToolExecutor:
             windows = result.get("windows") if isinstance(result, dict) else None
             if isinstance(windows, list) and windows:
                 payload["windows"] = windows
+            # AD 批增强：dom_snapshot 快照质量元信息随行（确有截断/骨架/下钻才出现，
+            # 完整树不带——与结果侧"未超限就静"同纪律），供分屏面板展示快照可信度。
+            if tool_name == "computer_dom_snapshot" and isinstance(result, dict):
+                snap_meta: Dict[str, Any] = {
+                    "truncated": bool(result.get("truncated")),
+                    "depth_truncated": bool(result.get("depth_truncated")),
+                    "skeleton": bool(result.get("skeleton")),
+                    "subtree_truncated_count": sum(
+                        1
+                        for el in (result.get("elements") or [])
+                        if isinstance(el, dict) and el.get("subtree_truncated")
+                    ),
+                }
+                if result.get("depth_truncated"):
+                    snap_meta["observed_max_depth"] = result.get("observed_max_depth")
+                if result.get("omitted_count") is not None:
+                    snap_meta["omitted_count"] = result.get("omitted_count")
+                if result.get("drilled_from") is not None:
+                    snap_meta["drilled_from"] = result.get("drilled_from")
+                if (
+                    snap_meta["truncated"]
+                    or snap_meta["depth_truncated"]
+                    or snap_meta["skeleton"]
+                    or "drilled_from" in snap_meta
+                ):
+                    payload["snapshot_meta"] = snap_meta
 
             mgr = get_session_sync_manager()
             mgr.register_or_create_session(session_id=session_id, user_id=SYSTEM_ACTOR_AGENT)

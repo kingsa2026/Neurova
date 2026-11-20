@@ -2370,6 +2370,10 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
     run: 'Ejecutar',
   },
   computerPanel: {
+    snapDepthCut: 'Profundidad recortada (prof. {depth})',
+    snapSkeletonFold: 'Esqueleto plegado: {n} elementos',
+    snapDrilledFrom: 'Perforado desde #{target}',
+    snapSubtreeCut: '{n} subárboles sin desplegar',
     title: 'Control del ordenador',
     live: 'En funcionamiento',
     idle: 'Inactivo',

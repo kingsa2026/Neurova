@@ -21,6 +21,18 @@ export interface ComputerWindowRow {
   focused: boolean
 }
 
+/** AD 批：dom_snapshot 快照质量元信息（后端按需出现——确有截断/骨架/下钻才带） */
+export interface ComputerSnapshotMeta {
+  truncated: boolean
+  depthTruncated: boolean
+  observedMaxDepth?: number
+  skeleton: boolean
+  omittedCount?: number
+  drilledFromIndex?: number
+  drilledFromRuntimeId?: string
+  subtreeTruncatedCount: number
+}
+
 export interface ComputerActionEntry {
   id: string
   /** 工具名，如 computer_click / browser_navigate */
@@ -53,6 +65,8 @@ export interface ComputerActionEntry {
   windows?: ComputerWindowRow[]
   /** SSH/shell 终端负载（命令 + 输出），面板渲染成终端窗口 */
   terminal?: { command: string; stdout: string; stderr: string; host?: string; exit?: number }
+  /** AD 批：dom_snapshot 快照质量（深度剪枝/骨架折叠/下钻来源），按需出现 */
+  snapshotMeta?: ComputerSnapshotMeta
 }
 
 export interface ComputerPanelState {
@@ -291,6 +305,48 @@ const RETRY_HINTS: Record<string, string> = {
   never: '⛔never',
 }
 
+/** AD 批：payload.snapshot_meta（snake_case）→ 条目展示形状（camelCase），无则 undefined */
+function extractSnapshotMeta(payload: Record<string, any>): ComputerSnapshotMeta | undefined {
+  const m = payload.snapshot_meta
+  if (!m || typeof m !== 'object') return undefined
+  const drilled = m.drilled_from
+  const meta: ComputerSnapshotMeta = {
+    truncated: m.truncated === true,
+    depthTruncated: m.depth_truncated === true,
+    skeleton: m.skeleton === true,
+    subtreeTruncatedCount: typeof m.subtree_truncated_count === 'number' ? m.subtree_truncated_count : 0,
+  }
+  if (typeof m.observed_max_depth === 'number') meta.observedMaxDepth = m.observed_max_depth
+  if (typeof m.omitted_count === 'number') meta.omittedCount = m.omitted_count
+  if (drilled && typeof drilled === 'object') {
+    if (typeof drilled.index === 'number') meta.drilledFromIndex = drilled.index
+    if (typeof drilled.runtime_id === 'string') meta.drilledFromRuntimeId = drilled.runtime_id
+  }
+  return meta
+}
+
+/** AD 批：快照质量 → 一行可读摘要（只拼存在的维度；全无则空串） */
+export function snapshotMetaText(meta: ComputerSnapshotMeta): string {
+  const parts: string[] = []
+  if (meta.depthTruncated) {
+    parts.push(i18n.global.t('computerPanel.snapDepthCut', { depth: meta.observedMaxDepth ?? '?' }))
+  }
+  if (meta.omittedCount != null) {
+    parts.push(i18n.global.t('computerPanel.snapSkeletonFold', { n: meta.omittedCount }))
+  }
+  if (meta.drilledFromIndex != null || meta.drilledFromRuntimeId) {
+    parts.push(
+      i18n.global.t('computerPanel.snapDrilledFrom', {
+        target: meta.drilledFromIndex ?? meta.drilledFromRuntimeId,
+      }),
+    )
+  }
+  if (meta.subtreeTruncatedCount > 0) {
+    parts.push(i18n.global.t('computerPanel.snapSubtreeCut', { n: meta.subtreeTruncatedCount }))
+  }
+  return parts.join(' · ')
+}
+
 function retryHint(retry?: string): string {
   if (!retry) return ''
   return RETRY_HINTS[retry] ?? `↻${retry}`
@@ -345,6 +401,7 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
       unknown
     >
     const actionResult = extractActionResult(payload)
+    const snapshotMeta = extractSnapshotMeta(payload)
     // 增强③：窗口清单（computer_list_windows 载荷）吸收进条目与面板状态
     const windows = Array.isArray(payload.windows)
       ? (payload.windows as ComputerWindowRow[]).filter((w) => w && typeof w === 'object')
@@ -381,6 +438,7 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
         ? { command: String(term.command ?? ''), stdout: String(term.stdout ?? ''), stderr: String(term.stderr ?? ''), host: term.host ? String(term.host) : undefined, exit: typeof term.exit === 'number' ? term.exit : undefined }
         : undefined,
       ...(windows && windows.length ? { windows } : {}),
+      ...(snapshotMeta ? { snapshotMeta } : {}),
       ...(actionResult ?? {}),
     }
 

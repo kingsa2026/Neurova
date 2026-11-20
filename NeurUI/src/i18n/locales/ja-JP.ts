@@ -2370,6 +2370,10 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     run: '実行',
   },
   computerPanel: {
+    snapDepthCut: 'スナップショット深度クリップ（実深度 {depth}）',
+    snapSkeletonFold: 'スケルトン折り畳み {n} 件',
+    snapDrilledFrom: '#{target} からドリルダウン',
+    snapSubtreeCut: '未展開サブツリー {n} 件',
     title: 'コンピューター操作',
     live: '操作中',
     idle: '待機中',

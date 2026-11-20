@@ -2370,6 +2370,10 @@ conflictTimeReadout: 'Lettura temporale: {basis} (vecchia {old} → nuova {new})
     run: 'Esegui',
   },
   computerPanel: {
+    snapDepthCut: 'Profondità snapshot troncata (prof. {depth})',
+    snapSkeletonFold: 'Scheletro ripiegato: {n} elementi',
+    snapDrilledFrom: 'Drill da #{target}',
+    snapSubtreeCut: '{n} sottoalberi non espansi',
     title: 'Controllo computer',
     live: 'In operazione',
     idle: 'Inattivo',

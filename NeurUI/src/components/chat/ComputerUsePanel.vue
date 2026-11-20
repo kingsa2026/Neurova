@@ -11,7 +11,7 @@ import { ref, computed } from 'vue'
 import UiIcon from '@/components/UiIcon.vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { actionBadgeText, useComputerPanel } from '@/composables/useComputerPanel'
+import { actionBadgeText, snapshotMetaText, useComputerPanel } from '@/composables/useComputerPanel'
 import { screenshot as apiScreenshot, click as apiClick, navigate as apiNavigate, shell as apiShell } from '@/api/modules/computer'
 
 const props = defineProps<{
@@ -218,6 +218,14 @@ async function doRunCommand() {
             </span>
             <!-- R2-5/T-01 ActionResult 契约徽标：route·delivery·effect（有验证证据才带 ✓）；
                  refused 显示精确拒绝码与跳级去向。文本单源出自 actionBadgeText，模板不再各拼一份 -->
+            <!-- AD 批：快照质量元信息（深度剪枝/骨架折叠/下钻来源），按需出现 -->
+            <span
+              v-if="entry.snapshotMeta"
+              class="cu-badge snap-meta"
+              :title="t('computerPanel.actionResultHint')"
+            >
+              {{ snapshotMetaText(entry.snapshotMeta) }}
+            </span>
             <span
               v-if="entry.route || entry.delivery || entry.effect"
               class="cu-badge"
@@ -401,6 +409,12 @@ async function doRunCommand() {
   color: var(--nr-error);
   background: rgba(252, 165, 165, 0.08);
   border-color: rgba(252, 165, 165, 0.3);
+}
+/* AD 批：快照质量徽标（深度剪枝/骨架折叠/下钻）——与 unverified 同族警示色 */
+.cu-badge.snap-meta {
+  color: var(--nr-warning);
+  background: rgba(250, 204, 21, 0.08);
+  border-color: rgba(250, 204, 21, 0.3);
 }
 .cu-shot-empty {
   display: flex;

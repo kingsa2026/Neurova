@@ -2370,6 +2370,10 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
     run: 'Запуск',
   },
   computerPanel: {
+    snapDepthCut: 'Глубина снимка усечена (глубина {depth})',
+    snapSkeletonFold: 'Свернуто элементов каркаса: {n}',
+    snapDrilledFrom: 'Спуск из #{target}',
+    snapSubtreeCut: '{n} поддеревьев не развернуто',
     title: 'Управление компьютером',
     live: 'В работе',
     idle: 'Ожидание',

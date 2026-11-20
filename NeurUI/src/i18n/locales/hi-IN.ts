@@ -2370,6 +2370,10 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     run: 'चलाएं',
   },
   computerPanel: {
+    snapDepthCut: 'स्नैपशॉट गहराई कटी (गहराई {depth})',
+    snapSkeletonFold: 'स्केलेटन में {n} आइटम मोड़े',
+    snapDrilledFrom: '#{target} से ड्रिलडाउन',
+    snapSubtreeCut: '{n} सबट्री अनविस्तारित',
     title: 'कंप्यूटर नियंत्रण',
     live: 'संचालन में',
     idle: 'निष्क्रिय',

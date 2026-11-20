@@ -144,6 +144,24 @@ class TestPhantomKnobSweep:
                     unread.append(f"{tool}.{param}")
         assert not unread, f"这些参数被广告给模型却无人读取（幻影旋钮）: {unread}"
 
+    def test_schemaParamsAreAllAdmitted(self):
+        """schema 声明的参数必须全部进放行表（AD-3/4 教训，2026-11-20）：
+        dom_snapshot 加 root_index/root_runtime_id/skeleton 时放行表漏同步，
+        工具面调用被「未知参数」拒绝——功能在主链路不可用而单测全绿
+        （测试都直调 manager，绕过了 normalize 这道闸）。双向钉死防复发。"""
+        missing = []
+        for tool in sorted(COMPUTER_USE_TOOLS):
+            declared = set(
+                (_BUILTIN_SCHEMAS.get(tool) or {}).get("parameters", {}).get("properties", {})
+            )
+            admitted = _COMPUTER_TOOL_PARAM_KEYS.get(tool, frozenset())
+            miss = declared - admitted
+            if miss:
+                missing.append(f"{tool}: {sorted(miss)}")
+        assert not missing, (
+            f"schema 声明但放行表未放行的参数（工具面会被未知参数拒绝）: {missing}"
+        )
+
     def test_paramReadDetectorIsNotVacuous(self):
         """正对照 + 负对照：探测函数本身必须先被证明能用，上一条的绿才有意义。"""
         counts = _sweepReadCounts()
