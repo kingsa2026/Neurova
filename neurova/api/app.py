@@ -984,6 +984,29 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as _swarmErr:  # noqa: BLE001 - 蜂群收敛故障不阻断启动
         logger.warning("Swarm 启动收敛失败（忽略）: %s", _swarmErr)
 
+    # 企业源摄取「启动钩子 + 24h 巡检补跑」双保险（P1-3，2026-11-21 拍板 D-E：
+    # 窗口 NEUROVA_ENTERPRISE_SYNC_STALE_HOURS 默认 24 可配；告警仅进 admin
+    # 同步历史读面，不做房间/渠道通知）。启动收敛后立即补跑一轮过期源
+    # （部署/重启即补齐，trigger=startup）；再经既有调度器挂 24h 日巡检 job
+    # （trigger=audit；addSystemJob 同 jobId replace_existing，幂等）。
+    # fail-soft：审计故障不阻断启动。
+    try:
+        from neurova.agent.scheduler import init_scheduler
+
+        from neurova.knowledge.enterprise.registry import (
+            auditEnterpriseSyncStaleness,
+            registerEnterpriseSyncAuditJob,
+        )
+
+        _staleReport = await asyncio.to_thread(
+            auditEnterpriseSyncStaleness, "startup")
+        logger.info("企业源同步启动审计（startup）：%s", _staleReport)
+        if registerEnterpriseSyncAuditJob(init_scheduler()):
+            logger.info("企业源同步日巡检 job 已注册（jobId=%s, seconds=%d）",
+                        "enterprise-sync-staleness-audit", 86400)
+    except Exception as _audit_err:  # noqa: BLE001 - 审计故障不阻断启动
+        logger.warning("企业源同步审计装配失败（忽略）: %s", _audit_err)
+
 # 知识摄取队列排水循环（sync=false 入队任务的后台执行；
 # NEUROVA_KNOWLEDGE_ASYNC=off 显式停用）。fail-open 不阻断启动
     if (os.environ.get("NEUROVA_KNOWLEDGE_ASYNC") or "on").strip().lower() != "off":

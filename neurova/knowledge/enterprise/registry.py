@@ -753,3 +753,118 @@ def _followUpSyncJob(tenantId: str, sourceId: str, store: Any = None) -> None:
                 "单源同步 job 跟随失败（%s/%s）：%s", tenantId, sourceId, exc)
         except Exception:  # noqa: BLE001
             pass
+
+
+#: P1-3（2026-11-21 拍板 D-E）：企业源摄取「启动钩子 + 24h 巡检补跑」双保险。
+#: 巡检窗口小时数走 env（默认 24）；日巡检 job 挂既有调度器，不新造第二台。
+STALE_HOURS_ENV = "NEUROVA_ENTERPRISE_SYNC_STALE_HOURS"
+_DEFAULT_STALE_HOURS = 24.0
+ENTERPRISE_SYNC_AUDIT_JOB_ID = "enterprise-sync-staleness-audit"
+ENTERPRISE_SYNC_AUDIT_SECONDS = 86400
+
+
+def _staleWindowHours() -> float:
+    """巡检窗口（小时）：每次调用现读 env，改配置即时生效；非法值回落默认 24。"""
+    import os
+
+    raw = (os.environ.get(STALE_HOURS_ENV) or "").strip()
+    if not raw:
+        return _DEFAULT_STALE_HOURS
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return _DEFAULT_STALE_HOURS
+
+
+def _lastSuccessStartedAt(store: Any, tenantId: str, sourceId: str) -> Optional[str]:
+    """该源在 enterprise_sync_history 里最近一条成功记录的 started_at（无则 None）。"""
+    with store._lock:
+        row = store._conn.execute(
+            "SELECT started_at FROM enterprise_sync_history"
+            " WHERE tenant_id = ? AND source_id = ? AND status = 'ok'"
+            " ORDER BY started_at DESC, history_id DESC LIMIT 1",
+            (str(tenantId or "default"), str(sourceId or ""))).fetchone()
+    return str(row["started_at"]) if row is not None else None
+
+
+def auditEnterpriseSyncStaleness(triggerKind: str = "audit",
+                                 store: Any = None) -> Dict[str, Any]:
+    """P1-3 巡检补跑：源「配置了同步但近期无成功」时的兜底拉取。
+
+    遍历 listSyncTenants() 每租户每个启用源，查 enterprise_sync_history 最近
+    一条成功记录；距今超过窗口（NEUROVA_ENTERPRISE_SYNC_STALE_HOURS，默认 24h）
+    或从未成功 → 调既有 runOnceAsync(tenant, source, triggerKind) 补跑
+    （内部自带单飞/失败落账/关闸语义，本函数零新同步逻辑）。
+
+    - triggerKind：落账的触发来源（启动钩子传 "startup"，日巡检传 "audit"；
+      trigger_kind 为 TEXT 列，新取值免迁移，admin 同步历史读面天然可见）；
+    - fail-soft：单源异常记 failed 计数并点名，不阻断其余源；
+    - 返回 {checked, triggered, skipped, failed}：checked=审计到的启用源数，
+      triggered=发起补跑数，skipped=窗口内已有成功而跳过数，failed=补跑抛错数。
+    """
+    import datetime as _datetime
+
+    if store is None:
+        from ..foundation import get_knowledge_fact_store
+
+        store = get_knowledge_fact_store()
+    now = _datetime.datetime.now(_datetime.timezone.utc)
+    windowHours = _staleWindowHours()
+    checked = triggered = skipped = failed = 0
+    ingestor = EnterpriseIngestor(store)
+    for tenant in listSyncTenants(store):
+        for config in ingestor.listConfigs(tenantId=tenant):
+            if not config.get("enabled"):
+                continue
+            sourceId = str(config.get("source_id") or "")
+            if not sourceId:
+                continue
+            checked += 1
+            lastOk = _lastSuccessStartedAt(store, tenant, sourceId)
+            if lastOk:
+                try:
+                    ageHours = (now - _datetime.datetime.fromisoformat(lastOk)
+                                ).total_seconds() / 3600.0
+                    if ageHours <= windowHours:
+                        skipped += 1
+                        continue
+                except ValueError:
+                    pass  # 历史时间戳不可解析 → 视同过期，如实补跑
+            try:
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(
+                        ingestor.runOnceAsync(tenant, sourceId,
+                                              triggerKind=triggerKind))
+                finally:
+                    loop.close()
+                triggered += 1
+            except Exception as exc:  # noqa: BLE001 - 单源失败不阻断其余源
+                failed += 1
+                try:
+                    from neurova.core.logger import get_logger
+
+                    get_logger(__name__).warning(
+                        "企业源巡检补跑失败（%s/%s）：%s", tenant, sourceId, exc)
+                except Exception:  # noqa: BLE001
+                    pass
+    return {"checked": checked, "triggered": triggered,
+            "skipped": skipped, "failed": failed}
+
+
+def registerEnterpriseSyncAuditJob(scheduler: Any,
+                                   seconds: int = ENTERPRISE_SYNC_AUDIT_SECONDS) -> bool:
+    """P1-3 日巡检注册口：经既有调度器 addSystemJob 挂周期 job（不另起线程）。
+
+    job 体调 auditEnterpriseSyncStaleness("audit")；addSystemJob 对同 jobId
+    replace_existing，重复注册幂等。无 addSystemJob 面的调度器如实回 False。
+    """
+    if scheduler is None or not hasattr(scheduler, "addSystemJob"):
+        return False
+
+    def _auditJob():
+        auditEnterpriseSyncStaleness("audit")
+
+    scheduler.addSystemJob(_auditJob, jobId=ENTERPRISE_SYNC_AUDIT_JOB_ID,
+                           seconds=seconds)
+    return True
