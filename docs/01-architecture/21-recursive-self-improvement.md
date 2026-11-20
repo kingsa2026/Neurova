@@ -2,7 +2,7 @@
 
 > **版本**: v1.3  
 > **日期**: 2026-06-08  
-> **状态**: 设计阶段（含棘轮论证机制 + 递归棘轮剪枝 + 工具层RSI + 集成矩阵 + 收敛性分析 + 监控体系 + 渐进部署）  
+> **状态**: 已实现（RSI 八组件 + 进化域 E1–E5 修复闭环——宪法死端点修复与规则注入、动机行动生成按 E3 裁定退役改道、人格特质注入、反思 lessons 补池；2026-11-19 按代码核对更新；2026-11-20 §6.3/§14.3/§15/§16 收敛与监控接口按 neurova/evolution/rsi/ 现实现二次对齐：六态词表、evidenced 失明防护、trend_slope 判据、RSIMetrics 12 指标与 ALERT_THRESHOLDS、check_alerts 六条）  
 
 ---
 
@@ -738,45 +738,11 @@ class ImprovementBudget:
 
 ### 6.3 收敛检测
 
-```python
-class ConvergenceDetector:
-    """收敛检测器"""
-    
-    def __init__(self, window_size: int = 10):
-        self.window_size = window_size
-        self.improvement_history = []
-        
-    def record_improvement(self, improvement: float):
-        """记录改进效果"""
-        self.improvement_history.append(improvement)
-        if len(self.improvement_history) > self.window_size:
-            self.improvement_history.pop(0)
-            
-    def has_converged(self) -> bool:
-        """检测是否已收敛
-        
-        收敛条件：
-        - 最近 N 次改进的平均值接近 0
-        - 改进效果的标准差很小
-        """
-        if len(self.improvement_history) < self.window_size:
-            return False
-            
-        avg = sum(self.improvement_history) / len(self.improvement_history)
-        variance = sum((x - avg) ** 2 for x in self.improvement_history) / len(self.improvement_history)
-        
-        # 如果平均改进接近0且方差很小，认为已收敛
-        return abs(avg) < 0.01 and variance < 0.001
-        
-    def is_diverging(self) -> bool:
-        """检测是否在发散（性能下降）"""
-        if len(self.improvement_history) < 3:
-            return False
-            
-        # 连续3次改进为负，认为在发散
-        recent = self.improvement_history[-3:]
-        return all(x < 0 for x in recent)
-```
+收敛检测的权威实现是 `ConvergenceAnalyzer`（`neurova/evolution/rsi/convergence_analyzer.py`），接口与判据见 §15.3，此处不再保留第二份伪接口。设计要点：
+
+- 滑动窗口（默认 20）内做均增益与趋势斜率双阈值判定：均增益绝对值 < 0.01 且斜率绝对值 < 0.001 判收敛；
+- 均增益 < −0.05 判发散，建议立即停止；
+- 失明轮（evidenced=False）只记成本不记增益，窗口内全失明报 measurement_blind——零证据不得冒充收敛。
 
 ### 6.4 棘轮验证器（Ratchet Validator）
 
@@ -2721,7 +2687,7 @@ class RSIIntegrationManager:
         # RSI组件
         self.meta_optimizer = MetaParameterOptimizer()
         self.ratchet_validator = RatchetValidator()
-        self.convergence_detector = ConvergenceDetector()
+        self.convergence_analyzer = ConvergenceAnalyzer()
         
     def collect_loop_signals(self) -> Dict[str, Any]:
         """从四大闭环收集性能信号
@@ -2910,146 +2876,67 @@ $$C_t = \alpha \cdot T_t + \beta \cdot M_t + \gamma \cdot E_t$$
 
 ```python
 class ConvergenceAnalyzer:
-    """收敛性分析器 - 数学保证RSI收敛"""
-    
-    def __init__(self, window_size: int = 20, 
+    # 收敛性分析器 - 数学保证 RSI 收敛
+    # 权威实现：neurova/evolution/rsi/convergence_analyzer.py
+    # 本块接口与判据已按现实现核对（2026-11-20）
+    #
+    # 收敛状态词表（工单 008）：分析器只发这六种结论，
+    # 晋升判据（deployment_controller）与响应面都按这张表分派。
+    # 没有 'active' 态——"仍在活跃改进"由兜底态 oscillating（继续观察）表达。
+    STATES = ("converged", "converging", "oscillating",
+              "diverging", "insufficient_data", "measurement_blind")
+
+    def __init__(self, window_size: int = 20,
                  convergence_threshold: float = 0.01,
                  divergence_threshold: float = -0.05):
-        """
-        Args:
-            window_size: 滑动窗口大小
-            convergence_threshold: 收敛阈值（增益小于此值认为收敛）
-            divergence_threshold: 发散阈值（增益小于此值认为发散）
-        """
+        # window_size: 滑动窗口大小（非法值回落 20，避免空切片求均值）
+        # convergence_threshold: |窗口均增益| 小于此值且趋势平坦判收敛
+        # divergence_threshold: 窗口均增益小于此值判发散
         self.window_size = window_size
         self.convergence_threshold = convergence_threshold
         self.divergence_threshold = divergence_threshold
-        self.gain_history: List[float] = []
-        self.cost_history: List[float] = []
-        
-    def record_iteration(self, gain: float, cost: float) -> None:
-        """记录一轮RSI迭代的增益和成本"""
-        self.gain_history.append(gain)
-        self.cost_history.append(cost)
-        
-        # 保持窗口大小
-        if len(self.gain_history) > self.window_size * 2:
-            self.gain_history = self.gain_history[-self.window_size * 2:]
-            self.cost_history = self.cost_history[-self.window_size * 2:]
-    
+        self.gain_history: List[float] = []     # 只收 evidenced=True 的增益
+        self.cost_history: List[float] = []     # 成本总记（含失明轮）
+        self.evidence_history: List[bool] = []  # 每轮是否有效测量，与 cost_history 等长
+        self.cost_vectors: List[Dict[str, Any]] = []  # E2 资源向量史
+
+    def record_iteration(self, gain: float, cost: float,
+                         evidenced: bool = True,
+                         cost_vector: Optional[Dict[str, Any]] = None) -> None:
+        # evidenced=False 表示度量失明（评测集用例全部回退到 setpoint）：
+        # 只记成本与"这轮量过但没量出来"的痕迹，不记增益——增益史是收敛
+        # 统计的唯一输入，掺进量不出来的 0 会把零证据窗口算成"已收敛"。
+        # 三条历史各自封顶 2×window（失明轮使它们不再等长）。
+
     def analyze_convergence(self) -> Dict[str, Any]:
-        """分析收敛状态
-        
-        Returns:
-            {
-                'status': 'converging' | 'converged' | 'diverging' | 'oscillating',
-                'confidence': float,  # 置信度
-                'recommendation': str,  # 建议
-                'metrics': {...},  # 详细指标
-            }
-        """
-        if len(self.gain_history) < self.window_size:
-            return {
-                'status': 'insufficient_data',
-                'confidence': 0.0,
-                'recommendation': '需要更多数据点',
-                'metrics': {},
-            }
-        
-        recent_gains = self.gain_history[-self.window_size:]
-        
-        # 计算统计量
-        mean_gain = sum(recent_gains) / len(recent_gains)
-        variance = sum((g - mean_gain) ** 2 for g in recent_gains) / len(recent_gains)
-        std_dev = variance ** 0.5
-        
-        # 趋势分析（线性回归斜率）
-        n = len(recent_gains)
-        x_mean = (n - 1) / 2
-        y_mean = mean_gain
-        slope = sum((i - x_mean) * (g - y_mean) for i, g in enumerate(recent_gains)) / \
-                sum((i - x_mean) ** 2 for i in range(n))
-        
-        # 收敛判定
-        if abs(mean_gain) < self.convergence_threshold and std_dev < self.convergence_threshold:
-            return {
-                'status': 'converged',
-                'confidence': 0.9,
-                'recommendation': 'RSI已收敛，可停止递归',
-                'metrics': {
-                    'mean_gain': mean_gain,
-                    'std_dev': std_dev,
-                    'slope': slope,
-                },
-            }
-        
-        # 发散判定
-        if mean_gain < self.divergence_threshold:
-            return {
-                'status': 'diverging',
-                'confidence': 0.8,
-                'recommendation': 'RSI在发散，应立即停止并回滚',
-                'metrics': {
-                    'mean_gain': mean_gain,
-                    'std_dev': std_dev,
-                    'slope': slope,
-                },
-            }
-        
-        # 振荡判定
-        sign_changes = sum(1 for i in range(1, len(recent_gains)) 
-                          if recent_gains[i] * recent_gains[i-1] < 0)
-        if sign_changes > len(recent_gains) * 0.6:
-            return {
-                'status': 'oscillating',
-                'confidence': 0.7,
-                'recommendation': 'RSI在振荡，建议降低学习率或增大剪枝力度',
-                'metrics': {
-                    'mean_gain': mean_gain,
-                    'std_dev': std_dev,
-                    'sign_changes': sign_changes,
-                },
-            }
-        
-        # 收敛中
-        if slope < 0 and mean_gain > 0:
-            return {
-                'status': 'converging',
-                'confidence': 0.6,
-                'recommendation': 'RSI正在收敛，继续观察',
-                'metrics': {
-                    'mean_gain': mean_gain,
-                    'std_dev': std_dev,
-                    'slope': slope,
-                },
-            }
-        
-        return {
-            'status': 'active',
-            'confidence': 0.5,
-            'recommendation': 'RSI仍在活跃改进中',
-            'metrics': {
-                'mean_gain': mean_gain,
-                'std_dev': std_dev,
-                'slope': slope,
-            },
-        }
-    
+        # 判定顺序与实现一致：
+        # 1. measurement_blind：窗口内一次有效测量都没有——多等不会变出证据，
+        #    先修测量再谈收敛（"再等等"指派的动作与真症结相反）；
+        # 2. insufficient_data：有效增益样本 < window_size——但 roi 照给
+        #    （成本核算与收敛样本量无关，工单 006）；
+        # 3. diverging：mean_gain < divergence_threshold(-0.05)，
+        #    confidence = min(0.9, |mean_gain/divergence_threshold|)，建议立即停止；
+        # 4. converged：|mean_gain| < 0.01 且 |trend_slope| < 0.001
+        #    ——判据是"平均增益小且趋势平"；std_dev 只统计不参与判定，
+        #    confidence = 0.9，建议转入降频巡检；
+        # 5. converging：mean_gain > 0 且 trend_slope < 0（增益为正而趋缓），
+        #    或 mean_gain < 2×convergence_threshold（增益很小）；
+        # 6. 兜底 oscillating：继续观察。
+        #
+        # Returns: {'status', 'confidence', 'recommendation',
+        #           'metrics': {'mean_gain', 'std_dev', 'trend_slope', 'roi'}}
+
+    def _roi_readout(self) -> Optional[float]:
+        # 无成本记录返回 None——"还没花过钱"与"花了钱零回报"是两件事（工单 006），
+        # 后者才是 roi < 0 这类守卫要比较的量。
+
     def compute_roi(self) -> float:
-        """计算RSI的投资回报率
-        
-        ROI = Σ(Gain_t) / Σ(Cost_t)
-        
-        ROI > 1: RSI带来正收益
-        ROI < 1: RSI的成本超过收益
-        """
-        if not self.cost_history or not self.gain_history:
-            return 0.0
-        
-        total_gain = sum(self.gain_history)
-        total_cost = sum(self.cost_history)
-        
-        return total_gain / total_cost if total_cost > 0 else float('inf')
+        # ROI = Σ(Gain_t) / Σ(Cost_t)；总成本为 0 返回 0.0（不是 inf）。
+
+    def costVectorReadout(self) -> Dict[str, Any]:
+        # E2 资源向量读数：{turns, tokens, wall_ms} 逐维总额＋逐轮明细。
+        # 向量不相加（Eq10 口径）——tokens/wall_ms 与增益不同纲，硬折算成
+        # 标量就是编汇率；ROI 标量的分母是轮数（cost_history），两本账各答各问。
 ```
 
 ### 15.4 收敛性保证策略
@@ -3058,9 +2945,10 @@ class ConvergenceAnalyzer:
 |------|------|----------|
 | 棘轮单调性 | 5道棘轮门 | $P(S_{t+1}) \geq P(S_t)$ |
 | 性能上界 | 改进预算 | $C_t \leq B_{max}$ |
-| 增益递减 | 自然规律 + 收敛检测 | $\lim G_t = 0$ |
-| 发散回滚 | 连续负增益检测 | 3次负增益即回滚 |
-| 振荡抑制 | 学习率衰减 | $\eta_t = \eta_0 / (1 + \lambda t)$ |
+| 增益递减 | 收敛检测：均增益绝对值 < 0.01 且趋势斜率绝对值 < 0.001 判 converged | $\lim G_t = 0$ |
+| 发散处置 | `analyze_convergence()` 报 `diverging`（窗口均增益 $< -0.05$）；RSIMetrics 对 ROI $< 0$ 发 CRITICAL 告警 | 立即停止并回滚 |
+| 度量失明防护 | `evidenced=False` 的迭代不记增益；窗口内全失明报 `measurement_blind` | 零证据不得冒充收敛 |
+| 振荡观察 | `analyze_convergence()` 兜底态 `oscillating`（继续观察，不自动加速） | 人工介入决策 |
 
 ---
 
@@ -3070,32 +2958,45 @@ class ConvergenceAnalyzer:
 
 ```python
 class RSIMetrics:
-    """RSI监控指标"""
-    
-    # 健康指标
-    CONVERGENCE_STATUS = "rsi.convergence.status"      # 收敛状态
-    CONVERGENCE_CONFIDENCE = "rsi.convergence.confidence"  # 收敛置信度
-    ROI = "rsi.roi"                                     # 投资回报率
-    
-    # 性能指标
-    ITERATION_DURATION = "rsi.iteration.duration_ms"    # 迭代耗时
-    CANDIDATES_GENERATED = "rsi.candidates.generated"   # 生成候选数
-    CANDIDATES_PRUNED = "rsi.candidates.pruned"         # 剪枝后候选数
-    VALIDATION_PASSED = "rsi.validation.passed"         # 验证通过数
-    VALIDATION_FAILED = "rsi.validation.failed"         # 验证失败数
-    
-    # 安全指标
-    SAFETY_VIOLATIONS = "rsi.safety.violations"         # 安全违规数
-    HUMAN_APPROVALS = "rsi.safety.human_approvals"      # 人工审批数
-    ROLLBACKS = "rsi.safety.rollbacks"                  # 回滚次数
-    
-    # 改进指标
-    PARAMETER_IMPROVEMENTS = "rsi.improvements.parameters"   # 参数改进数
-    ARCHITECTURE_IMPROVEMENTS = "rsi.improvements.architecture"  # 架构改进数
-    TOTAL_GAIN = "rsi.improvements.total_gain"           # 总改进增益
+    # RSI 监控指标管理器
+    # 权威实现：neurova/evolution/rsi/metrics.py（2026-11-20 核对）。
+    # 刻意不预置任何键为 0：缺席与"读数为 0"是两件事（工单 012/017），
+    # 读侧用 get_metric() 返回 None 区分二者。
+
+    # 7 个核心指标
+    RSI_CYCLES_TOTAL = "rsi_cycles_total"              # RSI 循环总次数
+    RSI_IMPROVEMENT_RATE = "rsi_improvement_rate"      # 改进率
+    RSI_CONVERGENCE_ROI = "rsi_convergence_roi"        # 收敛投资回报率
+    RSI_ROLLBACK_COUNT = "rsi_rollback_count"          # 回滚次数
+    RSI_CANDIDATES_GENERATED = "rsi_candidates_generated"  # 生成候选数
+    RSI_CANDIDATES_PRUNED = "rsi_candidates_pruned"        # 剪除候选数
+    RSI_GATE_FAILURES = "rsi_gate_failures"            # 门禁连续失败数
+
+    # 经验族指标（工单 008）：让"经验质量"从自我声明变成可告警读数。
+    # 写入方 = RSIOrchestrator._refresh_experience_metrics（每轮迭代刷新）
+    EXPERIENCE_ROWS = "experience_rows"                            # 经验条目数
+    EXPERIENCE_UNEVIDENCED_RATIO = "experience_unevidenced_ratio"  # 无回执占比
+    EXPERIENCE_HIT_RATE = "experience_hit_rate"                    # 命中率
+    EXPERIENCE_ADOPTION_SUCCESS_RATE = "experience_adoption_success_rate"  # 采纳后成功率
+    EXPERIENCE_ADOPTION_DECISIONS = "experience_adoption_decisions"        # 采纳决策数
+
+    # 告警阈值：check_alerts()（告警面）与 deployment_controller（晋升判据面）
+    # 共用同一张表，且在调用时刻读取——两边吃同一份数才不会漂移。
+    ALERT_THRESHOLDS = {
+        "roi_warning": 0.1,                           # WARNING: 0 < ROI < 0.1
+        "roi_critical": 0.0,                          # CRITICAL: ROI < 0（发散）
+        "gate_failures_error": 3,                     # ERROR: 门禁连续失败 ≥ 3
+        "experience_unevidenced_ratio_warning": 0.5,  # 无回执占比 ≥ 50%
+        "experience_adoption_success_rate_warning": 0.5,  # 采纳后成功率 < 50%
+        "experience_adoption_min_decisions": 2,       # 少于此决策数不下结论
+    }
 ```
 
+读出面两处：`get_dashboard_data()` 返回 metrics/experience/alerts/summary 四块；`experience_quality_readout()` 是阶段晋升判据的唯一供值口——分母为零时把 `adoption_success_rate` 还原成 `None`（"没测到"），不落盘成 0.0 被读成"照经验做全都失败"（工单 008/016）。
+
 ### 16.2 RSI仪表盘设计
+
+真实读出面：`RSIMetrics.get_dashboard_data()` 经 `GET /api/v1/governance/rsi/status` 暴露（`neurova/api/endpoints/governance.py`，另有 /rsi/proposals 审批面）。下图为设计期示意，字段以读出面实际返回为准。
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -3132,12 +3033,16 @@ class RSIMetrics:
 
 ### 16.3 告警规则
 
-| 告警级别 | 条件 | 动作 |
+| 告警级别 | 条件（`check_alerts()` 实测） | 含义/动作 |
 |----------|------|------|
-| **INFO** | RSI完成一轮迭代 | 记录日志 |
-| **WARNING** | 连续3轮增益 < 0.005 | 降低学习率 |
-| **ERROR** | 连续3轮增益 < 0（发散） | 立即停止，自动回滚 |
-| **CRITICAL** | 安全门被触发 | 停止RSI，通知人类 |
+| **INFO** | `RSI_CYCLES_TOTAL > 0` | RSI 循环完成 N 次，记录日志 |
+| **WARNING** | $0 < \text{ROI} < 0.1$ | ROI 低于阈值，收益偏薄 |
+| **WARNING** | 有经验条目且无回执占比 ≥ 50% | 质量位不携带信息（工单 002 病根） |
+| **WARNING** | 采纳决策 ≥ 2 且采纳后成功率 < 50% | "照经验做"在帮倒忙 |
+| **ERROR** | `RSI_GATE_FAILURES ≥ 3` | 门禁连续失败 |
+| **CRITICAL** | $\text{ROI} < 0$ | 检测到发散 |
+
+旧稿"连续 3 轮增益 < 0.005 降低学习率""安全门触发"等条件没有对应实现；全部告警由 `RSIMetrics.check_alerts()` 按 `ALERT_THRESHOLDS` 单源判定，阈值与晋升判据共表。
 
 ---
 
