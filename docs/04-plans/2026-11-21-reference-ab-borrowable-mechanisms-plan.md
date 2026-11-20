@@ -247,4 +247,17 @@
 
 ## 9. 执行记录
 
-（待实施批填：每批提交号、红灯/绿灯实测、A/B 域与读数、live-verify 证据、偏离说明。）
+**四车道并行实施完毕（2026-11-21），六项全部落地，均未推远端。**
+
+- **批1 = P1-2**：`627458c32`——`NeuacpVerifyChannel` 独立 ACP 判定会话（权限请求恒 fail-closed deny、不记 token、帧走 F2 留痕），构造缺省惰性自建，**swarm.py 零改动**（:2430/:2450 消费链自然取到通道）。红灯 8 failed → 绿灯 9 passed；neuacp 域 143 passed 零新增失败。live-verify（桩 CLI + `NEUROVA_SWARM_ACCEPTANCE=on`，9681）：外部成员 run `acceptance={"achieved": true, "rounds": 1, "reworked": true, ...}`——不再 judge_unavailable，「未达标→回炉→达标」全程走通。
+- **批2 = P2-3 + P1-1 + P2-4**：`f5f32dcef`（27 文件，+2906/−6）——`candidate_projection.py`（六类候选事件折叠，与 CAS 语义一一对应）+ `swarm_graph_projection.py`（v2 四类边：spawn/依赖/审批/候选，TypedDict 单源）+ console.py 两条只读路由 + integrationReport 兜底（内存板空→投影补齐标 `replay`）+ 前端 `SwarmFlowPanel.vue`（vue-flow 既有依赖）接 ChatPage 运行详情区 + 16 键×11 locale。35 条新测试全绿、vue-tsc 0 错误；路由快照/契约/授权面按门禁规定动作重生成治愈（含已提交 asr 特性的历史脱节）。live-verify（9683，[ERROR]=0）：候选端点返回重放板态 `source:"replay"`，图端点返回 2 节点 + spawn 边 + 候选卡边。
+- **批3 = P1-3**：`cb1de7db1`——`auditEnterpriseSyncStaleness(triggerKind)`（窗口 `NEUROVA_ENTERPRISE_SYNC_STALE_HOURS` 默认 24，单源 fail-soft）+ lifespan 启动审计（trigger=startup）+ `addSystemJob` 日巡检（jobId=`enterprise-sync-staleness-audit`，幂等注册）。红灯 ImportError → 绿灯 9 passed；A/B（git worktree@HEAD 隔离）：基线 5 failed/5480 passed → 叠加 4 failed/5490 passed（真子集，零新增）。live-verify（9685，隔离数据根）：启动审计 `checked=1/triggered=1` 落 `trigger=startup ok` 行（真工厂→真 SqlDirectAdapter→真映射→真准入全链），窗口内重复审计 `skipped`。
+- **批4 = P2-2**：`a48802918`——`enterprise_data_query` 成员工具面（schema+执行分支+动态描述带数据源 schema 摘要）+ 反向 MCP `data_query`（双鉴权+三层截断同款）+ `runReadonlyDataQuestion` 可复用入口（端点行为与总闸语义零变化）+ 只读断言 `assertReadonlySelect` 以测试钉死。红灯 21 failed → 绿灯 25 passed；A/B 零新增失败。live-verify（9687）8/8：闸关两面结构化 `capability_disabled`、开闸两面真实 3 行数据、他租户 source 拒绝、DROP 意图被点名拒绝。
+
+**偏离说明**：
+1. P1-2 走计划 §1.3 第 2 步备选路线——构造缺省自建判定通道，swarm.py 无需改动（与 D-B 拍板不冲突，隔离会话语义不变）。
+2. P1-1 TeamPage 未挂图：该页无会话上下文，团队维度聚合图需先定锚（team 维度读面），另批拍板。
+3. 依赖边数据源为内存 run 态（TaskUnit 不落台账）——重启后依赖边如实缺席（meta 诚实计数）；跨重启可查需把 dependencies 落事件载荷，登记为后续增强。
+4. P2-2 派生快照 `contracts/tool_catalog.json`（137→138）经官方门 `--update` 再生成，不在字面文件清单内、不再生成立即红，已在提交正文注明。
+
+**预存债务移交（非本批引入）**：vitest es-ES/it-IT locale 键集漂移与硬编码色基线（HEAD 即红）；console_run_ledger 一条顺序依赖 flaky；本机无 filesystem MCP server 的启动 [ERROR] 噪声。
