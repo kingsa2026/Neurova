@@ -145,10 +145,26 @@ class DangerousCommandDetector:
         return None
 
 
+# ── 语音口令确认（B4-9 HITL）────────────────────────────────────────────
+
+#: 口头确认的**整句肯定**形态：转写短句本身就是一个肯定词才算——长句里碰巧
+#: 含"好"字不算（"这个方案好不好"不是确认）。
+_VOICE_AFFIRM_PATTERN = re.compile(
+    r"^(好的?|可以|确认|同意|没错|就这样|批准|行|要得|yes|ok|okay|approve)"
+    r"[。，！!．.～~\s]*$",
+    re.IGNORECASE,
+)
+
+
+def affirmativeVoiceTranscript(transcript: str) -> bool:
+    """语音转写是否为**整句肯定**（语音口令确认的词法闸）。"""
+    t = str(transcript or "").strip()
+    return bool(t) and bool(_VOICE_AFFIRM_PATTERN.match(t))
+
+
 @dataclass
 class ApprovalRequest:
     """审批请求"""
-
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     agent_id: str = ""
     user_id: str = ""
@@ -421,6 +437,17 @@ class ApprovalManager:
     ) -> ApprovalRequest:
         """创建审批请求"""
         with self._lock:
+            # Dreaming 判定面注入（项 7）：active 规则的**建议性**提示进
+            # metadata（只改提示文案，不自动裁决；无规则时零改动）。
+            metadata = dict(metadata or {})
+            try:
+                from neurova.cognitive_layers.dreaming_feedback import approvalHint
+
+                hint = approvalHint(command)
+                if hint:
+                    metadata["dreamingHint"] = hint
+            except Exception as exc:  # noqa: BLE001 - 注入失败不阻断审批主流程
+                logger.debug("审批提示注入跳过：%s", exc)
             request = ApprovalRequest(
                 agent_id=agent_id,
                 user_id=user_id,
@@ -429,7 +456,7 @@ class ApprovalManager:
                 danger_reason=danger_reason,
                 expires_at=datetime.datetime.now(datetime.timezone.utc)
                 + datetime.timedelta(seconds=self.DEFAULT_EXPIRY_SECONDS),
-                metadata=metadata or {},
+                metadata=metadata,
             )
 
             self._requests[request.request_id] = request
@@ -492,6 +519,15 @@ class ApprovalManager:
             # P1-c：审批记忆沉淀
             self._remember_approval(request.command, approved_by, remember)
 
+            # Dreaming 反馈采集（项 7）：人的裁决是最诚实的显式反馈——
+            # 采集失败不阻断审批主流程（fail-open，只留日志）。
+            try:
+                from neurova.cognitive_layers.dreaming_feedback import noteApprovalDecision
+
+                noteApprovalDecision(request.command, True, request.request_id)
+            except Exception as exc:  # noqa: BLE001 - 采集旁路
+                logger.debug("审批反馈采集跳过：%s", exc)
+
             self._upsert_request_sqlite(request)
             self._save_requests()
 
@@ -525,6 +561,14 @@ class ApprovalManager:
             request.approval_note = note
             request.updated_at = datetime.datetime.now(datetime.timezone.utc)
 
+            # Dreaming 反馈采集（项 7）：拒绝是强纠偏信号（采集失败不阻断）
+            try:
+                from neurova.cognitive_layers.dreaming_feedback import noteApprovalDecision
+
+                noteApprovalDecision(request.command, False, request.request_id)
+            except Exception as exc:  # noqa: BLE001 - 采集旁路
+                logger.debug("审批反馈采集跳过：%s", exc)
+
             self._upsert_request_sqlite(request)
             self._save_requests()
 
@@ -534,6 +578,22 @@ class ApprovalManager:
             logger.info("审批请求已拒绝: %s, 拒绝人: %s", request_id, rejected_by)
 
             return True
+
+    def confirmByVoiceTranscript(
+        self, request_id: str, transcript: str, user_id: str = ""
+    ) -> bool:
+        """语音口令确认（B4-9 HITL）：用户口头"好"即确认，模型自问自答不算。
+
+        反自答是**结构性**的：本方法只由入站用户语音转写路径调用（渠道语音
+        消息/纪要链），assistant 自产的文本永远不会走到这里。确认走
+        ``approve_request`` 同一收敛路径——审批记忆/审计/dreaming 反馈采集
+        全部单源复用，note 留转写原文可追溯。
+        """
+        return self.approve_request(
+            request_id,
+            approved_by=str(user_id or "") or "voice_transcript",
+            note=f"voice:{str(transcript or '').strip()[:80]}",
+        )
 
     def get_pending_requests(self, agent_id: Optional[str] = None) -> List[ApprovalRequest]:
         """获取待处理的审批请求"""

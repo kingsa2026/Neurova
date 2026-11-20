@@ -143,6 +143,19 @@ class MobileDeviceStore:
                  deviceSecret: str = "") -> Dict[str, Any]:
         now = time.time()
         with self._lock, self._conn:
+            # 换绑即吊销（Linger 对照项 6）：同一物理设备（user+device_id）经新
+            # 配对码再次入册时，旧 pairing 绑定当场失效——revoked + token_epoch
+            # 递增，旧凭证的续签与重连随即被 verifyDeviceSecret/isAdmissible
+            # 拦下。同 pairing 重复确认是幂等形态，不得自吊销；device_id 为空
+            # （匿名入册）无从判定"同一台设备"，维持多绑定现状。
+            if deviceId:
+                self._conn.execute(
+                    "UPDATE mobile_devices SET state = 'revoked',"
+                    " token_epoch = token_epoch + 1, revoked_at = ?"
+                    " WHERE user_id = ? AND device_id = ? AND pairing_id <> ?"
+                    " AND state <> 'revoked'",
+                    (now, userId, deviceId, pairingId),
+                )
             self._conn.execute(
                 "INSERT OR REPLACE INTO mobile_devices"
                 " (pairing_id, user_id, device_name, device_type, device_id,"
@@ -157,9 +170,13 @@ class MobileDeviceStore:
         """设备身份核验（续签用）。
 
         用 `hmac.compare_digest` 比哈希，不比明文——明文压根不入库（§4.7）。
+        已吊销（含换绑即吊销）的绑定一律拒：摘要比对通过也不放行，否则
+        "吊销"只剩 epoch 一半，旧密钥仍能换来新 ticket。
         """
         row = self.get(pairingId)
         if not row or not deviceSecret:
+            return False
+        if row.get("state") == "revoked":
             return False
         stored = row.get("secret_hash") or ""
         if not stored:

@@ -49,6 +49,37 @@ def _default_agent_lookup(agent_id: str):
     return get_agent_instance(agent_id)
 
 
+def _tryVoiceConfirmPendingApprovals(agentId: str, message: ChannelMessage) -> None:
+    """语音口令确认回灌（B4-9 HITL）：**语音转写**消息为整句肯定 + 该 agent
+    恰好一张待审单 → 确认之。语音闸在本助手内判（唯一判定点）：非语音消息
+    （打字/机器人自产）永不触发——反自答的一半落在这里，另一半是只有入站
+    用户消息路径会调到本助手。多张不猜（须走面板带 request_id 明确裁决）。
+    纯旁路：任何失败只留日志，不影响消息主流程。"""
+    try:
+        if not (message.metadata or {}).get("voice_transcribed"):
+            return
+        from neurova.security.approval_manager import (
+            affirmativeVoiceTranscript,
+            get_approval_manager,
+        )
+
+        transcript = str(message.content or "").strip()
+        if not affirmativeVoiceTranscript(transcript):
+            return
+        pending = get_approval_manager().get_pending_requests(agent_id=agentId)
+        if len(pending) != 1:
+            logger.info(
+                "语音口令确认跳过：agent=%s 待审单 %d 张（≠1，不猜）", agentId, len(pending)
+            )
+            return
+        ok = get_approval_manager().confirmByVoiceTranscript(
+            pending[0].request_id, transcript, user_id=str(message.sender_id or "")
+        )
+        logger.info("语音口令确认回灌：agent=%s request=%s ok=%s", agentId, pending[0].request_id, ok)
+    except Exception as exc:  # noqa: BLE001 - 旁路失败不影响消息处理
+        logger.debug("语音口令确认回灌异常：%s", exc)
+
+
 def _channel_cfg(manager, channel_type: str, agent_id: str) -> Dict[str, Any]:
     """读该 (agent,渠道) 适配器的配置 extra（公共参数：show_thinking 等存这里）。
     未注册适配器时返回空 dict（各开关取默认）。
@@ -161,6 +192,10 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         if agent is None:
             logger.warning("ChannelRouter: agent『%s』不存在，%s 消息未处理", agent_id, message.channel_type)
             return None
+        # 语音口令确认（B4-9 HITL）：语音转写的整句肯定回灌恰一张待审单——
+        # 语音闸/词法闸/唯一待审闸都在助手内判（单一判定点）；反自答是结构性
+        # 的：只有入站用户消息路径会到这里。纯旁路。
+        _tryVoiceConfirmPendingApprovals(agent_id, message)
         session_id = manager.resolve_session_scope_id(message)
         # Wave H-W0 修复：owner_user_id 在 agent.config 上——原读
         # getattr(agent, "owner_user_id") 恒 None，渠道会话归属链自

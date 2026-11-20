@@ -37,6 +37,13 @@ __all__ = [
 class TurnEndpointDetector:
     """能量 VAD：逐 10ms 子帧判 RMS，说话后静默累计达阈值即判一轮结束。
 
+    双 VAD 两级（Linger 对照 B4-6 的本仓落法——服务端终裁不变，快侧先行）：
+    - **快侧（pause_ms，默认 350ms）**：说话后的短静默先标 ``pause_detected``
+      （候选停顿）——消费方（流式端点）借此在自然停顿时**提前刷新 partial**，
+      不必等满 700ms；说话恢复后本轮标记保持（每轮闩锁）。
+    - **慢侧（silence_ms，默认 700ms）**：静默持续到阈值才真正切轮出 final
+      （服务端终裁），防快侧误切短停顿。
+
     口径：
     - 开口前的静默不切轮（否则连接建立即被切）；
     - 连续说话不切轮；
@@ -51,6 +58,7 @@ class TurnEndpointDetector:
         min_speech_ms: int = 300,
         max_turn_ms: int = 60_000,
         energy_threshold: float = 200.0,
+        pause_ms: int = 350,
     ):
         self._sample_rate = sample_rate
         self._frame_ms = frame_ms
@@ -58,6 +66,7 @@ class TurnEndpointDetector:
         self._min_speech_ms = min_speech_ms
         self._max_turn_ms = max_turn_ms
         self._threshold = energy_threshold
+        self._pause_ms = max(0, int(pause_ms))
         self._samples_per_frame = max(1, int(sample_rate * frame_ms / 1000))
         self.reset()
 
@@ -68,6 +77,7 @@ class TurnEndpointDetector:
         self._silence_run_ms = 0
         self._ended = False
         self._end_reason = ""
+        self._pause_detected = False
 
     def feed(self, pcm: bytes) -> bool:
         """喂一帧 PCM16LE；返回 True 表示当前轮应终结（之后本实例保持 ended）。"""
@@ -83,10 +93,23 @@ class TurnEndpointDetector:
             else:
                 self._silence_run_ms += self._frame_ms
             self._total_ms += self._frame_ms
+            # 快侧：短停顿先标记（不切轮——慢侧终裁）
+            if (
+                not self._pause_detected
+                and self._voiced_ms >= self._min_speech_ms
+                and self._silence_run_ms >= self._pause_ms
+                and self._silence_run_ms < self._silence_ms
+            ):
+                self._pause_detected = True
             if self._should_end():
                 self._ended = True
                 return True
         return self._ended
+
+    @property
+    def pause_detected(self) -> bool:
+        """快侧停顿标记（每轮闩锁；慢侧终裁前给消费方提前刷新的时机）。"""
+        return self._pause_detected
 
     @property
     def end_reason(self) -> str:
@@ -167,6 +190,17 @@ class BatchTranscribeStreamingTurnSession:
                 self._last_partial = text
         return self._last_partial
 
+    async def flushPartial(self) -> str:
+        """停顿触发的一次**立即**重转（双 VAD 快侧消费：自然停顿时字幕先更新，
+        不必等 partial_interval_ms；慢侧 final 仍由端点终裁）。"""
+        if self._closed or not self._audio:
+            return self._last_partial
+        self._last_transcribe_monotonic_ms = time.monotonic() * 1000
+        text = await self._transcribe_accumulated()
+        if text:
+            self._last_partial = text
+        return self._last_partial
+
     async def finish(self) -> str:
         if self._closed:
             raise RuntimeError("流式会话已结束")
@@ -212,6 +246,10 @@ class FunASRStreamingTurnSession:
         text = await loop.run_in_executor(None, self._generate, samples, False)
         if text:
             self._segments.append(text)
+        return "".join(self._segments)
+
+    async def flushPartial(self) -> str:
+        """真流式引擎逐帧即解，无积压可冲——停顿刷新=当前累计文本（协议齐平）。"""
         return "".join(self._segments)
 
     async def finish(self) -> str:

@@ -38,6 +38,7 @@ router = APIRouter()
 # 模块级导入（避免重复导入）
 from neurova.api.endpoints import get_app_state
 from neurova.api.auth import get_current_user
+from neurova.asr.minutes import getMinutesPipeline, minutesCounters
 
 
 def require_admin_dep():
@@ -492,9 +493,44 @@ async def audio_status(current_user: Dict[str, Any] = Depends(get_current_user))
             "tts": tts_stats,
             "asr": asr_stats,
             "streaming_asr": _streaming_asr_status(),
+            "minutes": minutesCounters(),
             "timestamp": time.time(),
         },
     }
+
+
+@router.post("/minutes")
+async def create_voice_minutes(
+    file: "UploadFile",
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """录音 → 纪要 → Ask 判定 → 任务（B4-8）。
+
+    上传录音文件入队（有界队列，B4-4：满时记 input_gap 证据并如实 429，
+    不静默丢）；处理异步进行，用 GET /minutes/{job_id} 轮询结果。
+    判定为"办事"的任务自动落任务看板（createTaskFromVoiceMinutes）。
+    """
+    audioBytes = await file.read()
+    if not audioBytes:
+        raise HTTPException(status_code=400, detail="empty_audio")
+    pipeline = getMinutesPipeline()
+    result = pipeline.submit(audioBytes, filename=file.filename or "")
+    if not result.get("queued"):
+        # 有界背压的诚实形态：429 + 证据已落审计（input_gap），不装成功
+        raise HTTPException(status_code=429, detail=result)
+    return {"code": 0, "data": result}
+
+
+@router.get("/minutes/{job_id}")
+async def get_voice_minutes_status(
+    job_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """查询录音纪要作业状态/结果（transcript/summary/kind/task_id）。"""
+    job = getMinutesPipeline().jobStatus(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="minutes job not found")
+    return {"code": 0, "data": job}
 
 
 @router.get("/engines")
@@ -680,10 +716,11 @@ async def asr_stream(websocket: WebSocket, token: str = Query(default=""), langu
     engine_label = ""
     turn_id = 0
     last_partial = ""
+    pause_flushed = False
     total_ms = 0.0
 
     async def _end_turn(reason: str) -> None:
-        nonlocal session, detector, last_partial, turn_id
+        nonlocal session, detector, last_partial, turn_id, pause_flushed
         if session is None:
             return
         final_text = await session.finish()
@@ -694,6 +731,7 @@ async def asr_stream(websocket: WebSocket, token: str = Query(default=""), langu
         session = None
         detector.reset()
         last_partial = ""
+        pause_flushed = False
         turn_id += 1
 
     try:
@@ -743,6 +781,18 @@ async def asr_stream(websocket: WebSocket, token: str = Query(default=""), langu
                     )
                 if detector.feed(data):
                     await _end_turn(detector.end_reason or "silence")
+                    continue
+                # 双 VAD 快侧（B4-6）：自然停顿的上升沿立即重转一次 partial——
+                # 客户端字幕在短停顿时就更新，不必等满 silence 阈值；切轮仍由
+                # 慢侧（silence_ms）终裁。每轮只冲一次（pause_flushed 闩锁）。
+                if detector.pause_detected and not pause_flushed:
+                    pause_flushed = True
+                    flushed = await session.flushPartial()
+                    if flushed and flushed != last_partial:
+                        last_partial = flushed
+                        await websocket.send_json(
+                            {"type": "partial", "text": flushed, "turn_id": turn_id}
+                        )
                 continue
 
             text_frame = message.get("text")

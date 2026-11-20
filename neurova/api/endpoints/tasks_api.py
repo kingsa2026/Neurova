@@ -21,6 +21,7 @@
 from neurova.core.logger import get_logger
 from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 import os
+import threading
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -142,6 +143,64 @@ def _reboot_load() -> None:
 
 
 _load_store()
+
+
+# ---------------------------------------------------------------------------
+# 编程式任务落点（语音纪要链 B4-8 的"办事转任务"消费口）
+# ---------------------------------------------------------------------------
+
+_taskWriteLock = threading.Lock()
+
+
+def createTaskFromVoiceMinutes(title: str, description: str,
+                               sourceMeta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """把语音纪要链判定的"办事"落成看板任务（B4-8 的任务终点）。
+
+    - 无任何看板时先建缺省看板（按名幂等，名取 sourceMeta.board_name 或
+      「语音纪要」）；有看板则落第一个看板；
+    - 任务形状与 POST /boards/{id}/tasks 完全同源（同一 store、同一字段）；
+    - 元数据带来源（source/job_id）便于追溯 to 哪条录音；
+    - 返回任务 dict（含 id）。store 写与端点同锁（进程内互斥，落盘即时）。
+    """
+    boardName = str((sourceMeta or {}).get("board_name") or "语音纪要")
+    with _taskWriteLock:
+        board = next((b for b in _boards_store.values() if b.get("name") == boardName), None)
+        if board is None:
+            board = next(iter(_boards_store.values()), None)
+        if board is None:
+            boardId = str(uuid.uuid4())
+            now = time.time()
+            board = {
+                "id": boardId,
+                "name": boardName,
+                "description": "语音纪要链自动创建（办事转任务）",
+                "project_id": None,
+                "columns": [{"name": col, "order": i} for i, col in
+                            enumerate(["todo", "in-progress", "done"])],
+                "created_at": now,
+                "updated_at": now,
+            }
+            _boards_store[boardId] = board
+        taskId = str(uuid.uuid4())
+        now = time.time()
+        task = {
+            "id": taskId,
+            "title": str(title or "语音纪要任务")[:200],
+            "description": str(description or "")[:2000],
+            "status": "todo",
+            "priority": "medium",
+            "assignee": None,
+            "dueDate": "",
+            "board_id": board["id"],
+            "created_at": now,
+            "updated_at": now,
+            "source": str((sourceMeta or {}).get("source") or "voice_minutes"),
+            "source_job_id": str((sourceMeta or {}).get("job_id") or ""),
+        }
+        _tasks_store[taskId] = task
+        _save_store()
+    logger.info("语音纪要转任务: task=%s board=%s title=%s", taskId, board["id"], task["title"])
+    return task
 
 
 # ---------------------------------------------------------------------------

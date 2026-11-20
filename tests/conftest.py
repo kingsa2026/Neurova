@@ -92,6 +92,19 @@ def moe_state_session_dir() -> Path:
 
 
 @pytest.fixture(autouse=True)
+def _isolateDreamRules(tmp_path, monkeypatch):
+    """Dreaming 规则库逐用例隔离：线索单例落会话级共享数据根会跨用例累积，
+    前一用例转正的规则会改写后一用例的判定面（审批提示/主动提问闸）读数。
+    与 _isolateToolCallJournal 同一口径：tmp 库 + 单例重置（前后各一次）。"""
+    from neurova.cognitive_layers import dreaming
+
+    monkeypatch.setenv("NEUROVA_DREAMING_DB", str(tmp_path / "dreaming_rules.db"))
+    dreaming.reset_dream_rule_store()
+    yield
+    dreaming.reset_dream_rule_store()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_session_manager_singletons():
     """跨套件全局状态隔离（残留处理 2026-09-13 大合批泄漏治理）。
 
