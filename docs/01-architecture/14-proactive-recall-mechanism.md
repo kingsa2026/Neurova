@@ -6,10 +6,15 @@
 
 | 文档术语 | 实际代码类/方法 | 文件位置 |
 |---------|---------------|---------|
-| `ScheduledRecallEngine` | `ProactiveRecall`（支持关键词、情感、时间、频率、上下文等6种触发器） | `neurova/cognitive_layers/memory_layer/proactive_recall.py` |
-| `ProactiveMemoryManager` | **不存在** — 主动回忆功能统一由 `ProactiveRecall` 类实现 | `neurova/cognitive_layers/memory_layer/proactive_recall.py` |
+| `ScheduledRecallEngine`（定时回忆巩固） | **2026-11-20 已落地**：`runScheduledRecallCycle`——挂 `core/idle_tracker.py` 睡眠巩固尾（`_run_scheduled_recall`）与 `agent_shutdown.py` 关机整理尾；阈值/升温量经 memory-settings `proactive_recall.*` 配置；遗忘优先级复用 `TemperatureEngine.calculate_forgetting_probability` | `neurova/cognitive_layers/memory_layer/proactive_recall.py` |
+| 上下文触发回忆（时间/情感） | **2026-11-20 已落地**：`contextTriggeredRecall`——挂 `context/injector.py` `retrieve_memories`，与被动召回合并去重限量 | 同上 |
+| 任务驱动回忆 | **2026-11-20 已落地**：`taskDrivenRecall` + `renderTaskRecallSection`——挂 `agent/swarm.py` 派活任务书拼装（memberPrompt 追加段） | 同上 |
+| 回忆检索执行 | `NeurovaRecallEngine`（:651） | `neurova/cognitive_layers/memory_layer/neurova_recall.py` |
+| 联想链式回忆 | `NeurovaRecallEngine` 图通道 + drill 阶段 `_drill_connect`（既有能力，本批未改） | `neurova/cognitive_layers/memory_layer/neurova_recall.py` |
+| `ProactiveMemoryManager` | **不存在** | - |
 
-实际实现以代码为准。
+实际实现以代码为准。正文 §2–§4 的类名/接口为设计稿形态，落地以本表为准；
+主动行为入口仍是 `ProactiveBehaviorEngine` 与 `question_queue.py`（与主动回忆互不替代）。
 
 ## 1. 概述
 
@@ -751,6 +756,8 @@ def build_context_with_recall(
 ## 8. 监控与日志
 
 ### 8.1 回忆日志
+
+> ⚠️ `recall_logs` 表未建表（2026-11-19 核对：全仓代码零命中，无该表 DDL 与读写）。以下为设计稿。
 
 ```python
 @dataclass

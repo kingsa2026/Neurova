@@ -6,13 +6,15 @@
 > 已不存在，「✅ 已实现」对退役项不再成立。现役能力面以 [`docs/INDEX.md`](../INDEX.md)
 > 与 `neurova/` 现行代码为准。
 >
-> **【2026-11-20 主动回忆条目专项纠偏】** B17 与检索表 13–19 所指
+> **【2026-11-20 主动回忆条目专项纠偏（落地后更新）】** B17 与检索表 13–19 所指
 > `neurova/memory/core/proactive_recall.py` **在现行代码中不存在**（`neurova/memory/`
-> 下无 `core/` 目录，全仓 grep `proactive_recall|ProactiveRecall` 零命中）。
-> 截至 2026-11-20：关键词触发与联想链式回忆由 `NeurovaRecallEngine` 既有通道覆盖；
-> **时间触发、情感触发、定时回忆巩固、任务驱动回忆均未实现**
-> （设计稿见 [`14-proactive-recall-mechanism.md`](14-proactive-recall-mechanism.md)）。
-> 表中对应行的「✅ 已实现」按历史快照保留不改，现役状态以本段为准。
+> 下无 `core/` 目录）——表中路径系历史快照的旧布局假设，行内「✅」按沿革保留不改。
+> 现役事实（2026-11-20 落地批）：主动回忆四类能力已实现于
+> `neurova/cognitive_layers/memory_layer/proactive_recall.py`——关键词/联想链由
+> `NeurovaRecallEngine` 既有通道覆盖，**时间触发、情感触发、定时回忆巩固、
+> 任务驱动回忆**由该模块承载（消费方：`core/idle_tracker.py` 睡眠尾、
+> `agent_shutdown.py` 关机链、`context/injector.py` 召回点、`agent/swarm.py` 派活）；
+> 设计稿见 [`14-proactive-recall-mechanism.md`](14-proactive-recall-mechanism.md) 对齐表。
 
 > **分析日期**: 2026-05-07  
 > **分析范围**: `e:\项目\Neurova\neurova\` 代码库  

@@ -1066,6 +1066,20 @@ class UnifiedContextInjector(BaseModule):
         try:
             query_memories = self._memory_manager.recall(query=query, limit=limit)
 
+            # 上下文触发回忆（14 号设计稿落地批）：时间模式/情感共鸣主动带出，
+            # 与被动召回合并去重；fail-soft，不阻断检索主链。
+            proactive_memories: List[Dict] = []
+            try:
+                from neurova.cognitive_layers.memory_layer.proactive_recall import (
+                    contextTriggeredRecall,
+                )
+
+                proactive_memories = contextTriggeredRecall(
+                    self._memory_manager, emotionProvider=self._proactiveEmotionProvider()
+                )
+            except Exception as proactive_error:  # noqa: BLE001 — 触发链故障退回纯被动召回
+                self.log_debug(f"上下文触发回忆跳过: {proactive_error}")
+
             hot_memories = []
             crystallized = []
 
@@ -1080,7 +1094,7 @@ class UnifiedContextInjector(BaseModule):
 
             seen_ids = set()
             all_memories = []
-            for mem in query_memories + hot_memories + crystallized:
+            for mem in query_memories + proactive_memories + hot_memories + crystallized:
                 mem_id = mem.get("id", "")
                 if mem_id and mem_id not in seen_ids:
                     seen_ids.add(mem_id)
@@ -1096,6 +1110,17 @@ class UnifiedContextInjector(BaseModule):
         except Exception as e:
             self.log_error(f"检索记忆失败: {e}")
             return []
+
+    def _proactiveEmotionProvider(self):
+        """当前主导情感提供器（情感引擎不可用时返回 None → 跳过情感触发）。"""
+        try:
+            from neurova.cognitive_layers.emotion_context_layer.emotion import (
+                get_emotion_analyzer,
+            )
+
+            return get_emotion_analyzer(self._memory_manager.agent_id).get_dominant_emotion
+        except Exception:  # noqa: BLE001 — 情感引擎缺席时诚实降级为无情感触发
+            return None
 
     def get_reflection_logs_for_context(
         self, focus_types: Optional[List[ReflectionType]] = None, limit: int = 5

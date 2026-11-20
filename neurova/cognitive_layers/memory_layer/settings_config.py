@@ -162,6 +162,26 @@ PARAM_SCHEMAS: List[ParamSchema] = [
     ParamSchema("llm.temperature", 0.7, "float", 0.0, 2.0,
                 "全局默认生成温度——Agent 未显式配置温度时使用（agent 表单显式值优先）",
                 desc_key="memorySettings.paramllmTemperature"),
+
+    # ---- proactive_recall: 主动回忆（定时巩固 + 上下文/任务触发）----
+    ParamSchema("proactive_recall.enabled", True, "bool", None, None,
+                "是否启用主动回忆（睡眠期定时巩固与上下文/任务触发召回的总开关）",
+                desc_key="memorySettings.paramproactiveRecallEnabled"),
+    ParamSchema("proactive_recall.temperature_boost", 5.0, "float", 0.0, 100.0,
+                "定时回忆巩固的单次升温量（模拟想起，弱于真实访问的 temperature.access_boost）",
+                desc_key="memorySettings.paramproactiveRecallTemperatureBoost"),
+    ParamSchema("proactive_recall.important_interval_days", 3, "int", 1, 365,
+                "重要记忆的定时回忆闲置阈值（天）——超过即进入巩固候选",
+                desc_key="memorySettings.paramproactiveRecallImportantIntervalDays"),
+    ParamSchema("proactive_recall.normal_interval_days", 7, "int", 1, 365,
+                "普通记忆的定时回忆闲置阈值（天）——超过即进入巩固候选",
+                desc_key="memorySettings.paramproactiveRecallNormalIntervalDays"),
+    ParamSchema("proactive_recall.max_context_recall", 10, "int", 1, 50,
+                "上下文触发回忆单轮最大带出条数",
+                desc_key="memorySettings.paramproactiveRecallMaxContextRecall"),
+    ParamSchema("proactive_recall.emotion_min_intensity", 0.5, "float", 0.0, 1.0,
+                "情感触发回忆的最低当前情感强度（低于此值不触发情感共鸣召回）",
+                desc_key="memorySettings.paramproactiveRecallEmotionMinIntensity"),
 ]
 
 

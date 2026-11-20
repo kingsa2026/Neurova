@@ -2377,6 +2377,24 @@ class SwarmManager:
             # 台账/事件里的 run.task 保持原始文本不混排。
             memberPrompt = renderTaskUnitPrompt(run.task, run.task_unit)
 
+            # 任务驱动回忆（14 号设计稿落地批）：派活时按任务书关键词召回
+            # 经验/教训/技能/偏好注入任务提示词（proactive_recall.enabled
+            # 总开关；fail-soft，不阻断派活主链）。
+            try:
+                from neurova.cognitive_layers.memory_layer.proactive_recall import (
+                    renderTaskRecallSection,
+                    taskDrivenRecall,
+                )
+
+                taskRecall = taskDrivenRecall(
+                    getattr(agent, "memory_manager", None), str(run.task or ""), limitPerCategory=3
+                )
+                recallSection = renderTaskRecallSection(taskRecall)
+                if recallSection:
+                    memberPrompt = f"{memberPrompt}\n\n{recallSection}"
+            except Exception as recallError:  # noqa: BLE001 — 召回失败按原任务书派活
+                logger.debug("任务驱动回忆跳过: %s", recallError)
+
             async def doMemberChat(text: str) -> str:
                 """一次 member 管线调用（流式/会话/预算与首跑同源），返回提取后正文。"""
                 try:

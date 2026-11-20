@@ -311,6 +311,11 @@ class IdleTimeTracker(BaseModule):
                     # schema 归纳（门控 NEUROVA_SLEEP_INDUCTION，默认 off；
                     # fail-soft，绝不阻断整理主流程）
                     self._run_sleep_induction()
+                    # 主动回忆·定时巩固（14 号设计稿落地批，2026-11-20 拍板挂
+                    # 睡眠周期尾部）：整理落定后对久未访问记忆做一轮模拟回忆
+                    # 升温（proactive_recall.enabled 总开关；fail-soft，
+                    # 绝不阻断整理主流程）。
+                    self._run_scheduled_recall()
 
                 # 通知回调
                 for callback in self._callbacks.get("consolidation", []):
@@ -320,6 +325,25 @@ class IdleTimeTracker(BaseModule):
                         self.log_error(f"Error in consolidation callback: {e}")
         except Exception as e:
             self.log_error(f"Error during consolidation: {e}")
+
+    def _run_scheduled_recall(self) -> None:
+        """睡眠周期尾部的定时回忆巩固（proactive_recall.runScheduledRecallCycle）。
+
+        与 promotion cycle 同纪律：确定性扫描、无 LLM、有界、fail-soft，
+        挂在空闲整理线程，永不阻塞回复路径。
+        """
+        if not self._memory_manager:
+            return
+        try:
+            from neurova.cognitive_layers.memory_layer.proactive_recall import (
+                runScheduledRecallCycle,
+            )
+
+            recall_stats = runScheduledRecallCycle(self._memory_manager)
+            if recall_stats.get("recalled_count"):
+                self.log_info(f"Scheduled recall cycle: {recall_stats}")
+        except Exception as e:  # noqa: BLE001 — 巩固失败不影响睡眠整理主流程
+            self.log_debug(f"Scheduled recall skipped: {e}")
 
     def _write_back_consolidated_memories(self, result: Dict) -> None:
         """将合并后的记忆写回MemoryManager

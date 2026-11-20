@@ -234,8 +234,12 @@ RETIRED_DEAD_MODULES = {
     "neurova/cognitive_layers/memory_layer/unified_reasoning_engine.py":
         "零生产消费者（仅 ad-hoc 脚本与自身单测）。推理入口在"
         "cognitive_layers 的 causal_reasoning / temporal_reasoner。",
-    "neurova/cognitive_layers/memory_layer/proactive_recall.py":
-        "零生产消费者。主动行为入口是 proactive_question.py。",
+    # proactive_recall.py 曾以「零生产消费者」退役（2026-11 早期清理）。
+    # 2026-11-20 主动回忆落地批（docs/01-architecture/14-proactive-recall-mechanism.md）
+    # 按用户拍板重新实现并接入 4 个真实消费方：idle_tracker 睡眠尾、
+    # agent_shutdown 关机链、context.injector 召回点、swarm 派活任务书；
+    # 消费面由 test_proactive_recall.py 钉住——自此移出本退役清单，
+    # 不再是死码（规则与行为不一致时以改规则为准）。
     "neurova/cognitive_layers/memory_layer/deletion_state_manager.py":
         "零生产消费者。删除状态由 manager.forget（soft delete）承载。",
     "neurova/cognitive_layers/memory_layer/forgetting_recovery.py":

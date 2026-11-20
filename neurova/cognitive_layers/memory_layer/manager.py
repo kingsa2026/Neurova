@@ -859,6 +859,42 @@ class MemoryManager:
                 cached.temperature = min(100.0, cached.temperature + 10.0)
         return credited
 
+    def markSimulatedRecall(self, memoryId: str, boost: float = 5.0) -> bool:
+        """定时回忆巩固的「模拟回忆」记账：温度 +boost（封顶 100）、
+        `last_accessed_at`/`updated_at` 刷新、`access_count + 1`。
+
+        与 `creditRecallHits`（真实召回记账，固定 +10）语义不同：本方法是
+        睡眠期定时巩固对久未访问记忆的"再次想起"，升温量由
+        `proactive_recall.temperature_boost` 配置（默认 5.0，弱于真实访问）。
+        必须刷新 `last_accessed_at`——否则下轮扫描重复命中同一批，
+        定时巩固退化成把全部记忆轮流顶满。
+        """
+        conn = getattr(self, "_persist_conn", None)
+        if conn is None:
+            return False
+        from datetime import datetime, timezone
+
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        with self._persist_db_lock:
+            row = self._findBodyRow(memoryId)
+            if row is None:
+                return False
+            conn.execute(
+                "UPDATE memories SET access_count = access_count + 1,"
+                " temperature = MIN(100.0, temperature + ?),"
+                " updated_at = ?, last_accessed_at = ? WHERE id = ?",
+                (float(boost), now, now, row["id"]),
+            )
+            conn.commit()
+        cached = self._memories.get(memoryId)
+        if cached is not None:
+            cached.access_count += 1
+            cached.temperature = min(100.0, cached.temperature + float(boost))
+            cached.last_accessed_at = now_dt
+            cached.updated_at = now_dt
+        return True
+
     def iterBodyMemories(self, limit: int = 500) -> List[Memory]:
         """按 `updated_at` 升序只读列举本 agent 的正文行，**不做访问记账**。
 

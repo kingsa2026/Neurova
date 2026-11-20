@@ -91,6 +91,19 @@ async def shutdown_agent(agent) -> None:
                     "关机睡眠整理完成: 处理 %s 条，写回 %s",
                     len(all_memories), stats,
                 )
+
+            # 主动回忆·定时巩固（与 idle_tracker 睡眠尾部同源，关机整理也走一轮；
+            # proactive_recall.enabled 总开关，fail-soft 不阻断关机链）。
+            try:
+                from neurova.cognitive_layers.memory_layer.proactive_recall import (
+                    runScheduledRecallCycle,
+                )
+
+                recall_stats = runScheduledRecallCycle(memory_manager)
+                if recall_stats.get("recalled_count"):
+                    logger.info("关机定时回忆巩固: %s", recall_stats)
+            except Exception as e:  # noqa: BLE001 — 巩固失败不影响关机整理主流程
+                logger.debug("关机定时回忆巩固跳过: %s", e)
         except Exception as e:
             logger.warning("睡眠整理失败: %s", e)
 
