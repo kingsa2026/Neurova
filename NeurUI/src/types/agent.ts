@@ -18,6 +18,8 @@ export interface Agent {
   personality?: string
   /** 行为准则/宪法（后端 AgentConfig.constitution，表单编辑态回显） */
   constitution?: string
+  /** 执行档位回显（lite/standard/heavy；null=未设置跟随部署档位） */
+  exec_profile?: string | null
   createdAt: string
   updatedAt: string
   config?: AgentConfig

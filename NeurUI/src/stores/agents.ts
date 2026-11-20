@@ -22,6 +22,8 @@ function mapAgentResponse(raw: Record<string, any>): Agent {
     // P1-5b：性格/宪法回显（后端 agent_to_info 顶层字段）
     personality: raw.personality ?? '',
     constitution: raw.constitution ?? '',
+    // 执行档位回显（R6：lite/standard/heavy；null=未设置跟随部署档位）
+    exec_profile: raw.exec_profile ?? null,
     createdAt: raw.created_at ?? raw.createdAt ?? '',
     updatedAt: raw.updated_at ?? raw.updatedAt ?? '',
     config: {
@@ -200,6 +202,11 @@ export const useAgentStore = defineStore('agents', () => {
     provider?: string
     /** 所属部门组（specs/2026-11-07 批 D）；缺省由后端绑创建者部门组 */
     group_id?: string | null
+    /** P1-5b：性格/宪法（后端顶层字段实吃） */
+    personality?: string
+    constitution?: string
+    /** 执行档位（R6：lite/standard/heavy；空串=清除跟随部署档位） */
+    exec_profile?: string
     config?: Partial<AgentConfig>
   }): Promise<Agent | null> {
     loading.value = true
@@ -216,6 +223,16 @@ export const useAgentStore = defineStore('agents', () => {
       }
       if (payload.group_id) {
         body.group_id = payload.group_id
+      }
+      // P1-5b/R6：性格/宪法/执行档位为后端顶层实吃字段，必须显式拷贝（此前被丢弃）
+      if (payload.personality !== undefined) {
+        body.personality = payload.personality
+      }
+      if (payload.constitution !== undefined) {
+        body.constitution = payload.constitution
+      }
+      if (payload.exec_profile !== undefined) {
+        body.exec_profile = payload.exec_profile
       }
       if (payload.config) {
         body.config = mapConfigToApi(payload.config)
@@ -246,6 +263,11 @@ export const useAgentStore = defineStore('agents', () => {
       provider?: string
       /** 所属部门组（specs/2026-11-07 批 D）；空串 = 解除绑定 */
       group_id?: string | null
+      /** P1-5b：性格/宪法（后端顶层字段实吃） */
+      personality?: string
+      constitution?: string
+      /** 执行档位（R6：lite/standard/heavy；空串=清除） */
+      exec_profile?: string
       config?: Partial<AgentConfig>
     },
   ): Promise<Agent | null> {

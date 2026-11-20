@@ -362,7 +362,7 @@ const loadAgent = async () => {
         model: agent.model || '',
         provider: agent.provider || '',
         group_id: agent.group_id || '',
-        execProfile: (agent as any).exec_profile || '',
+        execProfile: agent.exec_profile || '',
         temperature: agent.config?.temperature ?? 0.7,
         maxTokens: agent.config?.maxTokens ?? 4096,
         // P1-5b：性格/宪法真实回填（后端 agent_to_info 顶层字段）
