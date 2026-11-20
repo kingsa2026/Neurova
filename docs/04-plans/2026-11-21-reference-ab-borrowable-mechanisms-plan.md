@@ -261,3 +261,8 @@
 4. P2-2 派生快照 `contracts/tool_catalog.json`（137→138）经官方门 `--update` 再生成，不在字面文件清单内、不再生成立即红，已在提交正文注明。
 
 **预存债务移交（非本批引入）**：vitest es-ES/it-IT locale 键集漂移与硬编码色基线（HEAD 即红）；console_run_ledger 一条顺序依赖 flaky；本机无 filesystem MCP server 的启动 [ERROR] 噪声。
+
+**追加批（2026-11-21 用户拍板「两个锦上添花项落地」+ 移动端对齐，三车道并行）**：
+- **触发来源标签**：`733247a9e`——企业源同步历史「触发来源」列改 i18n 标签渲染（manual/interval/startup/audit→本地化，未知值诚实回退原值），4 键×11 语言（按既有布局落 `_ontologySection.ts` 共享段）；渲染级红绿测试 3 例（含未知值回退）；vitest 全量零新增失败、vue-tsc 0 错误。
+- **鸿蒙协作过程视图**：`8c2df8a73`（16 文件 +1174/−11）——新建 `ConsoleApi.ets`（graph/candidates 拉取，路由前缀对照后端核实，字段边界防御归一）+ `SwarmFlowPanel.ets`（按 depth 分层拓扑、Path 数值坐标连线、状态色走 StyleManager 令牌对齐 PC 词汇、审批/候选徽标卡、加载/失败/空/截断诚实态）+ ChatPage 接线 + 13 键×11 locale；hvigor 模块编译 BUILD SUCCESSFUL 0 ERROR。移交：移动 WS 帧协议不含 subagent 事件，增量刷新走「回合终结重拉」；conflicts 明细行与真机冒烟留 v1.1。
+- **安卓协作过程视图**：`3f9080c8c`（8 文件，移动端 +1212/−1）——`SwarmGraphModels.kt` DTO（ignoreUnknownKeys、浮点秒 Double）+ `SwarmFlowPanel.kt`（分层拓扑+关系徽标卡+候选板小节+诚实态）+ ChatRepository 读面（复用既有 Bearer/401 续签/信封解包）+ TurnProgressStrip 下接线 + strings 中英 22 键；`:app:compileDebugKotlin` 与 `:app:testDebugUnitTest` 通过（68 例 0 失败，含新增 8 例，MockWebServer @After shutdown）。移交：WS 增量刷新与真机活体待后续。
