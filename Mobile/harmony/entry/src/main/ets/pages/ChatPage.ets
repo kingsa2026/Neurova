@@ -1926,23 +1926,32 @@ export struct ChatPage {
     .height('100%')
   }
 
-  /** 胶囊菜单底部弹层：行项目随 pillMenuOpen 切换（模型/思考/权限/档位） */
+  /** 胶囊菜单弹层：行项目随 pillMenuOpen 切换（模型/思考/权限/档位）。
+   *  无左侧遮罩暗影（用户拍板）：左边只放透明点击区负责「点外部关闭」，
+   *  卡片右上角提供 ✕ 关闭。 */
   @Builder
   buildPillMenu() {
     Row() {
       Column()
         .layoutWeight(1)
         .height('100%')
-        .backgroundColor('rgba(4,6,14,0.60)')
         .onClick(() => { this.pillMenuOpen = ''; })
       Column() {
-        Text(this.pillMenuOpen === 'model' ? '选择模型' : this.pillMenuOpen === 'effort' ? '思考深度'
-          : this.pillMenuOpen === 'mode' ? '权限模式' : '执行档位')
-          .fontSize(15)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.sm.getColor('text_primary'))
-          .width('100%')
-          .padding({ bottom: 8 })
+        Row() {
+          Text(this.pillMenuOpen === 'model' ? '选择模型' : this.pillMenuOpen === 'effort' ? '思考深度'
+            : this.pillMenuOpen === 'mode' ? '权限模式' : '执行档位')
+            .fontSize(15)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+          Blank()
+          Text('✕')
+            .fontSize(16)
+            .fontColor(this.sm.getColor('text_secondary'))
+            .padding({ left: 8, right: 4, top: 4, bottom: 4 })
+            .onClick(() => { this.pillMenuOpen = ''; })
+        }
+        .width('100%')
+        .padding({ bottom: 8 })
         Scroll() {
           Column() {
             ForEach(this.pillGroups, (g: PillMenuGroup) => {
