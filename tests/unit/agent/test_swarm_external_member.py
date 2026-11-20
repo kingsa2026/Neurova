@@ -112,6 +112,35 @@ def test_pluginKindResolvesToPluginExecutor(swarm, monkeypatch):
     assert isinstance(adapter._executor, NeuacpPluginExecutor)
 
 
+def test_spawnCapabilityViolationRefused(swarm, monkeypatch):
+    """F1 派活期第二闸（拍板 D-D）：spec 能力组合非法 → 打开前结构化拒绝，
+    执行体构造器不得被调用（refused before anything opens）。"""
+    import neurova.agent.neuacp as neuacp_pkg
+
+    monkeypatch.setenv("NEUROVA_EXTERNAL_AGENTS_ENABLED", "on")
+    patchTeams(monkeypatch, rosterWithExecutor(transport="websocket"))
+    patchInitiatorTenant(monkeypatch, "default")
+
+    calls = []
+
+    class SpyExecutor:
+        def __init__(self, *args, **kwargs):
+            calls.append("executor")
+
+    class SpyAdapter:
+        def __init__(self, *args, **kwargs):
+            calls.append("adapter")
+
+    # 桩布在 neuacp 包命名空间：_resolveExternalMember 惰性 import 时拿到的是桩
+    monkeypatch.setattr(neuacp_pkg, "NeuacpStdioExecutor", SpyExecutor)
+    monkeypatch.setattr(neuacp_pkg, "NeuacpMemberAdapter", SpyAdapter)
+
+    adapter, error = swarm._resolveExternalMember("ext-1", "team-1")
+    assert adapter is None
+    assert error and "能力不支持" in error and "websocket" in error
+    assert calls == [], f"能力违规时执行体不得被构造：{calls}"
+
+
 def test_spawnRejectsWhenExternalUnavailable(swarm, monkeypatch):
     """spawn 集成：开关 off 时对 executor 成员派活返回结构化拒绝（不建 run）。"""
     import asyncio

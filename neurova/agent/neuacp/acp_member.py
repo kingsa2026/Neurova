@@ -20,6 +20,7 @@ from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
 from neurova.agent.neuacp.executor import NeuacpSessionContext
+from neurova.agent.neuacp.redaction import redactFrame
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,28 @@ class NeuacpMemberAdapter:
         self._recorder = recorder
         self._spanId = spanId
 
+    def _logPermissionDecision(self, run: Any, action: str, decision: dict) -> None:
+        """permission 裁决落 H-4 账本（F2 断点 8 补账，设计文档 §3.2）。
+
+        payload 五键：action/approved/pending/denied/reason；先过 redactFrame
+        （reason 可能夹带凭据形态，F3 脱敏前置）；fail-open——落账故障只记
+        debug，绝不阻断裁决应答回传泵线程。
+        """
+        logEvent = self._logEvent
+        if not callable(logEvent):
+            return
+        try:
+            payload = redactFrame({
+                "action": action,
+                "approved": bool(decision.get("approved")),
+                "pending": bool(decision.get("pending")),
+                "denied": bool(decision.get("denied")),
+                "reason": str(decision.get("reason") or ""),
+            })
+            logEvent(run, "permission_decided", payload)
+        except Exception as exc:  # noqa: BLE001 - 账本故障不阻断审批应答
+            logger.debug("permission_decided 落账失败: %s", exc)
+
     def _approvalPermissionAsker(self, action: str, reason: str, context: str) -> dict:
         """session/request_permission → ``requestRunApproval``（审批链单源）。
 
@@ -101,14 +124,21 @@ class NeuacpMemberAdapter:
         ``NEUROVA_SWARM_APPROVAL_WAIT_S``（审批链同源读数），另加 5s 桥接
         宽限——让链内审批超时先到，回传诚实的 pending/denied 形态而非桥接
         超时异常。未 bindRun / 无循环 / 桥接失败一律 deny（fail-closed）。
+
+        F2：拿到裁决后（含桥接失败路径，run 存在即记）落 permission_decided
+        事件；run 未绑定的路径无从归属，维持不落账。
         """
         run = self._run
         loop = self._loop
         if run is None or loop is None:
-            return {
+            decision = {
                 "approved": False, "pending": False, "denied": True,
                 "reason": "external_member_not_bound",
             }
+            if run is not None:
+                # run 已绑定但事件循环缺失（罕见）：裁决照记，便于审计追溯
+                self._logPermissionDecision(run, action, decision)
+            return decision
         from neurova.agent.approval_chain import approvalWaitSeconds, requestRunApproval
 
         coro = requestRunApproval(
@@ -120,13 +150,15 @@ class NeuacpMemberAdapter:
         )
         try:
             future = asyncio.run_coroutine_threadsafe(coro, loop)
-            return future.result(timeout=approvalWaitSeconds() + 5.0)
+            decision = future.result(timeout=approvalWaitSeconds() + 5.0)
         except Exception as exc:  # noqa: BLE001 - 桥接故障按拒绝收口（fail-closed）
             logger.warning("外部成员审批桥接失败，按 deny 处理 (action=%s): %s", action, exc)
-            return {
+            decision = {
                 "approved": False, "pending": False, "denied": True,
                 "reason": f"approval_bridge_failed: {exc}",
             }
+        self._logPermissionDecision(run, action, decision)
+        return decision
 
     # ── B2：工具调用镜像 ─────────────────────────────────────────────────
 
@@ -148,14 +180,19 @@ class NeuacpMemberAdapter:
 
     def _mirrorToolCall(self, update: dict) -> None:
         """tool_call(_update) → H-4 账本 + member span 轨迹（§4.4/§6.3：
-        外部代理工具不纳管执行、但全量可见）。可在泵线程被调，fail-open。"""
+        外部代理工具不纳管执行、但全量可见）。可在泵线程被调，fail-open。
+
+        F3（设计文档 §3.3）：update 先过 redactFrame 再进账本/轨迹——工具
+        参数可能夹带密钥；redactFrame 深拷贝脱敏，原 update 不被就地改写。
+        """
         run = self._run
         if run is None:
             return
+        redacted = redactFrame(update if isinstance(update, dict) else {})
         logEvent = self._logEvent
         if callable(logEvent):
             try:
-                logEvent(run, "tool_call", update)
+                logEvent(run, "tool_call", redacted)
             except Exception as exc:  # noqa: BLE001 - 账本故障不阻断外部执行
                 logger.debug("tool_call 账本镜像失败: %s", exc)
         recorder = self._recorder
@@ -168,7 +205,7 @@ class NeuacpMemberAdapter:
                         "event": "tool_call",
                         "subagent_id": run.subagent_id,
                         "agent_name": run.agent_name,
-                        "tool_call": update,
+                        "tool_call": redacted,
                     },
                     span_id=self._spanId,
                 )

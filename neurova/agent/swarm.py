@@ -78,6 +78,29 @@ def reset_subagent_depth(token) -> None:
     _subagentDepthVar.reset(token)
 
 
+# F5 谱系：当前正在执行的 member 的 run id（顶层会话 = 空串）。member 内
+# 递归派生时，子代 spawn 路径（spawn_subagent 工具 → SwarmManager.spawn）
+# 在构造 run 时读它作为 parent_subagent_id——父链只在 spawn 时刻读一次。
+# 与 _subagentDepthVar 同形态同生命周期：挂 Agent 实例会在并发链间互踩；
+# `_run_member` 在子 Agent chat 之前按 run.subagent_id 绑定、finally 复位。
+_currentSubagentIdVar: ContextVar = ContextVar("neurova_current_subagent_id", default="")
+
+
+def currentSubagentId() -> str:
+    """当前执行上下文对应的 member run id（顶层会话 = 空串）。"""
+    return str(_currentSubagentIdVar.get() or "")
+
+
+def setCurrentSubagentId(subagent_id: str):
+    """绑定当前执行的 member run id，返回 token 供复位。"""
+    return _currentSubagentIdVar.set(str(subagent_id or ""))
+
+
+def resetCurrentSubagentId(token) -> None:
+    """复位 member run id 到绑定前（token 由 setCurrentSubagentId 返回）。"""
+    _currentSubagentIdVar.reset(token)
+
+
 # ── 子任务状态词汇的唯一出处（§6-78 K 条）──────────────────────────
 # 改前这六个词值散在本文件六处（dataclass 默认、返回投影、list_active、
 # _count_active、_evict_finished_runs、归档判定），**没有一份定义**：计数说
@@ -157,6 +180,49 @@ class IllegalRunStatusTransition(RuntimeError):
     """非法 run 状态迁移（迁移表拒绝）——显式暴露，不静默、不吞、不改状态。"""
 
 
+def buildRunLineage(run: "SubAgentRun", runsMap: Optional[Dict[str, "SubAgentRun"]] = None,
+                    walkLimit: int = 16) -> Dict[str, Any]:
+    """F5 谱系投影单源：run → 事件 lineage（设计文档 §3.5）。
+
+    - agent_path 沿 ``parent_subagent_id`` 上溯（``runsMap`` 内存 run 表优先）、
+      根→叶顺序；父 run 已被逐出/跨进程时其 id 仍入路径（谱系不断链）；
+      限深 ``walkLimit``（16 层远超派生深度治理上限）、访问集防环。
+    - 模块级：``SwarmManager._runLineage`` 与模块级 ``transitionRun``（无 self）
+      共用这一份——status_changed 与其余 run 事件同谱系，不留第二套拼装。
+    """
+    chain: List[str] = []  # 叶→根
+    visited: set = set()
+    cursor: Optional[SubAgentRun] = run
+    while cursor is not None and len(chain) < walkLimit:
+        sid = str(getattr(cursor, "subagent_id", "") or "")
+        if not sid or sid in visited:
+            break
+        visited.add(sid)
+        chain.append(sid)
+        parentId = str(getattr(cursor, "parent_subagent_id", "") or "")
+        if not parentId or parentId in visited:
+            break
+        parent = (runsMap or {}).get(parentId)
+        if parent is None:
+            # 父 run 不在内存（已逐出/跨进程）：id 仍入路径后停止上溯
+            chain.append(parentId)
+            visited.add(parentId)
+            break
+        cursor = parent
+    chain.reverse()  # 根→叶
+    return {
+        "tenant_id": getattr(run, "tenant_id", ""),
+        "team_id": getattr(run, "team_id", ""),
+        "project_id": getattr(run, "project_id", ""),
+        "room_id": getattr(run, "room_id", ""),
+        "depth": getattr(run, "depth", 0),
+        "parent_subagent_id": getattr(run, "parent_subagent_id", ""),
+        "agent_path": chain,
+        "trace_id": getattr(run, "trace_id", ""),
+        "parent_trace_id": getattr(run, "parent_trace_id", ""),
+    }
+
+
 def transitionRun(run: "SubAgentRun", newStatus: str, cause: str = "") -> str:
     """run 状态迁移唯一收口（S3）：迁移表强校验 + status_changed 事件归档。
 
@@ -182,10 +248,17 @@ def transitionRun(run: "SubAgentRun", newStatus: str, cause: str = "") -> str:
     try:
         from neurova.agent.swarm_event_log import appendRunEvent
 
+        # F5：status_changed 与其余 run 事件同谱系。本函数模块级无 self，
+        # 借当前管理器的内存 run 表上溯 agent_path（无管理器时退化为自头路径）。
+        try:
+            runsMap = dict(get_swarm_manager()._runs)
+        except Exception:  # noqa: BLE001 - 谱系取数失败不阻断状态机（fail-open 同纪律）
+            runsMap = {}
         eventId = appendRunEvent(
             run.subagent_id, "status_changed",
             {"from": current, "to": target, "cause": str(cause or "")},
             causationId=getattr(run, "last_event_id", ""),
+            lineage=buildRunLineage(run, runsMap),
         )
         run.last_event_id = eventId
     except Exception as e:  # noqa: BLE001 - 归档故障不阻断状态机（H-4 fail-open 同纪律）
@@ -367,6 +440,12 @@ class SubAgentRun:
     # 执行期自己开设的轨迹（台账行经 agent_runs.trace_id 与之关联）。
     parent_trace_id: str = ""
     trace_id: str = ""
+    # F5 谱系：发起者租户——spawn 时刻经 _currentTenantId() 读一次；台账行
+    # （openSubagentRun 的 tenantId）与事件 lineage 同源，运行中不重读。
+    tenant_id: str = ""
+    # F5 谱系：父 run id——member 内递归派生时指向父 run（顶层派生为空串）。
+    # agent_path 不落存储字段，事件写入时沿它上溯现算（见 _runLineage）。
+    parent_subagent_id: str = ""
     # P3-4（评测报告 G-13）：数据面围栏扫描摘要（task_hits/payload_hits/hit_count）。
     # None = 未命中（干净任务不留标记噪音）；命中只标记与告警，不改写不阻断。
     data_fence: Optional[Dict[str, Any]] = None
@@ -645,6 +724,9 @@ class SwarmManager:
                 "请压缩为自包含的子任务描述，不要把对话历史整段塞入",
             )
         child_depth = current_subagent_depth() + 1
+        # F5 谱系：member 内递归派生时，当前上下文绑定的就是父 member 的 run id
+        #（_run_member 在 chat 前绑定）；顶层派生此处读到空串。spawn 时刻读一次。
+        parentSubagentId = currentSubagentId()
         max_depth = self._effective_max_depth()
         if child_depth > max_depth:
             return self._rejection(
@@ -792,6 +874,8 @@ class SwarmManager:
                         "team_role": teamRoleLabel,
                         "team_member": dict(teamMember) if teamMember else None,
                         "runtime_budget_sec": max(0.0, float(runtimeBudgetSec or 0.0)),
+                        # F5 谱系：父链在 spawn（登记等待）时刻固定，放行时不重读
+                        "parent_subagent_id": parentSubagentId,
                         # B3：外部成员适配器随等待件携带——放行时直接续用，
                         # 不再走 _resolve_agent（外部 id 不在 Agent 注册表里）。
                         "external_adapter": externalAdapter,
@@ -834,6 +918,9 @@ class SwarmManager:
             team_role=teamRoleLabel,
             team_member=dict(teamMember) if teamMember else None,
             runtime_budget_sec=max(0.0, float(runtimeBudgetSec or 0.0)),
+            # F5 谱系：spawn 时刻单源（租户/父链只在此读一次）
+            tenant_id=self._currentTenantId(),
+            parent_subagent_id=parentSubagentId,
         )
         # 通过全部治理闸 → 预留模型并发槽 + 打派生时间戳（错峰）
         with self._lock:
@@ -1154,15 +1241,62 @@ class SwarmManager:
 
     # ── H-4：run 级事件归档（JSONL 账本，因果链沿 last_event_id 串接）──
 
+    #: 谱系上溯限深（防异常环拖垮事件写入；16 层远超派生深度治理上限）
+    LINEAGE_WALK_LIMIT = 16
+
+    def _runLineage(self, run: SubAgentRun) -> Dict[str, Any]:
+        """F5 谱系投影：事件写入时现算（不落存储字段，设计文档 §3.5）。
+
+        agent_path 沿 ``parent_subagent_id`` 在内存 run 表上溯、根→叶顺序；
+        父 run 已被逐出/不在内存时其 id 仍入路径（谱系不断链）；
+        限深 16、访问集防环。
+        """
+        chain: List[str] = []  # 叶→根
+        visited: set = set()
+        cursor: Optional[SubAgentRun] = run
+        while cursor is not None and len(chain) < self.LINEAGE_WALK_LIMIT:
+            sid = str(cursor.subagent_id or "")
+            if not sid or sid in visited:
+                break
+            visited.add(sid)
+            chain.append(sid)
+            parentId = str(getattr(cursor, "parent_subagent_id", "") or "")
+            if not parentId or parentId in visited:
+                break
+            parent = self._runs.get(parentId)
+            if parent is None:
+                # 父 run 不在内存（已逐出/跨进程）：id 仍入路径后停止上溯
+                chain.append(parentId)
+                visited.add(parentId)
+                break
+            cursor = parent
+        chain.reverse()  # 根→叶
+        return {
+            "tenant_id": run.tenant_id,
+            "team_id": run.team_id,
+            "project_id": run.project_id,
+            "room_id": run.room_id,
+            "depth": run.depth,
+            "parent_subagent_id": run.parent_subagent_id,
+            "agent_path": chain,
+            "trace_id": run.trace_id,
+            "parent_trace_id": run.parent_trace_id,
+        }
+
     def _logRunEvent(self, run: SubAgentRun, eventType: str,
                      payload: Optional[Dict[str, Any]] = None) -> None:
-        """run 生命周期事件入归档；fail-open（归档故障不阻断蜂群主流程）。"""
+        """run 生命周期事件入归档；fail-open（归档故障不阻断蜂群主流程）。
+
+        F5：全部 run 事件统一携带 lineage 谱系（spawned/started/terminal/
+        cancelled/tool_call/member_chunk/permission_decided… 自动带上）。
+        """
         try:
             from neurova.agent.swarm_event_log import appendRunEvent
 
             eventId = appendRunEvent(
                 run.subagent_id, eventType, payload,
                 causationId=getattr(run, "last_event_id", ""),
+                lineage=self._runLineage(run),
             )
             run.last_event_id = eventId
         except Exception as e:  # noqa: BLE001
@@ -1176,6 +1310,17 @@ class SwarmManager:
 
         events = readRunEvents(sid) if sid else []
         return {"subagent_id": sid, "count": len(events), "events": events}
+
+    def runFrames(self, subagent_id: str, afterSeq: int = 0,
+                  limit: int = 1000) -> Dict[str, Any]:
+        """F2 帧账本读侧（管理器统一入口，镜像 runEvents 形态）：按 seq 游标
+        回放一手帧流（原生帧脱敏后留痕，读逻辑单源在 frame_log.readFrames）。
+        未知/无帧的 run 返回空列表。"""
+        sid = str(subagent_id or "").strip()
+        from neurova.agent.neuacp.frame_log import readFrames
+
+        frames = readFrames(sid, afterSeq=afterSeq, limit=limit) if sid else []
+        return {"subagent_id": sid, "count": len(frames), "frames": frames}
 
     def reconcileRunFromEvents(self, subagent_id: str,
                                tailOverride: str = "") -> Dict[str, Any]:
@@ -1561,6 +1706,9 @@ class SwarmManager:
             team_role=info.get("team_role") or "",
             team_member=info.get("team_member"),
             runtime_budget_sec=float(info.get("runtime_budget_sec") or 0.0),
+            # F5 谱系：blocked 放行时父链取 spawn（登记）时刻的固定值
+            tenant_id=self._currentTenantId(),
+            parent_subagent_id=info.get("parent_subagent_id") or "",
         )
         with self._lock:
             self._runs[run.subagent_id] = run
@@ -1604,6 +1752,9 @@ class SwarmManager:
             team_id=info.get("team_id") or "",
             team_role=info.get("team_role") or "",
             team_member=info.get("team_member"),
+            # F5 谱系：同 blocked 登记时刻的固定值
+            tenant_id=self._currentTenantId(),
+            parent_subagent_id=info.get("parent_subagent_id") or "",
         )
         transitionRun(run, SUBAGENT_FAILED, cause="dependency_failed")
         run.cause = "dependency_failed"
@@ -1652,6 +1803,9 @@ class SwarmManager:
                 subagent_type=blocked.get("subagent_type", "general"),
                 task_unit=blocked.get("task_unit"),
                 parent_trace_id=blocked.get("parent_trace_id", ""),
+                # F5 谱系：同 blocked 登记时刻的固定值
+                tenant_id=self._currentTenantId(),
+                parent_subagent_id=blocked.get("parent_subagent_id", ""),
             )
             transitionRun(failed, SUBAGENT_FAILED, cause=SUBAGENT_CAUSE_CANCELLED)
             failed.cause = SUBAGENT_CAUSE_CANCELLED
@@ -2097,6 +2251,16 @@ class SwarmManager:
                 f"跨租户派活被拒：发起者租户 {initiator_tenant!r} != "
                 f"团队租户 {team_tenant!r}（§6.4 租户隔离红线）"
             )
+        # F1 第二闸（拍板 D-D，设计文档 §3.1）：租户闸之后、提取 kind/构造执行体
+        # 之前——名册经旧数据/旁路写入的不支持组合在这里 fail-closed，
+        # 「refused before anything opens」，绝不为其开进程。
+        from neurova.agent.neuacp.catalog import refuseExecutorSpec
+
+        capabilityReasons = refuseExecutorSpec(spec)
+        if capabilityReasons:
+            return None, (
+                f"外部成员 {agent_id} 能力不支持：{'；'.join(capabilityReasons)}"
+            )
         kind = str(spec.get("kind", "acp"))
         command = [str(part) for part in (spec.get("command") or [])]
         if not command:
@@ -2420,8 +2584,11 @@ class SwarmManager:
             traceId=run.trace_id,
             projectId=run.project_id,
             teamId=run.team_id,
-            tenantId=self._currentTenantId(),
+            # F5：spawn 时刻单源——吃 run.tenant_id，运行中不再重读租户
+            tenantId=run.tenant_id,
         )
+        # F5：谱系现算一次，subagent_started 载荷与 spawn_metadata 共用
+        runLineage = self._runLineage(run)
         # H-4：started 事件入账（因果链接在 spawned 之后）
         self._logRunEvent(run, "started", {
             "status": run.status, "model": run.model, "trace_id": run.trace_id,
@@ -2456,6 +2623,10 @@ class SwarmManager:
                 # S10：团队溯源标（前端 SubAgentPanel 团队徽标）
                 "team_id": run.team_id,
                 "team_role": run.team_role,
+                # F5：租户与谱系随事件透出（前端可选消费，不强制适配）
+                "tenant_id": run.tenant_id,
+                "parent_subagent_id": run.parent_subagent_id,
+                "agent_path": runLineage["agent_path"],
             },
         )
 
@@ -2471,6 +2642,9 @@ class SwarmManager:
         # 与"同时有几个兄弟在跑"无关（切片 D：深度不是广度的副作用）。
         # 绑定必须在 `await agent.chat` 之前；`finally` 复位，避免污染同任务后续链。
         depth_token = set_subagent_depth(run.depth)
+        # F5 谱系：把本 run 的 id 绑进上下文——member 内 spawn_subagent 递归
+        # 派生时，子代 spawn 路径据此读出 parent_subagent_id（父链单源）。
+        subagentIdToken = setCurrentSubagentId(run.subagent_id)
         # P1：绑定子代理工具面白名单（执行咽喉据此结构化拦截面外工具）
         from neurova.core.turn_context import set_subagent_tool_allowlist
 
@@ -2491,6 +2665,8 @@ class SwarmManager:
                 "origin": run.origin,
                 "subagent_id": run.subagent_id,
                 "session_id": run.member_session_id,
+                # F5：帧谱系——执行体经 ctx.metadata 取用作帧账本 lineage
+                "lineage": runLineage,
             }
             # S9 共享黑板：run 关联协作房间时，member 轮记忆按 room:<room_id> 作用域
             # 打标/召回（写读两侧经 memory_scope 的显式 chat_scope 透传，同构继承
@@ -2616,6 +2792,7 @@ class SwarmManager:
             })
             self._endMemberTrace(recorder, memberSpanId, run)
             reset_subagent_depth(depth_token)
+            resetCurrentSubagentId(subagentIdToken)
             set_subagent_tool_allowlist(None)
             self._restoreCostContext(prevCostCtx)
             # B3：run 已终态，外部成员适配器登记随之摘除（防跨 run 复用/泄漏）。
@@ -2701,6 +2878,13 @@ class SwarmManager:
             run.last_progress_at = time.monotonic()
             if contentBuffer is not None and event_type == "content" and isinstance(data, str):
                 contentBuffer.append(data)
+            # F2（设计文档 §3.2，断点 4）：chunk 元数据同步入 H-4 账本——只记
+            # 类型与长度不记正文（H-4 纪律不变），chunk 与 tool_call/permission/
+            # terminal 同账本同 seq，先后可判定；fail-open 由 _logRunEvent 兜住。
+            self._logRunEvent(run, "member_chunk", {
+                "chunk_type": event_type,
+                "length": len(data) if isinstance(data, str) else 0,
+            })
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
@@ -2940,10 +3124,13 @@ def reset_swarm_manager() -> None:
 __all__ = [
     "SubAgentRun",
     "SwarmManager",
+    "currentSubagentId",
     "current_subagent_depth",
     "get_swarm_manager",
     "reconcileSwarmRunsAtStartup",
+    "resetCurrentSubagentId",
     "reset_subagent_depth",
     "reset_swarm_manager",
+    "setCurrentSubagentId",
     "set_subagent_depth",
 ]
