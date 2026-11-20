@@ -19,9 +19,11 @@ from neurova.llm.llm_router import RequestType as LLMRequestType
 
 def test_process_multimodal_video_maps_to_video_understanding(monkeypatch):
     captured: dict = {}
+    # P1-15 起路由入参加 scope（agent 属主域）；本格只钉 media_type→RequestType
+    # 映射，scope 原样接下不参与断言。
     monkeypatch.setattr(
         "neurova.llm.llm_router.select_model_for_request",
-        lambda rt: captured.setdefault("rt", rt),
+        lambda rt, scope=None: captured.setdefault("rt", rt),
     )
     agent = SimpleNamespace(
         config=SimpleNamespace(llm_config=SimpleNamespace(model="m1")),

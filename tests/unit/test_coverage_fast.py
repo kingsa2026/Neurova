@@ -86,7 +86,9 @@ class TestChatErrors:
                 "stream": False,
             },
         )
-        assert response.status_code in [200, 400, 422]
+        # agent 未装配时端点显式 503 点名服务不可用（579b61522，审计 §3.1-17：
+        # 不再回 200 + "Echo:" 假成功），本格只验「空消息不炸出 5xx 之外的意外形态」
+        assert response.status_code in [200, 400, 422, 503]
     
     def test_chat_missing_message(self, client):
         """测试缺少消息字段"""
@@ -149,10 +151,13 @@ class TestFileDownloadErrors:
     def test_download_exception(self, app):
         """下载内部异常→500。原全局 patch pathlib.Path.stat 连测试自身
         finally 的 exists/unlink 一起炸（stat 全局副作用）——迁到端点读面
-        seam（FileResponse 构造抛错）+ quiet client。残留处理 2026-09-13"""
+        seam（FileResponse 构造抛错）+ quiet client。残留处理 2026-09-13。
+        S1 属主隔离后附件按 user_id 分域落盘（console_files._user_scope），
+        文件必须落进本人域内，否则端点先 404，压不到 FileResponse 那一步。"""
         client = _quiet_client(app)
-        from neurova.api.endpoints.console import _CONSOLE_UPLOAD_DIR as UPLOAD_DIR
-        test_file = UPLOAD_DIR / "test_error.txt"
+        from neurova.api.endpoints.console_files import _user_scope
+        scope = _user_scope({"user_id": "test_user"})
+        test_file = scope / "test_error.txt"
         test_file.write_text("test")
 
         try:

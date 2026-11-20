@@ -75,7 +75,10 @@ def client(tmp_path):
     from neurova.api import auth as _auth_mod
     from neurova.api import deps as _deps_mod
 
-    _u = {"user_id": "tester", "username": "tester", "role": "user"}
+    # install/uninstall/load/unload/enable/disable 自 S1 安全批（81130a17b）起挂
+    # require_admin 门；本文件只钉 HTTP 语义，鉴权面（user 403）由
+    # tests/unit/plugins/test_pluginRemoteSources.py 专测，故这里直接给 admin 身份。
+    _u = {"user_id": "tester", "username": "tester", "role": "admin"}
     app.dependency_overrides[_auth_mod.get_current_user] = lambda: _u
     app.dependency_overrides[_deps_mod.get_current_user] = lambda: _u
 

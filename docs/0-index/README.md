@@ -312,7 +312,7 @@
 
 ### 11-legacy 归档
 
-- [UI_FRAMEWORK_GUIDE.md](UI_FRAMEWORK_GUIDE.md) — 旧 UI 框架指南（2026-11-19 自 `03-user-guide/` 归档；文中原生 JS 组件体系在当前代码中不存在，现行前端为 NeurUI/Vue 3，勿按其开发）
+- [UI_FRAMEWORK_GUIDE.md](../11-legacy/UI_FRAMEWORK_GUIDE.md) — 旧 UI 框架指南（2026-11-19 自 `03-user-guide/` 归档；文中原生 JS 组件体系在当前代码中不存在，现行前端为 NeurUI/Vue 3，勿按其开发）
 - 历史/过时文档（grilling-* 分析、旧升级方案、旧 UI 方案、旧测试结果等），保留可追溯，不再维护。
 
 ---

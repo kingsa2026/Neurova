@@ -809,7 +809,10 @@ def declaredBackendPrefixes(text: str) -> list:
     会退化成恒真断言（自己与自己比，永远相等）。
     """
     section = _machineSection(text, "## 二、后端挂载前缀", "## 三")
-    return sorted(set(re.findall(r"\|\s*`(/api[\w/{}.-]*)`\s*\|\s*$", section, re.M)))
+    # 反向 MCP（5b9eb4e95）起挂载点含 `/v1/mcp`、`/v1/mcp/agent-tools` 这类
+    # 非 `/api` 前缀的 ASGI 面；读写两侧必须同一口径，这里按「行尾反引号路径」
+    # 整体认领，不再假定前缀必以 `/api` 开头。
+    return sorted(set(re.findall(r"\|\s*`(/[\w/{}.-]*)`\s*\|\s*$", section, re.M)))
 
 
 def _machineSection(text: str, heading: str, stopHeading: str) -> str:

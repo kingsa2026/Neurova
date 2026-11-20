@@ -54,6 +54,10 @@ class _TurnIdentityAgent(MagicMock):
 
 def _agent(agentId: str = "a-t11d"):
     agent = _TurnIdentityAgent()
+    # 同 test_compress_recall_guide_sc5._agent：替身不给 MagicMock workspace_path，
+    # 防全量合跑时（全局 tool_output_ref 已被 app lifespan 装配）大输出按 mock repr
+    # 落盘到仓库根 `MagicMock/...`。None=无工作区→诚实降级透传，不写盘。
+    agent.workspace_path = None
     agent.config = MagicMock()
     agent.config.name = "t"
     agent.config.constitution = ""

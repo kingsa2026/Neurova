@@ -109,11 +109,13 @@ def test_statistics():
         await manager.retrieve("查询1", limit=5, use_cache=False)
         await manager.retrieve("查询2", limit=5, use_cache=False)
         
-        # 获取统计
-        stats = manager.get_statistics()
-        assert stats["total_attempts"] == 2
-        assert stats["successful_attempts"] == 2
-        assert stats["success_rate"] == 1.0
+        # 获取统计：经验质量门控批（f8cfaafc1）后统计读面收口为 `metrics`
+        # （RetrievalMetrics 数据类），不再有 get_statistics()/success_rate 字典键。
+        metrics = manager.metrics
+        assert metrics.total_attempts == 2
+        assert metrics.successful_attempts == 2
+        assert metrics.failed_attempts == 0
+        assert metrics.successful_attempts / metrics.total_attempts == 1.0
     
     asyncio.run(test())
     print("✅ 统计功能测试通过")

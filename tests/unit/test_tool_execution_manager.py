@@ -204,7 +204,9 @@ class TestToolExecutionManager:
         )
         
         assert context.status == ExecutionStatus.TIMEOUT
-        assert context.result is None
+        # 9bb6a2d5d 起 execute() 的 finally 统一补成败判据：超时不是成功，
+        # result 恒有物可判（{"success": False, "error": "工具执行超时"}），不再是 None。
+        assert context.result == {"success": False, "error": "工具执行超时"}
         assert context.completed_at is not None
     
     @pytest.mark.asyncio

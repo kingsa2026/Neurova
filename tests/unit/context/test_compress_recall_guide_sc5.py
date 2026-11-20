@@ -42,6 +42,11 @@ def _isolatedDataRoot(tmp_path, monkeypatch):
 
 def _agent():
     agent = MagicMock()
+    # 全量合跑时 app lifespan 会装配全局 tool_output_ref（进程级单例）；
+    # 本文件的替身 agent 若留着自动生成的 MagicMock workspace_path，
+    # 大输出会按 repr 落到仓库根 `MagicMock/mock.workspace_path/<id>/`（污染守卫红）。
+    # 显式给 None=走「无工作区→诚实降级透传」的生产语义，不写盘。
+    agent.workspace_path = None
     agent.config = MagicMock()
     agent.config.name = "t"
     agent.config.constitution = ""

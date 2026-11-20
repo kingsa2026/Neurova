@@ -633,7 +633,10 @@ class TestConvertedSitesStayStructural:
 #: 并未削弱——该键从本表消失后，任何一处新增的墙钟上界都会让分布比对判红。
 OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/api/test_channel_config_blocking_regression.py": 2,
-    "tests/auth/test_security_integration.py": 3,
+    # `tests/auth/test_security_integration.py` 已**销账**（原登记 3 处）：
+    # `be2bb372f`（R5 旧布局测试收敛与孤儿退役）把该文件整体删除，键从本表消失。
+    # 这不是"沉默地少登记一条"：本表比对是 `live == 台账`，文件没了却还登记着
+    # 属于残留键，会当场判红（与 2026-10-23 `test_moe_routing` 残留键同形态）。
     # `tests/e2e/test_phase4_integration.py` 原登记 2 处，现 1 处（销账的那半条不是
     # "退役"，是**检出器看不到了**——这点必须写准，否则下一个人会以为主体已消失）。
     #
@@ -693,6 +696,22 @@ OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     # 与「CI 转绿」不是同一件事，故本轮只登记、不擅改。
     "tests/performance/knowledge/test_admissionThroughput.py": 1,
     "tests/unit/knowledge/test_ontologyValidateEndpoint.py": 1,
+    # ── 以下 4 处为 2026-11-20 分布比对待处理，全部由既有批次带进（此前未登记，
+    # 属"新增了却没人登记"的漏账）。均不在受保护子集、不阻塞 CI；按教义第 5 条
+    # 如实登记，逐条写明形态与为何本轮不动。
+    #
+    # 召回基准的 p95 量级护栏（`latency_p95_s < _P95_SECONDS_CEILING`，
+    # 阈值出自常量），本意就是量真实机时——改造属性能基准口径的另一票。
+    "tests/performance/memory/test_memoryRecallBenchmark.py": 1,
+    # 后台化转换的时延上界（`elapsed < 0.6`）：被测对象是"慢前台转后台"
+    # 的实际耗时，墙钟即被测语义本体，改结构不变量属另一票。
+    "tests/unit/agent/test_swarm_auto_background_stall.py": 1,
+    # 慢取回不阻塞事件环的冒烟预算（`elapsed < FETCH_SECONDS * 1.9`，
+    # 阈值随常量缩放）；判据主体是"事件环期间可响应"，墙钟只兜量级。
+    "tests/unit/api/test_knowledge_import_url_no_loop_block.py": 1,
+    # 满池等待不阻塞归还的冒烟预算（`return_elapsed < 1.0`）；同上，
+    # 被测对象是实际等待时长，登记不擅改。
+    "tests/unit/core/test_connection_pool_full_pool_cascade.py": 1,
 }
 
 

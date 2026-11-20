@@ -184,7 +184,9 @@ class TestH1CreateSessionCallsBackend:
         # GREEN 期望：调用 api.post('/console/chat/new') 或 api.post(`/console/chat/new`)
         # #2 改造后 createSession 委托给 useChat composable,通过 useChat 调用 api.post。
         # 直接调用的代码已迁移到 composables/useChat.ts,所以这里检查是否调用 _createSession(委托函数)。
-        assert "chat/new" in body or "_createSession" in body, (
+        # 现行落点：createSession 经类型化封装 createConsoleSession（api/modules/console.ts，
+        # 内部 POST `${BASE}/chat/new`）触达后端——语义与直连等价，一并认领。
+        assert "chat/new" in body or "_createSession" in body or "createConsoleSession" in body, (
             "H-1 失败：createSession 未调用 POST /console/chat/new,也未委托给 useChat.createSession。"
             "当前实现仅在本地 unshift，后端无此会话 → switchSession 必然 404"
         )
@@ -196,7 +198,8 @@ class TestH1CreateSessionCallsBackend:
         assert m, "createSession 函数未找到"
         body = src[m.start():m.start() + 4000]
         # 如果调用后端，应该有 await _createSession(...) 委托给 useChat(内部用 await api.post)
-        assert "_createSession" in body or "await api.post" in body, (
+        # 现行亦接受 await createConsoleSession(...)（类型化封装，内部 await api.post）
+        assert "_createSession" in body or "await api.post" in body or "await createConsoleSession" in body, (
             "H-1 失败：createSession 应使用 await _createSession(委托给 useChat) 或 await api.post 异步调用后端"
         )
 

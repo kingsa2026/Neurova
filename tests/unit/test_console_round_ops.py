@@ -30,6 +30,13 @@ def _make_request() -> Request:
     return Request(scope, receive=receive)
 
 
+# P1-1 属主门（2026-11-16 审计）后，轮次删除/反馈在 agent 实例在场时要求
+# 「属主或 admin」；本组用例直调端点、agent 实例由 FakeAgent 顶上（有实例即过门），
+# 而测试 agent 不在属主登记里（无主仅 admin）——故直调时显式带 admin 身份，
+# 不让「忘了传身份」被门按匿名拦下。门的鉴权语义由 HTTP 面专测覆盖。
+_ADMIN_IDENTITY = {"user_id": "u1", "username": "u1", "role": "admin"}
+
+
 SESSION = {"session_id": "s1", "agent_id": "a1", "user_id": "u1", "title": "T"}
 DELETED_ROUND = [
     {"role": "user", "content": "Q1", "timestamp": "2026-08-29T10:00:00"},
@@ -181,7 +188,8 @@ def test_delete_round_happy_path_purges_memory_and_syncs_history(monkeypatch):
 
     resp = asyncio.run(
         console_module.delete_chat_round(
-            session_id="s1", timestamp="2026-08-29T10:00:00", request=_make_request()
+            session_id="s1", timestamp="2026-08-29T10:00:00", request=_make_request(),
+            current_user=_ADMIN_IDENTITY,
         )
     )
 
@@ -356,7 +364,7 @@ def test_feedback_applies_memory_temperature(monkeypatch):
     body = console_module.FeedbackRequest(
         session_id="s1", timestamp="2026-08-29T10:00:00", feedback="like"
     )
-    resp = asyncio.run(console_module.post_chat_feedback(body, _make_request()))
+    resp = asyncio.run(console_module.post_chat_feedback(body, _make_request(), current_user=_ADMIN_IDENTITY))
 
     assert resp["code"] == 0
     assert agent.memory_agent.feedback_calls == [
@@ -392,7 +400,7 @@ def test_feedback_writes_knowledge_adoption_from_server_lineage(monkeypatch):
     body = console_module.FeedbackRequest(
         session_id="s1", timestamp="2026-08-29T10:00:00", feedback="like"
     )
-    resp = asyncio.run(console_module.post_chat_feedback(body, _make_request()))
+    resp = asyncio.run(console_module.post_chat_feedback(body, _make_request(), current_user=_ADMIN_IDENTITY))
 
     assert seen == {"ids": ["f1", "f2"], "feedback": "like", "corrected": None}
     assert resp["data"]["facts_recorded"] == 2
@@ -411,7 +419,7 @@ def test_feedback_cancel_does_not_touch_memory(monkeypatch):
     monkeypatch.setattr(console_module, "get_agent_instance", lambda agent_id="default": agent)
 
     body = console_module.FeedbackRequest(session_id="s1", timestamp="t0", feedback=None)
-    resp = asyncio.run(console_module.post_chat_feedback(body, _make_request()))
+    resp = asyncio.run(console_module.post_chat_feedback(body, _make_request(), current_user=_ADMIN_IDENTITY))
 
     assert resp["code"] == 0
     assert agent.memory_agent.feedback_calls == []

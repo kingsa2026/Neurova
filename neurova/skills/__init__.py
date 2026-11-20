@@ -8,7 +8,8 @@ Skills System 1.0.0 - 技能系统
 - library_service.py: 三库路由（agent 私库 / 用户私库 / 公共库），取法
   `from neurova.skills import library_service`
 - registry.py: 技能注册表
-- manifest.py: 技能清单
+- manifest_entry.py / manifest_provider.py / manifest_source.py: 技能清单
+  （条目数据类 / 清单提供方 / 清单来源；原单文件 manifest.py 已拆分退役）
 - hub_client.py: 市场侧远端技能取数 (SkillHubClient, RemoteSkill)
 - skill_install_gate.py: 安装门（所有安装面共用的唯一咽喉）
 
