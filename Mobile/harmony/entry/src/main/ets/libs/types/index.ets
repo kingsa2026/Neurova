@@ -252,6 +252,27 @@ export interface WSChatChunk {
   index: number;
 }
 
+/** chat:reasoning 消息（思考流增量） */
+export interface WSChatReasoning {
+  type: 'chat:reasoning';
+  session_id: string;
+  content: string;
+}
+
+/** chat:tool_call 消息（工具调用；data 形状随工具返回，字段做兼容读取） */
+export interface WSChatToolCall {
+  type: 'chat:tool_call';
+  session_id: string;
+  data: Record<string, Object>;
+}
+
+/** chat:tool_result 消息（工具结果） */
+export interface WSChatToolResult {
+  type: 'chat:tool_result';
+  session_id: string;
+  data: Record<string, Object>;
+}
+
 /** chat:done 消息 */
 export interface WSChatDone {
   type: 'chat:done';

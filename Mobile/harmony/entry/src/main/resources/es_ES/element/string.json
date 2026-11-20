@@ -6,6 +6,7 @@
     { "name": "reason_internet", "value": "Comunicación con el servicio backend" },
     { "name": "reason_network_info", "value": "Detectar el estado de la conexión de red" },
     { "name": "reason_camera", "value": "Emparejamiento por código QR" },
+    { "name": "reason_microphone", "value": "Entrada de voz" },
     { "name": "app_name", "value": "Neurova" },
     { "name": "login_title", "value": "Iniciar sesión" },
     { "name": "login_username", "value": "Nombre de usuario" },

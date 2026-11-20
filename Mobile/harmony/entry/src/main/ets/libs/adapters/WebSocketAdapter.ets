@@ -384,6 +384,11 @@ export class WebSocketAdapter {
         // 思考流：服务端在 content 之前推送；UI 侧暂未消费，但必须按契约分发
         // （此前落 default 被当「未识别」丢弃，11:41 实测每帧都打未识别日志）
         return 'chat:reasoning';
+      case 'chat:tool_call':
+        // 工具调用/结果事件：会话页工具卡数据源（对齐 PC）
+        return 'chat:tool_call';
+      case 'chat:tool_result':
+        return 'chat:tool_result';
       case 'chat:queued':
         return 'chat:queued';
       case 'chat:retry':

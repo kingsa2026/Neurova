@@ -6,6 +6,7 @@
     { "name": "reason_internet", "value": "बैकएंड सेवा के साथ संचार" },
     { "name": "reason_network_info", "value": "नेटवर्क कनेक्शन स्थिति का पता लगाना" },
     { "name": "reason_camera", "value": "QR कोड पेयरिंग" },
+    { "name": "reason_microphone", "value": "वॉइस इनपुट" },
     { "name": "app_name", "value": "Neurova" },
     { "name": "login_title", "value": "लॉगिन" },
     { "name": "login_username", "value": "उपयोगकर्ता नाम" },

@@ -6,6 +6,7 @@
     { "name": "reason_internet", "value": "백엔드 서비스와의 통신" },
     { "name": "reason_network_info", "value": "네트워크 연결 상태 감지" },
     { "name": "reason_camera", "value": "QR 코드 페어링" },
+    { "name": "reason_microphone", "value": "음성 입력" },
     { "name": "app_name", "value": "Neurova" },
     { "name": "login_title", "value": "로그인" },
     { "name": "login_username", "value": "사용자 이름" },

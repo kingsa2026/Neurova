@@ -6,6 +6,7 @@
     { "name": "reason_internet", "value": "التواصل مع خدمة الواجهة الخلفية" },
     { "name": "reason_network_info", "value": "اكتشاف حالة اتصال الشبكة" },
     { "name": "reason_camera", "value": " الاقتران عبر رمز QR" },
+    { "name": "reason_microphone", "value": "إدخال صوتي" },
     { "name": "app_name", "value": "Neurova" },
     { "name": "login_title", "value": "تسجيل الدخول" },
     { "name": "login_username", "value": "اسم المستخدم" },

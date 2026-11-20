@@ -37,11 +37,15 @@ import { ConfigManager } from '../libs/config/ConfigManager';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { WSChatChunk, WSChatDone, Agent } from '../libs/types';
+import { WSChatChunk, WSChatDone, WSChatReasoning, WSChatToolCall, WSChatToolResult, Agent } from '../libs/types';
 import { Router } from '../routing/Router';
 import { ChunkBatcher } from '../libs/perf/ChunkBatcher';
 import { SimpleDataSource } from '../libs/perf/SimpleDataSource';
 import { ChatSession } from '../libs/api/modules/SessionsApi';
+import { MarkdownText } from '../components/chat/MarkdownText';
+import { speechRecognizer } from '@kit.CoreSpeechKit';
+import { audio } from '@kit.AudioKit';
+import { abilityAccessCtrl, Permissions } from '@kit.AbilityKit';
 
 /** 对话消息视图模型（仅用于本页渲染） */
 interface ChatMessageView {
@@ -50,6 +54,15 @@ interface ChatMessageView {
   content: string;          // 文本内容
   timestamp: number;        // 毫秒时间戳
   isStreaming: boolean;     // 是否正在流式生成
+  reasoning: string;        // 思考流累积（chat:reasoning）
+  toolCalls: ToolCallView[]; // 工具调用/结果卡（chat:tool_call / chat:tool_result）
+}
+
+/** 工具调用卡片视图模型 */
+interface ToolCallView {
+  name: string;
+  args: string;
+  result: string;
 }
 
 /** 日志标签 */
@@ -116,6 +129,14 @@ export struct ChatPage {
   private doneHandler: EventHandler = () => {};
   private errorHandler: EventHandler = () => {};
   private queuedHandler: EventHandler = () => {};
+  private reasoningHandler: EventHandler = () => {};
+  private toolCallHandler: EventHandler = () => {};
+  private toolResultHandler: EventHandler = () => {};
+  // 语音输入（CoreSpeechKit 端侧识别 + AudioCapturer 采集喂入）
+  @State voiceListening: boolean = false;
+  private voiceEngine: speechRecognizer.SpeechRecognitionEngine | null = null;
+  private voiceCapturer: audio.AudioCapturer | null = null;
+  private voiceSessionId: string = '';
   // M5.2.1 WS 流式 chunk 批量节流器：60ms 窗口累积 chunk 减少 UI 重渲染次数
   private batcher: ChunkBatcher = new ChunkBatcher({ interval: 60 });
   // M5.2.2 消息列表 LazyForEach 数据源（与 messages 数组双写同步）
@@ -151,6 +172,11 @@ export struct ChatPage {
     this.bus.off('chat:done', this.doneHandler);
     this.bus.off('chat:error', this.errorHandler);
     this.bus.off('chat:queued', this.queuedHandler);
+    this.bus.off('chat:reasoning', this.reasoningHandler);
+    this.bus.off('chat:tool_call', this.toolCallHandler);
+    this.bus.off('chat:tool_result', this.toolResultHandler);
+    // 语音资源收尾（识别引擎/采集器可能仍在运行）
+    this.stopVoice();
     // 断开 WS（adapter 内部会清理心跳与重连定时器）
     this.ws.disconnect();
     // M5.2.1 清理 chunk 缓冲，避免下次进入页面残留旧数据
@@ -196,6 +222,8 @@ export struct ChatPage {
             content: content,
             timestamp: 0,
             isStreaming: false,
+            reasoning: '',
+            toolCalls: [],
           });
         }
         this.messages = views;
@@ -305,6 +333,171 @@ export struct ChatPage {
       this.queued = true;
     };
     this.bus.on('chat:queued', this.queuedHandler);
+
+    // 思考流（后端 chat:reasoning）：累积到当前 streaming assistant 消息
+    this.reasoningHandler = (data: Object) => {
+      const ev = data as WSChatReasoning;
+      this.adoptServerSession(ev.session_id);
+      const last = this.messages[this.messages.length - 1];
+      if (last && last.role === 'assistant' && last.isStreaming) {
+        last.reasoning += (ev.content ?? '');
+        this.messages = [...this.messages];
+        this.messagesDs.setData(this.messages);
+        this.scrollToBottom();
+      }
+    };
+    this.bus.on('chat:reasoning', this.reasoningHandler);
+
+    // 工具调用事件：追加工具卡
+    this.toolCallHandler = (data: Object) => {
+      const ev = data as WSChatToolCall;
+      this.adoptServerSession(ev.session_id);
+      const d = ev.data ?? {};
+      const last = this.messages[this.messages.length - 1];
+      if (last && last.role === 'assistant' && last.isStreaming) {
+        const name = String(d['name'] ?? d['tool_name'] ?? '工具');
+        const rawArgs = d['arguments'] ?? d['input'] ?? '';
+        const args = typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs);
+        const call: ToolCallView = { name: name, args: args, result: '' };
+        last.toolCalls = [...(last.toolCalls ?? []), call];
+        this.messages = [...this.messages];
+        this.messagesDs.setData(this.messages);
+        this.scrollToBottom();
+      }
+    };
+    this.bus.on('chat:tool_call', this.toolCallHandler);
+
+    // 工具结果事件：回填到最后一张工具卡
+    this.toolResultHandler = (data: Object) => {
+      const ev = data as WSChatToolResult;
+      const d = ev.data ?? {};
+      const last = this.messages[this.messages.length - 1];
+      if (last && last.role === 'assistant' && (last.toolCalls?.length ?? 0) > 0) {
+        const raw = d['result'] ?? d['content'] ?? d;
+        const text = typeof raw === 'string' ? raw : JSON.stringify(raw);
+        const calls = last.toolCalls ?? [];
+        calls[calls.length - 1].result = text;
+        last.toolCalls = [...calls];
+        this.messages = [...this.messages];
+        this.messagesDs.setData(this.messages);
+      }
+    };
+    this.bus.on('chat:tool_result', this.toolResultHandler);
+  }
+
+  /**
+   * 语音输入：点击麦克风开始/停止。
+   * 实现：CoreSpeechKit 端侧识别引擎（zh-CN）+ AudioCapturer 采集 16k/mono/16bit
+   * PCM，按 20ms 帧喂给引擎；最终识别结果直接作为消息发送。
+   */
+  private async toggleVoice(): Promise<void> {
+    if (this.voiceListening) {
+      this.stopVoice();
+      return;
+    }
+    try {
+      const atManager = abilityAccessCtrl.createAtManager();
+      const grant = await atManager.requestPermissionsFromUser(getContext(this) as Context,
+        ['ohos.permission.MICROPHONE'] as Array<Permissions>);
+      let granted = false;
+      for (const r of grant.authResults) {
+        if (r === 0) {
+          granted = true;
+        }
+      }
+      if (!granted) {
+        this.msg.warning('需要麦克风权限才能语音输入');
+        return;
+      }
+      const engine = await speechRecognizer.createEngine({ language: 'zh-CN', online: 1 });
+      this.voiceEngine = engine;
+      this.voiceSessionId = 'voice-' + Date.now().toString();
+      engine.setListener({
+        onStart: (sessionId: string, eventMessage: string) => {
+          this.voiceListening = true;
+        },
+        onEvent: (sessionId: string, eventCode: number, eventMessage: string) => {
+        },
+        onComplete: (sessionId: string, eventMessage: string) => {
+          // 识别完成（一句话结束）：引擎会继续等下一句，无需处理
+        },
+        onResult: (sessionId: string, result: speechRecognizer.SpeechRecognitionResult) => {
+          const text = result.result ?? '';
+          if (text.trim().length > 0 && result.isFinal) {
+            this.inputText = text.trim();
+            this.stopVoice();
+            this.sendMessage();
+          }
+        },
+        onError: (sessionId: string, errorCode: number, errorMessage: string) => {
+          this.logger.warn(TAG, `语音识别错误 ${errorCode}: ${errorMessage}`);
+          this.stopVoice();
+          this.msg.error('语音识别失败');
+        }
+      });
+      engine.startListening({
+        sessionId: this.voiceSessionId,
+        audioInfo: { audioType: 'pcm', sampleRate: 16000, soundChannel: 1, sampleBit: 16 },
+      });
+      this.voiceListening = true;
+      await this.startCapture(this.voiceSessionId);
+    } catch (e) {
+      this.stopVoice();
+      this.msg.error('语音启动失败：' + (e as Error).message);
+    }
+  }
+
+  /** AudioCapturer 采集 PCM 并按 640 字节帧喂给识别引擎 */
+  private async startCapture(sessionId: string): Promise<void> {
+    const streamInfo: audio.AudioStreamInfo = {
+      samplingRate: 16000,
+      channels: audio.AudioChannel.CHANNEL_1,
+      sampleFormat: audio.AudioSampleFormat.SAMPLE_FORMAT_S16LE,
+      encodingType: audio.AudioEncodingType.ENCODING_TYPE_RAW,
+    };
+    const capturerInfo: audio.AudioCapturerInfo = {
+      source: audio.SourceType.SOURCE_TYPE_MIC,
+      capturerFlags: 0,
+    };
+    const options: audio.AudioCapturerOptions = {
+      streamInfo: streamInfo,
+      capturerInfo: capturerInfo,
+    };
+    const capturer = await audio.createAudioCapturer(options);
+    this.voiceCapturer = capturer;
+    capturer.on('readData', (buffer: ArrayBuffer) => {
+      if (buffer.byteLength <= 0) {
+        return;
+      }
+      const bytes = new Uint8Array(buffer);
+      // 引擎要求 640/1280 字节帧；按 640 切分喂入
+      for (let off = 0; off + 640 <= bytes.length; off += 640) {
+        this.voiceEngine?.writeAudio(sessionId, bytes.slice(off, off + 640));
+      }
+    });
+    await capturer.start();
+  }
+
+  /** 停止语音：采集器与识别引擎一并收尾 */
+  private stopVoice(): void {
+    this.voiceListening = false;
+    try {
+      this.voiceCapturer?.stop();
+      this.voiceCapturer?.release();
+    } catch (e) {
+      // 采集器释放失败不影响主流程
+    }
+    this.voiceCapturer = null;
+    try {
+      if (this.voiceEngine !== null && this.voiceSessionId !== '') {
+        this.voiceEngine.cancel(this.voiceSessionId);
+        this.voiceEngine.shutdown();
+      }
+    } catch (e) {
+      // 引擎可能已随会话结束
+    }
+    this.voiceEngine = null;
+    this.voiceSessionId = '';
   }
 
   /**
@@ -325,6 +518,8 @@ export struct ChatPage {
       content: text,
       timestamp: Date.now(),
       isStreaming: false,
+      reasoning: '',
+      toolCalls: [],
     };
     // assistant 占位消息（等待流式填充）
     const assistantMsg: ChatMessageView = {
@@ -333,6 +528,8 @@ export struct ChatPage {
       content: '',
       timestamp: Date.now(),
       isStreaming: true,
+      reasoning: '',
+      toolCalls: [],
     };
     this.messages.push(userMsg, assistantMsg);
     this.messages = [...this.messages];
@@ -806,7 +1003,7 @@ export struct ChatPage {
         // 输入区（设计 F5 .inputbar：附件/语音 + 胶囊输入框 + 圆形发送/停止）
         Row() {
           IconBtn({ name: 'clip', onTap: () => { this.msg.info('附件发送即将开放'); } })
-          IconBtn({ name: 'mic', onTap: () => { this.msg.info('语音输入即将开放'); } })
+          IconBtn({ name: 'mic', onTap: () => { this.toggleVoice(); } })
             .margin({ left: 8 })
 
           GlassInput({
@@ -1180,21 +1377,105 @@ export struct ChatPage {
           .justifyContent(FlexAlign.Start)
           .margin({ bottom: 4 })
 
+          // 思考流卡片（chat:reasoning 累积；深底与气泡区分）
+          if (msg.reasoning !== '') {
+            Column() {
+              Row() {
+                AppIcon({ name: 'spark', iconSize: 12, color: this.sm.getColor('primary') })
+                Text('思考中')
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('text_secondary'))
+                  .margin({ left: 5 })
+              }
+              .width('100%')
+              Text(msg.reasoning)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .width('100%')
+                .maxLines(8)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .margin({ top: 4 })
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+            .padding(8)
+            .borderRadius(8)
+            .backgroundColor('rgba(0,0,0,0.25)')
+            .border({ width: 1, color: this.sm.getColor('border') })
+            .margin({ bottom: 6 })
+          }
+
+          // 工具调用/结果卡片（chat:tool_call / chat:tool_result）
+          if ((msg.toolCalls?.length ?? 0) > 0) {
+            Column() {
+              ForEach(msg.toolCalls, (tc: ToolCallView) => {
+                Column() {
+                  Row() {
+                    AppIcon({ name: 'gear', iconSize: 12, color: this.sm.getColor('primary') })
+                    Text('调用工具 ' + tc.name)
+                      .fontSize(this.sm.getFontSize('caption'))
+                      .fontColor(this.sm.getColor('text_secondary'))
+                      .margin({ left: 5 })
+                      .layoutWeight(1)
+                    Text(tc.result !== '' ? '✓ 已完成' : '执行中…')
+                      .fontSize(this.sm.getFontSize('caption'))
+                      .fontColor(tc.result !== '' ? this.sm.getColor('success') : this.sm.getColor('text_tertiary'))
+                  }
+                  .width('100%')
+                  if (tc.args !== '') {
+                    Text(tc.args)
+                      .fontFamily('monospace')
+                      .fontSize(11)
+                      .fontColor(this.sm.getColor('text_tertiary'))
+                      .width('100%')
+                      .maxLines(3)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .margin({ top: 3 })
+                  }
+                  if (tc.result !== '') {
+                    Text(tc.result)
+                      .fontFamily('monospace')
+                      .fontSize(11)
+                      .fontColor(this.sm.getColor('text_tertiary'))
+                      .width('100%')
+                      .maxLines(5)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .margin({ top: 3 })
+                  }
+                }
+                .width('100%')
+                .alignItems(HorizontalAlign.Start)
+                .padding(7)
+                .borderRadius(8)
+                .backgroundColor('rgba(0,0,0,0.25)')
+                .border({ width: 1, color: this.sm.getColor('border') })
+                .margin({ bottom: 5 })
+              }, (tc: ToolCallView) => tc.name + tc.args + tc.result)
+            }
+            .width('100%')
+            .margin({ bottom: 6 })
+          }
+
           Column() {
-            // 消息内容 + 流式光标
-            Row() {
-              Text(msg.content.length > 0 ? msg.content : (msg.isStreaming ? '' : '（空回复）'))
+            // 消息内容（Markdown 渲染）+ 流式光标
+            if (msg.content.length > 0) {
+              Row() {
+                MarkdownText({ content: msg.content })
+                  .layoutWeight(1)
+                if (msg.isStreaming) {
+                  Text('▍')
+                    .fontSize(this.sm.getFontSize('body_sm'))
+                    .fontColor(this.sm.getColor('primary'))
+                    .margin({ left: 2 })
+                }
+              }
+              .width('100%')
+              .alignItems(VerticalAlign.Bottom)
+            } else if (!msg.isStreaming) {
+              Text('（空回复）')
                 .fontSize(this.sm.getFontSize('body_sm'))
                 .fontColor(this.sm.getColor('text_primary'))
-              // 流式生成中显示闪烁光标
-              if (msg.isStreaming) {
-                Text('▍')
-                  .fontSize(this.sm.getFontSize('body_sm'))
-                  .fontColor(this.sm.getColor('primary'))
-                  .margin({ left: 2 })
-              }
             }
-            .alignItems(VerticalAlign.Bottom)
             // 时间戳
             Text(this.formatTime(msg.timestamp))
               .fontSize(this.sm.getFontSize('caption'))

@@ -6,6 +6,7 @@
     { "name": "reason_internet", "value": "用于与后端服务通信" },
     { "name": "reason_network_info", "value": "检测网络连接状态" },
     { "name": "reason_camera", "value": "扫码配对功能" },
+    { "name": "reason_microphone", "value": "语音输入" },
     { "name": "app_name", "value": "Neurova" },
     { "name": "login_title", "value": "登录" },
     { "name": "login_username", "value": "用户名" },

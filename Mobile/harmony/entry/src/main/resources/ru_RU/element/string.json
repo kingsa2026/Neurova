@@ -6,6 +6,7 @@
     { "name": "reason_internet", "value": "Связь с серверной службой" },
     { "name": "reason_network_info", "value": "Определение состояния сетевого подключения" },
     { "name": "reason_camera", "value": "Сопряжение по QR-коду" },
+    { "name": "reason_microphone", "value": "Голосовой ввод" },
     { "name": "app_name", "value": "Neurova" },
     { "name": "login_title", "value": "Вход" },
     { "name": "login_username", "value": "Имя пользователя" },
