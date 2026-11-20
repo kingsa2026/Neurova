@@ -294,7 +294,8 @@ export struct AgentListPage {
       .borderRadius(27)
       .linearGradient({ angle: 135, colors: this.sm.getBrandGradient() })
       .shadow({ radius: 30, color: 'rgba(99,102,241,0.50)', offsetY: 10 })
-      .position({ x: '80%', y: '85%' })
+      // y 取 78%：页面容器直通屏底后 85% 会落进透明玻璃页签栏区被遮住，上移到栏上方
+      .position({ x: '80%', y: '78%' })
       .onClick(() => { this.handleCreate(); })
     }
     .width('100%')
