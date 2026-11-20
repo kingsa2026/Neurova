@@ -81,10 +81,8 @@ export interface AuthTokens {
 export type AgentStatus = 'active' | 'inactive' | 'sleeping' | 'error';
 
 export interface AgentConfig {
-  systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;
-  topP?: number;
   ttsEnabled?: boolean;
   ttsVoice?: string;
   ttsSpeed?: number;
@@ -115,6 +113,14 @@ export interface Agent {
   stats?: AgentStats;
   /** 已挂载工具数（后端 AgentInfo.tools_count，F7 卡片标签用） */
   toolsCount?: number;
+  /** 性格设定（后端 AgentInfo.personality，P1-5b 回传） */
+  personality?: string;
+  /** 行为准则（宪法，后端 AgentInfo.constitution） */
+  constitution?: string;
+  /** 执行档位（lite/standard/heavy；空=跟随部署档位） */
+  execProfile?: string;
+  /** 所属部门组 id（后端 AgentInfo.group_id） */
+  groupId?: string;
 }
 
 export interface Session {

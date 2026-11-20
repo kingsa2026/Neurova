@@ -12,7 +12,7 @@
  */
 
 import { HttpClient } from '../HttpClient';
-import { ApiResponse, Agent, AgentStatus } from '../../types';
+import { ApiResponse, Agent, AgentConfig, AgentStatus } from '../../types';
 
 /** 后端 AgentInfo 投影（agent.py） */
 export interface AgentInfoDto {
@@ -29,6 +29,13 @@ export interface AgentInfoDto {
   group_id: string;
   /** 后端可空（agent.py:221）——Agent 创建时间，createdAt 的唯一事实源 */
   created_at: string;
+  /** P1-5b：性格/宪法回传（表单编辑态回填数据源） */
+  personality: string;
+  constitution: string;
+  /** 回显 config（snake_case：temperature/max_tokens/enable_tts/tts_voice/tts_speed/tts_pitch） */
+  config: Record<string, Object>;
+  /** 执行档位回显（lite/standard/heavy；null=未设置跟随部署档位） */
+  exec_profile: string | null;
 }
 
 export class AgentsApi {
@@ -65,6 +72,23 @@ export class AgentsApi {
       updatedAt: '',
     };
     agent.toolsCount = dto.tools_count;
+    // P1-5b：性格/宪法/执行档位/分组回传（表单编辑态回填数据源）
+    agent.personality = dto.personality ?? '';
+    agent.constitution = dto.constitution ?? '';
+    agent.execProfile = dto.exec_profile ?? '';
+    agent.groupId = dto.group_id ?? '';
+    // 回显 config（snake_case → AgentConfig camelCase），缺省回退与 PC 表单一致
+    const emptyConfig: Record<string, Object> = {};
+    const cfg = (dto.config ?? emptyConfig) as Object as Record<string, Object>;
+    const config: AgentConfig = {
+      temperature: cfg['temperature'] !== undefined ? Number(cfg['temperature']) : 0.7,
+      maxTokens: cfg['max_tokens'] !== undefined ? Number(cfg['max_tokens']) : 4096,
+      ttsEnabled: cfg['enable_tts'] === true,
+      ttsVoice: cfg['tts_voice'] !== undefined ? String(cfg['tts_voice']) : '',
+      ttsSpeed: cfg['tts_speed'] !== undefined ? Number(cfg['tts_speed']) : 1.0,
+      ttsPitch: cfg['tts_pitch'] !== undefined ? Number(cfg['tts_pitch']) : 1.0,
+    };
+    agent.config = config;
     return agent;
   }
 
@@ -89,15 +113,15 @@ export class AgentsApi {
     return AgentsApi.toAgent(dto);
   }
 
-  /** 创建 Agent */
-  async create(data: Partial<Agent>): Promise<Agent> {
+  /** 创建 Agent（data 为表单组装的提交载荷，键名与后端 CreateAgentRequest 一致） */
+  async create(data: Object): Promise<Agent> {
     const res = await this.client.post<Agent>('/agents', data);
     this.assertAgent(res);
     return res as Object as Agent;
   }
 
-  /** 更新 Agent */
-  async update(agentId: string, data: Partial<Agent>): Promise<Agent> {
+  /** 更新 Agent（data 为表单组装的提交载荷，键名与后端 UpdateAgentRequest 一致） */
+  async update(agentId: string, data: Object): Promise<Agent> {
     const res = await this.client.put<Agent>(`/agents/${agentId}`, data);
     this.assertAgent(res);
     return res as Object as Agent;
