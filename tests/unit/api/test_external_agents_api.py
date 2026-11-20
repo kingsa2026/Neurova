@@ -71,6 +71,27 @@ def test_catalogListsPresetsWithInstallProbe(client):
         assert "install_hint" in item, "未装时前端靠 install_hint 展示安装指引"
 
 
+# ── F1 线乙：catalog 透出能力声明 + kind 取值收口单源 ─────────────────────
+
+
+def test_catalogItemsDeclareCapabilities(client):
+    from neurova.api.endpoints import external_agents_api
+    from neurova.agent.neuacp.catalog import EXECUTOR_KINDS
+
+    # kind 取值唯一事实源：管理面 VALID_KINDS 必须引用 catalog.EXECUTOR_KINDS
+    assert external_agents_api.VALID_KINDS == EXECUTOR_KINDS
+    resp = client.get(f"{BASE}/catalog", headers=adminHeaders())
+    assert resp.status_code == 200, resp.text
+    items = resp.json()
+    assert items, "目录非空"
+    for item in items:
+        caps = item.get("capabilities")
+        assert isinstance(caps, dict), f"{item['tool']} 的 catalog 响应缺 capabilities"
+        assert {"transports", "permission_modes", "streaming", "resume", "session_reuse"} <= set(caps), item["tool"]
+        assert isinstance(caps["transports"], list), "transports 出口须为 list（JSON 可序列化）"
+        assert isinstance(caps["permission_modes"], list), "permission_modes 出口须为 list（JSON 可序列化）"
+
+
 # ── test：握手级连通测试 ─────────────────────────────────────────────────
 
 
@@ -156,3 +177,137 @@ def test_statusPoolPlaceholderUntilB3(client):
     data = resp.json()
     assert "processes" in data
     assert isinstance(data["processes"], list)
+
+
+# ── F2 线戊：帧账本读面 GET /runs/{subagent_id}/frames（设计文档 §3.2，拍板 D-C） ──
+#
+# 数据根隔离按仓约定（tests/conftest.py 导入期把 NEUROVA_DATA_DIR 钉进会话临时目录）；
+# 每条用例用独立 subagent_id，避免同会话内互相串账本。
+
+
+def _framesUrl(sid: str) -> str:
+    return f"{BASE}/runs/{sid}/frames"
+
+
+def test_framesRouteIsRegistered(client):
+    """路由清单与真路由表双向核对：frames 端点必须真的挂上 app。"""
+    paths = client.app.openapi()["paths"]
+    assert any("/external-agents/runs/{subagent_id}/frames" in p for p in paths), sorted(paths)
+
+
+def test_framesRequiresAdmin(client):
+    """与 catalog/test/status 同门：未认证 401，非 admin 403。"""
+    assert client.get(_framesUrl("sw_frames_gate")).status_code == 401
+    assert client.get(_framesUrl("sw_frames_gate"), headers=userHeaders()).status_code == 403
+
+
+def test_framesAdminSameTenantReadsAscending(client):
+    from neurova.agent.neuacp.frame_log import appendFrame
+
+    sid = "sw_frames_read_asc"
+    seq1 = appendFrame(sid, "in", {"jsonrpc": "2.0", "method": "session/prompt"})
+    seq2 = appendFrame(sid, "out", {"jsonrpc": "2.0", "id": 1, "result": {}})
+    seq3 = appendFrame(sid, "observed", {"type": "exited", "exit_code": 0})
+    resp = client.get(_framesUrl(sid), headers=adminHeaders())
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["subagent_id"] == sid
+    assert data["count"] == 3
+    seqs = [f["seq"] for f in data["frames"]]
+    assert seqs == [seq1, seq2, seq3], "frames 必须按 seq 升序全序回放"
+    assert all("frame" in f and "direction" in f for f in data["frames"])
+
+
+def test_framesAfterSeqCursorReturnsOnlyLaterFrames(client):
+    from neurova.agent.neuacp.frame_log import appendFrame
+
+    sid = "sw_frames_cursor"
+    seqs = [appendFrame(sid, "in", {"n": i}) for i in range(5)]
+    first = client.get(_framesUrl(sid), headers=adminHeaders(), params={"limit": 2}).json()
+    assert [f["seq"] for f in first["frames"]] == seqs[:2]
+    second = client.get(
+        _framesUrl(sid), headers=adminHeaders(), params={"after_seq": seqs[1], "limit": 2}
+    )
+    assert second.status_code == 200, second.text
+    second = second.json()
+    assert [f["seq"] for f in second["frames"]] == seqs[2:4], "第二页只含比游标更大的 seq"
+    assert second["count"] == 2
+
+
+def test_framesCrossTenantRunNotFound(client):
+    """run 租户线索（H-4 lineage）与请求者租户不同 → 404，不泄露存在性。"""
+    from neurova.agent.swarm_event_log import appendRunEvent
+
+    sid = "sw_frames_cross_tenant"
+    appendRunEvent(sid, "spawned", {}, lineage={"tenant_id": "tenant-other"})
+    resp = client.get(_framesUrl(sid), headers=adminHeaders())
+    assert resp.status_code == 404, resp.text
+
+
+def test_framesSameTenantLineagePasses(client):
+    """run 租户线索与请求者租户一致 → 200（admin 同租户读自己的 run）。"""
+    from neurova.agent.neuacp.frame_log import appendFrame
+    from neurova.agent.swarm_event_log import appendRunEvent
+
+    sid = "sw_frames_same_tenant"
+    appendRunEvent(sid, "spawned", {}, lineage={"tenant_id": "default"})
+    appendFrame(sid, "in", {"a": 1})
+    resp = client.get(_framesUrl(sid), headers=adminHeaders())
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["count"] == 1
+
+
+def test_framesInMemoryRunTenantChecked(client, monkeypatch):
+    """租户解析①：swarm 管理器内存 run 的 tenant_id 优先参与同租户校验。"""
+    from types import SimpleNamespace
+
+    from neurova.agent.swarm import get_swarm_manager
+
+    sid = "sw_frames_mem_tenant"
+    manager = get_swarm_manager()
+    monkeypatch.setitem(manager._runs, sid, SimpleNamespace(tenant_id="tenant-other"))
+    resp = client.get(_framesUrl(sid), headers=adminHeaders())
+    assert resp.status_code == 404, resp.text
+
+
+def test_framesUnknownRunNotFound(client):
+    """无帧记录且无任何租户线索 → 404（run 不存在或无帧记录）。"""
+    resp = client.get(_framesUrl("sw_frames_never_existed"), headers=adminHeaders())
+    assert resp.status_code == 404, resp.text
+
+
+def test_framesLimitClampedToThousand(client):
+    """limit=5000 超上限 → 生效值 1000（返回 count 上限体现夹取）。"""
+    from neurova.agent.neuacp.frame_log import appendFrame
+
+    sid = "sw_frames_limit_clamp"
+    for i in range(1001):
+        appendFrame(sid, "in", {"n": i})
+    resp = client.get(_framesUrl(sid), headers=adminHeaders(), params={"limit": 5000})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["count"] == 1000, "limit 夹取到 [1,1000] 上限"
+    assert len(data["frames"]) == 1000
+
+
+def test_framesLimitFloorClampedToOne(client):
+    """limit=0 低于下限 → 生效值 1。"""
+    from neurova.agent.neuacp.frame_log import appendFrame
+
+    sid = "sw_frames_limit_floor"
+    appendFrame(sid, "in", {"n": 1})
+    appendFrame(sid, "in", {"n": 2})
+    resp = client.get(_framesUrl(sid), headers=adminHeaders(), params={"limit": 0})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["count"] == 1
+
+
+def test_framesNegativeAfterSeqTreatedAsZero(client):
+    """after_seq 负数按 0 处理，不全空。"""
+    from neurova.agent.neuacp.frame_log import appendFrame
+
+    sid = "sw_frames_neg_cursor"
+    appendFrame(sid, "in", {"n": 1})
+    resp = client.get(_framesUrl(sid), headers=adminHeaders(), params={"after_seq": -5})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["count"] == 1

@@ -9,6 +9,12 @@
   合法 JSON 行即视为可达。超时 30s，进程必须清理。
   返回 ``{ok, protocolVersion?, serverCapabilities?, error?}``。
 - GET  /v1/external-agents/status   进程池状态（B3 落地前为占位，落地后如实读）。
+- GET  /v1/external-agents/runs/{subagent_id}/frames
+                                      帧账本读面（F2，设计文档 §3.2，拍板 D-C）：
+                                      按 seq 游标回放一次 run 的原生帧（脱敏后
+                                      留痕，永不合成/推断）。admin 门 + 同租户
+                                      校验（§6.4 红线）：跨租户 404 不泄露存在性
+                                      （与 teams 口径一致）。
 
 鉴权：整路由挂 ``get_current_user``，逐端点要求 ``role==admin``——外部编码
 代理是本机进程派生面（对齐 webhook 管理面教训：外部执行面必须有属主/角色门），
@@ -24,13 +30,13 @@ import json
 import shutil
 import subprocess
 import threading
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from neurova.agent.neuacp.acp_client import NeuacpClient
-from neurova.agent.neuacp.catalog import listCatalog
+from neurova.agent.neuacp.catalog import EXECUTOR_KINDS, listCatalog
 from neurova.agent.neuacp.child_env import buildChildEnvironment
 from neurova.api.auth import get_current_user
 from neurova.core.logger import get_logger
@@ -44,8 +50,9 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 TEST_TIMEOUT_S = 30.0
 _PLUGIN_TERMINATE_WAIT_S = 5.0
 
-#: 执行体类型分派（kind 取值唯一事实源，与名册 NeuacpExecutorSpec 同口径）
-VALID_KINDS = ("acp", "plugin")
+#: 执行体类型分派：kind 取值收口到 catalog.EXECUTOR_KINDS 单源
+#: （与名册 NeuacpExecutorSpec、能力校验 refuseExecutorSpec 同一口径，教义第 6 条）
+VALID_KINDS = EXECUTOR_KINDS
 
 
 async def requireAdmin(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
@@ -117,6 +124,102 @@ async def externalAgentsStatus(current_user: Dict[str, Any] = Depends(requireAdm
     if callable(snapshot):
         return snapshot()
     return {"processes": [], "note": "process pool lands with B3"}
+
+
+# ---------- F2：帧账本读面（设计文档 §3.2，拍板 D-C） ----------
+
+#: frames 读面分页边界：默认一页 200 条，上限 1000（limit 夹取 [1, 1000]）
+FRAMES_LIMIT_DEFAULT = 200
+FRAMES_LIMIT_MAX = 1000
+
+
+def _clampFrameWindow(afterSeq: int, limit: int) -> Tuple[int, int]:
+    """游标参数夹取：after_seq 负数按 0；limit 夹取 [1, 1000]，非法回落默认页宽。"""
+    try:
+        afterSeq = int(afterSeq)
+    except (TypeError, ValueError):
+        afterSeq = 0
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = FRAMES_LIMIT_DEFAULT
+    return max(0, afterSeq), max(1, min(FRAMES_LIMIT_MAX, limit))
+
+
+def _resolveRunTenantId(subagentId: str) -> str:
+    """run 租户线索解析（§6.4 红线，双源按序，解析不到返回空串）。
+
+    ① swarm 管理器内存 run 的 ``tenant_id``（getattr 容错——F5 字段落地前
+    读取为空，不致命）；② H-4 事件账本 lineage：``readRunEvents`` 里第一条
+    带 ``lineage.tenant_id`` 的事件。两处都无线索返回 ""，由调用方按
+    「帧非空放行（历史存量）/ 帧也为空 404」裁决。
+    """
+    sid = str(subagentId or "").strip()
+    if not sid:
+        return ""
+    # ① 内存 run：getattr 容错，管理器异常不致命（租户线索还有事件账本兜底）
+    try:
+        from neurova.agent.swarm import get_swarm_manager
+
+        run = get_swarm_manager()._runs.get(sid)
+        if run is not None:
+            tenant = str(getattr(run, "tenant_id", "") or "")
+            if tenant:
+                return tenant
+    except Exception:  # noqa: BLE001 - 线索解析 fail-soft，缺线索交由调用方裁决
+        pass
+    # ② H-4 事件账本 lineage（F5：事件统一携带谱系）
+    try:
+        from neurova.agent.swarm_event_log import readRunEvents
+
+        for event in readRunEvents(sid):
+            if not isinstance(event, dict):
+                continue
+            lineage = event.get("lineage")
+            tenant = str((lineage or {}).get("tenant_id") or "")
+            if tenant:
+                return tenant
+    except Exception:  # noqa: BLE001 - 同上，fail-soft
+        pass
+    return ""
+
+
+@router.get("/runs/{subagent_id}/frames")
+async def getSubagentRunFrames(
+    subagent_id: str,
+    after_seq: int = 0,
+    limit: int = FRAMES_LIMIT_DEFAULT,
+    current_user: Dict[str, Any] = Depends(requireAdmin),
+):
+    """帧账本读面：按 seq 游标回放一次 run 的原生帧（设计文档 §3.2，拍板 D-C）。
+
+    - 数据源直连 ``frame_log.readFrames``（帧账本与 H-4 治理账本分工见设计
+      文档 §4，本端点只读帧流）。
+    - 同租户校验（§6.4 红线）：解析到的 run 租户非空且 != 请求者租户 → 404
+      （不泄露存在性，与 teams 跨租户口径一致）；run 无任何租户线索且无帧
+      记录 → 404（run 不存在或无帧记录）；帧非空但租户线索缺失（历史存量）
+      → 放行（admin 门已过）。
+    - 返回 ``{"subagent_id", "count", "frames"}``，frames 按 seq 升序。
+    """
+    sid = str(subagent_id or "").strip()
+    # 请求边界写一次身份通道（AGENTS.md §3），请求者租户判定转调单源
+    from neurova.core.identity_context import set_request_user_id
+
+    set_request_user_id(str(current_user.get("user_id") or ""))
+    afterSeq, effectiveLimit = _clampFrameWindow(after_seq, limit)
+    from neurova.agent.neuacp.frame_log import readFrames
+
+    frames = readFrames(sid, afterSeq=afterSeq, limit=effectiveLimit) if sid else []
+    from neurova.auth.user_group_model import currentUserTenantId
+
+    requesterTenant = currentUserTenantId()
+    runTenant = _resolveRunTenantId(sid)
+    if runTenant and requesterTenant and runTenant != requesterTenant:
+        # 404 而非 403：不向其他租户泄露 run 存在性（teams 同口径）
+        raise HTTPException(status_code=404, detail=f"Run '{sid}' not found")
+    if not runTenant and not frames:
+        raise HTTPException(status_code=404, detail=f"Run '{sid}' not found")
+    return {"subagent_id": sid, "count": len(frames), "frames": frames}
 
 
 # ---------- 握手级探测（按 kind 分派） ----------

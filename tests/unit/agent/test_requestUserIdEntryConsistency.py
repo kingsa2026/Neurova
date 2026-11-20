@@ -166,6 +166,14 @@ ENTRY_POINTS: Dict[str, Dict[str, object]] = {
         "carrierSource": "不产生 metadata 载体；身份由 `tool_layers/mcp_server.py` 从同一条"
                          "通道读回后交给执行链（工作流属主 / CUA 透传）",
     },
+    "neurova/api/endpoints/external_agents_api.py": {
+        "kind": "notATurnEntry",
+        "requestSource": "current_user['user_id']（admin 管理面每请求写一次唯一通道）——"
+                         "frames 读面的同租户校验经租户单源 `currentUserTenantId()` 取道于此，"
+                         "与 `chat.py`/`agent.py` 的入口写点同形",
+        "carrierSource": "不产生 metadata 载体；只读/管理面（目录、连通探测、池状态、帧回放），"
+                         "不派生回合，身份仅用于鉴权门与租户比对",
+    },
     "neurova/channels/channel_router.py": {
         "kind": "boundaryFeedsMetadata",
         "requestSource": "turnIdentity['user_id'] —— §6-163 裁定甲：通道装**发送者**，"
