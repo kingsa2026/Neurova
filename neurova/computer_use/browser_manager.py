@@ -23,6 +23,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+# 护栏（项 8）接缝：实现体在 guardrail/lane_mutex 自由函数（manager 传参），本文件只留委托。
+from neurova.computer_use import guardrail as guardrailSeam
+from neurova.computer_use import lane_mutex as laneSeam
+# 内核失败分诊单源已移 capability_state（T-07 能力面）；re-export 兼容既有导入面。
+from neurova.computer_use.capability_state import diagnoseKernelFailure
+
 logger = get_logger(__name__)
 
 # 可选依赖
@@ -397,28 +403,6 @@ class ScraplingSpiderTool:
             self._spiders[spider_id]["status"] = "running"
             return True
         return False
-
-
-def diagnoseKernelFailure(message: str) -> Optional[Dict[str, str]]:
-    """Playwright 启动失败的根因分诊：内核缺失时给出结构化补救指引。
-
-    判据与 `web_reach/browser_read.py` 的内核缺失检测同族（"executable
-    doesn't exist" / "playwright install"）；两处消费场景不同（抓取入口 vs
-    后端初始化），各自落地、注释互指，不强行抽公共层。
-    返回 None 表示非内核缺失类失败（调用方原样透传原因，不误诊）。
-    """
-    low = (message or "").lower()
-    if "executable doesn't exist" in low or "playwright install" in low:
-        return {
-            "missing": "browser-kernel",
-            "install_command": "playwright install chromium",
-            "remediation": (
-                "浏览器内核缺失：可运行 playwright install chromium 安装"
-                "（约 150MB，装到本机 Playwright 缓存目录，可随时删除）。"
-                "属环境变更——请先向用户说明并征得同意，再调用 browser_install 工具。"
-            ),
-        }
-    return None
 
 
 @dataclass(frozen=True)
@@ -2579,7 +2563,7 @@ class BrowserManager:
         backend = await self._get_backend()
 
         if action == "navigate":
-            return await backend.navigate(kwargs.get("url", ""))
+            return await self.navigate(kwargs.get("url", ""))
         elif action == "screenshot":
             return await backend.screenshot()
         elif action == "click":
@@ -2597,10 +2581,20 @@ class BrowserManager:
         else:
             return BrowserResult(success=False, error=f"Unknown action: {action}")
 
+    # ── 护栏（项 8）接缝：实现体在 guardrail/lane_mutex，这里只留委托 ──
+    def noteSeenLinks(self, links: Any) -> None:
+        guardrailSeam.noteSeenLinks(self, links)
+    def guardrailSeenLinks(self) -> frozenset:
+        return guardrailSeam.guardrailSeenLinks(self)
+    def currentUrl(self) -> str:
+        return guardrailSeam.currentUrl(self)
+    def _activeSessionKey(self) -> str:
+        return laneSeam.activeSessionKey(self)
+    async def _guardrailNavigateRefusal(self, url: str) -> Optional[BrowserResult]:
+        return await guardrailSeam.navigationRefusal(self, url)
     async def navigate(self, url: str, backend: Optional[str] = None, generation: Optional[int] = None) -> BrowserResult:
-        """导航到 URL（导航使活动 tab 快照事实失效 → generation 递增）"""
-        b = await self._get_backend(backend)
-        return await b.navigate(url, generation)
+        """导航到 URL（导航使活动 tab 快照事实失效 → generation 递增）；护栏复核+车道互斥实现见 lane_mutex.runNavigation"""
+        return await laneSeam.runNavigation(self, url, backend, generation)
 
     async def dom_snapshot(
         self,
@@ -2789,9 +2783,11 @@ class BrowserManager:
         return await b.extract_text()
 
     async def extract_links(self, backend: Optional[str] = None) -> BrowserResult:
-        """提取链接"""
+        """提取链接（成功时入册已见链接，供导航护栏免审判据）"""
         b = await self._get_backend(backend)
-        return await b.extract_links()
+        result = await b.extract_links()
+        guardrailSeam.noteSeenLinks(self, result.data if result.success else None)
+        return result
 
     async def execute_js(self, script: str, backend: Optional[str] = None) -> BrowserResult:
         """执行 JavaScript"""

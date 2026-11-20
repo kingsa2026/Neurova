@@ -348,3 +348,28 @@ def reading(name: str, *, refresh: bool = False, manager: typing.Any = None) -> 
 def probeAll(*, refresh: bool = False, manager: typing.Any = None) -> typing.Dict[str, typing.Dict[str, typing.Any]]:
     """整块读数，供 /status 与自检消费。"""
     return {name: reading(name, refresh=refresh, manager=manager).asDict() for name in CAPABILITY_NAMES}
+
+
+def diagnoseKernelFailure(message: str) -> typing.Optional[typing.Dict[str, str]]:
+    """Playwright 启动失败的根因分诊：内核缺失时给出结构化补救指引。
+
+    判据与 `web_reach/browser_read.py` 的内核缺失检测同族（"executable
+    doesn't exist" / "playwright install"）；两处消费场景不同（抓取入口 vs
+    后端初始化），各自落地、注释互指，不强行抽公共层。
+    返回 None 表示非内核缺失类失败（调用方原样透传原因，不误诊）。
+
+    原落于 browser_manager.py，为尺寸棘轮收口移入本模块（能力故障的分诊与
+    补救指引本就是 T-07 能力面的职责）；browser_manager 保留 re-export。
+    """
+    low = (message or "").lower()
+    if "executable doesn't exist" in low or "playwright install" in low:
+        return {
+            "missing": "browser-kernel",
+            "install_command": "playwright install chromium",
+            "remediation": (
+                "浏览器内核缺失：可运行 playwright install chromium 安装"
+                "（约 150MB，装到本机 Playwright 缓存目录，可随时删除）。"
+                "属环境变更——请先向用户说明并征得同意，再调用 browser_install 工具。"
+            ),
+        }
+    return None

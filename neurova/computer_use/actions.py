@@ -9,20 +9,53 @@
 - 函数全部为同步阻塞（pyautogui/UIA），调用方负责放线程池（asyncio.to_thread）
 - 返回统一的 LLM 面向结果 dict（success/error 结构）；动作确认档
   （action_result）与刷新截图标记由调用方按通道策略附加
+
+车道互斥（护栏三招之三，项 8）：本模块的前台输入注入族动作
+（点击/输入/滚动/按键/粘贴/拖拽）执行前必须取得 **desktop 车道**；
+浏览器动作持 **browser:<session> 车道**，两侧互斥（lane_mutex）。
+车道被拒时返回结构化拒绝 dict（guardrail.code = lane_busy / lane_unknown），
+不执行动作本体。
 """
 
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.computer_use.lane_mutex import (
+    DESKTOP_LANE,
+    LaneRefusal,
+    currentLaneScope,
+    get_lane_mutex,
+)
 
 logger = get_logger(__name__)
+
+
+def _holdDesktopLane(action: str):
+    """取得 desktop 车道（护栏关闭时直通；被拒抛 LaneRefusal）。"""
+    return get_lane_mutex().hold(
+        DESKTOP_LANE, scope=currentLaneScope(), owner=str(action)
+    )
+
+
+def _laneRefusalResult(refusal: LaneRefusal) -> Dict:
+    """车道拒绝 → 统一结构化结果（带原因码，供模型/前端判读）。"""
+    logger.warning("桌面动作被车道拒绝（%s）：%s", refusal.code, refusal.message)
+    return {
+        "success": False,
+        "error": refusal.message,
+        "guardrail": {"code": refusal.code, "lane": refusal.lane},
+    }
 
 
 def click_screenshot_point(manager: Any, x: Any, y: Any, button: str = "left") -> Dict:
     """截图像素坐标点击（R0-2 坐标链：内部换算 DPI/多屏后落 pyautogui）"""
     if x is None or y is None:
         return {"error": "缺少必要的坐标参数 x, y"}
-    success = manager.click_screenshot_point(x, y, button)
+    try:
+        with _holdDesktopLane("computer_click"):
+            success = manager.click_screenshot_point(x, y, button)
+    except LaneRefusal as refusal:
+        return _laneRefusalResult(refusal)
     if success:
         return {"success": True, "x": x, "y": y, "button": button}
     return {"error": "点击操作失败", "x": x, "y": y}
@@ -32,7 +65,11 @@ def type_text(manager: Any, text: Any, interval: float = 0.05) -> Dict:
     """键盘输入文本"""
     if not text:
         return {"error": "缺少输入文本"}
-    success = manager.type_text(text, interval)
+    try:
+        with _holdDesktopLane("computer_type"):
+            success = manager.type_text(text, interval)
+    except LaneRefusal as refusal:
+        return _laneRefusalResult(refusal)
     if success:
         return {"success": True, "text": text, "length": len(text)}
     return {"error": "输入操作失败"}
@@ -49,7 +86,11 @@ def scroll(
     from neurova.computer_use import scroll_semantics
 
     vertical, horizontal = scroll_semantics(scroll_x, scroll_y)
-    success = manager.scroll(x, y, vertical, horizontal)
+    try:
+        with _holdDesktopLane("computer_scroll"):
+            success = manager.scroll(x, y, vertical, horizontal)
+    except LaneRefusal as refusal:
+        return _laneRefusalResult(refusal)
     if success:
         return {
             "success": True,
@@ -62,7 +103,7 @@ def scroll(
 
 
 def screenshot_bytes(manager: Any, region=None) -> Optional[bytes]:
-    """截图原始 PNG 字节（None=无可用后端）"""
+    """截图原始 PNG 字节（None=无可用后端）。观察面不占前台车道。"""
     return manager.screenshot(region)
 
 
@@ -78,7 +119,11 @@ def press_key(manager: Any, key: Any, repeat: Any = 1, interval: Any = 0.05) -> 
         interval_f = max(0.0, float(interval or 0.0))
     except (TypeError, ValueError):
         interval_f = 0.05
-    success = manager.press_key(str(key), repeat_n, interval_f)
+    try:
+        with _holdDesktopLane("computer_key"):
+            success = manager.press_key(str(key), repeat_n, interval_f)
+    except LaneRefusal as refusal:
+        return _laneRefusalResult(refusal)
     if success:
         return {"success": True, "key": key, "repeat": repeat_n}
     return {"error": f"按键失败或键名不支持: {key!r}（示例 enter / ctrl+s / alt+f4）"}
@@ -88,7 +133,11 @@ def paste_text(manager: Any, text: Any) -> Dict:
     """剪贴板写入 + ctrl+v 粘贴（P2-7；Windows 剪贴板通道）"""
     if not str(text or ""):
         return {"error": "缺少粘贴文本"}
-    success = manager.paste_text(str(text))
+    try:
+        with _holdDesktopLane("computer_paste"):
+            success = manager.paste_text(str(text))
+    except LaneRefusal as refusal:
+        return _laneRefusalResult(refusal)
     if success:
         return {"success": True, "text": text, "length": len(str(text))}
     return {"error": "粘贴失败（需要 Windows 剪贴板与 pyautogui，目标控件需已聚焦）"}
@@ -110,7 +159,11 @@ def drag(
         duration_f = max(0.05, float(duration or 0.5))
     except (TypeError, ValueError):
         duration_f = 0.5
-    success = manager.drag(start_x, start_y, end_x, end_y, duration_f, button or "left")
+    try:
+        with _holdDesktopLane("computer_drag"):
+            success = manager.drag(start_x, start_y, end_x, end_y, duration_f, button or "left")
+    except LaneRefusal as refusal:
+        return _laneRefusalResult(refusal)
     if success:
         return {
             "success": True,
@@ -119,3 +172,4 @@ def drag(
             "button": button or "left",
         }
     return {"error": "拖拽操作失败"}
+
