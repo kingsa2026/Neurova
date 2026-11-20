@@ -342,6 +342,10 @@ secret_*.json
 # scripts/diagnostics/ 统一收纳的临时定位/检查脚本需纳入版本控制，
 # 豁免上方未锚定的任意层级规则（check*.py / *_check*.py / *_patch*.py / fix_*.py 等）。
 !scripts/diagnostics/*.py
+# 契约快照 verify-diff 门（实施计划项 5）是常驻 CI 门，不是临时检查脚本：
+# 名字以 check_ 开头命中上方 check*.py，这里显式豁免。
+!scripts/check_openapi_snapshot.py
+!scripts/check_frontend_api_paths.py
 
 # ==================== 运行时/调试临时文件 ====================
 # SSE 抓包等诊断输出（youtube/webreach 调试残留）

@@ -114,6 +114,6 @@ class TestAdmissionParsing:
              "scripts/ci/protected_tests.2.txt",
              "scripts/ci/protected_tests.3.txt"],
             cwd=str(PROJECT_ROOT), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=30).stdout
+            encoding="utf-8", errors="replace", timeout=20).stdout
         assert admission.parseAdmissions(diff) == [], (
             "清单没动却判出新增收录——取数口把上下文/删除行当成了新增")

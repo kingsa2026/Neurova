@@ -107,11 +107,15 @@ export function uploadConsoleFile(file: File, agentId?: string) {
 
 /**
  * Get WebSocket URL for real-time console.
+ *
+ * 后端契约（neurova/api/endpoints/console.py）：`@router.websocket("/ws/{client_id}")`，
+ * 挂载于 `/api/v1/console` —— client_id 是必填路径段，缺失时升级握手 404。
+ * 由契约快照门（scripts/check_frontend_api_paths.py）钉住，勿再漂移。
  */
-export function getConsoleWSUrl(agentId: string) {
+export function getConsoleWSUrl(agentId: string, clientId: string) {
   const base = import.meta.env.VITE_API_BASE_URL || '/api/v1'
   const wsBase = base.replace(/^http/, 'ws')
-  return `${wsBase}${BASE}/ws?agent_id=${agentId}`
+  return `${wsBase}${BASE}/ws/${clientId}?agent_id=${agentId}`
 }
 
 // ---------------------------------------------------------------------------
