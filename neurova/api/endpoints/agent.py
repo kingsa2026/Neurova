@@ -376,6 +376,11 @@ def agent_to_info(agent) -> Dict[str, Any]:
             "max_tokens": int(getattr(config.llm_config, "max_tokens", 0) or 0)
             if hasattr(config, "llm_config")
             else 0,
+            # 温度回显：编辑表单重开后恢复已保存参数（0.0 是合法值，不能用 or 兜底）
+            "temperature": float(getattr(config.llm_config, "temperature", 0.7))
+            if hasattr(config, "llm_config")
+            and getattr(config.llm_config, "temperature", None) is not None
+            else 0.7,
         }
 
     # 获取工具数量
