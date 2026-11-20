@@ -29,6 +29,8 @@ export struct StarBackground {
   @Prop starCount: number = 50;
   // 是否启用闪烁动画
   @Prop twinkle: boolean = true;
+  // 是否绘制星点（渐变底恒在；主壳透明玻璃栏后不透星空时传 false）
+  @Prop showStars: boolean = true;
   // 星点数据（aboutToAppear 中生成）
   @State stars: Star[] = [];
   // 闪烁相位（0/1 之间周期切换，驱动透明度变化）
@@ -99,14 +101,16 @@ export struct StarBackground {
           colors: [['#0a0e27', 0], ['#1a1a3e', 1]]
         });
 
-      // 星点层：ForEach 渲染所有星点，使用 position 绝对定位
-      ForEach(this.stars, (star: Star, idx: number) => {
-        Circle({ width: star.size, height: star.size })
-          .fill('#ffffff')
-          .opacity(this.getStarOpacity(star))
-          .animation({ duration: 2000, curve: Curve.EaseInOut })
-          .position({ x: `${star.x * 100}%`, y: `${star.y * 100}%` })
-      }, (star: Star, idx: number) => idx.toString());
+      // 星点层：ForEach 渲染所有星点，使用 position 绝对定位（showStars=false 时只留渐变底）
+      if (this.showStars) {
+        ForEach(this.stars, (star: Star, idx: number) => {
+          Circle({ width: star.size, height: star.size })
+            .fill('#ffffff')
+            .opacity(this.getStarOpacity(star))
+            .animation({ duration: 2000, curve: Curve.EaseInOut })
+            .position({ x: `${star.x * 100}%`, y: `${star.y * 100}%` })
+        }, (star: Star, idx: number) => idx.toString());
+      }
     }
     .width('100%')
     .height('100%')

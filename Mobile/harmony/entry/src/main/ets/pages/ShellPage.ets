@@ -100,9 +100,9 @@ export struct ShellPage {
     }
     .width('100%')
     .height('100%')
-    // 悬浮页签栏压在内容之上（barOverlap），底部留出净空——
-    // 真机系统页签栏更高（88 不够，我的页退出登录按钮被玻璃栏挡住点不到）
-    .padding({ bottom: 120 })
+    // 悬浮页签栏压在内容之上（barOverlap）：列表页内容直通栏底、透过透明玻璃可见（不裁切）；
+    // 我的页保留净空——退出登录按钮在页尾，避免被玻璃栏挡住点不到（真机实证 88/120 的教训）
+    .padding({ bottom: idx === 4 ? 120 : 0 })
   }
 
   /** 页签项：激活态紫晕光斑 + 图标 + 标签（玻璃底由系统页签栏材质提供，此处不涂背景） */
@@ -156,8 +156,9 @@ export struct ShellPage {
 
   build() {
     Stack() {
-      // 星空底层：五个 Tab 共用（页面自身不再涂不透明背景，星穹透出）
-      StarBackground({ starCount: 60, twinkle: true })
+      // 星空底层：五个 Tab 共用（页面自身不再涂不透明背景，渐变底透出；
+      // 星点关闭——透明玻璃页签栏后不透星空）
+      StarBackground({ starCount: 60, twinkle: true, showStars: false })
 
       if (this.isWide) {
         // ≥600vp：左侧导航栏 + 内容区
@@ -199,11 +200,11 @@ export struct ShellPage {
           .tabBar(this.tabItemUser)
         }
         .barOverlap(true)
-        // barOverlap 自带整条页签栏的半透明底+模糊，关掉只留悬浮胶囊；
-        // maskColor 再给胶囊不透明底：液态玻璃后面不透出星空背景，材质只留质感高光
+        // 透明底液态玻璃：胶囊后直接透出滚动到此的列表内容（不裁切会话列表）；
+        // 星点已在壳层关闭，玻璃后是列表与渐变底，不再有星空
         .barBackgroundColor(Color.Transparent)
         .barBackgroundBlurStyle(BlurStyle.NONE)
-        .barFloatingStyle({ systemMaterial: this.tabMaterial, maskColor: this.sm.getColor('surface') })
+        .barFloatingStyle({ systemMaterial: this.tabMaterial, maskColor: Color.Transparent })
         .onChange((idx: number) => {
           this.currentTabIndex = idx;
           if (this.activeTab !== idx) {
