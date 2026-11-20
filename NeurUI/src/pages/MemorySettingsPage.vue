@@ -10,21 +10,6 @@
         <GlassButton variant="ghost" size="sm" :loading="loading" @click="fetchSchema">
           {{ t('common.refresh') }}
         </GlassButton>
-        <a-dropdown>
-          <GlassButton variant="secondary" size="sm">
-            {{ t('memorySettings.reset') }} ▾
-          </GlassButton>
-          <template #overlay>
-            <a-menu>
-              <a-menu-item @click="confirmResetAll">
-                {{ t('memorySettings.resetAll') }}
-              </a-menu-item>
-              <a-menu-item v-if="selectedKeys.length" @click="confirmResetSelected">
-                {{ t('memorySettings.resetSelected') }} ({{ selectedKeys.length }})
-              </a-menu-item>
-            </a-menu>
-          </template>
-        </a-dropdown>
         <GlassButton variant="secondary" size="sm" @click="handleExport">
           {{ t('memorySettings.export') }}
         </GlassButton>
@@ -177,15 +162,30 @@
       <a-empty v-if="!loading && schema.length === 0" :description="t('memorySettings.noSchema')" />
     </a-spin>
 
-    <!-- Save bar -->
-    <div v-if="isAdmin && hasChanges" class="save-bar">
-      <div class="save-info">
+    <!-- Save bar：管理员常驻操作条，重置紧挨保存按钮（重置选中项依赖行首勾选框） -->
+    <div v-if="isAdmin" class="save-bar">
+      <div v-if="hasChanges" class="save-info">
         {{ t('memorySettings.changedHint', { n: changedKeys.length }) }}
       </div>
-      <GlassButton variant="ghost" size="sm" @click="discardChanges">
+      <GlassButton v-if="hasChanges" variant="ghost" size="sm" @click="discardChanges">
         {{ t('common.cancel') }}
       </GlassButton>
-      <GlassButton variant="primary" size="sm" :loading="saving" @click="handleSave">
+      <a-dropdown>
+        <GlassButton variant="secondary" size="sm">
+          {{ t('memorySettings.reset') }} ▾
+        </GlassButton>
+        <template #overlay>
+          <a-menu>
+            <a-menu-item @click="confirmResetAll">
+              {{ t('memorySettings.resetAll') }}
+            </a-menu-item>
+            <a-menu-item v-if="selectedKeys.length" @click="confirmResetSelected">
+              {{ t('memorySettings.resetSelected') }} ({{ selectedKeys.length }})
+            </a-menu-item>
+          </a-menu>
+        </template>
+      </a-dropdown>
+      <GlassButton variant="primary" size="sm" :loading="saving" :disabled="!hasChanges" @click="handleSave">
         {{ t('memorySettings.save') }}
       </GlassButton>
     </div>

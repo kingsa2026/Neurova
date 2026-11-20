@@ -74,9 +74,9 @@ const messages = {
 const globalStubs = {
   GlassCard: { props: ['title'], template: '<div><h3>{{ title }}</h3><slot/><slot name="footer"/></div>' },
   GlassButton: {
-    props: ['variant', 'size', 'loading'],
+    props: ['variant', 'size', 'loading', 'disabled'],
     emits: ['click'],
-    template: '<button @click="$emit(\'click\')"><slot/></button>',
+    template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot/></button>',
   },
   'a-spin': { props: ['spinning'], template: '<div class="ant-spin"><slot/></div>' },
   'a-dropdown': { template: '<div class="ant-dropdown"><slot/><slot name="overlay"/></div>' },
@@ -176,5 +176,39 @@ describe('MemorySettingsPage 多语言适配', () => {
     expect(wrapper.text()).toContain('enable_llm_compression')
     // 原始键保留在 title tooltip
     expect(wrapper.html()).toContain('title="temperature.decay_rate"')
+  })
+})
+
+describe('MemorySettingsPage 重置入口迁至保存操作条', () => {
+  it('重置下拉在保存操作条内渲染（管理员恒可见，不随变更态消失）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const saveBar = wrapper.find('.save-bar')
+    expect(saveBar.exists()).toBe(true)
+    expect(saveBar.text()).toContain('重置全部'), '重置入口应在保存操作条内'
+  })
+
+  it('保存按钮在无变更时禁用，有变更时恢复', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const saveBtn = () => wrapper.findAll('button').filter(b => b.text() === '保存更改')[0]
+    expect(saveBtn()).toBeTruthy()
+    expect(saveBtn().attributes('disabled')).toBeDefined(), '无变更时保存应禁用'
+
+    const input = wrapper.find('input.ant-input-number')
+    await input.setValue('0.5')
+    expect(saveBtn().attributes('disabled')).toBeUndefined(), '有变更后保存应可用'
+  })
+
+  it('取消按钮仅在有变更时出现', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('取消'), '无变更不应出现取消按钮'
+    const input = wrapper.find('input.ant-input-number')
+    await input.setValue('0.5')
+    expect(wrapper.text()).toContain('取消')
   })
 })
