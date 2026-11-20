@@ -34,6 +34,7 @@ from neurova.tunnel import protocol
 import secrets
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlsplit
 
@@ -44,6 +45,11 @@ from pydantic import BaseModel, Field
 logger = get_logger(__name__)
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
+
+# 移动端回合思考档位合法域：light/standard/deep——消费点单源在
+# chat_pipeline（_THINKING_DIRECTIVES 键 + standard=默认不注入），此处只做
+# 入口校验，不另立第二套语义
+_MOBILE_THINKING_EFFORTS = frozenset({"light", "standard", "deep"})
 
 
 # ---------------------------------------------------------------------------
@@ -627,6 +633,158 @@ class MobileConnectionManager:
 # ---------------------------------------------------------------------------
 
 
+async def _sendToolResultDerivedEvents(ws, payload: dict, session_id: str,
+                                       agent_id: str, user_id: str) -> None:
+    """console 对话面从 tool_result 派生的三类增强事件 → 移动 WS（对齐 PC）。
+
+    plan_update / approval_required / artifact 三个提取函数单一事实源在
+    console.py 与 artifacts_api.py（移动端不复制解析逻辑）；派生失败只丢
+    增强能力、不影响 tool_result 本体（与 console.py:477 的 fail-soft 同口径）。
+    """
+    name = str(payload.get("name") or "")
+    content = payload.get("content")
+    contentText = content if isinstance(content, str) else (
+        json.dumps(content, ensure_ascii=False, default=str) if content is not None else "")
+    if not contentText:
+        return
+    try:
+        from neurova.api.endpoints.console import _extract_approval_payload, _extract_plan_update
+
+        planEvent = _extract_plan_update(content if isinstance(content, (dict, str)) else contentText)
+        if planEvent:
+            await ws.send_json({"type": "chat:plan_update", "session_id": session_id,
+                                "data": {"plan": planEvent.get("plan", []),
+                                         "explanation": planEvent.get("explanation", "")}})
+    except Exception:  # noqa: BLE001 — 派生增强失败不影响本体
+        pass
+    try:
+        from neurova.api.endpoints.console import _extract_approval_payload
+
+        approvalPayload = _extract_approval_payload(contentText, {"tool_name": name})
+        if approvalPayload:
+            await ws.send_json({"type": "chat:approval_required", "session_id": session_id,
+                                "data": approvalPayload})
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from neurova.api.endpoints.artifacts_api import extract_tool_artifacts
+
+        for artifactEvent in extract_tool_artifacts(name, contentText,
+                                                    agent_id=agent_id, user_id=user_id):
+            await ws.send_json({"type": "chat:artifact", "session_id": session_id,
+                                "data": {key: artifactEvent.get(key)
+                                         for key in ("artifact_id", "kind", "name", "size", "path")}})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_ARTIFACT_WS_MAX_BYTES = 2 * 1024 * 1024
+
+
+async def _handle_model_list(ws, user_id: str) -> None:
+    """模型候选列表（PC 切换模型数据源同源）：按 WS 用户 scope 取 provider 管理器。
+
+    /v1/models 是 JWT 面（get_optional_user），移动 WS 凭证不可直调——经本代理
+    消息类型在服务端直取 provider_manager，身份与 WS 会话同源。
+    """
+    modelsOut: List[dict] = []
+    try:
+        from neurova.llm.provider_manager import get_provider_manager_for_user
+
+        manager = get_provider_manager_for_user({"user_id": user_id})
+        allModels = manager.get_all_models() if hasattr(manager, "get_all_models") else []
+        for model in allModels:
+            modelsOut.append({
+                "model_id": str(getattr(model, "id", "unknown")),
+                "name": str(getattr(model, "name", "Unknown")),
+                "provider": str(getattr(model, "owned_by", "") or ""),
+                "context_window": getattr(model, "context_window", None),
+                "connectable": bool((getattr(model, "metadata", None) or {}).get("connectable", False)),
+                "is_active": bool(getattr(model, "is_active", False)),
+            })
+    except Exception as e:  # noqa: BLE001 — 列表失败诚实回空并记日志，不伪造候选
+        logger.warning("mobile model:list 失败 user=%s: %s", user_id, e)
+    if not modelsOut:
+        # 与 console list_models 的默认项同语义：无候选时给 auto 兜底
+        modelsOut = [{"model_id": "auto", "name": "Auto (自动选择)", "provider": "system",
+                      "context_window": None, "connectable": True, "is_active": True}]
+    try:
+        await ws.send_json({"type": "model:list_result", "models": modelsOut})
+    except Exception as e:  # noqa: BLE001 — 回帧失败多为连接已断，仍须留痕
+        logger.warning("mobile model:list 回帧失败（连接可能已断）: %s", e)
+
+
+async def _handle_context_composition(ws, message: dict) -> None:
+    """上下文面板数据（PC 悬停面板同源）：最近一轮实测 + 会话历史估算兜底。
+
+    该 agent/会话尚无实测快照时 data=None + reason=no_data——前端按「暂无数据」
+    处理，不伪造读数（与 HTTP 面 404 同口径）。
+    """
+    agentId = str(message.get("agent_id") or "default")
+    sessionId = str(message.get("session_id") or "")
+    data = None
+    reason = ""
+    try:
+        from neurova.context.composition import estimate_composition_from_history, get_last_composition
+
+        comp = get_last_composition(agentId, sessionId or None)
+        if comp is None and sessionId:
+            comp = estimate_composition_from_history(agentId, sessionId)
+        if comp is None:
+            reason = "no_data"
+        else:
+            data = comp
+    except Exception as e:  # noqa: BLE001
+        logger.warning("mobile context:composition 失败 agent=%s: %s", agentId, e)
+        reason = "query_failed"
+    try:
+        await ws.send_json({"type": "context:composition_result",
+                            "data": data, "reason": reason})
+    except Exception as e:  # noqa: BLE001 — 回帧失败多为连接已断，仍须留痕
+        logger.warning("mobile context:composition 回帧失败（连接可能已断）: %s", e)
+
+
+async def _handle_artifact_content(ws, message: dict, user_id: str) -> None:
+    """产出物内容取回：属主/共享校验与白名单路径解析与 HTTP 面同一事实源。
+
+    _get_owned_artifact/_resolve_if_allowed 是 /v1/artifacts/{id}/content 的
+    同一批函数（含 IDOR 404 口径），移动端不复刻第二套鉴权语义。
+    """
+    from neurova.api.endpoints import artifacts_api as artifactsMod
+
+    artifactId = str(message.get("artifact_id") or "")
+    try:
+        info = artifactsMod._get_owned_artifact(artifactId, {"user_id": user_id})
+        resolved = artifactsMod._resolve_if_allowed(Path(str(info.get("path", ""))))
+        if not resolved.is_file():
+            raise ValueError("产物文件不可用")
+        raw = resolved.read_bytes()
+        if len(raw) > _ARTIFACT_WS_MAX_BYTES:
+            await ws.send_json({"type": "error", "code": "artifact_too_large",
+                                "message": f"产物超过移动端取回上限（{_ARTIFACT_WS_MAX_BYTES} 字节），请在 PC 端查看"})
+            return
+        mime = str(info.get("mime_type") or "")
+        kind = str(info.get("kind") or "")
+        isText = mime.startswith("text/") or mime in ("application/json", "application/javascript") \
+            or kind in ("markdown", "text", "code", "html")
+        contentOut = raw.decode("utf-8", errors="replace") if isText \
+            else base64.b64encode(raw).decode("ascii")
+        await ws.send_json({"type": "artifact:content_result", "artifact_id": artifactId,
+                            "name": info.get("name"), "kind": kind, "mime_type": mime,
+                            "encoding": "utf8" if isText else "base64",
+                            "content": contentOut})
+    except HTTPException:
+        await ws.send_json({"type": "error", "code": "artifact_not_found",
+                            "message": "产物不存在或无权访问"})
+    except ValueError as e:
+        await ws.send_json({"type": "error", "code": "artifact_not_found",
+                            "message": f"产物不可取回：{e}"})
+    except Exception as e:  # noqa: BLE001 — 读盘/编码失败须留痕后如实回帧
+        logger.error("mobile artifact:get 读内容失败 artifact=%s: %s", artifactId, e)
+        await ws.send_json({"type": "error", "code": "artifact_read_failed",
+                            "message": str(e)})
+
+
 async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
     """处理 chat:send -- 流式聊天核心（运行态与 PC /v1/chat/stream 同源）。
 
@@ -644,6 +802,39 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
     if not content:
         await ws.send_json({"type": "error", "code": "empty_content", "message": "内容不能为空"})
         return
+
+    # 移动端对齐 PC 对话页（console.py ChatRequest 同族）：回合控制四字段。
+    # 非法值在回合装配前诚实拒绝（对齐 console 面 Pydantic 422 的形态），
+    # 不静默丢弃——静默丢弃就是「UI 有控件但不生效」的那个坑。
+    turnModel = str(data.get("model") or "").strip()
+    thinkingEffort = str(data.get("thinking_effort") or "").strip().lower()
+    permissionMode = str(data.get("permission_mode") or "").strip().lower()
+    taskProfile = str(data.get("task_profile") or "").strip().lower()
+    if thinkingEffort and thinkingEffort not in _MOBILE_THINKING_EFFORTS:
+        await ws.send_json({
+            "type": "error", "code": "invalid_thinking_effort",
+            "message": f"thinking_effort 取值非法：{thinkingEffort}（合法域 light/standard/deep）",
+        })
+        return
+    if permissionMode:
+        from neurova.security.permission_mode import VALID_MODE_VALUES
+
+        if permissionMode not in VALID_MODE_VALUES:
+            await ws.send_json({
+                "type": "error", "code": "invalid_permission_mode",
+                "message": f"permission_mode 取值非法：{permissionMode}"
+                           f"（合法域 {sorted(VALID_MODE_VALUES)}）",
+            })
+            return
+    if taskProfile:
+        from neurova.agent.turn_profile import VALID_PROFILES
+
+        if taskProfile not in VALID_PROFILES:
+            await ws.send_json({
+                "type": "error", "code": "invalid_task_profile",
+                "message": f"task_profile 取值非法：{taskProfile}（合法域 {list(VALID_PROFILES)}）",
+            })
+            return
 
     agent_id = data.get("agent_id", "default")
     session_id = (data.get("session_id") or "").strip()
@@ -757,11 +948,24 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
                         "event_emitter": _emit, "emit_status_events": True,
                         # 移动端对齐 PC：工具调用/结果事件透传到会话页卡片
                         "emit_tool_events": True}
+        # 回合控制字段并入 metadata——管线消费点全部现成：
+        # permission_mode → chat_pipeline.setRequestPermissionMode（946）
+        # task_profile → _resolve_task_profile（显式值优先级最高，2650）
+        # thinking_effort → _effort_of/_apply_thinking_effort（2697）
+        if thinkingEffort:
+            turnMetadata["thinking_effort"] = thinkingEffort
+        if permissionMode:
+            turnMetadata["permission_mode"] = permissionMode
+        if taskProfile:
+            turnMetadata["task_profile"] = taskProfile
 
         async def _runTurn():
             try:
                 return await agent.chat(user_input=content, stream=True,
-                                        session_id=session_id, metadata=turnMetadata)
+                                        session_id=session_id, metadata=turnMetadata,
+                                        # 对齐 console 面 model 热切换（console.py:1134
+                                        # agent.chat(model=...) 同一通道）
+                                        model=turnModel or None)
             finally:
                 # 收尾哨兵：泵循环据此退出（对齐 chat.py 的 _EMIT_DONE 姿势）
                 stream_queue.put_nowait(None)
@@ -799,6 +1003,11 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
                         # 移动端对齐 PC：工具调用/结果透传（emit_tool_events 门控在管线侧）
                         await ws.send_json({"type": f"chat:{kind}", "session_id": session_id,
                                             "data": payloadData if isinstance(payloadData, dict) else {"text": str(payloadData or "")}})
+                        # console 对话面同款增强派生：plan_update / approval_required /
+                        # artifact（产出物列表数据源）
+                        if kind == "tool_result" and isinstance(payloadData, dict):
+                            await _sendToolResultDerivedEvents(ws, payloadData, session_id,
+                                                               agent_id, user_id)
                     elif kind == "retry":
                         retryData = payloadData if isinstance(payloadData, dict) else {}
                         if retryData:
@@ -827,6 +1036,21 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
             if not seenContent and replyText:
                 await ws.send_json({"type": "chat:chunk", "content": replyText,
                                     "session_id": session_id, "index": index})
+            # 用量事件（PC 对话页环图数据源同源：usage_accounting.last_call）
+            try:
+                from neurova.core.usage_accounting import get_usage_accounting
+
+                lastUsage = get_usage_accounting().last_call()
+                if lastUsage:
+                    await ws.send_json({"type": "chat:usage", "session_id": session_id,
+                                        "data": {"model": str(lastUsage.get("model", "")),
+                                                 "provider": str(lastUsage.get("provider", "")),
+                                                 "prompt_tokens": int(lastUsage.get("prompt_tokens", 0)),
+                                                 "completion_tokens": int(lastUsage.get("completion_tokens", 0)),
+                                                 "total_tokens": int(lastUsage.get("total_tokens", 0)),
+                                                 "estimated": bool(lastUsage.get("estimated", False))}})
+            except Exception:  # noqa: BLE001 — 用量事件失败不影响本轮（console 同口径）
+                pass
             await ws.send_json({"type": "chat:done", "session_id": session_id,
                                 "message_id": f"msg-{uuid.uuid4().hex[:8]}"})
 
@@ -1661,6 +1885,18 @@ async def mobile_websocket(websocket: WebSocket):
                 ):
                     current_chat_task.cancel()
                 await _handle_chat_cancel(websocket, message)
+                continue
+
+            # 移动端对齐 PC 对话页：模型列表/上下文面板/产出物内容经 WS 代理
+            # （/v1/models、/v1/context/*、/v1/artifacts/* 是 JWT 面，WS 凭证不可直调）
+            if msg_type == "model:list":
+                await _handle_model_list(websocket, user_id)
+                continue
+            if msg_type == "context:composition":
+                await _handle_context_composition(websocket, message)
+                continue
+            if msg_type == "artifact:get":
+                await _handle_artifact_content(websocket, message, user_id)
                 continue
 
             # 分发消息到处理函数

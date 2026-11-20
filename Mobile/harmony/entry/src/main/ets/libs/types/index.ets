@@ -1398,3 +1398,55 @@ export interface AigcUsageSummary {
   totals: AigcUsageRow[];
   days: number;
 }
+
+/** chat:artifact 消息（产出物事件——console 对话面从 tool_result 派生，对齐 PC 产出物列表） */
+export interface WSChatArtifact {
+  type: 'chat:artifact';
+  session_id: string;
+  data: Record<string, Object>;
+}
+
+/** chat:plan_update 消息（update_plan 成功结果派生，对齐 PC 计划时间轴） */
+export interface WSChatPlanUpdate {
+  type: 'chat:plan_update';
+  session_id: string;
+  data: Record<string, Object>;
+}
+
+/** chat:usage 消息（回合用量——上下文环/累计读数数据源） */
+export interface WSChatUsage {
+  type: 'chat:usage';
+  session_id: string;
+  data: Record<string, Object>;
+}
+
+/** chat:approval_required 消息（治理审批请求；移动端只读展示，裁决在 PC 端治理面） */
+export interface WSChatApprovalRequired {
+  type: 'chat:approval_required';
+  session_id: string;
+  data: Record<string, Object>;
+}
+
+/** model:list_result 消息（WS 代理模型候选——PC 切换模型数据源同源） */
+export interface WSModelListResult {
+  type: 'model:list_result';
+  models: Array<Record<string, Object>>;
+}
+
+/** context:composition_result 消息（上下文面板数据；data=null 表示尚无实测快照） */
+export interface WSContextCompositionResult {
+  type: 'context:composition_result';
+  data: Record<string, Object> | null;
+  reason: string;
+}
+
+/** artifact:content_result 消息（产出物内容取回：utf8 文本或 base64） */
+export interface WSArtifactContentResult {
+  type: 'artifact:content_result';
+  artifact_id: string;
+  name: string;
+  kind: string;
+  mime_type: string;
+  encoding: string;
+  content: string;
+}

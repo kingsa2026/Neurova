@@ -389,6 +389,23 @@ export class WebSocketAdapter {
         return 'chat:tool_call';
       case 'chat:tool_result':
         return 'chat:tool_result';
+      case 'chat:artifact':
+        // 产出物事件：会话页产出物卡数据源（console 从 tool_result 派生，对齐 PC）
+        return 'chat:artifact';
+      case 'chat:plan_update':
+        // 计划时间轴事件（update_plan 结果派生）
+        return 'chat:plan_update';
+      case 'chat:usage':
+        // 回合用量事件（上下文环读数）
+        return 'chat:usage';
+      case 'chat:approval_required':
+        // 治理审批请求（移动端只读展示）
+        return 'chat:approval_required';
+      case 'model:list_result':
+      case 'context:composition_result':
+      case 'artifact:content_result':
+        // WS 代理查询回帧（模型候选/上下文组成/产物内容）
+        return type;
       case 'chat:queued':
         return 'chat:queued';
       case 'chat:retry':

@@ -37,7 +37,7 @@ import { ConfigManager } from '../libs/config/ConfigManager';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { WSChatChunk, WSChatDone, WSChatReasoning, WSChatToolCall, WSChatToolResult, Agent } from '../libs/types';
+import { WSChatChunk, WSChatDone, WSChatReasoning, WSChatToolCall, WSChatToolResult, WSChatArtifact, WSChatPlanUpdate, WSChatUsage, WSChatApprovalRequired, WSModelListResult, WSContextCompositionResult, WSArtifactContentResult, Agent } from '../libs/types';
 import { Router } from '../routing/Router';
 import { ChunkBatcher } from '../libs/perf/ChunkBatcher';
 import { SimpleDataSource } from '../libs/perf/SimpleDataSource';
@@ -56,6 +56,9 @@ interface ChatMessageView {
   isStreaming: boolean;     // 是否正在流式生成
   reasoning: string;        // 思考流累积（chat:reasoning）
   toolCalls: ToolCallView[]; // 工具调用/结果卡（chat:tool_call / chat:tool_result）
+  artifacts: ArtifactView[]; // 产出物卡（chat:artifact，console 从 tool_result 派生）
+  plan: PlanStepView[];     // 计划时间轴（chat:plan_update）
+  approval: string;         // 最近一条治理审批请求摘要（chat:approval_required；裁决在 PC 端）
 }
 
 /** 工具调用卡片视图模型 */
@@ -63,6 +66,20 @@ interface ToolCallView {
   name: string;
   args: string;
   result: string;
+}
+
+/** 产出物卡片视图模型（chat:artifact.data 投影） */
+interface ArtifactView {
+  artifactId: string;
+  name: string;
+  kind: string;
+  size: number;
+}
+
+/** 计划步骤视图模型（chat:plan_update.data.plan 投影） */
+interface PlanStepView {
+  step: string;
+  status: string;
 }
 
 /** 日志标签 */
@@ -110,6 +127,35 @@ export struct ChatPage {
   @State renamingSession: ChatSession | null = null;
   @State renameText: string = '';
 
+  // ── 对齐 PC 对话页五件套（模型/思考深度/权限模式/执行档位/上下文面板）──
+  // 回合控制四字段：随 chat:send 下发（后端并入 turnMetadata，管线现成消费点）
+  @State selectedModel: string = '';
+  @State thinkingEffort: string = 'standard';
+  @State permissionMode: string = '';
+  @State taskProfile: string = '';
+  // 模型候选（model:list WS 代理；首次展开菜单时懒取）
+  @State modelOptions: Array<Record<string, Object>> = [];
+  @State modelOptionsLoaded: boolean = false;
+  // 上下文面板（context:composition WS 代理 + chat:usage 累计）
+  @State contextOpen: boolean = false;
+  @State composition: Record<string, Object> | null = null;
+  @State compositionReason: string = '';
+  @State usageTotal: number = 0;
+  // 产出物预览弹层（artifact:get WS 代理取内容）
+  @State previewArtifact: ArtifactView | null = null;
+  @State previewContent: string = '';
+  @State previewEncoding: string = '';
+  @State previewMime: string = '';
+  @State previewLoading: boolean = false;
+  // 胶囊菜单弹层：'' | model | effort | mode | profile
+  @State pillMenuOpen: string = '';
+  // 上下文面板派生读数（@Builder 内不做 Record 解析，直读 State）
+  @State compTotal: number = 0;
+  @State compWindow: number = 0;
+  @State compMsgTokens: number = 0;
+  @State compToolTokens: number = 0;
+  @State compCacheRate: number = -1; // -1 = 无命中率数据
+
   // 统一库单例
   private api = ApiFacade.getInstance();
   private authStore = new AuthStore();
@@ -132,6 +178,13 @@ export struct ChatPage {
   private reasoningHandler: EventHandler = () => {};
   private toolCallHandler: EventHandler = () => {};
   private toolResultHandler: EventHandler = () => {};
+  private artifactHandler: EventHandler = () => {};
+  private planHandler: EventHandler = () => {};
+  private usageHandler: EventHandler = () => {};
+  private approvalHandler: EventHandler = () => {};
+  private modelListHandler: EventHandler = () => {};
+  private compositionHandler: EventHandler = () => {};
+  private artifactContentHandler: EventHandler = () => {};
   // 语音输入（CoreSpeechKit 端侧识别 + AudioCapturer 采集喂入）
   @State voiceListening: boolean = false;
   private voiceEngine: speechRecognizer.SpeechRecognitionEngine | null = null;
@@ -175,6 +228,13 @@ export struct ChatPage {
     this.bus.off('chat:reasoning', this.reasoningHandler);
     this.bus.off('chat:tool_call', this.toolCallHandler);
     this.bus.off('chat:tool_result', this.toolResultHandler);
+    this.bus.off('chat:artifact', this.artifactHandler);
+    this.bus.off('chat:plan_update', this.planHandler);
+    this.bus.off('chat:usage', this.usageHandler);
+    this.bus.off('chat:approval_required', this.approvalHandler);
+    this.bus.off('model:list_result', this.modelListHandler);
+    this.bus.off('context:composition_result', this.compositionHandler);
+    this.bus.off('artifact:content_result', this.artifactContentHandler);
     // 语音资源收尾（识别引擎/采集器可能仍在运行）
     this.stopVoice();
     // 断开 WS（adapter 内部会清理心跳与重连定时器）
@@ -224,6 +284,9 @@ export struct ChatPage {
             isStreaming: false,
             reasoning: '',
             toolCalls: [],
+            artifacts: [],
+            plan: [],
+            approval: '',
           });
         }
         this.messages = views;
@@ -383,6 +446,119 @@ export struct ChatPage {
       }
     };
     this.bus.on('chat:tool_result', this.toolResultHandler);
+
+    // ── 对齐 PC 对话页：产出物/计划/用量/审批/模型列表/上下文/产物内容 ──
+    this.artifactHandler = (data: Object) => {
+      const rec = (data as WSChatArtifact).data;
+      const artifactId = typeof rec['artifact_id'] === 'string' ? rec['artifact_id'] as string : '';
+      if (artifactId === '') {
+        return;
+      }
+      const view: ArtifactView = {
+        artifactId: artifactId,
+        name: typeof rec['name'] === 'string' ? rec['name'] as string : '',
+        kind: typeof rec['kind'] === 'string' ? rec['kind'] as string : '',
+        size: typeof rec['size'] === 'number' ? rec['size'] as number : 0,
+      };
+      const last = this.messages[this.messages.length - 1];
+      if (last && last.role === 'assistant') {
+        last.artifacts = [...(last.artifacts ?? []), view];
+        this.messages = [...this.messages];
+        this.messagesDs.setData(this.messages);
+      }
+    };
+    this.bus.on('chat:artifact', this.artifactHandler);
+
+    this.planHandler = (data: Object) => {
+      const rec = (data as WSChatPlanUpdate).data;
+      const rawPlan = (rec['plan'] as Record<string, Object>[] | null) ?? [];
+      const steps: PlanStepView[] = [];
+      for (const item of rawPlan) {
+        const step = item as Record<string, Object>;
+        steps.push({
+          step: typeof step['step'] === 'string' ? step['step'] as string : '',
+          status: typeof step['status'] === 'string' ? step['status'] as string : '',
+        });
+      }
+      const last = this.messages[this.messages.length - 1];
+      if (last && last.role === 'assistant' && steps.length > 0) {
+        last.plan = steps;
+        this.messages = [...this.messages];
+        this.messagesDs.setData(this.messages);
+      }
+    };
+    this.bus.on('chat:plan_update', this.planHandler);
+
+    this.usageHandler = (data: Object) => {
+      const rec = (data as WSChatUsage).data;
+      const total = typeof rec['total_tokens'] === 'number' ? rec['total_tokens'] as number : 0;
+      this.usageTotal = this.usageTotal + total;
+    };
+    this.bus.on('chat:usage', this.usageHandler);
+
+    this.approvalHandler = (data: Object) => {
+      const rec = (data as WSChatApprovalRequired).data;
+      const toolName = typeof rec['tool_name'] === 'string' ? rec['tool_name'] as string : '';
+      const reason = typeof rec['reason'] === 'string' ? rec['reason'] as string : '';
+      const last = this.messages[this.messages.length - 1];
+      if (last && last.role === 'assistant') {
+        last.approval = `工具「${toolName}」等待审批${reason === '' ? '' : '：' + reason}（请在 PC 端裁决）`;
+        this.messages = [...this.messages];
+        this.messagesDs.setData(this.messages);
+      }
+    };
+    this.bus.on('chat:approval_required', this.approvalHandler);
+
+    this.modelListHandler = (data: Object) => {
+      const res = data as WSModelListResult;
+      this.modelOptions = res.models ?? [];
+      this.modelOptionsLoaded = true;
+    };
+    this.bus.on('model:list_result', this.modelListHandler);
+
+    this.compositionHandler = (data: Object) => {
+      const res = data as WSContextCompositionResult;
+      this.composition = res.data ?? null;
+      this.compositionReason = res.reason ?? '';
+      // 派生展示读数（@Builder 直读 State，不在 builder 里解析 Record）
+      this.compTotal = 0;
+      this.compWindow = 0;
+      this.compMsgTokens = 0;
+      this.compToolTokens = 0;
+      this.compCacheRate = -1;
+      if (this.composition !== null) {
+        this.compTotal = typeof this.composition['total_tokens'] === 'number'
+          ? this.composition['total_tokens'] as number : 0;
+        this.compWindow = typeof this.composition['context_window'] === 'number'
+          ? this.composition['context_window'] as number : 0;
+        const messages = this.composition['messages'] as Record<string, Object>;
+        if (messages) {
+          this.compMsgTokens = typeof messages['total_tokens'] === 'number'
+            ? messages['total_tokens'] as number : 0;
+        }
+        const tools = this.composition['tools'] as Record<string, Object>;
+        if (tools) {
+          for (const key of ['system', 'mcp', 'skill']) {
+            const bucket = tools[key] as Record<string, Object>;
+            if (bucket && typeof bucket['tokens'] === 'number') {
+              this.compToolTokens = this.compToolTokens + (bucket['tokens'] as number);
+            }
+          }
+        }
+        const rate = this.composition['cache_hit_rate'];
+        this.compCacheRate = typeof rate === 'number' ? rate as number : -1;
+      }
+    };
+    this.bus.on('context:composition_result', this.compositionHandler);
+
+    this.artifactContentHandler = (data: Object) => {
+      const res = data as WSArtifactContentResult;
+      this.previewContent = res.content ?? '';
+      this.previewEncoding = res.encoding ?? '';
+      this.previewMime = res.mime_type ?? '';
+      this.previewLoading = false;
+    };
+    this.bus.on('artifact:content_result', this.artifactContentHandler);
   }
 
   /**
@@ -520,6 +696,9 @@ export struct ChatPage {
       isStreaming: false,
       reasoning: '',
       toolCalls: [],
+      artifacts: [],
+      plan: [],
+      approval: '',
     };
     // assistant 占位消息（等待流式填充）
     const assistantMsg: ChatMessageView = {
@@ -530,6 +709,9 @@ export struct ChatPage {
       isStreaming: true,
       reasoning: '',
       toolCalls: [],
+      artifacts: [],
+      plan: [],
+      approval: '',
     };
     this.messages.push(userMsg, assistantMsg);
     this.messages = [...this.messages];
@@ -539,13 +721,17 @@ export struct ChatPage {
     this.isGenerating = true;
     this.scrollToBottom();
 
-    // 通过 WS 下发 chat:send
+    // 通过 WS 下发 chat:send（对齐 PC：回合控制四字段随请求下发）
     try {
       await this.ws.send(JSON.stringify({
         type: 'chat:send',
         content: text,
         session_id: this.sessionId,
         agent_id: this.currentAgentId,
+        model: this.selectedModel !== '' ? this.selectedModel : undefined,
+        thinking_effort: this.thinkingEffort !== '' ? this.thinkingEffort : undefined,
+        permission_mode: this.permissionMode !== '' ? this.permissionMode : undefined,
+        task_profile: this.taskProfile !== '' ? this.taskProfile : undefined,
       }));
     } catch (e) {
       this.logger.error(TAG, '发送消息失败', e as Error);
@@ -1000,6 +1186,64 @@ export struct ChatPage {
           })
         }
 
+        // 对齐 PC Composer 工具条：模型/思考深度/权限模式/执行档位/上下文面板入口
+        Scroll() {
+          Row() {
+            Text(this.selectedModel === '' ? '模型 · 自动' : '模型 · ' + this.selectedModel)
+              .fontSize(12)
+              .fontColor(this.sm.getColor('text_secondary'))
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(999)
+              .backgroundColor('rgba(0,0,0,0.25)')
+              .border({ width: 1, color: this.sm.getColor('border') })
+              .margin({ right: 8 })
+              .onClick(() => { this.requestModelList(); this.pillMenuOpen = 'model'; })
+
+            Text('思考 · ' + this.effortLabel())
+              .fontSize(12)
+              .fontColor(this.sm.getColor('text_secondary'))
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(999)
+              .backgroundColor('rgba(0,0,0,0.25)')
+              .border({ width: 1, color: this.sm.getColor('border') })
+              .margin({ right: 8 })
+              .onClick(() => { this.pillMenuOpen = 'effort'; })
+
+            Text(this.permissionMode === '' ? '权限 · 默认' : '权限 · ' + this.permissionMode)
+              .fontSize(12)
+              .fontColor(this.sm.getColor('text_secondary'))
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(999)
+              .backgroundColor('rgba(0,0,0,0.25)')
+              .border({ width: 1, color: this.sm.getColor('border') })
+              .margin({ right: 8 })
+              .onClick(() => { this.pillMenuOpen = 'mode'; })
+
+            Text(this.taskProfile === '' ? '档位 · 自动' : '档位 · ' + this.taskProfile)
+              .fontSize(12)
+              .fontColor(this.sm.getColor('text_secondary'))
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(999)
+              .backgroundColor('rgba(0,0,0,0.25)')
+              .border({ width: 1, color: this.sm.getColor('border') })
+              .margin({ right: 8 })
+              .onClick(() => { this.pillMenuOpen = 'profile'; })
+
+            Text('上下文' + (this.usageTotal > 0 ? ' · ' + this.usageTotal.toString() : ''))
+              .fontSize(12)
+              .fontColor(this.sm.getColor('text_secondary'))
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(999)
+              .backgroundColor('rgba(0,0,0,0.25)')
+              .border({ width: 1, color: this.sm.getColor('border') })
+              .onClick(() => { this.contextOpen = true; this.requestComposition(); })
+          }
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .width('100%')
+        .padding({ left: 12, right: 12 })
+        // Scroll 缺 .scrollable(Horizontal) 横向内容不可滚（真机实证过的坑）
+
         // 输入区（设计 F5 .inputbar：附件/语音 + 胶囊输入框 + 圆形发送/停止）
         Row() {
           IconBtn({ name: 'clip', onTap: () => { this.msg.info('附件发送即将开放'); } })
@@ -1061,6 +1305,21 @@ export struct ChatPage {
         this.buildDrawer()
       }
 
+      // 上下文面板：底部滑出（对齐 PC ContextUsageIndicator 明细面板）
+      if (this.contextOpen) {
+        this.buildContextPanel()
+      }
+
+      // 产出物预览弹层（artifact:get WS 代理取回内容）
+      if (this.previewArtifact !== null) {
+        this.buildArtifactPreview()
+      }
+
+      // 胶囊菜单底部弹层（bindMenu 贴底展开出屏，改用自绘弹层）
+      if (this.pillMenuOpen !== '') {
+        this.buildPillMenu()
+      }
+
       // 重命名弹层（抽屉条目编辑图标呼出；AlertDialog 无输入框故用页面内弹层）
       if (this.renamingSession !== null) {
         this.buildRenameOverlay()
@@ -1075,6 +1334,337 @@ export struct ChatPage {
   // ===========================================================================
 
   /** 抽屉层：遮罩（点击收起）+ 右缘抽屉本体（设计 .drawer：300px → 76% 上限 340） */
+  // ── Composer 菜单/取数（对齐 PC 对话页五件套）──
+
+  private requestModelList(): void {
+    if (this.modelOptionsLoaded) {
+      return;
+    }
+    try {
+      this.ws.send(JSON.stringify({ type: 'model:list' }));
+    } catch (e) {
+      // WS 未连上时打开菜单无候选，属可重试态：不弹错，下次展开再取
+      this.logger.warn(TAG, 'model:list 未发送（连接未就绪）');
+    }
+  }
+
+  private requestComposition(): void {
+    try {
+      this.ws.send(JSON.stringify({ type: 'context:composition',
+        agent_id: this.currentAgentId, session_id: this.sessionId }));
+    } catch (e) {
+      this.logger.warn(TAG, 'context:composition 未发送（连接未就绪）');
+    }
+  }
+
+  private openArtifact(a: ArtifactView): void {
+    this.previewArtifact = a;
+    this.previewContent = '';
+    this.previewEncoding = '';
+    this.previewMime = '';
+    this.previewLoading = true;
+    try {
+      this.ws.send(JSON.stringify({ type: 'artifact:get', artifact_id: a.artifactId }));
+    } catch (e) {
+      this.previewLoading = false;
+      this.msg.warning('连接未就绪，无法取回产出物内容');
+    }
+  }
+
+  private effortLabel(): string {
+    if (this.thinkingEffort === 'light') { return '轻量'; }
+    if (this.thinkingEffort === 'deep') { return '深度'; }
+    return '标准';
+  }
+
+  private modelMenu(): MenuElement[] {
+    const items: MenuElement[] = [];
+    items.push({ value: '自动（默认路由）', action: () => { this.selectedModel = ''; } });
+    for (const m of this.modelOptions) {
+      const modelId = typeof m['model_id'] === 'string' ? m['model_id'] as string : '';
+      if (modelId === '') {
+        continue;
+      }
+      const provider = typeof m['provider'] === 'string' ? m['provider'] as string : '';
+      const connectable = m['connectable'] === true;
+      const label = (provider !== '' ? provider + ' · ' : '') + modelId + (connectable ? '' : '（不可用）');
+      items.push({ value: label, action: () => { this.selectedModel = modelId; } });
+    }
+    return items;
+  }
+
+  private effortMenu(): MenuElement[] {
+    return [
+      { value: '轻量 light', action: () => { this.thinkingEffort = 'light'; } },
+      { value: '标准 standard', action: () => { this.thinkingEffort = 'standard'; } },
+      { value: '深度 deep', action: () => { this.thinkingEffort = 'deep'; } },
+    ];
+  }
+
+  private modeMenu(): MenuElement[] {
+    return [
+      { value: '默认（Build）', action: () => { this.permissionMode = ''; } },
+      { value: '计划 plan（只读）', action: () => { this.permissionMode = 'plan'; } },
+      { value: '编辑 edit（文件三工具放行）', action: () => { this.permissionMode = 'edit'; } },
+      { value: '放行 yolo（ASK→ALLOW）', action: () => { this.permissionMode = 'yolo'; } },
+      { value: '审慎 guarded（强制危险门）', action: () => { this.permissionMode = 'guarded'; } },
+      { value: '自动 auto（预留）', action: () => { this.permissionMode = 'auto'; } },
+    ];
+  }
+
+  private profileMenu(): MenuElement[] {
+    return [
+      { value: '自动（按输入定档）', action: () => { this.taskProfile = ''; } },
+      { value: '轻档 lite', action: () => { this.taskProfile = 'lite'; } },
+      { value: '标准 standard', action: () => { this.taskProfile = 'standard'; } },
+      { value: '重载 heavy', action: () => { this.taskProfile = 'heavy'; } },
+    ];
+  }
+
+  private kindIcon(kind: string): string {
+    if (kind === 'image') { return 'eye'; }
+    if (kind === 'html') { return 'globe'; }
+    return 'book';
+  }
+
+  private formatSize(bytes: number): string {
+    if (bytes <= 0) { return ''; }
+    if (bytes < 1024) { return bytes.toString() + ' B'; }
+    if (bytes < 1024 * 1024) { return (bytes / 1024).toFixed(1) + ' KB'; }
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  /** 上下文面板：底部滑出（用量环读数 + 组成明细，PC ContextUsageIndicator 同源数据） */
+  @Builder
+  buildContextPanel() {
+    Row() {
+      Column()
+        .layoutWeight(1)
+        .height('100%')
+        .backgroundColor('rgba(4,6,14,0.60)')
+        .onClick(() => { this.contextOpen = false; })
+      Column() {
+        Row() {
+          Text('上下文')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+          Blank()
+          Text('✕')
+            .fontSize(16)
+            .fontColor(this.sm.getColor('text_secondary'))
+            .onClick(() => { this.contextOpen = false; })
+        }
+        .width('100%')
+        .padding({ bottom: 8 })
+
+        Text('本会话累计用量 ' + this.usageTotal.toString() + ' tokens')
+          .fontSize(13)
+          .fontColor(this.sm.getColor('text_secondary'))
+          .width('100%')
+          .padding({ bottom: 10 })
+
+        if (this.composition !== null) {
+          Text('最近一轮上下文组成（实测）')
+            .fontSize(12)
+            .fontColor(this.sm.getColor('text_tertiary'))
+            .width('100%')
+            .padding({ bottom: 6 })
+          Row() {
+            Text('消息').fontSize(13).fontColor(this.sm.getColor('text_primary'))
+            Blank()
+            Text(this.compMsgTokens.toString() + ' tokens')
+              .fontSize(13).fontColor(this.sm.getColor('text_secondary'))
+          }
+          .width('100%')
+          Progress({ value: this.compMsgTokens, total: Math.max(this.compTotal, 1) })
+            .color(this.sm.getColor('primary'))
+            .width('100%')
+            .margin({ bottom: 8 })
+          Row() {
+            Text('工具（系统+MCP+技能）').fontSize(13).fontColor(this.sm.getColor('text_primary'))
+            Blank()
+            Text(this.compToolTokens.toString() + ' tokens')
+              .fontSize(13).fontColor(this.sm.getColor('text_secondary'))
+          }
+          .width('100%')
+          Progress({ value: this.compToolTokens, total: Math.max(this.compTotal, 1) })
+            .color(this.sm.getColor('primary'))
+            .width('100%')
+            .margin({ bottom: 8 })
+          Row() {
+            Text('缓存命中率').fontSize(13).fontColor(this.sm.getColor('text_primary'))
+            Blank()
+            Text(this.compCacheRate >= 0 ? (this.compCacheRate * 100).toFixed(0) + '%' : '—')
+              .fontSize(13).fontColor(this.sm.getColor('text_secondary'))
+          }
+          .width('100%')
+          .margin({ bottom: 8 })
+          Row() {
+            Text('上下文窗口').fontSize(13).fontColor(this.sm.getColor('text_primary'))
+            Blank()
+            Text(this.compWindow > 0
+              ? this.compTotal.toString() + ' / ' + this.compWindow.toString()
+                  + '（' + (this.compTotal / Math.max(this.compWindow, 1) * 100).toFixed(1) + '%）'
+              : this.compTotal.toString() + ' tokens（窗口未知）')
+              .fontSize(13)
+              .fontColor(this.compWindow > 0 && this.compTotal > this.compWindow * 0.9
+                ? this.sm.getColor('error') : this.sm.getColor('text_secondary'))
+          }
+          .width('100%')
+        } else if (this.compositionReason === 'no_data') {
+          Text('暂无实测快照——该会话先发送一条消息后再查看')
+            .fontSize(13)
+            .fontColor(this.sm.getColor('text_tertiary'))
+            .width('100%')
+        } else {
+          Text(this.compositionReason === 'query_failed' ? '查询失败，请稍后重试' : '取数中…')
+            .fontSize(13)
+            .fontColor(this.sm.getColor('text_tertiary'))
+            .width('100%')
+        }
+      }
+      .width('86%')
+      .height('46%')
+      .padding(16)
+      .borderRadius(16)
+      .backgroundColor(this.sm.getColor('surface'))
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 产出物预览弹层：取回内容按类型渲染（md/text 走 MarkdownText，图片走 base64） */
+  @Builder
+  buildArtifactPreview() {
+    Row() {
+      Column()
+        .layoutWeight(1)
+        .height('100%')
+        .backgroundColor('rgba(4,6,14,0.60)')
+        .onClick(() => { this.previewArtifact = null; })
+      Column() {
+        Row() {
+          Text(this.previewArtifact === null ? '' : this.previewArtifact.name)
+            .fontSize(15)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+            .layoutWeight(1)
+          Text('✕')
+            .fontSize(16)
+            .fontColor(this.sm.getColor('text_secondary'))
+            .onClick(() => { this.previewArtifact = null; })
+        }
+        .width('100%')
+        .padding({ bottom: 6 })
+
+        Text((this.previewArtifact === null ? '' : this.previewArtifact.kind)
+          + (this.previewArtifact !== null && this.previewArtifact.size > 0
+            ? ' · ' + this.formatSize(this.previewArtifact.size) : ''))
+          .fontSize(12)
+          .fontColor(this.sm.getColor('text_tertiary'))
+          .width('100%')
+          .padding({ bottom: 8 })
+
+        if (this.previewLoading) {
+          Text('取回中…')
+            .fontSize(13)
+            .fontColor(this.sm.getColor('text_tertiary'))
+            .width('100%')
+        } else if (this.previewEncoding === 'utf8') {
+          Scroll() {
+            Column() {
+              MarkdownText({ content: this.previewContent })
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+          }
+          .scrollable(ScrollDirection.Vertical)
+          .align(Alignment.Top)
+          .layoutWeight(1)
+          .width('100%')
+        } else if (this.previewEncoding === 'base64' && this.previewMime.startsWith('image/')) {
+          Image('data:' + this.previewMime + ';base64,' + this.previewContent)
+            .objectFit(ImageFit.Contain)
+            .layoutWeight(1)
+            .width('100%')
+        } else {
+          Text('该类型暂不支持移动端预览，请在 PC 端查看')
+            .fontSize(13)
+            .fontColor(this.sm.getColor('text_tertiary'))
+            .width('100%')
+        }
+      }
+      .width('86%')
+      .height('86%')
+      .padding(16)
+      .borderRadius(16)
+      .backgroundColor(this.sm.getColor('surface'))
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 胶囊菜单底部弹层：行项目随 pillMenuOpen 切换（模型/思考/权限/档位） */
+  @Builder
+  buildPillMenu() {
+    Row() {
+      Column()
+        .layoutWeight(1)
+        .height('100%')
+        .backgroundColor('rgba(4,6,14,0.60)')
+        .onClick(() => { this.pillMenuOpen = ''; })
+      Column() {
+        Text(this.pillMenuOpen === 'model' ? '选择模型' : this.pillMenuOpen === 'effort' ? '思考深度'
+          : this.pillMenuOpen === 'mode' ? '权限模式' : '执行档位')
+          .fontSize(15)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.sm.getColor('text_primary'))
+          .width('100%')
+          .padding({ bottom: 8 })
+        Scroll() {
+          Column() {
+            ForEach(this.pillMenuItems(), (item: MenuElement) => {
+              Text(item.value)
+                .fontSize(14)
+                .fontColor(this.sm.getColor('text_primary'))
+                .width('100%')
+                .padding({ top: 12, bottom: 12, left: 8, right: 8 })
+                .borderRadius(8)
+                .onClick(() => {
+                  item.action();
+                  this.pillMenuOpen = '';
+                })
+            }, (item: MenuElement) => item.value)
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+        }
+        .scrollable(ScrollDirection.Vertical)
+        .layoutWeight(1)
+        .width('100%')
+      }
+      .width('78%')
+      .height('52%')
+      .padding(16)
+      .borderRadius(16)
+      .backgroundColor(this.sm.getColor('surface'))
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  private pillMenuItems(): MenuElement[] {
+    if (this.pillMenuOpen === 'model') { return this.modelMenu(); }
+    if (this.pillMenuOpen === 'effort') { return this.effortMenu(); }
+    if (this.pillMenuOpen === 'mode') { return this.modeMenu(); }
+    if (this.pillMenuOpen === 'profile') { return this.profileMenu(); }
+    return [];
+  }
+
   @Builder
   buildDrawer() {
     Row() {
@@ -1453,6 +2043,87 @@ export struct ChatPage {
               }, (tc: ToolCallView) => tc.name + tc.args + tc.result)
             }
             .width('100%')
+            .margin({ bottom: 6 })
+          }
+
+          // 计划时间轴卡（chat:plan_update，PC PlanPanel 的气泡内轻量版）
+          if ((msg.plan?.length ?? 0) > 0) {
+            Column() {
+              ForEach(msg.plan, (ps: PlanStepView) => {
+                Row() {
+                  Text(ps.status === 'done' ? '✓' : (ps.status === 'in_progress' ? '●' : '○'))
+                    .fontSize(12)
+                    .fontColor(ps.status === 'done' ? this.sm.getColor('success') : this.sm.getColor('primary'))
+                  Text(ps.step)
+                    .fontSize(this.sm.getFontSize('caption'))
+                    .fontColor(this.sm.getColor('text_secondary'))
+                    .margin({ left: 6 })
+                    .layoutWeight(1)
+                }
+                .width('100%')
+                .margin({ bottom: 3 })
+              }, (ps: PlanStepView) => ps.step + ps.status)
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+            .padding(8)
+            .borderRadius(8)
+            .backgroundColor('rgba(0,0,0,0.25)')
+            .border({ width: 1, color: this.sm.getColor('border') })
+            .margin({ bottom: 6 })
+          }
+
+          // 产出物卡（chat:artifact——console 从 tool_result 派生；点击经 WS 代理取内容预览）
+          if ((msg.artifacts?.length ?? 0) > 0) {
+            Column() {
+              ForEach(msg.artifacts, (a: ArtifactView) => {
+                Row() {
+                  AppIcon({ name: this.kindIcon(a.kind), iconSize: 13, color: this.sm.getColor('primary') })
+                  Text(a.name)
+                    .fontSize(this.sm.getFontSize('caption'))
+                    .fontColor(this.sm.getColor('text_primary'))
+                    .margin({ left: 6 })
+                    .layoutWeight(1)
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  if (a.size > 0) {
+                    Text(this.formatSize(a.size))
+                      .fontSize(11)
+                      .fontColor(this.sm.getColor('text_tertiary'))
+                      .margin({ right: 6 })
+                  }
+                  Text('打开')
+                    .fontSize(11)
+                    .fontColor(this.sm.getColor('primary'))
+                }
+                .width('100%')
+                .padding(7)
+                .borderRadius(8)
+                .backgroundColor('rgba(0,0,0,0.25)')
+                .border({ width: 1, color: this.sm.getColor('border') })
+                .margin({ bottom: 5 })
+                .onClick(() => { this.openArtifact(a); })
+              }, (a: ArtifactView) => a.artifactId + a.name)
+            }
+            .width('100%')
+            .margin({ bottom: 6 })
+          }
+
+          // 治理审批请求卡（移动端只读展示，裁决走 PC 端治理面）
+          if (msg.approval !== '') {
+            Row() {
+              AppIcon({ name: 'shield', iconSize: 13, color: this.sm.getColor('error') })
+              Text(msg.approval)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .margin({ left: 6 })
+                .layoutWeight(1)
+            }
+            .width('100%')
+            .padding(8)
+            .borderRadius(8)
+            .backgroundColor('rgba(248,113,113,0.12)')
+            .border({ width: 1, color: 'rgba(248,113,113,0.40)' })
             .margin({ bottom: 6 })
           }
 
