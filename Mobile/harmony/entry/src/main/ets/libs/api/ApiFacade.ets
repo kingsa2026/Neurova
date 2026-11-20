@@ -41,6 +41,7 @@ import { AuditApi } from './modules/AuditApi';
 import { BenchmarkApi } from './modules/BenchmarkApi';
 import { MarketplaceApi } from './modules/MarketplaceApi';
 import { SandboxApi } from './modules/SandboxApi';
+import { ProvidersApi } from './modules/ProvidersApi';
 
 export class ApiFacade {
   private static instance: ApiFacade;
@@ -83,6 +84,8 @@ export class ApiFacade {
   public benchmark: BenchmarkApi;
   public marketplace: MarketplaceApi;
   public sandbox: SandboxApi;
+  // 服务商/模型域（对话页模型菜单与 PC ModelPage 同源）
+  public providers: ProvidersApi;
 
   private constructor() {
     this.client = HttpClient.getInstance();
@@ -121,6 +124,7 @@ export class ApiFacade {
     this.benchmark = new BenchmarkApi(this.client);
     this.marketplace = new MarketplaceApi(this.client);
     this.sandbox = new SandboxApi(this.client);
+    this.providers = new ProvidersApi(this.client);
   }
 
   static getInstance(): ApiFacade {

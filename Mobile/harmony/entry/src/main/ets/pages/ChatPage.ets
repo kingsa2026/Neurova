@@ -28,6 +28,7 @@ import { GlassInput } from '../components/glass';
 import { AppIcon } from '../components/common/AppIcon';
 import { IconBtn } from '../components/common/IconBtn';
 import { ApiFacade } from '../libs/api/ApiFacade';
+import { ModelInfoDto } from '../libs/api/modules/ProvidersApi';
 import { AuthStore } from '../libs/state/stores/AuthStore';
 import { AgentsStore } from '../libs/state/stores/AgentsStore';
 import { StateManager } from '../libs/state/StateManager';
@@ -91,6 +92,12 @@ interface DrawerGroup {
   items: ChatSession[];
 }
 
+/** 胶囊菜单分组（模型菜单按服务商分组；header 为空串即无组头） */
+interface PillMenuGroup {
+  header: string;
+  items: MenuElement[];
+}
+
 @Component
 export struct ChatPage {
   // 消息列表（双向：user 右对齐，assistant 左对齐）
@@ -133,9 +140,13 @@ export struct ChatPage {
   @State thinkingEffort: string = 'standard';
   @State permissionMode: string = '';
   @State taskProfile: string = '';
-  // 模型候选（model:list WS 代理；首次展开菜单时懒取）
+  // 模型候选（REST /models 预取为主；model:list WS 代理为兜底刷新）
   @State modelOptions: Array<Record<string, Object>> = [];
   @State modelOptionsLoaded: boolean = false;
+  // 胶囊菜单当前分组数据：开菜单时快照进 @State——弹层 subtree 不随
+  // modelOptions/pillMenuOpen 的后续变化重渲染（真机实证的冻结坑），故用
+  // 「赋值替换数组」驱动 ForEach 重建
+  @State pillGroups: PillMenuGroup[] = [];
   // 上下文面板（context:composition WS 代理 + chat:usage 累计）
   @State contextOpen: boolean = false;
   @State composition: Record<string, Object> | null = null;
@@ -217,6 +228,8 @@ export struct ChatPage {
     this.connectWs();
     // 4. 订阅聊天事件
     this.subscribeEvents();
+    // 5. 模型候选预取（REST 同源 PC /models；失败留待开菜单时走 WS 兜底）
+    this.fetchModelsRest();
   }
 
   aboutToDisappear() {
@@ -513,6 +526,10 @@ export struct ChatPage {
       const res = data as WSModelListResult;
       this.modelOptions = res.models ?? [];
       this.modelOptionsLoaded = true;
+      // 兜底刷新：菜单开着时数据才到，直接替换分组数组驱动弹层重渲染
+      if (this.pillMenuOpen === 'model') {
+        this.pillGroups = this.modelGroups();
+      }
     };
     this.bus.on('model:list_result', this.modelListHandler);
 
@@ -1187,56 +1204,57 @@ export struct ChatPage {
         }
 
         // 对齐 PC Composer 工具条：模型/思考深度/权限模式/执行档位/上下文面板入口
+        // 底部工具条仅用图标标识（用户拍板）：当前取值在菜单选中态里体现，不在此重复文字
         Scroll() {
           Row() {
-            Text(this.selectedModel === '' ? '模型 · 自动' : '模型 · ' + this.selectedModel)
-              .fontSize(12)
-              .fontColor(this.sm.getColor('text_secondary'))
-              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-              .borderRadius(999)
-              .backgroundColor('rgba(0,0,0,0.25)')
-              .border({ width: 1, color: this.sm.getColor('border') })
-              .margin({ right: 8 })
-              .onClick(() => { this.requestModelList(); this.pillMenuOpen = 'model'; })
+            Row() {
+              AppIcon({ name: 'model', iconSize: 16, color: this.sm.getColor('text_secondary') })
+            }
+            .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+            .borderRadius(999)
+            .backgroundColor('rgba(0,0,0,0.25)')
+            .border({ width: 1, color: this.sm.getColor('border') })
+            .margin({ right: 8 })
+            .onClick(() => { this.requestModelList(); this.openPillMenu('model'); })
 
-            Text('思考 · ' + this.effortLabel())
-              .fontSize(12)
-              .fontColor(this.sm.getColor('text_secondary'))
-              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-              .borderRadius(999)
-              .backgroundColor('rgba(0,0,0,0.25)')
-              .border({ width: 1, color: this.sm.getColor('border') })
-              .margin({ right: 8 })
-              .onClick(() => { this.pillMenuOpen = 'effort'; })
+            Row() {
+              AppIcon({ name: 'spark', iconSize: 16, color: this.sm.getColor('text_secondary') })
+            }
+            .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+            .borderRadius(999)
+            .backgroundColor('rgba(0,0,0,0.25)')
+            .border({ width: 1, color: this.sm.getColor('border') })
+            .margin({ right: 8 })
+            .onClick(() => { this.openPillMenu('effort'); })
 
-            Text(this.permissionMode === '' ? '权限 · 默认' : '权限 · ' + this.permissionMode)
-              .fontSize(12)
-              .fontColor(this.sm.getColor('text_secondary'))
-              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-              .borderRadius(999)
-              .backgroundColor('rgba(0,0,0,0.25)')
-              .border({ width: 1, color: this.sm.getColor('border') })
-              .margin({ right: 8 })
-              .onClick(() => { this.pillMenuOpen = 'mode'; })
+            Row() {
+              AppIcon({ name: 'shield', iconSize: 16, color: this.sm.getColor('text_secondary') })
+            }
+            .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+            .borderRadius(999)
+            .backgroundColor('rgba(0,0,0,0.25)')
+            .border({ width: 1, color: this.sm.getColor('border') })
+            .margin({ right: 8 })
+            .onClick(() => { this.openPillMenu('mode'); })
 
-            Text(this.taskProfile === '' ? '档位 · 自动' : '档位 · ' + this.taskProfile)
-              .fontSize(12)
-              .fontColor(this.sm.getColor('text_secondary'))
-              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-              .borderRadius(999)
-              .backgroundColor('rgba(0,0,0,0.25)')
-              .border({ width: 1, color: this.sm.getColor('border') })
-              .margin({ right: 8 })
-              .onClick(() => { this.pillMenuOpen = 'profile'; })
+            Row() {
+              AppIcon({ name: 'gear', iconSize: 16, color: this.sm.getColor('text_secondary') })
+            }
+            .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+            .borderRadius(999)
+            .backgroundColor('rgba(0,0,0,0.25)')
+            .border({ width: 1, color: this.sm.getColor('border') })
+            .margin({ right: 8 })
+            .onClick(() => { this.openPillMenu('profile'); })
 
-            Text('上下文' + (this.usageTotal > 0 ? ' · ' + this.usageTotal.toString() : ''))
-              .fontSize(12)
-              .fontColor(this.sm.getColor('text_secondary'))
-              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-              .borderRadius(999)
-              .backgroundColor('rgba(0,0,0,0.25)')
-              .border({ width: 1, color: this.sm.getColor('border') })
-              .onClick(() => { this.contextOpen = true; this.requestComposition(); })
+            Row() {
+              AppIcon({ name: 'archive', iconSize: 16, color: this.sm.getColor('text_secondary') })
+            }
+            .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+            .borderRadius(999)
+            .backgroundColor('rgba(0,0,0,0.25)')
+            .border({ width: 1, color: this.sm.getColor('border') })
+            .onClick(() => { this.contextOpen = true; this.requestComposition(); })
           }
         }
         .scrollable(ScrollDirection.Horizontal)
@@ -1336,6 +1354,33 @@ export struct ChatPage {
   /** 抽屉层：遮罩（点击收起）+ 右缘抽屉本体（设计 .drawer：300px → 76% 上限 340） */
   // ── Composer 菜单/取数（对齐 PC 对话页五件套）──
 
+  /** 模型候选预取：REST /models 与 PC 同源；失败不置位，开菜单时走 WS 兜底 */
+  private fetchModelsRest(): void {
+    this.api.providers.listModels()
+      .then((models: ModelInfoDto[]) => {
+        const out: Array<Record<string, Object>> = [];
+        for (const m of models) {
+          const rec: Record<string, Object> = {
+            'model_id': m.model_id,
+            'provider': m.provider,
+            'connectable': m.connectable,
+          };
+          out.push(rec);
+        }
+        if (out.length === 0) {
+          return;
+        }
+        this.modelOptions = out;
+        this.modelOptionsLoaded = true;
+        if (this.pillMenuOpen === 'model') {
+          this.pillGroups = this.modelGroups();
+        }
+      })
+      .catch((e: Error) => {
+        this.logger.warn(TAG, '模型候选 REST 预取失败，开菜单时走 WS 兜底: ' + e.message);
+      });
+  }
+
   private requestModelList(): void {
     if (this.modelOptionsLoaded) {
       return;
@@ -1371,53 +1416,55 @@ export struct ChatPage {
     }
   }
 
-  private effortLabel(): string {
-    if (this.thinkingEffort === 'light') { return '轻量'; }
-    if (this.thinkingEffort === 'deep') { return '深度'; }
-    return '标准';
-  }
-
-  private modelMenu(): MenuElement[] {
-    const items: MenuElement[] = [];
-    items.push({ value: '自动（默认路由）', action: () => { this.selectedModel = ''; } });
+  /** 模型菜单：仅收录可用（connectable）模型并按服务商分组（用户拍板） */
+  private modelGroups(): PillMenuGroup[] {
+    const groups: PillMenuGroup[] = [];
+    groups.push({ header: '', items: [{ value: '自动', action: () => { this.selectedModel = ''; } }] });
+    const byProvider = new Map<string, MenuElement[]>();
     for (const m of this.modelOptions) {
       const modelId = typeof m['model_id'] === 'string' ? m['model_id'] as string : '';
-      if (modelId === '') {
+      if (modelId === '' || m['connectable'] !== true) {
         continue;
       }
-      const provider = typeof m['provider'] === 'string' ? m['provider'] as string : '';
-      const connectable = m['connectable'] === true;
-      const label = (provider !== '' ? provider + ' · ' : '') + modelId + (connectable ? '' : '（不可用）');
-      items.push({ value: label, action: () => { this.selectedModel = modelId; } });
+      const provider = typeof m['provider'] === 'string' && (m['provider'] as string) !== ''
+        ? m['provider'] as string : '其他';
+      const bucket = byProvider.get(provider) ?? [];
+      if (bucket.length === 0) {
+        byProvider.set(provider, bucket);
+      }
+      bucket.push({ value: modelId, action: () => { this.selectedModel = modelId; } });
     }
-    return items;
+    byProvider.forEach((items: MenuElement[], provider: string) => {
+      groups.push({ header: provider, items: items });
+    });
+    return groups;
   }
 
   private effortMenu(): MenuElement[] {
     return [
-      { value: '轻量 light', action: () => { this.thinkingEffort = 'light'; } },
-      { value: '标准 standard', action: () => { this.thinkingEffort = 'standard'; } },
-      { value: '深度 deep', action: () => { this.thinkingEffort = 'deep'; } },
+      { value: '轻量', action: () => { this.thinkingEffort = 'light'; } },
+      { value: '标准', action: () => { this.thinkingEffort = 'standard'; } },
+      { value: '深度', action: () => { this.thinkingEffort = 'deep'; } },
     ];
   }
 
   private modeMenu(): MenuElement[] {
     return [
-      { value: '默认（Build）', action: () => { this.permissionMode = ''; } },
-      { value: '计划 plan（只读）', action: () => { this.permissionMode = 'plan'; } },
-      { value: '编辑 edit（文件三工具放行）', action: () => { this.permissionMode = 'edit'; } },
-      { value: '放行 yolo（ASK→ALLOW）', action: () => { this.permissionMode = 'yolo'; } },
-      { value: '审慎 guarded（强制危险门）', action: () => { this.permissionMode = 'guarded'; } },
-      { value: '自动 auto（预留）', action: () => { this.permissionMode = 'auto'; } },
+      { value: '默认', action: () => { this.permissionMode = ''; } },
+      { value: '计划', action: () => { this.permissionMode = 'plan'; } },
+      { value: '编辑', action: () => { this.permissionMode = 'edit'; } },
+      { value: '放行', action: () => { this.permissionMode = 'yolo'; } },
+      { value: '审慎', action: () => { this.permissionMode = 'guarded'; } },
+      { value: '自动', action: () => { this.permissionMode = 'auto'; } },
     ];
   }
 
   private profileMenu(): MenuElement[] {
     return [
-      { value: '自动（按输入定档）', action: () => { this.taskProfile = ''; } },
-      { value: '轻档 lite', action: () => { this.taskProfile = 'lite'; } },
-      { value: '标准 standard', action: () => { this.taskProfile = 'standard'; } },
-      { value: '重载 heavy', action: () => { this.taskProfile = 'heavy'; } },
+      { value: '自动', action: () => { this.taskProfile = ''; } },
+      { value: '轻档', action: () => { this.taskProfile = 'lite'; } },
+      { value: '标准', action: () => { this.taskProfile = 'standard'; } },
+      { value: '重载', action: () => { this.taskProfile = 'heavy'; } },
     ];
   }
 
@@ -1626,18 +1673,31 @@ export struct ChatPage {
           .padding({ bottom: 8 })
         Scroll() {
           Column() {
-            ForEach(this.pillMenuItems(), (item: MenuElement) => {
-              Text(item.value)
-                .fontSize(14)
-                .fontColor(this.sm.getColor('text_primary'))
-                .width('100%')
-                .padding({ top: 12, bottom: 12, left: 8, right: 8 })
-                .borderRadius(8)
-                .onClick(() => {
-                  item.action();
-                  this.pillMenuOpen = '';
-                })
-            }, (item: MenuElement) => item.value)
+            ForEach(this.pillGroups, (g: PillMenuGroup) => {
+              Column() {
+                if (g.header !== '') {
+                  Text(g.header)
+                    .fontSize(12)
+                    .fontColor(this.sm.getColor('text_secondary'))
+                    .width('100%')
+                    .padding({ top: 10, bottom: 4, left: 8 })
+                }
+                ForEach(g.items, (item: MenuElement) => {
+                  Text(item.value)
+                    .fontSize(14)
+                    .fontColor(this.sm.getColor('text_primary'))
+                    .width('100%')
+                    .padding({ top: 12, bottom: 12, left: 8, right: 8 })
+                    .borderRadius(8)
+                    .onClick(() => {
+                      item.action();
+                      this.pillMenuOpen = '';
+                    })
+                }, (item: MenuElement) => item.value as string)
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
+            }, (g: PillMenuGroup) => g.header)
           }
           .width('100%')
           .alignItems(HorizontalAlign.Start)
@@ -1657,11 +1717,17 @@ export struct ChatPage {
     .height('100%')
   }
 
-  private pillMenuItems(): MenuElement[] {
-    if (this.pillMenuOpen === 'model') { return this.modelMenu(); }
-    if (this.pillMenuOpen === 'effort') { return this.effortMenu(); }
-    if (this.pillMenuOpen === 'mode') { return this.modeMenu(); }
-    if (this.pillMenuOpen === 'profile') { return this.profileMenu(); }
+  /** 开胶囊菜单：先快照分组数据再置开态，保证弹层首帧即带全量选项 */
+  private openPillMenu(menuType: string): void {
+    this.pillMenuOpen = menuType;
+    this.pillGroups = this.pillMenuGroupsFor(menuType);
+  }
+
+  private pillMenuGroupsFor(menuType: string): PillMenuGroup[] {
+    if (menuType === 'model') { return this.modelGroups(); }
+    if (menuType === 'effort') { return [{ header: '', items: this.effortMenu() }]; }
+    if (menuType === 'mode') { return [{ header: '', items: this.modeMenu() }]; }
+    if (menuType === 'profile') { return [{ header: '', items: this.profileMenu() }]; }
     return [];
   }
 

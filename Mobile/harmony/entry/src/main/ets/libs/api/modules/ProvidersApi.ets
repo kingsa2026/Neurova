@@ -59,6 +59,7 @@ export interface ModelInfoDto {
   max_tokens: number;
   is_active: boolean;
   status: string;
+  connectable: boolean;
 }
 
 export class ProvidersApi {
@@ -112,6 +113,7 @@ export class ProvidersApi {
         max_tokens: Number(m['max_tokens'] ?? 0),
         is_active: m['is_active'] === true,
         status: String(m['status'] ?? ''),
+        connectable: m['connectable'] === true,
       };
       out.push(item);
     }
