@@ -85,13 +85,13 @@
   衰减→排序→冲突检测" `:74-107`；⑤`ProcessOutput` 计数台账（total/deduped/conflicts）`:22-29`。
 - **关键入口**：`UnifiedResultProcessor:32`、`ProcessOutput:22`（无工厂函数）。
 - **来历**：ede49184 首入库；规格 `docs/04-plans/iteration-plan-channel-plugin-moe.md:122` 任务 3.1。
-  `--follow` 另三笔里最末 5c32bab0(09-02「三冲突检测器正名」) 只改它的 import 别名 ⇒ **被改动 ≠ 被消费**。
+  `--follow` 另三笔里最末 831ed1dd2(09-02「三冲突检测器正名」) 只改它的 import 别名 ⇒ **被改动 ≠ 被消费**。
   符号 `-S UnifiedResultProcessor -- neurova/` ＝ 1 笔（✅）。**引入即未接线**。
 - **现役替代**：①②③有实质替代（`neurova_recall.py:1586 _deduplicate_results` 同语义、
   `:1443-1466 _fusion_score` 同式 `base × channel_weight × time_decay`）；**④⑤零替代**：
   live 召回链里没有"管道内语义冲突检测"这一步（`neurova_recall.py` 内零 `conflict` 引用），
   且 `activations` 乘子**没有生产者**（`WeightAdjuster` 在 `neurova/` 只命中自身与门面，全史 1 笔）。
-  `memory_layer/result_processor.py` 已于 807ca120(09-21) 退役，不是替代。
+  `memory_layer/result_processor.py` 已于 1d54a311c(09-21) 退役，不是替代。
 - **判定**：**需人裁**——④⑤两处子能力全仓唯一，且 activation 反馈回路从未接线；
   删即永久失去"检索管道内联冲突检测"与"通道权重反馈乘子"。
   > 2026-10-21（§6-374）：processor 的冲突段已改调单源 `judgeClauseConflict`（含英文词级否定）；
@@ -165,7 +165,7 @@
    不是对 v2 的取用；`neurova/memory/__init__.py:19` ＋ `__all__:127` 是**聚合门面的再导出**，
    而 `from neurova.memory import ConflictDetector` 在全仓**零消费者**（✅ grep 复算）。
    两条判活证据同时是伪命中（同名不同物 ×2、门面再导出 ≠ 消费者 ×1）⇒ `conflict_detector_v2`
-   从"活"回到"待档"，其死列归属另批补档案（它的来历含 5c32bab0/238cb32c 两次正名，
+   从"活"回到"待档"，其死列归属另批补档案（它的来历含 831ed1dd2/2063d792f 两次正名，
    不能按"引入即未接线"一句带过）。
 2. **11 档是下限，不是全量**。候选谓词写的是"闭包内的 importers 全是门面"，于是
    **被死岛读**的下游模块直接掉出候选面：`channels/temporal.py` 与 `channels/conflict.py` 的读者是

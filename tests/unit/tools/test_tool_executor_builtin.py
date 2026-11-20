@@ -13,6 +13,9 @@ from typing import Dict, Any
 # actions/action_result（测试替身与真实契约逐字段对齐）
 import neurova.computer_use.actions as _real_actions
 import neurova.computer_use.action_result as _real_action_result
+import neurova.computer_use.guardrail as _real_guardrail
+import neurova.computer_use.desktop_uia as _real_desktop_uia
+import neurova.computer_use.lane_mutex as _real_lane_mutex
 from neurova.computer_use import scroll_semantics as _real_scroll_semantics
 
 
@@ -211,6 +214,11 @@ class TestBuiltinToolExecutor:
         mock_module.actions = _real_actions
         mock_module.action_result = _real_action_result
         mock_module.scroll_semantics = _real_scroll_semantics
+        # 护栏批（项 8）后，type/scroll 路径会懒加载这些子模块——
+        # 替身包必须挂真模块，否则"父包是 Mock 无 __path__"必炸 import
+        mock_module.guardrail = _real_guardrail
+        mock_module.desktop_uia = _real_desktop_uia
+        mock_module.lane_mutex = _real_lane_mutex
 
         with patch.dict('sys.modules', {'neurova.computer_use': mock_module}):
             result = await executor._execute_computer_type({"text": "Hello World"})
@@ -231,6 +239,9 @@ class TestBuiltinToolExecutor:
         mock_module.actions = _real_actions
         mock_module.action_result = _real_action_result
         mock_module.scroll_semantics = _real_scroll_semantics
+        mock_module.guardrail = _real_guardrail
+        mock_module.desktop_uia = _real_desktop_uia
+        mock_module.lane_mutex = _real_lane_mutex
 
         with patch.dict('sys.modules', {'neurova.computer_use': mock_module}):
             result = await executor._execute_computer_scroll({"scroll_y": 3})

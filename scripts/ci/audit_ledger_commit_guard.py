@@ -55,6 +55,10 @@ EXCEPTIONS_REL = ("scripts", "ci", "audit_ledger_unreachable_refs.txt")
 
 _numstatCache: dict = {}
 _objectTypeCache: dict = {}
+#: 短号 → 40 位全号（batch-check 一次取回）；短号歧义/不存在的号不进表
+_fullHashCache: dict = {}
+#: 失效号 → 提交标题（`git show -s` 按块批量取回）；取不到的号记空串
+_subjectCache: dict = {}
 
 #: 本脚本每次 git 调用的预算唯一出处。**逐号**起 `merge-base` 是全档成本的来源
 #: （台账有多少个号就起多少次），单次毫秒级；没有 `timeout=` 时一次卡住的 git
@@ -188,6 +192,37 @@ def batchProbe(tokens) -> None:
         parts = lines[index].split() if index < len(lines) else []
         # `missing` 不是对象类型，统一记成空串：`isCommit` 只认 "commit"，其余一律不进判据面
         _objectTypeCache[token] = "" if (not parts or parts[-1] == "missing") else parts[1]
+        if parts and parts[-1] != "missing":
+            _fullHashCache[token] = parts[0]
+
+
+def _subjectsOf(tokens) -> None:
+    """按块批量取回失效号的提交标题（§6-414 第三处逐号命中点的根修）。
+
+    findReplacement 原对每枚失效号起一次 `git log -1 --format=%s`——2026-11-20
+    全量实测失效号 1795 枚、累计 139s，是全量跑被 pytest-timeout 强杀的直接
+    成本来源。短号先经 batch-check 换全号（规避 show 对短号歧义整批报错），
+    再对存在的 commit 按 400 个一块批量取标题；不在对象库/非 commit 的号
+    标题记空串（=无可回写，判不可达），与旧语义一致。
+    """
+    pending = [t for t in tokens if t not in _subjectCache]
+    if not pending:
+        return
+    batchProbe(pending)
+    pairs = [(t, _fullHashCache.get(t, "")) for t in pending]
+    pairs = [(t, f) for t, f in pairs if f and _objectTypeCache.get(t) == "commit"]
+    for t, _f in pairs:
+        _subjectCache[t] = ""
+    for start in range(0, len(pairs), 400):
+        chunk = pairs[start:start + 400]
+        out = _git("show", "-s", "--format=%H%x09%h%x09%s", *[f for _t, f in chunk])
+        byFull = {}
+        for line in out.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 3 and HEX_ONLY.match(parts[0]):
+                byFull[parts[0]] = parts[2].strip()
+        for t, f in chunk:
+            _subjectCache[t] = byFull.get(f, "")
 
 
 def isReachable(token: str) -> bool:
@@ -221,15 +256,12 @@ def headIndex() -> list:
 def findReplacement(token: str, index: list) -> str:
     """同标题 + diffstat 逐行一致且唯一时才给替代号，否则空串（不许猜）。
 
-    标题从 `headIndex()` 的内存索引按短号取——2026-11-20 全量实测：失效号达
-    1795 枚时逐号起 `git log -1` 累计 2 分钟（§6-414 的第三处逐号命中点，
-    当年只扫荡了 merge-base 与 cat-file 两处），是全量跑被 pytest-timeout
-    强杀的直接成本来源。短号歧义（同前缀多号）按守卫口径返回空串，不许猜。
+    标题经 `_subjectsOf()` 批量取回（这里只读缓存；2026-11-20 全量实测失效号
+    1795 枚、逐号 fork 累计 139s，是全量跑被强杀的直接成本来源，故收口）。
+    短号歧义（同前缀多号）按守卫口径返回空串，不许猜。
     """
-    subjects = [subj for short, subj in index if short == token or short.startswith(token)]
-    if len(subjects) != 1:
-        return ""
-    staleSubject = subjects[0]
+    _subjectsOf([token])
+    staleSubject = _subjectCache.get(token, "")
     if not staleSubject:
         return ""
     candidates = [short for short, subj in index if subj == staleSubject]
@@ -293,8 +325,9 @@ def scanReport(path: Path, index: list, signed=frozenset()):
         candidates.append(short)
     batchProbe(candidates)          # 一次进程问完整批；逐号 fork 是这场扫描的成本主体
     tokens = [short for short in candidates if isCommit(short)]
-    stale = [(t, findReplacement(t, index)) for t in tokens
-             if not isReachable(t) and t not in signed]
+    staleTokens = [t for t in tokens if not isReachable(t) and t not in signed]
+    _subjectsOf(staleTokens)        # 一场一次批量取标题；findReplacement 只读缓存
+    stale = [(t, findReplacement(t, index)) for t in staleTokens]
     return tokens, stale
 
 

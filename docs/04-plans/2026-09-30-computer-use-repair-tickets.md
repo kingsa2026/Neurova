@@ -17,7 +17,7 @@
 2. **先红后绿**：每条工单第 1 个 commit 只交红灯，并附"它真的红"的 pytest 输出原文；绿灯实现随后。红灯文件**在转绿前不得进** `scripts/ci/protected_tests.txt`。
 3. **跑测试必须用项目解释器**：`.venv/Scripts/python.exe -m pytest`（Windows）。用全局 python、或设 `PYTHONIOENCODING=utf-8`，都会**伪造出一大片假红**（后者会打掉子进程 stdout）。
 4. **不要跑全量 pytest**：会被两个用例打死进程。按目录分块跑取摘要，且必须 deselect 开浏览器的那个 `start_script` 用例。
-5. **docs 守卫族在基线上本来就红**（`test_docs_name_collision_guard` / `test_legacy_ref_ledger_guard` / `test_docs_index_hand_copied_counts` 等，基线 5e54ead6 实测 8 failed / 8 errors）。**比的是失败名集合，不是总数**——别把预存红算成自己引入的。
+5. **docs 守卫族在基线上本来就红**（`test_docs_name_collision_guard` / `test_legacy_ref_ledger_guard` / `test_docs_index_hand_copied_counts` 等，基线 7f092b016 实测 8 failed / 8 errors）。**比的是失败名集合，不是总数**——别把预存红算成自己引入的。
 6. **教义第 5 条放大视角**：每条工单都列了「同根因扫荡」，命中点必须一并处理或**显式登记进台账**，不许静默遗留。
 7. **净新增 LOC 默认 ≤ 0**。为正在本集各工单的 LOC 表里逐条列了去向；若你的实现超出，须在 commit 正文说明差在哪。测试代码不计入。
 8. **禁止写法**（教义第 3 条点名项，本域尤易踩）：不得用 `MagicMock` 冒充 `BrowserResult`/UIA 元素对象；不得恒真断言；不得手工把 `generation`/`agent_id` 传进去绕过生产装配点——**判据必须从装配点起**。
@@ -44,7 +44,7 @@
 | **T-07** | 能力可用性是硬编码布尔，非带 owner 的三态探测 | — | 预估 +150 / **实测净 +352**（差额去向 §22.5） | 中 | ✅ **D-3 已拍**（§19 范围含浏览器/camofox；§22 补拍执行口径=缓存 + TTL + 显式失效、vision 走真探测） | **本轮落地**（§22）：六轴三态 + owner + `requiresRestart` 单源；`/status`、`/doctor` 的旧布尔全部改为派生，三处英文抛出改走 refusal 原文；判据 12 例（含真连不上地址的判别性对照）；活体 ✅ |
 | **T-08** | 浏览器无稳定动作句柄，每步重快照 | T-03 | 预估 +200 / **实测净 +380**（差额去向 §20.4） | **高（改 provider 可见契约）** | ✅ **D-1、D-2 已拍**（§19：ref 绑 generation；不暴露 selector/xpath 回退） | **本轮落地**（§20）：判据 16 例；活体 ✅（§20.3 真 Chromium——同名两按钮 `e1`→FIRST、`e2`→SECOND，`click_role` 在同名页**实测**撞 strict mode 硬失败）；顺带吃掉两处同根因缺陷（§20.2：权限面 fail-open、序列化回写事实源） |
 | **T-09** | 截图从不进模型上下文 | — | 预估 +120 / **实测净 +214**（去向 §24.4） | **高（改感知模式）** | ✅ **D-4 已拍**（§19：启用；子形状按 §19 记的默认走，可一句话改）；✅ **Q-3 已拍同形**（§32）；✅ **Q-2 已修**（§30/§31） | **验收已闭合 ✅（§35）**：真 headless 页面把短语只画进画布 → 真截图 → 真过期代次具名缺口 → 生产装配 image_parts=1 且原参未污染 → 真服务商 `sensetime:kimi-k3` 逐字答出该短语（6.13s）。能力轴同轮从 `unknown` 翻成 `available`（走实测档，§30 的成果在真链路上兑现）。Anthropic 环已同形同闸门（§32） |
-| **T-10** | 语义目标解析（§13 D-6 第一片） | 唯一命中才动作 | +100 | 中 | 无 | 入库 41bc68f2；活体 §13.1 ✅（**仅进程内，socket 层未验**） |
+| **T-10** | 语义目标解析（§13 D-6 第一片） | 唯一命中才动作 | +100 | 中 | 无 | 入库 ea6a7fa4c；活体 §13.1 ✅（**仅进程内，socket 层未验**） |
 | **T-11** | 撤 `smart-click` 的 501 + 前端载荷对齐 `{target}` | T-10 | 含上 | 低 | ✅ 附带项已拍（§19：`smart_type` 实现，与 click 统一） | **click / type / 歧义分支全部接通**（§21）：409 交出本代编号 `[eN]`，带 `ref` 重发真点到选定的那一个（活体：三个同名 Note，`e3`→THIRD、复用旧 `e1` 回 `ref-not-found: …0 个 ref 里`、重新快照后 `e1`→FIRST）；同页 8 处"吞掉服务端具名原因"的前端 catch 一并收口。链接提取/JS 执行/静态抓取 3 面仍诚实 501 |
 | **T-12** | 空快照被当成功快照（`success=True` + 空正文），致 502 分支不可达 | T-06b | +29 | 低 | ✅ **Q-1 已拍**（§28：走支路 B 定终态） | **验收已闭合**。入库；代码与判据已落地（10 例，含两后端 parity 与 502 可达性）；**502 分支活体 ✅**；**camofox 那条口已在真 HTTP 传输上取**，且已从散文升为**入库守卫 + 进 CI**（§27：7 例，三个变异对照各自咬住预期条目，M1 摘掉拒绝分支时红形即本单的原始谎报形态）。Playwright 侧原"空正文"形态 5 个候选态均未复现。**真实容器自身的字段与错误形态定为不在本仓验收面内**（外部服务，装它需授权）——口径、回潮判据与 §27 那条判据的连带影响见 §28 |
 | **T-13** | "取不到事实"在产出侧是内部英文裸串（18 处、3 种措辞），模型拿到只能瞎猜 | T-12 | ≈ +6（净） | 低 | 无 | 本轮落地；判据 7 例（含两后端**整句相等**parity + AST 反证回潮）；活体 ✅（§13.3：502 detail 现为 `no-active-tab: …——请先 browser_navigate …`） |
@@ -1066,7 +1066,7 @@ tests/unit/core/test_subprocess_encoding_discipline.py → sitesWithoutEncoding 
 ### 其余各簇的定性（都带取证方式，不是"应该不是我的"）
 
 - **osv 加固守卫 8 例**：最小窗口原地对照——把 `scripts/ci/osv_audit.py` 退回我改它之前
-  （`b3d075529^`）的内容跑同一条命令，**两侧同为 8 failed / 63 passed**，失败集合不变；
+  （`e9d79bcd8^`）的内容跑同一条命令，**两侧同为 8 failed / 63 passed**，失败集合不变；
   还原后 sha256 与 `cmp` 双校验一致。失败点指向扫描器二进制路径（`E:\bin\true` 非可执行），
   与本轮两行 bootstrap 无关。
 - **api 清单守卫 5 例**：机器区与生成器不一致——"后端挂载前缀"文档里是 **0 条**、生成器给 **90 条**，
@@ -1088,7 +1088,7 @@ tests/unit/core/test_subprocess_encoding_discipline.py → sitesWithoutEncoding 
 - **块 1 的 15 例里，13 例确实是我的**（这条推翻本节初稿的归因）：初稿写"块 1 内我碰过的文件为
   0 个"，那是**拿测试文件名去比对**——而我改的 `scripts/ci/*.py` 是被这些测试当**被测对象**
   调用的，不在测试文件清单里，比对法漏了它。让 runner 落 raw 输出、`--timeout=300` 重跑拿到
-  完整摘要后，再按 A/B（三个脚本退回 `b3d075529^` 内容、跑同一条命令、还原 sha256+cmp 双校验）
+  完整摘要后，再按 A/B（三个脚本退回 `e9d79bcd8^` 内容、跑同一条命令、还原 sha256+cmp 双校验）
   定死：现值 15 failed vs 旧值 2 failed，13 例全在 `test_deploy_config_guard.py`。
   根因与修法见 §15 末（模块级 reconfigure 撞上"脚本被进程内加载" + 父进程读子进程不带编码）。
   修完：`test_deploy_config_guard` 全绿；perf / experience 各留 1 例，与旧值同形 ⇒ 预存。
@@ -1355,7 +1355,7 @@ E CLICK e1 -> generation=4      F 页面回读 h2 = '- heading "FIRST" [level=2]
   `scripts-qa/duplicate-function-audit.mjs:1` 的 `#!/usr/bin/env node` 在 vitest 的
   转换管线下报 `SyntaxError: Invalid or unexpected token`（`node --check` 与
   `node --input-type=module -e import(...)` 都通过，20 个导出可见 ⇒ 是 shebang 与
-  打包器的组合，不是代码错误）。该文件与它的导入面本批一行未动，落在 b226754b。
+  打包器的组合，不是代码错误）。该文件与它的导入面本批一行未动，落在 e3ee7f2b3。
 - **`tests/unit/api` + `tests/unit/tools` 组合下 `test_mcp_catalog::test_catalog_list_endpoint_requires_auth` 红**：
   按"原地只回退我改的 3 个跟踪文件"做 A/B（sha256 往返校验后还原），HEAD 内容同组合
   **同样红** ⇒ 预存跨文件态污染（auth 依赖被前序用例改走），非本批引入；单跑 15 passed。
@@ -1476,7 +1476,7 @@ D-4 拍的是"启用"，§19 记的子形状是"分层兜底 + 同一轮至多�
 
 1. **模型侧目前结构性失明**：`tool_executor._normalize_browser_result` 把
    `image_base64` 摘掉；桌面侧走同名归一化路径。摘大对象本身是**故意的**
-   （base64 进历史 = 2026-09-09 图片串台事故的形状），本轮 ba12ea58 已把它改成
+   （base64 进历史 = 2026-09-09 图片串台事故的形状），本轮 7f5ddd28f 已把它改成
    "摘对象留痕迹"——归一化后落 `has_image`，感知门从此能判断"这次到底有没有图"。
    **这一层不欠账，欠的是没人消费 `has_image`**（T-09 的第一个真消费方就是它）。
 2. **请求级图片通道已经存在且成熟**：`chat_pipeline` 的
@@ -1598,7 +1598,7 @@ reset 换绑后上轮不残留、emit 在无 session 时仍进槽、缺口由具
   不是同一件事的第二个实现点。走 Anthropic provider 时，槽会被填而装配侧无人消费
   ——轮级对象随轮换绑，不泄漏、不付费，只是该能力在那条路上**尚未生效**。
   要补的是同一个 `_attachPerceptionImage` 形状，不在本批顺手改（两环请求形状不同）。
-- `has_image` 痕迹（ba12ea58）本轮成了缺口的间接凭据，但装配侧读的是槽的
+- `has_image` 痕迹（7f5ddd28f）本轮成了缺口的间接凭据，但装配侧读的是槽的
   `payload`/`gapTools`，不是 `has_image`——两处的口径不同别混读：
   `has_image` 回答"这次结果本来有没有图"，槽回答"本轮还有没有可交给模型的图"。
 
@@ -3153,7 +3153,7 @@ base/registry 的形状可用，但 `GenericAdapter` 的调用形状是错的。
   删前红灯实证 **3 failed（①目录在 ②挂载表含 /v1/model-adapter ③生产源符号命中）+ 6 passed（④六族推断）**；
   删后转绿 **9 passed**。判据④改前预验读数与施工单 §0 逐条一致（六族全落具体能力）。
 - **台账两守卫**：改前即全绿（42 passed / 1 skipped）——施工单 §0 登记的 5 条预存红
-  已被 5b8b6512 根修，基线红名集合 = ∅；删除后 `--write` 重生成台账（−4/+2，
+  已被 7d7b83488 根修，基线红名集合 = ∅；删除后 `--write` 重生成台账（−4/+2，
   model-adapter 前端模块行与后端挂载行退出清单），复跑仍 42 passed，∅ → ∅ 无新增。
 - **归档导航台账**：结构性文档树形图改动触发
   `test_archive_nav_impact_guard` 红（summary 块与扫描器漂移）——按守卫自述修法
@@ -3225,7 +3225,7 @@ base/registry 的形状可用，但 `GenericAdapter` 的调用形状是错的。
 | M3 生产源码回填一行 `from …model_adapter import get_model_adapter_registry` | 恰 1 红（④） | ④ 的符号表补上 `get_model_adapter_registry`。<br>⚠️ 这一条**原版本测不到**：它只扫 `AdapterCapabilities`/`BaseModelAdapter`，回填行里没这两个词就是绿 |
 
 **与另一批执行读数不同的三处，据实并列、不分对错**：① S1 预存红本节记的是 ∅（工单立项前已被
-5b8b6512 根修），另一批在落后 68 笔的陈旧基上实测到 5 条同名红 ⇒ 差在基线不在判据；
+7d7b83488 根修），另一批在落后 68 笔的陈旧基上实测到 5 条同名红 ⇒ 差在基线不在判据；
 ② 尺寸棘轮本节往 `agent_core_size_baseline.json` 追加了 12 行 history 条目，另一批在未追加的树上
 跑 17 passed ⇒ 该守卫只卡上界，追加属防御性写法、非必需，两种做法都不违纪律；
 ③ 活体强度以本节 §44.3 为准（真后端 `:9528` 打 socket 层），另一批只做到真 `create_app`

@@ -53,7 +53,7 @@ Neurova 知识语义栈现状以下列事实源为准（全部经本报告核对
 - **Agent 层**：`agent/chat_pipeline.py` 责任链四路检索＋`tool_executor.py` 治理化执行；无独立 Planner 抽象。
 - **前端**：`NeurUI/src/pages/GraphWorkbenchPage.vue`（本体/实例/空间三 tab，消费 `/knowledge-graph/studio`）、`KnowledgePage.vue`、`KnowledgeEvalPage.vue`。
 - **设计决策**：`docs/specs/2026-09-20-knowledge-foundation-design.md` 六项已锁定——零新增外部服务、SQLite＋本地 ONNX、**零新增第三方依赖**、形式化本体＋确定性推理属一期范围。
-- **台账现状**：KWeaver 候选 C1–C6 已全部处置（`audit-reports/simplification-audit-2026-10-05.md` §6-543..549；C1 认知安全门 commit `da0548ccd` 默认 observe、C2 出口脱敏 `b6fb05379`、C6 评测台 `d9941722f`）。
+- **台账现状**：KWeaver 候选 C1–C6 已全部处置（`audit-reports/simplification-audit-2026-10-05.md` §6-543..549；C1 认知安全门 commit `a33d0fe78` 默认 observe、C2 出口脱敏 `afb4c2af3`、C6 评测台 `d9941722f`）。
 
 ---
 

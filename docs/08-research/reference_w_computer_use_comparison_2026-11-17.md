@@ -351,16 +351,16 @@ reward==1.0（harness.py＋test_cua_sim_tasks.py）。
 
 | 候选 | 提交 | 要点 |
 |---|---|---|
-| P1-3 route 词表 | `0c721b642` | `playwright_ref` 入 ROUTES＋设计稿 §0.3 同步登记，ref 动作恢复 ActionResult 契约 |
-| P1-2 actionSent/retry | `03be1ccc3`（断言对齐 `1f98b3990`） | 契约新增两字段＋每拒绝码重试建议单源＋NEVER_RETRY 集；三类门控拒绝统一携带契约 |
-| P1-1 帧权威 | `2698573ac` | `frame_registry.py` 单源：观测发帧/变更失效/陈旧帧拒点（stale_frame，retry=reobserve）；frame_id 省略=既有行为零回归 |
-| P2-6 窗口枚举 | `0ed45f07c` | `computer_list_windows`（UIA 同源枚举）＋包 docstring「窗口管理-模拟实现」失实声明清除；远程/guest 同契约 |
-| P2-7 三动词 | `00005945c`（剪贴板根修 `25b89b6fa`） | `computer_key/paste/drag`：KEY_ALIASES 单源+键表校验；win32 剪贴板（活体抓出 64 位句柄截断真缺陷并根修）；坐标链换算拖拽 |
+| P1-3 route 词表 | `3e5abeefa` | `playwright_ref` 入 ROUTES＋设计稿 §0.3 同步登记，ref 动作恢复 ActionResult 契约 |
+| P1-2 actionSent/retry | `5e88e5dd6`（断言对齐 `955ff30ae`） | 契约新增两字段＋每拒绝码重试建议单源＋NEVER_RETRY 集；三类门控拒绝统一携带契约 |
+| P1-1 帧权威 | `f5cb4fe6a` | `frame_registry.py` 单源：观测发帧/变更失效/陈旧帧拒点（stale_frame，retry=reobserve）；frame_id 省略=既有行为零回归 |
+| P2-6 窗口枚举 | `c412919f8` | `computer_list_windows`（UIA 同源枚举）＋包 docstring「窗口管理-模拟实现」失实声明清除；远程/guest 同契约 |
+| P2-7 三动词 | `76414d258`（剪贴板根修 `a41c9a507`） | `computer_key/paste/drag`：KEY_ALIASES 单源+键表校验；win32 剪贴板（活体抓出 64 位句柄截断真缺陷并根修）；坐标链换算拖拽 |
 | P2-4 子代理策略 | `b42f32919` | `FOREGROUND_DESKTOP_TOOLS` 单源，swarm general 面整族剔除（对齐 ZCode「CUA 仅主代理」）；观察/命令面保留 |
-| P2-5 前台互斥 | `d14c851e3` | 进程级前台输入租约：跨会话 controller_busy（retry=never），同会话重入放行，finally 必释放 |
-| P3-8 等待语义 | `b3e85a805` | 「动作后必补拍」钉成契约：前台输入族必须声明补拍、观察/命令面不得补拍 |
-| P3-9 远程元数据 | `bdbb13c1f` | guest agent `screen_metadata` 动作＋宿主侧代理缓存，消除远程坐标链恒等退化 |
-| P3-10 SOM 接口化 | `2f0f3c9a3` | `SomDetector` 协议＋`get_som_detector()` 选型单点（env）＋capability_state 第 7 轴 som（如实标注启发式档） |
+| P2-5 前台互斥 | `9f0dca718` | 进程级前台输入租约：跨会话 controller_busy（retry=never），同会话重入放行，finally 必释放 |
+| P3-8 等待语义 | `67e4defde` | 「动作后必补拍」钉成契约：前台输入族必须声明补拍、观察/命令面不得补拍 |
+| P3-9 远程元数据 | `3e5e48d63` | guest agent `screen_metadata` 动作＋宿主侧代理缓存，消除远程坐标链恒等退化 |
+| P3-10 SOM 接口化 | `ad5fb4f4c` | `SomDetector` 协议＋`get_som_detector()` 选型单点（env）＋capability_state 第 7 轴 som（如实标注启发式档） |
 
 **验证证据**：computer_use 全量 778 passed（唯一失败 `test_reprobeRebuildsBackend`
 经基线 worktree A/B 实证为预存环境失败——本机缺 Chromium 内核，零新增）；关联面
@@ -368,8 +368,8 @@ reward==1.0（harness.py＋test_cua_sim_tasks.py）。
 2546 passed＋vue-tsc 0 错。活体（真后端 9577 实例）：`/api/v1/computer/status`
 七轴含 som（诚实标注启发式档）、`/doctor` 全项真探、截图 200；帧权威全链
 （发帧→新鲜→变更失效→stale_frame）、剪贴板写读回逐字一致（并当场抓出 64 位
-句柄截断缺陷，见 `25b89b6fa`）、UIA 缺失时 list_windows 诚实拒绝
-（unsupported_method）。附带：同名函数盘点台账按守卫重生成（`0d6983b36`）。
+句柄截断缺陷，见 `a41c9a507`）、UIA 缺失时 list_windows 诚实拒绝
+（unsupported_method）。附带：同名函数盘点台账按守卫重生成（`e275a4f33`）。
 
 ## 8. 增强项实施（2026-11-17，评测三项可选增强全部落地）
 
@@ -377,14 +377,14 @@ reward==1.0（harness.py＋test_cua_sim_tasks.py）。
 
 | 增强 | 提交 | 要点 |
 |---|---|---|
-| ① 重试建议上徽标 | `bf6ab0ce4` | `actionBadgeText` 追加 retry 提示（↻reobserve/↻retry/⛔never），`extractActionResult` 同步抽取 |
-| ② 拒绝可见性 | `6b9fe9eb2`（后端）＋`bf6ab0ce4`（前端） | controller_busy/运行档/审核待批三类门控拒绝在分发咽喉统一广播 computer_action——分屏面板看得见"为什么没动" |
-| ③ 窗口清单表格 | `6b9fe9eb2`（载荷）＋`bf6ab0ce4`（表格） | `windows` 进事件载荷（按需出现），ComputerUsePanel 渲染窗口表格（标题/类名/PID/前台高亮），i18n 五键×11 |
+| ① 重试建议上徽标 | `609a5a6f9` | `actionBadgeText` 追加 retry 提示（↻reobserve/↻retry/⛔never），`extractActionResult` 同步抽取 |
+| ② 拒绝可见性 | `2228572bb`（后端）＋`609a5a6f9`（前端） | controller_busy/运行档/审核待批三类门控拒绝在分发咽喉统一广播 computer_action——分屏面板看得见"为什么没动" |
+| ③ 窗口清单表格 | `2228572bb`（载荷）＋`609a5a6f9`（表格） | `windows` 进事件载荷（按需出现），ComputerUsePanel 渲染窗口表格（标题/类名/PID/前台高亮），i18n 五键×11 |
 
 **验证**：新增后端测试 5 例（拒绝广播 3＋载荷 2）与前端测试 6 例（徽标 4＋状态 2）
 均先红后绿（前端红灯以「换回 HEAD 版 composable 实跑 4 failed」取证）；全量
-vitest 2555 passed＋vue-tsc 0 错。附带清偿：并行批次 9d507ecd7 新增的三处裸
-rgba 触发色守卫，机械改令牌（`0346ac057`）。
+vitest 2555 passed＋vue-tsc 0 错。附带清偿：并行批次 e47943b24 新增的三处裸
+rgba 触发色守卫，机械改令牌（`065f72f6a`）。
 
 **过程记录（并行会话撞车处置）**：取红灯证据时 `git stash push` 与并行会话
 的 stash 操作撞车（stash@{0} 成为对方 neurova WIP，我的前端改动未受影响仍留在

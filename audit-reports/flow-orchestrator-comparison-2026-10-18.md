@@ -122,11 +122,11 @@ core 那份建档于 7835c367(2026-06-04「pyc 骨架恢复 - 全量导入修复
 来历形态（git 实证，主会话复算关键几条 ✅）：
 - collaborate 支：`git log -S "get_orchestrator" -- neurova/` **仅命中 1832a12b 一笔** ⇒ **引入即未接线**，
   没有"接入后被摘除"的提交可寻。
-- core 支：逐符号 pickaxe 命中集恒为 `{7835c367, 8a91e721, 6bff43f23}`，且
-  `from neurova.core.flow_orchestrator import` 这条 import 只由 6bff43f2(2026-09-04 测试入库) 添加
+- core 支：逐符号 pickaxe 命中集恒为 `{7835c367, 8a91e721, f16e5005a}`，且
+  `from neurova.core.flow_orchestrator import` 这条 import 只由 f16e5005a(2026-09-04 测试入库) 添加
   ⇒ 15 个符号**全部"从未被接进活链路"**（◑，主会话未逐符号复跑）。
-- 两份后来都**吃过维护成本**：6b9bc3df(2026-10-07) 懒建单例双检锁收口把两个工厂都改了、
-  f1f8722b(2026-09-21) token 尺子收口扫到了 core 的 `_count_tokens`（✅ 见各笔）。
+- 两份后来都**吃过维护成本**：1ad054250(2026-10-07) 懒建单例双检锁收口把两个工厂都改了、
+  fec11414e(2026-09-21) token 尺子收口扫到了 core 的 `_count_tokens`（✅ 见各笔）。
   ——死码不只是占地方，它每年要被机械修一遍。
 
 ---
@@ -167,7 +167,7 @@ core 那份建档于 7835c367(2026-06-04「pyc 骨架恢复 - 全量导入修复
 - `neurova/collaborate/models.py`(150)＋`template.py`(373) 这座相邻岛：主会话复算到"只有彼此＋门面再导出＋
   `test_refactor_imports.py:76-106` 形状检阅"，**但没做运行时反证**，故本卷不判它——登记为 §五甲/乙落地时的范围问题。
 - core 那 12 项相位在真实链路里的**等价覆盖率量化对比**（只做了定性：逐项有现役实现）。
-- 6bff43f2 之外是否还有被 squash 掉的接线尝试（未查 reflog／远端分支）。
+- f16e5005a 之外是否还有被 squash 掉的接线尝试（未查 reflog／远端分支）。
 
 ---
 

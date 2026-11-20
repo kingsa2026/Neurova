@@ -570,7 +570,7 @@ _open_chat_browser → webbrowser.open`（该函数在别的用例里被 patch �
 
 **收集口径更新**：`tests/benchmarks/test_multi_agent_coordination.py` 的
 `NameError: name 'Optional' is not defined`（模块级注解用到的 `Optional` 没进第 10 行的 typing 导入）
-已在本批补上该导入——它自 da9d0c9d 起入库即坏，与 §11.5 早期"未跟踪的在途件"登记是同一处。
+已在本批补上该导入——它自 f8cfaafc1 起入库即坏，与 §11.5 早期"未跟踪的在途件"登记是同一处。
 现在全量收集只需 `--ignore=tests/unit/neurflow`：`pytest tests/ --collect-only` 17616 项 / 0 错。
 
 ### 11.6 实施进度快照（E0/E1 完成、E2 判据改序、E3 提前落刀）

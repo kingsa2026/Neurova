@@ -63,9 +63,9 @@ PR #206 已合并进主线，但**源分支未按 §0 删除**。本轮复核时
 
 | 分支 | 对应合并请求 | 删除前 sha（远端头） | 处置 |
 |------|------|------|------|
-| `auto/turn-ledger-cross-task-ba7c` | #206 | 62055e8d | 已删 |
-| `auto/t10d-tool-turn-observability-90` | #207 | 0f02a27c | 已删 |
-| `auto/perf-gate-load-free-1790243293` | #185 一族的合并 | 420cd2b3 | 已删 |
+| `auto/turn-ledger-cross-task-ba7c` | #206 | c1160be71 | 已删 |
+| `auto/t10d-tool-turn-observability-90` | #207 | b554f730b | 已删 |
+| `auto/perf-gate-load-free-1790243293` | #185 一族的合并 | c70c9c4c0 | 已删 |
 
 删除后复算读数：`应当删除 0 条：[]`。
 
@@ -83,8 +83,8 @@ PR #206 已合并进主线，但**源分支未按 §0 删除**。本轮复核时
 
 | 分支 | 对应合并请求 | 删除前 sha（远端头） | 处置 |
 |------|------|------|------|
-| `auto/code-exec-sandbox-555c` | #212 | 8721b03d | 已删 |
-| `auto/relay-not-a-gate-217` | #226 | f16de573 | 已删 |
+| `auto/code-exec-sandbox-555c` | #212 | bf60ee45b | 已删 |
+| `auto/relay-not-a-gate-217` | #226 | 2469265f0 | 已删 |
 | `auto/skill-name-domain-migration-189` | #225 | eb221f2f | 已删 |
 
 三条在删除前均由判据给出双事实读数（第二父命中 = 真；是 `main` 的祖先 = 真）。
@@ -92,7 +92,7 @@ PR #206 已合并进主线，但**源分支未按 §0 删除**。本轮复核时
 
 另有一处**漏判**在本轮被记录、不当作已消解：`fix-caliber-generated`（#217 的 head，
 作者是 NPC）是旧口径下典型的漏判形态（不叫 `auto/*` 却被合并）。它在本轮开始前
-已被另一会话删除，故不再出现在远端；它的合并提交 b04d92fd 仍在主线历史里，
+已被另一会话删除，故不再出现在远端；它的合并提交 20ba4a4c9 仍在主线历史里，
 作为该形态的**常驻反证样本**留在守卫
 `tests/unit/ci/test_npc_branch_cleanup.py::TestCriterionIsMergeFactNotBranchName::testRealRepoMergeRecordYieldsNonAutoPrefixedSourceBranch` 中。
 
@@ -139,7 +139,7 @@ python scripts/ci/npc_branch_cleanup.py --json     # 机器读数
 
 | 分支 | 对应合并请求 | 删除前 sha（远端头） | 处置 |
 |------|------|------|------|
-| `auto/t11c-residual-closure-90` | #251 | a265e54a | 已删（已合入主线） |
+| `auto/t11c-residual-closure-90` | #251 | 01b60b6c1 | 已删（已合入主线） |
 
 它的 PR #251 已合并进主线、分支头也已是 `origin/main` 的祖先，两个 git 事实同时成立，
 符合第一节的口径；遗留原因与历次同型（合并后未按 §0 删分支）。
@@ -157,24 +157,24 @@ python scripts/ci/npc_branch_cleanup.py --json     # 机器读数
 
 | 分支 | 删除前 sha（远端头） | 处置 |
 |------|------|------|
-| `auto/cnb-dup-key-fix-cdab` | 34fa19a3 | 已删（已合入主线） |
-| `auto/docker-image-run-90` | 300447f0 | 已删（已合入主线） |
-| `auto/kb-index-count-single-source-38af` | 277a3972 | 已删（已合入主线） |
-| `auto/m3-prereq-turn-calls-fe2a` | 9f9bdaaa | 已删（已合入主线） |
-| `auto/m3-readout-honesty-7f3a` | 1edaf071 | 已删（已合入主线） |
-| `auto/manual-live-verify-contract-90-5892` | 8363fdfe | 已删（已合入主线） |
-| `auto/mcp-capability-declaration-9f2c` | 3e294515 | 已删（已合入主线） |
-| `auto/npc-auto-continue-272` | 9d06e58f | 已删（已合入主线） |
-| `auto/npc-branch-ledger-251-0d34` | 2334488d | 已删（已合入主线） |
-| `auto/npc-four-roles-max-272` | 88230ed2 | 已删（已合入主线） |
-| `auto/npc-handoff-role-continuity-dac7` | 362c7187 | 已删（已合入主线） |
-| `auto/npc-restore-dscoder-max-272` | 76ea24b0 | 已删（已合入主线） |
-| `auto/relay-carrier-env-pairing-256` | 5ba66b00 | 已删（已合入主线） |
-| `auto/t90-status-closure-86db` | 2cfaf23d | 已删（已合入主线） |
-| `auto/timeline-frontend-consumer-262` | 77a06854 | 已删（已合入主线） |
-| `auto/tool-batch-parallel-7c4e` | 2f3acf4b | 已删（已合入主线） |
-| `fix/chat-stream-survives-page-navigation` | f0a7d935 | 已删（已合入主线） |
-| `fix/tool-round-assistant-declaration` | c5abbcdf | 已删（已合入主线） |
+| `auto/cnb-dup-key-fix-cdab` | 60612fc82 | 已删（已合入主线） |
+| `auto/docker-image-run-90` | 5870a8512 | 已删（已合入主线） |
+| `auto/kb-index-count-single-source-38af` | 090d976ab | 已删（已合入主线） |
+| `auto/m3-prereq-turn-calls-fe2a` | 7e8b36932 | 已删（已合入主线） |
+| `auto/m3-readout-honesty-7f3a` | ac571f81a | 已删（已合入主线） |
+| `auto/manual-live-verify-contract-90-5892` | dc44215a8 | 已删（已合入主线） |
+| `auto/mcp-capability-declaration-9f2c` | 07af59f31 | 已删（已合入主线） |
+| `auto/npc-auto-continue-272` | f528d9197 | 已删（已合入主线） |
+| `auto/npc-branch-ledger-251-0d34` | 3af4c5a96 | 已删（已合入主线） |
+| `auto/npc-four-roles-max-272` | ab4241465 | 已删（已合入主线） |
+| `auto/npc-handoff-role-continuity-dac7` | eb7ac91fe | 已删（已合入主线） |
+| `auto/npc-restore-dscoder-max-272` | d693a55ba | 已删（已合入主线） |
+| `auto/relay-carrier-env-pairing-256` | 4e0c36a00 | 已删（已合入主线） |
+| `auto/t90-status-closure-86db` | b44ae20ce | 已删（已合入主线） |
+| `auto/timeline-frontend-consumer-262` | 524dc708c | 已删（已合入主线） |
+| `auto/tool-batch-parallel-7c4e` | 69d7cd9e1 | 已删（已合入主线） |
+| `fix/chat-stream-survives-page-navigation` | 2038d8cca | 已删（已合入主线） |
+| `fix/tool-round-assistant-declaration` | fcc034139 | 已删（已合入主线） |
 
 删除后复算读数：`应当删除 0 条：[]`（`keep` 的 `auto/m3-nodata-fork` 是在途 PR #281
 的源分支，照旧保留）。
@@ -193,9 +193,9 @@ commit 的第二父（两个 git 事实逐条独立复算）：
 
 | 分支 | 对应合并请求 | 删除前 sha（远端头） | 处置 |
 |------|------|------|------|
-| `auto/goalgate-round-budget-single-source-310` | #316 | 36c72b54 | 已删（已合入主线） |
-| `auto/npc-gate-script-reachability-314` | #315 | 55c71a86 | 已删（已合入主线） |
-| `auto/turn-run-invariants-slice-c-310` | #313 | 426921f3 | 已删（已合入主线） |
+| `auto/goalgate-round-budget-single-source-310` | #316 | 66ac054ad | 已删（已合入主线） |
+| `auto/npc-gate-script-reachability-314` | #315 | 14a97dd83 | 已删（已合入主线） |
+| `auto/turn-run-invariants-slice-c-310` | #313 | a177be11c | 已删（已合入主线） |
 
 三条都是 **NPC 会话（`auto/*`）** 的产物，且都被合并请求带进主线——即 §0 那句
 "合并后必须收口"的典型命中。删除后复算读数：**应当删除 0 条：[]**。

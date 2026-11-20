@@ -242,7 +242,7 @@ P1（E1–E4）已落地：提交 `625b994a8`。
 
 用户对遗留项逐项拍板：P2 全量实施、做远程召回、agent 域 9 条预存失败清偿、推送双远端。
 
-- **agent 域 9 条预存失败清偿**（`32c199965`）：tkg 桩补 `allowedCategories` 形参；快照按维护协议退役 `Agent.chat_stream`（a334ffb05 假流式收编进 `agent.chat(stream=True)`）与 `Agent.spawn_subagent`（6312384c7 SubAgentManager 并入退役，派单走 SwarmManager）并写明去向；failureLanding 的 chat_stream 守卫随之退役、改版出**现役流式分支失败落点守卫**（`agent.chat(..., stream=True)` 注入 `llm_client.chat_stream` 失败仍落 assistant 终态）；`toolLoopDeadlines.txt` 六行补记 `loop_gates_compiler` 新引用站（3→4 / 5→6，循 8f9adfe50「改回实状」先例）。agent 全域 2110 passed 全绿。
+- **agent 域 9 条预存失败清偿**（`32c199965`）：tkg 桩补 `allowedCategories` 形参；快照按维护协议退役 `Agent.chat_stream`（a334ffb05 假流式收编进 `agent.chat(stream=True)`）与 `Agent.spawn_subagent`（6312384c7 SubAgentManager 并入退役，派单走 SwarmManager）并写明去向；failureLanding 的 chat_stream 守卫随之退役、改版出**现役流式分支失败落点守卫**（`agent.chat(..., stream=True)` 注入 `llm_client.chat_stream` 失败仍落 assistant 终态）；`toolLoopDeadlines.txt` 六行补记 `loop_gates_compiler` 新引用站（3→4 / 5→6，循 88d53deee「改回实状」先例）。agent 全域 2110 passed 全绿。
 - **远程召回**（`85fe74baa`）：`recall_published_copy` 仅源租户 admin、仅作用于 `origin_*` 吻合的本源外发副本；副本 lifecycle 置 archived（各检索/读面即刻不可见）并打 `origin_recall` 留证——治理下架而非销毁；端点 `POST /{knowledge_id}/recall-copy` + 审计。
 - **P2 全量**（`d10dad497`）：
   - v57：`enterprise_source_configs.share_tenants_json`（saveConfig 显式回填，防 INSERT OR REPLACE 清零）；

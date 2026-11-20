@@ -14,7 +14,7 @@
 |----|------|
 | 任务性质 | 只读盘点，**先出报告等点单，零点单不动码**（既定任务分发口径） |
 | 范围 | 全库 5862 个跟踪文件（`git ls-files | wc -l` 现算） |
-| 基准 | main @ 196e14a4（知识库三时间戳台账落格），工作树 clean |
+| 基准 | main @ c58b2809a（知识库三时间戳台账落格），工作树 clean |
 | 方法 | 主会话侦察定界 → 六个互不重叠批次并行只读子代理 → 主会话对 P1 头部断言逐条复算 → 汇总分级 |
 | 去重纪律 | 每报一条先 grep 旧台账 `audit-reports/simplification-audit-2026-10-05.md`（1.1 万行），已收且无恶化不重报 |
 | 预算纪律 | 吸取旧台账执行事故教训（150 次工具调用截断、maxTurns 空手），**每批显式封顶 40 次工具调用，先广 grep 后精读，宁可少而实** |
@@ -31,7 +31,7 @@
 
 - 规模现算：`git ls-files | wc -l` = **5862**；顶层分布 neurova 1074 / tests 2667 / NeurUI 839 / docs 491 / Mobile/harmony 260 / scripts 103 / audit-reports 39 / models 32 / helm 21 / embedding 13，余为散件。
 - 二级分布：neurova/api 140、cognitive_layers 103、knowledge 81、core 78、agent 76、collaboration 65、evolution 61、channels 61、llm 55、skills 54、security 37、context 31（其余见 §3 批次表）；NeurUI/src 630、src-tauri 168。
-- 台账定位：最近一笔 docs(audit) 提交（196e14a4）改动 `audit-reports/simplification-audit-2026-10-05.md` ⇒ **该文件即现役台账**；读其头部（v2 三态口径 A 可删/B 需人裁/C 该接线）与 §6 缺陷格格式（一档逐项档案、file:line + 来历 + 影响面 + 判定），本批产出格式与之对齐。
+- 台账定位：最近一笔 docs(audit) 提交（c58b2809a）改动 `audit-reports/simplification-audit-2026-10-05.md` ⇒ **该文件即现役台账**；读其头部（v2 三态口径 A 可删/B 需人裁/C 该接线）与 §6 缺陷格格式（一档逐项档案、file:line + 来历 + 影响面 + 判定），本批产出格式与之对齐。
 - 尾号现算：`grep "§6-516"` 落在该台账 ⇒ 后继自 §6-517 起。
 
 ### T1 · 六批次并行派发
@@ -83,7 +83,7 @@
 
 ### 批 C · 业务服务面（重点：三时间戳新批接线完整性）
 - 范围：`neurova/knowledge/`、`neurova/llm/`、`neurova/memory/`、`neurova/memory_ingest/`、`neurova/channels/`、`neurova/api/endpoints/` 与路由装配、`neurova/models/`、`neurova/embedding/`。
-- 背景：3985d934 / d3ab8f4e / 196e14a4 三笔（三时间戳批）刚落地；已登记尾巴 TD② 不算新发现。审的是入库写入→存储→查询过滤→消费方的闭环，及 epoch 秒/毫秒/ISO 双轨混用、新端点三处登记、输入校验。
+- 背景：e61d59367 / f69a06de9 / c58b2809a 三笔（三时间戳批）刚落地；已登记尾巴 TD② 不算新发现。审的是入库写入→存储→查询过滤→消费方的闭环，及 epoch 秒/毫秒/ISO 双轨混用、新端点三处登记、输入校验。
 
 ### 批 D · 其余子系统死码/双源
 - 范围：`neurova/skills/`、`evolution/`、`collaboration/`、`cognitive_layers/`、`tool_layers/`、`plugins/`、`computer_use/`、`tts/`、`asr/`、`aigc_studio/`、包根 `__init__` 链。
@@ -184,7 +184,7 @@
 产生于 `repository.py:2160`（time_context）与 `:2113-2145`（`_conflictTimeContext`）；透出于 `knowledge_sharing.py:87-89`（entry 轴整行透传）、`knowledge_core.py:401`（详情 `**entry`）；前端零消费（全仓 grep time_context/newer_side 仅 repository.py 一处；`KnowledgePage.vue:230-252` 冲突队列只渲染 axis/kind/severity/policy）。影响面：newer_side/两侧源修改时间/basis 已随冲突接口发出，但裁决人在 UI 看不到任何时间读数——"给裁决者时间信号"的设计目的到不了人，属只写不读；且给人"功能已闭环"错觉。处置：KnowledgePage 冲突行/详情补 time_context 展示（i18n 11 语言随批），或明确登记进台账尾巴。
 
 **P2-9 ◑ `collaboration/seen_cursor.py` 479 行失去最后调用方，与 glance_yield_rules 构成同功能双实现**
-- 来历：旧账 §3-B7 记 `coordination_decorators.py:47` 是其外部唯一调用方；189bc226（2026-10-07，让位执行体收成一份）删除 coordination_decorators.py 后，新鲜度能力由 `glance_yield_rules.py:107/:393`（内存版 `_seen_sequences` + preflight）承担；`coordination_api.py:42-46` 注释显式弃守 `/seen-boundary/*` 并点名 seen_cursor——全仓已无任何代码调用它。
+- 来历：旧账 §3-B7 记 `coordination_decorators.py:47` 是其外部唯一调用方；e6da395dc（2026-10-07，让位执行体收成一份）删除 coordination_decorators.py 后，新鲜度能力由 `glance_yield_rules.py:107/:393`（内存版 `_seen_sequences` + preflight）承担；`coordination_api.py:42-46` 注释显式弃守 `/seen-boundary/*` 并点名 seen_cursor——全仓已无任何代码调用它。
 - 影响面：接线的话，SeenCursorManager 提供带 SHA256 去重、持久化到 data_root 的新鲜度预检（防协作操作重复执行），可替代现役内存版"重启即失"的游标；不接线/删除的话，失去持久化级新鲜度游标，479 行及其测试退役，无端点行为变化。
 - 处置：**待拍板**——或删（教义 7 已选定 glance_yield_rules 那份，479 行属"接通后未退役清理"残留），或反向接线换得持久化。二选一，不许并存。
 
@@ -195,7 +195,7 @@
 `NeurUI/src/stores/utils.ts:16-130`（handleStoreError/logStoreOperation/mapApiResponse/snakeToCamel/camelToSnake/safeGet/deepMerge 七个导出，`from '@/stores/utils'` 全仓 0 引用）。store 各自已在别处实现错误处理/字段名转换，留着即第二个候选事实源。处置：确认无动态引用后整文件删。
 
 **P2-12 ◑ 知识条目时间戳类型声明与运行时口径相反**
-`NeurUI/src/api/modules/knowledge.ts:19-20/:762` 声明 `created_at?: string`；后端实发 epoch 秒（`repository.py:850/:887` `...timestamp()`；旁证 `fts_index.py:102` 对 updated_at 做 float()）；页面用 `formatEpochSecondDate`（秒口径）渲染是对的，TS 层靠 antd 宽类型穿透才没红。同文件 revisions 的 `updated_at` 又真是 ISO（`repository.py:875-876`）——同名字段两种量纲全靠声明区分。影响面：三时间批（d3ab8f4e）刚落地，`source_created_at/source_modified_at`（ISO）与 `created_at`（秒）双轨并存，下一个消费方若信类型声明按 ISO 处理 created_at，即复现 `displayText.ts:39` 钉过的"全表 1970/Invalid Date"回归。处置：主条目 created_at/updated_at 改 `number`，与 `AnnotationItem:250-251` 对齐。
+`NeurUI/src/api/modules/knowledge.ts:19-20/:762` 声明 `created_at?: string`；后端实发 epoch 秒（`repository.py:850/:887` `...timestamp()`；旁证 `fts_index.py:102` 对 updated_at 做 float()）；页面用 `formatEpochSecondDate`（秒口径）渲染是对的，TS 层靠 antd 宽类型穿透才没红。同文件 revisions 的 `updated_at` 又真是 ISO（`repository.py:875-876`）——同名字段两种量纲全靠声明区分。影响面：三时间批（f69a06de9）刚落地，`source_created_at/source_modified_at`（ISO）与 `created_at`（秒）双轨并存，下一个消费方若信类型声明按 ISO 处理 created_at，即复现 `displayText.ts:39` 钉过的"全表 1970/Invalid Date"回归。处置：主条目 created_at/updated_at 改 `number`，与 `AnnotationItem:250-251` 对齐。
 
 **P2-13 ◑ OAuth 把 app_secret 拼进 URL query 后 window.open 无 noopener**
 `NeurUI/src/modules/collaboration/CanvasStoreDrawer.vue:194-200`：URLSearchParams 含 app_secret 直接拼进 GET authorize URL；secret 进浏览器历史、可能进服务端 access log 与 Referer。后端 `neurflow_stores.py:230` 确以 query 收参（双端同病，前端可先自救）。同文件 window.open 未带 'noopener'（对照 `MdPreviewPanel.vue:61` 已带，同仓两种口径）。影响面：多平台店铺 OAuth 接入链路（taobao/jd/pdd/douyin 等 8 个 Tier 2 平台）。处置：改 POST 表单或一次性 code；window.open 补 'noopener'。
@@ -325,7 +325,7 @@ association_cues 三件、evolution 七新件（blind_selection/deterministic_ju
 - **◑ 项未经主会话逐条二次复核**：P1 头部断言已复算（§8），P2/P3 依赖子代理取证；点单落格前建议按台账惯例对将落格条目逐条复算（✅ 化）。
 - **预算内未深查的点名**：cost_store.py 五处 except、mermaid securityLevel、channel-configs conflicts 前缀、hooks_engine shell=True 威胁模型（均在存疑区）。
 - **并发事故**：首波 6 并发超本机并发上限三批未启动（§2-T1），已重派补齐；该上限值本身未探明，后续大批次建议 ≤3 并发。
-- **时间快照**：结论基于 main @ 196e14a4 与当日工作树；三时间戳批后续若有新提交，P1-4/P1-5/P2-5/P2-8/P2-12 需对最新基线重核。
+- **时间快照**：结论基于 main @ c58b2809a 与当日工作树；三时间戳批后续若有新提交，P1-4/P1-5/P2-5/P2-8/P2-12 需对最新基线重核。
 
 ---
 
@@ -346,7 +346,7 @@ association_cues 三件、evolution 七新件（blind_selection/deterministic_ju
 
 ## 11. P1 处置进度与核验记录（2026-11-04）
 
-> P1×8 已按 §10 处置序①-④修复落库（`31560d222` fix(security)＝批①②、`333a0e5b1` fix(desktop)＝P1-6，前端死码批 P1-7/P1-8 随前端提交收口）。
+> P1×8 已按 §10 处置序①-④修复落库（`27f728655` fix(security)＝批①②、`cf5f25605` fix(desktop)＝P1-6，前端死码批 P1-7/P1-8 随前端提交收口）。
 > 本节为**独立核验记录**：逐项 HEAD 现读原文 + 重跑测试门 + 真实链路活体。结论：**8/8 修复并核验通过**。
 
 | 项 | 修复实状（HEAD 现读） | 测试门 | 活体 / 实测 |
@@ -375,10 +375,10 @@ association_cues 三件、evolution 七新件（blind_selection/deterministic_ju
 
 | 项 | 裁定与结论 | 落库/证据 |
 |----|------|------|
-| P1-1 角色级收口 | **分级收口**：DELETE/PUT/download-source/download → `deps.require_admin()`（现役角色门，audit.py 同源）；/switch、/probe-*、/check-connection 保持登录（探针读型、切模型是 agent 工作面） | `efd1dd3f`；TestRoleGate 6 用例红→绿；test_model_download_api 假身份补 role 键跟随 |
-| P2-1 运维指标暴露 | **限环回**：/metrics、/health/detailed 移入 `LOOPBACK_ONLY_PUBLIC_PATHS`，中间件按 client 判环回；/health 保持全公开（healthcheck 面不回退）；持凭证外部读不受影响 | `efd1dd3f`；7 用例纯 ASGI 直驱；live-verify 隔离实例 0.0.0.0:19527＋enforce：非环回 /metrics **401**、环回 200、非环回 /health 200 |
+| P1-1 角色级收口 | **分级收口**：DELETE/PUT/download-source/download → `deps.require_admin()`（现役角色门，audit.py 同源）；/switch、/probe-*、/check-connection 保持登录（探针读型、切模型是 agent 工作面） | `a911e3d41`；TestRoleGate 6 用例红→绿；test_model_download_api 假身份补 role 键跟随 |
+| P2-1 运维指标暴露 | **限环回**：/metrics、/health/detailed 移入 `LOOPBACK_ONLY_PUBLIC_PATHS`，中间件按 client 判环回；/health 保持全公开（healthcheck 面不回退）；持凭证外部读不受影响 | `a911e3d41`；7 用例纯 ASGI 直驱；live-verify 隔离实例 0.0.0.0:19527＋enforce：非环回 /metrics **401**、环回 200、非环回 /health 200 |
 | P2-2 凭据 keyfile | **延后登记**（威胁模型弱：仅同机文件读权限；桌面单机形态收益有限）：尾巴＝「接 OS 级保护（DPAPI/Keychain），触发条件：多端同步或凭据面扩大」 | 零改动，本格即登记 |
-| cargo check 遗留 | **根因不在代码**：仓级 `.cargo/config.toml` 把 link.exe 钉死在 C:/Program Files (x86)/.../BuildTools/ 标准位，VS2022 实装已迁 `E:\neurova-build-tools\VS2022`（P2-14 同类硬编码路径病）。去钉后 rustc 原生 vswhere 探测可用：`--config` 覆盖真路径 50.58s Finished（lib.rs P1-6 校验代码可编实证）→ 零注入干净环境 52.05s Finished | `680e0ea8`；cargo check 全绿 |
+| cargo check 遗留 | **根因不在代码**：仓级 `.cargo/config.toml` 把 link.exe 钉死在 C:/Program Files (x86)/.../BuildTools/ 标准位，VS2022 实装已迁 `E:\neurova-build-tools\VS2022`（P2-14 同类硬编码路径病）。去钉后 rustc 原生 vswhere 探测可用：`--config` 覆盖真路径 50.58s Finished（lib.rs P1-6 校验代码可编实证）→ 零注入干净环境 52.05s Finished | `0d9ee0af9`；cargo check 全绿 |
 | P2-9 seen_cursor | **已接线**（另一会话批）：`coordination_api.py` / `agent_workspaces.py` / `agent_layout_migration.py` 有生产消费方——479 行不再是孤儿 | HEAD 现读 |
 | P2-10 browser_capability | **已接线**（另一会话批）：`context/orchestrator.py` 消费 | HEAD 现读 |
 | P2-8 time_context | **已接 UI**（另一会话批）：KnowledgePage.vue 冲突队列已渲染 time_context | HEAD 现读（3 处命中） |

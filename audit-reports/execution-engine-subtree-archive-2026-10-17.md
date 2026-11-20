@@ -108,8 +108,8 @@ READOUT {'constructs': {'ExecutionEngine.__new__': 1, 'ExecutionEngine._init_com
 - 原功能：`ExecutionResult` dataclass（:32-77，含 `to_dict`/`from_dict`）＋ `_executions` 字典 ＋
   `get_execution_result`(:374)/`list_executions`(:378)/`cancel_execution`(:390) 三个读口。
 - 关键入口：写侧只有 A1/A2/A3 三处；读侧就是这三个。
-- 来历：同 A1。`get_execution_result` 的字符串在历史里变过号：4561fbd1(2026-09-29 T-09 死码处置批) 与
-  b52acab5(2026-09-23 T-01 判据基础设施) ——那是**别模块同名符号**的变动，本类的读口从未被外部取用。
+- 来历：同 A1。`get_execution_result` 的字符串在历史里变过号：0d831fd69(2026-09-29 T-09 死码处置批) 与
+  335b051fd(2026-09-23 T-01 判据基础设施) ——那是**别模块同名符号**的变动，本类的读口从未被外部取用。
 - 现役替代：执行记录这件事在本仓的真落点是 `core/agent_run_ledger`（运行台账）与 neurflow 的 `event_recorder`／
   `checkpoint`；这份进程内 dict 既非单源也不落盘。三个读口 import 通道复算全 0。
   **同名陷阱**：`ExecutionResult` 在 `neurova/execution_layers/__init__.py:96` 有**另一个类**，
@@ -137,8 +137,8 @@ READOUT {'constructs': {'ExecutionEngine.__new__': 1, 'ExecutionEngine._init_com
 | 7835c367(2026-06-04) pyc 骨架恢复 | 从 .pyc 反推全量导入，骨架即未接线 | A1/A2/A4/A5 的出生 |
 | 806c7047(2026-06-06) 145 文件批量更新 | 批量补体，从不接消费方 | A1/A2 补全 |
 | 8cdbd34f(2026-09-04) 并行批次落库 | 转发 shim 与它自己的契约测试**同笔**入库 | A3 自产自销 |
-| 6bff43f2(2026-09-04) 解除 `tests/` 整目录忽略、809 测试入库 | 私人笔记形状升格为"看起来有覆盖" | `shared_brainstem` 那类 test-only 面（见 D3） |
-| 2a50f542(2026-10-12) 三套零接线编排器退役（§6-157/§6-166） | **只删了消费方，留下被孤立的实现** | D3：`multi_agent_manager` 仍留注入参数与 docstring 宣称 |
+| f16e5005a(2026-09-04) 解除 `tests/` 整目录忽略、809 测试入库 | 私人笔记形状升格为"看起来有覆盖" | `shared_brainstem` 那类 test-only 面（见 D3） |
+| 7ae68f417(2026-10-12) 三套零接线编排器退役（§6-157/§6-166） | **只删了消费方，留下被孤立的实现** | D3：`multi_agent_manager` 仍留注入参数与 docstring 宣称 |
 
 清退顺序建议按事件反向：先收 shared_core（A1-A5），再收它牵出的 legacy 模块（A3 乙），最后收
 `multi_agent_manager` 那条恒不命中支路（D3，独立一批）。
@@ -153,7 +153,7 @@ READOUT {'constructs': {'ExecutionEngine.__new__': 1, 'ExecutionEngine._init_com
 - **D3 · `MultiAgentManager` 是一个没有调用方的共享组件壳**。`initialize_shared_components`(:97) 全仓零调用
   （只有测试类名 `TestInitializeSharedComponents` 提到）；`_plan_orchestrator` 恒 None ⇒ `:221-223` 那条
   "共享小脑执行"支路恒不命中；而 `:6` 的 docstring 仍宣称"所有 Agent 共用 PlanOrchestrator（小脑）、
-  ExecutionEngine（脑干）和 Infrastructure（脊髓）"。`shared_brainstem` 只存在于 6bff43f2 那次批量入库的测试里。
+  ExecutionEngine（脑干）和 Infrastructure（脊髓）"。`shared_brainstem` 只存在于 f16e5005a 那次批量入库的测试里。
   ⇒ 散文陈述与实状不符 ＋ 恒不命中支路，另批处理。
 - **D4 · `neurova/tool_executor.py:5602` docstring 与代码不符**（批 73 已登记，此处只作同族互引）。
 - **D5 · `neurova/core/flow_orchestrator.py` 在 `neurova/` 内零引用**（**未深扫**，见第 7 节）。

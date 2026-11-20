@@ -2,7 +2,7 @@
 
 **审计性质**:只读静态审计(10 面并行)→ 统筹合并。非 test pass 报告;未跑全量测试、未改任何文件。
 
-**基线**:统筹盘点时 HEAD `0be8050c`;各面以任务内 `git rev-parse`/工作树现状为准(轮次内工作树非洁:多会话在途 M/R/RM,行号多为工寸现读数,提交判据另 `git log -1 -- <file>`)。约 55 项在途改动横跨 docs/、audit-reports/、少量 neurova/、tests/。
+**基线**:统筹盘点时 HEAD `3b68ad3ca`;各面以任务内 `git rev-parse`/工作树现状为准(轮次内工作树非洁:多会话在途 M/R/RM,行号多为工寸现读数,提交判据另 `git log -1 -- <file>`)。约 55 项在途改动横跨 docs/、audit-reports/、少量 neurova/、tests/。
 
 **方法口径**:每面按热度/扇出定向深读 + 全局 grep/引用扫描(个别面自建 AST 扫描脚本);基于"全链路即可追溯 + 修复纪律七条 + 唯一事实源/单一契约"审;修复纪律§1-7、测试禁写法(MagicMock 冒充业务对象/恒真/绕过生产装配)、R4 类守卫红绿、liveness 检查(死面须点名数据流向与功能面)。非文本/二进制/生成物(见 §6)按存在性/排除处理。原宣称"逐一审计所有文件":执行口径为**分面全覆盖 + 定向深判**,非字面每行通读。
 
@@ -30,7 +30,7 @@
 - **文档标已退役模块"✅ 已实现"** `[docs 01-architecture]`:`COMPLETE_MODULES.md:22` 等(state_manager/api_standard/ConfigManager 等 `git ls-files` 0 命中;FUNCTIONALITY_ANALYSIS.md:48/310/317、PHASE5_DEVELOPMENT_PLAN.md:143、plugin-architecture-design.md:532/536/826/971-972)。带 2026-10-20 历史横幅的 `NEUROVA_CogArch_2.0.md` 宽恕面大;其余按"历史快照+已退役"刷表。
 - **skills 面裁定记录** `[knowledge/skills]`:`FactSurface`/`mergeIntoLegacy` 测试触达、生产调用零,但 `read_surface.py` docstring 引工单011 真数据否证两池交织 → 不回档"漏接线",提案台账可检索留存;**不预设待用户拍板**(子代理 originally 建议,综述判"已有记录裁定")。
 - **08-research 改名波引用面未刷** `[docs]`:约 19 对重命名 + 若干 in-place RM;≥12 非 08-research 文件、≥30 行仍引旧名(token 命中 INDEX.md/0-index/04-* /specs 等);终评正文相对链指向 MISSING 路径(落点文件名已存在)。INDEX"保留原文"注解针对目录级。
-- **Mobile 配对 scheme 面** `[Mobile]`:`neurova://pair` Android 有 intent-filter(注释自称两端同一事实源),鸿蒙入库面未见同类 → 鸿蒙端是否闭**待数**;Capacitor 退役证据成立(`ad05c46fd`,现 `git ls-files` 无 web 资产残留);签名物 `.p12`/`passwords.local.md` 等 ignore 自洽(位置形态,不展开);token 类键名持久化面未逐读。
+- **Mobile 配对 scheme 面** `[Mobile]`:`neurova://pair` Android 有 intent-filter(注释自称两端同一事实源),鸿蒙入库面未见同类 → 鸿蒙端是否闭**待数**;Capacitor 退役证据成立(`43b80317f`,现 `git ls-files` 无 web 资产残留);签名物 `.p12`/`passwords.local.md` 等 ignore 自洽(位置形态,不展开);token 类键名持久化面未逐读。
 - **docs 计数/态叙述漂移样本**:记录"14+ 渠道/42 py" vs `neurova/channels` 62 py;"82 端点模块" vs `api/endpoints` 274 文件(口径疑路由/注册,**未核不下结论**);"60 页面" vs NeurUI pages 237 文件(未核);肌肉记忆 ✅ 与文件面存在(未跑测试)。
 - **`docs/.cf_doc.md`/`.roles.md`**:已跟踪、外部 ASP 内容误置 docs 根(各 ~198KB),记态、**不改**。
 
@@ -76,11 +76,11 @@
 
 **复核结论**：本报告主体属实；三处更正——① §A 复跑附带现状里「R5-env 死配置」系误报：`NEUROVA_MASTER_RECOVERY_PASSWORD` 经 `auth.py` 的 `_MASTER_RECOVERY_PASSWORD_ENV` 常量真被 `os.environ.get` 读取（守卫扫描器不解析常量间接），helm `deployment-backend.yaml:102` 注入同样有效；② §B2 所指 swarm.py 已无在途 diff，且 `current_user_id` 是 turn_state 明文的「唯一通道直读转发」，真问题仅是台账行被发送者优先顶掉属主裁定；③ §D「notifications auth_code 明文」实际在 `negative_screen_settings.py`（响应侧已 masked），「单条读无属主」实为仅测试消费、无 HTTP 暴露的 `manager.get_notification`。
 
-**已修复（每笔先红后绿+回归）**：R4 Chart beta14（a606f3bf8）；R5 守卫常量间接（a7213a8e0）；B1 webhook 属主门六端点 + live-verify 12/12（34decf4f2）；B2 子代理台账身份属主优先（51ed34649）；C1 usage.agent_id 接 cost_tracking 既有上下文（0c5507af2）；C3 保护清单两条目随 `8003eb949` 改名迁移+退役署名（ec48d4912）；C4 四份历史快照文档补沿革横幅（30369f0c6）；C6 改名引用面扫荡+断链清零（673 条 0 BROKEN）+0-index 补登 12 份+重复终评件退役（037b73bdd）；C8 端点计数对齐现读 115 路由模块/136 .py（c508bd548）；D 组 plugin grants 内层校验（cd76105bf）、`_is_youtube_url` host 边界（268f377cc）、发布脚本版本单源+删死链（450fe9666）、start.sh .venv 优先（49c923da9）；另清偿登记史守卫预存红——字面 `\n` 坏行拆解+两笔历史退役署名（4cc505d43）。
+**已修复（每笔先红后绿+回归）**：R4 Chart beta14（a606f3bf8）；R5 守卫常量间接（a7213a8e0）；B1 webhook 属主门六端点 + live-verify 12/12（34decf4f2）；B2 子代理台账身份属主优先（51ed34649）；C1 usage.agent_id 接 cost_tracking 既有上下文（0c5507af2）；C3 保护清单两条目随 `8003eb949` 改名迁移+退役署名（ec48d4912）；C4 四份历史快照文档补沿革横幅（30369f0c6）；C6 改名引用面扫荡+断链清零（673 条 0 BROKEN）+0-index 补登 12 份+重复终评件退役（037b73bdd）；C8 端点计数对齐现读 115 路由模块/136 .py（c508bd548）；D 组 plugin grants 内层校验（cd76105bf）、`_is_youtube_url` host 边界（268f377cc）、发布脚本版本单源+删死链（450fe9666）、start.sh .venv 优先（49c923da9）；另清偿登记史守卫预存红——字面 `\n` 坏行拆解+两笔历史退役署名（5421cc6b3）。
 
-**已修复（每笔先红后绿+回归）**：R4 Chart beta14（a606f3bf8）；R5 守卫常量间接（a7213a8e0）；B1 webhook 属主门六端点 + live-verify 12/12（34decf4f2）；B2 子代理台账身份属主优先（51ed34649）；C1 usage.agent_id 接 cost_tracking 既有上下文（0c5507af2）；C3 保护清单两条目随 `8003eb949` 改名迁移+退役署名（ec48d4912）；C4 四份历史快照文档补沿革横幅（30369f0c6）；C6 改名引用面扫荡+断链清零（673 条 0 BROKEN）+0-index 补登 12 份+重复终评件退役（037b73bdd）；C8 端点计数对齐现读 115 路由模块/136 .py（c508bd548）；D 组 plugin grants 内层校验（cd76105bf）、`_is_youtube_url` host 边界（268f377cc）、发布脚本版本单源+删死链（450fe9666）、start.sh .venv 优先（49c923da9）；另清偿登记史守卫预存红——字面 `\n` 坏行拆解+两笔历史退役署名（4cc505d43）。
+**已修复（每笔先红后绿+回归）**：R4 Chart beta14（a606f3bf8）；R5 守卫常量间接（a7213a8e0）；B1 webhook 属主门六端点 + live-verify 12/12（34decf4f2）；B2 子代理台账身份属主优先（51ed34649）；C1 usage.agent_id 接 cost_tracking 既有上下文（0c5507af2）；C3 保护清单两条目随 `8003eb949` 改名迁移+退役署名（ec48d4912）；C4 四份历史快照文档补沿革横幅（30369f0c6）；C6 改名引用面扫荡+断链清零（673 条 0 BROKEN）+0-index 补登 12 份+重复终评件退役（037b73bdd）；C8 端点计数对齐现读 115 路由模块/136 .py（c508bd548）；D 组 plugin grants 内层校验（cd76105bf）、`_is_youtube_url` host 边界（268f377cc）、发布脚本版本单源+删死链（450fe9666）、start.sh .venv 优先（49c923da9）；另清偿登记史守卫预存红——字面 `\n` 坏行拆解+两笔历史退役署名（5421cc6b3）。
 
-**接手批补遗（2026-11-19，用户裁定后执行）**：R7 production 副本收回 1（f510f95fa）；INTENT_WEIGHTS 两表互指注记 + browser 抓页 SSRF 豁免注记（f05ad2260）；C9 外部厂商文档移 docs/external/（d506ca49f）；swarm member 成本上下文绑定/还原（c35c0168f）；user_id 哨兵常量单源（a98965321）；sandbox 句柄全路径回收（7b8596520/233d47a55）；计费诚实批——mock usage 报 0 + 未知模型计价缺目警告（86e4cdd07）；脚本卫生批——port_guard 兜底告警 + .scanignore 补敏感面（fef5c01ba）；G6 outcome 契约词单源（dce0c7081）；C7 鸿蒙配对深链 neurova://pair（cca951fee，hvigor 真构建通过）；NeurUI 按钮色令牌化 + tokens 同步守卫（2db50337b）；eslint 平面配置立项 + 存量违规清零 + CI lint 门（dbeec0a04）；**语音批——ASR 测试态 mock 全局链污染改本地副本、TTS 默认链摘 mock（对齐 ASR 补课 4.1）、Agent 默认 asr_engine mock→auto、落 mock 打警告 + stats mock_active（e684ce253；语音往返 live-verify 复跑全过）**。
+**接手批补遗（2026-11-19，用户裁定后执行）**：R7 production 副本收回 1（f510f95fa）；INTENT_WEIGHTS 两表互指注记 + browser 抓页 SSRF 豁免注记（f05ad2260）；C9 外部厂商文档移 docs/external/（d506ca49f）；swarm member 成本上下文绑定/还原（c35c0168f）；user_id 哨兵常量单源（a98965321）；sandbox 句柄全路径回收（233d47a55/233d47a55）；计费诚实批——mock usage 报 0 + 未知模型计价缺目警告（86e4cdd07）；脚本卫生批——port_guard 兜底告警 + .scanignore 补敏感面（fef5c01ba）；G6 outcome 契约词单源（dce0c7081）；C7 鸿蒙配对深链 neurova://pair（cca951fee，hvigor 真构建通过）；NeurUI 按钮色令牌化 + tokens 同步守卫（2db50337b）；eslint 平面配置立项 + 存量违规清零 + CI lint 门（dbeec0a04）；**语音批——ASR 测试态 mock 全局链污染改本地副本、TTS 默认链摘 mock（对齐 ASR 补课 4.1）、Agent 默认 asr_engine mock→auto、落 mock 打警告 + stats mock_active（848c5b07d；语音往返 live-verify 复跑全过）**。
 
 **仍开放**：ASR 测试态 mock 无恢复与 benchmark 进程级累计差值两条的报告引用未能在现仓定位（可能指向审计时在途文件）——留档待指认（注：ASR/TTS mock 口径三处已按语音批收口）；skills 词表外的历史 `any`/`unused-vars` 存量（eslint 棘轮起步档已显式关闭，按目录逐步收紧）；鸿蒙侧 hvigor 真构建已过，真机/模拟器活体验证归鸿蒙会话。
 

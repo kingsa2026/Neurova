@@ -70,7 +70,7 @@
 ## 6. 关联裁定记录
 
 - 2026-11-18 用户裁定：蒸馏回写接温度机制，不进 MEMORY.md；
-- 2026-11-18 用户拍板：MEMORY.md 退役（`ca23e3940`），本方案为其后继；
+- 2026-11-18 用户拍板：MEMORY.md 退役（`c132f7d64`），本方案为其后继；
 - 依据机制：`memory_admission.py`、`memory/pending_memory.py`、
   `memory_discipline.py`（S16）、`cognitive_layers/memory_layer/temperature.py`、
   `sleep_writeback.py`。
@@ -79,8 +79,8 @@
 
 | 批 | 结果 | 提交 |
 |---|---|---|
-| D1–D3 | ✅ 落地：`neurova/memory/distiller.py`（开关 NEUROVA_MEMORY_DISTILL 默认 off/取材窗口 6000 字符有界/LLM 非流式归纳 30s 超时/admission enforce 筛查/propose 候选/连续失败 3 次熔断 300s 冷却/fail-soft）+ PostChatPipeline 注册 `memory_distill` 后台步骤（开关关=不注册零步）；12 契约用例红 12→绿 12（开关关零行为/双候选入队/重复幂等/confirm 转正 remember_fn 三元组/敏感跳过/熔断/超时/坏 JSON/错误信封/接线源码断言） | cb5252226 |
-| D4 | ✅ 落地：`neurova_memory_distill_candidates_total`（outcome=turn/submitted/duplicate/sensitive/failed）进 /metrics 指标读面 + distillCounters 进程内快照；红 1→绿，13/13 | b7b927cf6 |
+| D1–D3 | ✅ 落地：`neurova/memory/distiller.py`（开关 NEUROVA_MEMORY_DISTILL 默认 off/取材窗口 6000 字符有界/LLM 非流式归纳 30s 超时/admission enforce 筛查/propose 候选/连续失败 3 次熔断 300s 冷却/fail-soft）+ PostChatPipeline 注册 `memory_distill` 后台步骤（开关关=不注册零步）；12 契约用例红 12→绿 12（开关关零行为/双候选入队/重复幂等/confirm 转正 remember_fn 三元组/敏感跳过/熔断/超时/坏 JSON/错误信封/接线源码断言） | a2fb8f6a6 |
+| D4 | ✅ 落地：`neurova_memory_distill_candidates_total`（outcome=turn/submitted/duplicate/sensitive/failed）进 /metrics 指标读面 + distillCounters 进程内快照；红 1→绿，13/13 | 2fc1240ad |
 
 **A/B**：agent+api+memory 三域（约 6500 用例）前后各一遍——失败集合**逐行
 完全一致**（29 个预存失败两侧相同：webhooks/tkg/goal_gate/storage 等），

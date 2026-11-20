@@ -169,19 +169,19 @@ P3 产品化增强      G-11 跨 agent 审批链 / G-12 蜂群 span 级 trace / 
 
 | 批 | 提交 | 内容 | 验证 |
 |---|---|---|---|
-| P0-1 | `301a6290f` | 多 agent 评测 harness（neurova/benchmark/multi_agent：任务注册表/BenchRunner 双模式/指标聚合/JSON+MD 报告 + 种子任务集） | 红：ModuleNotFoundError；绿：tests/unit/benchmark 24 passed |
-| P1-1 | `b538a71e7` | TaskUnit（neurova/agent/task_unit.py）+ spawn task_unit 入参 + member 任务书拼装 + 工具 schema/透传 | 红：stash 后 collection error；绿：37 passed |
-| P1-2 | `1d9de376e` | 验收门（neurova/agent/acceptance_gate.py）+ 设置项 advanced.swarm_acceptance_enabled（默认关）+ 前端设置面板开关（11 语言 i18n）+ 不达标回炉一次/诚实降级 | 红：stash 后 8 errors；绿：8 passed + agent 全目录与基线同失败集；locale-consistency 41 passed；vue-tsc 0 错 |
-| P1-3 | `c921da80e` | 监督评审相位（neurova/agent/review_gate.py）+ in_review 相位（占槽，状态域不变量保持）+ findings 回炉一次 + 前端 SubAgentPanel 纳管 in_review | 红：stash 后 7 failed；绿：67 passed；vue-tsc 0 错 |
-| P1-4 | `f471e542a` | 依赖门控：task_unit.dependencies + DEPENDENCY_UNKNOWN/DUPLICATED/FAILED 校验 + blocked 等待（不占槽）+ 终态结算放行/判失败 | 红：stash 后 7 failed；绿：7 passed + agent 全目录与基线同失败集 |
-| P2-3a | `8bc2c0180` | CRDT 退役（零消费证实）+ SubAgentManager 并入退役（subagent.py/Agent.spawn_subagent 死方法/两个专属测试同批退役） | refactor 免红绿；agent 全目录回归同基线 |
-| P2-3b | `36a9f161b` | CAPABILITY_* 接线：注册即发布能力 + CAPABILITY_QUERY 中枢直答 CAPABILITY_RESPONSE + COLLABORATION_INVITE 显式拒绝 | 红：stash 后 6 failed；绿：33 passed |
-| P2-1 | `fa574c1b0` | 子任务 run 启动收敛钉子（机制已现役：agent_runs 表 + reconcile_at_startup；崩溃遗留 running→failed(process_died) 且可溯源） | 绿：2 passed |
-| P2-2 | `6d8d5eae7` | 外部 Agent 握手/注册持久化（JSON 原子落盘 data/external_agents_state.json，启动恢复，损坏按空态起步） | 红：用例先行必红；绿：4 passed |
-| P2-4/5 | `ba5cb1e7e` | integrationReport 集成核对面（subagent_status view=integration）+ escalate 带 suggested_action/action_note 闭环 + to_dict 补 escalation/submitted_result 投影 | 红：stash 后 8 failed；绿：8 passed + 蜂群七套件 67 passed |
-| P3-1 | `3d018e601` | 跨 agent 审批链（neurova/agent/approval_chain.py）：L0/L1/L2 分级（声明只升不降，危险命令检测强制升档）、L2 任何模式强制人工、interactive/auto_approve 双模式（NEUROVA_SWARM_APPROVAL_MODE）；request_approval / decide_subagent_approval 双工具，member 面剔除裁决权；审批单只落既有 ApprovalManager（不建第二套），等待/唤醒复用 approval_relay；run.approvals 进 to_dict | 红：ModuleNotFoundError；绿：18 passed |
-| P3-3 | `f05e88b3c` | APEX 式 T3 任务集扩到 11 条（DCF/可比/并购/授信/LBO/财报/IPO/尽调/董事会备忘录 + 不可解题）+ effort_inference 变量报告（逐任务 effort/effort_source + by_effort 分档聚合 + Markdown 档位节）+ registerBuiltinSuites 幂等收口（修掉 registerSeedTasks 零调用方断点，死入口同批退役） | 红：collection error；绿：tests/unit/benchmark 50 passed |
-| P3-2/4 | `c8bbde9b9` | **P3-2 span 级 trace**：spawn 捕获 parent_trace_id + member 经 TrajectoryRecorder 开轨迹/swarm_member_run span（挂根成树，OTel bridge 既有 observer 投影）+ agent_runs v4 迁移列 trace_id（台账行↔span 关联）+ 事件/信封带 trace_id + NEUROVA_SWARM_TRACE 开关（fail-open）。**P3-4 数据面围栏**（neurova/agent/context_firewall.py）：中英文注入特征扫描 + untrustedPayload 不可信槽位（警示前缀+BEGIN/END 物理标记，原文不改写）+ spawn 命中只标记（run.data_fence）与告警、不阻断。**审批邮箱写点收口**（P3-1 回归修复）：SwarmManager.pushParentMail 唯一写点收拢五处邮箱投递 | 红：span trace 8 failed + firewall collection error + 邮箱单源钉子多出引用面；绿：8+15+12 passed；core 串行 22 失败与基线一致；agent+collaboration+benchmark 终跑 35 failed=基线、2527 passed |
+| P0-1 | `c05bf9aee` | 多 agent 评测 harness（neurova/benchmark/multi_agent：任务注册表/BenchRunner 双模式/指标聚合/JSON+MD 报告 + 种子任务集） | 红：ModuleNotFoundError；绿：tests/unit/benchmark 24 passed |
+| P1-1 | `02a8eee49` | TaskUnit（neurova/agent/task_unit.py）+ spawn task_unit 入参 + member 任务书拼装 + 工具 schema/透传 | 红：stash 后 collection error；绿：37 passed |
+| P1-2 | `43bcfb19d` | 验收门（neurova/agent/acceptance_gate.py）+ 设置项 advanced.swarm_acceptance_enabled（默认关）+ 前端设置面板开关（11 语言 i18n）+ 不达标回炉一次/诚实降级 | 红：stash 后 8 errors；绿：8 passed + agent 全目录与基线同失败集；locale-consistency 41 passed；vue-tsc 0 错 |
+| P1-3 | `1cdce540f` | 监督评审相位（neurova/agent/review_gate.py）+ in_review 相位（占槽，状态域不变量保持）+ findings 回炉一次 + 前端 SubAgentPanel 纳管 in_review | 红：stash 后 7 failed；绿：67 passed；vue-tsc 0 错 |
+| P1-4 | `8e2e537ae` | 依赖门控：task_unit.dependencies + DEPENDENCY_UNKNOWN/DUPLICATED/FAILED 校验 + blocked 等待（不占槽）+ 终态结算放行/判失败 | 红：stash 后 7 failed；绿：7 passed + agent 全目录与基线同失败集 |
+| P2-3a | `6312384c7` | CRDT 退役（零消费证实）+ SubAgentManager 并入退役（subagent.py/Agent.spawn_subagent 死方法/两个专属测试同批退役） | refactor 免红绿；agent 全目录回归同基线 |
+| P2-3b | `450fceff1` | CAPABILITY_* 接线：注册即发布能力 + CAPABILITY_QUERY 中枢直答 CAPABILITY_RESPONSE + COLLABORATION_INVITE 显式拒绝 | 红：stash 后 6 failed；绿：33 passed |
+| P2-1 | `b227b3585` | 子任务 run 启动收敛钉子（机制已现役：agent_runs 表 + reconcile_at_startup；崩溃遗留 running→failed(process_died) 且可溯源） | 绿：2 passed |
+| P2-2 | `ef69c0982` | 外部 Agent 握手/注册持久化（JSON 原子落盘 data/external_agents_state.json，启动恢复，损坏按空态起步） | 红：用例先行必红；绿：4 passed |
+| P2-4/5 | `c72d3fb35` | integrationReport 集成核对面（subagent_status view=integration）+ escalate 带 suggested_action/action_note 闭环 + to_dict 补 escalation/submitted_result 投影 | 红：stash 后 8 failed；绿：8 passed + 蜂群七套件 67 passed |
+| P3-1 | `6273c9f45` | 跨 agent 审批链（neurova/agent/approval_chain.py）：L0/L1/L2 分级（声明只升不降，危险命令检测强制升档）、L2 任何模式强制人工、interactive/auto_approve 双模式（NEUROVA_SWARM_APPROVAL_MODE）；request_approval / decide_subagent_approval 双工具，member 面剔除裁决权；审批单只落既有 ApprovalManager（不建第二套），等待/唤醒复用 approval_relay；run.approvals 进 to_dict | 红：ModuleNotFoundError；绿：18 passed |
+| P3-3 | `21c266a14` | APEX 式 T3 任务集扩到 11 条（DCF/可比/并购/授信/LBO/财报/IPO/尽调/董事会备忘录 + 不可解题）+ effort_inference 变量报告（逐任务 effort/effort_source + by_effort 分档聚合 + Markdown 档位节）+ registerBuiltinSuites 幂等收口（修掉 registerSeedTasks 零调用方断点，死入口同批退役） | 红：collection error；绿：tests/unit/benchmark 50 passed |
+| P3-2/4 | `6a9e054ff` | **P3-2 span 级 trace**：spawn 捕获 parent_trace_id + member 经 TrajectoryRecorder 开轨迹/swarm_member_run span（挂根成树，OTel bridge 既有 observer 投影）+ agent_runs v4 迁移列 trace_id（台账行↔span 关联）+ 事件/信封带 trace_id + NEUROVA_SWARM_TRACE 开关（fail-open）。**P3-4 数据面围栏**（neurova/agent/context_firewall.py）：中英文注入特征扫描 + untrustedPayload 不可信槽位（警示前缀+BEGIN/END 物理标记，原文不改写）+ spawn 命中只标记（run.data_fence）与告警、不阻断。**审批邮箱写点收口**（P3-1 回归修复）：SwarmManager.pushParentMail 唯一写点收拢五处邮箱投递 | 红：span trace 8 failed + firewall collection error + 邮箱单源钉子多出引用面；绿：8+15+12 passed；core 串行 22 失败与基线一致；agent+collaboration+benchmark 终跑 35 failed=基线、2527 passed |
 
 **P3 批终验（2026-11-17 第二批）**：tests/unit/core 串行 A/B——22 条预存失败与基线**逐条一致（零新增）**；首跑曾现 1 条全仓 AST 扫描档（test_theTakeoverTableMatchesTheSharedEntry）失败，经单跑（31s 通过）与串行复跑证实为两套件并行争抢 CPU 的超时假红，非回归。tests/unit/agent+collaboration+benchmark 终跑 35 failed 与基线一致、2527 passed（+67 全为本轮与并行批次新用例）。期间终验抓到并当场修复 1 条 P3-1 回归：审批信封直连邮箱撞"邮箱写点单源"钉子（testOnlySwarmWritesParentMailbox），按教义第 5/6 条收口为 `SwarmManager.pushParentMail` 唯一写点（swarm 内五处投递同批收拢）。P3-1..P3-4 至此全部落地，本方案 P0–P3 四批闭环。
 

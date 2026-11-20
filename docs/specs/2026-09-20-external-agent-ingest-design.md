@@ -154,29 +154,29 @@ scripts/ingest_memory.py   薄 CLI：detect / convert / apply / undo
 
 | Finding | 处置 | 提交 |
 |---|---|---|
-| F-01 未知 kind 抛 ValueError 穿到写入口 | 已修（取值域进校验层 + intake 兜 ValueError） | 26a4b688b |
-| F-02 importance/temperature 无域校验 | 已修（同上） | 26a4b688b |
-| F-03a opencode 只有思考块即 IndexError | 已修（思考作用域收到消息内） | e5210a318 |
+| F-01 未知 kind 抛 ValueError 穿到写入口 | 已修（取值域进校验层 + intake 兜 ValueError） | ff518e926 |
+| F-02 importance/temperature 无域校验 | 已修（同上） | ff518e926 |
+| F-03a opencode 只有思考块即 IndexError | 已修（思考作用域收到消息内） | 3042e1f56 |
 | F-03b OpenClaw 缺记忆附表整支转不出 | 已修（NULL 列带别名） | 7e232c3bd |
-| F-06 五处静默 now() | 已修（定不出→申报跳过） | 1dbe2f224 |
-| F-07 空正文轮整条消失且不申报 | 已修（轮内记 reasoning_state；qwenpaw 补空行申报） | cab56577e / be8653ca6 |
-| F-08 extra 不进落盘形状 | 已修（extra 随行落盘） | cab56577e |
-| F-09 只有 redacted_thinking 的行不留痕 | 已修（产事件；hermes 照数申报） | 358f0bd9e |
-| F-12 只读 URI 未转义 | 已修（Path.as_uri） | 2295e68ae |
-| F-13 apply 不接受 convert 的产物 | 已修（_is_bundle 分岔） | 3053f7b14 |
-| F-14 空目录假成功 | 已修（零 store 退非零码） | 3053f7b14 |
-| F-15 第二份"记录→消息"映射 | 已删（只留 turns.py） | 5ec092846 |
-| F-19a 六份 _dropped_entries 各写一份 | 已修（上收 writer.dropped_entries） | aca93df72 |
-| F-19b 角色不认报成"空正文" | 已修（本批核对：role 前缀在各族信封已申报，补防回归锁） | aca93df72 / b13b46f18 |
-| F-19c 死条件 `if rows or True` | 已修（去掉包裹） | aca93df72 |
-| F-19d relations.jsonl 无从登记 | 已修（writer 按实计数 + validate 登记闸） | aca93df72 |
-| F-20 origin 权威归一处 | 已修（校验器权威；咽喉 fail-safe 降档保留并写明） | 26a4b688b |
-| F-21 包内同名不同目录被拍平 | 已修（强制内容寻址命名 + 摘要必声明） | df77d39ef |
-| F-22 撤销拼全文取子串判引用 | 已修（改结构化引用集合） | df77d39ef |
+| F-06 五处静默 now() | 已修（定不出→申报跳过） | 776c4115b |
+| F-07 空正文轮整条消失且不申报 | 已修（轮内记 reasoning_state；qwenpaw 补空行申报） | c0f42256e / be8653ca6 |
+| F-08 extra 不进落盘形状 | 已修（extra 随行落盘） | c0f42256e |
+| F-09 只有 redacted_thinking 的行不留痕 | 已修（产事件；hermes 照数申报） | 948875715 |
+| F-12 只读 URI 未转义 | 已修（Path.as_uri） | f584d5f54 |
+| F-13 apply 不接受 convert 的产物 | 已修（_is_bundle 分岔） | 3bbc47950 |
+| F-14 空目录假成功 | 已修（零 store 退非零码） | 3bbc47950 |
+| F-15 第二份"记录→消息"映射 | 已删（只留 turns.py） | 568eb1803 |
+| F-19a 六份 _dropped_entries 各写一份 | 已修（上收 writer.dropped_entries） | 1029f2e18 |
+| F-19b 角色不认报成"空正文" | 已修（本批核对：role 前缀在各族信封已申报，补防回归锁） | 1029f2e18 / 93aed6433 |
+| F-19c 死条件 `if rows or True` | 已修（去掉包裹） | 1029f2e18 |
+| F-19d relations.jsonl 无从登记 | 已修（writer 按实计数 + validate 登记闸） | 1029f2e18 |
+| F-20 origin 权威归一处 | 已修（校验器权威；咽喉 fail-safe 降档保留并写明） | ff518e926 |
+| F-21 包内同名不同目录被拍平 | 已修（强制内容寻址命名 + 摘要必声明） | 7f14200de |
+| F-22 撤销拼全文取子串判引用 | 已修（改结构化引用集合） | 7f14200de |
 | F-04 导入会话用户归属 | 已修：CLI `--owner-user-id` + 会话级归属不变量（既有属主只读、共享批次不得放宽已有属主） | 见 §7.4 |
 | F-05 导入结果对运行中服务不可见 | 已修：`MemoryManager.reload_memories()` 增量并入 + `POST /v1/memory/reload` 端点 + 管理页入口；CLI 出口改指该通道（重启降为兜底）。见 §7.6 | 见 §7.6 |
-| F-10 撤销作用域口径 | 已修：按**行自带**三元组删盘 + 索引摘除收口（授权凭据是批次标签，不是调用现场作用域） | 629a10858 |
-| F-11 回填历史的温度语义 | 已修：导入侧定标获知时刻（created_at 记事件、last_accessed_at 记获知），温度照原样落库 | 11e032dfd |
+| F-10 撤销作用域口径 | 已修：按**行自带**三元组删盘 + 索引摘除收口（授权凭据是批次标签，不是调用现场作用域） | 5d8ed4848 |
+| F-11 回填历史的温度语义 | 已修：导入侧定标获知时刻（created_at 记事件、last_accessed_at 记获知），温度照原样落库 | b38a4467f |
 | F-16 OpenClaw 同 event id 多行 | 已修：幂等键改立行主键 (session_id, seq)，event id 降级为 extra 标识；**真样本已取证**（npm openclaw@2026.9.5 上游 schema） | 17d2e8f5f |
 | F-17 memory-enhancement/import 端点 | 仍待拍板 DEC-5（退役/接线/声明仅演示，三选一；本轮不动） | — |
 | F-18 私有方言双路幂等域 | 已修：打通（老脚本会话导入改走产品链，会话号与行幂等键只在转换器定义一处）；见 §7.4 | 见 §7.4 |

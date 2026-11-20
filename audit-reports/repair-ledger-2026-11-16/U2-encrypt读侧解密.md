@@ -6,7 +6,7 @@
 
 ## 勘查结论（现读 HEAD，含前批落地形态）
 
-**前批（70d54c11e，2026-11-17）已落地读侧主体**：`Memory.to_dict → plaintextContent()`
+**前批（fdf72ba4b，2026-11-17）已落地读侧主体**：`Memory.to_dict → plaintextContent()`
 统一解密出口——按 `metadata._security.encrypted == "fernet"` 标记调
 `decrypt_sensitive_content`，模型层唯一读出口（`test_memoryCipherFailFast`
 守卫钉死收敛面）；写侧维持 R3 形态（remember 咽喉入口加密，内存态与库一致

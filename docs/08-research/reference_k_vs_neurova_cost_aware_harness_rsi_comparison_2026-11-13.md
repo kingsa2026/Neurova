@@ -236,7 +236,7 @@ GLM-5.2×Claude Code 同型（heavy：TB2 81.4%/$0.62、SWE 77.3%/$1.01、PB 64.
 ## 3. Neurova 对应面
 
 > 取证：两路只读深度核查＋主代理承重断言亲验；行号绑定 2026-11-13 工作树
-> （HEAD `3f7c916be` 起经四批对照落地，见 §9–§10.6；下表状态为**当前实态**）。
+> （HEAD `f1c37e617` 起经四批对照落地，见 §9–§10.6；下表状态为**当前实态**）。
 
 ### 3.1 运行时 harness 面：形态对应出人意料地齐
 
@@ -506,7 +506,7 @@ Ran 4 tests in 0.344s  FAILED (errors=6)
 
 ### 7.2 规模读数
 
-| 项 | HarnessPro（`6fd2d4db`） | Neurova（`3f7c916be`） |
+| 项 | HarnessPro（`6fd2d4db`） | Neurova（`f1c37e617`） |
 |---|---:|---:|
 | 方法/运行时 Python | 10,960（src/rho） | ≈346,580（全仓） |
 | 评测 runner/脚本 | 9,548（scripts） | —（API/管线内） |
@@ -563,19 +563,19 @@ Ran 4 tests in 0.344s  FAILED (errors=6)
 
 > 用户点单「先把断点修复掉」后，按 §5.2 候选与 §6 推荐项（T1A/T2A/T3A/T4A）实施的
 > 落地记录。评测正文（§0–§7）是当日评估快照，不因本节改写；本节只记「断点修了什么、
-> 落在哪、怎么验的」。四批提交：`71db6a1f5`（批1）/ `256873e6a`（批2）/ `00d9e62ea`
-> （批3）/ `3795b4a2a`（批4）。
+> 落在哪、怎么验的」。四批提交：`30fa5720d`（批1）/ `e56729990`（批2）/ `c43c8b908`
+> （批3）/ `dfa87bc22`（批4）。
 
 ### 9.1 逐断点落地状态
 
 | 断点 | 落地形态 | 提交 | 关键落点 |
 |---|---|---|---|
-| HN1 成本不进目标 | 每任务成本账＋CoP＋成本软门 | `71db6a1f5` | `eval/cost_ledger.py`（EvalCostLedger＋costSoftGateVerdict）；runner 三返回路径按臂落 usage 差分；提案 `cost_gate`＋`requires_manual_review`（涨幅>0.2 软门） |
-| HN2 判据靠 judge | 可执行测试判据层 | `256873e6a` | `eval/exec_suite.py`（TestSynthesizer＋冻结 suite_hash＋七种确定性断言 op）；runner 判定 2.15 非回归门（`exec_suite_regression`）；套件生成失败诚实回退 judge |
-| HN3 路由无兜底 | 歧义显式回退 standard | `00d9e62ea` | `effort_inference.resolveQueryEffort`（explicit/inferred/fallback_standard）；`_resolve_auto_effort` 落档位＋来源标记（提示面同形：standard 不注入指令） |
-| HN4 预算无分档/Stop 未接线 | 执行档位组＋分段提醒＋Stop 接线 | `00d9e62ea` | `agent_limits_settings.EXEC_PROFILES`（lite/standard/heavy，优先级 env>档位>文件>默认）；`agent/budget_stages.py`（economy/strict/finalize 纯文本提醒，两环注入，不造第二把 TERMINATE）；`hooks_engine.runStopHooks`（默认关，`NEUROVA_STOP_HOOKS=1` 灰度开） |
-| HN5 压缩阈值全局化 | 按档溢出阈值 | `3795b4a2a` | `tool_offload_settings`：无显式设置时默认 64KB 按档缩放（lite ×0.5/heavy ×2，夹紧合法域）；显式设置优先于档位 |
-| HN6 无核选/无多档工件 | 难度加权多样性核选 | `3795b4a2a` | `eval/coreset.py`（bigram Jaccard 距离＋信息量权重的确定性贪心，DPP 思想自研近似）；runner `eval_coreset_k>0` 时核选到 K 再走既有 split（默认 0=旧行为） |
+| HN1 成本不进目标 | 每任务成本账＋CoP＋成本软门 | `30fa5720d` | `eval/cost_ledger.py`（EvalCostLedger＋costSoftGateVerdict）；runner 三返回路径按臂落 usage 差分；提案 `cost_gate`＋`requires_manual_review`（涨幅>0.2 软门） |
+| HN2 判据靠 judge | 可执行测试判据层 | `e56729990` | `eval/exec_suite.py`（TestSynthesizer＋冻结 suite_hash＋七种确定性断言 op）；runner 判定 2.15 非回归门（`exec_suite_regression`）；套件生成失败诚实回退 judge |
+| HN3 路由无兜底 | 歧义显式回退 standard | `c43c8b908` | `effort_inference.resolveQueryEffort`（explicit/inferred/fallback_standard）；`_resolve_auto_effort` 落档位＋来源标记（提示面同形：standard 不注入指令） |
+| HN4 预算无分档/Stop 未接线 | 执行档位组＋分段提醒＋Stop 接线 | `c43c8b908` | `agent_limits_settings.EXEC_PROFILES`（lite/standard/heavy，优先级 env>档位>文件>默认）；`agent/budget_stages.py`（economy/strict/finalize 纯文本提醒，两环注入，不造第二把 TERMINATE）；`hooks_engine.runStopHooks`（默认关，`NEUROVA_STOP_HOOKS=1` 灰度开） |
+| HN5 压缩阈值全局化 | 按档溢出阈值 | `dfa87bc22` | `tool_offload_settings`：无显式设置时默认 64KB 按档缩放（lite ×0.5/heavy ×2，夹紧合法域）；显式设置优先于档位 |
+| HN6 无核选/无多档工件 | 难度加权多样性核选 | `dfa87bc22` | `eval/coreset.py`（bigram Jaccard 距离＋信息量权重的确定性贪心，DPP 思想自研近似）；runner `eval_coreset_k>0` 时核选到 K 再走既有 split（默认 0=旧行为） |
 
 **档位工件（HC3）的「多档部署工件」形态以命名配置组落地**（`NEUROVA_EXEC_PROFILE=
 lite|standard|heavy`，standard=内置默认逐字不变）；管理端只读展示页未做（前端面另批）。
@@ -628,8 +628,8 @@ lite|standard|heavy`，standard=内置默认逐字不变）；管理端只读展
 ### 10.1 落地回执（2026-11-13 第二批：R1–R10 执行完毕）
 
 > 用户点单「按照文档 10.2 部分 R1 到 R10 执行提升」后的落地记录。提交：
-> `cbcd458c4`（R1）/ `5a5ed972a`（R2+R7）/ `42266a095`（R3+R6）/ `cd9b131b6`（R4）/
-> `45e0a3fb0`（R5）/ `2758df499`（R8+R9）/ `456965495`（R2 加固）。
+> `e026accf6`（R1）/ `66a4afd61`（R2+R7）/ `c80cb13a8`（R3+R6）/ `75c85bda3`（R4）/
+> `c6e3a3a6b`（R5）/ `2d688c916`（R8+R9）/ `4caaf746b`（R2 加固）。
 
 | 项 | 状态 | 落地形态与落点 |
 |---|---|---|
@@ -658,7 +658,7 @@ test_usage_cost_readout 6）；回归 `tests/unit/evolution` 408、agent 1713（
 
 ### 10.2 追补（同日，用户点单两项）
 
-- **R3 分类器开关设置项化**（`81fd4f039`）：新增 `security/task_profile_settings.py`
+- **R3 分类器开关设置项化**（`06dbca601`）：新增 `security/task_profile_settings.py`
   （JSON 持久化，优先级 env 灰度直开 > 设置文件 > 默认关）；`turn_profile.taskProfileEnabled`
   改读设置单源；governance GET/PUT `/governance/task-profile`（仅管理员）。
 - **R6 前端 UI 补齐**（同提交）：SettingPage 新增「任务级档位分类」开关面板与
@@ -672,23 +672,23 @@ test_usage_cost_readout 6）；回归 `tests/unit/evolution` 408、agent 1713（
 
 ### 10.3 尾巴清偿（2026-11-13 第三批：R1–R10 余项全部闭合）
 
-> 提交：`c859eca2c`（coreset 设置项＋双段复核）/ `77e89fbb5`（R5 API 接线）/
-> `d9524b714`（R2 实证＋重试）。
+> 提交：`f79c1990c`（coreset 设置项＋双段复核）/ `d42b32071`（R5 API 接线）/
+> `5b1c6bd63`（R2 实证＋重试）。
 
-- **coreset 设置项化＋双段复核**（`c859eca2c`）：新增
+- **coreset 设置项化＋双段复核**（`f79c1990c`）：新增
   `security/eval_coreset_settings.py`（K 值 JSON 持久化，合法域 0–200，
   env `NEUROVA_EVAL_CORESET_K` 灰度直改仍优先）＋ governance GET/PUT
   `/governance/eval-coreset`；runner 生效 K = max(代码级配置, 治理设置)。
   **双段复核落格**：核选收缩后，胜者在未收缩的全量留出上复核
   （arm=holdout_full 入成本账），全量改善 <0 ⇒ `coreset_recheck_failed`
   拒绝——「核选探路便宜」不以放过全量回归为代价。
-- **R5 API 接线**（`77e89fbb5`）：`POST /skills/{agent_id}/evolve-recursive`
+- **R5 API 接线**（`d42b32071`）：`POST /skills/{agent_id}/evolve-recursive`
   （仅管理员）——epochs 1–10、数据集三级回退（抽取
   `_resolveEvolutionDataset` 供 /evolve 与本端点共用）、预算闸按
   「单轮计划 × epochs」放大；响应含递归轨迹与末轮 pending 提案。
   顺带修一处口径不一致：/evolve 的 API 侧预算闸补 `include_exec_suite`
   （R7 后 template 也产生套件回合，API 侧上界此前未计）。
-- **R2 真模型实证转实测通过**（`d9524b714`）：真实 provider
+- **R2 真模型实证转实测通过**（`5b1c6bd63`）：真实 provider
   （上海人工智能实验室）上合成出 4 条可用用例
   （suite_hash `sha256:770fef43…`），断言烟囱 pass_rate=1.0；同时暴露
   「同一技能二次合成输出不可解析」的运行间波动——generate 对解析失败
@@ -701,8 +701,8 @@ test_usage_cost_readout 6）；回归 `tests/unit/evolution` 408、agent 1713（
 
 ### 10.4 N1–N3 残差清偿（2026-11-13 第四批）
 
-> 用户点单「按照 11.3 继续升级」后的落地记录。提交 `fe335e2a4`；文档回执
-> `616261f86`。
+> 用户点单「按照 11.3 继续升级」后的落地记录。提交 `1b5b780a8`；文档回执
+> `733d0fead`。
 
 - **N1 Pareto 多档交付**：`profile_variants_enabled`（灰度默认关）——多变体轮幸存
   候选按 lite/standard/heavy 轮转指派 turn 档位**串行**评测（成本按 candidate:* 臂
@@ -720,8 +720,8 @@ test_usage_cost_readout 6）；回归 `tests/unit/evolution` 408、agent 1713（
 
 ### 10.5 开关设置项化（2026-11-13 第五批）
 
-> 用户点单「三开关做成设置项」＋「R6 补前端 UI」。提交 `81fd4f039`（任务级分类器
-> 设置项＋per-agent UI）/ `4854adf96`（N1–N3 开关设置项＋实验机制面板）。
+> 用户点单「三开关做成设置项」＋「R6 补前端 UI」。提交 `06dbca601`（任务级分类器
+> 设置项＋per-agent UI）/ `bfd581ac0`（N1–N3 开关设置项＋实验机制面板）。
 
 - **任务级分类器开关**：`security/task_profile_settings.py`（JSON 持久化，env
   `NEUROVA_TASK_PROFILE` 灰度直开仍优先）＋ governance GET/PUT

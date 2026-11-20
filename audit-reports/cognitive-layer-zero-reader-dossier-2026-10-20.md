@@ -46,7 +46,7 @@
 - **关键入口**：`ProactiveQuestionManager:614`、`QuestionQueueManager:183`、`CuriosityDrive:399`。
 - **来历**：7835c367 骨架 → 65309f6b(06-05) 扩写 → 31be70ff；无真实消费者。
   旧门面曾按不存在的 `ProactiveQuestion` 名称导入（恒 None，教义第 2 条的形态），
-  4ea8bf91(10-14) 把这类 None 兜底拆掉时一并摘除。⇒ **引入即未接线**。
+  9597af1f5(10-14) 把这类 None 兜底拆掉时一并摘除。⇒ **引入即未接线**。
 - **现役替代**：**部分缺**。队列部分有活替代：`meta_cognition_layer/question_queue.py:97`
   经 `mem_core.py:661`、`post_chat_pipeline.py:2659/:2672`、`orchestrator.py:1047`、`growth.py:489` 在役；
   **好奇心驱动、探索史、提问质量分零替代**（`intrinsic_motivation.py:427` 只调整机、不产问题）。
@@ -77,7 +77,7 @@
   `cleanup_old_archives:300`；`clear_all:326`。
 - **关键入口**：`ForgettingRecoveryStorageMixin:15`（无工厂、无 `__init_subclass__`/`type()` 装配）。
 - **来历**：7835c367 引入；`-S` 全史仅此一笔 ⇒ **引入即未接线**。同能力的
-  `forgetting_recovery.py`(346) 在 807ca120(09-21) 被删，本件未随批清退——属"删主体留副本"；
+  `forgetting_recovery.py`(346) 在 1d54a311c(09-21) 被删，本件未随批清退——属"删主体留副本"；
   但主体是独立实现的 `ForgettingRecoveryManager`（删除前无 import 本 mixin），不是"删父类留 mixin"。
 - **现役替代**：**部分缺**。`manager.py:4394 archive_memory`／`:4409 delete_memory_soft`／
   `:4418 recover_from_archive`／`:4430/:4440` 用 `LifecycleStage` 落盘，覆盖归档/恢复/列举；
@@ -111,7 +111,7 @@
 - **来历**：7835c367 引入、806c7047(06-06) 补 name/init/shutdown；两笔均只改本文件
   ⇒ **引入即未接线**。装配面：`modules/__init__.py` 仅 6 行、零导出（docstring 仍写"集中导出"）；
   `manager.py` 对 `modules/` 的 21 处 `_ensure_*` 懒导入**不含本件**；唯一能按字符串装载的
-  `memory_bus.py` 已随 807ca120 删除。
+  `memory_bus.py` 已随 1d54a311c 删除。
 - **现役替代**：**部分缺**。`emotion_context_layer/emotion_conduction.py:28` 是 **agent 级心情**
   （`update_emotional_state:65`），与"记忆间 BFS 传导"不同物；`modules/emotion_module.py` 只做
   单记忆存值，没有传导/聚合/极性列举（`aggregate_emotion:156` 全仓唯一）。

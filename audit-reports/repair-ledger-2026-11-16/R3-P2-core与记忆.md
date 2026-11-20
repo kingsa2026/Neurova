@@ -73,7 +73,7 @@ tool_executor 类属性锁），修前实跑 **13 failed**。
 
 ---
 
-## 3.2-2 DCL 单例守卫锁 Lock→RLock 收口 ✅（提交 7531e33f3）
+## 3.2-2 DCL 单例守卫锁 Lock→RLock 收口 ✅（提交 ea8f29e77）
 
 **根因**：AGENTS.md §3 要求懒创建型单例走 DCL + `threading.RLock`；13 处手写 DCL
 单例守卫锁仍是 `threading.Lock`（重入路径自死锁风险）。单源 `core/lazy_singleton.py`
@@ -96,7 +96,7 @@ env_delta:63、pending_memory:510、tool_executor:5096）。
 ---
 
 ## 3.2-5 usage_history 建库失败吞异常 ✅ + 3.2-9/3.3-2/3.4-10 db_migration 注册批 ✅
-（提交 7531e33f3 前四域 + 708c2c675 后四域）
+（提交 ea8f29e77 前四域 + 2495fc767 后四域）
 
 **根因**：8 个自建表域（usage_history/aigc_usage/annotations/pending_memories/
 channel_identity/channel_outbound/approval/evolution_jobs）schema 演进停留在裸
@@ -127,7 +127,7 @@ mobile_push/ekb 等）不在本条范围。
 
 ---
 
-## 3.2-6 dead_letter_queue _is_processed 恒 False ✅（提交 c0ba22d08）
+## 3.2-6 dead_letter_queue _is_processed 恒 False ✅（提交 4e1cc5f3a）
 
 **根因**：`_is_processed` 两段条件嵌套的归并分支全部落 False。重试次数达
 `max_retries` 的死信在每次退避窗口到期后都重回 `get_retryable()` 重放面——
@@ -149,7 +149,7 @@ get_pending 同样包含）。
 
 ---
 
-## 3.2-7 turn_context clear_turn_state 漏清两变量 ✅（提交 c6885763e）
+## 3.2-7 turn_context clear_turn_state 漏清两变量 ✅（提交 d3c8c2b1e）
 
 **根因**：teardown 清空清单漏 `_subagent_tool_allowlist_var`（蜂群子代理工具面
 白名单跨回合残留→面外工具被结构化拒绝）与 `_tool_call_id_var`（审批回投地址
@@ -163,7 +163,7 @@ test_agent_turn_session_contract 13 格无回归。
 
 ---
 
-## 3.2-8 retriever_adapters _simple_cache 只写不淘汰 ✅（提交 9991e2d12）
+## 3.2-8 retriever_adapters _simple_cache 只写不淘汰 ✅（提交 5cc1ea6a7）
 
 **根因**：无界 dict、只写不淘汰——长驻进程随查询多样性单向增长。
 
@@ -177,7 +177,7 @@ test_agent_turn_session_contract 13 格无回归。
 
 ---
 
-## 3.2-13 context 三处死重复/弃用取值 ✅（提交 d36bf6e95，refactor）
+## 3.2-13 context 三处死重复/弃用取值 ✅（提交 26ed701de，refactor）
 
 semantic_drawer 第二份逐字相同的 `_setReadout`（遮蔽前者）、orchestrator
 会话身份回落链重复判定块（第二遍不可达）、builder.py:390 裸
@@ -208,7 +208,7 @@ workflow/scripted/__init__.py 同款措辞）+ models/computer.py（`ZCODE` 为
 
 ---
 
-## 3.2-15 voice_pipeline 装配失败仅 debug 吞 ✅（提交 d8eb5d806）
+## 3.2-15 voice_pipeline 装配失败仅 debug 吞 ✅（提交 c9c5da1ca）
 
 **修复点**：fail-soft 保持；四处装配失败 debug→WARNING 并点名失能后果
 （上下文注入/记忆记录/识别/合成），装配结束对失能清单补汇总 WARNING。
@@ -219,7 +219,7 @@ workflow/scripted/__init__.py 同款措辞）+ models/computer.py（`ZCODE` 为
 
 ---
 
-## 3.3-3 /activation/{id} 恒 200 空壳 ✅（提交 2a5302bb7）
+## 3.3-3 /activation/{id} 恒 200 空壳 ✅（提交 82e6894f0）
 
 **根因**：读全仓零写入方的全局字典 `_activations`，任意 id 恒 200 返回伪造
 零激活。同文件 /decay 已有 P2-6 先例：无生产实现 → 诚实 501。
@@ -234,7 +234,7 @@ workflow/scripted/__init__.py 同款措辞）+ models/computer.py（`ZCODE` 为
 
 ---
 
-## 3.3-4 knowledge/storage API Key 固定盐 ✅（提交 dcfdb0738）
+## 3.3-4 knowledge/storage API Key 固定盐 ✅（提交 e4b76d840）
 
 **根因**：`_hash_api_key` 固定盐 "neurova-knowledge-salt"——同一 Key 全库
 哈希一致，可离线建彩虹表反查。
@@ -253,7 +253,7 @@ workflow/scripted/__init__.py 同款措辞）+ models/computer.py（`ZCODE` 为
 
 ---
 
-## 3.3-5 MemorySecurity 接线进主链 ✅（提交 e437738d1，用户拍板）
+## 3.3-5 MemorySecurity 接线进主链 ✅（提交 9d86b4585，用户拍板）
 
 **根因**：memory_layer/security.py（731 行）主链零消费——加密/敏感检测零生产
 调用、遗忘链被 memory_enhancement 直调 manager.forget 绕过（无访问审计）。
@@ -290,7 +290,7 @@ SELECT 直读，接入属每读点解密大手术）——encrypt 显式开启�
 
 ---
 
-## 3.3-6 旁路存储隔离面 None 放行 ✅（提交 84e9c0e5d）
+## 3.3-6 旁路存储隔离面 None 放行 ✅（提交 21be8ab6f）
 
 **根因**：`_passesIsolation` 对 `isolation_context=None` 直接放行——三层隔离
 在"调用方忘传上下文"时整个失效。

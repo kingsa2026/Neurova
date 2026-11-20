@@ -11,18 +11,18 @@
 | P1（39） | **39/39** | 逐条对应：S1×7（P1-1/2/3/4/9 + 越权链）、S2×5（P1-5/6/7/14/15）、S3×1（P1-37）、S4×8（P1-28~32/34/35/36）、S5×4（P1-8/10/16/17）、S6×6（P1-22~27）、S7×5（P1-11/12/13/18/20）、S8×3（P1-19/21/33/38/39 中 P1-33 含 15 死页） |
 | P2（106，按域压缩） | 部分清偿 | 已修：鉴权散点（3.1-1~6）、并发群（3.2-10a/10b/12、3.3-1、3.5-13）、3.6-16、core-P2-11、auth-500 细节、死码散点（auth_protocol/thought_sandbox/channels-websocket/skills-manifest/context.py/llm_client mock/ChannelConfig 双定义/双 get_request）、卫生散点（gitignore/node 版本/死 npm script/nul）。其余 P2 条目未动，见 §4 遗留 |
 
-## 2. 8 会话产出（23 笔提交，基线 8b18e5afa → HEAD）
+## 2. 8 会话产出（23 笔提交，基线 3923d218e → HEAD）
 
 | 会话 | 提交 |
 |---|---|
-| S1 | f16ac38c0 fix(api) S1 安全批——属主门与管理员门收口 |
-| S2 | a7962ad5c fix(security) 主恢复密码注入化与 SSRF/属主/隔离收口 |
-| S3 | 28cdc7d36 fix(mobile) 安卓 WS 心跳统一 JSON 契约；7fed0b821 refactor 删 PairingConfirmed |
-| S4 | aa3dfd32c（契约批）、389bd894c（P1-34）、832e71465（P1-36）、75aa342ed/2490c604f/7e87f10f0/4cba0bc9c（ohosTest 基建与清偿） |
-| S5 | 39f9a7896 fix(stability) benchmark/分诊门/渠道与技能阻塞/并发竞态 |
-| S6 | 429da7948、ca0075cf2、4f39651ba、af2be06f2、9a60ebe1a、57f4161bf（P1-22~27 + fe-P2-4） |
-| S7 | 98f1b7c03 refactor(cleanup) 死码群退役（净约 −8,400 生产行） |
-| S8 | 3e2a84c5d（P1-19 下沉）、68e9db057（P1-33 死页 9 接线 6 退役）、f76493239（P1-21）、492df1ce2/7ec60481c（P1-38/39 + 卫生） |
+| S1 | 81130a17b fix(api) S1 安全批——属主门与管理员门收口 |
+| S2 | 0ff43c180 fix(security) 主恢复密码注入化与 SSRF/属主/隔离收口 |
+| S3 | 59b90fcac fix(mobile) 安卓 WS 心跳统一 JSON 契约；9e25c6bc8 refactor 删 PairingConfirmed |
+| S4 | 175fe25d1（契约批）、eb71a3dc1（P1-34）、38cc25b03（P1-36）、dd7048cf7/3f7354847/9c55f4316/ac3db43c6（ohosTest 基建与清偿） |
+| S5 | 4158d1341 fix(stability) benchmark/分诊门/渠道与技能阻塞/并发竞态 |
+| S6 | 975f874dd、557f1836e、6265db005、e1e8f896c、27e439b5b、61d6ae8ee（P1-22~27 + fe-P2-4） |
+| S7 | 8249ed7ed refactor(cleanup) 死码群退役（净约 −8,400 生产行） |
+| S8 | 675ac52ff（P1-19 下沉）、65cdfb073（P1-33 死页 9 接线 6 退役）、44787a223（P1-21）、be2e8168e/bd5d1e51f（P1-38/39 + 卫生） |
 | 总控收口 | 本文件连同台账入库；S8 漏提交的 6 个退役 ohosTest 删除补提交；protected_tests 悬空项摘除 |
 
 ## 3. 总控复核抽验（不信台账，实测）
@@ -32,7 +32,7 @@
 - **P0-2**：MobileWsChannel.kt 实测 JSON 帧 `{"type":"ping"}` + `awaitingPong` 判定在位。
 - **P1-19**：`neurova/`、`scripts/` 下 `from tests` 0 残留（ast_scan 薄转发除外）。
 - **守卫执法复核中发现并当场修复**：S2 退役 `test_recoverPasswordFromSourceConstant.py` 后，`protected_tests.2.txt`/索引残留悬空路径 → shards 守卫红（`TestEntriesAreTheShardsOwnProperty`）→ 已从索引与分片 2 摘除，shards 16 passed 复绿。
-- **S8 收口缺口**：6 个退役死页的 ohosTest 删除停留在暂存区未随 68e9db057 入库——本次补提交（页面已退役而测试残留会让 ohosTest 收集到引用已删页面的用例）。
+- **S8 收口缺口**：6 个退役死页的 ohosTest 删除停留在暂存区未随 65cdfb073 入库——本次补提交（页面已退役而测试残留会让 ohosTest 收集到引用已删页面的用例）。
 - 各会话台账自报的预存失败（S1 列 18 项、S7 列 7 项等）均为并行在途/环境性失败，与修复批无因果，未计入回归。
 
 ## 4. 遗留与待拍板（各会话移交汇总）
@@ -68,11 +68,11 @@
 
 | 会话 | 提交 | 内容 |
 |---|---|---|
-| R1 后端安全收尾 | c684258ad | neurflow 调试两端点属主门（复用 _ensure_execution_owned）、media 列表面上传者过滤、/triage/check 诚实 503、delete_project TypeError 修复 |
-| R2 移动收尾 | 51ec3d6e3、0f6b9ac2e、845cdd460 + 台账 d15756ea7 | §3.8 十条根修（时间戳/颜色 token 三真源/排序比较器/SettingPage/deviceId 统一/品牌渐变收 token/Logger 与超时口径/PairingProtocol 死码/ArkTS 卫生）+ ohosTest 运行期红清理 + 安卓明文策略单点化与版本基线对齐 |
-| R3 P2 core/记忆 | 0d8032200、7531e33f3、708c2c675、c0ba22d08、c6885763e、9991e2d12、d36bf6e95、22dc7cafa、d8eb5d806、2a5302bb7、dcfdb0738、e437738d1、84e9c0e5d + 台账 455e86bde | §3.2 剩余全清（check_connection 诚实化、DCL RLock 单源收口、吞异常×3、死信重放、turn_context 漏清、缓存有界、db_migration 8 域登记、context 三处、原创性措辞红线）；§3.3 剩余全清（/activation 诚实 501、API Key 随机盐、**MemorySecurity 接线进 remember 咽喉**、旁路隔离 fail-closed） |
-| R4 P2 API/渠道/安全 | abed1353b + 台账（426 行） | §3.1 剩余 13 条（logs/scheduler/mobile_push/memory_timeline/admin 门/登出黑名单/WS 秘钥/配对属主/computer 串读/console Echo/模拟状态标注/日志脱敏/_get_default_llm）、§3.4 剩余 11 条（neurflow 四节点假成功、collaboration_isolation 越权与横向泄露、xiaoyi 修通、模板未注册节点、qqbot 明文 token、wechat_auth 常量时间、skills 吞异常、ValidationResult 消歧、AgentSkillManager 方法退役、computer_manager admin、evolution/manager 双锁）、§3.5 剩余 10 条（ToolOrchestrator 假成功、async 同步调用、asr 幽灵声明、日志泄 hash、qclaw 可逆落库、cost_budget 空实现、cost_tracking 退役、mcp_oauth/mcp_client、aigc_studio 旁路）+ **url_guard 收口为一份** |
-| R5 前端/测试CI/构建链 | c08411f72、52eef6b47、efb3f1633 | §3.6 剩余 13 条 + 3.7-3 死代理删除 + 3.9-1/3/8（孤儿测试退役、旧布局测试收敛、敏感种子清理）+ **P0-1 构建链闭环**（bundle_backend 出厂守卫 + helm deployment 注入 NEUROVA_MASTER_RECOVERY_PASSWORD） |
+| R1 后端安全收尾 | 263bc033e | neurflow 调试两端点属主门（复用 _ensure_execution_owned）、media 列表面上传者过滤、/triage/check 诚实 503、delete_project TypeError 修复 |
+| R2 移动收尾 | a4a6973f1、d5b044b25、a15381cbd + 台账 f09bfeb7c | §3.8 十条根修（时间戳/颜色 token 三真源/排序比较器/SettingPage/deviceId 统一/品牌渐变收 token/Logger 与超时口径/PairingProtocol 死码/ArkTS 卫生）+ ohosTest 运行期红清理 + 安卓明文策略单点化与版本基线对齐 |
+| R3 P2 core/记忆 | 27825d71b、ea8f29e77、2495fc767、4e1cc5f3a、d3c8c2b1e、5cc1ea6a7、26ed701de、22dc7cafa、c9c5da1ca、82e6894f0、e4b76d840、9d86b4585、21be8ab6f + 台账 fda62ca73 | §3.2 剩余全清（check_connection 诚实化、DCL RLock 单源收口、吞异常×3、死信重放、turn_context 漏清、缓存有界、db_migration 8 域登记、context 三处、原创性措辞红线）；§3.3 剩余全清（/activation 诚实 501、API Key 随机盐、**MemorySecurity 接线进 remember 咽喉**、旁路隔离 fail-closed） |
+| R4 P2 API/渠道/安全 | 579b61522 + 台账（426 行） | §3.1 剩余 13 条（logs/scheduler/mobile_push/memory_timeline/admin 门/登出黑名单/WS 秘钥/配对属主/computer 串读/console Echo/模拟状态标注/日志脱敏/_get_default_llm）、§3.4 剩余 11 条（neurflow 四节点假成功、collaboration_isolation 越权与横向泄露、xiaoyi 修通、模板未注册节点、qqbot 明文 token、wechat_auth 常量时间、skills 吞异常、ValidationResult 消歧、AgentSkillManager 方法退役、computer_manager admin、evolution/manager 双锁）、§3.5 剩余 10 条（ToolOrchestrator 假成功、async 同步调用、asr 幽灵声明、日志泄 hash、qclaw 可逆落库、cost_budget 空实现、cost_tracking 退役、mcp_oauth/mcp_client、aigc_studio 旁路）+ **url_guard 收口为一份** |
+| R5 前端/测试CI/构建链 | 58d94147a、be2bb372f、ce818d654 | §3.6 剩余 13 条 + 3.7-3 死代理删除 + 3.9-1/3/8（孤儿测试退役、旧布局测试收敛、敏感种子清理）+ **P0-1 构建链闭环**（bundle_backend 出厂守卫 + helm deployment 注入 NEUROVA_MASTER_RECOVERY_PASSWORD） |
 
 ## 收尾轮总控抽验（实测）
 
@@ -92,7 +92,7 @@
 
 # 补漏轮复核结论（2026-11-17 第三轮·终局）
 
-总控复盘实锤 **7 项移交悬空**（前两轮会话间移交无人接手），派 R6 一并清偿，3 笔提交（a9fa54746、dabd221a9、faf365c84）：
+总控复盘实锤 **7 项移交悬空**（前两轮会话间移交无人接手），派 R6 一并清偿，3 笔提交（0e10e2368、ab4a2e0f1、bb310b0a7）：
 
 1. 鸿蒙 5 个 mock 页（SkillPool/Audit/Benchmark/Marketplace/Sandbox）接真实 API——新增五 API 模块（信封归一走 envelope.ets 单源）+ 五页删 mock（S8→S4 悬空）；
 2. skill_pool zip 落盘名随机化（S2→S1 悬空，路径拼接面消除）；
@@ -102,7 +102,7 @@
 6. list_projects 属主过滤接线最后一公里：collaboration_api 四处 + projects_api 一处补传 requester_id（R4 悬空，横向泄露闭环）；
 7. test_ekb_user_outcome_attach×3 身份升 admin 适配（default 属主收紧连带）。
 
-抽验：R6 新增 3 测试文件 11 passed；台账 R6-补漏收尾.md 入库 faf365c84。
+抽验：R6 新增 3 测试文件 11 passed；台账 R6-补漏收尾.md 入库 bb310b0a7。
 
 ## 终局遗留（均为"新建能力/需产品拍板"级，非缺陷悬空）
 
@@ -117,7 +117,7 @@
 
 复盘实锤剩余悬空后派 R6（七项移交悬空）与 U1/U2（四项产品拍板）；U1/U2 卡
 needs_attention 后总控直接接手，R6/U1 全部完成。本轮（R7，总控直接执行）清偿
-最后一批台账移交项，提交 af8f2da1c：
+最后一批台账移交项，提交 3321f6582：
 
 1. **AgentInfo.created_at 投影赋值断链**（U1 复核新发现）：agent.py 三条投影
    路径（list_agents 运行态/config_only、get_agent 运行态/config_only）从
@@ -153,9 +153,9 @@ needs_attention 后总控直接接手，R6/U1 全部完成。本轮（R7，总�
 
 | 会话 | 提交 | 交付 |
 |---|---|---|
-| N1 真流式 | 219216ab9 | OpenAIAdapter.stream_call 真流式（aiohttp SSE 逐 token、[DONE] 终止、错误诚实抛），契约对齐 provider_interface.py:97；本地假 SSE 服务真 HTTP 红绿 |
-| N2 telegram webhook | cb6fab308 | webhook 接收端点（verify_webhook_signature fail-closed→_process_update）+ 管理三端点挂出（admin 门、to_thread）|
-| N3 benchmark 执行器 | 48acfafb4 | 新增 neurova/benchmark/suite_eval.py（SuiteTask/CheckFn/任务库注册/runSuite 故障隔离判分）+ run_benchmark 分流（真执行=后台线程+GET /runs/{run_id} 轮询；simulated 语义保留；无 LLM 通道 503）+ 四 suite 任务库种子注册 |
+| N1 真流式 | 8d1135eb0 | OpenAIAdapter.stream_call 真流式（aiohttp SSE 逐 token、[DONE] 终止、错误诚实抛），契约对齐 provider_interface.py:97；本地假 SSE 服务真 HTTP 红绿 |
+| N2 telegram webhook | 03dccc172 | webhook 接收端点（verify_webhook_signature fail-closed→_process_update）+ 管理三端点挂出（admin 门、to_thread）|
+| N3 benchmark 执行器 | 577f65577 | 新增 neurova/benchmark/suite_eval.py（SuiteTask/CheckFn/任务库注册/runSuite 故障隔离判分）+ run_benchmark 分流（真执行=后台线程+GET /runs/{run_id} 轮询；simulated 语义保留；无 LLM 通道 503）+ 四 suite 任务库种子注册 |
 
 抽验：N3 三测试文件 29 passed；N1/N2 台账入库（N1-真流式.md 99 行、
 N2-telegram-webhook.md 167 行、N3-benchmark执行器.md 由总控补记）。
@@ -174,11 +174,11 @@ N2-telegram-webhook.md 167 行、N3-benchmark执行器.md 由总控补记）。
 复盘实锤 N3 真执行器的前端适配缺口（run 由同步返回结果变为"后台执行+状态
 查询"，PC/移动两端 BenchmarkPage 均无轮询——用户拍板 PC+移动都做）：
 
-- **PC**（0068ff8fd）：benchmark.ts 新增 getBenchmarkRun(runId)；
+- **PC**（719ad5472）：benchmark.ts 新增 getBenchmarkRun(runId)；
   BenchmarkPage run 后轮询 GET /runs/{run_id} 到终态（首查立即、间隔 2s、
   上限 60 次、失败静默停、onUnmounted 清理）。红灯 1 failed（零轮询）→
   绿灯 2/2 + 既有 6/6 + vue-tsc 0 错。
-- **移动**（7bfec4177）：runSuite 成功且 status=running 时延迟刷新历史两次
+- **移动**（f8ab247c8）：runSuite 成功且 status=running 时延迟刷新历史两次
   （3s/8s）。红绿以 Node harness 提取 runSuite 就地求值实证（旧实现
   immediate/4s/9s = 1/1/1 [RED]；新实现 1/2/3 [GREEN]）；hvigor ArkTS
   编译 BUILD SUCCESSFUL。
