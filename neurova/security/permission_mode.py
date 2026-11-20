@@ -19,7 +19,7 @@ from __future__ import annotations
 import contextvars
 import enum
 from contextlib import contextmanager
-from typing import Optional
+from typing import Any, Optional
 
 
 class PermissionMode(str, enum.Enum):

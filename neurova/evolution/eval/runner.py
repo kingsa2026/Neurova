@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Optional, Protocol
+from typing import Any, Awaitable, Callable, Dict, Optional, Protocol
 
 from neurova.core.logger import get_logger
 from neurova.evolution.eval import cost_ledger as _cost_ledger

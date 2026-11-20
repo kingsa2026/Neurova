@@ -121,22 +121,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS pending_memories_live_fp_idx
     WHERE status IN ('pending', 'rejected');
 """
 
-# 核验轮修复②：存量库幂等列迁移（CREATE TABLE 只覆盖新建库）。旧库缺
-# proposed_action/target_memory_id 两列时补齐，默认值保持旧行为语义
-# （store、无目标）。
-def _migrate_action_columns(conn: "sqlite3.Connection") -> None:
-    existing = {
-        row[1] for row in conn.execute("PRAGMA table_info(pending_memories)").fetchall()
-    }
-    if "proposed_action" not in existing:
-        conn.execute(
-            "ALTER TABLE pending_memories ADD COLUMN proposed_action TEXT NOT NULL DEFAULT 'store'"
-        )
-    if "target_memory_id" not in existing:
-        conn.execute(
-            "ALTER TABLE pending_memories ADD COLUMN target_memory_id TEXT NOT NULL DEFAULT ''"
-        )
-
 
 def _fingerprint(content: str) -> str:
     """内容指纹：去首尾空白 + 小写归一后哈希（拒绝名单判重用）。"""

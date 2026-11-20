@@ -12,6 +12,7 @@
 
 import importlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -41,7 +42,9 @@ def runChecker(root: Path, *extra: str, baseline: Path | None = None) -> subproc
         *extra,
     ]
     return subprocess.run(
-        cmd, capture_output=True, text=True, encoding="utf-8", cwd=str(REPO_ROOT)
+        cmd, capture_output=True, text=True, encoding="utf-8",
+        env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+        timeout=20, cwd=str(REPO_ROOT)
     )
 
 

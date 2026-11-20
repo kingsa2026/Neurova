@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from neurova.channels import wechat_kf_crypto
+from neurova.core.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ARCHIVE_SOURCE = PROJECT_ROOT / "neurova" / "channels" / "wecom_archive.py"
@@ -77,7 +78,7 @@ def test_bad_base64_random_key_raises(decryptArchiveRandomKey):
 
 def test_archive_module_has_no_aes_cipher():
     """AES 半边在官方 DecryptData 内——存档模块出现 ciphers/Cipher/AES 即第二套实装。"""
-    archiveTree = ast.parse(ARCHIVE_SOURCE.read_text(encoding="utf-8"))
+    archiveTree = parseSource(ARCHIVE_SOURCE.read_text(encoding="utf-8"))
     for node in ast.walk(archiveTree):
         if isinstance(node, ast.ImportFrom):
             assert "ciphers" not in (node.module or ""), (
@@ -89,7 +90,7 @@ def test_archive_module_has_no_aes_cipher():
             for alias in node.names:
                 assert "ciphers" not in (alias.name or "")
     # 反证（判据真阳性形状）：crypto 单源里 AES 的 import 确实存在，本判据不是恒真
-    cryptoTree = ast.parse(CRYPTO_SOURCE.read_text(encoding="utf-8"))
+    cryptoTree = parseSource(CRYPTO_SOURCE.read_text(encoding="utf-8"))
     assert any(
         isinstance(n, ast.ImportFrom) and "ciphers" in (n.module or "")
         for n in ast.walk(cryptoTree)
@@ -103,7 +104,7 @@ def test_rsa_half_lives_in_crypto_module_not_archive():
     archiveText = ARCHIVE_SOURCE.read_text(encoding="utf-8")
     archiveNames = {
         node.name
-        for node in ast.walk(ast.parse(archiveText))
+        for node in ast.walk(parseSource(archiveText))
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
     assert "decryptArchiveRandomKey" not in archiveNames, (

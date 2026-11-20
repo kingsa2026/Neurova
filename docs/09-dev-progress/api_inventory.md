@@ -9,7 +9,7 @@
 过期判据不是日历而是**双向差集**：代码树增删一个模块，本表与代码树的差集即非空，守卫 `tests/unit/test_api_inventory_freshness_guard.py` 立刻报红并给出差集两侧的名单。
 
 <!-- API-INVENTORY:BEGIN -->
-## 一、前端 API 模块（64 个）
+## 一、前端 API 模块（73 个）
 
 | 模块文件 | 消费的后端前缀 | barrel 导出 | 仓内引用处 |
 |------|------|------|------|
@@ -17,53 +17,62 @@
 | `NeurUI/src/api/modules/agent-enhancement.ts` | `/agent-enhancement` | 是 | 1 |
 | `NeurUI/src/api/modules/agent-migration.ts` | `/agents` | **否** | 2 |
 | `NeurUI/src/api/modules/agent-package.ts` | `/agents` | 是 | 1 |
+| `NeurUI/src/api/modules/agents.ts` | `/agents` | 是 | 1 |
 | `NeurUI/src/api/modules/analytics.ts` | `/analytics` | 是 | 3 |
-| `NeurUI/src/api/modules/audit.ts` | `/audit` | 是 | 1 |
+| `NeurUI/src/api/modules/asr.ts` | `/audio` | 是 | 2 |
+| `NeurUI/src/api/modules/audit.ts` | `/audit` | 是 | 3 |
+| `NeurUI/src/api/modules/benchmark.ts` | `/benchmark` | 是 | 3 |
 | `NeurUI/src/api/modules/build.ts` | `/build` | **否** | 3 |
 | `NeurUI/src/api/modules/builder.ts` | `/builder` | 是 | 1 |
-| `NeurUI/src/api/modules/channel-configs.ts` | `/channel-adapters`, `/channel-configs` | 是 | 17 |
-| `NeurUI/src/api/modules/collaboration.ts` | `/collaboration`, `/neurflow` | 是 | 20 |
+| `NeurUI/src/api/modules/channel-configs.ts` | `/channel-adapters`, `/channel-configs` | 是 | 19 |
+| `NeurUI/src/api/modules/channel-sharing.ts` | `/channel-sharing` | 是 | 1 |
+| `NeurUI/src/api/modules/collaboration.ts` | `/collaboration`, `/neurflow`, `/projects` | 是 | 20 |
 | `NeurUI/src/api/modules/collaborationRoom.ts` | `/collaboration` | **否** | 2 |
 | `NeurUI/src/api/modules/computer.ts` | `/computer` | 是 | 3 |
-| `NeurUI/src/api/modules/console.ts` | `/console` | 是 | 8 |
-| `NeurUI/src/api/modules/context.ts` | `/context` | 是 | 1 |
+| `NeurUI/src/api/modules/console.ts` | `/audio`, `/console` | 是 | 12 |
+| `NeurUI/src/api/modules/context.ts` | `/context` | 是 | 5 |
 | `NeurUI/src/api/modules/cost.ts` | `/budgets`, `/cost-rollup` | **否** | 2 |
 | `NeurUI/src/api/modules/enhanced-users.ts` | `/enhanced-users` | 是 | 1 |
 | `NeurUI/src/api/modules/experience.ts` | `/experience` | 是 | 4 |
-| `NeurUI/src/api/modules/files.ts` | `/files` | 是 | 7 |
-| `NeurUI/src/api/modules/firewall.ts` | `/firewall` | 是 | 2 |
+| `NeurUI/src/api/modules/files.ts` | `/files` | 是 | 9 |
+| `NeurUI/src/api/modules/firewall.ts` | `/firewall` | 是 | 4 |
 | `NeurUI/src/api/modules/generation.ts` | `/generation` | 是 | 6 |
 | `NeurUI/src/api/modules/governance.ts` | `/channel-adapters`, `/governance` | **否** | 4 |
-| `NeurUI/src/api/modules/groups.ts` | `/groups` | 是 | 4 |
-| `NeurUI/src/api/modules/growth.ts` | `/growth` | 是 | 5 |
+| `NeurUI/src/api/modules/groups.ts` | `/groups` | 是 | 5 |
+| `NeurUI/src/api/modules/growth.ts` | `/growth` | 是 | 8 |
 | `NeurUI/src/api/modules/health.ts` | `/health` | 是 | 5 |
 | `NeurUI/src/api/modules/home.ts` | `/home` | 是 | 3 |
 | `NeurUI/src/api/modules/image.ts` | `/image` | 是 | 1 |
-| `NeurUI/src/api/modules/knowledge.ts` | `/knowledge`, `/knowledge-graph`, `/semantic-search` | 是 | 11 |
+| `NeurUI/src/api/modules/knowledge-graph.ts` | `/knowledge-graph` | 是 | 2 |
+| `NeurUI/src/api/modules/knowledge.ts` | `/knowledge`, `/knowledge-graph`, `/semantic-search` | 是 | 17 |
 | `NeurUI/src/api/modules/knowledgeEval.ts` | `/knowledge` | 是 | 3 |
 | `NeurUI/src/api/modules/language.ts` | `/language` | 是 | 4 |
 | `NeurUI/src/api/modules/logs-api.ts` | `/logs-api` | 是 | 1 |
+| `NeurUI/src/api/modules/marketplace.ts` | `/marketplace` | 是 | 1 |
 | `NeurUI/src/api/modules/media.ts` | `/media` | 是 | 1 |
 | `NeurUI/src/api/modules/memory-settings.ts` | `/memory-settings` | 是 | 4 |
-| `NeurUI/src/api/modules/memory.ts` | `/enhanced-memory-search`, `/memory`, `/memory-enhancement`, `/memory-share-groups`, `/memory-timeline`, `/semantic-search` | 是 | 17 |
+| `NeurUI/src/api/modules/memory.ts` | `/enhanced-memory-search`, `/memory`, `/memory-enhancement`, `/memory-share-groups`, `/memory-timeline`, `/semantic-search` | 是 | 18 |
 | `NeurUI/src/api/modules/metacognition.ts` | `/metacognition` | 是 | 4 |
 | `NeurUI/src/api/modules/mobile.ts` | `/mobile` | 是 | 2 |
-| `NeurUI/src/api/modules/models.ts` | `/models` | 是 | 13 |
+| `NeurUI/src/api/modules/models.ts` | `/models` | 是 | 15 |
+| `NeurUI/src/api/modules/monitor.ts` | `/monitor` | **否** | 2 |
 | `NeurUI/src/api/modules/negative-screen.ts` | `/negative-screen`, `/notifications` | 是 | 6 |
-| `NeurUI/src/api/modules/neurflow.ts` | `/neurflow` | 是 | 8 |
-| `NeurUI/src/api/modules/notifications.ts` | `/notifications` | 是 | 6 |
-| `NeurUI/src/api/modules/ontology.ts` | `/knowledge` | **否** | 14 |
+| `NeurUI/src/api/modules/neuacp.ts` | `/external-agents`, `/teams` | 是 | 5 |
+| `NeurUI/src/api/modules/neurflow.ts` | `/neurflow` | 是 | 7 |
+| `NeurUI/src/api/modules/notifications.ts` | `/notifications` | 是 | 5 |
+| `NeurUI/src/api/modules/ontology.ts` | `/knowledge` | **否** | 29 |
 | `NeurUI/src/api/modules/plans.ts` | `/plans` | 是 | 3 |
 | `NeurUI/src/api/modules/plugins.ts` | `/plugins` | 是 | 0 |
 | `NeurUI/src/api/modules/projects.ts` | `/projects` | 是 | 5 |
-| `NeurUI/src/api/modules/providers.ts` | `/providers` | 是 | 11 |
+| `NeurUI/src/api/modules/providers.ts` | `/providers` | 是 | 13 |
 | `NeurUI/src/api/modules/quality.ts` | `/quality` | **否** | 5 |
 | `NeurUI/src/api/modules/rsiGovernance.ts` | `/governance` | **否** | 2 |
 | `NeurUI/src/api/modules/rules.ts` | `/rules` | 是 | 1 |
 | `NeurUI/src/api/modules/runtime.ts` | `/runtime` | 是 | 1 |
 | `NeurUI/src/api/modules/sandbox.ts` | `/sandbox` | 是 | 0 |
 | `NeurUI/src/api/modules/scheduler.ts` | `/scheduler` | 是 | 3 |
-| `NeurUI/src/api/modules/settings.ts` | `/governance`, `/settings` | 是 | 10 |
+| `NeurUI/src/api/modules/sessionSync.ts` | `/sync` | **否** | 2 |
+| `NeurUI/src/api/modules/settings.ts` | `/governance`, `/settings` | 是 | 12 |
 | `NeurUI/src/api/modules/shared-config.ts` | `/shared-config` | 是 | 0 |
 | `NeurUI/src/api/modules/skill-pool.ts` | `/marketplace`, `/skill-pool` | 是 | 9 |
 | `NeurUI/src/api/modules/sleep.ts` | `/sleep` | 是 | 8 |
@@ -72,7 +81,7 @@
 | `NeurUI/src/api/modules/synonyms.ts` | `/synonyms` | 是 | 1 |
 | `NeurUI/src/api/modules/system-logs.ts` | — | 是 | 1 |
 | `NeurUI/src/api/modules/tasks.ts` | `/tasks` | 是 | 0 |
-| `NeurUI/src/api/modules/teams.ts` | `/teams` | 是 | 2 |
+| `NeurUI/src/api/modules/teams.ts` | `/teams` | 是 | 6 |
 | `NeurUI/src/api/modules/text-evolution.ts` | `/evolution` | **否** | 2 |
 | `NeurUI/src/api/modules/tool-layers.ts` | `/tool-layers` | 是 | 2 |
 | `NeurUI/src/api/modules/trace.ts` | `/trace` | 是 | 4 |
@@ -80,7 +89,7 @@
 
 > `NeurUI/src/api/index.ts` 是 axios 实例与鉴权拦截器，`NeurUI/src/api/auth.ts` / `NeurUI/src/api/neuron.ts` 是模块目录之外的单文件客户端，三者不属本表模块口径。
 
-## 二、后端挂载前缀（94 条）
+## 二、后端挂载前缀（100 条）
 
 | 端点模块 | 挂载前缀 |
 |------|------|
@@ -91,6 +100,7 @@
 | `neurova/api/endpoints/agent_communication_api.py` | `/api/v1/agent-communication` |
 | `neurova/api/endpoints/agent_enhancement.py` | `/api/v1/agent-enhancement` |
 | `neurova/api/endpoints/agent.py` | `/api/v1/agents` |
+| `neurova/api/endpoints/agent_checkpoints_api.py` | `/api/v1/agents` |
 | `neurova/api/endpoints/agent_migration.py` | `/api/v1/agents` |
 | `neurova/api/endpoints/agent_package.py` | `/api/v1/agents` |
 | `neurova/api/endpoints/analytics.py` | `/api/v1/analytics` |
@@ -114,10 +124,12 @@
 | `neurova/api/endpoints/console.py` | `/api/v1/console` |
 | `neurova/api/endpoints/context.py` | `/api/v1/context` |
 | `neurova/api/endpoints/cost_rollup_api.py` | `/api/v1/cost-rollup` |
+| `neurova/api/endpoints/crystallized_health_api.py` | `/api/v1/diagnostics` |
 | `neurova/api/endpoints/enhanced_memory_search_api.py` | `/api/v1/enhanced-memory-search` |
 | `neurova/api/endpoints/enhanced_users_api.py` | `/api/v1/enhanced-users` |
 | `neurova/api/endpoints/text_evolution_api.py` | `/api/v1/evolution` |
 | `neurova/api/endpoints/experience_knowledge_api.py` | `/api/v1/experience` |
+| `neurova/api/endpoints/external_agents_api.py` | `/api/v1/external-agents` |
 | `neurova/api/endpoints/files_api.py` | `/api/v1/files` |
 | `neurova/api/endpoints/firewall.py` | `/api/v1/firewall` |
 | `neurova/api/endpoints/generation.py` | `/api/v1/generation` |
@@ -144,6 +156,7 @@
 | `neurova/api/endpoints/memory_timeline_api.py` | `/api/v1/memory-timeline` |
 | `neurova/api/endpoints/metacognition_api.py` | `/api/v1/metacognition` |
 | `neurova/api/endpoints/mobile_pairing.py` | `/api/v1/mobile` |
+| `neurova/api/endpoints/mobile_push.py` | `/api/v1/mobile/push` |
 | `neurova/api/endpoints/model.py` | `/api/v1/models` |
 | `neurova/api/endpoints/monitor.py` | `/api/v1/monitor` |
 | `neurova/api/endpoints/negative_screen_settings.py` | `/api/v1/negative-screen` |
@@ -178,10 +191,12 @@
 | `neurova/api/endpoints/trace.py` | `/api/v1/trace` |
 | `neurova/api/endpoints/webhooks.py` | `/api/v1/webhooks` |
 | `neurova/api/endpoints/workspace_files.py` | `/api/v1/workspace` |
+| `builtins.py` | `/v1/mcp` |
+| `builtins.py` | `/v1/mcp/agent-tools` |
 
 ## 三、差集（断点以显式名单暴露，不用「大致一致」带过）
 
-**barrel 未导出的模块**：`NeurUI/src/api/modules/agent-migration.ts`, `NeurUI/src/api/modules/build.ts`, `NeurUI/src/api/modules/collaborationRoom.ts`, `NeurUI/src/api/modules/cost.ts`, `NeurUI/src/api/modules/governance.ts`, `NeurUI/src/api/modules/ontology.ts`, `NeurUI/src/api/modules/quality.ts`, `NeurUI/src/api/modules/rsiGovernance.ts`, `NeurUI/src/api/modules/studio.ts`, `NeurUI/src/api/modules/text-evolution.ts`
+**barrel 未导出的模块**：`NeurUI/src/api/modules/agent-migration.ts`, `NeurUI/src/api/modules/build.ts`, `NeurUI/src/api/modules/collaborationRoom.ts`, `NeurUI/src/api/modules/cost.ts`, `NeurUI/src/api/modules/governance.ts`, `NeurUI/src/api/modules/monitor.ts`, `NeurUI/src/api/modules/ontology.ts`, `NeurUI/src/api/modules/quality.ts`, `NeurUI/src/api/modules/rsiGovernance.ts`, `NeurUI/src/api/modules/sessionSync.ts`, `NeurUI/src/api/modules/studio.ts`, `NeurUI/src/api/modules/text-evolution.ts`
 
 **前后端前缀契约断点**（前端按 `baseURL=/api/v1` 请求，后端无对应挂载点 → 404）：无
 
@@ -191,7 +206,7 @@
 
 **未挂载路由模块**（全仓定义了路由、装配后却不在路由表里 —— 运行时不提供服务）：无
 
-**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/coordination`, `/api/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/computers`, `/api/v1/knowledge-integration`, `/api/v1/knowledge/categories`, `/api/v1/logs`, `/api/v1/mcp`, `/api/v1/monitor`, `/api/v1/openplatform`, `/api/v1/phase3`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/workspace`
+**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/coordination`, `/api/neuron`, `/api/v1/artifacts`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/chat`, `/api/v1/computers`, `/api/v1/diagnostics`, `/api/v1/knowledge-integration`, `/api/v1/knowledge/categories`, `/api/v1/logs`, `/api/v1/mcp`, `/api/v1/mobile/push`, `/api/v1/openplatform`, `/api/v1/phase3`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/tools`, `/api/v1/workspace`, `/v1/mcp`, `/v1/mcp/agent-tools`
 
 
 ## 四、前端调用 ↔ 后端注册 差集
@@ -200,29 +215,25 @@
 
 ## 五、后端已注册 ↔ 前端消费方 差集
 
-下列 **21** 个后端挂载前缀无任何前端模块直连，属「后端已就位、前端待补消费方」的显式清单：
+下列 **17** 个后端挂载前缀无任何前端模块直连，属「后端已就位、前端待补消费方」的显式清单：
 
 | 后端挂载前缀 |
 |------|
 | `/acp` |
 | `/artifacts` |
-| `/audio` |
 | `/backups` |
-| `/benchmark` |
-| `/channel-sharing` |
 | `/chat` |
 | `/coordination` |
+| `/diagnostics` |
 | `/frontend` |
 | `/knowledge-integration` |
 | `/mcp` |
 | `/metrics` |
-| `/monitor` |
 | `/openplatform` |
 | `/phase3` |
 | `/skill-versions` |
 | `/skills` |
 | `/status` |
-| `/sync` |
 | `/tools` |
 | `/workspace` |
 <!-- API-INVENTORY:END -->

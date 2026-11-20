@@ -23,6 +23,7 @@ def registry():
     return create_default_skills()
 
 
+@pytest.mark.timeout(210)
 @pytest.mark.asyncio
 async def test_isolated_execution_rebuilds_registry(registry, monkeypatch):
     import neurova.execution_layers as execution_layers
@@ -68,9 +69,11 @@ async def test_isolated_execution_rebuilds_registry(registry, monkeypatch):
     # 真跑一遍捕获的子进程代码：技能必须能解析并执行（而非报"不存在"）
     env = dict(os.environ)
     env.update(captured["env"])
+    env["PYTHONIOENCODING"] = "utf-8"
     proc = subprocess.run(
         [sys.executable] + captured["args"],
-        capture_output=True, text=True, timeout=180, env=env,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=180, env=env,
     )
     payload = json.loads(proc.stdout or "{}")
     assert payload.get("success") is True, (

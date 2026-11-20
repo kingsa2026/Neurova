@@ -562,7 +562,7 @@ class EnterpriseIngestor:
                                 + int(projected.get("admitted") or 0))
                         except Exception as exc:  # noqa: BLE001 - 投影失败不回滚源轮，
                             # 但必须点名（静默丢数据=教义第 2 条）；下轮重拉按内容键幂等补齐
-                            projectedErrors[targetTenant] = str(exc)
+                            projectionErrors[targetTenant] = str(exc)
                             from neurova.core.logger import get_logger
 
                             get_logger(__name__).error(

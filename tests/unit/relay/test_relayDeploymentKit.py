@@ -6,6 +6,7 @@
 2. `neurova-relay.service` —— 引用的路径/用户/入口与 install.sh 写下的一致；
 3. `python -m neurova.relay` —— 空令牌拒绝启动（空令牌等于没有入口）。
 """
+import os
 import re
 import shutil
 import subprocess
@@ -31,6 +32,7 @@ class TestMinimalFileSet:
         for rel in _relayFilesFromInstallScript():
             assert (REPO / rel).is_file(), f"install.sh 清单里的文件不存在：{rel}"
 
+    @pytest.mark.timeout(150)
     def test_minimal_set_runs_standalone(self, tmp_path):
         """按 install.sh 的清单拷到独立目录后，中继必须能起、/healthz 必须通。
 
@@ -56,7 +58,9 @@ class TestMinimalFileSet:
             "print('STANDALONE_OK')"
         )
         proc = subprocess.run([sys.executable, "-c", probe], capture_output=True,
-                              text=True, timeout=120)
+                              text=True, encoding="utf-8", errors="replace",
+                              env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+                              timeout=120)
         assert proc.returncode == 0, f"最小集独立运行失败：\n{proc.stderr[-2000:]}"
         assert "STANDALONE_OK" in proc.stdout
 
@@ -72,7 +76,8 @@ class TestServiceUnit:
     def test_install_script_is_valid_shell(self):
         script = (KIT / "install.sh").read_text(encoding="utf-8")
         proc = subprocess.run(["bash", "-n", str(KIT / "install.sh")],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=20)
         assert proc.returncode == 0, proc.stderr
         assert "set -euo pipefail" in script, "部署脚本必须 fail-fast"
         # 幂等关键：令牌首启生成后复用，不能每次部署都换（换了面板就得重填）

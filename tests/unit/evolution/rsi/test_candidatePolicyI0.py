@@ -12,6 +12,7 @@ import json
 
 import pytest
 
+from neurova.core.ast_scan import parseSource
 from neurova.evolution.rsi.candidate_policy import (
     I_0_SUMMARY,
     CandidatePolicy,
@@ -124,7 +125,7 @@ class TestStructureGuard:
         import inspect
 
         source = inspect.getsource(orch_module)
-        tree = ast.parse(source)
+        tree = parseSource(source)
         banned = {0.05, 0.10, 0.15, 0.20, 0.1, 0.15, 0.2}
         offenders = []
         for node in ast.walk(tree):

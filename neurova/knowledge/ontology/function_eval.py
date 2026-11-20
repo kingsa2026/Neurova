@@ -19,6 +19,8 @@ from __future__ import annotations
 import ast
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
+from neurova.core.ast_scan import parseSource
+
 #: selector 取数上限（D1：超限显式拒，不静默截断）
 SELECTOR_ROW_CAP = 5000
 #: 表达式 AST 深度上限
@@ -149,7 +151,7 @@ def compileFunction(exprText: str, allowedNames: Tuple[str, ...] = (),
     if not text:
         raise FunctionCompileError("表达式为空")
     try:
-        tree = ast.parse(text, mode="eval")
+        tree = parseSource(text, mode="eval")
     except SyntaxError as exc:
         raise FunctionCompileError("表达式语法错误：%s" % exc) from exc
     counter = [0]

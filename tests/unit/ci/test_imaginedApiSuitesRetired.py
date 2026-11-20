@@ -309,7 +309,9 @@ class TestImaginedApiSuitesRetired:
         """承接面自证：真实档必须还在、还在跑，否则本守卫守的是空气。"""
         honest = {
             "tests/unit/security/test_cognitive_security.py": 20,
-            "tests/unit/core/test_state_manager.py": 6,
+            # tests/unit/core/test_state_manager.py 已随 8249ed7ed 退役（P1-11：
+            # core/state_manager.py 生产零消费，连测清偿）——能力本身按裁定退净，
+            # 不再有"承接真实契约的档"可钉，故从本表摘行而不是改指别的档。
             "tests/integration/test_event_workflow.py": 4,
             "tests/integration/test_browser_manager_integration.py": 5,
         }

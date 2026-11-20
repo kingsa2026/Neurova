@@ -20,6 +20,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+# 本脚本是入口档（仅 `python scripts/githooks/install.py` 直跑，不被 import）：
+# 中文 print 在 cp936 宿主上会把退出码打成本档的 1，出口先钉 utf-8（§6-496）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 #: 本工具管理的钩子名单。只装这两个，其余一律不碰。
 MANAGED_HOOKS = ("commit-msg", "pre-commit")
 #: 归属标记：两个壳的注释里都有这句（指向判据唯一出处）。dst 带它＝本工具的旧版，

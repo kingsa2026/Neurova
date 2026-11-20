@@ -22,6 +22,8 @@ import ast
 import builtins as _builtins_mod
 from typing import Any, Dict, List
 
+from neurova.core.ast_scan import parseSource
+
 #: 表达式环境可用的内建函数（白名单，宁少勿多）
 ALLOWED_BUILTIN_NAMES = (
     "len", "sum", "min", "max", "sorted", "any", "all", "abs",
@@ -49,7 +51,7 @@ def validateRecallExpression(expression: str) -> ast.Expression:
     if not expression or not expression.strip():
         raise RecallExpressionError("表达式为空")
     try:
-        tree = ast.parse(expression.strip(), mode="eval")
+        tree = parseSource(expression.strip(), mode="eval")
     except SyntaxError as e:
         raise RecallExpressionError(f"表达式语法错误：{e}") from e
 

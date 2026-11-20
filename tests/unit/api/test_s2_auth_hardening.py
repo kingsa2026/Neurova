@@ -25,6 +25,7 @@ os.environ.setdefault("NEUROVA_JWT_SECRET", "s2-pin-0123456789abcdef-2026-11-16"
 
 from neurova.api.auth import hash_password  # noqa: E402
 from neurova.api.endpoints import auth as AUTH  # noqa: E402
+from neurova.core.ast_scan import parseSource  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 AUTH_SOURCE = REPO_ROOT / "neurova" / "api" / "endpoints" / "auth.py"
@@ -83,7 +84,7 @@ class TestMasterRecoveryPasswordEnvInjection:
     def test_source_no_longer_carries_password_literal(self):
         """源码不得再含 MASTER_RECOVERY_PASSWORD 字面量赋值，也不得残留旧口令串。"""
         src = AUTH_SOURCE.read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        tree = parseSource(src)
         for node in tree.body:
             if isinstance(node, ast.Assign):
                 for target in node.targets:

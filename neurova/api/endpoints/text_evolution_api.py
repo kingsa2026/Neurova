@@ -20,7 +20,11 @@ from __future__ import annotations
 from neurova.skills.library_service import agentLibrary
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    # 仅注解面引用：运行时在用点就地 import（避免模块级拉起 eval 依赖链）。
+    from neurova.evolution.eval.dataset import EvalDataset
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field

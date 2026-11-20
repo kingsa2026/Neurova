@@ -89,7 +89,8 @@ def test_ab_library_consumer_count_is_registered():
 
     result = subprocess.run(
         ["grep", "-rln", "classifyPairwise", "neurova/"],
-        capture_output=True, text=True, cwd=".",
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=20, cwd=".",
     )
     files = [line for line in result.stdout.splitlines() if line.strip()]
     assert len(files) >= 2, (

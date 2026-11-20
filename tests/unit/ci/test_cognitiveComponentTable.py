@@ -126,8 +126,11 @@ class TestMachineBlocksMatchGenerator:
 class TestTableIsNotVacuous:
     def test_rowsCoverTheWholeLayer(self):
         rows = _componentRows(_loadGenerator())
-        # §6-380 退役 agent_self/memory_stream 后现值 90；下限随批次更新，不许无声塌缩。
-        assert len(rows) >= 90, f"组件表只 {len(rows)} 行？认知层的模块远不止这些"
+        # §6-380 退役 agent_self/memory_stream 后现值 90；2026-11-20 现值 83——
+        # d93ad0a3c（五簇同功能双实现退役：工作记忆/睡眠/自我模型/时序事实存储/检索死支）
+        # 与 8249ed7ed（P1-11 core 死码群）按教义第 7 条退净后层的真实规模。
+        # 下限随批次更新，不许无声塌缩：再退役须连本行一起改，新增即自然离开下限。
+        assert len(rows) >= 80, f"组件表只 {len(rows)} 行？认知层的模块远不止这些"
         sublayers = {r["sublayer"] for r in rows}
         assert len(sublayers) >= 4, f"只扫到 {len(sublayers)} 个子层：{sorted(sublayers)}"
 
