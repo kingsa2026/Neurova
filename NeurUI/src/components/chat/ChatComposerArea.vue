@@ -18,6 +18,7 @@
       <div v-if="isRecording" class="nr-recording-bar">
         <div class="nr-recording-dot" />
         <span class="nr-recording-label">{{ t('chat.recording') }}</span>
+        <span v-if="usingStreaming" class="nr-recording-cloud">{{ t('chat.asrCloudTag') }}</span>
         <div class="nr-recording-wave">
           <span v-for="n in 12" :key="n" class="nr-wave-bar" :style="{ animationDelay: `${n * 0.08}s` }" />
         </div>
@@ -430,7 +431,7 @@ function toggleModelMenu(): void {
 const { pendingFiles, removePendingFile, handleFileSelect, handlePaste } = usePendingFiles()
 
 // ── ASR（共享单例）────────────────────────────────────
-const { asrAvailable, isRecording, recordingTimeStr, toggleRecording, cancelRecording } = useASRRecording()
+const { asrAvailable, isRecording, recordingTimeStr, usingStreaming, toggleRecording, cancelRecording } = useASRRecording()
 
 // ── 自动语音开关（共享单例，流式 TTS runner 由页面接线）───────
 const { autoVoice, toggleAutoVoice } = useAutoVoice()
@@ -774,6 +775,16 @@ defineExpose({ closeSlashPanel, autoResize })
   font-size: 13px;
   color: var(--nr-error);
   font-weight: 500;
+}
+.nr-recording-cloud {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--nr-text-muted);
+  background: var(--nr-bg-secondary);
+  border: 1px solid var(--nr-border);
+  white-space: nowrap;
 }
 .nr-recording-wave {
   display: flex;
