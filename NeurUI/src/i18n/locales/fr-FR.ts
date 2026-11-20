@@ -101,6 +101,7 @@ export default {
     models: 'Modèles',
     tools: 'Outils',
     mobilePairing: 'Appairage mobile',
+    externalAgentFrames: "Relecture des trames",
     channels: 'Canaux',
     system: 'Système',
     settings: 'Paramètres',

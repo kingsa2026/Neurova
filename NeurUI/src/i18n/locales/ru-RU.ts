@@ -101,6 +101,7 @@ export default {
     models: 'Модели',
     tools: 'Инструменты',
     mobilePairing: 'Мобильная привязка',
+    externalAgentFrames: "Воспроизведение кадров агентов",
     channels: 'Каналы',
     system: 'Система',
     settings: 'Настройки',

@@ -101,6 +101,7 @@ export default {
     models: 'Models',
     tools: 'Tools',
     mobilePairing: 'Mobile Pairing',
+    externalAgentFrames: "External agent frame replay",
     channels: 'Channels',
     system: 'System',
     settings: 'Settings',

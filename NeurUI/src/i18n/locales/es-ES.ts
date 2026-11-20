@@ -101,6 +101,7 @@ export default {
     models: 'Modelos',
     tools: 'Herramientas',
     mobilePairing: 'Vinculación móvil',
+    externalAgentFrames: "Reproducción de tramas",
     channels: 'Canales',
     system: 'Sistema',
     settings: 'Ajustes',

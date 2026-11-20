@@ -101,6 +101,7 @@ export default {
     models: 'النماذج',
     tools: 'الأدوات',
     mobilePairing: 'إقران الهاتف المحمول',
+    externalAgentFrames: "إعادة تشغيل الإطارات",
     channels: 'القنوات',
     system: 'النظام',
     settings: 'الإعدادات',

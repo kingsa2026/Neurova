@@ -101,6 +101,7 @@ export default {
     models: '模型',
     tools: '工具',
     mobilePairing: '移动端配对',
+    externalAgentFrames: "外部代理帧回放",
     channels: '渠道',
     system: '系统',
     settings: '设置',

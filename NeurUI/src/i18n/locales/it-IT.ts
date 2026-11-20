@@ -101,6 +101,7 @@ export default {
     models: 'Modelli',
     tools: 'Strumenti',
     mobilePairing: 'Abbinamento mobile',
+    externalAgentFrames: "Riproduzione frame",
     channels: 'Canali',
     system: 'Sistema',
     settings: 'Impostazioni',

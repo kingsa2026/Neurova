@@ -49,6 +49,8 @@ const TOP_MODULES: ModuleItem[] = [
   { key: '/groups', labelKey: 'groups' },
   { key: '/firewall', labelKey: 'firewall' },
   { key: '/audit', labelKey: 'audit' },
+  // 外部代理帧回放（admin 调试视图；与 navigation.ts 平台管理区同步登记）
+  { key: '/tools/external-agent-frames', labelKey: 'externalAgentFrames' },
   { key: '/marketplace', labelKey: 'marketplace' },
   { key: '/benchmark', labelKey: 'benchmark' },
 ]

@@ -101,6 +101,7 @@ export default {
     models: 'मॉडल',
     tools: 'उपकरण',
     mobilePairing: 'मोबाइल पेयरिंग',
+    externalAgentFrames: "फ़्रेम रिप्ले",
     channels: 'चैनल',
     system: 'सिस्टम',
     settings: 'सेटिंग्स',

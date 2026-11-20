@@ -101,6 +101,7 @@ export default {
     models: 'モデル',
     tools: 'ツール',
     mobilePairing: 'モバイルペアリング',
+    externalAgentFrames: "外部エージェント フレーム再生",
     channels: 'チャンネル',
     system: 'システム',
     settings: '設定',

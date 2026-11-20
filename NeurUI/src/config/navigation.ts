@@ -88,6 +88,8 @@ export const TOP_NAV_CATEGORIES: TopNavCategory[] = [
       { to: '/groups', labelKey: 'nav.groups', icon: TeamOutlined },
       { to: '/firewall', labelKey: 'nav.firewall', icon: AlertOutlined },
       { to: '/audit', labelKey: 'nav.audit', icon: HistoryOutlined },
+      // 外部代理帧回放（F2 帧账本读面的 admin 调试视图；页面内再验角色，接口 403 兜底）
+      { to: '/tools/external-agent-frames', labelKey: 'nav.externalAgentFrames', icon: ControlOutlined },
     ],
   },
   {
