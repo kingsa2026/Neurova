@@ -211,7 +211,8 @@ export struct AgentListPage {
   }
 
   build() {
-    Stack() {
+    // FAB 锚定右下（BottomEnd+固定边距）：百分比定位随屏高漂移，曾把 FAB 推进玻璃栏区
+    Stack({ alignContent: Alignment.BottomEnd }) {
       Column() {
         // 顶部导航栏：标题"智能体"（21/700）+ 数量/在线副标（右侧插槽）
         // 内联头（原型 F7：标题 + 「N 个 · M 在线」；创建入口收敛为右下 FAB）
@@ -300,8 +301,8 @@ export struct AgentListPage {
       .borderRadius(27)
       .linearGradient({ angle: 135, colors: this.sm.getBrandGradient() })
       .shadow({ radius: 30, color: 'rgba(99,102,241,0.50)', offsetY: 10 })
-      // y 取 78%：页面容器直通屏底后 85% 会落进透明玻璃页签栏区被遮住，上移到栏上方
-      .position({ x: '80%', y: '78%' })
+      // 距右 20 / 距底 120：任何屏幕尺寸都完整落在玻璃页签栏上方，可看可点
+      .margin({ right: 20, bottom: 120 })
       .onClick(() => { this.handleCreate(); })
     }
     .width('100%')
