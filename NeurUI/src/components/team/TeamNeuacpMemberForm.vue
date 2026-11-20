@@ -61,14 +61,15 @@
       <div class="field-row">
         <a-form-item :label="t('neuacp.transport')">
           <a-select v-model:value="form.transport">
-            <a-select-option value="stdio">{{ t('neuacp.transportStdio') }}</a-select-option>
-            <a-select-option value="ssh">{{ t('neuacp.transportSsh') }}</a-select-option>
+            <a-select-option v-for="tr in availableTransports" :key="tr" :value="tr">
+              {{ tr === 'ssh' ? t('neuacp.transportSsh') : t('neuacp.transportStdio') }}
+            </a-select-option>
           </a-select>
         </a-form-item>
         <a-form-item :label="t('neuacp.permissionMode')">
           <a-select :value="form.permissionMode" @change="onPermissionModeChange">
-            <a-select-option value="chain">{{ t('neuacp.permissionChain') }}</a-select-option>
-            <a-select-option value="auto" :disabled="!isAdmin">{{ t('neuacp.permissionAuto') }}</a-select-option>
+            <a-select-option v-if="availablePermissionModes.includes('chain')" value="chain">{{ t('neuacp.permissionChain') }}</a-select-option>
+            <a-select-option v-if="availablePermissionModes.includes('auto')" value="auto" :disabled="!isAdmin">{{ t('neuacp.permissionAuto') }}</a-select-option>
           </a-select>
         </a-form-item>
       </div>
@@ -184,6 +185,22 @@ const form = reactive({
 
 const selectedCatalog = computed(() => catalog.value.find((item) => item.tool === form.tool))
 
+// F1 能力预筛：catalog 未带 capabilities 时按保守档全开（与旧契约兼容，不破坏旧目录）
+const DEFAULT_TRANSPORTS = ['stdio', 'ssh']
+const DEFAULT_PERMISSION_MODES = ['chain', 'auto']
+
+/** 当前选中工具支持的传输形态（capabilities.transports；缺省回退两档全开） */
+const availableTransports = computed<string[]>(() => {
+  const list = selectedCatalog.value?.capabilities?.transports
+  return Array.isArray(list) && list.length ? list.map(String) : DEFAULT_TRANSPORTS
+})
+
+/** 当前选中工具支持的审批交互形态（capabilities.permission_modes；plugin 家无 auto） */
+const availablePermissionModes = computed<string[]>(() => {
+  const list = selectedCatalog.value?.capabilities?.permission_modes
+  return Array.isArray(list) && list.length ? list.map(String) : DEFAULT_PERMISSION_MODES
+})
+
 const commandPlaceholder = computed(() => {
   const cmd = selectedCatalog.value?.command
   return cmd && cmd.length ? cmd.join(' ') : t('neuacp.command')
@@ -216,6 +233,15 @@ function handleToolChange(tool: string) {
   const item = catalog.value.find((entry) => entry.tool === form.tool)
   // 启动命令预填 catalog 默认值，允许覆盖（单一事实源：目录给默认，名册给生效值）
   form.command = item?.command?.length ? item.command.join(' ') : form.command
+  // F1 能力预筛：当前值不在该工具支持集内时回落到支持档（选择期拦截，不等提交 422）
+  const transports = availableTransports.value
+  if (!transports.includes(form.transport)) {
+    form.transport = (transports.includes('stdio') ? 'stdio' : transports[0]) as 'stdio' | 'ssh'
+  }
+  const modes = availablePermissionModes.value
+  if (!modes.includes(form.permissionMode)) {
+    form.permissionMode = (modes.includes('chain') ? 'chain' : modes[0]) as 'chain' | 'auto'
+  }
 }
 
 function onPermissionModeChange(value: unknown) {
@@ -338,6 +364,8 @@ defineExpose({
   catalog,
   testResult,
   isAdmin,
+  availableTransports,
+  availablePermissionModes,
   loadCatalog,
   handleToolChange,
   handleTestConnection,

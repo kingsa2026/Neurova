@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -65,6 +66,13 @@ const catalog = [
     disabled: false,
     installed: false,
     install_hint: 'https://z.ai/claude-code',
+    capabilities: {
+      transports: ['stdio', 'ssh'],
+      permission_modes: ['chain'],
+      streaming: true,
+      resume: true,
+      session_reuse: false,
+    },
   },
 ]
 
@@ -292,5 +300,54 @@ describe('TeamNeuacpMemberForm — 权限模式', () => {
     vm.onPermissionModeChange('auto')
     expect(Modal.confirm).not.toHaveBeenCalled()
     expect(vm.form.permissionMode).toBe('chain')
+  })
+})
+
+describe('TeamNeuacpMemberForm — 能力声明预筛（F1 前端适配）', () => {
+  it('目录项未带 capabilities 时保守回退：传输/权限两档全开（旧契约兼容）', async () => {
+    const w = mountForm()
+    await flushPromises()
+    const vm = w.vm as any
+    vm.handleToolChange('opencode')
+    expect(vm.availableTransports).toEqual(['stdio', 'ssh'])
+    expect(vm.availablePermissionModes).toEqual(['chain', 'auto'])
+  })
+
+  it('plugin 工具按 capabilities 隐藏 auto 权限档：选项不渲染且已选 auto 回落 chain', async () => {
+    const w = mountForm()
+    await flushPromises()
+    const vm = w.vm as any
+    vm.form.permissionMode = 'auto'
+    vm.handleToolChange('zcode')
+    await nextTick()
+    expect(vm.availablePermissionModes).toEqual(['chain'])
+    expect(vm.availableTransports).toEqual(['stdio', 'ssh'])
+    expect(vm.form.permissionMode).toBe('chain')
+    expect(w.text()).not.toContain('低危自动放行')
+  })
+
+  it('仅支持 stdio 的工具隐藏 ssh 传输选项且已选 ssh 回落 stdio', async () => {
+    ;(fetchNeuacpCatalog as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        tool: 'pi',
+        known: true,
+        kind: 'acp',
+        origin: 'builtin',
+        command: ['pi', 'acp'],
+        requires_node: false,
+        disabled: false,
+        installed: true,
+        install_hint: '',
+        capabilities: { transports: ['stdio'], permission_modes: ['chain', 'auto'] },
+      },
+    ])
+    const w = mountForm()
+    await flushPromises()
+    const vm = w.vm as any
+    vm.form.transport = 'ssh'
+    vm.handleToolChange('pi')
+    expect(vm.availableTransports).toEqual(['stdio'])
+    expect(vm.form.transport).toBe('stdio')
+    expect(w.text()).not.toContain('SSH 远程')
   })
 })

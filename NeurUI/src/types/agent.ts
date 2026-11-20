@@ -69,6 +69,20 @@ export interface NeuacpExecutorSpec {
   remote?: { host?: string; port?: number; user?: string; key_ref?: string } | null
 }
 
+/** 目录项能力声明（F1：per-runtime 支持面；缺省字段前端按保守档回退全开） */
+export interface NeuacpCapabilitySet {
+  /** 支持的传输形态（stdio/ssh） */
+  transports?: string[]
+  /** 支持的审批交互形态（chain/auto） */
+  permission_modes?: string[]
+  /** 事件流是否流式 */
+  streaming?: boolean
+  /** 是否支持跨进程续跑 */
+  resume?: boolean
+  /** 是否支持进程/会话复用 */
+  session_reuse?: boolean
+}
+
 /** GET /external-agents/catalog 单条目录项 */
 export interface NeuacpCatalogItem {
   tool: string
@@ -87,6 +101,8 @@ export interface NeuacpCatalogItem {
   installed?: boolean
   /** 未安装时的安装指引 */
   install_hint?: string
+  /** 能力声明（打开前拒绝的契约面；缺省=旧目录，前端按保守档全开） */
+  capabilities?: NeuacpCapabilitySet
 }
 
 /** POST /external-agents/test 握手结果 */
