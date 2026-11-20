@@ -48,6 +48,8 @@ import { MarkdownText } from '../components/chat/MarkdownText';
 import { speechRecognizer } from '@kit.CoreSpeechKit';
 import { audio } from '@kit.AudioKit';
 import { abilityAccessCtrl, Permissions } from '@kit.AbilityKit';
+import { AsrStreamClient } from '../libs/adapters/AsrStreamClient';
+import { HttpClient } from '../libs/api/HttpClient';
 
 /** 对话消息视图模型（仅用于本页渲染） */
 interface ChatMessageView {
@@ -202,6 +204,9 @@ export struct ChatPage {
   private voiceEngine: speechRecognizer.SpeechRecognitionEngine | null = null;
   private voiceCapturer: audio.AudioCapturer | null = null;
   private voiceSessionId: string = '';
+  // 后端流式 ASR 通道（端侧 CoreSpeechKit 不可用时的回落，对照报告 B4-1）
+  private asrStream: AsrStreamClient | null = null;
+  private backendVoiceActive: boolean = false;
   // M5.2.1 WS 流式 chunk 批量节流器：60ms 窗口累积 chunk 减少 UI 重渲染次数
   private batcher: ChunkBatcher = new ChunkBatcher({ interval: 60 });
   // M5.2.2 消息列表 LazyForEach 数据源（与 messages 数组双写同步）
@@ -874,7 +879,35 @@ export struct ChatPage {
         this.msg.warning('需要麦克风权限才能语音输入');
         return;
       }
-      const engine = await speechRecognizer.createEngine({ language: 'zh-CN', online: 1 });
+      // 识别通道（B4-1）：asr_channel = auto|device|backend（设置页可选，默认 auto）
+      const channel = this.config.get<string>('asr_channel', 'auto');
+      if (channel === 'backend') {
+        // 仅后端：跳过端侧引擎，直接走流式识别
+        const backendOnlyOk = await this.startBackendVoice();
+        if (!backendOnlyOk) {
+          this.msg.error('后端语音识别通道未就绪');
+        }
+        return;
+      }
+      let engine: speechRecognizer.SpeechRecognitionEngine | null = null;
+      try {
+        engine = await speechRecognizer.createEngine({ language: 'zh-CN', online: 1 });
+      } catch (engineErr) {
+        // 端侧识别引擎不可用（部分设备/模拟器未部署 CoreSpeechKit 引擎）
+        engine = null;
+      }
+      if (engine === null) {
+        if (channel === 'device') {
+          this.msg.error('设备端语音识别引擎不可用');
+          return;
+        }
+        // auto：回落后端流式 ASR 通道（B4-1）：PCM 直送 /api/v1/audio/asr/stream
+        const backendOk = await this.startBackendVoice();
+        if (!backendOk) {
+          this.msg.error('语音识别不可用：设备端引擎与后端通道均未就绪');
+        }
+        return;
+      }
       this.voiceEngine = engine;
       this.voiceSessionId = 'voice-' + Date.now().toString();
       engine.setListener({
@@ -940,12 +973,97 @@ export struct ChatPage {
         this.voiceEngine?.writeAudio(sessionId, bytes.slice(off, off + 640));
       }
     });
+      await capturer.start();
+  }
+
+  /**
+   * 后端流式 ASR 通道（B4-1 移动端适配）：端侧 CoreSpeechKit 不可用时的回落。
+   * AudioCapturer 采 16k/mono/16bit PCM 以二进制帧直送
+   * /api/v1/audio/asr/stream；partial 实时上屏，final 成句即作为消息发送。
+   * 返回 false 表示通道不可用（未登录/未配对/连接失败），调用方提示用户。
+   */
+  private async startBackendVoice(): Promise<boolean> {
+    const httpClient = HttpClient.getInstance();
+    const base = httpClient.getBaseUrl();
+    const token = httpClient.getAuthToken();
+    if (!base || !token) {
+      this.msg.warning('请先登录并配对终端，再使用语音识别');
+      return false;
+    }
+    const url = base.replace('http', 'ws') + '/audio/asr/stream';
+    const client = new AsrStreamClient();
+    try {
+      await client.connect(url, token, {
+        onReady: (engine: string) => {
+          this.voiceListening = true;
+          this.logger.info(TAG, '后端流式 ASR 就绪: ' + engine);
+        },
+        onPartial: (text: string, turnId: number) => {
+          // 服务端 partial 为当轮累计文本：覆盖式实时上屏
+          const trimmed = text.trim();
+          if (trimmed.length > 0) {
+            this.inputText = trimmed;
+          }
+        },
+        onFinal: (text: string, turnId: number, reason: string) => {
+          const trimmed = text.trim();
+          if (trimmed.length > 0 && this.backendVoiceActive) {
+            this.inputText = trimmed;
+            this.stopVoice();
+            this.sendMessage();
+          }
+        },
+        onError: (code: string, message: string) => {
+          this.logger.warn(TAG, `后端流式 ASR 错误 ${code}: ${message}`);
+        },
+        onClosed: () => {
+        },
+      });
+    } catch (e) {
+      this.logger.warn(TAG, '后端流式 ASR 连接失败', e as Error);
+      this.asrStream = null;
+      return false;
+    }
+    this.asrStream = client;
+    this.backendVoiceActive = true;
+    const streamInfo: audio.AudioStreamInfo = {
+      samplingRate: 16000,
+      channels: audio.AudioChannel.CHANNEL_1,
+      sampleFormat: audio.AudioSampleFormat.SAMPLE_FORMAT_S16LE,
+      encodingType: audio.AudioEncodingType.ENCODING_TYPE_RAW,
+    };
+    const capturerInfo: audio.AudioCapturerInfo = {
+      source: audio.SourceType.SOURCE_TYPE_MIC,
+      capturerFlags: 0,
+    };
+    const options: audio.AudioCapturerOptions = {
+      streamInfo: streamInfo,
+      capturerInfo: capturerInfo,
+    };
+    const capturer = await audio.createAudioCapturer(options);
+    this.voiceCapturer = capturer;
+    capturer.on('readData', (buffer: ArrayBuffer) => {
+      if (buffer.byteLength <= 0) {
+        return;
+      }
+      // 整帧直发：服务端自切 10ms 子帧，无需按 640 字节预切
+      this.asrStream?.sendPcm(buffer);
+    });
     await capturer.start();
+    return true;
   }
 
   /** 停止语音：采集器与识别引擎一并收尾 */
   private stopVoice(): void {
     this.voiceListening = false;
+    this.backendVoiceActive = false;
+    if (this.asrStream) {
+      const client = this.asrStream;
+      this.asrStream = null;
+      // 先终结当前轮再关闭（final 已送达时 stop 帧无副作用）
+      client.stop();
+      client.dispose();
+    }
     try {
       this.voiceCapturer?.stop();
       this.voiceCapturer?.release();
