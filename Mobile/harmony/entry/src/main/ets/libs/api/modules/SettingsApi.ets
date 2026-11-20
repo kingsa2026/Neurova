@@ -58,14 +58,52 @@ function sectionTitle(key: string): string {
   return key;
 }
 
-/** settings.py 单键载荷 → SettingItem（单源映射；组名取键首段译名，条目名取键尾段） */
+/**
+ * 设置条目尾键 → 中文名（单一映射出口，与 sectionTitle 同源配套）。
+ * 覆盖后端现网全部键（2026-11-21 实测盘点）；未知键诚实保留原尾键（不编造译名）。
+ */
+export function settingItemLabel(tailKey: string): string {
+  if (tailKey === 'theme') { return '主题'; }
+  if (tailKey === 'auto_save') { return '自动保存'; }
+  if (tailKey === 'notifications') { return '通知'; }
+  if (tailKey === 'stream_mode') { return '流式输出'; }
+  if (tailKey === 'app_name') { return '应用名称'; }
+  if (tailKey === 'max_llm_calls_per_day') { return '每日最大调用次数'; }
+  if (tailKey === 'max_llm_tokens_per_day') { return '每日最大 Token 数'; }
+  if (tailKey === 'max_output_tokens') { return '单次最大输出 Token'; }
+  if (tailKey === 'debug_mode') { return '调试模式'; }
+  if (tailKey === 'log_level') { return '日志级别'; }
+  if (tailKey === 'telemetry') { return '遥测上报'; }
+  if (tailKey === 'desktop_runtime_mode') { return '桌面运行模式'; }
+  if (tailKey === 'desktop_provider') { return '桌面执行器'; }
+  if (tailKey === 'skill_catalog_enabled') { return '技能目录'; }
+  if (tailKey === 'skill_schema_budget_enabled') { return '技能预算管控'; }
+  if (tailKey === 'skill_schema_max') { return '技能数量上限'; }
+  if (tailKey === 'evolution_queue_enabled') { return '演化队列'; }
+  if (tailKey === 'skill_semantic_recall_enabled') { return '技能语义召回'; }
+  if (tailKey === 'dedup_semantic_enabled') { return '语义去重'; }
+  if (tailKey === 'tool_search_enabled') { return '工具搜索'; }
+  if (tailKey === 'lost_in_middle_enabled') { return '中段信息保留'; }
+  if (tailKey === 'graph_studio_limit') { return '图谱工坊上限'; }
+  if (tailKey === 'ontology_extract_on_update') { return '更新时抽取本体'; }
+  if (tailKey === 'swarm_acceptance_enabled') { return '蜂群验收门'; }
+  if (tailKey === 'actionability_enabled') { return '可执行性判定'; }
+  if (tailKey === 'actionability_lookback') { return '可执行性回看轮数'; }
+  if (tailKey === 'group_leadership_enabled') { return '群组领导机制'; }
+  if (tailKey === 'group_lease_ttl_seconds') { return '群组租约时长（秒）'; }
+  if (tailKey === 'cognitive_security_mode') { return '认知安全模式'; }
+  return tailKey;
+}
+
+/** settings.py 单键载荷 → SettingItem（单源映射；组名取键首段译名，条目名取键尾段译名，描述回带完整键名便于对照） */
 function toSettingItem(key: string, value: Object): SettingItem {
   const group = key.indexOf('.') !== -1 ? key.split('.')[0] : 'general';
   const parts = key.split('.');
-  const label = parts.length > 1 ? parts[parts.length - 1] : key;
+  const label = settingItemLabel(parts.length > 1 ? parts[parts.length - 1] : key);
   const item: SettingItem = {
     key: key,
     label: label,
+    description: key,
     type: inferSettingType(value),
     value: value,
     defaultValue: value,

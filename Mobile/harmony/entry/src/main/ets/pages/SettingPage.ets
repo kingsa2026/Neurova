@@ -61,16 +61,6 @@ import { SettingGroup, SettingItem } from '../libs/types';
 /** 日志标签 */
 const TAG = 'SettingPage';
 
-/** 通道取值的展示名（auto/device/backend；未知值回落自动） */
-function asrChannelLabel(value: string): string {
-  const labels = new Map<string, string>();
-  labels.set('auto', '自动（端侧优先）');
-  labels.set('device', '仅设备端');
-  labels.set('backend', '仅后端');
-  const label = labels.get(value);
-  return label === undefined ? '自动（端侧优先）' : label;
-}
-
 /**
  * SettingViewHelper - 应用设置页视图模型纯函数集合
  *
@@ -298,13 +288,16 @@ export struct SettingPage {
   // F10 入口行徽标数据（真实计数，fail-soft）
   @State private serverCount: number = 0;
   @State private unreadCount: number = 0;
-  // 语音识别通道当前值（asr_channel: auto|device|backend）
-  @State private asrChannelLabel: string = '自动（端侧优先）';
+  // 单组模式：经导航菜单 push 进入时携带 groupKey，只渲染该分组（空 = 我的根页菜单模式）
+  @State private singleGroupKey: string = '';
 
   aboutToAppear() {
+    const params = this.router.getCurrentParam() as Record<string, Object> | undefined;
+    if (params && params['groupKey'] !== undefined && params['groupKey'] !== null) {
+      this.singleGroupKey = params['groupKey'] as string;
+    }
     this.loadSettings();
     this.loadEntryCounts();
-    this.asrChannelLabel = asrChannelLabel(this.cm.get<string>('asr_channel', 'auto'));
   }
 
   /** F10 分组一徽标：终端档案数 + 未读通知数（真端点，失败置 0 不阻塞页面） */
@@ -354,14 +347,36 @@ export struct SettingPage {
         // 后端无数据时使用默认分组
         this.groups = SettingViewHelper.buildDefaultGroups();
       }
-      this.originalGroups = this.cloneGroups(this.groups);
     } catch (e) {
       this.logger.error(TAG, '加载设置失败，使用默认分组', e as Error);
       this.groups = SettingViewHelper.buildDefaultGroups();
-      this.originalGroups = this.cloneGroups(this.groups);
     } finally {
+      if (this.singleGroupKey !== '') {
+        // 单组模式：只保留导航菜单点入的目标分组
+        this.groups = this.groups.filter((g: SettingGroup) => g.key === this.singleGroupKey);
+      }
+      this.originalGroups = this.cloneGroups(this.groups);
       this.loading = false;
     }
+  }
+
+  /** 单组模式标题（分组中文名；分组缺失时诚实回落） */
+  private singleGroupTitle(): string {
+    if (this.groups.length > 0) {
+      return this.groups[0].title;
+    }
+    return '设置详情';
+  }
+
+  /** 分组导航图标（按 section 键映射，未知回落 gear） */
+  private sectionIcon(key: string): string {
+    if (key === 'security' || key === 'privacy') { return 'shield'; }
+    if (key === 'quota') { return 'task'; }
+    if (key === 'routing') { return 'fork'; }
+    if (key === 'storage') { return 'folder'; }
+    if (key === 'notification') { return 'bell'; }
+    if (key === 'about') { return 'book'; }
+    return 'gear';
   }
 
   /** 深拷贝分组数组（用于原始快照） */
@@ -625,118 +640,26 @@ export struct SettingPage {
     // 整页可滚：页内固定内容（个人卡+入口组+管理组+退出卡）过高会挤掉设置 List 的滚动位（我的页不能上滑的根因）
     Scroll() {
       Column() {
-        // 内联头（原型 F10：21/700 我的 + 保存渐变胶囊）
-        Row() {
-          Text('我的')
-            .fontSize(21)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.sm.getColor('text_primary'))
-            .layoutWeight(1)
-          Button() {
-            Text('保存')
-              .fontSize(13)
-              .fontColor(this.sm.getColor('text_on_primary'))
+        // 顶栏：单组模式=返回+组名+保存；菜单模式=我的
+        if (this.singleGroupKey !== '') {
+          TopNavMenu({ title: this.singleGroupTitle(), showBack: true, onBack: () => { this.router.back(); } }) {
+            this.saveButton()
           }
-          .height(34)
-          .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
-          .onClick(() => {
-            this.saveAll();
-          })
-        }
-        .width('100%')
-        .padding({ left: 20, right: 20, top: 8, bottom: 10 })
-
-        // 个人卡（原型 F10：渐变头像 + 用户名 + 工作区/配对态 + 箭头）
-        Row() {
-          Text((this.authStore.user?.username ?? 'U').slice(0, 1))
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.sm.getColor('text_on_primary'))
-            .width(52)
-            .height(52)
-            .borderRadius(18)
-            .textAlign(TextAlign.Center)
-            .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
-          Column() {
-            Text(this.authStore.user?.username ?? '未登录')
-              .fontSize(16)
+        } else {
+          Row() {
+            Text('我的')
+              .fontSize(21)
               .fontWeight(FontWeight.Bold)
               .fontColor(this.sm.getColor('text_primary'))
-            Row() {
-              Row()
-                .width(5)
-                .height(5)
-                .borderRadius(3)
-                .backgroundColor(this.authStore.isPaired ? this.sm.getColor('success') : this.sm.getColor('warning'))
-              Text('工作区 ' + this.workspaceHost() + (this.authStore.isPaired ? ' · 已配对' : ' · 未配对'))
-                .fontSize(this.sm.getFontSize('badge'))
-                .fontColor(this.sm.getColor('text_secondary'))
-                .margin({ left: 6 })
-            }
-            .margin({ top: 3 })
-            .alignItems(VerticalAlign.Center)
-          }
-          .alignItems(HorizontalAlign.Start)
-          .margin({ left: 12 })
-          .layoutWeight(1)
-          AppIcon({ name: 'chev', iconSize: 16, color: this.sm.getColor('text_tertiary') })
-        }
-        .width('calc(100% - 32vp)')
-        .margin({ left: 16, right: 16, bottom: 10 })
-        .padding(14)
-        .borderRadius(16)
-        .backgroundColor(this.sm.getColor('glass'))
-        .border({ width: 1, color: this.sm.getColor('border') })
-        .alignItems(VerticalAlign.Center)
-
-        // 分组一（原型 F10：功能入口行 = 圆角图标 + 标题(+徽标) + 数值 + 箭头）
-        Column() {
-          this.entryRow('server', 'PC 终端与配对', this.serverCount > 0 ? this.serverCount.toString() + ' 台档案' : '', '', RouteNames.CONNECTION)
-          this.entryRow('model', '模型管理', '', '', RouteNames.MODEL)
-          this.entryRow('mic', '语音识别通道', '', this.asrChannelLabel, '', () => {
-            this.showAsrChannelDialog();
-          })
-          this.entryRow('bell', '通知中心', this.unreadCount > 0 ? this.unreadCount.toString() : '', '', RouteNames.NOTIFICATION)
-          this.entryRow('task', '任务看板', '', '', RouteNames.TASK)
-          this.entryRow('folder', '文件', '', '', RouteNames.FILE)
-          this.entryRow('book', '技能市场', '', '', RouteNames.MARKETPLACE)
-        }
-        .width('calc(100% - 32vp)')
-        .margin({ left: 16, right: 16, bottom: 10 })
-        .borderRadius(16)
-        .backgroundColor(this.sm.getColor('glass'))
-        .border({ width: 1, color: this.sm.getColor('border') })
-        .clip(true)
-
-        // 管理员分组：仅 role=admin 渲染（原型 F10；紫边框 + 组标完整语义）
-        if (this.isAdmin()) {
-          Column() {
-            Row() {
-              AppIcon({ name: 'shield', iconSize: 11, color: this.sm.getColor('primary') })
-              Text('管理员 · 仅 role=admin 时渲染')
-                .fontSize(10)
-                .fontColor(this.sm.getColor('primary'))
-                .letterSpacing(0.6)
-                .margin({ left: 6 })
-            }
-            .margin({ left: 20, top: 4, bottom: 8 })
-            .alignItems(VerticalAlign.Center)
-
-            Column() {
-              this.entryRow('user', '用户管理', '', '', RouteNames.ADMIN_USERS)
-              this.entryRow('task', '用户组管理', '', '', RouteNames.ADMIN_GROUPS)
-              this.entryRow('book', '市场管理', '', '', RouteNames.ADMIN_MARKET)
-              this.entryRow('gear', '系统设置（治理）', '', '', RouteNames.ADMIN_SETTINGS)
-            }
-            .width('calc(100% - 32vp)')
-            .margin({ left: 16 })
-            .borderRadius(16)
-            .backgroundColor(this.sm.getColor('glass'))
-            .border({ width: 1, color: this.sm.getColor('primary') })
-            .clip(true)
+              .layoutWeight(1)
           }
           .width('100%')
-          .margin({ bottom: 10 })
+          .padding({ left: 20, right: 20, top: 8, bottom: 10 })
+        }
+
+        // 菜单模式内容：个人卡 + 功能入口 + 管理员分组（单组详情模式不渲染）
+        if (this.singleGroupKey === '') {
+          this.buildMenuModeContent()
         }
 
         if (this.loading) {
@@ -749,8 +672,8 @@ export struct SettingPage {
           .width('100%')
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
-        } else {
-          // 分组列表
+        } else if (this.singleGroupKey !== '') {
+          // 单组模式：只渲染导航菜单点入的目标分组
           List({ space: 16 }) {
             ForEach(this.groups, (group: SettingGroup) => {
               ListItem() {
@@ -766,31 +689,36 @@ export struct SettingPage {
             top: this.sm.getSpacing('sm'),
             bottom: this.sm.getSpacing('sm'),
           })
+        } else {
+          // 分组导航菜单：点击进入对应分组详情（本页单组模式复用）
+          this.buildGroupMenu()
         }
 
-        // 退出登录（设计 F10 .me-out：独立红色卡；与隐私组内 logout 动作同一处理单源）
-        Row() {
-          AppIcon({ name: 'logout', iconSize: 18, color: this.sm.getColor('error') })
-          Text('退出登录')
-            .fontSize(this.sm.getFontSize('body_sm'))
-            .fontColor(this.sm.getColor('error'))
-            .margin({ left: 8 })
+        // 退出登录（设计 F10 .me-out：独立红色卡；与隐私组内 logout 动作同一处理单源）——仅菜单模式渲染
+        if (this.singleGroupKey === '') {
+          Row() {
+            AppIcon({ name: 'logout', iconSize: 18, color: this.sm.getColor('error') })
+            Text('退出登录')
+              .fontSize(this.sm.getFontSize('body_sm'))
+              .fontColor(this.sm.getColor('error'))
+              .margin({ left: 8 })
+          }
+          .width('calc(100% - 32vp)')
+          .justifyContent(FlexAlign.Center)
+          .padding(14)
+          .borderRadius(16)
+          .backgroundColor('rgba(248,113,113,0.06)')
+          .border({ width: 1, color: 'rgba(248,113,113,0.25)' })
+          .margin({ left: 16, right: 16, bottom: 16 })
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            this.logout();
+          })
         }
-        .width('calc(100% - 32vp)')
-        .justifyContent(FlexAlign.Center)
-        .padding(14)
-        .borderRadius(16)
-        .backgroundColor('rgba(248,113,113,0.06)')
-        .border({ width: 1, color: 'rgba(248,113,113,0.25)' })
-        .margin({ left: 16, right: 16, bottom: 16 })
-        .alignItems(VerticalAlign.Center)
-        .onClick(() => {
-          this.logout();
-        })
       }
       .width('100%')
-      // 底部预留 120：满滚时退出登录卡停在玻璃页签栏上方，可看可点
-      .padding({ bottom: 120 })
+      // 底部预留：菜单模式给玻璃页签栏（120）；单组详情页无页签栏只留呼吸位（30）
+      .padding({ bottom: this.singleGroupKey === '' ? 120 : 30 })
     }
     .width('100%')
     .height('100%')
@@ -802,7 +730,7 @@ export struct SettingPage {
   // ===========================================================================
 
   @Builder
-  entryRow(icon: string, title: string, badge: string, value: string, route: string, onTap?: () => void) {
+  entryRow(icon: string, title: string, badge: string, value: string, route: string) {
     Row() {
       Column() {
         AppIcon({ name: icon, iconSize: 18, color: this.sm.getColor('primary') })
@@ -842,53 +770,179 @@ export struct SettingPage {
     .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
-      if (onTap !== undefined) {
-        onTap();
-        return;
-      }
-      if (route !== '') {
         this.router.push(route);
-      }
     })
   }
 
-  /** 语音识别通道三选一（auto/device/backend，AlertDialog buttons 数组） */
-  private showAsrChannelDialog(): void {
-    AlertDialog.show({
-      title: '语音识别通道',
-      message: '选择语音输入用哪个识别通道。自动=设备端引擎优先，失败回落后端；仅后端走 PC 终端的流式识别。',
-      autoCancel: true,
-      alignment: DialogAlignment.Center,
-      buttons: [
-        {
-          value: '自动（端侧优先）',
-          action: () => {
-            this.applyAsrChannel('auto');
-          }
-        },
-        {
-          value: '仅设备端',
-          action: () => {
-            this.applyAsrChannel('device');
-          }
-        },
-        {
-          value: '仅后端',
-          fontColor: this.sm.getColor('primary'),
-          action: () => {
-            this.applyAsrChannel('backend');
-          }
+  // 菜单模式内容（个人卡 + 功能入口 + 管理员分组）
+  // ===========================================================================
+
+  /** 菜单模式专属内容：单组详情模式不渲染（build 内按 singleGroupKey 条件调用） */
+  @Builder
+  buildMenuModeContent() {
+    // 个人卡（原型 F10：渐变头像 + 用户名 + 工作区/配对态 + 箭头）
+    Row() {
+      Text((this.authStore.user?.username ?? 'U').slice(0, 1))
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.sm.getColor('text_on_primary'))
+        .width(52)
+        .height(52)
+        .borderRadius(18)
+        .textAlign(TextAlign.Center)
+        .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
+      Column() {
+        Text(this.authStore.user?.username ?? '未登录')
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.sm.getColor('text_primary'))
+        Row() {
+          Row()
+            .width(5)
+            .height(5)
+            .borderRadius(3)
+            .backgroundColor(this.authStore.isPaired ? this.sm.getColor('success') : this.sm.getColor('warning'))
+          Text('工作区 ' + this.workspaceHost() + (this.authStore.isPaired ? ' · 已配对' : ' · 未配对'))
+            .fontSize(this.sm.getFontSize('badge'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .margin({ left: 6 })
         }
-      ]
-    });
+        .margin({ top: 3 })
+        .alignItems(VerticalAlign.Center)
+      }
+      .alignItems(HorizontalAlign.Start)
+      .margin({ left: 12 })
+      .layoutWeight(1)
+      AppIcon({ name: 'chev', iconSize: 16, color: this.sm.getColor('text_tertiary') })
+    }
+    .width('calc(100% - 32vp)')
+    .margin({ left: 16, right: 16, bottom: 10 })
+    .padding(14)
+    .borderRadius(16)
+    .backgroundColor(this.sm.getColor('glass'))
+    .border({ width: 1, color: this.sm.getColor('border') })
+    .alignItems(VerticalAlign.Center)
+
+    // 分组一（原型 F10：功能入口行 = 圆角图标 + 标题(+徽标) + 数值 + 箭头）
+    Column() {
+      this.entryRow('server', 'PC 终端与配对', this.serverCount > 0 ? this.serverCount.toString() + ' 台档案' : '', '', RouteNames.CONNECTION)
+      this.entryRow('model', '模型管理', '', '', RouteNames.MODEL)
+      this.entryRow('bell', '通知中心', this.unreadCount > 0 ? this.unreadCount.toString() : '', '', RouteNames.NOTIFICATION)
+      this.entryRow('task', '任务看板', '', '', RouteNames.TASK)
+      this.entryRow('folder', '文件', '', '', RouteNames.FILE)
+      this.entryRow('book', '技能市场', '', '', RouteNames.MARKETPLACE)
+    }
+    .width('calc(100% - 32vp)')
+    .margin({ left: 16, right: 16, bottom: 10 })
+    .borderRadius(16)
+    .backgroundColor(this.sm.getColor('glass'))
+    .border({ width: 1, color: this.sm.getColor('border') })
+    .clip(true)
+
+    // 管理员分组：仅 role=admin 渲染（原型 F10；紫边框 + 组标完整语义）
+    if (this.isAdmin()) {
+      Column() {
+        Row() {
+          AppIcon({ name: 'shield', iconSize: 11, color: this.sm.getColor('primary') })
+          Text('管理员 · 仅 role=admin 时渲染')
+            .fontSize(10)
+            .fontColor(this.sm.getColor('primary'))
+            .letterSpacing(0.6)
+            .margin({ left: 6 })
+        }
+        .margin({ left: 20, top: 4, bottom: 8 })
+        .alignItems(VerticalAlign.Center)
+
+        Column() {
+          this.entryRow('user', '用户管理', '', '', RouteNames.ADMIN_USERS)
+          this.entryRow('task', '用户组管理', '', '', RouteNames.ADMIN_GROUPS)
+          this.entryRow('book', '市场管理', '', '', RouteNames.ADMIN_MARKET)
+          this.entryRow('gear', '系统设置（治理）', '', '', RouteNames.ADMIN_SETTINGS)
+        }
+        .width('calc(100% - 32vp)')
+        .margin({ left: 16 })
+        .borderRadius(16)
+        .backgroundColor(this.sm.getColor('glass'))
+        .border({ width: 1, color: this.sm.getColor('primary') })
+        .clip(true)
+      }
+      .width('100%')
+      .margin({ bottom: 10 })
+    }
   }
 
-  /** 落库所选通道并刷新行值（配置随 saveToPreferences 持久化） */
-  private applyAsrChannel(value: string): void {
-    this.cm.set<string>('asr_channel', value);
-    this.cm.saveToPreferences();
-    this.asrChannelLabel = asrChannelLabel(value);
-    this.msg.success('语音识别通道：' + this.asrChannelLabel);
+  /** 保存渐变胶囊（单组模式顶栏右侧动作；saveAll 只遍历栈内分组=当前组） */
+  @Builder
+  saveButton() {
+    Button() {
+      Text('保存')
+        .fontSize(13)
+        .fontColor(this.sm.getColor('text_on_primary'))
+    }
+    .height(34)
+    .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
+    .onClick(() => {
+      this.saveAll();
+    })
+  }
+
+  // ===========================================================================
+  // 设置分组导航菜单（通用/配额/高级…点击进入对应分组详情）
+  // ===========================================================================
+
+  /** 分组导航菜单卡片：每分组一行（图标 + 中文名 + 条目数 + 箭头） */
+  @Builder
+  buildGroupMenu() {
+    Column() {
+      ForEach(this.groups, (group: SettingGroup) => {
+        this.buildGroupMenuRow(group)
+      }, (group: SettingGroup) => group.key)
+    }
+    .width('calc(100% - 32vp)')
+    .margin({ left: 16, right: 16 })
+    .borderRadius(16)
+    .backgroundColor(this.sm.getColor('glass'))
+    .border({ width: 1, color: this.sm.getColor('border') })
+    .clip(true)
+  }
+
+  /** 导航菜单行：点击 push 本页单组模式（RouteNames.SETTINGS + groupKey 参数） */
+  @Builder
+  buildGroupMenuRow(group: SettingGroup) {
+    Row() {
+      Column() {
+        AppIcon({ name: this.sectionIcon(group.key), iconSize: 18, color: this.sm.getColor('primary') })
+      }
+      .width(30)
+      .height(30)
+      .borderRadius(10)
+      .backgroundColor(this.sm.getColor('primary_soft'))
+      .justifyContent(FlexAlign.Center)
+      .alignItems(HorizontalAlign.Center)
+
+      Text(group.title)
+        .fontSize(this.sm.getFontSize('body_sm'))
+        .fontColor(this.sm.getColor('text_primary'))
+        .margin({ left: 12 })
+      Text(group.items.length.toString() + ' 项')
+        .fontSize(9.5)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.sm.getColor('text_on_primary'))
+        .backgroundColor('rgba(99,102,241,0.85)')
+        .borderRadius(999)
+        .padding({ left: 7, right: 7, top: 1, bottom: 1 })
+        .margin({ left: 8 })
+      Blank()
+      AppIcon({ name: 'chev', iconSize: 14, color: this.sm.getColor('text_tertiary') })
+        .margin({ left: 6 })
+    }
+    .width('100%')
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      this.router.push(RouteNames.SETTINGS, { 'groupKey': group.key });
+    })
   }
 
   // ===========================================================================
