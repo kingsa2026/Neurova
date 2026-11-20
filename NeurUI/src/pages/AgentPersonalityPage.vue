@@ -116,6 +116,45 @@
                 </div>
               </template>
             </GlassCard>
+
+            <!-- 风格与价值观：communication_style/decision_style/values 编辑入口
+                 （后端 PersonalityUpdate 契约与人格段编译器均支持，2026-11-20 接通） -->
+            <GlassCard :title="t('personality.styleValuesCard')" class="style-values-card">
+              <div class="style-values-list">
+                <div class="style-row">
+                  <span class="style-label">{{ t('personality.communicationStyle') }}</span>
+                  <a-select v-model:value="communicationStyle" :options="communicationStyleOptions" :disabled="!editingStyle" class="style-select" />
+                </div>
+                <div class="style-row">
+                  <span class="style-label">{{ t('personality.decisionStyle') }}</span>
+                  <a-select v-model:value="decisionStyle" :options="decisionStyleOptions" :disabled="!editingStyle" class="style-select" />
+                </div>
+                <div class="style-row values-row">
+                  <span class="style-label">{{ t('personality.values') }}</span>
+                  <div class="values-editor">
+                    <div class="values-tags">
+                      <a-tag v-for="v in valueList" :key="v" closable :disabled="!editingStyle" @close="removeValue(v)">{{ v }}</a-tag>
+                      <span v-if="valueList.length === 0" class="values-empty">{{ t('common.noData') }}</span>
+                    </div>
+                    <div v-if="editingStyle" class="values-add-row">
+                      <a-input v-model:value="valueInput" :placeholder="t('personality.valuesPlaceholder')" class="values-input" @press-enter="addValue" />
+                      <GlassButton variant="secondary" size="sm" @click="addValue">{{ t('personality.valuesAdd') }}</GlassButton>
+                    </div>
+                    <div v-if="valueList.length >= VALUES_MAX_COUNT" class="values-max-hint">{{ t('personality.valuesMaxHint') }}</div>
+                  </div>
+                </div>
+                <div v-if="verifyStyleFailed" class="traits-verify-tip">{{ verifyStyleFailed }}</div>
+              </div>
+              <template #footer>
+                <div class="traits-footer">
+                  <GlassButton v-if="!editingStyle" variant="secondary" size="sm" @click="startStyleEdit">{{ t('common.edit') }}</GlassButton>
+                  <template v-else>
+                    <GlassButton variant="ghost" size="sm" @click="cancelStyleEdit">{{ t('common.cancel') }}</GlassButton>
+                    <GlassButton variant="primary" size="sm" :loading="savingStyle" @click="saveStyleValues">{{ t('common.save') }}</GlassButton>
+                  </template>
+                </div>
+              </template>
+            </GlassCard>
           </div>
         </a-spin>
       </a-tab-pane>
@@ -180,6 +219,23 @@ const traitList = ref<{ key: string; value: number; percent: number }[]>([
   { key: 'neuroticism', value: 0.3, percent: 30 },
   { key: 'creativity', value: 0.65, percent: 65 },
 ])
+
+// --- 风格与价值观（communication_style/decision_style/values，PUT /personality 同契约）---
+const editingStyle = ref(false)
+const savingStyle = ref(false)
+const verifyStyleFailed = ref<string | null>(null)
+const communicationStyle = ref('balanced')
+const decisionStyle = ref('analytical')
+const valueList = ref<string[]>([])
+const valueInput = ref('')
+// 对齐后端人格段编译上界 PERSONALITY_TRAITS_MAX_COUNT（personality_persistence.py）
+const VALUES_MAX_COUNT = 12
+// 预设枚举（后端为自由字符串，预设保证提示词产出可预期且可译；标签走 personality.*）
+const COMMUNICATION_STYLES = ['balanced', 'direct', 'warm', 'concise', 'formal', 'humorous'] as const
+const DECISION_STYLES = ['analytical', 'intuitive', 'collaborative', 'decisive', 'cautious'] as const
+const styleOptions = (keys: readonly string[]) => keys.map((v) => ({ value: v, label: enumLabel('personality', v) }))
+const communicationStyleOptions = computed(() => styleOptions(COMMUNICATION_STYLES))
+const decisionStyleOptions = computed(() => styleOptions(DECISION_STYLES))
 
 // 类型映射对齐后端 EmotionType 枚举（17 类：8 核心 + 9 扩展）
 const emotionEmoji = (emotion?: string) => {
@@ -322,11 +378,80 @@ const fetchPersonality = async () => {
         return { ...t, value: val, percent: Math.round(val * 100) }
       })
     }
+    applyServerStyleValues(data)
   } catch {
     message.error(t('common.error'))
   } finally {
     loading.value = false
   }
+}
+
+/** 服务端回读值 → 风格/价值观状态（缺省回落展示默认，行为同 GET 端点） */
+const applyServerStyleValues = (data: Record<string, any>) => {
+  if (typeof data.communication_style === 'string' && data.communication_style) communicationStyle.value = data.communication_style
+  if (typeof data.decision_style === 'string' && data.decision_style) decisionStyle.value = data.decision_style
+  if (Array.isArray(data.values)) valueList.value = data.values.map((v: any) => String(v).trim()).filter(Boolean)
+}
+
+const startStyleEdit = () => {
+  verifyStyleFailed.value = null
+  editingStyle.value = true
+}
+
+const cancelStyleEdit = () => {
+  editingStyle.value = false
+  valueInput.value = ''
+}
+
+const saveStyleValues = async () => {
+  savingStyle.value = true
+  verifyStyleFailed.value = null
+  try {
+    const payload = {
+      communication_style: communicationStyle.value,
+      decision_style: decisionStyle.value,
+      values: [...valueList.value],
+    }
+    const res: any = await updatePersonality(agentId.value, payload)
+    // 回读逐字段校验（同 traits 回读纪律）：不一致/缺 envelope.data 都不谎报成功
+    const readBack = res?.data
+    const mismatch = !readBack || typeof readBack !== 'object'
+      || readBack.communication_style !== payload.communication_style
+      || readBack.decision_style !== payload.decision_style
+      || JSON.stringify(Array.isArray(readBack.values) ? readBack.values : []) !== JSON.stringify(payload.values)
+    if (mismatch) {
+      if (readBack && typeof readBack === 'object') applyServerStyleValues(readBack)
+      message.error(t('common.error'))
+      verifyStyleFailed.value = t('personality.verifyMismatch')
+      return
+    }
+    applyServerStyleValues(readBack)
+    editingStyle.value = false
+    message.success(t('common.success'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    savingStyle.value = false
+  }
+}
+
+const addValue = () => {
+  const v = valueInput.value.trim()
+  if (!v) return
+  if (valueList.value.includes(v)) {
+    valueInput.value = ''
+    return
+  }
+  if (valueList.value.length >= VALUES_MAX_COUNT) {
+    message.warning(t('personality.valuesMaxHint'))
+    return
+  }
+  valueList.value = [...valueList.value, v]
+  valueInput.value = ''
+}
+
+const removeValue = (v: string) => {
+  valueList.value = valueList.value.filter((x) => x !== v)
 }
 
 /** PUT /personality 并用响应 envelope.data.traits 回读校验。
@@ -473,6 +598,20 @@ onMounted(refreshAll)
 /* 空态引导：服务端未建立档案 */
 .traits-empty-guide { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 36px 12px; }
 .traits-empty-hint { margin: 0; font-size: 13px; color: var(--nr-text-secondary); }
+
+/* 风格与价值观卡：横跨双列；窄屏单列时由网格自然回落 */
+.style-values-card { grid-column: 1 / -1; }
+.style-values-list { display: flex; flex-direction: column; gap: 14px; }
+.style-row { display: flex; align-items: center; gap: 16px; }
+.style-label { width: 160px; flex-shrink: 0; font-size: 13px; font-weight: 500; color: var(--nr-text-primary); }
+.style-select { flex: 1; max-width: 320px; }
+.values-row { align-items: flex-start; }
+.values-editor { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.values-tags { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 24px; }
+.values-empty { font-size: 12px; color: var(--nr-text-tertiary); }
+.values-add-row { display: flex; align-items: center; gap: 8px; }
+.values-input { flex: 1; max-width: 320px; }
+.values-max-hint { font-size: 12px; color: var(--nr-text-tertiary); }
 .traits-verify-tip {
   margin-top: 12px;
   padding: 8px 12px;

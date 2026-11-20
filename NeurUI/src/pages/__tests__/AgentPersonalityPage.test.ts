@@ -217,19 +217,24 @@ describe('AgentPersonalityPage 人格双页签契约', () => {
     expect(names.join(',')).toBe('Openness,Conscientiousness,Extraversion,Agreeableness,Neuroticism,Creativity')
   })
 
-  it('个性页签两卡左右分区：radar 卡与特质卡为 personality-grid 同级子项', async () => {
+  it('个性页签三卡分区：radar/特质/风格价值观卡为 personality-grid 同级子项，风格卡跨双列', async () => {
     const wrapper = await mountPage()
     await flushPromises()
     const pane = findPane(wrapper, '个性')!
     const grid = pane.find('.personality-grid')
     expect(grid.exists()).toBe(true)
     const cards = grid.findAll(':scope > .glass-card')
-    expect(cards).toHaveLength(2)
-    // 布局：网格双列（窄屏回退单列由媒体查询负责）
+    expect(cards).toHaveLength(3)
+    // 风格与价值观卡横跨双列（窄屏回退单列由媒体查询负责）
+    expect(grid.find('.style-values-card').exists()).toBe(true)
+    // 布局：网格双列
     const sfc = readFileSync(resolve(process.cwd(), 'src/pages/AgentPersonalityPage.vue'), 'utf-8')
     const rule = sfc.match(/\.personality-grid\s*\{[^}]*\}/)
     expect(rule).toBeTruthy()
     expect(rule![0]).toContain('grid-template-columns')
+    const span = sfc.match(/\.style-values-card\s*\{[^}]*\}/)
+    expect(span, '风格卡应声明跨双列').toBeTruthy()
+    expect(span![0]).toContain('grid-column: 1 / -1')
   })
 })
 
