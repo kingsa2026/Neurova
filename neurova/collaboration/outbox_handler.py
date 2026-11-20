@@ -464,6 +464,34 @@ class OutboxHandler:
 
             return events
 
+    def get_all_events(
+        self,
+        status_filter: Optional[EventStatus] = None,
+    ) -> List[OutboxEvent]:
+        """
+        获取全量事件（按 created_at 升序）——兜底扫描的读面。
+
+        与 get_agent_events 的差别：不依赖 agent_id 索引（空 agent_id 的事件也在内）。
+
+        Args:
+            status_filter: 状态过滤
+
+        Returns:
+            OutboxEvent 列表
+        """
+        with self._lock:
+            events = [
+                event
+                for event in self._events.values()
+                if status_filter is None or event.status == status_filter
+            ]
+            events.sort(key=lambda e: e.created_at)
+            return events
+
+    def saveEvent(self, event: OutboxEvent) -> bool:
+        """公开落盘口（兜底扫描写回确认标记等状态回写用）。"""
+        return self._save_event(event)
+
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
         with self._lock:

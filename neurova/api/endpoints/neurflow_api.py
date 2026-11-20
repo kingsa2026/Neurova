@@ -18,10 +18,12 @@ from pydantic import BaseModel
 from neurova.api.auth import get_current_user, get_current_user_or_default
 from neurova.api.deps import require_admin
 from neurova.api.endpoints import defaultAgentId, get_agent_instance
+from neurova.api.realtime_push import PollingSnapshotFeed, ssePushStream
 from neurova.collaboration.neurflow.dag import get_dag_validator
 from neurova.collaboration.neurflow.event_recorder import (
     attach_event_recorder,
     get_execution_event_recorder,
+    isTerminalFrame,
 )
 from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
 from neurova.collaboration.neurflow.models import (
@@ -631,11 +633,12 @@ async def stream_execution_events(
     after: int = Query(0, ge=0),
     current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
-    """执行事件 SSE 流。
+    """执行事件 SSE 流（统一推送模板：订阅先于读首屏 → 首屏快照 → 增量 → 心跳重验）。
 
-    帧格式 data: {seq,type,workflow_id,execution_id,node_id,data,timestamp}；
+    对外帧格式不变：data: {seq,type,workflow_id,execution_id,node_id,data,timestamp}；
     回放 seq>after 历史帧 + 实时推送，终态帧（workflow_completed/failed）后收尾；
-    keep-alive 注释行防代理超时。用户隔离：仅属主（或未认证 default）可订阅。
+    keep-alive 注释行防代理超时。用户隔离：仅属主（或未认证 default）可订阅，
+    且每个心跳周期重验属主门——权限过期的连接一个心跳内被服务端摘除。
     """
     recorder = get_execution_event_recorder()
     executor = get_workflow_executor()
@@ -648,32 +651,48 @@ async def stream_execution_events(
     if instance is None and not recorder.is_tracked(execution_id):
         raise HTTPException(status_code=404, detail=f"执行不存在: {execution_id}")
 
-    owner = str(getattr(instance, "user_id", "") or "") if instance is not None else ""
-    # §3.1-P2（复核新增命中点 6）：原判断 `owner and user_id and owner != user_id`
-    # 对空身份短路放行、且无 admin 通道。现：owner 在而身份不匹配即 403，
-    # admin 放行——匿名/默认身份不再借短路读到他人执行事件流。
-    if owner and owner != user_id and current_user.get("role") != "admin":
+    def _executionVisible(candidate) -> bool:
+        """属主门（§3.1-P2，入口与心跳重验共用同一份判据）：owner 在而身份
+        不匹配即拒，admin 放行——匿名/默认身份不借短路读到他人执行事件流。"""
+        owner = str(getattr(candidate, "user_id", "") or "") if candidate is not None else ""
+        return not (owner and owner != user_id and current_user.get("role") != "admin")
+
+    if not _executionVisible(instance):
         raise HTTPException(status_code=403, detail="无权访问该执行")
 
-    async def event_generator():
-        import json as _json
+    def _renderFrame(frame: Dict[str, Any]) -> str:
+        return f"data: {json.dumps(frame, ensure_ascii=False)}\n\n"
 
+    def _authorize() -> bool:
+        """心跳内重验属主门：执行被删/属主变更 → 一个心跳内摘除连接。"""
+        candidate = executor._instances.get(execution_id)
+        if candidate is None:
+            candidate = _get_storage().get_execution(execution_id)
+        if candidate is None:
+            # 实例已不可见但缓冲仍有帧：让剩余帧（含终态帧）送完再收尾
+            return recorder.is_tracked(execution_id)
+        return _executionVisible(candidate)
+
+    async def event_generator():
         status_value = ""
         if instance is not None:
             raw_status = getattr(instance, "status", None)
             status_value = getattr(raw_status, "value", str(raw_status or ""))
         is_live = status_value in ("pending", "running", "paused")
 
-        # 竞态兜底：wait=false 返回与客户端连接之间首帧可能未发（引擎刚起跑）
+        # 竞态兜底：wait=false 返回与客户端连接之间首帧可能未发（引擎刚起跑）。
+        # 这里等的是"缓冲出现"；订阅（feed）先建立、游标衔接交给模板，缓冲出现
+        # 前后的事件都不会漏。
         waited = 0.0
         while not recorder.snapshot(execution_id) and is_live and waited < 5.0:
             await asyncio.sleep(0.05)
             waited += 0.05
 
         if not recorder.snapshot(execution_id):
+            # 缓冲为空：仍在执行 → 空流收尾（不应发生；由轮询端点兜底）；
+            # 已落库 → 合成终态帧收尾（重启兜底，不进 recorder）。帧格式与正常流一致。
             if is_live:
-                return  # 仍在执行但无事件可回放（不应发生；由轮询端点兜底）
-            # 重启兜底：缓冲为空但已落库 → 合成终态帧收尾（不进 recorder）
+                return
             stored = _get_storage().get_execution(execution_id)
             if stored is not None:
                 raw = getattr(stored, "status", None)
@@ -693,19 +712,22 @@ async def stream_execution_events(
                         "data": {"outputs": stored.outputs or {}, "error": stored.error},
                         "timestamp": stored.finished_at or 0.0,
                     }
-                    yield f"data: {_json.dumps(frame, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps(frame, ensure_ascii=False)}\n\n"
             return
 
-        it = recorder.subscribe(execution_id, after=after).__aiter__()
-        while True:
-            try:
-                frame = await asyncio.wait_for(it.__anext__(), timeout=15.0)
-            except asyncio.TimeoutError:
-                yield ": keep-alive\n\n"
-                continue
-            except StopAsyncIteration:
-                break
-            yield f"data: {_json.dumps(frame, ensure_ascii=False)}\n\n"
+        # 订阅先建立（feed 持有续传游标 after），首屏快照与增量经它按游标衔接：
+        # 快照里已有的帧不重发，快照后到达的帧经增量必达。
+        feed = PollingSnapshotFeed(
+            snapshotFn=lambda cursor: recorder.snapshot(execution_id, after=cursor or 0),
+            keyFn=lambda frame: frame["seq"],
+            isTerminalFn=isTerminalFrame,
+            closedFn=lambda: not recorder.is_tracked(execution_id),
+            initialCursor=after,
+        )
+        async for chunk in ssePushStream(
+            feed=feed, renderFrame=_renderFrame, authorize=_authorize, heartbeatInterval=15.0
+        ):
+            yield chunk
 
     return StreamingResponse(
         event_generator(),

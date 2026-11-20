@@ -34,6 +34,11 @@ MAX_TRACKED_EXECUTIONS = 200
 # 终态事件类型（订阅在这些帧后收尾）；引擎 cancel 发的是 workflow_failed
 _TERMINAL_TYPES = frozenset({"workflow_completed", "workflow_failed", "workflow_cancelled"})
 
+
+def isTerminalFrame(frame: Any) -> bool:
+    """帧是否终态帧（订阅收尾判据的单源；SSE 出口与订阅器共用这一份名单）。"""
+    return bool(frame) and frame.get("type") in _TERMINAL_TYPES
+
 # 挂到引擎 handler 上的哨兵属性名（attach 幂等判定）
 _HANDLER_SENTINEL = "_neurflow_event_recorder_handler"
 

@@ -307,6 +307,19 @@ class NotificationManager:
         """获取单个通知"""
         return self._notifications.get(notification_id)
 
+    def findNotificationIdsByData(self, key: str, value: Any) -> List[str]:
+        """按 data 键值反查通知 id（全站通知存储单源，反查口只此一处）。
+
+        Outbox 兜底扫描用它核对"这条事件的通知是否真的落到了通知面"——
+        投递成功与否的判据咬合事实源，不以生产方的返回值为准。
+        """
+        with self._lock:
+            return [
+                nid
+                for nid, notification in self._notifications.items()
+                if (notification.data or {}).get(key) == value
+            ]
+
     def mark_as_read(self, notification_id: str, user_id: str) -> bool:
         """标记通知为已读"""
         with self._lock:

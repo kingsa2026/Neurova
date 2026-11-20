@@ -157,7 +157,7 @@
     "name": "stream_execution_events",
     "decorator": "router.get('/executions/{execution_id}/events')",
     "signature": "execution_id: str, after: int=Query(0, ge=0), current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
-    "doc": "执行事件 SSE 流。\n\n帧格式 data: {seq,type,workflow_id,execution_id,node_id,data,timestamp}；\n回放 seq>after 历史帧 + 实时推送，终态帧（workflow_completed/failed）后收尾；\nkeep-alive 注释行防代理超时。用户隔离：仅属主（或未认证 default）可订阅。"
+    "doc": "执行事件 SSE 流（统一推送模板：订阅先于读首屏 → 首屏快照 → 增量 → 心跳重验）。\n\n对外帧格式不变：data: {seq,type,workflow_id,execution_id,node_id,data,timestamp}；\n回放 seq>after 历史帧 + 实时推送，终态帧（workflow_completed/failed）后收尾；\nkeep-alive 注释行防代理超时。用户隔离：仅属主（或未认证 default）可订阅，\n且每个心跳周期重验属主门——权限过期的连接一个心跳内被服务端摘除。"
   },
   {
     "method": "GET",
