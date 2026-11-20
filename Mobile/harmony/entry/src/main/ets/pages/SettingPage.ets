@@ -602,172 +602,176 @@ export struct SettingPage {
   }
 
   build() {
-    Column() {
-      // 内联头（原型 F10：21/700 我的 + 保存渐变胶囊）
-      Row() {
-        Text('我的')
-          .fontSize(21)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.sm.getColor('text_primary'))
-          .layoutWeight(1)
-        Button() {
-          Text('保存')
-            .fontSize(13)
-            .fontColor(this.sm.getColor('text_on_primary'))
+    // 整页可滚：页内固定内容（个人卡+入口组+管理组+退出卡）过高会挤掉设置 List 的滚动位（我的页不能上滑的根因）
+    Scroll() {
+      Column() {
+        // 内联头（原型 F10：21/700 我的 + 保存渐变胶囊）
+        Row() {
+          Text('我的')
+            .fontSize(21)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+            .layoutWeight(1)
+          Button() {
+            Text('保存')
+              .fontSize(13)
+              .fontColor(this.sm.getColor('text_on_primary'))
+          }
+          .height(34)
+          .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
+          .onClick(() => {
+            this.saveAll();
+          })
         }
-        .height(34)
-        .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
+        .width('100%')
+        .padding({ left: 20, right: 20, top: 8, bottom: 10 })
+
+        // 个人卡（原型 F10：渐变头像 + 用户名 + 工作区/配对态 + 箭头）
+        Row() {
+          Text((this.authStore.user?.username ?? 'U').slice(0, 1))
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_on_primary'))
+            .width(52)
+            .height(52)
+            .borderRadius(18)
+            .textAlign(TextAlign.Center)
+            .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
+          Column() {
+            Text(this.authStore.user?.username ?? '未登录')
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.sm.getColor('text_primary'))
+            Row() {
+              Row()
+                .width(5)
+                .height(5)
+                .borderRadius(3)
+                .backgroundColor(this.authStore.isPaired ? this.sm.getColor('success') : this.sm.getColor('warning'))
+              Text('工作区 ' + this.workspaceHost() + (this.authStore.isPaired ? ' · 已配对' : ' · 未配对'))
+                .fontSize(this.sm.getFontSize('badge'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .margin({ left: 6 })
+            }
+            .margin({ top: 3 })
+            .alignItems(VerticalAlign.Center)
+          }
+          .alignItems(HorizontalAlign.Start)
+          .margin({ left: 12 })
+          .layoutWeight(1)
+          AppIcon({ name: 'chev', iconSize: 16, color: this.sm.getColor('text_tertiary') })
+        }
+        .width('calc(100% - 32vp)')
+        .margin({ left: 16, right: 16, bottom: 10 })
+        .padding(14)
+        .borderRadius(16)
+        .backgroundColor(this.sm.getColor('glass'))
+        .border({ width: 1, color: this.sm.getColor('border') })
+        .alignItems(VerticalAlign.Center)
+
+        // 分组一（原型 F10：功能入口行 = 圆角图标 + 标题(+徽标) + 数值 + 箭头）
+        Column() {
+          this.entryRow('server', 'PC 终端与配对', this.serverCount > 0 ? this.serverCount.toString() + ' 台档案' : '', '', RouteNames.CONNECTION)
+          this.entryRow('model', '模型管理', '', '', RouteNames.MODEL)
+          this.entryRow('bell', '通知中心', this.unreadCount > 0 ? this.unreadCount.toString() : '', '', RouteNames.NOTIFICATION)
+          this.entryRow('task', '任务看板', '', '', RouteNames.TASK)
+          this.entryRow('folder', '文件', '', '', RouteNames.FILE)
+          this.entryRow('book', '技能市场', '', '', RouteNames.MARKETPLACE)
+        }
+        .width('calc(100% - 32vp)')
+        .margin({ left: 16, right: 16, bottom: 10 })
+        .borderRadius(16)
+        .backgroundColor(this.sm.getColor('glass'))
+        .border({ width: 1, color: this.sm.getColor('border') })
+        .clip(true)
+
+        // 管理员分组：仅 role=admin 渲染（原型 F10；紫边框 + 组标完整语义）
+        if (this.isAdmin()) {
+          Column() {
+            Row() {
+              AppIcon({ name: 'shield', iconSize: 11, color: this.sm.getColor('primary') })
+              Text('管理员 · 仅 role=admin 时渲染')
+                .fontSize(10)
+                .fontColor(this.sm.getColor('primary'))
+                .letterSpacing(0.6)
+                .margin({ left: 6 })
+            }
+            .margin({ left: 20, top: 4, bottom: 8 })
+            .alignItems(VerticalAlign.Center)
+
+            Column() {
+              this.entryRow('user', '用户管理', '', '', RouteNames.ADMIN_USERS)
+              this.entryRow('task', '用户组管理', '', '', RouteNames.ADMIN_GROUPS)
+              this.entryRow('book', '市场管理', '', '', RouteNames.ADMIN_MARKET)
+              this.entryRow('gear', '系统设置（治理）', '', '', RouteNames.ADMIN_SETTINGS)
+            }
+            .width('calc(100% - 32vp)')
+            .margin({ left: 16 })
+            .borderRadius(16)
+            .backgroundColor(this.sm.getColor('glass'))
+            .border({ width: 1, color: this.sm.getColor('primary') })
+            .clip(true)
+          }
+          .width('100%')
+          .margin({ bottom: 10 })
+        }
+
+        if (this.loading) {
+          // 加载态
+          Column() {
+            Text('加载中...')
+              .fontSize(this.sm.getFontSize('body'))
+              .fontColor(this.sm.getColor('text_secondary'))
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+        } else {
+          // 分组列表
+          List({ space: 16 }) {
+            ForEach(this.groups, (group: SettingGroup) => {
+              ListItem() {
+                this.buildGroupSection(group)
+              }
+            }, (group: SettingGroup) => group.key)
+          }
+          .width('100%')
+          .scrollBar(BarState.Off)
+          .padding({
+            left: this.sm.getSpacing('md'),
+            right: this.sm.getSpacing('md'),
+            top: this.sm.getSpacing('sm'),
+            bottom: this.sm.getSpacing('sm'),
+          })
+        }
+
+        // 退出登录（设计 F10 .me-out：独立红色卡；与隐私组内 logout 动作同一处理单源）
+        Row() {
+          AppIcon({ name: 'logout', iconSize: 18, color: this.sm.getColor('error') })
+          Text('退出登录')
+            .fontSize(this.sm.getFontSize('body_sm'))
+            .fontColor(this.sm.getColor('error'))
+            .margin({ left: 8 })
+        }
+        .width('calc(100% - 32vp)')
+        .justifyContent(FlexAlign.Center)
+        .padding(14)
+        .borderRadius(16)
+        .backgroundColor('rgba(248,113,113,0.06)')
+        .border({ width: 1, color: 'rgba(248,113,113,0.25)' })
+        .margin({ left: 16, right: 16, bottom: 16 })
+        .alignItems(VerticalAlign.Center)
         .onClick(() => {
-          this.saveAll();
+          this.logout();
         })
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 8, bottom: 10 })
-
-      // 个人卡（原型 F10：渐变头像 + 用户名 + 工作区/配对态 + 箭头）
-      Row() {
-        Text((this.authStore.user?.username ?? 'U').slice(0, 1))
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.sm.getColor('text_on_primary'))
-          .width(52)
-          .height(52)
-          .borderRadius(18)
-          .textAlign(TextAlign.Center)
-          .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
-        Column() {
-          Text(this.authStore.user?.username ?? '未登录')
-            .fontSize(16)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.sm.getColor('text_primary'))
-          Row() {
-            Row()
-              .width(5)
-              .height(5)
-              .borderRadius(3)
-              .backgroundColor(this.authStore.isPaired ? this.sm.getColor('success') : this.sm.getColor('warning'))
-            Text('工作区 ' + this.workspaceHost() + (this.authStore.isPaired ? ' · 已配对' : ' · 未配对'))
-              .fontSize(this.sm.getFontSize('badge'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .margin({ left: 6 })
-          }
-          .margin({ top: 3 })
-          .alignItems(VerticalAlign.Center)
-        }
-        .alignItems(HorizontalAlign.Start)
-        .margin({ left: 12 })
-        .layoutWeight(1)
-        AppIcon({ name: 'chev', iconSize: 16, color: this.sm.getColor('text_tertiary') })
-      }
-      .width('calc(100% - 32vp)')
-      .margin({ left: 16, right: 16, bottom: 10 })
-      .padding(14)
-      .borderRadius(16)
-      .backgroundColor(this.sm.getColor('glass'))
-      .border({ width: 1, color: this.sm.getColor('border') })
-      .alignItems(VerticalAlign.Center)
-
-      // 分组一（原型 F10：功能入口行 = 圆角图标 + 标题(+徽标) + 数值 + 箭头）
-      Column() {
-        this.entryRow('server', 'PC 终端与配对', this.serverCount > 0 ? this.serverCount.toString() + ' 台档案' : '', '', RouteNames.CONNECTION)
-        this.entryRow('model', '模型管理', '', '', RouteNames.MODEL)
-        this.entryRow('bell', '通知中心', this.unreadCount > 0 ? this.unreadCount.toString() : '', '', RouteNames.NOTIFICATION)
-        this.entryRow('task', '任务看板', '', '', RouteNames.TASK)
-        this.entryRow('folder', '文件', '', '', RouteNames.FILE)
-        this.entryRow('book', '技能市场', '', '', RouteNames.MARKETPLACE)
-      }
-      .width('calc(100% - 32vp)')
-      .margin({ left: 16, right: 16, bottom: 10 })
-      .borderRadius(16)
-      .backgroundColor(this.sm.getColor('glass'))
-      .border({ width: 1, color: this.sm.getColor('border') })
-      .clip(true)
-
-      // 管理员分组：仅 role=admin 渲染（原型 F10；紫边框 + 组标完整语义）
-      if (this.isAdmin()) {
-        Column() {
-          Row() {
-            AppIcon({ name: 'shield', iconSize: 11, color: this.sm.getColor('primary') })
-            Text('管理员 · 仅 role=admin 时渲染')
-              .fontSize(10)
-              .fontColor(this.sm.getColor('primary'))
-              .letterSpacing(0.6)
-              .margin({ left: 6 })
-          }
-          .margin({ left: 20, top: 4, bottom: 8 })
-          .alignItems(VerticalAlign.Center)
-
-          Column() {
-            this.entryRow('user', '用户管理', '', '', RouteNames.ADMIN_USERS)
-            this.entryRow('task', '用户组管理', '', '', RouteNames.ADMIN_GROUPS)
-            this.entryRow('book', '市场管理', '', '', RouteNames.ADMIN_MARKET)
-            this.entryRow('gear', '系统设置（治理）', '', '', RouteNames.ADMIN_SETTINGS)
-          }
-          .width('calc(100% - 32vp)')
-          .margin({ left: 16 })
-          .borderRadius(16)
-          .backgroundColor(this.sm.getColor('glass'))
-          .border({ width: 1, color: this.sm.getColor('primary') })
-          .clip(true)
-        }
-        .width('100%')
-        .margin({ bottom: 10 })
-      }
-
-      if (this.loading) {
-        // 加载态
-        Column() {
-          Text('加载中...')
-            .fontSize(this.sm.getFontSize('body'))
-            .fontColor(this.sm.getColor('text_secondary'))
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center)
-      } else {
-        // 分组列表
-        List({ space: 16 }) {
-          ForEach(this.groups, (group: SettingGroup) => {
-            ListItem() {
-              this.buildGroupSection(group)
-            }
-          }, (group: SettingGroup) => group.key)
-        }
-        .layoutWeight(1)
-        .width('100%')
-        .scrollBar(BarState.Off)
-        .padding({
-          left: this.sm.getSpacing('md'),
-          right: this.sm.getSpacing('md'),
-          top: this.sm.getSpacing('sm'),
-          bottom: this.sm.getSpacing('sm'),
-        })
-      }
-
-      // 退出登录（设计 F10 .me-out：独立红色卡；与隐私组内 logout 动作同一处理单源）
-      Row() {
-        AppIcon({ name: 'logout', iconSize: 18, color: this.sm.getColor('error') })
-        Text('退出登录')
-          .fontSize(this.sm.getFontSize('body_sm'))
-          .fontColor(this.sm.getColor('error'))
-          .margin({ left: 8 })
-      }
-      .width('calc(100% - 32vp)')
-      .justifyContent(FlexAlign.Center)
-      .padding(14)
-      .borderRadius(16)
-      .backgroundColor('rgba(248,113,113,0.06)')
-      .border({ width: 1, color: 'rgba(248,113,113,0.25)' })
-      .margin({ left: 16, right: 16, bottom: 16 })
-      .alignItems(VerticalAlign.Center)
-      .onClick(() => {
-        this.logout();
-      })
+      // 底部预留 120：满滚时退出登录卡停在玻璃页签栏上方，可看可点
+      .padding({ bottom: 120 })
     }
     .width('100%')
     .height('100%')
-
+    .scrollBar(BarState.Off)
   }
 
   // ===========================================================================
@@ -815,7 +819,7 @@ export struct SettingPage {
     .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
-      this.router.push(route);
+        this.router.push(route);
     })
   }
 
