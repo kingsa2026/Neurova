@@ -14795,7 +14795,7 @@
               "type": "number"
             },
             "version": {
-              "default": "1.0.0-beta14",
+              "default": "1.0.0-beta15",
               "title": "Version",
               "type": "string"
             }
@@ -18636,7 +18636,7 @@
     "info": {
       "description": "Neurova - 智能 Agent 系统 API",
       "title": "Neurova API",
-      "version": "1.0.0-beta14"
+      "version": "1.0.0-beta15"
     },
     "openapi": "3.1.0",
     "paths": {

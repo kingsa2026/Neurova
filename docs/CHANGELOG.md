@@ -5,7 +5,7 @@
 
 ## 当前版本
 
-**1.0.0-beta14**（读自 `neurova/__init__.py::__version__`，核对基准 2026-11-19）
+**1.0.0-beta15**（读自 `neurova/__init__.py::__version__`，核对基准 2026-11-21）
 
 - 版本线：`1.0.0-beta` 预发布系列。
 - 代码内架构自称：**Neurova CogArch 1.0.0**（见 `neurova/execution_engine/__init__.py`、
@@ -32,6 +32,7 @@
 | v1.0.0-beta12 | 2026-11-13 |
 | v1.0.0-beta13 | 2026-11-15 |
 | v1.0.0-beta14 | 2026-11-18 |
+| v1.0.0-beta15 | 2026-11-21 |
 
-> 逐版本变更明细请按 tag 区间自查：`git log v1.0.0-beta13..v1.0.0-beta14`。
+> 逐版本变更明细请按 tag 区间自查：`git log v1.0.0-beta14..v1.0.0-beta15`。
 > 本文件不逐笔罗列 commit，避免与 git 历史形成第二份会漂移的事实源。

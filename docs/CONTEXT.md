@@ -15,7 +15,7 @@ Neurova 是一个功能完整的 AI Agent 框架，核心特点是为每个 Agen
 | 前端页面组件 | 90（`NeurUI/src/pages/` 下 `*.vue` 实测） |
 | API 端点模块 | 96（`ENDPOINT_MODULES` 注册项实测） |
 | 通信渠道 | 14 种 |
-| 版本 | 1.0.0-beta14（`neurova/__init__.py` 的 `__version__`；代码内架构自称 CogArch 1.0.0） |
+| 版本 | 1.0.0-beta15（`neurova/__init__.py` 的 `__version__`；代码内架构自称 CogArch 1.0.0） |
 
 > 表中数字核对基准 2026-11-19。
 
