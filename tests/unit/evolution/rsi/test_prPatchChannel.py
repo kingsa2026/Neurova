@@ -34,7 +34,7 @@ from neurova.evolution.rsi.self_improvement_proposer import (
     SelfImprovementProposer,
 )
 from neurova.evolution.rsi.shadow_verify import ShadowRunResult, ShadowVerify
-from neurova.evolution.rsi.target_registry import EvolutionTarget, EvolutionTargetRegistry
+from neurova.evolution.rsi.target_registry import EvolutionTargetRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -80,19 +80,11 @@ def _makeWorkspace(tmp_path: Path) -> Path:
 
 
 def _localRegistry() -> EvolutionTargetRegistry:
-    """局部注册表：内核禁改项（内置）+ 两个 L2 白名单对象（本测试域登记）。"""
-    registry = EvolutionTargetRegistry()
-    for targetId, locator in (
-        ("l2.promptCompiler", "neurova/context/rules_sections.py"),
-        ("l2.skillCardCatalog", "neurova/skills/skill_service.py"),
-    ):
-        registry.register(
-            EvolutionTarget(
-                targetId=targetId, layer="L2", kind="module", locator=locator,
-                scope="global", gateLevel="approval", verdictSuite="suite_eval.chat",
-            )
-        )
-    return registry
+    """局部注册表实例：禁改内核 + P2-3 首批 L2 白名单随构造自动装配。
+
+    用独立实例而非进程级单例——单测不依赖、也不污染全局注册表状态。
+    """
+    return EvolutionTargetRegistry()
 
 
 def _allGreenVerdicts() -> dict:

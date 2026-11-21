@@ -87,3 +87,36 @@ def normalize_legacy_status(status: Any) -> str:
     """历史行状态字面量归一（文本臂 "approved" → 规范 "applied"）。"""
     raw = str(status or "")
     return LEGACY_TEXT_STATUS_ALIASES.get(raw, raw)
+
+
+def collectProposals(
+    *,
+    textService: Any = None,
+    rsiProposer: Any = None,
+    status: str = "",
+) -> list:
+    """两臂提案的只读聚合读口（P2-4 / 计划书 §1.7-11：存储读取统一）。
+
+    取舍：两臂落盘格式（文本臂 proposals.json 单文件数组 vs RSI 臂
+    proposals/<id>.json 逐文件）本卡不迁移——整体换格式要动审批端点与重启
+    恢复语义，爆炸面大；先收口"读"：单一入口同时读出两臂，行带 ``arm``
+    标记（text_evolution / rsi），状态按规范值归一（文本臂历史行经
+    :data:`LEGACY_TEXT_STATUS_ALIASES`），``status`` 过滤双臂统一按规范值
+    比较，按 ``created_at`` 升序排成跨臂时间线。写侧两臂均已原子写 + 有界
+    （P2-4 同卡交付）。
+    """
+    items: list = []
+    if textService is not None:
+        for row in textService.list_proposals():
+            items.append({"arm": "text_evolution", **row})
+    if rsiProposer is not None:
+        for proposal in rsiProposer.list_all_proposals():
+            items.append({"arm": "rsi", **proposal.to_dict()})
+    if status:
+        wanted = normalize_legacy_status(status)
+        items = [
+            row for row in items
+            if normalize_legacy_status(row.get("status")) == wanted
+        ]
+    items.sort(key=lambda row: str(row.get("created_at") or ""))
+    return items

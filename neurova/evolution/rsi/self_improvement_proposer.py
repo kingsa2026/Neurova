@@ -356,6 +356,9 @@ class SelfImprovementProposer:
     4. 回滚机制：应用前创建快照，可一键回滚
     """
 
+    #: 提案台账有界上限（P2-4：与文本臂 proposals.json 的有界 50 同范式）。
+    MAX_LEDGER_ENTRIES = 50
+
     def __init__(
         self,
         *,
@@ -987,12 +990,47 @@ class SelfImprovementProposer:
                 logger.warning("加载提案文件失败 %s: %s", proposal_file, e)
 
     def _save_proposal_to_disk(self, proposal: ImprovementProposal) -> None:
-        """保存提案到磁盘"""
+        """保存提案到磁盘（P2-4：tmp + os.replace 原子写；超限归档最旧）。
+
+        直接 write_text 的旧实现写中途崩溃会留半写文件，重启加载时
+        json.loads 失败即整条提案"消失"——先写 .tmp 再原子替换，正式文件
+        要么不存在要么完整。
+        """
         proposal_file = self._proposals_dir / f"{proposal.proposal_id}.json"
-        proposal_file.write_text(
+        tmp_file = proposal_file.with_suffix(".json.tmp")
+        tmp_file.write_text(
             json.dumps(proposal.to_dict(), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        os.replace(tmp_file, proposal_file)
+        self._archiveOldestProposals()
+
+    def _archiveOldestProposals(self) -> int:
+        """台账有界（P2-4，沿文本臂「有界 50」范式）：超限的最旧提案移入 archive/。
+
+        归档式而非丢弃式（文本臂 proposals.json 直接截断；RSI 臂的提案是
+        审计留痕，移入 archive/ 子目录可追溯）。archive/ 不在
+        _load_proposals_from_disk 的 glob("*.json") 命里面——重启加载只认
+        现役台账，归档件不混入。
+        """
+        ledgerFiles = sorted(
+            (p for p in self._proposals_dir.glob("*.json") if p.is_file()),
+            key=lambda p: p.stat().st_mtime_ns,
+        )
+        overflow = len(ledgerFiles) - self.MAX_LEDGER_ENTRIES
+        if overflow <= 0:
+            return 0
+        archiveDir = self._proposals_dir / "archive"
+        archiveDir.mkdir(parents=True, exist_ok=True)
+        moved = 0
+        for stale in ledgerFiles[:overflow]:
+            os.replace(stale, archiveDir / stale.name)
+            moved += 1
+        logger.info(
+            "提案台账归档 %d 条（agent=%s，上限 %d）",
+            moved, self._agent_id, self.MAX_LEDGER_ENTRIES,
+        )
+        return moved
 
     def _capture_pre_apply_state(
         self, proposal: ImprovementProposal
