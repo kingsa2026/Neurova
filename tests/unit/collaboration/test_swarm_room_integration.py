@@ -341,3 +341,123 @@ class TestTeamSwarmBoundary:
         """AgentTeam=ACP 步骤编排；Swarm=进程内子代理治理。编排面不复制进 SwarmManager。"""
         assert hasattr(AgentTeam, "orchestrate")
         assert not hasattr(SwarmManager, "orchestrate")
+
+
+# ── 修复计划 M1：房间文本批准必须与显式裁决端点同效力（回灌治理）────
+
+
+class TestRoomApprovalBackfillLandsGovernance:
+    """房间自由文本「同意」批准 team_consolidation / 项目治理审批单时，
+    必须像 decide_room_approval 端点一样回灌 teams_api 与项目治理快照——
+    同一裁决同一效力（decidedByChannel=room）。"""
+
+    @pytest.fixture
+    def teamsStore(self, monkeypatch):
+        import neurova.api.endpoints.teams_api as teamsApi
+
+        monkeypatch.setattr(teamsApi, "_save_store", lambda: None)
+        teamsApi._teams_store.clear()
+        yield teamsApi
+        teamsApi._teams_store.clear()
+
+    @pytest.fixture
+    def governanceProject(self, monkeypatch):
+        """同时服务 _canDecideInRoom（owner 判定）与治理回灌（成员/可见性落地）的房间项目。"""
+        project = SimpleNamespace(
+            project_id=ROOM, owner_id=OWNER,
+            members={OWNER: {"role": "owner"}, MEMBER: {"role": "member"}},
+            visibility="private", updated_at=0.0,
+            _added=[],
+        )
+        project.is_member = lambda uid: uid in project.members
+
+        def _addMember(uid, role, invited_by=None):
+            project._added.append(uid)
+            project.members[uid] = {"role": str(role), "invited_by": invited_by}
+
+        project.add_member = _addMember
+
+        def saveProject(p):
+            project.saved_at = p.updated_at
+
+        project.saved_at = None
+        manager = MagicMock()
+        manager.get_project.return_value = project
+        manager._save_project = saveProject
+        monkeypatch.setattr(
+            "neurova.collaboration.collaboration_isolation.get_collaboration_manager",
+            lambda: manager)
+        return project
+
+    @pytest.fixture
+    def quietAudit(self, monkeypatch):
+        import neurova.tool_executor as te
+
+        monkeypatch.setattr(te, "_auditProjectAction", lambda *a, **k: None)
+
+    @pytest.mark.asyncio
+    async def test_owner_room_approve_backfills_team_proposal(
+        self, swarm, roomStore, roomBus, approvals, parentMail, roomProject, teamsStore,
+    ):
+        run = makeRun()
+        swarm._runs[run.subagent_id] = run
+        verdict = await requestRunApproval(run, "沉淀协作团队", reason="成员配合默契", level="L2")
+        rid = verdict["request_id"]
+        teamsStore.registerTeamProposal(rid, {
+            "name": "数据整理特勤队", "description": "源自蜂群协作沉淀",
+            "members_detail": [{"user_id": "u_child", "name": "子代理", "role": "reviewer", "prompt": ""}],
+            "promoted_from_run": run.subagent_id,
+        })
+
+        res = handleRoomSwarmReply(ROOM, OWNER, isAdmin=False, text="同意批准")
+
+        assert res["matched"] == "approval"
+        assert res["decision_result"]["success"] is True
+        assert approvals.get_request(rid).status.value == "approved"
+        assert rid not in teamsStore._pendingTeamProposals, "批准后登记快照必须被消费"
+        created = [t for t in teamsStore._teams_store.values() if t.get("promoted_from_run") == run.subagent_id]
+        assert created, "房间文本批准必须与显式端点同效力：团队沉淀真正落成固定团队"
+        assert created[0]["approved_by"] == OWNER
+        assert res["decision_result"].get("team_created", {}).get("id") == created[0]["id"]
+
+    @pytest.mark.asyncio
+    async def test_owner_room_approve_backfills_project_governance(
+        self, swarm, roomStore, roomBus, approvals, parentMail, governanceProject, quietAudit,
+    ):
+        import neurova.tool_executor as te
+
+        run = makeRun()
+        swarm._runs[run.subagent_id] = run
+        verdict = await requestRunApproval(run, "给用户开项目可见", reason="协作需要", level="L2")
+        rid = verdict["request_id"]
+        te._registerPendingProjectGovernance(rid, {
+            "project_id": ROOM, "member_user_ids": ["user_z"],
+            "visibility": "team", "agent_id": "child",
+        })
+
+        res = handleRoomSwarmReply(ROOM, OWNER, isAdmin=False, text="同意批准")
+
+        assert res["matched"] == "approval"
+        assert res["decision_result"]["success"] is True
+        applied = res["decision_result"].get("project_governance_applied", {})
+        assert applied.get("applied") is True, "房间文本批准必须回灌项目治理（与显式端点同效力）"
+        assert applied.get("added_members") == ["user_z"]
+        assert applied.get("visibility") == "team"
+        assert "user_z" in governanceProject.members
+        assert rid not in te._pendingProjectGovernance
+
+    @pytest.mark.asyncio
+    async def test_owner_room_reject_does_not_backfill(
+        self, swarm, roomStore, roomBus, approvals, parentMail, roomProject, teamsStore,
+    ):
+        run = makeRun()
+        swarm._runs[run.subagent_id] = run
+        verdict = await requestRunApproval(run, "沉淀另一队", reason="驳回路径", level="L2")
+        rid = verdict["request_id"]
+        teamsStore.registerTeamProposal(rid, {"name": "不该建的队", "members_detail": []})
+
+        res = handleRoomSwarmReply(ROOM, OWNER, isAdmin=False, text="驳回")
+
+        assert res["decision_result"]["success"] is True
+        assert not [t for t in teamsStore._teams_store.values() if t.get("promoted_from_run") == run.subagent_id], \
+            "驳回不落团队（与显式端点口径一致）"

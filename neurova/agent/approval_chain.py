@@ -1189,6 +1189,29 @@ def handleRoomSwarmReply(
             decidedByChannel="room",
         )
         _roomRegistryPop(_roomApprovalRegistry, rid)
+        # M1（修复计划 2026-11-21）：与显式裁决端点（collaboration_room_api
+        # decide_room_approval）同效力——批准即回灌团队沉淀与项目治理，
+        # 杜绝「同一裁决，房间文本批准不落地」的语义分叉；回灌失败不影响裁决本身。
+        if result.get("success") and str(result.get("decision")) == "approve":
+            try:
+                from neurova.api.endpoints import teams_api
+
+                applied = teams_api.applyTeamProposalDecision(
+                    rid, "approve", decidedBy=str(userId or ""))
+                if applied.get("applied"):
+                    result["team_created"] = applied.get("team")
+            except Exception as e:  # noqa: BLE001 - 沉淀回灌失败不影响裁决本身
+                logger.warning("团队沉淀回灌失败 (%s): %s", rid, e)
+            try:
+                from neurova.tool_executor import applyProjectGovernanceDecision
+
+                projectApplied = applyProjectGovernanceDecision(
+                    rid, decidedBy=str(userId or ""),
+                    decidedByChannel=str(result.get("decided_by_channel") or "room"))
+                if projectApplied.get("applied"):
+                    result["project_governance_applied"] = projectApplied
+            except Exception as e:  # noqa: BLE001 - 治理回灌失败不影响裁决本身
+                logger.warning("项目治理回灌失败 (%s): %s", rid, e)
         notice = _roomDecisionNotice(str(userId or ""), decision, rid, result)
         try:
             from neurova.collaboration.room_bus import publishRoomSystemMessage
