@@ -1042,7 +1042,13 @@ class RSIOrchestrator:
                 "outstanding": debt_verdict.outstanding,
             }
 
-        if optimizations and self.deployment_controller.can_auto_execute("low"):
+        if (
+            optimizations
+            and self.deployment_controller.can_auto_execute("low")
+            # P1-6：自动档应用前的世代门禁——门禁拒绝的世代参数不落地
+            #（与人工通道 409 同一语义，总纲"生产基线只接受全绿世代"）。
+            and self._generationGateAllowsAutoApply(self._iteration_count + 1)
+        ):
             # R1 抽取：应用段公共实现——自动档与人工批准通道共用同一份
             # "应用 → 前后实测 → 棘轮保留/回滚"，不保留第二套复制粘贴。
             _outcome = self._applyOptimizationsWithMeasurement(
@@ -2008,6 +2014,26 @@ class RSIOrchestrator:
             logger.warning("世代自动档部署挂接失败（不改变应用结果）: %s", e)
             setattr(generationOrchestrator, "lastPipelineError",
                     f"auto apply settle: {type(e).__name__}: {e}")
+
+    def _generationGateAllowsAutoApply(self, roundNo: int) -> bool:
+        """自动档应用前的世代门禁（P1-6）：门禁拒绝的世代不自动应用。
+
+        与人工通道 `_generationGateForApproval`（409）同一语义的自动档侧：
+        世代被拒 → 拦下应用、提案登记如实记 blocked_by_gate、参数不落地
+        （总纲 §2.0：影子失败→候选自动淘汰，生产基线只接受全绿世代）。
+        世代管线未挂接/本轮无世代档案 → 放行（向后兼容，零行为变化）。
+        """
+        generationOrchestrator = getattr(self, "generationOrchestrator", None)
+        if generationOrchestrator is None:
+            return True
+        allowed = generationOrchestrator.autoApplyAllowed(roundNo)
+        if not allowed:
+            self._markRoundProposalsConsumed("blocked_by_gate")
+            logger.info(
+                "RSI 自动档被世代门禁拦下（round=%s）：候选淘汰，参数不应用",
+                roundNo,
+            )
+        return allowed
 
     def _observeCanaryWindows(self, readings: Optional[Dict[str, Any]]) -> None:
         """金丝雀观测窗检查点驱动（P1-4）：观测全部开窗世代（fail-soft）。

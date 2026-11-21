@@ -380,6 +380,22 @@ class GenerationOrchestrator:
         self._ledger.recordDecision(gen.generationNo, self._decisionFor(roundNo, approvedBy))
         return self._ledger.get(gen.generationNo)
 
+    def autoApplyAllowed(self, roundNo: int) -> bool:
+        """自动档应用放行判定（P1-6 总纲：生产基线只接受全绿世代的晋升）。
+
+        与人工通道 ``gateManualApproval`` 的 409 同一语义——自动档不是绕过
+        门禁的后门：世代被门禁拒绝（影子失败/门禁未过）时其候选必须自动
+        淘汰，参数不落地（§2.0「影子失败→候选自动淘汰，不落基线」）。
+
+        - 本轮无世代档案（开代失败/未挂接）→ 放行（管线缺席零行为变化）；
+        - 世代 rejected → False（调用方不得应用）；
+        - 其余状态（gated/canary）→ 放行（应用段与观测窗语义照旧）。
+        """
+        gen = self.generationForRound(roundNo)
+        if gen is None:
+            return True
+        return gen.status != GenerationStatus.REJECTED.value
+
     def onManualApprovalApplied(
         self, *, roundNo: int, approvedBy: str, outcome: Dict[str, Any]
     ) -> Optional[EvolutionGeneration]:
@@ -667,14 +683,22 @@ class GenerationOrchestrator:
     def _promoteCanary(
         self, roundNo: int, window: Dict[str, Any], gen: EvolutionGeneration
     ) -> EvolutionGeneration:
-        """窗满无异常 → 晋升生产（markDeployed，promotedAt 落定）。"""
+        """窗满无异常 → 晋升生产（markDeployed，promotedAt 落定）。
+
+        观测窗起点（``annotateCanaryWindow`` 落在 deployment 上的
+        canaryStartedAt）必须随晋升留痕——否则"观测了多久"在结算后对不上账
+        （P1-6 演练一揪出的留痕断点：markDeployed 整体替换 deployment 会把
+        起点抹掉，这里显式带过去）。
+        """
         self._canaryWindows.pop(int(roundNo), None)
+        base = gen.deployment if gen.deployment is not None else DeploymentRef()
         self._ledger.markDeployed(
             gen.generationNo,
             DeploymentRef(
                 canaryConclusion=(
                     f"金丝雀观测窗通过（{window['windowSeconds']:.1f}s 无越界），晋升生产"
-                )
+                ),
+                canaryStartedAt=base.canaryStartedAt,
             ),
         )
         logger.info("世代 %s 金丝雀观测窗通过，晋升生产", gen.generationNo)
