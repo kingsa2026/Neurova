@@ -32,6 +32,64 @@ def makeClient(mode, **kwargs):
     return client, events, crashes
 
 
+def assertCausalFrameOrder(records):
+    """因果序断言：只钉「有真因果」的帧对，不断言无因果帧之间的全局全序。
+
+    真因果（必须成立，违者即红）：
+    - 每个请求 out 必须先于它的应答 in（按 id 配对、seq 判定；
+      _sendFrame 先记 out 再 flush，读泵最早在 flush 后才可能见到应答）；
+    - observed/exited 必须最后（terminate 收口后才落账本）；
+    - 同方向保持 FIFO：out 之间、in 之间各按 seq 递增；in 方向内部顺序确定
+      （桩 agent 先写 initialize 应答再推 session/update，ping 应答须待
+      收到 ping 才写，管道 FIFO + 单线程读泵保序）。
+
+    无因果（合法交错，不得钉序）：session/update 是 agent 主动推送的通知，
+    ping 是客户端随后发起的新请求——二者分属独立方向、互不依赖，其相对
+    顺序取决于读泵线程与主线程的调度，两种交错都合法。旧断言把二者钉成
+    全局全序（["out","in","in","out",...]），因此间歇性误报；本断言不弱化
+    到恒真：帧数量、方向多重集、各帧内容、因果对、FIFO、observed 收尾
+    全部逐项保留。
+    """
+    assert len(records) == 6, f"应恰好 6 帧（2 out / 3 in / 1 observed），实际 {len(records)}: {records}"
+    directions = sorted(r["direction"] for r in records)
+    assert directions == ["in", "in", "in", "observed", "out", "out"], (
+        f"方向多重集不符：{[r['direction'] for r in records]}"
+    )
+    seqs = [r["seq"] for r in records]
+    assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs), f"seq 须按文件序单调递增且唯一：{seqs}"
+
+    outs = [r for r in records if r["direction"] == "out"]
+    ins = [r for r in records if r["direction"] == "in"]
+    observedRecs = [r for r in records if r["direction"] == "observed"]
+
+    # 同方向 FIFO（文件序即 seq 序；readFrames 按文件序返回）
+    assert [r["seq"] for r in outs] == sorted(r["seq"] for r in outs), "out 方向须保持 FIFO"
+    assert [r["seq"] for r in ins] == sorted(r["seq"] for r in ins), "in 方向须保持 FIFO"
+
+    # 出站顺序：先 initialize 握手，后 ping（发送方单线程顺序，真因果链的起点）
+    assert outs[0]["frame"].get("method") == "initialize", f"第 1 个 out 应为 initialize：{outs[0]['frame']}"
+    assert outs[1]["frame"].get("method") == "ping", f"第 2 个 out 应为 ping：{outs[1]['frame']}"
+    initReq, pingReq = outs
+
+    # 入站顺序（读泵 FIFO，桩时序确定）：initialize 应答 → session/update 通知 → ping 应答
+    assert ins[0]["frame"].get("id") is not None, f"initialize 应答须带 id：{ins[0]['frame']}"
+    assert ins[0]["frame"].get("id") == initReq["frame"].get("id"), "initialize 应答 id 须与请求配对"
+    assert ins[1]["frame"].get("method") == "session/update", f"第 2 个 in 应为通知：{ins[1]['frame']}"
+    assert ins[2]["frame"].get("id") == pingReq["frame"].get("id"), "ping 应答 id 须与请求配对"
+    assert (ins[2]["frame"].get("result") or {}).get("pong") is True, f"ping 应答须 pong=true：{ins[2]['frame']}"
+
+    # 因果对（跨方向真序，seq 判定）：请求 out 严格先于它的应答 in
+    assert initReq["seq"] < ins[0]["seq"], "因果违规：initialize 请求必须先于其应答"
+    assert pingReq["seq"] < ins[2]["seq"], "因果违规：ping 请求必须先于其应答"
+
+    # 退出观测必须收口在最后
+    assert len(observedRecs) == 1, f"observed 应恰好 1 条：{observedRecs}"
+    assert observedRecs[0]["seq"] == seqs[-1], "observed/exited 必须是最后一帧"
+    observed = observedRecs[0]["frame"]
+    assert observed.get("type") == "exited", f"observed 帧类型应为 exited：{observed}"
+    assert isinstance(observed.get("exit_code"), int), f"exit_code 应为 int：{observed}"
+
+
 def test_startHandshakeSucceedsAndReturnsCapabilities():
     client, _, _ = makeClient("ok")
     try:
@@ -141,23 +199,10 @@ class TestFrameHooks:
         finally:
             client.terminate()
         records = readFrames("frames_client_1")
-        directions = [r["direction"] for r in records]
-        # 桩时序：握手应答后立即推送 session/update，随后才是 ping 往返。
-        assert directions == ["out", "in", "in", "out", "in", "observed"], (
-            f"帧序不符：{directions}"
-        )
-        assert records[0]["frame"]["method"] == "initialize"
-        assert records[1]["frame"].get("id") is not None
-        # 入站通知在 _dispatch 之前留痕
-        assert records[2]["frame"]["method"] == "session/update"
-        assert records[3]["frame"]["method"] == "ping"
-        assert records[4]["frame"].get("result", {}).get("pong") is True
-        # 退出观测：terminate 收口后 observed/exited，退出码能拿到就带
-        observed = records[5]["frame"]
-        assert observed["type"] == "exited"
-        assert isinstance(observed.get("exit_code"), int)
-        seqs = [r["seq"] for r in records]
-        assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)
+        # 因果序断言（见 assertCausalFrameOrder）：session/update 通知与 ping
+        # 请求之间无因果关系，读泵/主线程调度使其两种交错都合法；请求→应答、
+        # observed 收尾、同方向 FIFO 等真序逐项钉死。
+        assertCausalFrameOrder(records)
 
     def test_noFrameKeyMeansNoFrameLog(self):
         from pathlib import Path

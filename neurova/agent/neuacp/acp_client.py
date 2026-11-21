@@ -171,18 +171,31 @@ class NeuacpClient:
 
         self._startPumps()
         try:
+            # D-G 互操作根修：ACP 规范 ProtocolVersion = integer(uint16)。
+            # 线上必须发整数——字符串 "1" 会被真实 CLI（opencode/claude/codex
+            # 适配器）以 -32602 Invalid params 拒绝（假 agent 不校验类型，
+            # 故此前未暴露）。应答按整数比较，宽松服务端的数字字符串也兼容。
+            try:
+                version_wire = int(str(protocol_version).strip())
+            except (TypeError, ValueError):
+                raise NeuacpError(
+                    f"ACP protocolVersion 必须是整数（收到 {protocol_version!r}）")
             result = self.request(
                 "initialize",
-                {"protocolVersion": protocol_version, "clientCapabilities": client_capabilities or {}},
+                {"protocolVersion": version_wire, "clientCapabilities": client_capabilities or {}},
             )
         except NeuacpError:
             self.terminate()
             raise
-        remote_version = str((result or {}).get("protocolVersion", ""))
-        if remote_version != protocol_version:
+        remote_version = (result or {}).get("protocolVersion", "")
+        try:
+            remote_ok = int(str(remote_version).strip()) == version_wire
+        except (TypeError, ValueError):
+            remote_ok = False
+        if not remote_ok:
             self.terminate()
             raise NeuacpProtocolError(
-                f"ACP 版本协商失败: 期望 {protocol_version!r}，实际 {remote_version!r}"
+                f"ACP 版本协商失败: 期望 {version_wire!r}，实际 {remote_version!r}"
             )
         self._handshake = result or {}
         return self._handshake
