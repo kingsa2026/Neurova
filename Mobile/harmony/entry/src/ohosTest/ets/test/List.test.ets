@@ -96,6 +96,8 @@ import firewallPageTest from './FirewallPage.test';
 // M5.2 性能优化测试套件
 import chunkBatcherTest from './ChunkBatcher.test';
 import simpleDataSourceTest from './SimpleDataSource.test';
+// P1-8 演化状态域 API 测试套件（世代谱系/门禁结果只读面，接 P1-5 治理端点）
+import evolutionApiTest from './EvolutionApi.test';
 
 export default function testsuite() {
   abilityTest();
@@ -194,4 +196,6 @@ export default function testsuite() {
   apiRouteGuardTest();
   webhookApiTest();
   authStoreTest();
+  // P1-8 演化状态域
+  evolutionApiTest();
 }

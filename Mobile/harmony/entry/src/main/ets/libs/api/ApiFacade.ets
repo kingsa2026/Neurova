@@ -34,6 +34,7 @@ import { ChannelIntegrationApi } from './modules/ChannelIntegrationApi';
 import { AigcApi } from './modules/AigcApi';
 import { SessionSyncApi } from './modules/SessionSyncApi';
 import { AdminApi } from './modules/AdminApi';
+import { EvolutionApi } from './modules/EvolutionApi';
 import { HomeApi } from './modules/HomeApi';
 import { WebhookApi } from './modules/WebhookApi';
 import { SkillsApi } from './modules/SkillsApi';
@@ -92,6 +93,8 @@ export class ApiFacade {
   public audio: AudioApi;
   // Console 域（车道F：蜂群协作图/候选板读面，对齐 PC console.ts）
   public console: ConsoleApi;
+  // 演化状态域（P1-8：世代谱系只读面，对齐 PC RsiGovernancePage 世代区块）
+  public evolution: EvolutionApi;
 
   private constructor() {
     this.client = HttpClient.getInstance();
@@ -133,6 +136,7 @@ export class ApiFacade {
     this.providers = new ProvidersApi(this.client);
     this.audio = new AudioApi(this.client);
     this.console = new ConsoleApi(this.client);
+    this.evolution = new EvolutionApi(this.client);
   }
 
   static getInstance(): ApiFacade {

@@ -932,6 +932,8 @@ export struct SettingPage {
           this.entryRow('task', '用户组管理', '', '', RouteNames.ADMIN_GROUPS)
           this.entryRow('book', '市场管理', '', '', RouteNames.ADMIN_MARKET)
           this.entryRow('gear', '系统设置（治理）', '', '', RouteNames.ADMIN_SETTINGS)
+          // P1-8：演化状态只读入口（世代谱系/门禁结果摘要，接 P1-5 治理端点）
+          this.entryRow('spark', '演化状态', '', '', RouteNames.ADMIN_EVOLUTION)
         }
         .width('calc(100% - 32vp)')
         .margin({ left: 16, right: 16 })

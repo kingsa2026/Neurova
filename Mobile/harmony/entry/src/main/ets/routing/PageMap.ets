@@ -25,6 +25,7 @@ import { AdminUsersPage } from '../pages/AdminUsersPage';
 import { AdminGroupsPage } from '../pages/AdminGroupsPage';
 import { AdminMarketPage } from '../pages/AdminMarketPage';
 import { AdminSettingsPage } from '../pages/AdminSettingsPage';
+import { AdminEvolutionPage } from '../pages/AdminEvolutionPage';
 import { KnowledgePage } from '../pages/KnowledgePage';
 import { MemoryPage } from '../pages/MemoryPage';
 import { ModelPage } from '../pages/ModelPage';
@@ -118,6 +119,8 @@ export function pageMap(name: string) {
     NavDestination() { AdminMarketPage() }.hideTitleBar(true)
   } else if (name === RouteNames.ADMIN_SETTINGS) {
     NavDestination() { AdminSettingsPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.ADMIN_EVOLUTION) {
+    NavDestination() { AdminEvolutionPage() }.hideTitleBar(true)
   } else if (name === RouteNames.KNOWLEDGE) {
     NavDestination() { KnowledgePage() }.hideTitleBar(true)
   } else if (name === RouteNames.MEMORY) {

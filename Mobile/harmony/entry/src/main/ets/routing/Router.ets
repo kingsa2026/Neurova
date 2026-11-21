@@ -36,6 +36,8 @@ export class RouteNames {
   static readonly ADMIN_GROUPS: string = 'AdminGroupsPage';
   static readonly ADMIN_MARKET: string = 'AdminMarketPage';
   static readonly ADMIN_SETTINGS: string = 'AdminSettingsPage';
+  // P1-8：演化状态只读页（世代谱系/门禁结果摘要，接 P1-5 治理端点）
+  static readonly ADMIN_EVOLUTION: string = 'AdminEvolutionPage';
   static readonly PAIRING: string = 'PairingPage';
   static readonly CONNECTION: string = 'ConnectionPage';
   static readonly MEMORY: string = 'MemoryPage';
@@ -111,6 +113,7 @@ const PROTECTED_ROUTES: string[] = [
   RouteNames.ADMIN_GROUPS,
   RouteNames.ADMIN_MARKET,
   RouteNames.ADMIN_SETTINGS,
+  RouteNames.ADMIN_EVOLUTION,
   RouteNames.CHAT,
   RouteNames.AGENT_LIST,
   RouteNames.AGENT_FORM,

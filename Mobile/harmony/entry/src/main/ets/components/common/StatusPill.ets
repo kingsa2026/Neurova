@@ -39,8 +39,8 @@ export struct StatusPill {
     }
   }
 
-  /** 态描边：30% 透明同色 */
-  private border(): string {
+  /** 态描边：30% 透明同色（命名避让 CustomComponent 边框属性方法——border/borderColor 同名即编译红） */
+  private strokeTone(): string {
     const dark = sm.getThemeMode() === ThemeMode.DARK;
     switch (this.variant) {
       case 'run': return dark ? 'rgba(52,211,153,0.30)' : 'rgba(12,143,94,0.30)';
@@ -65,7 +65,7 @@ export struct StatusPill {
     .padding({ left: 10, right: 10, top: 3, bottom: 3 })
     .borderRadius(sm.getRadius('full'))
     .backgroundColor(this.bg())
-    .border({ width: 1, color: this.border() })
+    .border({ width: 1, color: this.strokeTone() })
     .alignItems(VerticalAlign.Center)
   }
 }
