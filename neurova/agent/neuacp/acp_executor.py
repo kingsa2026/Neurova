@@ -248,13 +248,21 @@ class NeuacpStdioExecutor:
     # ---------- 内部 ----------
 
     def _ensureClient(self) -> None:
-        """确保底层 ACP 客户端就绪（幂等）：优先池取件，池故障 fail-open 直启。"""
+        """确保底层 ACP 客户端就绪（幂等）：优先池取件（有界等待，M10），
+        池设施故障 fail-open 直启；池的明确裁决（池满超时/已关闭）如实上抛。"""
         if self._client.started:
             return
         if self._pool is not None and self._pool_key is not None:
+            from neurova.agent.neuacp.process_pool import envAcquireWaitTimeout
+
             try:
-                entry = self._pool.acquire(self._pool_key, self._newStartedClient)
-            except Exception as exc:  # noqa: BLE001 - fail-open：池异常不阻断派活
+                entry = self._pool.acquire(self._pool_key, self._newStartedClient,
+                                           waitTimeout=envAcquireWaitTimeout())
+            except NeuacpError:
+                # M10：池满超时/池已关闭是池的明确裁决——直启会绕过全局进程上限，
+                # 必须结构化失败上抛，由 run 链诚实记失败（不静默重试）。
+                raise
+            except Exception as exc:  # noqa: BLE001 - fail-open：池设施异常不阻断派活
                 logger.warning("外部进程池获取失败，退回直启 (key=%s): %s", self._pool_key, exc)
             else:
                 self._pool_entry = entry

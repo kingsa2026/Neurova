@@ -355,3 +355,60 @@ def test_launchRunCarriesExternalAdapterForPromotedBlockedRun(monkeypatch):
     finally:
         reset_swarm_manager()
 
+
+
+# ── M10：执行体池取件有界等待；池的明确裁决不得被直启绕过 ─────────────────
+from unittest.mock import MagicMock
+
+
+class TestExecutorPoolBoundedAcquire:
+    def _executor(self):
+        from neurova.agent.neuacp.acp_executor import NeuacpStdioExecutor
+
+        return NeuacpStdioExecutor(["fake-agent"], protocol_version="1")
+
+    def test_acquire_wait_timeout_env(self, monkeypatch):
+        from neurova.agent.neuacp import process_pool as pp
+
+        monkeypatch.setenv("NEUROVA_EXTERNAL_AGENTS_ACQUIRE_TIMEOUT_S", "7")
+        assert pp.envAcquireWaitTimeout() == 7.0
+        monkeypatch.setenv("NEUROVA_EXTERNAL_AGENTS_ACQUIRE_TIMEOUT_S", "0")
+        assert pp.envAcquireWaitTimeout() is None, "0 = 不设限（保持原无限等待语义）"
+        monkeypatch.setenv("NEUROVA_EXTERNAL_AGENTS_ACQUIRE_TIMEOUT_S", "bogus")
+        assert pp.envAcquireWaitTimeout() == pp.DEFAULT_ACQUIRE_TIMEOUT
+
+    def test_acquire_receives_bounded_wait_timeout(self, monkeypatch):
+        from types import SimpleNamespace as NS
+        from neurova.agent.neuacp import acp_executor as ae
+
+        monkeypatch.setenv("NEUROVA_EXTERNAL_AGENTS_ACQUIRE_TIMEOUT_S", "7")
+        ex = self._executor()
+        captured = {}
+        fake_entry = NS(process=NS(started=True), closed=False)
+
+        def fake_acquire(key, factory, waitTimeout=None):
+            captured["waitTimeout"] = waitTimeout
+            return fake_entry
+
+        pool = MagicMock()
+        pool.acquire.side_effect = fake_acquire
+        ex.attachProcessPool(pool, ("t", "tool", ("c",), "cwd", "stdio", ""))
+        ex._ensureClient()
+        assert captured["waitTimeout"] == pytest.approx(7.0), \
+            "池取件必须带 env 有界等待（原实现不传 → 池满时无限排队）"
+
+    def test_pool_explicit_verdict_not_bypassed_by_direct_start(self):
+        from neurova.agent.neuacp.acp_client import NeuacpError
+
+        ex = self._executor()
+        pool = MagicMock()
+        pool.acquire.side_effect = NeuacpError(
+            "外部进程池已满（存活 4/4），排队等待超时（30s）")
+        ex.attachProcessPool(pool, ("t", "tool", ("c",), "cwd", "stdio", ""))
+
+        def forbiddenDirectStart():
+            raise AssertionError("池的明确裁决（池满/已关闭）不得走直启绕过全局上限")
+
+        ex._newStartedClient = forbiddenDirectStart  # type: ignore[assignment]
+        with pytest.raises(NeuacpError):
+            ex._ensureClient()

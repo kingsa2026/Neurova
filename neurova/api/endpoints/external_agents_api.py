@@ -129,15 +129,28 @@ async def testExternalAgent(
 
 @router.get("/status")
 async def externalAgentsStatus(current_user: Dict[str, Any] = Depends(requireAdmin)):
-    """进程池状态：B3（process_pool）落地前为占位；落地后如实读池快照。"""
+    """进程池状态：读 NeuacpProcessPool 单例真实快照（M6——原 getattr 落空恒占位，
+    管理面看不到池水位）。池不可用时诚实降级为 note，不 500。"""
     try:
-        from neurova.agent.neuacp import process_pool
+        from neurova.agent.neuacp.process_pool import getNeuacpProcessPool
     except ImportError:
         return {"processes": [], "note": "process pool lands with B3"}
-    snapshot = getattr(process_pool, "poolStatus", None)
-    if callable(snapshot):
-        return snapshot()
-    return {"processes": [], "note": "process pool lands with B3"}
+    try:
+        stats = getNeuacpProcessPool().stats()
+    except Exception as exc:  # noqa: BLE001 - 池不可用是读数不是 HTTP 错误
+        logger.warning("外部代理池快照读取失败: %s", exc)
+        return {"processes": [], "note": f"pool unavailable: {exc}"}
+    return {
+        "processes": stats.get("processes", []),
+        "live": stats.get("live", 0),
+        "busy": stats.get("busy", 0),
+        "idle": stats.get("idle", 0),
+        "waiters": stats.get("waiters", 0),
+        "crashes": stats.get("crashes", 0),
+        "max_procs": stats.get("max_procs", 0),
+        "idle_seconds": stats.get("idle_seconds", 0),
+        "closed": stats.get("closed", False),
+    }
 
 
 # ---------- G1：ACP registry 手动刷新（默认关，无定时任务） ----------

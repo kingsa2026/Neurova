@@ -267,7 +267,9 @@ def test_poolFailureFailsOpenToDirectStart(swarm, monkeypatch):
 
     class BrokenPool:
         def acquire(self, *args, **kwargs):
-            raise NeuacpError("池故障（测试注入）")
+            # M10 语义切分：NeuacpError 是池的明确裁决（池满/已关闭）→ 上抛不直启；
+            # 这里注入的是**设施故障**（非裁决），验证 fail-open 直启仍在。
+            raise RuntimeError("池故障（测试注入）")
 
     pool = BrokenPool()
     injectPool(monkeypatch, pool)

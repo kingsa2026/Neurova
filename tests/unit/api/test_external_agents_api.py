@@ -314,3 +314,38 @@ def test_framesNegativeAfterSeqTreatedAsZero(client):
     resp = client.get(_framesUrl(sid), headers=adminHeaders(), params={"after_seq": -5})
     assert resp.status_code == 200, resp.text
     assert resp.json()["count"] == 1
+
+
+# ── M6：/status 必须读池真实水位（原 getattr 落空恒占位） ──────────────────
+
+
+class _FakePoolProc:
+    def __init__(self):
+        self.terminated = False
+    def is_alive(self):
+        return not self.terminated
+    def terminate(self):
+        self.terminated = True
+    def close(self):
+        self.terminated = True
+
+
+def test_statusReportsRealPoolSnapshot(client, monkeypatch):
+    from neurova.agent.neuacp import process_pool as pp
+
+    pool = pp.NeuacpProcessPool(maxProcs=4, idleSeconds=600)
+    monkeypatch.setattr(pp, "_poolInstance", pool)
+    key = pp.poolKey("tenant_a", "opencode", ["opencode"], "/tmp/wk", "stdio", "")
+    entry = pool.acquire(key, lambda: _FakePoolProc())
+    pool.release(key, entry)  # 归还成 idle → 快照应见真实条目
+
+    resp = client.get(f"{BASE}/status", headers=adminHeaders())
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data.get("live") == 1, f"池快照应报真实存活数: {data}"
+    assert data.get("idle") == 1
+    assert data.get("busy") == 0
+    assert data.get("max_procs") == 4
+    assert isinstance(data.get("processes"), list) and len(data["processes"]) == 1
+    assert data["processes"][0]["tool"] == "opencode"
+    assert data["processes"][0]["tenant"] == "tenant_a"

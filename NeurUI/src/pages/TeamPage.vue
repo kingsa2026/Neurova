@@ -8,7 +8,7 @@
     <!-- 外部代理运行状态（admin 只读卡，§5.5 目录/连通性调试入口） -->
     <GlassCard v-if="isAdmin" :title="t('neuacp.statusTitle')" variant="subtle" padding="14px 18px">
       <div v-if="neuacpStatus" class="neuacp-status">
-        <span>{{ t('neuacp.statusProcesses') }}: {{ neuacpStatus.processes?.length ?? 0 }}</span>
+        <span>{{ t('neuacp.statusProcesses') }}: {{ neuacpStatus.live ?? neuacpStatus.processes?.length ?? 0 }}</span>
         <span v-if="neuacpStatus.note" class="neuacp-status-note">{{ t('neuacp.statusNote') }}: {{ neuacpStatus.note }}</span>
       </div>
       <div v-else-if="neuacpStatusError" class="neuacp-status-error">{{ t('neuacp.statusLoadFailed') }}</div>

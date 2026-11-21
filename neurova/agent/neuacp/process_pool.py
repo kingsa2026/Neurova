@@ -25,8 +25,11 @@ from neurova.agent.neuacp.acp_client import NeuacpError
 
 MAX_PROCS_ENV = "NEUROVA_EXTERNAL_AGENTS_MAX_PROCS"
 IDLE_SECONDS_ENV = "NEUROVA_EXTERNAL_AGENTS_IDLE_S"
+#: M10：池取件有界等待（秒）；0 或负 = 不设限（保持原无限排队语义）。
+ACQUIRE_TIMEOUT_ENV = "NEUROVA_EXTERNAL_AGENTS_ACQUIRE_TIMEOUT_S"
 DEFAULT_MAX_PROCS = 4
 DEFAULT_IDLE_SECONDS = 600.0
+DEFAULT_ACQUIRE_TIMEOUT = 30.0
 
 #: 池键：租户段在首位（§6.4），其余为执行体身份段。
 PoolKey = Tuple[str, str, Tuple[str, ...], str, str, str]
@@ -54,6 +57,18 @@ def envIdleSeconds() -> float:
     except ValueError:
         return DEFAULT_IDLE_SECONDS
     return max(0.0, value)
+
+
+def envAcquireWaitTimeout() -> Optional[float]:
+    """池取件有界等待（M10）：env 显式值最优先；非法回落默认；<=0 = None（不限）。"""
+    raw = (os.environ.get(ACQUIRE_TIMEOUT_ENV) or "").strip()
+    if not raw:
+        return DEFAULT_ACQUIRE_TIMEOUT
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_ACQUIRE_TIMEOUT
+    return None if value <= 0 else value
 
 
 def _normalizeKey(key: Tuple) -> PoolKey:
@@ -318,17 +333,29 @@ class NeuacpProcessPool:
     # ── 观测 / 关停 ──────────────────────────────────────────────────────
 
     def stats(self) -> dict:
-        """池状态快照（status 端点/测试用）。"""
+        """池状态快照（status 端点/测试用）。M6：增 busy 计数与逐条目清单。"""
         with self._condition:
+            processes = []
+            for key, queue in self._idle.items():
+                tenant, tool, command, cwd, transport, remote = key
+                for entry in queue:
+                    processes.append({
+                        "tenant": tenant, "tool": tool, "command": list(command),
+                        "cwd": cwd, "transport": transport, "remote": remote,
+                        "created_at": entry.created_at, "last_used": entry.last_used,
+                        "state": "idle", "closed": entry.closed,
+                    })
             idleCount = sum(len(queue) for queue in self._idle.values())
             return {
                 "max_procs": self._maxProcs,
                 "idle_seconds": self._idleSeconds,
                 "live": self._liveCount,
                 "idle": idleCount,
+                "busy": max(0, self._liveCount - idleCount),
                 "waiters": self._waiters,
                 "crashes": self._crashCount,
                 "closed": self._closed,
+                "processes": processes,
             }
 
     def shutdown(self) -> None:

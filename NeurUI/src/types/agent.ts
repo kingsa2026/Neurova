@@ -136,9 +136,25 @@ export interface NeuacpFramesPage {
   frames: NeuacpFrameRecord[]
 }
 
-/** GET /external-agents/status 进程池状态（进程行字段后端自由扩展，前端按需展示） */
+/** GET /external-agents/status 进程池状态（M6：真实水位；进程行字段后端自由扩展，前端按需展示） */
 export interface NeuacpStatusInfo {
   processes: Array<Record<string, unknown>>
+  /** 存活进程数（空闲 + 在用）——状态卡主读数 */
+  live?: number
+  /** 在用（非空闲）进程数 */
+  busy?: number
+  /** 空闲驻留进程数 */
+  idle?: number
+  /** 排队等待取件的派活数 */
+  waiters?: number
+  /** 近端崩溃累计计数 */
+  crashes?: number
+  /** 全局进程上限 */
+  max_procs?: number
+  /** 空闲回收阈值（秒） */
+  idle_seconds?: number
+  /** 池是否已关闭 */
+  closed?: boolean
   note?: string
 }
 
