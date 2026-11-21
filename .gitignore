@@ -43,6 +43,8 @@ patch*.py
 # 影子验证执行器是递归自演化的生产模块（计划书 §3.5 / P1-2），不是临时脚本——
 # 上面的 *_verify*.py 通机会吞掉它（与注释里 *_check*.py 吞合法文件同一形态），点名豁免。
 !neurova/evolution/rsi/shadow_verify.py
+# PR_PATCH 生效通道同理（计划书 §3.6 / P2-1 生产模块），被 *_patch*.py 通机吞掉，点名豁免。
+!neurova/evolution/rsi/pr_patch_channel.py
 
 # 日志和输出文件
 *.log

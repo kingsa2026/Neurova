@@ -453,8 +453,14 @@ class TestDeploymentPhaseGate:
         assert result.success is False
         assert "phase" in result.error.lower() or "阶段" in result.error
 
-    def test_phase_4_allows_high_risk_with_approval(self, tmp_path):
-        """测试 Phase 4（全自动）允许高风险，但仍需人工批准"""
+    def test_phase_4_high_risk_with_approval_routes_to_channel(self, tmp_path):
+        """测试 Phase 4（全自动）+ 人工批准：pr_patch 走 L2 生效通道（P2-1）。
+
+        工单 010 曾在本用例断言 not_supported——那时 pr_patch 没有生效通道。
+        通道接通后，部署 gate 仍先拦（high→phase≥4），过了 gate 的提案由
+        PrPatchChannel 按注册表白名单判定：未登记目标（白名单外）显式拒绝
+        且不改状态。
+        """
         proposer = _make_proposer(
             proposals_dir=tmp_path / "proposals",
             agents_dir=tmp_path / ".agents",
@@ -469,11 +475,9 @@ class TestDeploymentPhaseGate:
         result = proposer.approve_and_apply(
             proposal.proposal_id, approver="admin", tool_sequence=["read_memory", "write_memory"]
         )
-        # 工单 010 改写本用例：Phase 4 + 人工批准**过了阶段 gate**，但 pr_patch
-        # 没有生效通道 —— 原断言 `success is True` 固化的正是"伪报成功"
-        # （它只是往 .agents/patches/ 写了个文件）。现在必须显式拒绝且不改状态。
+        # 部署 gate 放行（phase 4 ≥ high 所需 4），通道按白名单拒绝未登记目标
         assert result.success is False
-        assert "not_supported" in result.error, result.error
+        assert "l2_not_allowed" in result.error, result.error
         assert result.proposal.status == ProposalStatus.PENDING
 
 

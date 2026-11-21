@@ -478,27 +478,22 @@ class ShadowVerify:
 
     @staticmethod
     def _gitApply(patch: str, cwd: Path, *, checkOnly: bool) -> subprocess.CompletedProcess:
-        command = ["git", "apply"]
+        # 传输委托 neurova.core.git_runner（二进制 transport）：文本模式会把补丁
+        # 里的 \n 翻译成 \r\n 再进管道，--check 对 LF 工作区文件必假失败
+        # （Windows 三坑同款；P2-1 生效通道依赖本预检，按教义第 5 条一并收口）。
+        from neurova.core.git_runner import run_git
+
+        command = ["apply"]
         if checkOnly:
             command.append("--check")
         command.append("-")
-        return subprocess.run(
-            command,
-            input=patch,
-            cwd=str(cwd),
-            capture_output=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=_GIT_TIMEOUT_S,
-        )
+        return run_git(*command, cwd=str(cwd), stdin=patch, timeout=_GIT_TIMEOUT_S)
 
     @staticmethod
     def _gitErrorHeadline(proc: subprocess.CompletedProcess) -> str:
-        lines = [
-            line.strip()
-            for line in ((proc.stderr or "") + (proc.stdout or "")).splitlines()
-            if line.strip()
-        ]
+        raw = (proc.stderr or b"") + (proc.stdout or b"")
+        text = raw if isinstance(raw, str) else raw.decode("utf-8", "replace")
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
         return lines[0] if lines else f"exit={proc.returncode}"
 
     # ── L1 参数：词表核验与结论 ───────────────────────────────

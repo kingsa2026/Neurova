@@ -122,20 +122,17 @@ def test_approver_may_supply_the_missing_sequence(tmp_path, service, registry):
     assert service.get_skill_info("rsi-fix-sleep") is not None
 
 
-@pytest.mark.parametrize("proposal_type,creator", [
-    (ProposalType.ACTION_DEFINITION, "propose_action_definition"),
-    (ProposalType.PR_PATCH, "propose_pr_patch"),
-])
 def test_types_without_an_activation_channel_are_not_supported(
-        tmp_path, service, registry, proposal_type, creator):
-    """没有生效通道的类型必须显式拒绝 —— 继续伪报成功就是本单禁止的表面抹除。"""
+        tmp_path, service, registry):
+    """没有生效通道的类型必须显式拒绝 —— 继续伪报成功就是本单禁止的表面抹除。
+
+    PR_PATCH 曾在本参数化里（工单 010）；P2-1 通道接通后它走 PrPatchChannel
+    （白名单/禁改/生效/回滚判据见 test_prPatchChannel.py），不再在此断言
+    not_supported。
+    """
     proposer = _proposer(tmp_path, service=service, registry=registry)
-    if proposal_type is ProposalType.ACTION_DEFINITION:
-        proposal = getattr(proposer, creator)(
-            action_name="rsi_new_action", handler_code="def handle(args):\n    return 1\n")
-    else:
-        proposal = getattr(proposer, creator)(
-            target_file="neurova/core.py", patch_content="diff --git a/x b/x\n")
+    proposal = proposer.propose_action_definition(
+        action_name="rsi_new_action", handler_code="def handle(args):\n    return 1\n")
     proposer.submit_proposal(proposal)
 
     result = proposer.approve_and_apply(proposal.proposal_id, approver="admin")

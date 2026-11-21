@@ -7,8 +7,10 @@ SelfImprovementProposer - 自我改进提议器
 1. Agent 不直接修改生产代码 —— 所有改进以"提案"形式提交
 2. 三种渐进路径：
    - skill_manifest (低风险): 批准即装入本 agent 技能库并回灌注册表（工单 010）
+   - pr_patch (高风险): 经 PrPatchChannel 生效（P2-1 / 计划书 §3.6）——影子
+     门禁链 G0-G4 全绿 + CandidateMergeBoard CAS 合入 + CheckpointService
+     scope 快照 + 基线 git apply；部署 gate 保持 high→phase≥4
    - action_definition (中风险): 尚无生效通道 → 批准时返回 not_supported
-   - pr_patch (高风险): 尚无生效通道 → 批准时返回 not_supported
 3. 必须经过人类评审 gate（approve_and_apply / reject_proposal）
 4. 集成现有 RSI 基础设施：
    - RSIDeploymentController: 风险 gate (low=phase2, medium=phase3, high=phase4)
@@ -319,6 +321,8 @@ class ApplyResult:
     # 工单 010 的"生效证据"：装进了哪个技能、回灌后注册表是否真取得到
     applied_skill_id: str = ""
     registry_hit: bool = False
+    # P2-1：PR_PATCH 通道的门禁链摘要（g0..g4/overall → 三态），供审计与治理读面
+    gate_summary: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -361,6 +365,7 @@ class SelfImprovementProposer:
         proposals_dir: Optional[Path] = None,
         skill_service: Any = None,
         skill_registry: Any = None,
+        pr_patch_channel: Optional[Any] = None,
     ) -> None:
         """初始化自我改进提议器
 
@@ -401,6 +406,8 @@ class SelfImprovementProposer:
         self.rollback_manager = rollback_manager
         self._skill_service = skill_service
         self._skill_registry = skill_registry
+        # P2-1：L2 生效通道（缺省懒构造，见 prPatchChannel 属性）
+        self._pr_patch_channel = pr_patch_channel
 
         # proposal_id → ImprovementProposal 的内存缓存（从磁盘加载）
         # 共享可变状态，所有读写必须持有 self._lock（AGENTS.md 线程安全规则）
@@ -444,6 +451,15 @@ class SelfImprovementProposer:
 
             self._skill_registry = get_skill_registry()
         return self._skill_registry
+
+    @property
+    def prPatchChannel(self) -> Any:
+        """L2 生效通道（P2-1，懒构造避免导入面拖重）。"""
+        if self._pr_patch_channel is None:
+            from neurova.evolution.rsi.pr_patch_channel import PrPatchChannel
+
+            self._pr_patch_channel = PrPatchChannel()
+        return self._pr_patch_channel
 
     # ------------------------------------------------------------------
     # 提案创建 API（3 种渐进路径）
@@ -756,6 +772,11 @@ class SelfImprovementProposer:
                 logger.info("提案 %s 不予激活：%s", proposal_id, plan)
                 return ApplyResult(success=False, proposal=proposal, error=plan)
 
+            # 6a. PR_PATCH 走 L2 生效通道（计划书 §3.6）：门禁链全绿 → CAS 合入
+            #     → scope 快照 → 基线应用。通道不绕审批——本方法的双 gate 已在前。
+            if proposal.proposal_type is ProposalType.PR_PATCH:
+                return self._applyPrPatchProposal(proposal, plan, approver)
+
             # 6. 创建回滚快照（记录应用前的状态）
             pre_apply_state = self._capture_pre_apply_state(proposal)
             snapshot_id = self.rollback_manager.create_snapshot(pre_apply_state)
@@ -789,13 +810,57 @@ class SelfImprovementProposer:
                 snapshot_id,
                 plan["skill_id"],
             )
-            return ApplyResult(
-                success=True,
-                proposal=proposal,
-                snapshot_id=snapshot_id,
-                applied_skill_id=plan["skill_id"],
-                registry_hit=outcome["registry_hit"],
+        return ApplyResult(
+            success=True,
+            proposal=proposal,
+            snapshot_id=snapshot_id,
+            applied_skill_id=plan["skill_id"],
+            registry_hit=outcome["registry_hit"],
+        )
+
+    def _applyPrPatchProposal(
+        self, proposal: ImprovementProposal, plan: Any, approver: str
+    ) -> ApplyResult:
+        """PR_PATCH 生效链（P2-1 / 计划书 §3.6）。
+
+        通道完成：门禁链 G0-G4 全绿校验 → CandidateMergeBoard CAS 合入
+        （冲突升级人工）→ CheckpointService scope 快照 → 基线工作区 git apply。
+        通道只做机制；状态记账（APPLIED / 快照号 / 审批人）由本方法落，
+        与 skill_manifest 路径同一套状态机纪律——任一环节失败提案留在 PENDING。
+        """
+        outcome = self.prPatchChannel.apply(proposal, plan, approver)
+        if not outcome.ok:
+            logger.info(
+                "PR_PATCH 提案 %s 应用未成：%s", proposal.proposal_id, outcome.error
             )
+            return ApplyResult(
+                success=False,
+                proposal=proposal,
+                error=outcome.error,
+                gate_summary=dict(outcome.gateSummary),
+            )
+
+        now = datetime.now(timezone.utc).isoformat()
+        proposal.approved_by = approver
+        proposal.approved_at = now
+        proposal.applied_at = now
+        proposal.snapshot_id = outcome.snapshotRef
+        proposal.status = ProposalStatus.APPLIED
+        self._save_proposal_to_disk(proposal)
+
+        logger.info(
+            "Applied PR_PATCH proposal %s (approver=%s, snapshot=%s, mergeRevision=%s)",
+            proposal.proposal_id,
+            approver,
+            outcome.snapshotRef,
+            outcome.mergeRevision,
+        )
+        return ApplyResult(
+            success=True,
+            proposal=proposal,
+            snapshot_id=outcome.snapshotRef,
+            gate_summary=dict(outcome.gateSummary),
+        )
 
     def reject_proposal(self, proposal_id: str, reason: str = "") -> bool:
         """拒绝提案
@@ -878,18 +943,20 @@ class SelfImprovementProposer:
                     ),
                 )
 
-            # 3. 通过 rollback_manager 执行回滚（验证快照存在）
-            rollback_ok = self.rollback_manager.execute_rollback(snapshot_id)
-            if not rollback_ok:
-                return RollbackResult(
-                    success=False,
-                    proposal_id=proposal_id,
-                    error=f"snapshot not found or rollback failed: {snapshot_id}",
-                )
-
-            # 4. 撤销生效：从技能库与注册表都撤下（工单 010）。
-            #    撤不下就保持 APPLIED —— 状态必须跟着事实走，不能先改账再补动作
-            problem = self._deactivate_skill_manifest(proposal)
+            # 3+4. 撤销生效：PR_PATCH 走通道的 scope 快照恢复；技能提案走
+            #      rollback_manager 快照 + 技能库/注册表撤下（工单 010）。
+            #      撤不下就保持 APPLIED —— 状态必须跟着事实走，不能先改账再补动作
+            if proposal.proposal_type is ProposalType.PR_PATCH:
+                problem = self.prPatchChannel.rollback(proposal)
+            else:
+                rollback_ok = self.rollback_manager.execute_rollback(snapshot_id)
+                if not rollback_ok:
+                    return RollbackResult(
+                        success=False,
+                        proposal_id=proposal_id,
+                        error=f"snapshot not found or rollback failed: {snapshot_id}",
+                    )
+                problem = self._deactivate_skill_manifest(proposal)
             if problem:
                 logger.error("回滚提案 %s 失败（保持 APPLIED 状态）: %s", proposal_id, problem)
                 return RollbackResult(
@@ -970,6 +1037,10 @@ class SelfImprovementProposer:
         返回 dict（激活计划）或 str（拒绝理由）。拒绝**必须**显式：
         把"装不上"记成 APPLIED 就是本单禁止的伪报成功。
         """
+        if proposal.proposal_type is ProposalType.PR_PATCH:
+            # §3.6：PR_PATCH 路由到 L2 生效通道（返回 PatchPlan 或拒绝理由串；
+            # 白名单/禁改校验在通道内经 TargetRegistry.assertMutable fail-closed）
+            return self.prPatchChannel.plan(proposal)
         if proposal.proposal_type is not ProposalType.SKILL_MANIFEST:
             return (
                 f"{_NOT_SUPPORTED}: 提案类型 {proposal.proposal_type.value} 目前没有生效通道，"
