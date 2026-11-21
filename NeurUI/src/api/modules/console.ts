@@ -176,7 +176,8 @@ export function getConsoleChatRuns(sessionId: string, scope?: string) {
   })
 }
 
-/** 子任务事件账本的一条事件（H-4：JSONL 归档原样形态，payload 按事件类型变化）。 */
+/** 子任务事件账本的一条事件（H-4：JSONL 归档原样形态，payload 按事件类型变化）。
+ * M5 起经 after_seq 游标读取时，事件来自全局事件库镜像（额外携带 seq/lineage）。 */
 export interface SubagentEvent {
   event_id: string
   type: string
@@ -184,19 +185,56 @@ export interface SubagentEvent {
   causation_id: string
   payload: Record<string, unknown>
   occurred_at: string
+  /** 全局事件库 seq（仅 after_seq 游标重放形态返回） */
+  seq?: number
+  lineage?: Record<string, unknown>
 }
 
 export interface SubagentEventsResult {
   subagent_id: string
   count: number
   events: SubagentEvent[]
+  /** M5：after_seq 游标重放形态的标注（缺省 = 全量 JSONL 读法） */
+  mode?: 'replay'
+  high_water?: number
+  degraded?: boolean
 }
 
-/** 取子任务的事件账本（H-4 闭环读侧：spawned→…→terminal 全程 + 因果链）。 */
-export function getConsoleSubagentEvents(subagentId: string) {
+/** 取子任务的事件账本（H-4 闭环读侧：spawned→…→terminal 全程 + 因果链）。
+ * 传 afterSeq 时改走全局事件库游标增量重放（M5）：degraded=true 表示游标过旧
+ * 或超预算，调用方应回退全量读法（绝不部分回放）。 */
+export function getConsoleSubagentEvents(subagentId: string, afterSeq?: number) {
+  const query = afterSeq === undefined ? '' : `?after_seq=${Number(afterSeq)}`
   return api.get<ApiResponse<SubagentEventsResult>>(
-    `${BASE}/chat/subagents/${encodeURIComponent(subagentId)}/events`,
+    `${BASE}/chat/subagents/${encodeURIComponent(subagentId)}/events${query}`,
   )
+}
+
+/** M8：lineage 审计聚合行（run 行 + 该 run 的 H-4 事件族计数 + 谱系样本）。 */
+export interface SwarmLineageAuditRow {
+  subagent_id: string
+  agent_id: string
+  status: string
+  tenant_id: string
+  project_id: string
+  team_id: string
+  trace_id: string
+  event_counts: Record<string, number>
+  lineage_sample: Record<string, unknown>
+}
+
+export interface SwarmLineageAuditResult {
+  count: number
+  runs: SwarmLineageAuditRow[]
+}
+
+/** M8：lineage 租户/房间维度审计聚合读面（admin 门）。 */
+export function getSwarmLineageAudit(filters: { tenantId?: string; roomId?: string; limit?: number } = {}) {
+  const params: Record<string, unknown> = {}
+  if (filters.tenantId) params.tenant_id = filters.tenantId
+  if (filters.roomId) params.room_id = filters.roomId
+  if (filters.limit) params.limit = filters.limit
+  return api.get<ApiResponse<SwarmLineageAuditResult>>(`${BASE}/chat/swarm/lineage-audit`, { params })
 }
 
 /** 蜂群协作拓扑图投影（P1-1，v2 全边集 spawn+依赖+审批+候选）。 */

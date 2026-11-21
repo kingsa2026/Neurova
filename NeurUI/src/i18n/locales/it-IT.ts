@@ -1986,6 +1986,17 @@ conflictTimeReadout: 'Lettura temporale: {basis} (vecchia {old} → nuova {new})
     qrLoginSuccess: 'Accesso WeChat riuscito',
     qrGenerateFailed: 'Generazione del codice QR non riuscita',
   },
+  lineage: {
+    title: "Audit linea swarm",
+    tenant: "Tenant",
+    room: "Stanza/ID progetto",
+    subagent: "Sottoattività",
+    agent: "Agente",
+    status: "Stato",
+    team: "Team",
+    events: "Conteggi eventi",
+    lineage: "Campione di linea",
+  },
   collab: {
     // S12 dossier di collaborazione del progetto
     dossierRequestArchive: 'Archivio richieste',

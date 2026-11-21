@@ -1986,6 +1986,17 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
     qrLoginSuccess: 'Вход через WeChat выполнен',
     qrGenerateFailed: 'Не удалось сгенерировать QR-код',
   },
+  lineage: {
+    title: "Аудит родословной swarm",
+    tenant: "Тенант",
+    room: "Комната/ID проекта",
+    subagent: "Подзадача",
+    agent: "Агент",
+    status: "Статус",
+    team: "Команда",
+    events: "Счётчики событий",
+    lineage: "Образец родословной",
+  },
   collab: {
     // S12 сводка сотрудничества по проекту
     dossierRequestArchive: 'Архив запросов',

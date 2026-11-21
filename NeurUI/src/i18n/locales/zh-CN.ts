@@ -1995,6 +1995,17 @@ conflictTimeReadout: '时间读数：{basis}（旧 {old} → 新 {new}）',
     qrLoginSuccess: '微信扫码登录成功',
     qrGenerateFailed: '二维码生成失败',
   },
+  lineage: {
+    title: "蜂群谱系审计",
+    tenant: "租户段",
+    room: "房间/项目 ID",
+    subagent: "子任务",
+    agent: "智能体",
+    status: "状态",
+    team: "团队",
+    events: "事件计数",
+    lineage: "谱系样本",
+  },
   collab: {
     // S12 项目协作档案
     dossierRequestArchive: '请求归档',

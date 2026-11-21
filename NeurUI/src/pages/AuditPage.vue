@@ -55,6 +55,51 @@
       </div>
     </GlassPanel>
 
+    <!-- M8：蜂群谱系审计（lineage 租户/房间维度聚合读面，admin） -->
+    <GlassPanel class="panel" data-testid="lineage-audit-panel">
+      <div class="panel-head">
+        <span class="panel-title" data-testid="lineage-title">{{ t('lineage.title') }}</span>
+        <GlassButton size="sm" :loading="lineageLoading" data-testid="lineage-search" @click="fetchLineageAudit">
+          {{ t('common.search') }}
+        </GlassButton>
+      </div>
+      <div class="acc-filters">
+        <a-input v-model:value="lineageTenant" size="small" :placeholder="t('lineage.tenant')" style="width: 160px" data-testid="lineage-tenant" />
+        <a-input v-model:value="lineageRoom" size="small" :placeholder="t('lineage.room')" style="width: 200px" data-testid="lineage-room" />
+      </div>
+      <a-empty v-if="!lineageRows.length" :description="t('common.noData')" />
+      <a-table
+        v-else
+        size="small"
+        row-key="subagent_id"
+        :data-source="lineageRows"
+        :pagination="{ pageSize: 10 }"
+        data-testid="lineage-table"
+      >
+        <a-table-column key="subagent_id" :title="t('lineage.subagent')" data-index="subagent_id" />
+        <a-table-column key="agent_id" :title="t('lineage.agent')" data-index="agent_id" />
+        <a-table-column key="status" :title="t('lineage.status')" data-index="status" />
+        <a-table-column key="tenant_id" :title="t('lineage.tenant')" data-index="tenant_id" />
+        <a-table-column key="project_id" :title="t('lineage.room')" data-index="project_id" />
+        <a-table-column key="team_id" :title="t('lineage.team')" data-index="team_id" />
+        <a-table-column key="event_counts" :title="t('lineage.events')">
+          <template #bodyCell="{ record }">
+            <a-tag
+              v-for="(count, etype) in topEventCounts(record.event_counts)"
+              :key="etype"
+              color="blue"
+              class="lineage-count-tag"
+            >{{ etype }} ×{{ count }}</a-tag>
+          </template>
+        </a-table-column>
+        <a-table-column key="lineage_sample" :title="t('lineage.lineage')">
+          <template #bodyCell="{ record }">
+            <span class="mono lineage-sample">{{ lineageSampleText(record.lineage_sample) }}</span>
+          </template>
+        </a-table-column>
+      </a-table>
+    </GlassPanel>
+
     <!-- U7：待审批行——展开动作语义引用（W4 联动；读数面不裁决） -->
     <GlassPanel class="panel" data-testid="pending-approvals-panel">
       <div class="panel-head">
@@ -220,6 +265,7 @@ import { useI18n } from 'vue-i18n'
 import { listAuditRecords, exportAudit as exportAuditApi, getApprovalTrajectory } from '@/api/modules/audit'
 import type { ApprovalTrajectoryItem } from '@/api/modules/audit'
 import { getDesktopAuditWaiting, getIngressBypassStats, getPendingApprovals } from '@/api/modules/governance'
+import { getSwarmLineageAudit, type SwarmLineageAuditRow } from '@/api/modules/console'
 import { mergeWaitingHuman } from '@/utils/waitingHuman'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
@@ -270,6 +316,43 @@ const accError = ref('')
 const accResult = ref<{ events: Array<Record<string, unknown>>; total: number } | null>(null)
 const verifyLoading = ref(false)
 const verifyResult = ref<{ ok: boolean; chains: number; rows: number } | null>(null)
+
+// ── M8：蜂群谱系审计（lineage 租户/房间维度聚合读面） ─────────────────────
+const lineageTenant = ref('')
+const lineageRoom = ref('')
+const lineageLoading = ref(false)
+const lineageRows = ref<SwarmLineageAuditRow[]>([])
+
+async function fetchLineageAudit() {
+  lineageLoading.value = true
+  try {
+    const res: any = await getSwarmLineageAudit({
+      tenantId: lineageTenant.value.trim() || undefined,
+      roomId: lineageRoom.value.trim() || undefined,
+      limit: 100,
+    })
+    lineageRows.value = res?.data?.runs ?? []
+  } catch {
+    lineageRows.value = []
+  } finally {
+    lineageLoading.value = false
+  }
+}
+
+/** 事件计数投影：按次数降序取前三，避免表格单元格被二十余种事件族刷屏。 */
+function topEventCounts(counts: Record<string, number> | undefined): Record<string, number> {
+  if (!counts) return {}
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .reduce((acc, [k, v]) => ({ ...acc, [k]: v }), {})
+}
+
+function lineageSampleText(sample: Record<string, unknown> | undefined): string {
+  if (!sample) return '—'
+  const entries = Object.entries(sample).filter(([, v]) => v !== undefined && v !== null && v !== '')
+  return entries.length ? entries.map(([k, v]) => `${k}=${String(v)}`).join('  ') : '—'
+}
 
 // U7：待审批行展开——动作语义（precondition/impact）引用（W4 联动；读数面不裁决）
 const pendingApprovals = ref<Array<Record<string, any>>>([])
@@ -480,6 +563,7 @@ onMounted(() => {
   void fetchWaitingHuman()
   void fetchPendingApprovals()
   void fetchOntologyActions()
+  void fetchLineageAudit()
 })
 </script>
 
@@ -518,6 +602,9 @@ onMounted(() => {
   border-bottom: 1px solid var(--nr-border, rgba(128, 128, 128, 0.2));
 }
 .acc-ledger { font-family: var(--nr-font-mono, monospace); font-size: 11px; }
+/* M8：蜂群谱系审计 */
+.lineage-count-tag { margin: 1px 2px 1px 0; font-size: 11px; }
+.lineage-sample { font-family: var(--nr-font-mono, monospace); font-size: 11px; color: var(--nr-text-secondary); }
 .acc-when { font-size: 11px; color: var(--nr-text-secondary, rgba(128,128,128,0.7)); }
 .verify-result { font-size: 12px; display: flex; gap: 12px; align-items: center; }
 .verify-pass { color: var(--nr-success, #52c41a); font-weight: 600; }

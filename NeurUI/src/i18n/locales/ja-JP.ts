@@ -1986,6 +1986,17 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     qrLoginSuccess: 'WeChatログインに成功しました',
     qrGenerateFailed: 'QRコードの生成に失敗しました',
   },
+  lineage: {
+    title: "Swarm系譜監査",
+    tenant: "テナント",
+    room: "ルーム/プロジェクトID",
+    subagent: "サブタスク",
+    agent: "エージェント",
+    status: "ステータス",
+    team: "チーム",
+    events: "イベント数",
+    lineage: "系譜サンプル",
+  },
   collab: {
     // S12 プロジェクト協働アーカイブ
     dossierRequestArchive: 'リクエストアーカイブ',

@@ -1986,6 +1986,17 @@ conflictTimeReadout: 'Zeitauswertung: {basis} (alt {old} → neu {new})',
     qrLoginSuccess: 'WeChat-Anmeldung erfolgreich',
     qrGenerateFailed: 'QR-Code-Erstellung fehlgeschlagen',
   },
+  lineage: {
+    title: "Swarm-Herkunft Audit",
+    tenant: "Mandant",
+    room: "Raum/Projekt-ID",
+    subagent: "Unteraufgabe",
+    agent: "Agent",
+    status: "Status",
+    team: "Team",
+    events: "Ereigniszähler",
+    lineage: "Herkunftsstichprobe",
+  },
   collab: {
     // S12 Projekt-Kollaborationsdossier
     dossierRequestArchive: 'Anfragearchiv',

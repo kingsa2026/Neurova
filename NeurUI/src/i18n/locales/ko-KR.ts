@@ -1986,6 +1986,17 @@ conflictTimeReadout: '시간 판독: {basis} (이전 {old} → 최신 {new})',
     qrLoginSuccess: 'WeChat 로그인 성공',
     qrGenerateFailed: 'QR 코드 생성 실패',
   },
+  lineage: {
+    title: "Swarm 계보 감사",
+    tenant: "테넌트",
+    room: "방/프로젝트 ID",
+    subagent: "하위 작업",
+    agent: "에이전트",
+    status: "상태",
+    team: "팀",
+    events: "이벤트 수",
+    lineage: "계보 샘플",
+  },
   collab: {
     // S12 프로젝트 협업 아카이브
     dossierRequestArchive: '요청 아카이브',

@@ -1986,6 +1986,17 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     qrLoginSuccess: 'WeChat लॉगिन सफल',
     qrGenerateFailed: 'QR कोड बनाने में विफल',
   },
+  lineage: {
+    title: "स्वार्म वंश ऑडिट",
+    tenant: "टेनेंट",
+    room: "रूम/प्रोजेक्ट ID",
+    subagent: "उपकार्य",
+    agent: "एजेंट",
+    status: "स्थिति",
+    team: "टीम",
+    events: "घटना गणना",
+    lineage: "वंश नमूना",
+  },
   collab: {
     // S12 परियोजना सहयोग दस्तावेज़
     dossierRequestArchive: 'अनुरोध संग्रह',

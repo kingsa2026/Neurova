@@ -1986,6 +1986,17 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     qrLoginSuccess: 'تم تسجيل الدخول عبر WeChat بنجاح',
     qrGenerateFailed: 'فشل إنشاء رمز الاستجابة السريعة',
   },
+  lineage: {
+    title: "تدقيق نسبة السرب",
+    tenant: "المستأجر",
+    room: "معرف الغرفة/المشروع",
+    subagent: "مهمة فرعية",
+    agent: "الوكيل",
+    status: "الحالة",
+    team: "الفريق",
+    events: "عدّادات الأحداث",
+    lineage: "عينة النسب",
+  },
   collab: {
     // S12 سجل التعاون للمشروع
     dossierRequestArchive: 'أرشيف الطلبات',
