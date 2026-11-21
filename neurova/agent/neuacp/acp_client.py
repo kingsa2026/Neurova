@@ -172,6 +172,17 @@ class NeuacpClient:
         resolved_head = shutil.which(command[0]) if command else None
         if resolved_head:
             command[0] = resolved_head
+        # G5 路径守卫：cwd 符号链接感知规约（fail-closed）——断链/越界在拉起
+        # 子进程前即拒绝，且 session/new 携带的是规约后的真实路径。
+        spawn_cwd = self._cwd
+        if spawn_cwd:
+            from neurova.security.path_guard import PathGuardError, normalizeDir
+
+            try:
+                spawn_cwd = normalizeDir(spawn_cwd)
+            except PathGuardError as exc:
+                self._process = None
+                raise NeuacpError(f"外部代理 cwd 不可用: {exc}") from exc
         try:
             self._process = subprocess.Popen(
                 command,
@@ -179,7 +190,7 @@ class NeuacpClient:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=env,
-                cwd=self._cwd,
+                cwd=spawn_cwd,
                 # C3 进程组治理前置：子进程自立进程组/会话（Windows 侧为
                 # CREATE_NEW_PROCESS_GROUP），POSIX killpg 才不会误伤本进程组；
                 # Windows taskkill /T 按父子树杀，不受此标志影响
