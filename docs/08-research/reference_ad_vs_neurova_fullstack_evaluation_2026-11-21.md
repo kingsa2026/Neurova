@@ -1,6 +1,6 @@
 # reference_ad：LobeHub（lobehub/lobehub）vs Neurova 全方位代码级对照评测
 
-- 日期：2026-11-21
+- 日期：2026-11-21（v2：同日增补 D11 自我进化/RSI 维）
 - 对象：[lobehub/lobehub](https://github.com/lobehub/lobehub)（代号 reference_ad；LobeChat 同源演进后的 agent 平台主线仓库）
 - 快照：canary 分支浅克隆，版本 2.3.4，pushed_at 2026-11-21；85.9k stars / 16.3k forks；TypeScript
 - 体量：124 个 pnpm 子包；ts/tsx 共 **3,777,641 行**；`*.test.*` 文件 **7,321** 个；18 种界面语言；32 条 GitHub workflow
@@ -10,10 +10,10 @@
 
 ## 0. 结论摘要
 
-**总分（10 维 110 分）：LobeHub 93.0 vs Neurova 81.0。**
+**总分（11 维 120 分）：LobeHub 98.5 vs Neurova 89.5。**（v2 增补 D11 自我进化/RSI 维：L 5.5 / N 8.5）
 
 - LobeHub 是当前公开仓里**工程完成度最高**的 agent 平台之一：agent 运行时（分布式步调度/parked-resume/成本预算）、44 个全真内置工具、三档沙箱、91 家模型 provider、7,321 个测试文件、四通道桌面 OTA 发布，均为第一梯队。
-- Neurova 反超的五处：**多智能体治理深度**（审批链 L0-L2/候选 CAS/依赖门控/评审相位/台账重放）、**记忆生命周期**（睡眠整理/遗忘/污染清除/纪律准入 vs 对方无遗忘无衰减）、**本体知识图谱**（对方为零）、**租户隔离的真实执行**（对方 OSS 侧 RBAC 是空壳 stub）、**MCP server 面**（对方仅 client）。
+- Neurova 反超的六处：**多智能体治理深度**（审批链 L0-L2/候选 CAS/依赖门控/评审相位/台账重放）、**记忆生命周期**（睡眠整理/遗忘/污染清除/纪律准入 vs 对方无遗忘无衰减）、**本体知识图谱**（对方为零）、**租户隔离的真实执行**（对方 OSS 侧 RBAC 是空壳 stub）、**MCP server 面**（对方仅 client）、**自我进化/RSI**（对方=默认关闭的受控自改进：无评测闭环、无影子/灰度、回滚靠人；本仓=门禁链+影子验证+回滚+存活探针的世代闭环）。
 - LobeHub 领先的六处：模型接入广度（91 vs 7）、多模态（图像 41 家/视频 24 家/语音/音乐）、工具生态规模与执行安全分层、认证体系（17 SSO+Passkey+自建 OIDC IdP）、数据层工程（242 表 228 迁移）、工程纪律规模（e2e 性能预算/bundle 门禁/语义化发布）。
 - 评分不是体量加分：LobeHub 的 OSS 快照有真实短板（RBAC stub、主站 CSP 缺失、业务 API 无限流、Electron IPC 裸 socket、secret-channel 疑似未接线），均已如实扣分。
 
@@ -37,7 +37,8 @@
 | D8 | 多模态 | 8 | 6.5 | 3.5 | L 胜 |
 | D9 | 数据/租户/认证/安全 | 12 | 9.0 | 8.0 | L 小胜 |
 | D10 | 工程纪律 | 14 | 12.5 | 11.0 | L 胜 |
-| | **合计** | **110** | **93.0** | **81.0** | |
+| D11 | 自我进化/RSI | 10 | 5.5 | 8.5 | **N 胜** |
+| | **合计** | **120** | **98.5** | **89.5** | |
 
 ## 3. 分域详评
 
@@ -101,6 +102,25 @@
 **Neurova**：2944 后端测试文件（unit 2873/integration 60/e2e 12/perf 13）+前端 360 文件约 2501 用例；.cnb.yml 五门禁（static-gate/protected 单测子集/frontend 四件套/perf-gate 阻断/experience）+commit-msg 红绿证据门+protected_tests 收录门+尺寸棘轮+i18n 一致性守卫测试（11 语言）。扣分：e2e/perf 偏薄；前端 eslint 门实际不可运行（无配置无依赖，AGENTS.md 已自认）；发布通道单一。
 **子项**：测试 4.5/4.0；CI/发布 4.0/3.0；静态检查与守卫 2.5/2.5；i18n 1.5/1.5。
 
+### D11 自我进化/RSI（L 5.5 / N 8.5）——本仓反超（v2 增补）
+
+**LobeHub**：真实存在一套受控自改进管线，但不是自主 RSI。按"触发→提案→评估→门禁→应用→验证→回滚"七环判定：
+- 触发=**有**（三路）：对话内模型主动声明的意图侧信道（`builtin-tool-self-iteration/src/manifest.ts:25`，advisory 不改资源）；弱信号累加器触发每轮反思（纠正≥2/工具失败≥2/步数≥6，`apps/server/src/services/agentSignal/procedure/accumulators/selfReflection.ts:66-73`）；每晚 2-4 点 cron 复盘（`services/agentSignal/services/selfIteration/review/schedule.ts:27-30`）。
+- 提案=**有**：self-reflection/nightly-review 等 mini 模型 agent 产出冻结提案（actions+快照，72h 滑动/7d 硬顶过期，`review/proposal.ts:199-230`）。
+- 评估=**弱**：仅结构性 preflight（目标存在/可写/CAS 快照/重名，`review/proposalPreflight.ts`）；**eval-rubric/eval-dataset-parser 与自改进零接线**（消费方仅 agentEvalRun/taskReview/tracing replay，grep 证实 agentSignal 服务内无引用）。
+- 门禁=**有**：Labs→Self-evolving 开关**默认关**（`featureGate.ts:23-27`）；apply 前用户/agent/服务端三道门复检（`briefs/selfReview.ts:397-407`）；市场技能安装与 shell 执行强制人工确认。
+- 应用=**有**（双轨）：低风险直接写（记忆写入/托管技能 CAS 整体替换）；prompt 改写仅能走提案（"Never directly overwrite the prompt"，`prompts/agentSignal/selfIteration/runtime.ts:124`）。
+- 验证=**无**：应用后无自动评测、无 shadow/canary（全仓 grep "canary/shadow" 仅命中 bot wake 的 shadow 模式）。
+- 回滚=**有但靠人**：`receiptRollbackService.ts:212` 为用户手动接口，无指标自动回滚。
+
+可自我修改面：能改用户记忆、Agent Signal 托管技能、经审批提案可整体替换复盘 agent 的 systemRole；**不能改**代码/工具 manifest/模型路由/其他 agent 配置/运行时；技能不可删除（`skill-maintainer/src/manifest.ts:112`）。另有第二条真实回路 **Expertise(SCLPT)**：从对话/拒绝/验收证据自动 ingest 教训→修订整合→**编译为 verify criterion 注入后续每次运行**（`aiAgent/pipeline/operationPrep.ts:870-874`）——对方"学习影响行为"最实的一条线。goal 服务的 planner/decideNextMove/machineRecovery 属任务内自主性，产出不回写能力。
+
+**Neurova**：世代化 RSI 闭环——`evolution/rsi/` 35 文件（orchestrator 2532 行/generation_orchestrator 985 行）：门禁链（gate_chain/gate_verdict）、影子验证（shadow_verify）、回滚（rollback_manager）、存活探针（survival_probe）、部署控制器（deployment_controller，含金丝雀）、世代账本（generation_ledger）、收敛分析（convergence_analyzer）、自查提议器（self_improvement_proposer）、目标注册表（target_registry，禁改内核）+ eval_harness/task_yardstick；`closed_loop.py` EvolutionOrchestrator 981 行 + genetic_engine/skill_lifecycle/proposal_lifecycle；进化三原则（内核先于演化/候选不直改基线/裁判在演化集合外）。近期已完成全自动闭环贯通演练（总纲验收，commit e3a57aaf4）。诚实注记：机制完整但生产采纳仍早（历史 RSI 迭代的应用数与 EvalCase 立案数尚低，递归自进化一期计划已把"评测立案/跑批入口"列为整改项）。
+
+**子项**：闭环七环完整度 2.5/3.5；可自我修改面 1.5/2.0；评测驱动 0.5/1.0；安全与发布治理 1.0/2.0。
+
+**判定**：对方胜在幂等/CAS/审批的工程细节与"教训→验证判据编译注入"的巧思；本仓胜在闭环完备性（评测门禁/影子/灰度/回滚/世代账本）与可自我修改面广度。对方"get better every week"目前是能力上限描述而非默认事实（默认关闭+无评测闭环）。
+
 ## 4. 可借鉴清单（待拍板，非立即实施）
 
 P0（高价值、改动面可控）：
@@ -112,11 +132,13 @@ P1：
 4. **alint 式"模型背书 lint"**：以小模型+结构化输出守架构/安全判据（误报率定级后才可设 error）。适合守"禁裸 import 重依赖/禁绕过 ToolExecutor/禁第二身份通道"这类现有静态规则表达不了的判据。
 5. **异构外部 agent 名册扩容**：对方 adapters 覆盖 claude code/codex/kimi/amp/antigravity 等；本仓 neuacp 已有 4 家，名册与目录机制可对照补齐。
 6. **前端 bundle/性能基线门禁**：把本仓尺寸棘轮思路扩到 NeurUI 构建产物（对方 e2e 内做 bundle 基线对比，PR 阻断）。
+7. **教训→验证判据的编译注入**：对方 Expertise(SCLPT) 把运行教训编译成 verify criterion 并注入后续每次运行（operationPrep.ts:870-874）——可接入本仓元认知回路与任务书验收判据，让"吃过亏"显式变成"下次验收项"。
 
 P2：
-7. provider 中立流事件模型（16 类事件归一）作为 llm 层协议演进参考。
-8. 语义化发布与桌面 OTA 通道（本仓移动端已有发版链，桌面端可参考其四通道灰度）。
-9. 验收证据链（acceptance 证据落固定可访问位置，可复用不重跑）与"每 bugfix 先红后绿"的 skills 化路由（本仓已有钩子强制，可补 skills 文档路由）。
+8. provider 中立流事件模型（16 类事件归一）作为 llm 层协议演进参考。
+9. 语义化发布与桌面 OTA 通道（本仓移动端已有发版链，桌面端可参考其四通道灰度）。
+10. 验收证据链（acceptance 证据落固定可访问位置，可复用不重跑）与"每 bugfix 先红后绿"的 skills 化路由（本仓已有钩子强制，可补 skills 文档路由）。
+11. **弱信号累加器触发反思**：纠正≥2/工具失败≥2/步数≥6 等廉价阈值触发每轮反思（selfReflection.ts:66-73），比定时全量反思省成本；可作本仓元认知回路的触发源补充。
 
 不照搬：
 - 三轨 API 与 124 包超细粒度 monorepo（胶水层理解成本高，与本仓"单一事实源"教义相悖）；
@@ -137,3 +159,4 @@ P2：
 - D7 给 9.5 vs 5.5 是全场最大分差，依据是 provider 数量（91 vs 7）、协议归一层（3 线协议+16 事件 vs 单层 client）与路由容错（RouterRuntime vs 无对应物）三项均有直接证据。
 - D3/D6/D9 的本仓反超均有对方代码内"自认"证据（"Voting is not yet implemented"、"Status: design, not built"、RBAC stub 注释），不是推测。
 - 对方当日仍有推送（pushed_at 2026-11-21T15:06Z），本报告为当日快照结论；复评时应以当期主干重跑关键计数。
+- v2（同日）：应评审指出补 D11 自我进化/RSI 维（对方侧证据来自对 agentSignal/self-iteration/skill-store/eval-rubric 簇的专项只读深读），总分口径由 10 维 110 分改为 11 维 120 分；D1–D10 各子项分未变。
