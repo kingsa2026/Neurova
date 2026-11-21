@@ -190,3 +190,12 @@ registry 本身即 G1 卡本体，纳入升级。
 | 回归 | **已验证** | 本笔提交 | 合并回归 neuacp 全套+external_agents+wire 契约：**293 passed, 2 skipped**（skip=既有未装 CLI 诚实跳过），零新增失败 |
 | 复评三 | **已复评（部分达成，差距继续收窄）** | — | 对照 T3 当期主干 `2af43518`（2026-11-20 23:35 -0800；较二轮 `80871270` 前进 25 笔，以修复/projects 多仓特性/perf 为主，20 子项能力面无变化，T3 维持 91.8）完成第三轮 20 子项复评（验收节口径：重点 C1/C2/E3）：Neurova 85.25→**86.0**，净差 6.5→**5.8**。调分三项：**C1 8.5→9.0**（G1 registry 零代码接入——真拉 46 agents 归一、catalog 8→52、版本透传协商+G6 ACP v2 全量适配+G2 真机回放契约+agentCapabilities 规范名扫荡）、**D3 8.5→9.0**（G4 心跳/重放窗口/订阅范围单源+按需订阅账本语义+realtime_push 心跳收口）、**E2 8.0→8.5**（G2 真实 transcript 录制→真 NeuacpClient 管线回放+30 变异注入防恒真的回放兼容纪律）；其余 17 项维持——G3 方法面（adapter_surface 能力闸 fail-closed+steer/交接两处接线）按「接线广度」口径强化 C2 但四方法（rollback/fork/switchModel/snapshot）尚无编排侧调用方，C2 维持 9.0；B2 收敛面换道非新触发点不调分；G5 原生模式纪律经自证系既有覆盖确认，D2 不调分。16 落后（净尾差 11.5）/3 平（B4/D1/E1）/1 反超（A4 +1.0）；逐项证据与判定详见评测报告「## 复评记录三（2026-11-21，第三轮，T3 主干 2af43518）」节 |
 | C2 接线 | **已实施（消解复评三的 C2 缺口）** | 本笔提交 | G3 收敛面四方法全部接入编排入口：switchModel→resumeFinishedRun 切换分支经面（D-B 行为零变化）；fork→continue_subagent 可选 mode=fork（新 run 派生+resumed_from 溯源+原 run 不叫停不改动；外部成员未声明 fork 诚实拒绝，内部 agent 放行）；rollback→新工具 rollback_subagent（member 会话恢复到最近检查点，pre-restore 留档，无检查点诚实失败）；snapshot→console 子代理事件读面换道经面（响应形状不变）。21 例新测试；目标套件 158 绿；agent 全量 2846/tools 1361（两例失败=HEAD 预存，worktree 复跑证实）；tool_catalog.json 再生（139 工具） |
+
+## 执行记录补（体系深度批，2026-11-21）
+
+| 卡 | 状态 | commit | 备注 |
+|---|---|---|---|
+| A5 多驱动结算 | **已实施** | 本笔提交 | 结算扩为三驱动：时钟（既有小时 job）/显式（POST /v1/swarm-queue/settle，admin 门，不受默认关限制但不豁免九护栏）/终态助推（开关开时 run 落终态把下次扫掠提前 60s，到期时间戳模式——TaskScheduler 勘察结论：仅支持 IntervalTrigger 无一次性 job API）。16 例新测试；既有回归 292 例全绿 |
+| A3 effect outbox | **已实施** | 本笔提交 | mail_outbox.py（SQLite，域名 mail_outbox v1 按命令收据先例由本模块 register_migration 注册，db_migration.py 零改动）：recordIntent 幂等/markDelivered/pendingIntents/deleteDelivered 防无界增长/reconcile 启动对账；pushParentMail 接线（mailbox.push 前 recordIntent fail-open，成功后 markDelivered）；启动对账挂 reconcileSwarmRunsAtStartup 末尾（fail-open）。崩溃恢复集成用例实证（进程一记意图后崩溃→进程二对账补投，messageId 去重不重复生效）。与 B1 账本分工：账本=内存活体状态机，outbox=持久意图层，去重安全网统一收敛在邮箱 messageId 幂等 |
+| A2 单写溯源 | **拍板：维持现状** | — | 用户拍板维持「JSONL 一手事实源 + SQLite 全序镜像（fail-open）」——单事务的主要收益（全局序/回放/快照降级）已由镜像获得；切换 SQLite 单写需热路径每事件一事务+多处读侧改道，风险收益比不佳。差距如实保留 |
+| C4 auth binding | **可测部分已实施** | 本笔提交 | run 级身份凭据（neurova/security/run_identity.py）：HMAC-SHA256 绑定 run_id+tenant_id+过期（密钥惰性取 JWT 密钥单源，常量时间比较，verify fail-closed 返回 None）；child_env 注入 NEUROVA_RUN_CREDENTIAL（None 不注入行为不变）。HTTP 消费面留待有真实身份基础设施环境另卡 |
