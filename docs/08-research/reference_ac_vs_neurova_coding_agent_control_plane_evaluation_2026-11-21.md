@@ -418,3 +418,100 @@ T3 当期主干与原快照相隔约四小时（e19193db → 6f94a063），20 �
 - 复评纪律说明：本次不为追分放水——B2/C1/C5 虽已实施，因接线广度/活体启用未达
   「生产可用无短板」档位，未给 9 分档；T3 侧逐项重读无退步证据，各项维持原分；
   唯一分数变动是 D/E 类合计的笔误修正（27.5→28.0、26.0→27.0）。
+
+---
+
+## 复评记录二（2026-11-21，第二轮，T3 主干 80871270）
+
+> 复评时点：第一轮复评（提交 17e8f04ba 回填）之后的新工作——A1 深化（依赖门消费终态质量）
+> +B4 深化（/v1/swarm-queue 管理面 REST+queue_position 投影）（d6e519460，先于首轮复评提交
+> 约 1 分钟落树、首轮未及计入，本轮补核）、harmony WS 订阅稳态化（ee14cddef）、前端三增强
+> （f2bb26be1）+benchmark cost_note 端点透传（2a23b398f）、E3 列表渲染回归门（36c35fc86）
+> 与两处无界列表收口（58d0c9061）、D-G 三家真握手 live-verify+ACP protocolVersion 线上类型
+> 根修+帧钩子 flaky 清偿（6d81d55e3）、D-A 交接预算 16k→32k（5ce25df94）、D-B 非 admin
+> 中途切换 provider+租户隔离红线（b344b8e96）。
+> T3 浅克隆再 fetch 确认漂移：主干前进一笔——`80871270f9a13955a25ac5513aab8ac255065878`
+> （2026-11-20 21:42 -0800，"perf(server): ask npm once per global prefix for provider latest
+> versions (#40109)"），改动仅 `packages/provider-core/src/server/maintenanceResolver.ts`
+> 及其测试（provider 版本探测去重，纯性能优化），与 20 子项能力面无交集——T3 逐项维持原分。
+> 评分口径沿用原卡（每子项 0-10、五大类同权重）；本仓证据全部按当前树（c7ada5e6d）现场读数。
+
+### 调分项（3 项，原分 → 新分）
+
+| 子项 | Neurova | T3 Code | 关键证据（本次现场读数） | 变化原因 |
+|---|---|---|---|---|
+| C1 协议覆盖 | 8.0 → **8.5** | 9.5 → 9.5 | 本仓 `neurova/agent/neuacp/acp_client.py:179-198`（protocolVersion 线上整数类型根修+宽松服务端兼容）、`tests/unit/agent/neuacp/strict_initialize_agent.py`（按 ACP schema 复刻真 CLI 严格校验）；真机三家握手 live-verify 全 PASS（opencode 1.2.27 / claude-code 适配器 / codex 适配器；gemini-cli 未装如实登记） | 第一轮「三家真 CLI 握手 live 未启用」差距消解：由预设+探测升级为真机握手 PASS，且 live 首跑抓出并根修线上类型互操作缺陷（本仓发字符串 "1" 被真 CLI 以 -32602 拒绝）；剩余差距=T3 十一家原生适配+ACP registry 任意 agent 的接入广度 |
+| C5 provider 切换与接续 | 8.0 → **8.5** | 9.5 → 9.5 | 本仓 `neurova/agent/swarm.py:2046`（resumeFinishedRun 重写）、`:2078-2112`（租户红线先于终态判定、跨租户与「未找到」同形拒绝）、`:2093`（resume_cross_tenant_admin 审计事件）、`:2118-2146`（spawn 时刻执行体快照 vs 名册现值→五结果决策）、`:2192`（按决策分流复用/重开会话）、`swarm_support.py:383-385`（executor_caps_snapshot/executor_tool/executor_model 快照三字段）；`tests/unit/agent/test_provider_switch_tenant.py:250-257`（create_with_handoff 可达用例） | 第一轮「切换路径不可达」差距消解：非 admin 中途切换放开，五结果决策（reuse/switch_model_in_session/restart_and_resume/create_with_handoff/reject）全可达（18 例测试），租户隔离红线+admin 豁免审计落地；剩余差距=三家预设能力档 `handoff_inject` 仍保守缺省 False（`catalog.py:71-80` _CONSERVATIVE_CAPABILITIES），真跨家 handoff 须显式声明，T3 物化交割+活窗口动态预算仍深 |
+| E3 性能与资源治理 | 8.0 → **8.5** | 9.0 → 9.0 | 本仓 `NeurUI/src/pages/__tests__/AgentListPage.listRenderGate.test.ts`、`KnowledgePage.listRenderGate.test.ts`、`LogPage.listRenderGate.test.ts`（三处关键列表渲染回归门，变异法红→绿实证）、`NeurUI/src/composables/useRenderWindow.ts`（渲染窗口化单源）；`NeurUI/src/components/chat/ChatSessionSidebar.vue`、`SubAgentPanel.vue`（首轮登记的两处无界渲染列表收口+配套回归门） | 第一轮「本方无性能回归门」差距消解：前端关键列表渲染回归门落地（大列表分页/截断有界性钉死），登记的两处无界渲染同批收口；剩余差距=T3 性能审计面更广（steady shells、内存限额自停等） |
+
+### 维持项（17 项，逐项说明）
+
+| 子项 | 维持分（本仓/T3） | 维持原因 |
+|---|---|---|
+| A1 生命周期状态机 | 9.0 / 9.5 | 深化（d6e519460）补上首轮「分级就绪但门未消费」断点：依赖门真消费终态质量（`swarm.py:1618` _depSatisfied、`:1629` requiresReviewConfirmation——weak/none 终态不再自动放行下游）并根修依赖全满足时 blockedId 未赋值崩溃（`swarm.py:712-714`）——属巩固 9.0 的消费闭环；T3 的 attempt 代际+执行图节点状态差距未变，不调分 |
+| A2 事件溯源与审计 | 8.5 / 9.5 | 单写路径事件溯源/全量投影重建未动（事件库仍为 JSONL 账本的 fail-open 双写镜像） |
+| A3 幂等与恢复 | 8.5 / 9.5 | effect outbox（租约认领/退避/崩溃对账）仍未立项 |
+| A4 并发治理 | 8.0 / 7.0 | 双方均无新工作；本方 turn 准入治理继续反超 +1.0 |
+| A5 结算与收敛 | 8.0 / 9.0 | 仍仅 idle sweep 且默认关；T3 为 PR merge 事件流等四驱动且常开 |
+| B1 子代理建模 | 9.0 / 9.5 | 投递账本销账闭环首轮已计入；T3 执行图节点树+确定性派生 id 的建模深度差距未动 |
+| B2 上下文传递 | 8.0 / 9.5 | D-A 仅提高预算常量（`context_transfer.py:23` DEFAULT_TOKEN_CAP=32000），属参数变化非机制变化；fork/provider 切换/spawn/result 多触发点接线未动、预算仍非活窗口动态 |
+| B3 checkpoint 回滚 | 8.5 / 9.5 | provider 会话协同回退仍依赖能力声明保守缺省（False），未真执行 |
+| B4 依赖与队列 | 8.5 / 8.5 | 深化补管理面 REST（`neurova/api/endpoints/swarm_queue_api.py:44-71`，GET/PATCH/DELETE/POST+admin 门）与 queue_position 状态投影（`swarm.py:1120`），管理面出口补齐后与 T3 维持拉平；T3 promote-to-steer 细分仍由本方 edit 三态覆盖，不构成反超 |
+| C2 能力声明与降级 | 9.0 / 9.5 | T3 12 维按域嵌套分组结构差距未动（本方为扁平布尔维单源） |
+| C3 进程治理 | 9.0 / 9.5 | cgroup lease+POSIX 所有权台账差距未动 |
+| C4 认证与凭据 | 8.5 / 9.0 | T3 auth 全生命周期控制器+实例间 binding 隔离差距未动 |
+| D1 审批链 | 9.0 / 9.0 | 前端审批 memory_grant 徽标（`NeurUI/src/utils/approvalGrant.ts`、`NeurUI/src/api/modules/audit.ts:73-75`）为既有记忆式批准补消费读面，机制面已拉平 |
+| D2 权限天花板 | 8.5 / 9.5 | D-B 将租户隔离红线延伸至切换/续跑路径，但 T3 另有的跨环境请求头与 MCP 子任务两层收窄未动 |
+| D3 多端与远程 | 8.5 / 9.5 | harmony WS 稳态化落地（`Mobile/harmony/entry/src/main/ets/libs/adapters/WebSocketAdapter.ets:44-46` 退避单源、`:390/:492` sync_snapshot_required 快照通告处理；`ChatPage.ets:130` 起列表稳态记账）——客户端稳态补齐；T3 三路由热切换+learned routes+DPoP 云中继的完整远程面差距未动 |
+| E1 评测体系 | 8.5 / 8.5 | cost_note 端点透传（`neurova/api/endpoints/benchmark.py:42/119/134-135/198/230/238`）补齐成本标注消费链，前端评测成本列可读——与 T3 evals 纪律维持拉平 |
+| E2 契约与兼容 | 8.0 / 9.5 | 契约单源包（服务端+三端共同消费、双向兼容纪律）未动；本方仍为守卫测试+变更登记 |
+
+### 总分对照
+
+| | Neurova | T3 Code（reference_ac） |
+|---|---|---|
+| A 编排模型 | 42.0 / 50 | 44.5 / 50 |
+| B 执行图与上下文 | 34.0 / 40 | 37.0 / 40 |
+| C 外部 agent 接入 | 42.5 → **43.5** / 50 | 47.0 / 50 |
+| D 协作与人在环 | 26.0 / 30 | 28.0 / 30 |
+| E 工程方法 | 24.5 → **25.0** / 30 | 27.0 / 30 |
+| **合计（百分制）** | **84.5 → 85.25** | **91.8**（精确 91.75，维持） |
+
+### 仍未达标子项（16 项，按差距排序）
+
+| 子项 | 差距 | 剩余差距原因 |
+|---|---|---|
+| B2 上下文传递 | −1.5 | 接线仍以续跑单路径为主；fork/provider 切换/spawn/result 多触发点未贯通，预算非活窗口动态 |
+| E2 契约与兼容 | −1.5 | 守卫测试+变更登记 vs T3 3.4 万行契约单源包被服务端+三端共同消费 |
+| A2 事件溯源 | −1.0 | 事件库仍为 JSONL 账本 fail-open 双写镜像，非单写路径事件溯源，无全量投影重建 |
+| A3 幂等与恢复 | −1.0 | effect outbox（租约/退避/崩溃对账）未立项 |
+| A5 结算与收敛 | −1.0 | 仅 idle sweep 且默认关；T3 四驱动（含 PR merge 事件流）常开 |
+| B3 checkpoint 回滚 | −1.0 | provider 会话协同回退依赖能力声明（保守缺省 False），未真执行 |
+| C1 协议覆盖 | −1.0 | 三家真握手已 PASS，但 T3 十一家原生适配+ACP registry 任意 agent 的广度仍领先 |
+| C5 切换与接续 | −1.0 | 五结果决策全可达，但预设 handoff_inject 保守缺省、真跨家活体交割未开；T3 动态预算+物化交割更深 |
+| D2 权限天花板 | −1.0 | 跨环境请求头与 MCP 子任务两层收窄未覆盖 |
+| D3 多端与远程 | −1.0 | 三路由热切换+learned routes+DPoP 云中继的完整远程产品面未覆盖 |
+| A1 状态机 | −0.5 | attempt 代际+执行图节点状态未建 |
+| B1 子代理建模 | −0.5 | 执行图节点树+确定性派生 id 建模未建 |
+| C2 能力声明 | −0.5 | T3 12 维按域嵌套分组 vs 本方扁平布尔维 |
+| C3 进程治理 | −0.5 | cgroup lease+所有权台账未建 |
+| C4 认证与凭据 | −0.5 | auth 生命周期控制器+binding 隔离未建 |
+| E3 性能治理 | −0.5 | 列表渲染回归门已建；T3 审计面更广（steady shells/内存限额自停） |
+
+### 达成判定
+
+- **未全面达标（部分达成，差距继续收窄）**。16 项落后（净尾差 13.0，折百分制 6.5 分）、
+  3 项拉平（B4/D1/E1）、1 项反超保持（A4，+1.0）。
+- 总分：Neurova **84.5 → 85.25**，T3 **91.8**（当期主干较首轮前进一笔 perf 提交，能力面无
+  变化），净差由 7.3 收窄至 **6.5**。
+- 本轮实质消解第一轮指出的三个差距：C1 三家真机握手 live PASS（并根修 protocolVersion
+  线上类型互操作缺陷——live 验证直接抓出真缺陷的实例）、C5 非 admin 切换放开+五结果决策
+  全可达+租户隔离红线、E3 前端列表渲染回归门+两处无界渲染收口。
+- 剩余差距仍集中在两类：**接线广度**（B2 多触发点、C1 十一家原生+registry、C5 预设
+  handoff_inject 保守缺省）与**体系深度**（A2 单写事件溯源、A3 effect outbox、E2 契约单源、
+  C3 cgroup、C4 auth binding、B3 协同回退、A5 多驱动、D2/D3 远程治理面）——均为可继续
+  立项的明确后续，不是机制缺失。
+- 复评纪律说明：本次不为追分放水——A1/B4 深化经现场核实属「巩固既有分位」而非新档位
+  （结构差距未变），维持原分；D-A 预算 16k→32k 是参数变化非机制变化，B2 不调分；前端
+  徽标/cost_note 透传属既有机制消费面补链，D1/E1 不调分；T3 侧漂移为 provider 版本探测
+  性能优化单点，20 项维持原分。本轮调分仅 C1/C5/E3 三项各 +0.5。
