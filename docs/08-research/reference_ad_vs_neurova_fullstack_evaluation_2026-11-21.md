@@ -106,6 +106,8 @@
 **Neurova**：7 provider（anthropic/gemini/openai/openrouter/ollama/lm_studio/opencode+CUSTOM，`llm/providers/types.py:16-24`）；multi_model_client chat_stream（`llm/multi_model_client.py:1086`）+capability_detector+model_rate_limiter+model_limits+presets 预设表；真流式（SSE）与成本记账已有。差距主要在广度、路由容错与协议归一层。
 **子项**：provider 覆盖 4.0/1.5；协议归一与流式 3.0/2.0；路由容错与记账 2.5/2.0。
 
+> 细分拆解（十轴逐项 + 自适应路由五级标定专论）见同目录《[reference_ad_llm_access_and_adaptive_routing_teardown_2026-11-22.md](reference_ad_llm_access_and_adaptive_routing_teardown_2026-11-22.md)》：专项口径 L 86.0 / N 70.0（/100），其中容错轴本仓反超（9.0 vs 8.5）。
+
 ### D8 多模态（L 6.5 / N 3.5）
 
 **LobeHub**：图像生成 41 个 provider 实现+完整 agent 工具（ExecutionRuntime 622 行任务状态机，`builtin-tool-image-generation/src/ExecutionRuntime/index.ts:36-56`）；视频生成 24 家+727 行运行时（轮询/webhook 回执）；TTS 核心+6 家专用（兼容工厂使 OpenAI 系默认获得 TTS）；ASR 5 家；音乐生成+realtime 模型类型；视觉输入在消息协议原生支持（`types/chat.ts:42-62`）。
