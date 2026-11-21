@@ -976,10 +976,12 @@ class BaseAgentLoop(ABC):
             _sid = str(getattr(self.agent, "current_session_id", "") or "")
             _mailbox = get_agent_mailbox()
             _acked = []
+            _ackedMessageIds = []
             for _mail in _mailbox.lease(_sid):
                 _messageId = str(_mail.get("messageId") or "")
                 if _messageId and _mailboxAlreadyInjected(_sid, _messageId):
                     _acked.append(_mail["id"])
+                    _ackedMessageIds.append(_messageId)
                     continue
                 _persisted = persistModelVisibleAnnouncement(
                     self.agent, _mail["message"], source="subagent_mail"
@@ -990,9 +992,19 @@ class BaseAgentLoop(ABC):
                 if _persisted:
                     if _messageId:
                         _mailboxMarkInjected(_sid, _messageId)
+                        _ackedMessageIds.append(_messageId)
                     _acked.append(_mail["id"])
             if _acked:
                 _mailbox.acknowledge(_sid, _acked)
+                # B1 投递账本镜像：邮箱 ack 即投递单销账（acknowledged 生产可达）；
+                # fail-open——账本镜像失败不阻断邮箱排空主流程。
+                try:
+                    from neurova.agent.delegated_delivery import getDeliveryLedger
+
+                    for _mid in _ackedMessageIds:
+                        getDeliveryLedger().acknowledgeByMessageId(_mid)
+                except Exception:  # noqa: BLE001 - 镜像失败仅记调试
+                    logger.debug("投递账本确认镜像失败(忽略)", exc_info=True)
         except Exception:  # noqa: BLE001
             logger.debug("子代理邮箱排空失败(忽略)", exc_info=True)
 

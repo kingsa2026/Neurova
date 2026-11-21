@@ -353,22 +353,13 @@ def _eventStore():
     return _EVENT_STORE
 
 
-_DELIVERY_LEDGER = None
-_DELIVERY_LEDGER_LOCK = threading.RLock()
-
-
 def _deliveryLedger():
-    """子代理完成投递账本（B1，惰性单例）：投递单 pending→claimed→
-    acknowledged|disposed 的状态机与父闲补投，接在 pushParentMail 唯一写点。"""
-    global _DELIVERY_LEDGER
-    if _DELIVERY_LEDGER is not None:
-        return _DELIVERY_LEDGER
-    with _DELIVERY_LEDGER_LOCK:
-        if _DELIVERY_LEDGER is None:
-            from neurova.agent.delegated_delivery import DeliveryLedger
+    """子代理完成投递账本（B1）：投递单 pending→claimed→acknowledged|disposed
+    的状态机与父闲补投，接在 pushParentMail 唯一写点与邮箱消费侧 ack 镜像。
+    单例单源在 delegated_delivery.getDeliveryLedger，此处委托（历史调用点不变）。"""
+    from neurova.agent.delegated_delivery import getDeliveryLedger
 
-            _DELIVERY_LEDGER = DeliveryLedger()
-    return _DELIVERY_LEDGER
+    return getDeliveryLedger()
 
 
 _RUN_QUEUE = None

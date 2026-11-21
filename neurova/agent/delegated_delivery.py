@@ -131,6 +131,19 @@ class DeliveryLedger:
             self._appendAudit(ticket, "acknowledge")
             return True
 
+    def acknowledgeByMessageId(self, message_id: str) -> bool:
+        """按投递时 messageId 镜像确认（B1 闭环）：邮箱消费侧（loops/base.py
+        排空 ack）经此把投递单推到 acknowledged——销账态因此生产可达。
+        未知/空 id 诚实返回 False；重复确认幂等。"""
+        mid = str(message_id or "").strip()
+        if not mid:
+            return False
+        with self._lock:
+            ticketId = self._byMessageId.get(mid)
+        if ticketId is None:
+            return False
+        return self.acknowledge(ticketId)
+
     def dispose(self, ticket_id: str, reason: str) -> Dict[str, Any]:
         """→disposed 并留痕。reason 必填（空则 ValueError）；未知单 KeyError；
         已 disposed 幂等返回原单（保留首次原因）。
@@ -219,3 +232,22 @@ class DeliveryLedger:
             tickets = sorted(self._tickets.values(),
                              key=lambda t: (t["created_at"], t["ticket_id"]))
             return [self._view(t) for t in tickets]
+
+
+_LEDGER: Optional[DeliveryLedger] = None
+_LEDGER_LOCK = threading.Lock()
+
+
+def getDeliveryLedger() -> DeliveryLedger:
+    """进程级投递账本单例（DCL+RLock）。
+
+    单一事实源在本模块；``swarm._deliveryLedger`` 委托到此，邮箱消费侧
+    （loops/base.py）与编排写点（swarm.pushParentMail）据此共享同一本账。
+    """
+    global _LEDGER
+    if _LEDGER is not None:
+        return _LEDGER
+    with _LEDGER_LOCK:
+        if _LEDGER is None:
+            _LEDGER = DeliveryLedger()
+    return _LEDGER

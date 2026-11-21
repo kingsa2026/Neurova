@@ -65,6 +65,26 @@ class TestDeliveryLedgerWiring:
         assert tickets[0]["parent_run_id"] == "parent-1"
         assert get_agent_mailbox().pending("sess-1") == 1
 
+    def test_mailbox_ack_mirrors_to_ledger_acknowledged(self, swarm):
+        """B1 闭环：邮箱消费侧 ack 后，投递单经 messageId 镜像到 acknowledged。"""
+        from neurova.agent.delegated_delivery import getDeliveryLedger
+        from neurova.agent.mailbox import get_agent_mailbox
+
+        _run(swarm, "parent-1b", status=SUBAGENT_RUNNING)
+        child = _run(swarm, "child-1b", status=SUBAGENT_COMPLETED, parent="parent-1b")
+        assert swarm.pushParentMail(child, "子Agent终态", {"kind": "subagent_terminal"}) is True
+        ledger = getDeliveryLedger()
+        ticket = ledger.snapshot()[0]
+        assert ticket["status"] == "claimed"
+        mails = get_agent_mailbox().lease("sess-1")
+        assert len(mails) == 1
+        # 消费侧确认（loops/base.py 排空后的镜像路径）
+        assert ledger.acknowledgeByMessageId(mails[0]["messageId"]) is True
+        assert ledger.get(ticket["ticket_id"])["status"] == "acknowledged"
+        # 幂等：重复确认不炸；未知 id 诚实 False
+        assert ledger.acknowledgeByMessageId(mails[0]["messageId"]) is True
+        assert ledger.acknowledgeByMessageId("no-such-mid") is False
+
     def test_top_level_push_has_no_ticket(self, swarm):
         from neurova.agent.mailbox import get_agent_mailbox
 
