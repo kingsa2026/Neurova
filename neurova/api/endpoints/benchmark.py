@@ -12,6 +12,8 @@ Benchmark 基准测试框架 API 端点 v1.0.0
   POST /api/v1/benchmark/compare
   GET  /api/v1/benchmark/baseline-reports            (S1-1E 只读：多 agent 基线报告列表)
   GET  /api/v1/benchmark/baseline-reports/{report_id} (S1-1E 只读：单份基线报告全文)
+  POST /api/v1/benchmark/multi-agent/run             (R3 跑批生产入口，admin)
+  GET  /api/v1/benchmark/multi-agent/runs/{run_id}   (R3 跑批状态查询，admin)
 """
 
 import datetime
@@ -22,11 +24,16 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Request
 from neurova.api.auth import get_current_user, Depends
+from neurova.api.deps import require_admin
 from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Depends(get_current_user)],)
+
+# R3：跑批入口的 admin 权限门（与 governance 同一取源，require_admin 单源）。
+# 跑批消耗真实 LLM 预算并产出基线报告，不对普通用户开放。
+_benchmark_admin_dep = require_admin()
 
 
 # ── Models ─────────────────────────────────────────────
@@ -402,6 +409,141 @@ async def get_baseline_report(report_id: str, request: Request):
     if report is None:
         raise HTTPException(status_code=404, detail=f"Baseline report '{report_id}' not found")
     return {"code": 0, "message": "success", "data": report}
+
+
+# ── R3：multi_agent 评测跑批生产入口（递归自演化第一期 R3） ────────────────
+# BenchRunner.runAllWithReport 此前生产零调用（跑批无 API 入口，data/benchmark/
+# 从未落盘）。本节补生产触发面：admin 门 + 后台线程执行 + 状态查询；报告沿既有
+# 落盘（report.saveReport → <数据根>/benchmark/multi_agent/*.json），不建第二套
+# 存储。诚实纪律：无 LLM 通道/任务失败的事实由 runner 逐任务记入报告，本节不
+# 伪造分数、不发明 simulated 语义。
+
+_MULTI_RUNS_STORE: typing.Dict[str, dict] = {}  # run_id -> run data
+_MULTI_RUNS_LOCK = threading.RLock()
+
+
+class MultiAgentRunRequest(BaseModel):
+    task_ids: typing.Optional[typing.List[str]] = Field(
+        default=None,
+        description="任务子集（缺省=全部注册任务；与 suites 同给时以本项优先）",
+    )
+    suites: typing.Optional[typing.List[str]] = Field(
+        default=None, description="套件子集（如 t1_sim / t3_rubric）"
+    )
+    modes: typing.Optional[typing.List[typing.Literal["solo", "swarm"]]] = Field(
+        default=None,
+        description='执行模式，缺省 ["solo"]；双模式对比传 ["solo","swarm"]',
+    )
+    agent_id: typing.Optional[str] = Field(
+        default=None, description="被测 agent（缺省=当前默认 agent）"
+    )
+    task_isolated_memory: bool = Field(
+        default=True, description="逐任务隔离会话记忆（S1-1C，正式对比默认开）"
+    )
+
+
+def _executeMultiAgentRun(runId: str, body: MultiAgentRunRequest) -> None:
+    """后台执行 multi_agent 跑批（POST 即返 running，本函数只在线程里跑）。
+
+    沿 `_executeBenchmarkRun` 同款范式：执行结果/异常如实写回运行台账，
+    不静默。报告落盘由 runner.runAllWithReport 完成（原子写）。
+    """
+    import asyncio
+
+    from neurova.benchmark.multi_agent.runner import BenchRunner
+
+    def _finish(updates: dict) -> None:
+        with _MULTI_RUNS_LOCK:
+            run = _MULTI_RUNS_STORE.get(runId)
+            if run is not None:
+                run.update(updates)
+                run["completed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    try:
+        runner = BenchRunner(
+            agent_id=body.agent_id or None,
+            taskIsolatedMemory=body.task_isolated_memory,
+        )
+        report = asyncio.run(runner.runAllWithReport(
+            modes=tuple(body.modes) if body.modes else ("solo",),
+            taskIds=body.task_ids,
+            suites=body.suites,
+        ))
+        _finish({
+            "status": "completed",
+            "report_id": report.get("report_id"),
+            "report_path": report.get("report_path"),
+            "summary": {
+                "task_count": len(report.get("tasks") or []),
+                "metrics": report.get("metrics"),
+                "comparison": report.get("comparison"),
+            },
+        })
+        logger.info("Multi-agent benchmark run %s completed (report=%s)", runId, report.get("report_id"))
+    except Exception as exc:  # noqa: BLE001 - 执行器意外故障如实落账，不静默
+        logger.error("Multi-agent benchmark run %s failed: %s", runId, exc)
+        _finish({"status": "failed", "error": f"{type(exc).__name__}: {exc}"})
+
+
+@router.post("/multi-agent/run", dependencies=[Depends(_benchmark_admin_dep)])
+async def run_multi_agent_benchmark(body: MultiAgentRunRequest, request: Request):
+    """触发 multi_agent 评测跑批（R3 生产入口，admin 门）。
+
+    - body 圈定范围：task_ids / suites 子集（缺省=全部注册任务）、modes
+      （solo/swarm，缺省 solo；swarm 走真 SwarmManager 链路含治理闸）；
+    - 后台线程执行 BenchRunner.runAllWithReport，POST 立即返回 run 标识与
+      running 态；GET /multi-agent/runs/{run_id} 轮询终态与报告落盘路径；
+    - 无 LLM 通道不伪造：runner 逐任务如实记失败事实，报告照常落盘。
+    """
+    run_id = str(uuid.uuid4())
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    run_data = {
+        "run_id": run_id,
+        "kind": "multi_agent",
+        "status": "running",
+        "modes": list(body.modes) if body.modes else ["solo"],
+        "task_ids": body.task_ids,
+        "suites": body.suites,
+        "agent_id": body.agent_id or "",
+        "user_id": _get_user_id(request),
+        "task_isolated_memory": body.task_isolated_memory,
+        "started_at": now,
+        "completed_at": None,
+        "report_id": None,
+        "report_path": None,
+        "summary": None,
+        "error": None,
+    }
+    with _MULTI_RUNS_LOCK:
+        _MULTI_RUNS_STORE[run_id] = run_data
+
+    worker = threading.Thread(
+        target=_executeMultiAgentRun,
+        args=(run_id, body),
+        name=f"multi-agent-bench-{run_id[:8]}",
+        daemon=True,
+    )
+    worker.start()
+    logger.info(
+        "Multi-agent benchmark run %s started (modes=%s task_ids=%s suites=%s)",
+        run_id, run_data["modes"], body.task_ids, body.suites,
+    )
+    return {
+        "code": 0,
+        "message": "Multi-agent benchmark run started — 后台执行中，GET /multi-agent/runs/{run_id} 查询进度与报告",
+        "data": run_data,
+    }
+
+
+@router.get("/multi-agent/runs/{run_id}", dependencies=[Depends(_benchmark_admin_dep)])
+async def get_multi_agent_run(run_id: str):
+    """查询 multi_agent 跑批执行状态与结果摘要（含报告落盘路径）。"""
+    with _MULTI_RUNS_LOCK:
+        run = _MULTI_RUNS_STORE.get(run_id)
+        data = dict(run) if run is not None else None
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"Multi-agent run '{run_id}' not found")
+    return {"code": 0, "message": "success", "data": data}
 
 
 # ── RAG 评估──

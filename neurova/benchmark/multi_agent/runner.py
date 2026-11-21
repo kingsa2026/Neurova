@@ -286,17 +286,38 @@ class BenchRunner:
         registerBuiltinSuites()
         return await self.runTasks([t.task_id for t in listTasks()], modes=modes)
 
-    async def runAllWithReport(self, modes: Sequence[str] = MODES, save: bool = True) -> dict:
-        """跑全任务集并产出结构化报告（S1-1E 只读端点的数据生产点）。
+    async def runAllWithReport(self, modes: Sequence[str] = MODES, save: bool = True,
+                               taskIds: Optional[Sequence[str]] = None,
+                               suites: Optional[Sequence[str]] = None) -> dict:
+        """跑任务集并产出结构化报告（S1-1E 只读端点与 R3 跑批入口的数据生产点）。
 
         save=True 时原子落盘到数据根 `benchmark/multi_agent/`（report.saveReport），
         报告自带 report_id/report_path 与 task_isolated_memory 注记——只读端点
         直接读这份落盘，不建第二套存储。
+
+        R3：taskIds / suites 任一给出时只跑该子集（taskIds 优先；两者皆缺省仍跑
+        全部注册任务）——生产跑批入口（api/endpoints/benchmark 的
+        POST /multi-agent/run）按请求体圈定范围。未注册的 taskId 由 runTasks
+        如实记 task_not_registered 失败事实，不伪造通过。
         """
         from neurova.benchmark.multi_agent.metrics import aggregate, compare
         from neurova.benchmark.multi_agent.report import buildReport, defaultReportPath, saveReport
 
-        results = await self.runAll(modes=modes)
+        if taskIds or suites:
+            from neurova.benchmark.multi_agent.suites import registerBuiltinSuites
+            from neurova.benchmark.multi_agent.tasks import listTasks
+
+            # 幂等登记内置任务集：suite 子集选择依赖内置任务在册（与 runAll 同款）
+            registerBuiltinSuites()
+            if taskIds:
+                resolvedIds: List[str] = [str(taskId) for taskId in taskIds]
+            else:
+                resolvedIds = [
+                    task.task_id for suite in suites for task in listTasks(suite=str(suite))
+                ]
+            results = await self.runTasks(resolvedIds, modes=modes)
+        else:
+            results = await self.runAll(modes=modes)
         report = buildReport(
             results, aggregate(results), compare(results),
             taskIsolatedMemory=self.taskIsolatedMemory,
