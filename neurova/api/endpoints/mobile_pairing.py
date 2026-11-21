@@ -1797,6 +1797,21 @@ async def revoke_pairing(
     }
 
 
+def _scopeKeyAdmissible(wsLedger, pairing_id: str, scope: Any) -> bool:
+    """D3 越权防线：键控订阅范围（session/thread）的 scope_key 必须确实属于
+    当前配对设备——判定依据是**本设备账本留存帧**里出现过该归属键
+    （session_id / thread_id）。账本本就按 pairing_id 隔离，这里再挡一层
+    "拿别处会话/线程键来订阅"的请求：不符即拒（403 形态），且不泄露任何
+    他设备/他会话的存在性。global 无键，恒可订阅。
+
+    用显式 scope 元组扫描（不回落已登记订阅，避免旧订阅遮蔽本次判定）；
+    已被保留窗口老化出去的键视同不存在——反正其帧已不可重放。
+    """
+    if scope.isGlobal:
+        return True
+    return len(wsLedger.replaySince(pairing_id, 0, scope=(scope.scope, scope.scope_key))) > 0
+
+
 def _ticketFromHandshake(websocket: WebSocket) -> Optional[str]:
     """从握手取接入凭证：**header 优先**，`?token=` 只作旧客户端的兼容通道。
 
@@ -1913,6 +1928,36 @@ async def mobile_websocket(websocket: WebSocket):
                     resumeCursor = int(message.get("last_seq") or 0)
                 except (TypeError, ValueError):
                     resumeCursor = 0
+                # D3 scope 接线（端点→账本最后一段）：请求可带可选订阅范围
+                # scope [+ scope_key]。缺省不传 → replayScope=None，replaySince
+                # 不做范围过滤（未登记订阅时与改前逐字一致，既有客户端零影响）；
+                # 传入时经 connection_runtime 单源解析校验（非法诚实拒绝），
+                # 再登记订阅并按该范围补发（G4：范围外帧 fail-closed 扣下）。
+                replayScope = None
+                if message.get("scope") is not None:
+                    from neurova.api.connection_runtime import parseSubscriptionScope
+
+                    try:
+                        replayScope = parseSubscriptionScope(
+                            message.get("scope"), str(message.get("scope_key") or ""))
+                    except ValueError as scopeError:
+                        # 400 形态：请求级错误不落账（error 帧无 session_id，
+                        # 进账本反而会被范围过滤扣下，等于对后续重放静默消失），
+                        # 只对本连接当下这次请求应答。
+                        await websocket.send_json({
+                            "type": "error", "code": "invalid_scope", "status": 400,
+                            "message": str(scopeError),
+                        })
+                        continue
+                    if not _scopeKeyAdmissible(wsLedger, pairing_id, replayScope):
+                        # 403 形态：scope_key 与本设备账本归属不符——诚实拒绝，
+                        # 不登记、不下发、不泄露他会话/线程存在性。
+                        await websocket.send_json({
+                            "type": "error", "code": "scope_forbidden", "status": 403,
+                            "message": "订阅范围与当前设备归属不符，已拒绝",
+                        })
+                        continue
+                    wsLedger.subscribe(pairing_id, replayScope.scope, replayScope.scope_key)
                 resumeDecision = wsLedger.resolveResume(pairing_id, resumeCursor)
                 if resumeDecision.mode != "replay":
                     await ledgerWs.send_json({
@@ -1922,7 +1967,7 @@ async def mobile_websocket(websocket: WebSocket):
                         "head_seq": wsLedger.lastSeq(pairing_id),
                     })
                     continue
-                for row in wsLedger.replaySince(pairing_id, resumeCursor):
+                for row in wsLedger.replaySince(pairing_id, resumeCursor, scope=replayScope):
                     replayFrame = dict(row["frame"])
                     replayFrame["seq"] = row["seq"]
                     replayFrame["replay"] = True
@@ -2014,3 +2059,6 @@ async def mobile_websocket(websocket: WebSocket):
         manager.disconnect(connection_id, user_id)
         _ws_connections.pop(pairing_id, None)
         getDeviceRegistry().recordActivity(pairing_id)
+        # D3：订阅是连接级内存态（账本单源语义"断线重连由客户端重新订阅"）——
+        # 连接关闭即注销；未登记过的设备此处是空操作，行为不变。
+        wsLedger.unsubscribe(pairing_id)
