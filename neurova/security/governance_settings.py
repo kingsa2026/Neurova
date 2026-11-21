@@ -94,10 +94,30 @@ DEFAULTS: Dict[str, Any] = {
     # 迭代）的最少累计次数。phase 1→2 无此要求（手动档还没自动执行过，卡次数
     # 会把晋升链锁成循环依赖）。堵"空转也能升顶"的结构性漏洞。
     "rsi_phase_min_applied": {"2": 3, "3": 10},
+    # R7（拍板 2026-11-21，详案 §6-R7 / §8-4）：金丝雀观测窗（秒）。保守起步
+    # （短窗 + 敏感阈值，先保证不出事再按实测放宽）；P1-4 金丝雀实现读取。
+    "rsi_canary_window_seconds": 300.0,
+    # R7：金丝雀回滚阈值族。键集即 P1-4 的消费契约（见 CANARY_THRESHOLD_KEYS），
+    # 值为比率域 0..1；结构进设置面，面板可调值，判据结构不进面板（§6-R7 边界）。
+    "rsi_canary_rollback_thresholds": {
+        "max_error_rate": 0.2,
+        "min_success_rate_drop": 0.1,
+    },
 }
 
 #: `approval_wait_seconds` 的合法域。夹紧而非报错：配置写歪不该让整轮失败。
 APPROVAL_WAIT_BOUNDS = (0.0, 3600.0)
+
+#: `rsi_canary_window_seconds` 的合法域（秒）：下界 1 防"观测窗为 0"的死循环，
+#: 上界一天——再长的"窗"就不是金丝雀而是放任。
+CANARY_WINDOW_BOUNDS = (1.0, 86400.0)
+#: env 覆盖口（与治理开关的 env > 设置 > 默认优先级同一条链）。
+CANARY_WINDOW_ENV = "NEUROVA_RSI_CANARY_WINDOW"
+
+#: 金丝雀回滚阈值族的合法键与值域。键集写死在此（单源）：P1-4 消费方按这三个
+#: 语义取数——错误率上界、成功率较基线的最小降幅；比率一律 0..1。
+CANARY_THRESHOLD_KEYS = ("max_error_rate", "min_success_rate_drop")
+CANARY_THRESHOLD_BOUNDS = (0.0, 1.0)
 
 
 def settings_path() -> Path:
@@ -195,6 +215,43 @@ def resolveRsiPhaseMinApplied(settings: Optional[Dict[str, Any]] = None) -> Dict
         if 0 <= phase <= 4 and threshold >= 0:
             thresholds[phase] = threshold
     return thresholds
+
+
+def resolveRsiCanaryWindowSeconds() -> float:
+    """金丝雀观测窗（秒）的唯一读法（R7，P1-4 消费）。
+
+    沿 `resolve_seconds` 的既有优先级链：env 显式值（越界/非数值不旁路，
+    夹紧回合法域）> 治理设置值 > 内置默认 300。必须在**决策时刻**调用，
+    不许构造期缓存成属性——那是"治理页能改、运行时不认"的幻影旋钮老病。
+    """
+    return resolve_seconds(
+        "rsi_canary_window_seconds", CANARY_WINDOW_ENV, CANARY_WINDOW_BOUNDS)
+
+
+def resolveRsiCanaryRollbackThresholds(
+    settings: Optional[Dict[str, Any]] = None,
+) -> Dict[str, float]:
+    """金丝雀回滚阈值族的唯一读法（R7，P1-4 消费）。
+
+    逐键解析：设置值可解析则夹紧到 [0,1]；缺键/坏键回**该键自己的默认**
+    ——不整组作废（一个手滑的键不该把另一个键的运维配置也冲掉），
+    也绝不把垃圾值折算成 0/1 放行。键集以 CANARY_THRESHOLD_KEYS 为准，
+    设置里多出的键不外泄（消费方拿到的形状恒定）。
+    """
+    data = settings if settings is not None else load_governance_settings()
+    raw = data.get("rsi_canary_rollback_thresholds")
+    defaults = DEFAULTS["rsi_canary_rollback_thresholds"]
+    low, high = CANARY_THRESHOLD_BOUNDS
+    resolved: Dict[str, float] = {}
+    for key in CANARY_THRESHOLD_KEYS:
+        fallback = float(defaults[key])
+        candidate = raw.get(key) if isinstance(raw, dict) else None
+        try:
+            value = float(candidate)
+        except (TypeError, ValueError):
+            value = fallback
+        resolved[key] = min(max(value, low), high)
+    return resolved
 
 
 def rsiPhaseSourceFor(agent_id: str, settings: Optional[Dict[str, Any]] = None) -> str:

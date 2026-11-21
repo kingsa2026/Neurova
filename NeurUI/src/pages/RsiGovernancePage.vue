@@ -6,7 +6,8 @@
  * 可见、且批准动作作用在"最后构造的那个 agent"上 —— 人工通道等于不存在。
  * 所以本页把三件事摆明：选哪个 agent、提案现在什么状态、批准之后是否真的生效。
  *
- * 部署阶段（rsi_phase）在此只读：写仍归 SettingPage 的治理卡片，两处可改迟早漂移。
+ * 部署阶段（rsi_phase）的写入口（R7）收敛到本页"运行参数"区——
+ * 此前写归 SettingPage 治理卡片、读归本页，两处可改迟早漂移。
  */
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -24,6 +25,8 @@ import {
   type RsiStatus,
   approveImproverUpgrade,
 } from '@/api/modules/rsiGovernance'
+import { getGovernanceSettings, updateGovernanceSettings } from '@/api/modules/settings'
+import { getEvolutionSettings, updateEvolutionSettings } from '@/api/modules/text-evolution'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -259,7 +262,124 @@ async function approveUpgrade() {
   }
 }
 
-onMounted(load)
+// ── 运行参数（R7）─────────────────────────────────────────────
+// 演化运行参数单点写入口：治理键走 /governance/settings，回滚持久化开关
+// 走 /evolution/settings（EvolutionSettings 族）。面板可调的是参数值；
+// 判据结构与禁改清单不进面板（裁判件边界不变，详案 §6-R7）。
+
+/** 后端键缺省时的前端兜底只用于首帧渲染；未加载成功时提交被拦，不会覆盖线上配置。 */
+const params = ref({
+  rsi_phase: 0,
+  metacog_gate_enabled: false,
+  rsi_rollback_persistence_enabled: true,
+  rsi_phase_min_applied: {} as Record<string, number>,
+  rsi_canary_window_seconds: 300,
+  max_error_rate: 0.2,
+  min_success_rate_drop: 0.1,
+})
+/** agent 级相位覆写只读展示——覆写的写入口仍在治理设置面，不在此重复。 */
+const overridesReadonly = ref<Record<string, number>>({})
+const paramsLoaded = ref(false)
+const savingParams = ref(false)
+
+const minAppliedKeys = computed(() =>
+  Object.keys(params.value.rsi_phase_min_applied).sort())
+
+const overridesReadonlyText = computed(() => {
+  const entries = Object.entries(overridesReadonly.value)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([agent, phase]) => `${agent}=${phase}`)
+  return entries.length ? entries.join(', ') : t('rsiGovernance.overridesNone')
+})
+
+async function loadParams() {
+  paramsLoaded.value = false
+  try {
+    const [govResp, evoResp] = await Promise.all([
+      getGovernanceSettings(),
+      getEvolutionSettings(),
+    ])
+    const gov = unwrap<Record<string, unknown>>(govResp) || {}
+    const evo = unwrap<Record<string, unknown>>(evoResp) || {}
+    const thresholds = (gov.rsi_canary_rollback_thresholds || {}) as Record<string, unknown>
+    params.value.rsi_phase = Number(gov.rsi_phase ?? 0)
+    params.value.metacog_gate_enabled = gov.metacog_gate_enabled === true
+    params.value.rsi_phase_min_applied = {
+      ...(gov.rsi_phase_min_applied as Record<string, number> || {}),
+    }
+    params.value.rsi_canary_window_seconds = Number(gov.rsi_canary_window_seconds ?? 300)
+    params.value.max_error_rate = Number(thresholds.max_error_rate ?? 0.2)
+    params.value.min_success_rate_drop = Number(thresholds.min_success_rate_drop ?? 0.1)
+    overridesReadonly.value = {
+      ...(gov.rsi_phase_overrides as Record<string, number> || {}),
+    }
+    params.value.rsi_rollback_persistence_enabled =
+      evo.rsi_rollback_persistence_enabled !== false
+    paramsLoaded.value = true
+  } catch (err) {
+    // 读数失败不冒充加载成功：提示行给出原因，提交被 saveParams 拦下
+    // （与 SettingPage 的 F-12 同一纪律——拿前端默认值覆盖线上配置比失败更坏）。
+    paramsLoaded.value = false
+    console.error('[RsiGovernance] 运行参数读取失败:', err)
+  }
+}
+
+/** 提交前前端校验：越界/非法值直接点名，不等后端 422。 */
+function validateParams(): string {
+  const p = params.value
+  if (!Number.isInteger(p.rsi_phase) || p.rsi_phase < 0 || p.rsi_phase > 4) {
+    return t('rsiGovernance.phaseInvalid')
+  }
+  if (!(p.rsi_canary_window_seconds >= 1)) {
+    return t('rsiGovernance.canaryWindowInvalid')
+  }
+  for (const value of [p.max_error_rate, p.min_success_rate_drop]) {
+    if (!(value >= 0 && value <= 1)) return t('rsiGovernance.canaryThresholdInvalid')
+  }
+  for (const count of Object.values(p.rsi_phase_min_applied)) {
+    if (!Number.isInteger(count) || count < 0) return t('rsiGovernance.minAppliedInvalid')
+  }
+  return ''
+}
+
+async function saveParams() {
+  if (!paramsLoaded.value) {
+    message.warning(t('rsiGovernance.paramsNotLoaded'))
+    return
+  }
+  const invalid = validateParams()
+  if (invalid) {
+    message.error(invalid)
+    return
+  }
+  savingParams.value = true
+  try {
+    await updateGovernanceSettings({
+      rsi_phase: params.value.rsi_phase,
+      metacog_gate_enabled: params.value.metacog_gate_enabled,
+      rsi_phase_min_applied: { ...params.value.rsi_phase_min_applied },
+      rsi_canary_window_seconds: params.value.rsi_canary_window_seconds,
+      rsi_canary_rollback_thresholds: {
+        max_error_rate: params.value.max_error_rate,
+        min_success_rate_drop: params.value.min_success_rate_drop,
+      },
+    })
+    await updateEvolutionSettings({
+      rsi_rollback_persistence_enabled: params.value.rsi_rollback_persistence_enabled,
+    })
+    message.success(t('rsiGovernance.paramsSaveOk'))
+    await loadParams()
+  } catch (err) {
+    message.error(`${t('rsiGovernance.paramsSaveFailed')}：${errorText(err)}`)
+  } finally {
+    savingParams.value = false
+  }
+}
+
+onMounted(() => {
+  load()
+  loadParams()
+})
 </script>
 
 <template>
@@ -346,6 +466,100 @@ onMounted(load)
           </a-tag>
         </span>
       </div>
+    </GlassCard>
+
+    <!-- 运行参数（R7）：演化运行参数的单点写入口。rsi_phase 写控件自
+         SettingPage 治理卡片收敛到此，消除"两处可改迟早漂移"；覆写条目
+         在此只读（写入仍归治理设置面），判据结构与禁改清单不进面板。 -->
+    <GlassCard :title="t('rsiGovernance.paramsTitle')" data-testid="rsi-params">
+      <p class="rsi-hint">{{ t('rsiGovernance.paramsHint') }}</p>
+      <p v-if="!paramsLoaded" class="rsi-not-ready" data-testid="rsi-params-not-loaded">
+        {{ t('rsiGovernance.paramsNotLoaded') }}
+      </p>
+      <a-form layout="vertical">
+        <a-form-item :label="t('rsiGovernance.phaseInputLabel')">
+          <a-input-number
+            v-model:value="params.rsi_phase"
+            :min="0"
+            :max="4"
+            :precision="0"
+            data-testid="rsi-param-phase"
+          />
+        </a-form-item>
+        <a-form-item :label="t('rsiGovernance.metacogGateLabel')">
+          <p class="rsi-hint">{{ t('rsiGovernance.metacogGateHint') }}</p>
+          <a-switch
+            v-model:checked="params.metacog_gate_enabled"
+            data-testid="rsi-param-metacog"
+          />
+        </a-form-item>
+        <a-form-item :label="t('rsiGovernance.rollbackPersistenceLabel')">
+          <p class="rsi-hint">{{ t('rsiGovernance.rollbackPersistenceHint') }}</p>
+          <a-switch
+            v-model:checked="params.rsi_rollback_persistence_enabled"
+            data-testid="rsi-param-rollback-persistence"
+          />
+        </a-form-item>
+        <a-form-item :label="t('rsiGovernance.phaseMinAppliedLabel')">
+          <p class="rsi-hint">{{ t('rsiGovernance.phaseMinAppliedHint') }}</p>
+          <div v-for="pk in minAppliedKeys" :key="pk" class="rsi-param-row">
+            <span class="rsi-param-name">{{ t('rsiGovernance.phaseNLabel', { phase: pk }) }}</span>
+            <a-input-number
+              v-model:value="params.rsi_phase_min_applied[pk]"
+              :min="0"
+              :precision="0"
+              :data-testid="`rsi-param-min-applied-${pk}`"
+            />
+          </div>
+        </a-form-item>
+        <a-form-item :label="t('rsiGovernance.canaryWindowLabel')">
+          <a-input-number
+            v-model:value="params.rsi_canary_window_seconds"
+            :min="1"
+            :max="86400"
+            :precision="0"
+            data-testid="rsi-param-canary-window"
+          />
+        </a-form-item>
+        <a-form-item :label="t('rsiGovernance.canaryThresholdsLabel')">
+          <div class="rsi-param-row">
+            <span class="rsi-param-name">{{ t('rsiGovernance.maxErrorRateLabel') }}</span>
+            <a-input-number
+              v-model:value="params.max_error_rate"
+              :min="0"
+              :max="1"
+              :step="0.01"
+              data-testid="rsi-param-max-error-rate"
+            />
+          </div>
+          <div class="rsi-param-row">
+            <span class="rsi-param-name">{{ t('rsiGovernance.minSuccessDropLabel') }}</span>
+            <a-input-number
+              v-model:value="params.min_success_rate_drop"
+              :min="0"
+              :max="1"
+              :step="0.01"
+              data-testid="rsi-param-min-success-drop"
+            />
+          </div>
+        </a-form-item>
+        <a-form-item :label="t('rsiGovernance.overridesReadonlyLabel')">
+          <p class="rsi-hint">{{ t('rsiGovernance.overridesReadonlyHint') }}</p>
+          <span class="rsi-overrides-readonly" data-testid="rsi-overrides-readonly">
+            {{ overridesReadonlyText }}
+          </span>
+        </a-form-item>
+      </a-form>
+      <template #footer>
+        <a-button
+          type="primary"
+          :loading="savingParams"
+          data-testid="rsi-params-save"
+          @click="saveParams"
+        >
+          {{ t('common.save') }}
+        </a-button>
+      </template>
     </GlassCard>
 
     <GlassCard v-if="status" :title="t('rsiGovernance.evidenceTitle')" data-testid="rsi-evidence-machine">
@@ -494,6 +708,20 @@ onMounted(load)
 .rsi-not-ready {
   margin: 12px 0 0;
   color: var(--color-warning, #b8860b);
+}
+.rsi-param-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.rsi-param-name {
+  min-width: 120px;
+  font-size: 13px;
+}
+.rsi-overrides-readonly {
+  font-size: 13px;
+  opacity: 0.85;
 }
 .rsi-status {
   display: flex;

@@ -466,13 +466,19 @@
           <p class="governance-hint">{{ t('settings.governanceHint') }}</p>
           <a-form layout="vertical">
             <a-form-item :label="t('settings.governanceRsiPhase')">
-              <a-select v-model:value="governance.rsi_phase" style="width: 100%">
-                <a-select-option :value="0">{{ t('settings.governancePhase0') }}</a-select-option>
-                <a-select-option :value="1">{{ t('settings.governancePhase1') }}</a-select-option>
-                <a-select-option :value="2">{{ t('settings.governancePhase2') }}</a-select-option>
-                <a-select-option :value="3">{{ t('settings.governancePhase3') }}</a-select-option>
-                <a-select-option :value="4">{{ t('settings.governancePhase4') }}</a-select-option>
-              </a-select>
+              <!-- R7：rsi_phase 写入口收敛到 RsiGovernancePage 的"运行参数"区
+                   （单点写）。此处只留读数说明与跳转，消除"两处可改迟早漂移"
+                   的双写入口；agent 级覆写（rsi_phase_overrides）仍是独立键，
+                   写入口保留在本卡片。 -->
+              <p class="governance-hint">{{ t('settings.governancePhasePanelHint') }}</p>
+              <GlassButton
+                variant="primary"
+                size="sm"
+                data-testid="governance-phase-panel-link"
+                @click="goRsiGovernance"
+              >
+                {{ t('settings.governancePhasePanelLink') }}
+              </GlassButton>
             </a-form-item>
             <a-form-item :label="t('settings.governanceConversationRules')">
               <a-switch v-model:checked="governance.conversation_rules_enabled" />
@@ -557,6 +563,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getToolOffloadSettings, updateToolOffloadSettings, getLlmRetrySettings, updateLlmRetrySettings, getTaskProfileSettings, updateTaskProfileSettings, getAgentExecProfiles, updateAgentExecProfile, getEvalCoresetSettings, updateEvalCoresetSettings, getEvalExperimentSettings, updateEvalExperimentSettings, getRetrievalRecipe, updateRetrievalRecipe } from '@/api/modules/settings'
 import type { AgentExecProfile } from '@/api/modules/settings'
 import { listAgents } from '@/api/modules/agents'
@@ -577,6 +584,7 @@ import type { ContextCompressionSettings } from '@/api/modules/context'
 import { message } from 'ant-design-vue'
 
 const { t } = useI18n()
+const router = useRouter()
 const authStore = useAuthStore()
 /** 全局系统设置仅管理员可操作; 非管理员不渲染设置表单 */
 const isAdmin = computed(() => authStore.user?.role === 'admin')
@@ -638,7 +646,6 @@ const governance = ref({
   conversation_rules_enabled: false,
   // T2/T3 睡眠归纳相位门控（schema 归纳 + 跨域碰撞，LLM 成本闸，默认关）
   sleep_induction_enabled: false,
-  rsi_phase: 0,
   /** G2 覆写编辑态：textarea 逐行 `agent_id=phase`，保存时解析（后端 422 兜底值域）。 */
   rsi_phase_overrides: {} as Record<string, number>,
   overridesText: '',
@@ -649,6 +656,9 @@ const governance = ref({
   permModeText: '',
 })
 const savingGovernance = ref(false)
+
+/** R7：rsi_phase 的写入口已收敛到 RSI 进化审批页（运行参数区），此处只跳转。 */
+const goRsiGovernance = () => router.push({ name: 'RsiGovernance' })
 
 /**
  * Agent 运行限制：**值与合法域都取自回包**，前端既不写默认值、也不写键名白名单。
@@ -1122,7 +1132,8 @@ const saveGovernance = async () => {
     await updateGovernanceSettings({
       conversation_rules_enabled: governance.value.conversation_rules_enabled,
       sleep_induction_enabled: governance.value.sleep_induction_enabled,
-      rsi_phase: governance.value.rsi_phase,
+      // rsi_phase 不在此提交（R7 起写入口单点收敛到 RsiGovernancePage 运行参数区；
+      // 留空 = 不改该项，后端按"无有效字段"之外的键照常合并保存其余键）
       rsi_phase_overrides: overrides,
       guarded_syntax_gate_enabled: governance.value.guarded_syntax_gate_enabled,
       readonly_argv_autoallow_enabled: governance.value.readonly_argv_autoallow_enabled,

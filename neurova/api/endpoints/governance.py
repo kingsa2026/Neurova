@@ -36,6 +36,8 @@ from neurova.security.agent_limits_settings import (
     MIN_SUBAGENT_DEPTH,
     MIN_TOKEN_BUDGET,
 )
+# R7 金丝雀观测窗合法域——同样取配置单源常量，不在端点里重打数字。
+from neurova.security.governance_settings import CANARY_WINDOW_BOUNDS  # noqa: E402
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 import typing
@@ -1121,6 +1123,14 @@ async def update_llm_retry_settings(body: LlmRetrySettingsUpdate, admin=Depends(
     return {"code": 0, "data": get_effective_llm_retry_settings()}
 
 
+def _isValidPhaseKey(raw: Any) -> bool:
+    """rsi_phase_min_applied 的相位键校验：JSON 键恒为字符串，收成 0..4 整数判定。"""
+    try:
+        return 0 <= int(raw) <= 4
+    except (TypeError, ValueError):
+        return False
+
+
 class GovernanceSettingsUpdate(BaseModel):
     """治理设置更新（rsi_phase: 0..4；conversation_rules_enabled: LLM 成本门控；
     metacog_gate_enabled: V3 调控门，命中教训的工具执行前拦截；
@@ -1159,6 +1169,14 @@ class GovernanceSettingsUpdate(BaseModel):
     readonly_argv_autoallow_enabled: Optional[bool] = None
     # P1-4 权限模式 agent 级覆写：{agent_id: plan|build|edit|yolo|guarded|auto}
     permission_mode_overrides: Optional[Dict[str, str]] = None
+    # R7（详案 §6-R7）：RSI 运行参数出街到治理面。rsi_phase_min_applied 是 R6
+    # 判据的参数（此前只有 GET 读数、无写入口——读得到改不到即幻影旋钮）；
+    # 金丝雀两键为 P1-4 消费的运行参数。合法域以 governance_settings 单源
+    # 常量为准，越界 422 点名（判据结构与禁改清单不进面板，边界不变）。
+    rsi_phase_min_applied: Optional[Dict[str, int]] = None
+    rsi_canary_window_seconds: Optional[float] = Field(
+        None, ge=CANARY_WINDOW_BOUNDS[0], le=CANARY_WINDOW_BOUNDS[1])
+    rsi_canary_rollback_thresholds: Optional[Dict[str, float]] = None
 
 
 @router.put("/settings")
@@ -1204,6 +1222,51 @@ async def update_governance_settings(body: GovernanceSettingsUpdate, admin=Depen
                 detail=(
                     "permission_mode_overrides 含非法条目（agent_id 须非空、"
                     f"mode 须为 {sorted(VALID_MODE_VALUES)}）: {badModes}"
+                ),
+            )
+    # R7：实做次数门槛显式校验——相位键 0..4、次数为非负整数（布尔不是次数）。
+    # 静默丢非法条目就是"管理员以为收紧了晋升闸，运行时照旧"。
+    minApplied = payload.get("rsi_phase_min_applied")
+    if minApplied is not None:
+        badApplied = {
+            str(phase): count for phase, count in minApplied.items()
+            if isinstance(count, bool)
+            or not isinstance(count, int)
+            or not (0 <= count <= 1_000_000)
+            or not _isValidPhaseKey(phase)
+        }
+        if badApplied:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "rsi_phase_min_applied 含非法条目（相位键须 0..4、"
+                    f"次数须非负整数）: {badApplied}"
+                ),
+            )
+    # R7：金丝雀回滚阈值显式校验——键集单源（CANARY_THRESHOLD_KEYS），
+    # 值为比率 0..1。键集外的键 422 而非静默丢弃：多一套键名就是第二份契约。
+    thresholds = payload.get("rsi_canary_rollback_thresholds")
+    if thresholds is not None:
+        from neurova.security.governance_settings import (
+            CANARY_THRESHOLD_BOUNDS,
+            CANARY_THRESHOLD_KEYS,
+        )
+
+        low, high = CANARY_THRESHOLD_BOUNDS
+        badThresholds = {
+            str(key): value for key, value in thresholds.items()
+            if key not in CANARY_THRESHOLD_KEYS
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not (low <= value <= high)
+        }
+        if badThresholds:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "rsi_canary_rollback_thresholds 含非法条目（键须为 "
+                    f"{list(CANARY_THRESHOLD_KEYS)}、值须为 {low}..{high} 的比率）"
+                    f": {badThresholds}"
                 ),
             )
     if not save_governance_settings(payload):

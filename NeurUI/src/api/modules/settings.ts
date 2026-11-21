@@ -161,6 +161,17 @@ export interface GovernanceSettings {
   readonly_argv_autoallow_enabled?: boolean
   /** P1-4：agent 级权限模式覆写（plan/build/edit/yolo/guarded/auto）。 */
   permission_mode_overrides?: Record<string, string>
+  /** V3 调控门（命中 avoid_tool 教训的工具执行前拦截；R7 起面板可开关）。 */
+  metacog_gate_enabled?: boolean
+  /** R6：晋升实做次数门槛 {相位: 最少真实应用次数}（R7 起面板可调）。 */
+  rsi_phase_min_applied?: Record<string, number>
+  /** R7：金丝雀观测窗（秒），P1-4 消费，保守默认 300。 */
+  rsi_canary_window_seconds?: number
+  /** R7：金丝雀回滚阈值族（比率 0..1），P1-4 消费。 */
+  rsi_canary_rollback_thresholds?: {
+    max_error_rate: number
+    min_success_rate_drop: number
+  }
 }
 
 export function getGovernanceSettings() {

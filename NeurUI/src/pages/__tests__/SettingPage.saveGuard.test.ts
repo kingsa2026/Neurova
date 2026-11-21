@@ -144,9 +144,13 @@ describe('SettingPage — 未加载禁止保存（F-12 回归）', () => {
     const wrapper = mountPage()
     await flushPromises()
     await (wrapper.vm as any).saveGovernance()
-    expect(updateGovernanceSettings).toHaveBeenCalledWith(expect.objectContaining({ rsi_phase: 2 }))
     expect(message.success).toHaveBeenCalled()
     expect(message.warning).not.toHaveBeenCalled()
+    // R7 收敛：rsi_phase 的写入口单点在 RsiGovernancePage 运行参数区，
+    // SettingPage 不再提交该键（留在 payload 里就是第二个可写入口）。
+    const payload = (updateGovernanceSettings as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(payload).not.toHaveProperty('rsi_phase')
+    expect(payload).toHaveProperty('rsi_phase_overrides')
   })
 
   it('治理配置加载失败 → 保存被拦截并警告', async () => {

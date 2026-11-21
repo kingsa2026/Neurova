@@ -12,6 +12,8 @@ export interface EvolutionSettings {
   lifecycle_interval_hours: number
   judge_model: string
   optimizer_model: string
+  /** R5：回滚历史与装配时刻是否落盘（晋升判据"距上次回滚天数"的数据源开关）。 */
+  rsi_rollback_persistence_enabled?: boolean
 }
 
 export interface SkillLifecycleItem {
