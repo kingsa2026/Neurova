@@ -4072,21 +4072,28 @@ class MemoryManager:
             elif isinstance(value, str):
                 module.update_knowledge(key, 0.5)
             elif isinstance(value, (list, tuple)):
-                # profile API 契约：values/goals/capabilities/limitations 是列表。
-                # 旧实现两个分支都不匹配 → 字段被静默丢弃；现以逗号 join 进
-                # 知识域（0.8 = 显式声明过的领域），不再丢字段。
-                joined = ", ".join(str(v) for v in value if str(v).strip())
-                if joined:
-                    module.update_knowledge(key, 0.8)
+                # profile API 契约：values/goals/limitations 是偏好/目标清单 →
+                # 知识域；**capabilities 是能力声明** → 逐项落声明能力
+                # （_known_capabilities，promptSection 的"声明能力"段数据源），
+                # 与实测画像（tool_memory 派生）分列，不再混进知识域。
+                if key == "capabilities":
+                    for item in value:
+                        item = str(item).strip()
+                        if item:
+                            module.update_capability(item, 0.8)
+                else:
+                    joined = ", ".join(str(v) for v in value if str(v).strip())
+                    if joined:
+                        module.update_knowledge(key, 0.8)
         return True
 
-    def recordCapabilityOutcome(self, capability: str, success: bool) -> None:
-        """按工具执行成败更新能力置信度（委托 SelfModelModule，写入面单点）。"""
-        self._ensure_self_model_module().recordCapabilityOutcome(capability, success)
+    def selfModelPromptSection(self, usage_records=None) -> str:
+        """自我模型 prompt 摘要段（委托 SelfModelModule.promptSection，读取面）。
 
-    def selfModelPromptSection(self) -> str:
-        """自我模型 prompt 摘要段（委托 SelfModelModule.promptSection，读取面）。"""
-        return self._ensure_self_model_module().promptSection()
+        usage_records：tool_memory 的逐次使用记录（可选）——实测能力画像的
+        唯一数据源，本层只透传不加工。
+        """
+        return self._ensure_self_model_module().promptSection(usage_records=usage_records)
 
     def assessTaskCapabilities(self, task: str, requirements: List[str]) -> Dict[str, Any]:
         """任务能力自评（委托 SelfModelModule.assess_task）。

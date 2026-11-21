@@ -1481,16 +1481,18 @@ class ContextOrchestrator:
         if catalog_section:
             system_instructions.append(catalog_section)
 
-        # 自我模型读取面：能力置信度/知识领域摘要注入（写入源在工具执行咽喉
-        # recordCapabilityOutcome，此处只读）。无数据返回空串=零注入零成本；
-        # 运行期动态段，不随身份快照冻结（与技能目录段同性质）。
-        # 判据收严：只接受**非空字符串**返回值——测试桩/异常实现可能返回
-        # MagicMock 等真值对象，直接 append 会在 join 处炸掉整轮上下文。
+        # 自我模型读取面：实测能力画像（tool_memory 逐次记录派生）+ 声明能力
+        # + 知识领域 + 最近任务自评。原始账单源在 tool_memory，此处只透传
+        # usage_history 快照；无数据返回空串=零注入零成本。运行期动态段，
+        # 不随身份快照冻结（与技能目录段同性质）。判据收严：只接受**非空
+        # 字符串**返回值——测试桩/异常实现可能返回 MagicMock 等真值对象。
         _self_model_section = ""
         try:
             _mm = getattr(self._agent, "memory_manager", None)
             if _mm is not None and hasattr(_mm, "selfModelPromptSection"):
-                _section = _mm.selfModelPromptSection()
+                _tm = getattr(self._agent, "tool_memory", None)
+                _usage = getattr(_tm, "usage_history", None) if _tm is not None else None
+                _section = _mm.selfModelPromptSection(usage_records=_usage)
                 if isinstance(_section, str):
                     _self_model_section = _section.strip()
         except Exception:  # noqa: BLE001 - 摘要缺席不阻断上下文装配

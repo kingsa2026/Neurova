@@ -15,37 +15,73 @@ import pytest
 from neurova.cognitive_layers.memory_layer.modules.self_model_module import SelfModelModule
 
 
-class TestRecordCapabilityOutcome:
-    """写入面：经验式能力置信度更新（成功 +0.05 / 失败 -0.10，夹 [0,1]）。"""
+def _record(tool_name, success):
+    from neurova.cognitive_layers.memory_layer.tool_memory_integration import ToolUsageRecord
 
-    def test_recordCapabilityOutcome_raisesOnSuccess(self):
-        module = SelfModelModule(agent_id="t")
-        module.recordCapabilityOutcome("web_search", True)
-        assert module.get_capability_confidence("web_search") == pytest.approx(0.55)
+    return ToolUsageRecord(tool_name=tool_name, success=success)
 
-    def test_recordCapabilityOutcome_lowersOnFailure(self):
-        module = SelfModelModule(agent_id="t")
-        module.recordCapabilityOutcome("web_search", False)
-        assert module.get_capability_confidence("web_search") == pytest.approx(0.40)
 
-    def test_recordCapabilityOutcome_unknownStartsAtHalf(self):
-        module = SelfModelModule(agent_id="t")
-        # 未记录过的能力，判据基线是 0.5（get_capability_confidence 的既有缺省）
-        assert module.get_capability_confidence("file_write") == pytest.approx(0.5)
+class TestDerivedCapabilityProfile:
+    """实测能力画像 = tool_memory 逐次记录的派生视图（单一事实源，模块不独立记账）。
 
-    def test_recordCapabilityOutcome_clampsToUnitInterval(self):
-        module = SelfModelModule(agent_id="t")
-        for _ in range(30):
-            module.recordCapabilityOutcome("always_fail", False)
-        assert module.get_capability_confidence("always_fail") == 0.0
-        for _ in range(30):
-            module.recordCapabilityOutcome("always_win", True)
-        assert module.get_capability_confidence("always_win") <= 1.0
+    口径：每工具取其最近 _RECENT_WINDOW 条，算成功率；无记录的工具不进画像。
+    """
 
-    def test_recordCapabilityOutcome_rejectsEmptyCapability(self):
+    def test_promptSection_derivesRecentSuccessRate(self):
         module = SelfModelModule(agent_id="t")
-        with pytest.raises(ValueError):
-            module.recordCapabilityOutcome("", True)
+        records = [_record("web_search", True)] * 3 + [_record("web_search", False)]
+        section = module.promptSection(usage_records=records)
+        assert "web_search" in section and "0.75" in section
+
+    def test_promptSection_noRecords_noMeasuredSection(self):
+        module = SelfModelModule(agent_id="t")
+        assert module.promptSection(usage_records=[]) == ""
+
+    def test_promptSection_derivedCoexistsWithDeclared(self):
+        module = SelfModelModule(agent_id="t")
+        module.update_capability("file_write", 0.6)  # 声明能力（profile API 面）
+        records = [_record("web_search", True)]
+        section = module.promptSection(usage_records=records)
+        assert "web_search" in section and "1.00" in section  # 实测派生
+        assert "file_write" in section and "0.60" in section  # 声明保留
+
+    def test_promptSection_recentWindowOnly(self):
+        module = SelfModelModule(agent_id="t")
+        # 22 条失败 + 最近 2 条成功：窗口 20 → 2/20 = 10%
+        records = [_record("t9", False)] * 22 + [_record("t9", True)] * 2
+        section = module.promptSection(usage_records=records)
+        assert "0.10" in section
+
+
+class TestRetiredCapabilityOutcome:
+    """退役钉子：实测置信度独立记账已收口为 tool_memory 派生视图，不得复活。"""
+
+    def test_retired_onModule(self):
+        assert not hasattr(SelfModelModule(agent_id="t"), "recordCapabilityOutcome")
+
+    def test_retired_onManager(self, tmp_path):
+        from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+
+        manager = MemoryManager(agent_id="t", db_path=str(tmp_path / "m.db"))
+        assert not hasattr(manager, "recordCapabilityOutcome")
+
+    def test_toolExecutorNoLongerWritesCapabilityLedger(self, tmp_path):
+        """执行咽喉只喂 tool_memory 一本账，自我模型声明面不被实测污染。"""
+        from types import SimpleNamespace
+
+        from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+        from neurova.tool_executor import ToolExecutor
+
+        manager = MemoryManager(agent_id="t", db_path=str(tmp_path / "m.db"))
+        module = manager._ensure_self_model_module()
+        agent = SimpleNamespace(
+            memory_manager=manager,
+            config=SimpleNamespace(agent_id="t"),
+            _skill_registry=None,
+        )
+        executor = ToolExecutor(agent)
+        executor.on_tool_executed("web_search", {}, "x", True, tool_source="builtin")
+        assert "web_search" not in module._known_capabilities
 
 
 class TestPromptSection:
@@ -81,18 +117,19 @@ class TestManagerWiring:
 
         return MemoryManager(agent_id="t", db_path=str(tmp_path / "mem.db"))
 
-    def test_managerRecordCapabilityOutcomeDelegates(self, tmp_path):
+    def test_selfModelPromptSection_forwardsUsageRecords(self, tmp_path):
         manager = self._manager(tmp_path)
-        manager.recordCapabilityOutcome("file_write", False)
         module = manager._ensure_self_model_module()
-        assert module.get_capability_confidence("file_write") == pytest.approx(0.40)
+        module.update_capability("file_write", 0.6)
+        section = manager.selfModelPromptSection(usage_records=[_record("web_search", True)])
+        assert "web_search" in section and "1.00" in section  # 实测派生透传
+        assert "file_write" in section  # 声明面保留
 
     def test_managerUpdateSelfModelAcceptsApiContract(self, tmp_path):
-        """profile API 以 **updates 展开传参：str 与 list 字段都必须落库不炸。
+        """profile API 以 **updates 展开传参：字段按语义分流落库。
 
-        回归钉子：manager.update_self_model(self, **kwargs) 只认 int/float/str，
-        list 值（values/goals/capabilities/limitations）会被静默丢弃——
-        接线后 list 以逗号 join 进知识域，不再丢字段。
+        capabilities 是能力声明 → 逐项落 _known_capabilities（promptSection
+        "声明能力"段的唯一真实写入源）；values 等偏好清单 → 知识域。
         """
         manager = self._manager(tmp_path)
         assert manager.update_self_model(
@@ -103,7 +140,8 @@ class TestManagerWiring:
         module = manager._ensure_self_model_module()
         assert module.get_expertise("narrative_identity") == pytest.approx(0.5)
         assert module.get_expertise("values") == pytest.approx(0.8)
-        assert module.get_expertise("capabilities") == pytest.approx(0.8)
+        assert module.get_capability_confidence("搜索") == pytest.approx(0.8)
+        assert module.get_capability_confidence("写文件") == pytest.approx(0.8)
 
 
 class _StubDecomposer:

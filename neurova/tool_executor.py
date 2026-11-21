@@ -9464,21 +9464,13 @@ class ToolExecutor:
                 logger.exception("工具记忆记录失败: %s", tool_name)
 
         # 更新工具生命周期 (真实方法是 touch, 不是 update_usage)
+        # 自我模型侧不在此记账：实测能力画像是 tool_memory 逐次记录的派生视图
+        # （单一事实源，见 SelfModelModule.promptSection 的 usage_records 入参）。
         if self.tool_lifecycle and not policy_denial:
             try:
                 self.tool_lifecycle.touch(tool_name, success)
             except Exception:
                 logger.exception("工具生命周期更新失败: %s", tool_name)
-
-        # 自我模型写入面：工具执行成败回写能力置信度。策略拒绝不记
-        # （决策 ≠ 故障，与上方 S2 缺口同口径）；记忆子系统缺席/未启用时静默。
-        if not policy_denial:
-            try:
-                _mm = getattr(self._agent, "memory_manager", None)
-                if _mm is not None and hasattr(_mm, "recordCapabilityOutcome"):
-                    _mm.recordCapabilityOutcome(tool_name, bool(success))
-            except Exception:
-                logger.debug("自我模型能力回写跳过: %s", tool_name, exc_info=True)
 
         # 五段流水线 result 观察者门面（neurova/agent/tool_pipeline）：
         # 默认无观察者注册时 no-op，行为与未接入完全一致（零回归面）。
