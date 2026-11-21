@@ -124,8 +124,19 @@ export struct ChatPage {
   // 蜂群协作图增量信号（车道F）：chat:done（回合终结）自增，触发 SwarmFlowPanel 静默重拉。
   // 移动端 WS 帧型不含 subagent_started/completed（那是 PC /sync 通道词汇），故借道回合终态。
   @State swarmRefreshTick: number = 0;
-  // 会话是否来自列表（可置顶/归档；新会话未落库，操作会 404）
+  // 会话是否来自列表（可置顶/归档；新会话未落库，操作会 404）。
+  // adoptServerSession 采纳服务端铸真的会话 id 后同样置位——语义即「会话已落库」
   private fromList: boolean = false;
+  // ── D3 steady 化：重连/快照重建期间的列表稳态记账 ──
+  // 首连标记：首连的会话历史恢复走进页既有链路（aboutToAppear → loadHistory），
+  // 只有**重连**（含 sync_snapshot_required 弃游标重连）才触发快照重同步，避免进页双拉
+  private hasConnectedOnce: boolean = false;
+  // 重连时有回合在途：此刻不能拿服务端时间线覆盖列表（在途 chunk 尚未落时间线，
+  // 写入会清掉流式占位气泡）——先记账，待回合终态（done/error）后再补快照
+  private pendingSnapshotResync: boolean = false;
+  // 会话快照装载代次：仅最新一次装载可写视图，晚到的旧快照不覆盖新状态。
+  // 页内无 seq/时间戳可判新旧，按事件到达序递增（同 SwarmFlowPanel.fetchSeq 形态）
+  private historyLoadSeq: number = 0;
   // F6 会话抽屉开关（聊天页右上角 ⋯ 呼出，右缘滑出）
   @State drawerOpen: boolean = false;
   // 抽屉会话列表（GET /console/chat/sessions 全量摘要）
@@ -293,12 +304,23 @@ export struct ChatPage {
   /**
    * 拉取会话历史（同源 PC：GET /console/chat/history），{role,content} → ChatMessageView
    * 失败静默（不影响流式输入），toast 提示由 MessageManager 统一
+   *
+   * D3 steady 化：本方法是会话消息列表的「快照装载」入口（进页/切会话/重连重同步共用）。
+   * 装载全程不清空旧行、不进加载态；新快照在末尾经 applyHistorySnapshot 一次性原子替换。
+   * @param scrollToLatest 写入成功后是否滚到底部（重连重同步传 false，避免拽动阅读位置）
+   * @returns 是否真正写入视图（过期装载/取数失败返回 false，调用方据此决定是否补拉）
    */
-  private async loadHistory(): Promise<void> {
+  private async loadHistory(scrollToLatest: boolean = true): Promise<boolean> {
+    // 会话身份与装载代次锚点：装载是异步链路，中途切会话 / 更新装载启动 /
+    // 装载期间开新回合都会使本次结果过期——过期响应一律弃写，不覆盖当前视图
+    // （对齐 SwarmFlowPanel「过期响应不写当前视图」纪律）。
+    const sid = this.sessionId;
+    const loadSeq = ++this.historyLoadSeq;
+    const generatingAtStart = this.isGenerating;
     // 终端侧缓存 + 时间线增量同步：进页先上屏缓存，再只拉未加载的事件
     // （offset=已缓存条数），不再每次全量拉历史。时间线为空的旧会话退回
     // 纯文本历史（那之后产生的回合才有卡片可重放）。
-    const cacheKey = 'chat_tl_cache_' + this.sessionId;
+    const cacheKey = 'chat_tl_cache_' + sid;
     const storage = StorageAdapter.getInstance();
     let views: ChatMessageView[] = [];
     let cachedCount = 0;
@@ -321,7 +343,7 @@ export struct ChatPage {
     let total = cachedCount;
     let timelineOk = false;
     try {
-      const res = await this.api.sessions.timeline(this.sessionId, cachedCount);
+      const res = await this.api.sessions.timeline(sid, cachedCount);
       if (res.code === 0 && res.data) {
         newEvents = res.data.events ?? [];
         total = Number(res.data.total ?? cachedCount);
@@ -331,18 +353,26 @@ export struct ChatPage {
       this.logger.warn(TAG, '时间线增量拉取失败', e as Error);
     }
     if (!timelineOk && views.length === 0) {
-      // 时间线不可用且无缓存：退回纯文本历史（旧会话兼容）
-      await this.loadHistoryTextOnly();
-      return;
+      // 时间线不可用且无缓存：退回纯文本历史（旧会话兼容）；
+      // 文本视图没有事件数可记，不落时间线缓存（防下次增量重算重复）
+      const textViews = await this.fetchHistoryTextOnly(sid);
+      if (textViews === null) {
+        return false;
+      }
+      return await this.applyHistorySnapshot(sid, loadSeq, generatingAtStart,
+        textViews, scrollToLatest, cacheKey, 0, false);
     }
     if (views.length === 0) {
       if (newEvents.length === 0) {
         // 时间线为空（功能上线前的旧会话）：文本历史 + 空缓存
-        await this.loadHistoryTextOnly();
-        await this.persistHistoryCache(cacheKey, 0, this.messages);
-        return;
+        const textViews = await this.fetchHistoryTextOnly(sid);
+        if (textViews === null) {
+          return false;
+        }
+        return await this.applyHistorySnapshot(sid, loadSeq, generatingAtStart,
+          textViews, scrollToLatest, cacheKey, 0, true);
       }
-      const historyViews = await this.fetchHistoryViews();
+      const historyViews = await this.fetchHistoryViews(sid);
       const first = newEvents[0];
       const coversAll = String(first['type'] ?? '') === 'user_message'
         && historyViews.length > 0
@@ -361,23 +391,68 @@ export struct ChatPage {
     } else if (newEvents.length > 0) {
       this.appendEventsToViews(views, newEvents);
     }
-    this.messages = views;
-    this.messagesDs.setData(views);
-    this.scrollToBottom();
-    await this.persistHistoryCache(cacheKey, total, views);
+    return await this.applyHistorySnapshot(sid, loadSeq, generatingAtStart,
+      views, scrollToLatest, cacheKey, total, true);
   }
 
-  /** 旧路径兜底：仅文本历史（无卡片可重放） */
-  private async loadHistoryTextOnly(): Promise<void> {
+  /**
+   * 快照写盘点（D3 steady 化）：先做过期判定，再一次性原子替换。
+   * messages 与 LazyForEach 数据源同批落位，setData 只发一次 onDataReloaded——
+   * 不逐行闪烁；过期装载（会话已切走/有更新装载/装载期间开了新回合）一律弃写，
+   * 已显示的行保持原状（占位气泡等新增量不会被晚到快照覆盖）。
+   */
+  private async applyHistorySnapshot(sid: string, loadSeq: number, generatingAtStart: boolean,
+    views: ChatMessageView[], scrollToLatest: boolean, cacheKey: string,
+    timelineCount: number, persist: boolean): Promise<boolean> {
+    const stale = this.sessionId !== sid || loadSeq !== this.historyLoadSeq
+      || (this.isGenerating && !generatingAtStart);
+    if (stale) {
+      return false;
+    }
+    this.messages = views;
+    this.messagesDs.setData(views);
+    if (scrollToLatest) {
+      this.scrollToBottom();
+    }
+    if (persist) {
+      await this.persistHistoryCache(cacheKey, timelineCount, views);
+    }
+    return true;
+  }
+
+  /**
+   * 旧路径兜底：仅文本历史（无卡片可重放）。
+   * 取数失败返回 null 并保持当前视图（不清空已显示的行）。
+   */
+  private async fetchHistoryTextOnly(sid: string): Promise<ChatMessageView[] | null> {
     try {
-      const res = await this.api.sessions.history(this.sessionId);
+      const res = await this.api.sessions.history(sid);
       if (res.code === 0 && res.data) {
-        this.messages = this.fetchViewsFromHistory(res.data.messages);
-        this.messagesDs.setData(this.messages);
-        this.scrollToBottom();
+        return this.fetchViewsFromHistory(res.data.messages);
       }
     } catch (e) {
       this.logger.warn(TAG, '拉取会话历史失败', e as Error);
+    }
+    return null;
+  }
+
+  /**
+   * 重连后的首屏快照重同步（D3 steady 化）：以服务端时间线为权威快照恢复会话列表。
+   * 装载期间旧行保持已显示状态、成功后一次性原子替换（loadHistory/applyHistorySnapshot 保证）；
+   * 不强制滚动（scrollToLatest=false），内容一致时视觉零扰动。
+   * 未落库的新会话（服务端尚无记录）没有可恢复的快照，直接清账不拉。
+   * 快照写入被更新的增量顶掉（返回 false，如装载期间又开了新回合）时保留记账，
+   * 待下个回合终态再补——直到快照真正落视图才算恢复完成。
+   */
+  private async resyncSessionSnapshot(): Promise<void> {
+    if (!this.fromList) {
+      this.pendingSnapshotResync = false;
+      return;
+    }
+    this.logger.info(TAG, '重连后按服务端时间线重同步会话快照');
+    const wrote = await this.loadHistory(false);
+    if (wrote) {
+      this.pendingSnapshotResync = false;
     }
   }
 
@@ -393,9 +468,10 @@ export struct ChatPage {
     return views;
   }
 
-  private async fetchHistoryViews(): Promise<ChatMessageView[]> {
+  /** 拉纯文本历史视图（旧会话兼容链路用）；会话 id 由调用方锚定，防中途切会话串数据 */
+  private async fetchHistoryViews(sid: string): Promise<ChatMessageView[]> {
     try {
-      const res = await this.api.sessions.history(this.sessionId);
+      const res = await this.api.sessions.history(sid);
       if (res.code === 0 && res.data) {
         return this.fetchViewsFromHistory(res.data.messages);
       }
@@ -678,6 +754,11 @@ export struct ChatPage {
       this.batcher.reset();
       // 会话摘要已变（新会话落库/最新消息预览）——广播列表页刷新（会话与 PC 同源可见）
       this.bus.emit('chat:sessions-changed', '');
+      // D3 steady 化：重连期间在途的回合已收敛——若重连时因正在生成而推迟了
+      // 快照重同步，此刻服务端时间线已含本回合全部事件，补做恢复
+      if (this.pendingSnapshotResync) {
+        this.resyncSessionSnapshot();
+      }
     };
     this.bus.on('chat:done', this.doneHandler);
 
@@ -697,6 +778,10 @@ export struct ChatPage {
         this.messagesDs.setData(this.messages);
       }
       this.logger.error(TAG, '聊天错误', undefined, data);
+      // D3 steady 化：失败也是回合终态——时间线里已提交的事件照常补快照恢复
+      if (this.pendingSnapshotResync) {
+        this.resyncSessionSnapshot();
+      }
     };
     this.bus.on('chat:error', this.errorHandler);
 
@@ -705,12 +790,28 @@ export struct ChatPage {
     // 报 running（其结果帧随后经重放/直播到达）、要么首次真正执行（发送本身
     // 在断线中丢失的情形）。三种走向都收敛到同一个回合，不会二次执行。
     this.connectedHandler = () => {
+      // D3 steady 化：首连的历史恢复已由进页链路（aboutToAppear → loadHistory）
+      // 负责，这里只在**重连**时做首屏快照重同步——含 sync_snapshot_required
+      // 弃游标重连：服务端拒绝按旧游标补拉，断线窗口内丢的帧只能以服务端
+      // 时间线快照整体恢复（chat:done 帧不带全文，重放也补不回丢掉的 chunk）。
+      const firstConnect = !this.hasConnectedOnce;
+      this.hasConnectedOnce = true;
       if (this.inFlightCommandId !== '' && this.inFlightPayload !== '') {
         this.logger.info(TAG, `重连后重发在途指令 ${this.inFlightCommandId}`);
         this.ws.send(this.inFlightPayload).catch((e: Error) => {
           this.logger.warn(TAG, '在途指令重发失败', e);
         });
       }
+      if (firstConnect) {
+        return;
+      }
+      if (this.isGenerating) {
+        // 在途回合不打断：流式占位气泡是最新增量，服务端时间线还没有在途事件，
+        // 此刻快照晚到不得覆盖——记账待回合终态后再恢复
+        this.pendingSnapshotResync = true;
+        return;
+      }
+      this.resyncSessionSnapshot();
     };
     this.bus.on('ws:connected', this.connectedHandler);
 
@@ -1247,6 +1348,8 @@ export struct ChatPage {
   private adoptServerSession(id: string): void {
     if (id.length > 0 && id !== this.sessionId) {
       this.sessionId = id;
+      // 服务端已为该会话铸真记录：视为已落库（可置顶/归档；重连快照重同步也以此为准）
+      this.fromList = true;
       StateManager.getInstance().set('chat:active_session_id', id);
     }
   }

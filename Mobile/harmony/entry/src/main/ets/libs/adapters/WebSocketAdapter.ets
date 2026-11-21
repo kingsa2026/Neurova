@@ -2,7 +2,8 @@
  * WebSocketAdapter - WebSocket 适配层
  *
  * 职责：桥接上层与鸿蒙 @kit.NetworkKit 的 websocket 模块，将底层 WebSocket
- *      事件转译为 EventBus 事件分发；提供断线重连与心跳保活能力
+ *      事件转译为 EventBus 事件分发；提供断线重连与心跳保活能力；
+ *      支持出站账本游标续传（sync_resume）与快照重同步（sync_snapshot_required）
  * 设计：单例模式，纯桥接层，不含业务逻辑；所有消息经 EventBus 统一分发
  *
  * 用法：
@@ -29,7 +30,6 @@ import { webSocket } from '@kit.NetworkKit';
 import { BusinessError } from '@ohos.base';
 import { Logger } from '../logger/Logger';
 import { EventBus } from '../bus/EventBus';
-import { ConfigManager } from '../config/ConfigManager';
 import { AuthStore } from '../state/stores/AuthStore';
 import { ApiFacade } from '../api/ApiFacade';
 import { ErrorManager, ErrorCategory } from '../error/ErrorManager';
@@ -41,8 +41,10 @@ const TAG = 'WebSocketAdapter';
 const HEARTBEAT_INTERVAL = 30000;
 /** 最大重连次数 */
 const MAX_RECONNECT = 10;
-/** 默认重连间隔（毫秒），当 ConfigManager 未配置时使用 */
-const DEFAULT_RECONNECT_INTERVAL = 5000;
+/** 重连退避基数（毫秒）：min(0.5s * 2^n, 30s)，n 从 0 计 */
+const RECONNECT_BASE_MS = 500;
+/** 重连退避上限（毫秒）：封顶在抖动之前生效 */
+const RECONNECT_CAP_MS = 30000;
 /** 心跳消息内容 */
 const HEARTBEAT_MESSAGE = '{"type":"ping"}';
 
@@ -87,11 +89,18 @@ interface SyncResumeRequest {
   last_seq: number;
 }
 
+/** sync_snapshot_required 通告（服务端判定游标不可续传，要求弃游标按快照重同步） */
+interface SyncSnapshotRequiredNotice {
+  type: string;
+  reason?: string;   // 机器可读原因：cursor_pruned / cursor_ahead_of_head / cursor_invalid / no_cursor / budget_exhausted
+  note?: string;     // 服务端诚实标注（供日志与排查）
+  head_seq?: number; // 服务端当前账本头（仅诊断用，不可当本地游标——中间帧本端未收到）
+}
+
 export class WebSocketAdapter {
   private static instance: WebSocketAdapter;
   private logger: Logger = Logger.getInstance();
   private bus: EventBus = EventBus.getInstance();
-  private config: ConfigManager = ConfigManager.getInstance();
   private errorManager: ErrorManager = ErrorManager.getInstance();
   private authStore: AuthStore = new AuthStore();
   private apiFacade: ApiFacade = ApiFacade.getInstance();
@@ -376,6 +385,12 @@ export class WebSocketAdapter {
       this.logger.warn(TAG, '消息缺少 type 字段');
       return;
     }
+    // 服务端快照重同步通告：游标过旧/非法/预算耗尽时增量必不完整——
+    // 立即弃游标并复用既有重连路径，以首屏快照恢复（不做会漏帧的部分重放）
+    if (type === 'sync_snapshot_required') {
+      this.handleSnapshotRequired(raw);
+      return;
+    }
     // 服务端帧带单调 seq（先落账再发送）：推进游标（重放帧按原 seq 计，幂等）
     if (parsed.seq !== undefined && parsed.seq > this.lastServerSeq) {
       this.lastServerSeq = parsed.seq;
@@ -461,6 +476,46 @@ export class WebSocketAdapter {
     });
   }
 
+  /**
+   * 处理 sync_snapshot_required（服务端 → 客户端）：本地游标已不可续传
+   * （过旧被修剪 / 非法 / 重放预算耗尽），服务端拒绝部分重放，要求按快照重同步。
+   *
+   * 端上动作：
+   *   1. lastServerSeq 归零——重连成功后 resumeMissedFrames 不再携带旧游标，
+   *      连接按首连语义以首屏快照恢复（会话历史走既有加载链路）；
+   *   2. 主动关闭当前连接，经 on('close') 复用既有 reauthAndReconnect() 退避重连，
+   *      不另起第二条重连路径。
+   *
+   * 注意：head_seq 只是服务端当前账本头，不能拿来当本地游标——(cursor, head]
+   * 之间的帧本端并未收到，拿它续传正是要避免的漏帧。
+   */
+  private handleSnapshotRequired(raw: string): void {
+    let reason: string = '';
+    let note: string = '';
+    let headSeq: number = 0;
+    try {
+      const notice = JSON.parse(raw) as SyncSnapshotRequiredNotice;
+      reason = notice.reason ?? '';
+      note = notice.note ?? '';
+      headSeq = notice.head_seq ?? 0;
+    } catch (e) {
+      this.logger.warn(TAG, 'sync_snapshot_required 解析失败，按未知原因弃游标重同步', e as Error);
+    }
+    this.logger.info(TAG, `服务端要求快照重同步：弃用本地游标 reason=${reason} head_seq=${headSeq} note=${note}`);
+    // 弃游标：重连后不发 sync_resume，按首连语义走首屏快照恢复
+    this.lastServerSeq = 0;
+    // 复用既有重连流程：主动关闭当前连接，由 on('close') → reauthAndReconnect() 接管
+    if (this.ws) {
+      try {
+        this.ws.close().catch((e: Error) => {
+          this.logger.warn(TAG, '快照重同步关闭旧连接失败（连接可能已断开）', e);
+        });
+      } catch (e) {
+        this.logger.warn(TAG, '快照重同步关闭旧连接异常（连接可能已断开）', e as Error);
+      }
+    }
+  }
+
   // ===========================================================================
   // 心跳保活
   // ===========================================================================
@@ -512,8 +567,8 @@ export class WebSocketAdapter {
       return;
     }
     this.reconnectCount++;
-    const interval: number = this.config.get<number>('ws_reconnect_interval', DEFAULT_RECONNECT_INTERVAL);
-    this.logger.info(TAG, `第 ${this.reconnectCount}/${this.maxReconnect} 次重连，${interval}ms 后尝试`);
+    const delayMs: number = this.nextReconnectDelayMs();
+    this.logger.info(TAG, `第 ${this.reconnectCount}/${this.maxReconnect} 次重连，${Math.round(delayMs)}ms 后尝试`);
 
     this.reconnectTimerId = setTimeout(() => {
       this.reconnectTimerId = -1;
@@ -521,7 +576,20 @@ export class WebSocketAdapter {
         this.logger.error(TAG, '重连失败', e);
         this.tryReconnect();
       });
-    }, interval);
+    }, delayMs);
+  }
+
+  /**
+   * 下次重连退避时延（毫秒）：min(base * 2^n, cap) 后乘 ±20% 抖动。
+   * 语义对齐服务端下发的续传/重连说明（同仓单源）：base 0.5s、指数 2^n、
+   * cap 30s、±20% 抖动、封顶在抖动之前生效（结果至多 cap * 1.2）。
+   * n 从 0 计：首次重连 0.5s 起步（reconnectCount 已先行自增，故取 n = 次数 - 1）。
+   */
+  private nextReconnectDelayMs(): number {
+    const attempt: number = Math.max(0, this.reconnectCount - 1);
+    const cappedMs: number = Math.min(RECONNECT_BASE_MS * Math.pow(2, attempt), RECONNECT_CAP_MS);
+    const jitter: number = 0.8 + Math.random() * 0.4;
+    return cappedMs * jitter;
   }
 
   /** 用长期设备身份换新 ticket 再连；无设备身份（未配对）时按旧 token 直连 */

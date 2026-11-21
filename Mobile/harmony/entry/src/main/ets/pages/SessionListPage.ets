@@ -44,6 +44,9 @@ export struct SessionListPage {
   private sm = StyleManager.getInstance();
   private msg = MessageManager.getInstance();
   private bus = EventBus.getInstance();
+  // 列表装载代次：进页加载与 chat:sessions-changed 事件可能并发触发重载，
+  // 晚到的旧响应不得覆盖新响应（D3 steady 化时序纪律，按事件到达序判新旧）
+  private loadSeq: number = 0;
   /** 聊天回合结束 → 会话摘要（新会话/最新预览）已变，刷新本列表 */
   private sessionsRefreshHandler: EventHandler = () => {
     this.loadSessions();
@@ -99,18 +102,29 @@ export struct SessionListPage {
   }
 
   private async loadSessions(): Promise<void> {
+    // D3 steady 化：重载全程不清空旧行（空态由 !loading 门控），新列表一次性
+    // 原子替换；只有最新一次装载可写视图与 loading，晚到的旧响应整体弃写
+    const loadSeq = ++this.loadSeq;
     this.loading = true;
     try {
       const res = await this.api.sessions.listAll('');
+      if (loadSeq !== this.loadSeq) {
+        return; // 过期响应：已有更新装载接管，弃写
+      }
       if (res.code === 0 && res.data) {
         this.sessions = res.data.sessions;
       } else {
         this.msg.error(res.message || '会话列表获取失败');
       }
     } catch (e) {
+      if (loadSeq !== this.loadSeq) {
+        return; // 过期响应的失败也不抢当前视图
+      }
       this.msg.error('会话列表获取失败：' + (e as Error).message);
     }
-    this.loading = false;
+    if (loadSeq === this.loadSeq) {
+      this.loading = false;
+    }
   }
 
   /** 按筛选 Tab、Agent 下拉与搜索词输出可见列表（置顶优先，其次按更新时间倒序） */

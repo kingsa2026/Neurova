@@ -34,7 +34,6 @@ function buildDefaults(): Map<string, Object> {
   m.set('api_base_url', '');
   m.set('ws_base_url', '');
   m.set('request_timeout', DEFAULT_REQUEST_TIMEOUT_MS);
-  m.set('ws_reconnect_interval', 5000);
   m.set('ws_heartbeat_interval', 30000);
   m.set('app_name', 'Neurova');
   m.set('app_version', '1.0.0');
