@@ -183,7 +183,11 @@ class SelfModelModule:
     def promptSection(self) -> str:
         """生成注入 system 指令的自我模型摘要段（无数据返回空串，零注入）。"""
         with self._lock:
-            if not self._known_capabilities and not self._knowledge_domains:
+            if (
+                not self._known_capabilities
+                and not self._knowledge_domains
+                and not self._assessments
+            ):
                 return ""
             parts = ["[自我模型]"]
             if self._known_capabilities:
@@ -192,6 +196,16 @@ class SelfModelModule:
             if self._knowledge_domains:
                 domains = sorted(self._knowledge_domains.items(), key=lambda x: x[1], reverse=True)
                 parts.append("知识领域: " + ", ".join(f"{d} {v:.2f}" for d, v in domains[:5]))
+            if self._assessments:
+                # 最近一次任务能力自评（assess_task 的反馈面）：模型据此感知
+                # "刚才这类任务的自身能力覆盖度"。只取最近一条，避免历史刷屏。
+                last = self._assessments[-1]
+                parts.append(
+                    "最近任务自评: 覆盖 {:.0%} 置信 {:.2f}".format(
+                        float(last.get("coverage", 0.0)),
+                        float(last.get("confidence", 0.0)),
+                    )
+                )
             return "；".join(parts)
 
     def get_stats(self) -> Dict[str, Any]:

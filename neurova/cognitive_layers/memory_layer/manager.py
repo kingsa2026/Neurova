@@ -4088,6 +4088,14 @@ class MemoryManager:
         """自我模型 prompt 摘要段（委托 SelfModelModule.promptSection，读取面）。"""
         return self._ensure_self_model_module().promptSection()
 
+    def assessTaskCapabilities(self, task: str, requirements: List[str]) -> Dict[str, Any]:
+        """任务能力自评（委托 SelfModelModule.assess_task）。
+
+        消费方：SkillNeedAnalyzer.analyze_and_acquire——任务需求分解出
+        required_skills 后，把"该任务的能力覆盖度/置信度"落进自我模型。
+        """
+        return self._ensure_self_model_module().assess_task(task, requirements)
+
     def update_user_profile(self, **kwargs) -> bool:
         """更新用户画像（委托到 SelfModelModule，无独立用户画像模块时记录到知识领域）"""
         module = self._ensure_self_model_module()

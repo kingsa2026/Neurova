@@ -104,3 +104,92 @@ class TestManagerWiring:
         assert module.get_expertise("narrative_identity") == pytest.approx(0.5)
         assert module.get_expertise("values") == pytest.approx(0.8)
         assert module.get_expertise("capabilities") == pytest.approx(0.8)
+
+
+class _StubDecomposer:
+    """规则可控的任务分解桩：固定 required_skills，不触 LLM/市场。"""
+
+    def __init__(self, skills):
+        self._skills = list(skills)
+
+    def decompose(self, request):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            subtasks=[SimpleNamespace(required_skills=list(self._skills))],
+            required_skills=[],
+        )
+
+
+class _StubRegistry:
+    """已安装判定桩：list_skills 返回 dict 形态（与 registry 契约一致）。"""
+
+    def __init__(self, names):
+        self._names = list(names)
+
+    def list_skills(self):
+        return [{"name": n} for n in self._names]
+
+
+class TestTaskAssessmentWiring:
+    """任务需求分解 → 自我模型任务自评（assess_task 活消费入口）接线判据。"""
+
+    def _analyzer(self, tmp_path, skills, provider):
+        from neurova.skills.skill_need_analyzer import SkillNeedAnalyzer
+
+        manager = TestManagerWiring()._manager(tmp_path)
+        module = manager._ensure_self_model_module()
+        module.update_capability(skills[0], 0.8) if skills else None
+        analyzer = SkillNeedAnalyzer(
+            decomposer=_StubDecomposer(skills),
+            searcher=object(),
+            importer=object(),
+            skill_registry=_StubRegistry(skills),
+            self_model_provider=provider,
+        )
+        return analyzer, manager, module
+
+    def test_analyzeAndAcquire_recordsTaskAssessment(self, tmp_path):
+        analyzer, manager, module = self._analyzer(
+            tmp_path, ["搜索"], lambda: manager.assessTaskCapabilities
+        )
+        result = analyzer.analyze_and_acquire("帮我搜索文件")
+        assert result["can_execute"] is True
+        stats = module.get_stats()
+        assert stats["assessments_count"] == 1
+        assessment = module._assessments[-1]
+        assert assessment["coverage"] == pytest.approx(1.0)
+        assert ("搜索", "搜索", 0.8) in [
+            (req, cap, conf) for req, cap, conf in assessment["capability_matches"]
+        ]
+
+    def test_analyzeAndAcquire_withoutProvider_skipsAssessment(self, tmp_path):
+        analyzer, _manager, module = self._analyzer(tmp_path, ["搜索"], None)
+        result = analyzer.analyze_and_acquire("帮我搜索文件")
+        assert result["can_execute"] is True
+        assert module.get_stats()["assessments_count"] == 0
+
+    def test_analyzeAndAcquire_providerFailure_failSoft(self, tmp_path):
+        def _boom():
+            raise RuntimeError("self model unavailable")
+
+        analyzer, _manager, module = self._analyzer(tmp_path, ["搜索"], _boom)
+        result = analyzer.analyze_and_acquire("帮我搜索文件")
+        assert result["can_execute"] is True
+        assert module.get_stats()["assessments_count"] == 0
+
+    def test_agentSkillManager_forwardsProvider(self):
+        from neurova.skills.agent_skill_manager import AgentSkillManager
+
+        provider = lambda: None  # noqa: E731
+        manager = AgentSkillManager(agent_id="t", self_model_provider=provider)
+        assert manager.analyzer._self_model_provider is provider
+
+    def test_promptSection_includesLatestAssessment(self, tmp_path):
+        manager = TestManagerWiring()._manager(tmp_path)
+        module = manager._ensure_self_model_module()
+        module.update_capability("搜索", 0.8)
+        module.assess_task("帮我搜索文件", ["搜索"])
+        section = module.promptSection()
+        assert "最近任务自评" in section
+        assert "100%" in section and "0.80" in section

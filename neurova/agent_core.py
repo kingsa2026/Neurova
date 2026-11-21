@@ -1547,6 +1547,9 @@ class Agent:
                 agent_id=self.config.agent_id,
                 skill_registry=self._skill_registry,
                 auto_acquire=True,
+                # 任务能力自评读取面：惰性解引用（memory_manager 装配顺序晚于本处），
+                # analyze_and_acquire 每次现取，缺席返回 None 由调用方 fail-soft。
+                self_model_provider=lambda: getattr(self.memory_manager, "assessTaskCapabilities", None),
             )
             logger.info("Agent %s 的 SkillManager 已初始化", self.config.name)
 

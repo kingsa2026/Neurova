@@ -29,6 +29,7 @@ class AgentSkillManager:
         agent_id: str,
         skill_registry=None,
         auto_acquire: bool = True,
+        self_model_provider=None,
     ):
         """
         初始化 AgentSkillManager
@@ -37,7 +38,10 @@ class AgentSkillManager:
             agent_id: Agent ID
             skill_registry: 技能注册表实例
             auto_acquire: 是否自动获取缺失的技能
+            self_model_provider: 惰性取 MemoryManager.assessTaskCapabilities 的 callable
+                （可选；透传给 SkillNeedAnalyzer 做任务能力自评）
         """
+        self.self_model_provider = self_model_provider
         self.agent_id = agent_id
         self.skill_registry = skill_registry
         self.auto_acquire = auto_acquire
@@ -93,7 +97,7 @@ class AgentSkillManager:
         try:
             from neurova.skills.skill_need_analyzer import SkillNeedAnalyzer
             # SkillNeedAnalyzer 只接受 config 参数（不含 skill_registry）
-            return SkillNeedAnalyzer()
+            return SkillNeedAnalyzer(self_model_provider=self.self_model_provider)
         except Exception as e:
             logger.warning("Could not initialize SkillNeedAnalyzer: %s", e)
             return None

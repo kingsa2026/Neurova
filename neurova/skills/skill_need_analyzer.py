@@ -89,6 +89,7 @@ class SkillNeedAnalyzer:
         importer: Optional[Any] = None,
         auto_install: Optional[bool] = None,
         skill_registry: Optional[Any] = None,
+        self_model_provider: Optional[Any] = None,
     ):
         """
         Args:
@@ -98,6 +99,8 @@ class SkillNeedAnalyzer:
             importer: 市场导入器实例（DI；缺省用 SkillService 兜底安装）
             auto_install: 是否自动安装缺失技能；None 时取 config.auto_install（默认 True）
             skill_registry: Agent 技能注册表（可选，用于已安装判定）
+            self_model_provider: 惰性取 MemoryManager.assessTaskCapabilities 的 callable
+                （可选；提供时每次分析把任务能力自评落进自我模型，读取面反馈闭环）
         """
         self.config = config or {}
         self.decomposer = decomposer if decomposer is not None else TaskDecomposer(config=self.config)
@@ -112,6 +115,7 @@ class SkillNeedAnalyzer:
             auto_install if auto_install is not None else bool(self.config.get("auto_install", True))
         )
         self.skill_registry = skill_registry
+        self._self_model_provider = self_model_provider
 
         # 已安装技能缓存
         self._installed_skills: Dict[str, Skill] = {}
@@ -231,6 +235,7 @@ class SkillNeedAnalyzer:
                     fail_count += 1
 
             self._acquisition_history.extend(results)
+            self._recordTaskAssessment(request, required_skills)
             return {
                 "required_skills": required_skills,
                 "missing_skills": missing_skills,
@@ -239,6 +244,22 @@ class SkillNeedAnalyzer:
                 "fail_count": fail_count,
                 "can_execute": len(missing_skills) == 0,
             }
+
+    def _recordTaskAssessment(self, request: str, required_skills: List[str]) -> None:
+        """任务能力自评落自我模型（assess_task 的唯一活消费入口）。
+
+        闭环：任务需求分解的 required_skills → assess_task 覆盖/置信评估 →
+        自我模型历史 + promptSection 最近自评行。provider 惰性解引用
+        （Agent 装配顺序：memory_manager 可能晚于 skill_manager 就绪）；
+        自评失败不阻断技能获取主流程（fail-soft）。
+        """
+        try:
+            assess = self._self_model_provider() if self._self_model_provider else None
+            if assess is None:
+                return
+            assess(request, required_skills)
+        except Exception as e:  # noqa: BLE001 - 自评缺席不阻断技能获取
+            logger.debug("任务能力自评跳过: %s", e)
 
     @staticmethod
     def _collect_required_skills(decomposition: Any) -> List[str]:
