@@ -6,6 +6,32 @@
   供上层按需恢复）、覆盖说明、投递状态与实际成本。
 - 预算：token / byte 双预算，从新到旧整条填充；强制保留最新一轮与最早 user。
 - 诚实失败：窗口放不下交接内容时抛 ContextHandoffBudgetError，禁止静默截断。
+
+五类型 × 本仓编排触发点接线矩阵（B2 多触发点卡的可审计产出；改接线先改此矩阵，
+测试钉子在 tests/unit/agent/test_context_transfer_triggers.py）：
+
+- fork —— 本仓机制：C2 分支派生（continue_subagent mode=fork →
+  NeuacpMemberSurface.fork → spawn 派生新 run，新 member 会话 + resumed_from
+  溯源）。接线决策：已接（B2 多触发点卡）——swarm._updateSubagentInner 的
+  fork 分支在派生前为**已终态**来源 run 构建交接工件（type=fork，登记/预算/
+  inline 投递/context_transfer 事件留痕），随分支任务投递；构建失败诚实降级
+  不阻断 fork。运行中来源无产出可交接，fork 照常（不带工件，如实缺省）。
+- provider_handoff —— 本仓机制：D-B 跨 executor 切换（resumeFinishedRun
+  五结果决策 create_with_handoff / restart_and_resume →
+  NeuacpMemberSurface.handoffArtifact）。接线决策：已接（B2 既有）——工件经
+  本模块 buildHandoff 物化（type=subagent_result 登记），随重开的 member
+  会话任务 inline 投递；断言测试钉住。
+- merge_back —— 本仓机制：候选合入（_submitResultCandidate /
+  _mergeCandidateForRun）。接线决策：如实不接——合入消费的是子 run 全文
+  report（无截断），不存在需要工件化的「先前上下文」；硬套工件不增益，
+  反而多出一处截断面。
+- subagent_spawn —— 本仓机制：普通 spawn 派生。接线决策：如实不接——spawn
+  的任务书本身就是完整上下文，没有「先前上下文」可交接；父侧历史由会话召回
+  既有通道覆盖。
+- subagent_result —— 本仓机制：完成回灌（_uplinkEnvelope + _notifyParentMail，
+  信封带全文 report + transcript 指针，无截断）。接线决策：触发点如实不接——
+  完成信封已带全文，工件不增益；类型枚举本身被 B2 续跑/分支衔接复用
+  （SwarmManager._buildResumeHandoff 以本类型登记），衔接工件即本类型的既有消费点。
 """
 
 from __future__ import annotations

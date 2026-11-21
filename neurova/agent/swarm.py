@@ -2102,9 +2102,24 @@ class SwarmManager:
                 NeuacpMemberSurface,
             )
 
+            # B2 多触发点：fork 派生前把原 run 的任务书+产出经上下文传递工件
+            # 随分支任务投递（同续跑形态：登记/预算/inline 投递/事件留痕，
+            # transfer type 用 fork 语义）。工件需要原 run 已终态的产出
+            # （report）——运行中来源无产出可交接，fork 照常不带工件（不假装
+            # 带了，与 surface.fork「不叫停不改动」既有约束一致）。工件构建
+            # 失败诚实降级不阻断 fork：分支从新会话起步，缺工件如实留痕
+            # （context_transfer_failed），不静默截断也不编造。
+            forkTask = text
+            if run.status in SUBAGENT_FINISHED_STATUSES:
+                handoffText, handoffMeta = self._buildResumeHandoff(
+                    run, transfer_type="fork", intro_label="分支衔接")
+                if handoffText:
+                    forkTask = f"{handoffText}\n\n[分支任务]\n{text}"
+                # handoffMeta.get("failed") 时不阻断：fork 照常派生（失败原因
+                # 已由 _buildResumeHandoff 落 context_transfer_failed 事件）。
             try:
                 forkResult = await NeuacpMemberSurface.forRun(run).fork(
-                    text, background=background)
+                    forkTask, background=background)
             except CapabilityNotDeclared as exc:
                 self._logRunEvent(run, "fork_rejected", {
                     "reason": str(exc)[:EVENT_ERROR_SUMMARY_CHARS]})
@@ -2510,14 +2525,18 @@ class SwarmManager:
         return ("该外部成员执行体能力档不支持续跑（无 session_reuse/resume 声明）"
                 "——请重派全新任务或调整其 executor 配置")
 
-    def _buildResumeHandoff(self, old: SubAgentRun) -> tuple:
-        """B2（参照系 ac 借鉴）：续跑衔接升级为上下文传递工件。
+    def _buildResumeHandoff(self, old: SubAgentRun, *, transfer_type: str = "subagent_result",
+                            intro_label: str = "续跑衔接") -> tuple:
+        """B2（参照系 ac 借鉴）：续跑/分支衔接升级为上下文传递工件。
 
         旧任务书 + 旧产出（report）作为两条历史条目，按预算物化 ContextHandoff
         并 inline 投递（替代旧 report[:4000] 裸截断——预算内完整衔接，省略
         如实记录）。返回 (inline_text, meta)；meta.failed=True 表示构建失败
         （预算不足等），调用方诚实降级（不静默截断）。report 为空 → ("", {})。
         事件留痕：context_transfer / context_transfer_failed 入 H-4 账本。
+
+        transfer_type：登记的传递类型（续跑衔接=subagent_result 缺省；
+        fork 分支衔接传 "fork"）。intro_label：任务书前缀的用途标注。
         """
         report = str(getattr(old, "report", "") or "").strip()
         oldTask = str(getattr(old, "task", "") or "").strip()
@@ -2535,7 +2554,7 @@ class SwarmManager:
 
         transfer = ContextTransfer(
             transfer_id=f"tr_{uuid.uuid4().hex[:12]}",
-            type="subagent_result",
+            type=transfer_type,
             source_point=ContextSourcePoint(
                 thread_id=str(old.member_session_id or old.subagent_id or ""),
                 run_id=str(old.subagent_id or ""),
@@ -2580,7 +2599,7 @@ class SwarmManager:
             "budget_bytes": handoff.budget_bytes,
         })
         return (
-            f"[续跑衔接] 这是上一次执行的产出（{stateLabel}），"
+            f"[{intro_label}] 这是上一次执行的产出（{stateLabel}），"
             f"供你衔接，不要从头重复：\n{prefix}"
         ), {
             "handoff_id": handoff.handoff_id,
