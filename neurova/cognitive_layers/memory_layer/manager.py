@@ -4071,7 +4071,22 @@ class MemoryManager:
                 module.update_capability(key, float(value))
             elif isinstance(value, str):
                 module.update_knowledge(key, 0.5)
+            elif isinstance(value, (list, tuple)):
+                # profile API 契约：values/goals/capabilities/limitations 是列表。
+                # 旧实现两个分支都不匹配 → 字段被静默丢弃；现以逗号 join 进
+                # 知识域（0.8 = 显式声明过的领域），不再丢字段。
+                joined = ", ".join(str(v) for v in value if str(v).strip())
+                if joined:
+                    module.update_knowledge(key, 0.8)
         return True
+
+    def recordCapabilityOutcome(self, capability: str, success: bool) -> None:
+        """按工具执行成败更新能力置信度（委托 SelfModelModule，写入面单点）。"""
+        self._ensure_self_model_module().recordCapabilityOutcome(capability, success)
+
+    def selfModelPromptSection(self) -> str:
+        """自我模型 prompt 摘要段（委托 SelfModelModule.promptSection，读取面）。"""
+        return self._ensure_self_model_module().promptSection()
 
     def update_user_profile(self, **kwargs) -> bool:
         """更新用户画像（委托到 SelfModelModule，无独立用户画像模块时记录到知识领域）"""

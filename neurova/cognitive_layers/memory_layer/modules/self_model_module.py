@@ -66,6 +66,25 @@ class SelfModelModule:
         with self._lock:
             self._known_capabilities[capability] = max(0.0, min(1.0, confidence))
 
+    # 经验式更新步长（写入面口径单源）：单次成功小幅上调，单次失败以更大步长
+    # 下调——失败证据权重高于成功，防止一两次侥幸成功把能力刷满。
+    _SUCCESS_STEP = 0.05
+    _FAILURE_STEP = 0.10
+    _UNKNOWN_CONFIDENCE = 0.5
+
+    def recordCapabilityOutcome(self, capability: str, success: bool) -> None:
+        """按一次真实执行成败更新能力置信度（经验式，非直接赋值）。
+
+        写入面单点：工具执行咽喉（tool_executor）每次执行后调用。
+        未知能力从 0.5 起步（与 get_capability_confidence 的缺省同源）。
+        """
+        if not capability or not str(capability).strip():
+            raise ValueError("capability must not be empty")
+        with self._lock:
+            current = self._known_capabilities.get(capability, self._UNKNOWN_CONFIDENCE)
+            delta = self._SUCCESS_STEP if success else -self._FAILURE_STEP
+            self._known_capabilities[capability] = max(0.0, min(1.0, current + delta))
+
     def get_capability_confidence(self, capability: str) -> float:
         """获取能力置信度"""
         with self._lock:
@@ -160,6 +179,20 @@ class SelfModelModule:
                 parts.append(f"知识领域: {domain_str}")
 
             return "\n".join(parts)
+
+    def promptSection(self) -> str:
+        """生成注入 system 指令的自我模型摘要段（无数据返回空串，零注入）。"""
+        with self._lock:
+            if not self._known_capabilities and not self._knowledge_domains:
+                return ""
+            parts = ["[自我模型]"]
+            if self._known_capabilities:
+                caps = sorted(self._known_capabilities.items(), key=lambda x: x[1], reverse=True)
+                parts.append("能力置信度: " + ", ".join(f"{c} {v:.2f}" for c, v in caps[:5]))
+            if self._knowledge_domains:
+                domains = sorted(self._knowledge_domains.items(), key=lambda x: x[1], reverse=True)
+                parts.append("知识领域: " + ", ".join(f"{d} {v:.2f}" for d, v in domains[:5]))
+            return "；".join(parts)
 
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""

@@ -92,7 +92,9 @@ async def update_self_model(
         if request.preferred_style is not None:
             updates["preferred_style"] = request.preferred_style
 
-        manager.update_self_model(updates)
+        # 修复：manager.update_self_model 签名是 **kwargs，原位置传参
+        # （update_self_model(updates)）必然 TypeError → PUT 500。展开传参。
+        manager.update_self_model(**updates)
         return success_response(
             data={"updated": list(updates.keys())},
             message="自我模型已更新",
