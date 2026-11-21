@@ -1,0 +1,221 @@
+{
+  "fixture_version": 1,
+  "family": "claude-code",
+  "scenario": "handshake",
+  "recorded_at": "2026-11-21T06:33:58.435243+00:00",
+  "command": [
+    "C:\\Program Files\\nodejs\\npx.CMD",
+    "@agentclientprotocol/claude-agent-acp"
+  ],
+  "cwd": "C:\\Users\\xccoo\\AppData\\Local\\Temp\\neuacpRecordCwd-o85wcela",
+  "steps": [
+    {
+      "op": "start",
+      "protocol_version": "1",
+      "client_capabilities": {}
+    },
+    {
+      "op": "sleep",
+      "seconds": 1.5
+    },
+    {
+      "op": "terminate"
+    }
+  ],
+  "frames": [
+    {
+      "seq": 1,
+      "direction": "out",
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": 1,
+          "clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "seq": 2,
+      "direction": "in",
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "protocolVersion": 1,
+          "agentCapabilities": {
+            "_meta": {
+              "claudeCode": {
+                "promptQueueing": true
+              },
+              "authStatus": {}
+            },
+            "promptCapabilities": {
+              "image": true,
+              "embeddedContext": true
+            },
+            "mcpCapabilities": {
+              "http": true,
+              "sse": true,
+              "acp": true
+            },
+            "auth": {
+              "logout": {},
+              "status": {}
+            },
+            "providers": {},
+            "loadSession": true,
+            "sessionCapabilities": {
+              "additionalDirectories": {},
+              "close": {},
+              "delete": {},
+              "fork": {},
+              "list": {},
+              "options": {},
+              "resume": {},
+              "status": {},
+              "systemPrompt": {
+                "mode": {
+                  "override": {}
+                }
+              },
+              "title": {}
+            }
+          },
+          "agentInfo": {
+            "name": "@agentclientprotocol/claude-agent-acp",
+            "title": "Claude Agent",
+            "version": "0.109.0"
+          },
+          "authMethods": [],
+          "_meta": {
+            "steering": {
+              "supported": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "direction": "in",
+      "frame": {
+        "jsonrpc": "2.0",
+        "method": "_auth/status_update",
+        "params": {
+          "authStatus": {
+            "kind": "none",
+            "label": "Not logged in"
+          }
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "direction": "in",
+      "frame": {
+        "jsonrpc": "2.0",
+        "method": "auth/status_update",
+        "params": {
+          "state": "unauthenticated"
+        }
+      }
+    },
+    {
+      "seq": 5,
+      "direction": "observed",
+      "frame": {
+        "type": "exited",
+        "exit_code": 0
+      }
+    }
+  ],
+  "expected": {
+    "steps": [
+      {
+        "op": "start",
+        "ok": true,
+        "handshake": {
+          "protocolVersion": 1,
+          "agentCapabilities": {
+            "_meta": {
+              "claudeCode": {
+                "promptQueueing": true
+              },
+              "authStatus": {}
+            },
+            "promptCapabilities": {
+              "image": true,
+              "embeddedContext": true
+            },
+            "mcpCapabilities": {
+              "http": true,
+              "sse": true,
+              "acp": true
+            },
+            "auth": {
+              "logout": {},
+              "status": {}
+            },
+            "providers": {},
+            "loadSession": true,
+            "sessionCapabilities": {
+              "additionalDirectories": {},
+              "close": {},
+              "delete": {},
+              "fork": {},
+              "list": {},
+              "options": {},
+              "resume": {},
+              "status": {},
+              "systemPrompt": {
+                "mode": {
+                  "override": {}
+                }
+              },
+              "title": {}
+            }
+          },
+          "agentInfo": {
+            "name": "@agentclientprotocol/claude-agent-acp",
+            "title": "Claude Agent",
+            "version": "0.109.0"
+          },
+          "authMethods": [],
+          "_meta": {
+            "steering": {
+              "supported": true
+            }
+          }
+        }
+      },
+      {
+        "op": "sleep",
+        "ok": true,
+        "seconds": 1.5
+      },
+      {
+        "op": "terminate",
+        "ok": true
+      }
+    ],
+    "events": [
+      {
+        "method": "_auth/status_update",
+        "params": {
+          "authStatus": {
+            "kind": "none",
+            "label": "Not logged in"
+          }
+        }
+      },
+      {
+        "method": "auth/status_update",
+        "params": {
+          "state": "unauthenticated"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,646 @@
+{
+  "fixture_version": 1,
+  "family": "opencode",
+  "scenario": "prompt_end_of_turn",
+  "recorded_at": "2026-11-21T06:32:50.406650+00:00",
+  "command": [
+    "C:\\Users\\xccoo\\AppData\\Roaming\\npm\\opencode.CMD",
+    "acp"
+  ],
+  "cwd": "C:\\Users\\xccoo\\AppData\\Local\\Temp\\neuacpRecordCwd-kwo6v4n7",
+  "steps": [
+    {
+      "op": "start",
+      "protocol_version": "1",
+      "client_capabilities": {}
+    },
+    {
+      "op": "request",
+      "method": "session/new",
+      "params": {
+        "cwd": "$cwd",
+        "mcpServers": []
+      },
+      "timeout": 20
+    },
+    {
+      "op": "request",
+      "method": "session/prompt",
+      "params": {
+        "sessionId": "$session_id",
+        "prompt": [
+          {
+            "type": "text",
+            "text": "只回答数字本身：1+1=?"
+          }
+        ]
+      },
+      "timeout": 15
+    },
+    {
+      "op": "terminate"
+    }
+  ],
+  "frames": [
+    {
+      "seq": 1,
+      "direction": "out",
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": 1,
+          "clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "seq": 2,
+      "direction": "in",
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "protocolVersion": 1,
+          "agentCapabilities": {
+            "loadSession": true,
+            "mcpCapabilities": {
+              "http": true,
+              "sse": true
+            },
+            "promptCapabilities": {
+              "embeddedContext": true,
+              "image": true
+            },
+            "sessionCapabilities": {
+              "fork": {},
+              "list": {},
+              "resume": {}
+            }
+          },
+          "authMethods": [
+            {
+              "description": "Run `opencode auth login` in the terminal",
+              "name": "Login with opencode",
+              "id": "opencode-login"
+            }
+          ],
+          "agentInfo": {
+            "name": "OpenCode",
+            "version": "1.2.27"
+          }
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "direction": "out",
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "session/new",
+        "params": {
+          "cwd": "C:\\Users\\xccoo\\AppData\\Local\\Temp\\neuacpRecordCwd-kwo6v4n7",
+          "mcpServers": []
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "direction": "in",
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {
+          "sessionId": "ses_e03317b7affeoJH7MUDubMHMIg",
+          "models": {
+            "currentModelId": "opencode/big-pickle",
+            "availableModels": [
+              {
+                "modelId": "opencode/big-pickle",
+                "name": "OpenCode/Big Pickle"
+              },
+              {
+                "modelId": "opencode/big-pickle/low",
+                "name": "OpenCode/Big Pickle (low)"
+              },
+              {
+                "modelId": "opencode/big-pickle/medium",
+                "name": "OpenCode/Big Pickle (medium)"
+              },
+              {
+                "modelId": "opencode/big-pickle/high",
+                "name": "OpenCode/Big Pickle (high)"
+              },
+              {
+                "modelId": "opencode/tidepool-alpha-free",
+                "name": "OpenCode/Tidepool Alpha Free"
+              },
+              {
+                "modelId": "opencode/tidepool-alpha-free/low",
+                "name": "OpenCode/Tidepool Alpha Free (low)"
+              },
+              {
+                "modelId": "opencode/tidepool-alpha-free/medium",
+                "name": "OpenCode/Tidepool Alpha Free (medium)"
+              },
+              {
+                "modelId": "opencode/tidepool-alpha-free/high",
+                "name": "OpenCode/Tidepool Alpha Free (high)"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-super-vl-free",
+                "name": "OpenCode/Nemotron 3.5 Super VL Free"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-super-vl-free/low",
+                "name": "OpenCode/Nemotron 3.5 Super VL Free (low)"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-super-vl-free/medium",
+                "name": "OpenCode/Nemotron 3.5 Super VL Free (medium)"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-super-vl-free/high",
+                "name": "OpenCode/Nemotron 3.5 Super VL Free (high)"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-lightning-free",
+                "name": "OpenCode/Nemotron 3.5 Lightning Free"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-lightning-free/low",
+                "name": "OpenCode/Nemotron 3.5 Lightning Free (low)"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-lightning-free/medium",
+                "name": "OpenCode/Nemotron 3.5 Lightning Free (medium)"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-lightning-free/high",
+                "name": "OpenCode/Nemotron 3.5 Lightning Free (high)"
+              },
+              {
+                "modelId": "opencode/mimo-v2.6-flash-free",
+                "name": "OpenCode/MiMo-V2.6-Flash Free"
+              },
+              {
+                "modelId": "opencode/mimo-v2.6-flash-free/low",
+                "name": "OpenCode/MiMo-V2.6-Flash Free (low)"
+              },
+              {
+                "modelId": "opencode/mimo-v2.6-flash-free/medium",
+                "name": "OpenCode/MiMo-V2.6-Flash Free (medium)"
+              },
+              {
+                "modelId": "opencode/mimo-v2.6-flash-free/high",
+                "name": "OpenCode/MiMo-V2.6-Flash Free (high)"
+              },
+              {
+                "modelId": "opencode/longcat-2.5-free",
+                "name": "OpenCode/LongCat 2.5 Free"
+              },
+              {
+                "modelId": "opencode/longcat-2.5-free/low",
+                "name": "OpenCode/LongCat 2.5 Free (low)"
+              },
+              {
+                "modelId": "opencode/longcat-2.5-free/medium",
+                "name": "OpenCode/LongCat 2.5 Free (medium)"
+              },
+              {
+                "modelId": "opencode/longcat-2.5-free/high",
+                "name": "OpenCode/LongCat 2.5 Free (high)"
+              },
+              {
+                "modelId": "opencode/iceman-free",
+                "name": "OpenCode/Iceman Free"
+              },
+              {
+                "modelId": "opencode/iceman-free/low",
+                "name": "OpenCode/Iceman Free (low)"
+              },
+              {
+                "modelId": "opencode/iceman-free/medium",
+                "name": "OpenCode/Iceman Free (medium)"
+              },
+              {
+                "modelId": "opencode/iceman-free/high",
+                "name": "OpenCode/Iceman Free (high)"
+              },
+              {
+                "modelId": "opencode/hy4-flash-free",
+                "name": "OpenCode/Hy4 flash Free"
+              },
+              {
+                "modelId": "opencode/hy4-flash-free/low",
+                "name": "OpenCode/Hy4 flash Free (low)"
+              },
+              {
+                "modelId": "opencode/hy4-flash-free/medium",
+                "name": "OpenCode/Hy4 flash Free (medium)"
+              },
+              {
+                "modelId": "opencode/hy4-flash-free/high",
+                "name": "OpenCode/Hy4 flash Free (high)"
+              },
+              {
+                "modelId": "opencode/flint-40b-free",
+                "name": "OpenCode/Flint 40B Free"
+              },
+              {
+                "modelId": "opencode/flint-40b-free/low",
+                "name": "OpenCode/Flint 40B Free (low)"
+              },
+              {
+                "modelId": "opencode/flint-40b-free/medium",
+                "name": "OpenCode/Flint 40B Free (medium)"
+              },
+              {
+                "modelId": "opencode/flint-40b-free/high",
+                "name": "OpenCode/Flint 40B Free (high)"
+              },
+              {
+                "modelId": "opencode/deepseek-v4.1-flash-free",
+                "name": "OpenCode/DeepSeek V4.1 Flash Free"
+              },
+              {
+                "modelId": "opencode/beam-free",
+                "name": "OpenCode/Beam Free"
+              },
+              {
+                "modelId": "opencode/beam-free/low",
+                "name": "OpenCode/Beam Free (low)"
+              },
+              {
+                "modelId": "opencode/beam-free/medium",
+                "name": "OpenCode/Beam Free (medium)"
+              },
+              {
+                "modelId": "opencode/beam-free/high",
+                "name": "OpenCode/Beam Free (high)"
+              }
+            ]
+          },
+          "modes": {
+            "availableModes": [
+              {
+                "id": "build",
+                "name": "build",
+                "description": "The default agent. Executes tools based on configured permissions."
+              },
+              {
+                "id": "plan",
+                "name": "plan",
+                "description": "Plan mode. Disallows all edit tools."
+              }
+            ],
+            "currentModeId": "build"
+          },
+          "_meta": {
+            "opencode": {
+              "modelId": "opencode/big-pickle",
+              "variant": null,
+              "availableVariants": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "seq": 5,
+      "direction": "out",
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "session/prompt",
+        "params": {
+          "sessionId": "ses_e03317b7affeoJH7MUDubMHMIg",
+          "prompt": [
+            {
+              "type": "text",
+              "text": "只回答数字本身：1+1=?"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "seq": 6,
+      "direction": "in",
+      "frame": {
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+          "sessionId": "ses_e03317b7affeoJH7MUDubMHMIg",
+          "update": {
+            "sessionUpdate": "available_commands_update",
+            "availableCommands": [
+              {
+                "name": "init",
+                "description": "create/update AGENTS.md"
+              },
+              {
+                "name": "review",
+                "description": "review changes [commit|branch|pr], defaults to uncommitted"
+              },
+              {
+                "name": "compact",
+                "description": "compact the session"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "seq": 7,
+      "direction": "observed",
+      "frame": {
+        "type": "exited",
+        "exit_code": 0
+      }
+    }
+  ],
+  "expected": {
+    "steps": [
+      {
+        "op": "start",
+        "ok": true,
+        "handshake": {
+          "protocolVersion": 1,
+          "agentCapabilities": {
+            "loadSession": true,
+            "mcpCapabilities": {
+              "http": true,
+              "sse": true
+            },
+            "promptCapabilities": {
+              "embeddedContext": true,
+              "image": true
+            },
+            "sessionCapabilities": {
+              "fork": {},
+              "list": {},
+              "resume": {}
+            }
+          },
+          "authMethods": [
+            {
+              "description": "Run `opencode auth login` in the terminal",
+              "name": "Login with opencode",
+              "id": "opencode-login"
+            }
+          ],
+          "agentInfo": {
+            "name": "OpenCode",
+            "version": "1.2.27"
+          }
+        }
+      },
+      {
+        "op": "request",
+        "ok": true,
+        "method": "session/new",
+        "result": {
+          "sessionId": "ses_e03317b7affeoJH7MUDubMHMIg",
+          "models": {
+            "currentModelId": "opencode/big-pickle",
+            "availableModels": [
+              {
+                "modelId": "opencode/big-pickle",
+                "name": "OpenCode/Big Pickle"
+              },
+              {
+                "modelId": "opencode/big-pickle/low",
+                "name": "OpenCode/Big Pickle (low)"
+              },
+              {
+                "modelId": "opencode/big-pickle/medium",
+                "name": "OpenCode/Big Pickle (medium)"
+              },
+              {
+                "modelId": "opencode/big-pickle/high",
+                "name": "OpenCode/Big Pickle (high)"
+              },
+              {
+                "modelId": "opencode/tidepool-alpha-free",
+                "name": "OpenCode/Tidepool Alpha Free"
+              },
+              {
+                "modelId": "opencode/tidepool-alpha-free/low",
+                "name": "OpenCode/Tidepool Alpha Free (low)"
+              },
+              {
+                "modelId": "opencode/tidepool-alpha-free/medium",
+                "name": "OpenCode/Tidepool Alpha Free (medium)"
+              },
+              {
+                "modelId": "opencode/tidepool-alpha-free/high",
+                "name": "OpenCode/Tidepool Alpha Free (high)"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-super-vl-free",
+                "name": "OpenCode/Nemotron 3.5 Super VL Free"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-super-vl-free/low",
+                "name": "OpenCode/Nemotron 3.5 Super VL Free (low)"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-super-vl-free/medium",
+                "name": "OpenCode/Nemotron 3.5 Super VL Free (medium)"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-super-vl-free/high",
+                "name": "OpenCode/Nemotron 3.5 Super VL Free (high)"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-lightning-free",
+                "name": "OpenCode/Nemotron 3.5 Lightning Free"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-lightning-free/low",
+                "name": "OpenCode/Nemotron 3.5 Lightning Free (low)"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-lightning-free/medium",
+                "name": "OpenCode/Nemotron 3.5 Lightning Free (medium)"
+              },
+              {
+                "modelId": "opencode/nemotron-3.5-lightning-free/high",
+                "name": "OpenCode/Nemotron 3.5 Lightning Free (high)"
+              },
+              {
+                "modelId": "opencode/mimo-v2.6-flash-free",
+                "name": "OpenCode/MiMo-V2.6-Flash Free"
+              },
+              {
+                "modelId": "opencode/mimo-v2.6-flash-free/low",
+                "name": "OpenCode/MiMo-V2.6-Flash Free (low)"
+              },
+              {
+                "modelId": "opencode/mimo-v2.6-flash-free/medium",
+                "name": "OpenCode/MiMo-V2.6-Flash Free (medium)"
+              },
+              {
+                "modelId": "opencode/mimo-v2.6-flash-free/high",
+                "name": "OpenCode/MiMo-V2.6-Flash Free (high)"
+              },
+              {
+                "modelId": "opencode/longcat-2.5-free",
+                "name": "OpenCode/LongCat 2.5 Free"
+              },
+              {
+                "modelId": "opencode/longcat-2.5-free/low",
+                "name": "OpenCode/LongCat 2.5 Free (low)"
+              },
+              {
+                "modelId": "opencode/longcat-2.5-free/medium",
+                "name": "OpenCode/LongCat 2.5 Free (medium)"
+              },
+              {
+                "modelId": "opencode/longcat-2.5-free/high",
+                "name": "OpenCode/LongCat 2.5 Free (high)"
+              },
+              {
+                "modelId": "opencode/iceman-free",
+                "name": "OpenCode/Iceman Free"
+              },
+              {
+                "modelId": "opencode/iceman-free/low",
+                "name": "OpenCode/Iceman Free (low)"
+              },
+              {
+                "modelId": "opencode/iceman-free/medium",
+                "name": "OpenCode/Iceman Free (medium)"
+              },
+              {
+                "modelId": "opencode/iceman-free/high",
+                "name": "OpenCode/Iceman Free (high)"
+              },
+              {
+                "modelId": "opencode/hy4-flash-free",
+                "name": "OpenCode/Hy4 flash Free"
+              },
+              {
+                "modelId": "opencode/hy4-flash-free/low",
+                "name": "OpenCode/Hy4 flash Free (low)"
+              },
+              {
+                "modelId": "opencode/hy4-flash-free/medium",
+                "name": "OpenCode/Hy4 flash Free (medium)"
+              },
+              {
+                "modelId": "opencode/hy4-flash-free/high",
+                "name": "OpenCode/Hy4 flash Free (high)"
+              },
+              {
+                "modelId": "opencode/flint-40b-free",
+                "name": "OpenCode/Flint 40B Free"
+              },
+              {
+                "modelId": "opencode/flint-40b-free/low",
+                "name": "OpenCode/Flint 40B Free (low)"
+              },
+              {
+                "modelId": "opencode/flint-40b-free/medium",
+                "name": "OpenCode/Flint 40B Free (medium)"
+              },
+              {
+                "modelId": "opencode/flint-40b-free/high",
+                "name": "OpenCode/Flint 40B Free (high)"
+              },
+              {
+                "modelId": "opencode/deepseek-v4.1-flash-free",
+                "name": "OpenCode/DeepSeek V4.1 Flash Free"
+              },
+              {
+                "modelId": "opencode/beam-free",
+                "name": "OpenCode/Beam Free"
+              },
+              {
+                "modelId": "opencode/beam-free/low",
+                "name": "OpenCode/Beam Free (low)"
+              },
+              {
+                "modelId": "opencode/beam-free/medium",
+                "name": "OpenCode/Beam Free (medium)"
+              },
+              {
+                "modelId": "opencode/beam-free/high",
+                "name": "OpenCode/Beam Free (high)"
+              }
+            ]
+          },
+          "modes": {
+            "availableModes": [
+              {
+                "id": "build",
+                "name": "build",
+                "description": "The default agent. Executes tools based on configured permissions."
+              },
+              {
+                "id": "plan",
+                "name": "plan",
+                "description": "Plan mode. Disallows all edit tools."
+              }
+            ],
+            "currentModeId": "build"
+          },
+          "_meta": {
+            "opencode": {
+              "modelId": "opencode/big-pickle",
+              "variant": null,
+              "availableVariants": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "op": "request",
+        "ok": false,
+        "error_class": "NeuacpTimeoutError",
+        "error_contains": "ACP request timeout: session/prompt（重试次数用尽（1/1））"
+      },
+      {
+        "op": "terminate",
+        "ok": true
+      }
+    ],
+    "events": [
+      {
+        "method": "session/update",
+        "params": {
+          "sessionId": "ses_e03317b7affeoJH7MUDubMHMIg",
+          "update": {
+            "sessionUpdate": "available_commands_update",
+            "availableCommands": [
+              {
+                "name": "init",
+                "description": "create/update AGENTS.md"
+              },
+              {
+                "name": "review",
+                "description": "review changes [commit|branch|pr], defaults to uncommitted"
+              },
+              {
+                "name": "compact",
+                "description": "compact the session"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

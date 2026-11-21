@@ -1,0 +1,134 @@
+{
+  "fixture_version": 1,
+  "family": "opencode",
+  "scenario": "handshake",
+  "recorded_at": "2026-11-21T06:33:52.147978+00:00",
+  "command": [
+    "C:\\Users\\xccoo\\AppData\\Roaming\\npm\\opencode.CMD",
+    "acp"
+  ],
+  "cwd": "C:\\Users\\xccoo\\AppData\\Local\\Temp\\neuacpRecordCwd-xj3z7flt",
+  "steps": [
+    {
+      "op": "start",
+      "protocol_version": "1",
+      "client_capabilities": {}
+    },
+    {
+      "op": "sleep",
+      "seconds": 1.5
+    },
+    {
+      "op": "terminate"
+    }
+  ],
+  "frames": [
+    {
+      "seq": 1,
+      "direction": "out",
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": 1,
+          "clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "seq": 2,
+      "direction": "in",
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "protocolVersion": 1,
+          "agentCapabilities": {
+            "loadSession": true,
+            "mcpCapabilities": {
+              "http": true,
+              "sse": true
+            },
+            "promptCapabilities": {
+              "embeddedContext": true,
+              "image": true
+            },
+            "sessionCapabilities": {
+              "fork": {},
+              "list": {},
+              "resume": {}
+            }
+          },
+          "authMethods": [
+            {
+              "description": "Run `opencode auth login` in the terminal",
+              "name": "Login with opencode",
+              "id": "opencode-login"
+            }
+          ],
+          "agentInfo": {
+            "name": "OpenCode",
+            "version": "1.2.27"
+          }
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "direction": "observed",
+      "frame": {
+        "type": "exited",
+        "exit_code": 0
+      }
+    }
+  ],
+  "expected": {
+    "steps": [
+      {
+        "op": "start",
+        "ok": true,
+        "handshake": {
+          "protocolVersion": 1,
+          "agentCapabilities": {
+            "loadSession": true,
+            "mcpCapabilities": {
+              "http": true,
+              "sse": true
+            },
+            "promptCapabilities": {
+              "embeddedContext": true,
+              "image": true
+            },
+            "sessionCapabilities": {
+              "fork": {},
+              "list": {},
+              "resume": {}
+            }
+          },
+          "authMethods": [
+            {
+              "description": "Run `opencode auth login` in the terminal",
+              "name": "Login with opencode",
+              "id": "opencode-login"
+            }
+          ],
+          "agentInfo": {
+            "name": "OpenCode",
+            "version": "1.2.27"
+          }
+        }
+      },
+      {
+        "op": "sleep",
+        "ok": true,
+        "seconds": 1.5
+      },
+      {
+        "op": "terminate",
+        "ok": true
+      }
+    ],
+    "events": []
+  }
+}

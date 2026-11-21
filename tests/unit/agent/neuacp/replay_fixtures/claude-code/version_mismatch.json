@@ -1,0 +1,110 @@
+{
+  "fixture_version": 1,
+  "family": "claude-code",
+  "scenario": "version_mismatch",
+  "recorded_at": "2026-11-21T06:34:11.732358+00:00",
+  "command": [
+    "C:\\Program Files\\nodejs\\npx.CMD",
+    "@agentclientprotocol/claude-agent-acp"
+  ],
+  "cwd": "C:\\Users\\xccoo\\AppData\\Local\\Temp\\neuacpRecordCwd-qkzywt_b",
+  "steps": [
+    {
+      "op": "start",
+      "protocol_version": "99",
+      "client_capabilities": {}
+    },
+    {
+      "op": "terminate"
+    }
+  ],
+  "frames": [
+    {
+      "seq": 1,
+      "direction": "out",
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": 99,
+          "clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "seq": 2,
+      "direction": "in",
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "protocolVersion": 2,
+          "info": {
+            "name": "@agentclientprotocol/claude-agent-acp",
+            "title": "Claude Agent",
+            "version": "0.109.0"
+          },
+          "capabilities": {
+            "session": {
+              "prompt": {
+                "image": {},
+                "embeddedContext": {}
+              },
+              "mcp": {
+                "stdio": {},
+                "http": {},
+                "acp": {}
+              },
+              "delete": {},
+              "fork": {},
+              "additionalDirectories": {},
+              "systemPrompt": {
+                "mode": {
+                  "override": {}
+                }
+              },
+              "status": {},
+              "options": {},
+              "title": {}
+            },
+            "providers": {},
+            "auth": {
+              "status": {}
+            },
+            "_meta": {
+              "claudeCode": {
+                "promptQueueing": true
+              },
+              "authStatus": {}
+            }
+          },
+          "authMethods": []
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "direction": "observed",
+      "frame": {
+        "type": "exited",
+        "exit_code": 0
+      }
+    }
+  ],
+  "expected": {
+    "steps": [
+      {
+        "op": "start",
+        "ok": false,
+        "error_class": "NeuacpProtocolError",
+        "error_contains": "ACP 版本协商失败: 期望 99，实际 2"
+      },
+      {
+        "op": "terminate",
+        "ok": true
+      }
+    ],
+    "events": []
+  }
+}

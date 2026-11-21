@@ -1,0 +1,212 @@
+{
+  "fixture_version": 1,
+  "family": "codex",
+  "scenario": "handshake",
+  "recorded_at": "2026-11-21T06:34:04.674886+00:00",
+  "command": [
+    "C:\\Program Files\\nodejs\\npx.CMD",
+    "@agentclientprotocol/codex-acp"
+  ],
+  "cwd": "C:\\Users\\xccoo\\AppData\\Local\\Temp\\neuacpRecordCwd-zfwkha31",
+  "steps": [
+    {
+      "op": "start",
+      "protocol_version": "1",
+      "client_capabilities": {}
+    },
+    {
+      "op": "sleep",
+      "seconds": 1.5
+    },
+    {
+      "op": "terminate"
+    }
+  ],
+  "frames": [
+    {
+      "seq": 1,
+      "direction": "out",
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": 1,
+          "clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "seq": 2,
+      "direction": "in",
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "protocolVersion": 1,
+          "agentInfo": {
+            "name": "@agentclientprotocol/codex-acp",
+            "title": "Codex",
+            "version": "2.8.0"
+          },
+          "agentCapabilities": {
+            "auth": {
+              "logout": {}
+            },
+            "providers": {},
+            "loadSession": true,
+            "promptCapabilities": {
+              "embeddedContext": true,
+              "image": true
+            },
+            "sessionCapabilities": {
+              "resume": {},
+              "list": {},
+              "close": {},
+              "delete": {},
+              "fork": {},
+              "title": {},
+              "additionalDirectories": {},
+              "systemPrompt": {}
+            },
+            "mcpCapabilities": {
+              "acp": true,
+              "http": true,
+              "sse": false
+            },
+            "_meta": {
+              "authStatus": {}
+            }
+          },
+          "authMethods": [
+            {
+              "id": "api-key",
+              "name": "API Key",
+              "description": "Use an API key to authenticate",
+              "_meta": {
+                "api-key": "[redacted]"
+              }
+            },
+            {
+              "id": "chat-gpt",
+              "name": "ChatGPT",
+              "description": "Use ChatGPT to authenticate"
+            }
+          ],
+          "_meta": {
+            "steering": {
+              "supported": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "direction": "in",
+      "frame": {
+        "jsonrpc": "2.0",
+        "method": "_auth/status_update",
+        "params": {
+          "authStatus": {
+            "kind": "none",
+            "label": "Not logged in"
+          }
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "direction": "observed",
+      "frame": {
+        "type": "exited",
+        "exit_code": 1
+      }
+    }
+  ],
+  "expected": {
+    "steps": [
+      {
+        "op": "start",
+        "ok": true,
+        "handshake": {
+          "protocolVersion": 1,
+          "agentInfo": {
+            "name": "@agentclientprotocol/codex-acp",
+            "title": "Codex",
+            "version": "2.8.0"
+          },
+          "agentCapabilities": {
+            "auth": {
+              "logout": {}
+            },
+            "providers": {},
+            "loadSession": true,
+            "promptCapabilities": {
+              "embeddedContext": true,
+              "image": true
+            },
+            "sessionCapabilities": {
+              "resume": {},
+              "list": {},
+              "close": {},
+              "delete": {},
+              "fork": {},
+              "title": {},
+              "additionalDirectories": {},
+              "systemPrompt": {}
+            },
+            "mcpCapabilities": {
+              "acp": true,
+              "http": true,
+              "sse": false
+            },
+            "_meta": {
+              "authStatus": {}
+            }
+          },
+          "authMethods": [
+            {
+              "id": "api-key",
+              "name": "API Key",
+              "description": "Use an API key to authenticate",
+              "_meta": {
+                "api-key": "[redacted]"
+              }
+            },
+            {
+              "id": "chat-gpt",
+              "name": "ChatGPT",
+              "description": "Use ChatGPT to authenticate"
+            }
+          ],
+          "_meta": {
+            "steering": {
+              "supported": true
+            }
+          }
+        }
+      },
+      {
+        "op": "sleep",
+        "ok": true,
+        "seconds": 1.5
+      },
+      {
+        "op": "terminate",
+        "ok": true
+      }
+    ],
+    "events": [
+      {
+        "method": "_auth/status_update",
+        "params": {
+          "authStatus": {
+            "kind": "none",
+            "label": "Not logged in"
+          }
+        }
+      }
+    ]
+  }
+}
