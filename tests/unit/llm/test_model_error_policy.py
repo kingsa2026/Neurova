@@ -5,10 +5,14 @@ providers/model_error_policy.py 与 model_capability_cache.py）。
 锁定契约：
 1. classify_model_error 八类：authentication / bad_request / context_overflow /
    content_safety / model_not_found / rate_limited / transient / unknown。
-2. 回退资格：仅 rate_limited / transient / model_not_found 允许跨模型回退——
-   auth/bad_request/context_overflow/content_safety 换模型无意义，不回退。
-3. MultiModelClient：transient（超时/连接/5xx）必须触发 auto failover
-   （旧行为只认 rate_limit/not_found，网络抖动整轮失败）。
+2. 回退资格（R1 契约变更 2026-11-22，语义表单源
+   neurova.llm.routing.error_policy）：rate_limited / transient（含
+   408/409/423/425 网关态）/ model_not_found / authentication 可跨模型回退
+   ——旧约"auth 不回退"的理由"换模型同样 401"只在单 provider 内成立，
+   多服务商各持独立 key 时换家能真解决 key 失效；bad_request /
+   context_overflow / content_safety 仍不回退。
+3. MultiModelClient：transient（超时/连接/5xx）必须触发 auto failover；
+   auth（401/403）同样触发（R1 契约变更）。
 4. ModelCapabilityCache：learn/get/forget/clear + TTL 过期。
 """
 from __future__ import annotations
@@ -21,10 +25,18 @@ from neurova.llm.model_error_policy import classify_model_error
 
 
 class TestClassifyModelError:
-    def test_authentication_401_not_fallback_eligible(self):
+    def test_authentication_401_fallback_eligible(self):
+        """R1 契约变更：auth 可回退（多服务商独立 key，换家能解 key 失效）。"""
         d = classify_model_error("Error code: 401 - invalid api key")
         assert d.kind == "authentication"
-        assert d.fallback_eligible is False
+        assert d.fallback_eligible is True
+
+    def test_gateway_transient_states_fallback_eligible(self):
+        """R1：408/409/423/425 由 bad_request（不切）改 transient（可切）。"""
+        for code in (408, 409, 423, 425):
+            d = classify_model_error(f"Error code: {code} - transient gateway state")
+            assert d.kind == "transient", code
+            assert d.fallback_eligible is True, code
 
     def test_model_not_found_fallback_eligible(self):
         d = classify_model_error("Error code: 404 - model gpt-x does not exist")
@@ -125,14 +137,16 @@ class TestMultiModelClientFailoverGate:
 
         asyncio.run(scenario())
 
-    def test_auth_error_does_not_failover(self):
+    def test_auth_error_fails_over(self):
+        """R1 契约变更：auth（401）现在触发跨服务商回退（独立 key 换家可解）。"""
         client = self._make_client()
         calls = self._wire_two_models(client, ["Error code: 401 - invalid api key"])
 
         async def scenario():
             result = await client.chat([{"role": "user", "content": "hi"}])
-            assert result.get("success") is False
-            assert calls["n"] == 1  # 没有切模型
+            assert result.get("success") is True
+            assert result.get("model") == "second"
+            assert calls["n"] == 1  # first 失败一次后切 second
 
         asyncio.run(scenario())
 

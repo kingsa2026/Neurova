@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """模型错误分类单源。
 
-retry / 健康检查 / 跨模型回退共用一套分类。回退资格：仅 rate_limited /
-transient / model_not_found 允许切换下一模型——authentication（换模型同样
-401）、bad_request（请求本身有问题）、context_overflow、content_safety
-换模型无意义或不应静默换。
+retry / 健康检查 / 跨模型回退共用一套分类。回退资格（fallback_eligible）
+的语义表单源在 neurova.llm.routing.error_policy（R1，2026-11-22 契约变更：
+authentication 由「不回退」改「可回退」——多服务商各持独立 key 时换家能
+真解决 key 失效；旧理由"换模型同样 401"只在单 provider 内成立）：
+rate_limited（先原地重试）/ transient（含 408/409/423/425 网关态）/
+model_not_found / authentication 可回退；bad_request / context_overflow /
+content_safety / unknown 就此打住。
 
 输入兼容 Exception 与字符串（multi_model_client 两种形态都有）。
 """
@@ -15,7 +18,11 @@ import re
 from dataclasses import dataclass
 from typing import Optional, Union
 
-RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504, 529})
+#: 值得"再试一次"的 HTTP 状态（跨模型回退与同模型重试共用的底集）。
+#: 2026-11-22（R1，对齐参照系 ad 语义）：纳入 408（请求超时）与
+#: 409/423/425（冲突/锁定/太早——换一个服务商/渠道即可活的网关态）；
+#: 旧集只认 429/5xx，这四类被误归 bad_request 就此打住。
+RETRYABLE_STATUS_CODES = frozenset({429, 408, 409, 423, 425, 500, 502, 503, 504, 529})
 
 ModelErrorKind = str
 
@@ -114,7 +121,11 @@ def classify_model_error(error: Union[BaseException, str]) -> ModelErrorDecision
         kind = "unknown"
 
     retryable = kind in {"rate_limited", "transient"}
-    fallback_eligible = retryable or kind == "model_not_found"
+    # 回退资格语义表单源在 neurova.llm.routing.error_policy（R1）；此处延迟
+    # 导入（打破包初始化环），保证两条消费路径读到同一张表（教义第 6 条）。
+    from neurova.llm.routing.error_policy import FALLBACK_ELIGIBLE_KINDS
+
+    fallback_eligible = kind in FALLBACK_ELIGIBLE_KINDS
     return ModelErrorDecision(
         kind=kind,
         status_code=status,

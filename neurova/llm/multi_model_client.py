@@ -777,12 +777,26 @@ class MultiModelLLMClient:
 
         # auto failover：仅未显式指定 provider 时启用（显式指定尊重用户选择，不静默切换）
         # 2026-09-07 根因修复（audit P2-12A）：排除集原挂全局单例，并发请求互踩
-        # （A 已失败模型被 B 重试/B 继承 A 排除集提前无候选）；改请求局部变量
+        # （A 已失败模型被 B 重试/B 继承 A 排除集提前无候选）；改请求局部变量。
+        # R1（2026-11-22）：排除集存 provider/model 复合键（同名模型跨服务商
+        # 互不顶掉）；可尝试次数以「已配置的 enabled+keyed 服务商模型数」托底
+        # （懒建候选后，可切空间大于已初始化的 _clients）。
         failover_excluded: set = set()
-        # auto failover：仅未显式指定 provider 时启用（显式指定尊重用户选择，不静默切换）
         auto_failover = not provider_id
+        try:
+            configured_pairs = sum(
+                max(1, len(p.models or []))
+                for p in self._provider_manager.list_providers(enabled_only=True)
+                if p.api_key
+            )
+        except Exception:  # noqa: BLE001 — 目录不可用退回 _clients 口径
+            configured_pairs = 0
         # __new__ 最小注入的测试实例可能不带 _clients，防御性读取
-        max_attempts = max(1, len(getattr(self, "_clients", {}) or {})) if auto_failover else 1
+        max_attempts = (
+            max(1, len(getattr(self, "_clients", {}) or {}), configured_pairs)
+            if auto_failover
+            else 1
+        )
 
         client = self._get_client_for_request(model, provider_id)
         last_result: Dict[str, Any] = {"success": False, "error": "No client available"}
@@ -799,9 +813,10 @@ class MultiModelLLMClient:
             if result.get("success"):
                 return result
             last_result = result
-            # B1-2 回退资格单源：仅 rate_limited/transient/model_not_found 触发
-            # 跨模型切换（transient 旧版缺失——网络抖动/超时/5xx 整轮失败）；
-            # 认证/参数/上下文溢出/内容安全换模型无意义，不切换
+            # R1 回退资格单源：语义表在 neurova.llm.routing.error_policy
+            # （rate_limited/transient〔含 408/409/423/425 网关态〕/
+            # model_not_found/authentication 可切；参数/上下文溢出/内容安全/
+            # 余额不足就此打住）。2026-11-22 契约变更：auth 由不切改可切。
             error_kind = self._classify_error(result.get("error") or "")
 # 429 先同模型等待重试（默认 ≤10 次、间隔
 # 20s、单次封顶 120s、整条请求累计封顶 wait_budget；非流式信封不携带 Retry-After 头，
@@ -834,7 +849,11 @@ class MultiModelLLMClient:
                     if self._classify_error(result.get("error") or "") != "rate_limited":
                         break
                 error_kind = self._classify_error(last_result.get("error") or "")
-            from neurova.llm.model_error_policy import is_fallback_eligible
+            # R1（参照系 ad 追平）：回退资格读路由语义表单源
+            # （neurova.llm.routing.error_policy）——auth/408/409/423/425 的
+            # 契约变更见该模块 docstring；429 先同模型等待重试（下方分支），
+            # 预算耗尽后同样放行切换。
+            from neurova.llm.routing.error_policy import is_fallback_eligible
 
             if not auto_failover or not is_fallback_eligible(result.get("error") or ""):
                 return result
@@ -842,8 +861,8 @@ class MultiModelLLMClient:
                 "auto 切换：%s/%s 失败（%s），尝试下一可用候选",
                 client.provider.id, client.model, error_kind,
             )
-            failover_excluded.add(client.model)
-            client = self._next_failover_client(client.model, failover_excluded)
+            failover_excluded.add(f"{client.provider.id}/{client.model}")
+            client = self._next_failover_client(client, failover_excluded)
         return last_result
 
     async def _chat_single_attempt(
@@ -1476,14 +1495,18 @@ class MultiModelLLMClient:
                         yielded_any = False
                         continue
                 fail_count += 1  # 本模型被放弃，计入连续失败链
+                # R1：切换资格读路由语义表单源（与 chat() 同一张表，原此处
+                # 硬编码三类 kind 元组，语义漂移隐患——教义第 5/6 条扫荡）。
+                from neurova.llm.routing.error_policy import is_fallback_eligible
+
                 if (
-                    error_kind in ("rate_limited", "transient", "model_not_found")
+                    is_fallback_eligible(e)
                     and fail_count < cfg["max_switches"]
                 ):
-                    nxt = self._next_failover_client(client.model, switched_models)
+                    nxt = self._next_failover_client(client, switched_models)
                     if nxt is not None:
                         switch_count += 1
-                        switched_models.add(client.model or "unknown")
+                        switched_models.add(f"{client.provider.id}/{client.model}")
                         payload = dict(
                             phase="switched", fail_count=fail_count,
                             max_switches=cfg["max_switches"], switch_count=switch_count,
@@ -1511,19 +1534,21 @@ class MultiModelLLMClient:
                 yield _instream_error_dict(e)
                 return
 
-    def _next_failover_client(self, failed_model: Optional[str], excluded: Optional[set] = None) -> Optional[ModelClient]:
-        """auto 失败切换：返回排除已失败模型后的下一候选（None=无候选）。
+    def _next_failover_client(self, failed_client: Optional[ModelClient], excluded: Optional[set] = None) -> Optional[ModelClient]:
+        """auto 失败切换：返回排除已试过 (provider, model) 后的下一候选（None=无候选）。
 
         2026-09-07：排除集改请求局部（调用方持有并累积），不再挂全局单例。
+        R1（2026-11-22）：排除集从「模型名」改为「provider/model 复合键」——
+        两服务商配同名模型时，按模型名排除会把还没试过的候选也顶掉。
         """
         exclude = set(excluded or set())
-        if failed_model:
-            exclude.add(failed_model)
-        return self._resolve_available_fallback(exclude_models=exclude)
+        if failed_client is not None:
+            exclude.add(f"{failed_client.provider.id}/{failed_client.model}")
+        return self._resolve_available_fallback(exclude_keys=exclude)
 
     def _resolve_available_fallback(
         self,
-        exclude_models: Optional[set] = None,
+        exclude_keys: Optional[set] = None,
     ) -> Optional[ModelClient]:
         """请求的 provider/model 不可用时的兜底客户端。
 
@@ -1533,7 +1558,8 @@ class MultiModelLLMClient:
         2. _clients 为空（冷启动或初始化失败）→ 触发 refresh_all_providers() 自愈，
            重建所有 enabled + 有 key 的服务商客户端后再取。
 
-        ``exclude_models``：auto 失败切换时排除已失败模型（同能力下一候选）。
+        ``exclude_keys``：auto 失败切换时排除的 provider/model 复合键
+        （R1：原为模型名，同名模型跨服务商会被误排除）。
 
         根因背景：默认服务商（如 sensetime，优先级最高）可能没有 api_key，
         而其他有效服务商（如 b.ai）反而有 key；若严格按请求的 provider/model
@@ -1544,11 +1570,32 @@ class MultiModelLLMClient:
         current_provider_id = getattr(self, "_current_provider_id", None)
         current_model = getattr(self, "_current_model", None)
 
-        if exclude_models:
-            # 失败切换：从全部客户端中选第一个不在排除集的（保持注册序）
+        if exclude_keys:
+            # 失败切换：从全部客户端中选第一个未试过的（保持注册序）
             for client in clients.values():
-                if client.model not in exclude_models:
+                if f"{client.provider.id}/{client.model}" not in exclude_keys:
                     return client
+            # R1 live-verify 根因修复（2026-11-22）：_clients 通常只有默认
+            # provider 的客户端，跨服务商回退常在此无候选。改为从「已配置的
+            # 其他 enabled+keyed 服务商」按优先级懒建候选（_try_lazy_init 走
+            # 生产创建链），仍无候选才认输（有界，不做 refresh 自愈——审计 F3
+            # 语义差异点，维护时勿改回）。
+            try:
+                providers = self._provider_manager.list_providers(enabled_only=True)
+            except Exception:  # noqa: BLE001 — 目录不可用按无候选处理
+                providers = []
+            for provider in providers:
+                if not (getattr(provider, "api_key", None) or getattr(provider, "encrypted_api_key", None)):
+                    continue
+                candidates = [getattr(provider, "default_model", None)] + list(
+                    getattr(provider, "models", None) or []
+                )
+                for model in candidates:
+                    if not model or f"{provider.id}/{model}" in exclude_keys:
+                        continue
+                    client = self._try_lazy_init(provider.id, model)
+                    if client is not None:
+                        return client
             # 审计 F3：排除后无候选 → 终止 failover（有界，不做 refresh 自愈
             # ——与第一版死代码的语义差异点，维护时勿改回）
             return None
