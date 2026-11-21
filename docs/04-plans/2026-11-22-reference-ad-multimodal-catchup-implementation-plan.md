@@ -122,3 +122,11 @@
 - 每卡：红灯（对现状失败的断言）→ 绿灯（最小实现）→ live-verify（真后端 9527 + 桩 provider/桩 SIP；多模态桩置于测试数据根）。
 - 批验收：批一=轴 7/3/1 复测（音乐闭环+视频首尾帧+三 provider 图片 parity）；批二=轴 6/10 复测（DTMF 通话转写+预算单源+探测矩阵）；批三=契约四类用例+入池召回。
 - 总验收：三批后按专项十轴同口径复评，目标总分 69.0→75.0+、轴 7 ≥5.0、轴 1 ≥8.5、轴 6 ≥6.0；复评结论回写专项文档与总报告 D8。
+
+## 8. 执行记录（2026-11-22 三批全部实施完毕）
+
+- **批一**：M1+M2+M9=0b1a63fd3（生成域三卡文件交叠，按仓内先例合并一笔；fal Queue API 实核、三家 v2v+首尾帧、GENERATION 来源入池+召回命中）；M3=6ae012c91（Gemini 原生视觉链路补齐：geminiImagePartFromUrl/geminiPartsFromContent 单源+converter 第三形态）；M4=7fe18e744（opencode vision 排除契约钉住，核实通过零码改）；M7=0a4dbe78d（探测矩阵三协议族进 CI+同源联动）；M6=49b88fcf6（SIP DTMF+通话转写闭环）。
+- **批二**：M6b ASRManager 启动即初始化=5282b18e9（线3 live-verify 发现的域外装配缺口当场收口：app.py 只构造不 initialize→VoiceEngine[ASR] 永不装配）；M5 预算单源=2917ffadd（model_limits 承载多模态输入预算，四消费点改读单源，现值平移逐字节一致）；M8 契约棘轮=fe447b536（SVG 诚实拒发/AVIF 转码/无视觉钉约/工具图片回灌四类）。
+- **批三**：M10 realtime 评估结论=不立项（D-M2 已拍板），SIP/Twilio 深化路线覆盖。
+- **遗留移交**：chat_pipeline.py:1814 `_IMAGE_RETENTION_KEEP_LAST` 字面量收口（值与单源一致，行为无漂移）；fal duration/产物字段官方模型卡待核；v2v 三家请求体待真 key 实测；音乐前端页未接（后端+端点已通）；Twilio Digits 接入下批；ASRManager 装配缺口的同族排查（TTSManager 是否同病）下批核对。
+- **复评（同口径十轴）**：69.0→**74.5**（轴 7 音乐 0→3.5 后端闭环、轴 1 视觉 8→8.5 Gemini 补齐、轴 3 视频 7→7.5 v2v、轴 6 实时语音 5→6.5 DTMF+转写、轴 10 契约 8→8.5）；总报告 D8 维 7.0→7.5，总分 94.0→95.0。未达 75.0 目标的缺口=音乐前端页未接与 v2v 真 key 实测未做（见遗留移交）。
