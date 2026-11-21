@@ -26,6 +26,9 @@
 | 2026-11-21 | run 状态投影 | `subagent_status`/`SwarmManager.status()` 结果新增 `queue_position`（排队位次，从 1 起；0=不在队列；B4 管理面） | 向后兼容（新增可选键） | 消费方按需读取 |
 | 2026-11-21 | REST 新增 | `GET/PATCH/DELETE/POST /api/v1/swarm-queue[...]`（B4 管理面：队列快照/优先级/取消/任务书修订；admin 门；未知 id 404；在跑 steer 不可达 200+`mode=rejected`） | 向后兼容（纯新增端点） | 前端/运维面按需接入 |
 | 2026-11-21 | spawn 依赖门 | `DEPENDENCY_FAILED` 拒绝范围扩大：前置为 weak/none 终态（超时/取消兜底、来路不明）的 completion 也不再自动放行下游，须复核（A1）；历史空质量（未经迁移收口的直接构造）行为不变；另根修「依赖全部已满足时 spawn 崩溃（blockedId 未赋值）」的预存 bug | 行为收紧（弱终态不再被当强终态消费）+ 崩溃修复 | 依赖弱终态前端的下游任务需先复核/重派前置 |
+| 2026-11-21 | 上下文交接 | handoff 默认预算 16k→**32k token**（D-A 拍板；`NEUROVA_CONTEXT_HANDOFF_TOKEN_CAP` 覆盖不变，字节上限 64KiB 不变） | 默认值变化（env 覆盖者无感） | 依赖旧 16k 默认的部署方无需动作；如需回落用 env 覆盖 |
+| 2026-11-21 | run 投影/事件 | `SubAgentRun.to_dict()` 新增 `executor_caps_snapshot`/`executor_tool`/`executor_model`（D-B 派生时执行体档案快照）；续跑结果新增 `provider_transition`（五结果之一或 null）；`resume_decision` 事件 payload 增 `same_executor`/`model_changed`/`tenant_checked`；新事件类型 `resume_cross_tenant_admin`（admin 跨租户豁免审计） | 向后兼容（新增可选键/枚举值，未知类型跳过语义不变） | 消费方按需读取 |
+| 2026-11-21 | 续跑行为 | resumeFinishedRun 重写（D-B）：租户闸先于终态判定（跨租户非 admin 返回与「未找到」逐字同形，不泄露存在性）；五结果决策按「spawn 快照 vs 名册现值」判定，切换路径（switch_model_in_session/create_with_handoff/restart_and_resume）首次可达 | 行为增强（此前切换路径不可达；跨租户续跑不设防） | 跨租户续跑/切换从前「可用」变为「拒绝」——这是红线修复，非回归 |
 
 ## 待登记（ upcoming）
 
