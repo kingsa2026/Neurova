@@ -296,7 +296,21 @@ _UNKNOWN_MODEL_WARNED: set = set()
 
 
 def _calculate_cost_from_usage(provider: LLMProvider, model: str, usage: dict) -> float:
-    """从 usage 计算成本（输入+输出 token，USD）"""
+    """从 usage 计算成本（输入+输出 token，USD）
+
+    R5（参照系 ad 追平）：聚合商上报成本优先——usage 携带
+    provider_reported_cost_usd（如 OpenRouter usage.cost）时直接采信，
+    本地价目只作缺报兜底；价目表支持 tiers 阶梯（按 prompt_tokens 所处
+    区间取档，超出所有档位取最高档）。
+    """
+    reported = usage.get("provider_reported_cost_usd")
+    if reported is not None:
+        try:
+            return round(float(reported), 6)
+        except (TypeError, ValueError):
+            logger.warning(
+                "provider_reported_cost_usd 不可数值（%r），回落本地价目", reported
+            )
     price_map = PRICE_TABLES.get(provider, {}).get(model) or PRICE_TABLES.get(provider, {}).get("default")
     if not price_map:
         # 未知模型按 0 记账是静默失真：「未计价」不等于「免费」——每
@@ -313,6 +327,19 @@ def _calculate_cost_from_usage(provider: LLMProvider, model: str, usage: dict) -
     output_tokens = usage.get("completion_tokens", 0) or 0
     cache_read = usage.get("cache_read_tokens", 0) or 0
     cache_write = usage.get("cache_write_tokens", 0) or 0
+    tiers = price_map.get("tiers")
+    if tiers:
+        chosen = None
+        for tier in sorted(
+            (t for t in tiers if isinstance(t, dict)),
+            key=lambda t: int(t.get("up_to_tokens", 0) or 0),
+        ):
+            if input_tokens <= int(tier.get("up_to_tokens", 0) or 0):
+                chosen = tier
+                break
+            chosen = tier
+        if chosen:
+            price_map = chosen
     cost = (
         input_tokens * price_map.get("input", 0) / 1000
         + output_tokens * price_map.get("output", 0) / 1000

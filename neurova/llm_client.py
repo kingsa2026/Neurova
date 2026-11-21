@@ -150,6 +150,28 @@ def _pick_reasoning(obj, *attrs):
     return None
 
 
+def _providerReportedCost(usage_obj):
+    """聚合商上报成本提取（R5）：OpenRouter usage.cost / provider_cost 等。
+
+    返回 float 或 None（未上报/不可数值）。上报值经 usage dict 的
+    provider_reported_cost_usd 键透传，成本记账优先采信（见
+    cost_tracking._calculate_cost_from_usage）。
+    """
+    if usage_obj is None:
+        return None
+    cost = getattr(usage_obj, "cost", None)
+    if cost is None and isinstance(usage_obj, dict):
+        cost = usage_obj.get("cost")
+    if cost is None:
+        cost = getattr(usage_obj, "provider_cost", None)
+    if cost is None:
+        return None
+    try:
+        return float(cost)
+    except (TypeError, ValueError):
+        return None
+
+
 class LLMClient:
     """LLM 客户端
 
@@ -450,6 +472,11 @@ class LLMClient:
                     "completion_tokens": response.usage.completion_tokens,
                     "total_tokens": response.usage.total_tokens,
                 }
+                # R5：聚合商上报成本透传（OpenRouter usage.cost 等）——
+                # 成本记账优先采信上报值（见 cost_tracking._calculate_cost_from_usage）
+                _pc = _providerReportedCost(response.usage)
+                if _pc is not None:
+                    usage["provider_reported_cost_usd"] = _pc
                 # B6（对照改进项）：Prompt Cache 命中计数透传。改前此处只留
                 # 三键，SDK 的 prompt_tokens_details.cached_tokens 在这一步被
                 # 剥掉，下游 _extract_cache_tokens 恒读 (0,0)——cache 计量
@@ -549,6 +576,10 @@ class LLMClient:
                         "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
                         "total_tokens": getattr(u, "total_tokens", 0) or 0,
                     }
+                    # R5：聚合商上报成本透传（OpenRouter usage.cost 等）
+                    _pc = _providerReportedCost(u)
+                    if _pc is not None:
+                        billed_usage["provider_reported_cost_usd"] = _pc
 
             # 处理流式响应
             for chunk in stream:
@@ -573,6 +604,10 @@ class LLMClient:
                         "completion_tokens": chunk.usage.completion_tokens,
                         "total_tokens": chunk.usage.total_tokens,
                     }
+                    # R5：聚合商上报成本透传
+                    _pc = _providerReportedCost(chunk.usage)
+                    if _pc is not None:
+                        usage["provider_reported_cost_usd"] = _pc
                     _capture(chunk.usage)
 
                 # 提取 tool_calls
@@ -674,6 +709,10 @@ class LLMClient:
                         "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
                         "total_tokens": getattr(u, "total_tokens", 0) or 0,
                     }
+                    # R5：聚合商上报成本透传（OpenRouter usage.cost 等）
+                    _pc = _providerReportedCost(u)
+                    if _pc is not None:
+                        billed_usage["provider_reported_cost_usd"] = _pc
 
             # 处理流式响应
             async for chunk in stream:
@@ -696,6 +735,10 @@ class LLMClient:
                         "completion_tokens": chunk.usage.completion_tokens,
                         "total_tokens": chunk.usage.total_tokens,
                     }
+                    # R5：聚合商上报成本透传
+                    _pc = _providerReportedCost(chunk.usage)
+                    if _pc is not None:
+                        usage["provider_reported_cost_usd"] = _pc
                     _capture(chunk.usage)
 
                 # 提取 tool_calls
