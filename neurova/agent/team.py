@@ -8,6 +8,11 @@ AgentTeam 多角色编排。
 - orchestrate: 按步骤序列派发 task_assignment 消息，收集 task_result
 - 全编排共享一个 trace_id，贯穿所有消息
 
+定位边界（M14，修复计划 2026-11-21）：本模块是 **ACP 协议层的多角色编排
+预留抽象**——不接 SwarmManager 治理面（无预算/审批/候选/依赖门），选人只取
+角色首个成员；生产多 agent 编排主链在 ``neurova.agent.swarm.SwarmManager``。
+新需求一律走主链，勿在本模块扩第二套编排语义。
+
 设计约束（AGENTS.md）:
 - 深模块：不 import Agent；成员执行体以 ACP handler 注入
 - 每步失败不中断后续步骤（容错编排）

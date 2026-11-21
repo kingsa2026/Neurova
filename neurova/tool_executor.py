@@ -1440,8 +1440,10 @@ class ToolExecutor:
         """执行工具（公开入口，供 API 端点 / Agent Loop 调用）
 
         这是 ToolExecutor 的主公开接口。内部委托给 _execute_single_tool，
-        后者实现四级回退链：ToolEngine → 内置工具 → Skill → ToolRouter。
-        将复杂回退链隐藏在单一公开方法背后，使 API 端点无需感知内部细节。
+        后者在 _execute_tool_core 实现回退链：工作流（run_workflow_agent /
+        workflow:{id}）→ 内置工具分派表 → Skill → ToolRouter（M14：原
+        "ToolEngine" 档已拆并，文档同步）。将复杂回退链隐藏在单一公开方法
+        背后，使 API 端点无需感知内部细节。
 
         Args:
             tool_name: 工具名称
