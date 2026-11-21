@@ -114,7 +114,7 @@
 **Neurova**：语音双栈深且全线接线——TTS 3+ 引擎+流式合成+聊天流式播报（useStreamTTS）+渠道出站三形态契约（`channels/voice_egress.py`）；ASR 4 引擎+WS 流式+语音纪要+渠道入站转写（`voice_pipeline.py`）；SIP/Twilio 电话通道（无 DTMF/转接，深度中等）；AIGC 生成有实测端点矩阵——/generation/image|video|audio|text + 协议矩阵（openai-images/ark/dashscope-wan/seedance/veo/sora，`llm/generators/protocols.py:55-236`）+ aigc_studio 分镜→图→视频生产管线 + 前端三页走本仓端点；视觉输入单源链路（attachment_turn_injection→图像轮路由→图像保留→双协议切片）+真图探测；文档 OCR 三引擎同契约；**桌面屏幕视觉**（computer_use：截图+UIA+SOM+perception_gate 三闸）为差异化理解面。短板：音乐生成缺失；Gemini 原生链路收图待核实；video_to_video 无实测协议。
 **子项**：生成类（图/视频/音乐） 3.0/2.0；语音（TTS/ASR/通话） 1.0/2.0（本仓反超：对方 TTS 产品面断裂、无电话通道）；视觉理解与文件解析 1.5/1.5；屏幕与设备视觉 0.5/1.5（本仓 computer use 大胜）。
 
-> 细分拆解（十轴逐项）见同目录《[reference_ad_multimodal_teardown_2026-11-22.md](reference_ad_multimodal_teardown_2026-11-22.md)》：专项口径 LobeHub 68.5 / Neurova 69.0（/100）——生成广度对方胜、语音/屏幕视觉/OCR 本仓胜，总体接近、本仓反超；追平方案见《docs/04-plans/2026-11-22-reference-ad-multimodal-catchup-implementation-plan.md》（三批十卡，待拍板四项）。
+> 细分拆解（十轴逐项）见同目录《[reference_ad_multimodal_teardown_2026-11-22.md](reference_ad_multimodal_teardown_2026-11-22.md)》：专项口径 LobeHub 68.5 / Neurova 69.0（/100）——生成广度对方胜、语音/屏幕视觉/OCR 本仓胜，总体接近、本仓反超；追平方案见《docs/04-plans/2026-11-22-reference-ad-multimodal-catchup-implementation-plan.md》（三批十卡，已拍板：fal/深化 SIP/三家视频协议全做用户可选/生成物入池）。
 
 ### D9 数据/租户/认证/安全（L 9 / N 8）
 
@@ -189,4 +189,4 @@ P2：
 - v2（同日）：应评审指出补 D11 自我进化/RSI 维（对方侧证据来自对 agentSignal/self-iteration/skill-store/eval-rubric 簇的专项只读深读），总分口径由 10 维 110 分改为 11 维 120 分；D1–D10 各子项分未变。
 - v3（同日）：应评审指出补 D2 上下文活水池专项（双方各一路专项只读深读：本仓 context_pool/context 36 文件 vs 对方 context-engine 27 处理器+压缩库+修剪链），本仓上下文工程子项 4.0→4.5，总分 89.5→90.0；其余子项分未变。
 - v4（同日）：应评审指出补 D4 工具肌肉记忆专项（本仓 muscle_memory/tool_memory_integration vs 对方 agent-signal/Expertise/UsageCounter 工具学习面扫查），本仓工具框架子项 3.0→3.5，总分 90.0→90.5；其余子项分未变。
-- v5（2026-11-22）：应评审要求把多模态单独拆出细化——新增专项《reference_ad_multimodal_teardown_2026-11-22.md》（十轴：L 68.5 / N 69.0，两路只读深读）。首版 D8 粗评漏计本仓 AIGC 端点/语音双栈/OCR，据实重评 D8：L 6.5→6.0 / N 3.5→7.0，总分 98.5/90.5 → 98.0/94.0；追平方案另立《2026-11-22-reference-ad-multimodal-catchup-implementation-plan.md》（三批十卡，待拍板四项）。
+- v5（2026-11-22）：应评审要求把多模态单独拆出细化——新增专项《reference_ad_multimodal_teardown_2026-11-22.md》（十轴：L 68.5 / N 69.0，两路只读深读）。首版 D8 粗评漏计本仓 AIGC 端点/语音双栈/OCR，据实重评 D8：L 6.5→6.0 / N 3.5→7.0，总分 98.5/90.5 → 98.0/94.0；追平方案另立《2026-11-22-reference-ad-multimodal-catchup-implementation-plan.md》（三批十卡，四项已拍板：fal/深化 SIP/三家视频协议全做用户可选/生成物入池）。

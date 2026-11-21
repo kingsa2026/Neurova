@@ -4,7 +4,7 @@
 - 来源：《reference_ad_multimodal_teardown_2026-11-22.md》（十轴专项细拆：LobeHub 68.5 vs Neurova 69.0 /100）与总报告 D8 维（细化前 L 6.5 / N 3.5 → 细化后 L 6.0 / N 7.0 /8）
 - 目标：把专项暴露的短板补齐——重点攻**音乐生成（轴 7，0 起步）**、**视频协议覆盖（轴 3）**、**视觉协议面（轴 1 的 Gemini/转换形态缺口）**、**实时语音深度（轴 6）**；同时保持本仓已反超的语音双栈/屏幕视觉/OCR 不被稀释
 - 范围：`neurova/llm/generators/`、`neurova/api/endpoints/generation.py`、`neurova/tts|asr|channels`（仅增量）、`neurova/agent/attachment_turn_injection.py`/`context/converter.py`、NeurUI aigc 页；不动活水池/记忆/编排/RSI 域
-- 状态：**备稿待拍板**（D-M1…D-M4 四项）；未拍板不动码
+- 状态：**已拍板（2026-11-22 交互拍板）**——D-M1=fal（对方同款）/D-M2=realtime 不立项、深化 SIP/Twilio/D-M3=三家视频协议全做、用户自由选择/D-M4=生成物入池；可按批开工
 - 复评机制：每批完成按专项十轴同卡复测；三批全完后总复评目标=专项总分 69.0→75.0+（轴 7 从 0 起步、轴 1 ≥8.5、轴 6 ≥6.0），总报告 D8 维保持 ≥7.0
 
 ## 0. 总原则
@@ -19,7 +19,7 @@
 ### M1 音乐生成最小闭环（轴 7，0→有）
 
 - 现状：无端点、无 provider、无页面（仅 multimodal_prober.py:71 musicgen 关键词与 neurflow 背景乐模板字段）。
-- 改法：新建音乐生成协议（选型见 D-M1）落 `neurova/llm/generators/`；`generation.py` 加 `/generation/music` + `/generation/music/status`（对齐 video 的提交/轮询两段式）；前端复用 AudioGenPage 模式扩展或独立 MusicGenPage；生成物音频文件走既有附件存储与鉴权取回。
+- 改法：新建 fal 音乐生成协议（D-M1 已拍板：fal，对方同款）落 `neurova/llm/generators/`；`generation.py` 加 `/generation/music` + `/generation/music/status`（对齐 video 的提交/轮询两段式）；前端复用 AudioGenPage 模式扩展或独立 MusicGenPage；生成物音频文件走既有附件存储与鉴权取回。
 - 红绿判据：红灯=协议桩单测先写（提交/轮询/完成/失败四态，当前无此端点必红）+ 端点审计测试；绿灯=实现后全绿。
 - 验收：live-verify 真后端 + 桩 provider，全链路提交→轮询→取回。
 - 影响面：`llm/generators/`（新增协议文件）、`api/endpoints/generation.py`（新增端点）、NeurUI aigc 页、provider 预置表。
@@ -27,8 +27,8 @@
 ### M2 视频生成协议补全（轴 3）
 
 - 现状：Veo/SEEDANCE2/dashscope-wan 已有协议，但 video_to_video 无实测协议（facade 诚实报错）；无首尾帧参数语义。
-- 改法：按实测核验结果补 video_to_video 协议与首尾帧（imageUrl/endImageUrl）参数；轮询对齐既有 /video/status。
-- 红绿判据：协议单测先红（现 facade 对 video_to_video 报错）；实现后按协议样例断言请求/响应映射全绿。
+- 改法（D-M3 已拍板：三家全做、用户自由选择）：dashscope-wan/SEEDANCE2/Veo 三家 video_to_video 协议与首尾帧（imageUrl/endImageUrl）参数全部落地，由前端模型/协议参数选择、facade 按协议分派（未指定时默认 dashscope-wan 先验证）；轮询对齐既有 /video/status。
+- 红绿判据：三家协议桩单测先红（现 facade 对 video_to_video 报错）；实现后逐家断言请求/响应映射与分派选择全绿。
 - 验收：live-verify 桩 provider 走通首尾帧视频生成与状态轮询。
 - 影响面：`llm/generators/protocols.py`（或新协议文件）、`generation.py`。
 
@@ -94,14 +94,14 @@
 - 现状：对方 realtime 纯占位；本仓 SIP 已有真实通道。
 - 改法：产出评估结论（OpenAI Realtime 类 WebSocket 通道 vs 现有 SIP/Twilio 深化），给立项建议；本计划不含实现。
 
-## 4. 待拍板项
+## 4. 拍板记录（2026-11-22 交互拍板）
 
-| 项 | 问题 | 选项与影响 | 建议 |
-|----|------|-----------|------|
-| D-M1 | 音乐生成 provider 选型 | fal（对方同款，海外）/Suno 类（质量强，合规与凭据待核）/国内大模型音频接口 | 先接 1 家跑通闭环（协议桩+端点+页面），第二家后置 |
-| D-M2 | realtime 语音通道是否立项 | OpenAI Realtime 类通道（新协议面大）/深化现有 SIP/Twilio | 本期不做 realtime，M6 深化 SIP 优先 |
-| D-M3 | 视频协议补全优先级 | Veo/SEEDANCE2/WAN 哪个先补 video_to_video | 按已有凭据与实测可及性定，先易后难 |
-| D-M4 | AIGC 生成物是否入活水池（M9） | 入=跨轮可召回、池来源+1；不入=仅消息附件 | 建议入池——这是对方没有的特色整合，成本可控 |
+| 项 | 问题 | 拍板结果 | 落点 |
+|----|------|---------|------|
+| D-M1 | 音乐生成 provider 选型 | **fal（对方同款）** | M1 |
+| D-M2 | realtime 语音通道是否立项 | **不立项，深化 SIP/Twilio** | M6 |
+| D-M3 | 视频协议补全范围 | **三家全做（dashscope-wan/SEEDANCE2/Veo），用户自由选择** | M2（范围扩容） |
+| D-M4 | AIGC 生成物是否入活水池 | **入池** | M9 |
 
 ## 5. 不照搬清单
 
