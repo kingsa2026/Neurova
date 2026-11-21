@@ -400,7 +400,10 @@ async function doRunCommand() {
   background: rgba(74, 222, 128, 0.1);
   border: 1px solid rgba(74, 222, 128, 0.3);
 }
-.cu-badge.unverified {
+/* AD 批：快照质量徽标（深度剪枝/骨架折叠/下钻）——与 unverified 同族警示色，
+   选择器并入上组共享同一组色值（硬编码色基线冻结，不再新增裸值） */
+.cu-badge.unverified,
+.cu-badge.snap-meta {
   color: var(--nr-warning);
   background: rgba(250, 204, 21, 0.08);
   border-color: rgba(250, 204, 21, 0.3);
@@ -409,12 +412,6 @@ async function doRunCommand() {
   color: var(--nr-error);
   background: rgba(252, 165, 165, 0.08);
   border-color: rgba(252, 165, 165, 0.3);
-}
-/* AD 批：快照质量徽标（深度剪枝/骨架折叠/下钻）——与 unverified 同族警示色 */
-.cu-badge.snap-meta {
-  color: var(--nr-warning);
-  background: rgba(250, 204, 21, 0.08);
-  border-color: rgba(250, 204, 21, 0.3);
 }
 .cu-shot-empty {
   display: flex;
