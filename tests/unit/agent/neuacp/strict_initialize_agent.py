@@ -35,8 +35,15 @@ def main():
                 send(out, {"jsonrpc": "2.0", "id": msg_id, "error": {
                     "code": -32602, "message": "Invalid params: protocolVersion must be integer"}})
                 continue
-            send(out, {"jsonrpc": "2.0", "id": msg_id, "result": {
-                "protocolVersion": pv, "agentCapabilities": {}}})
+            if pv >= 2:
+                # v2 InitializeResponse：必带 info（Implementation{name,version}）
+                # 与 capabilities（v2 能力字段名）。
+                result = {"protocolVersion": pv,
+                          "info": {"name": "strict-wire-agent", "version": "1.0.0"},
+                          "capabilities": {}, "authMethods": []}
+            else:
+                result = {"protocolVersion": pv, "agentCapabilities": {}}
+            send(out, {"jsonrpc": "2.0", "id": msg_id, "result": result})
         elif msg_id is not None:
             send(out, {"jsonrpc": "2.0", "id": msg_id, "result": {}})
 

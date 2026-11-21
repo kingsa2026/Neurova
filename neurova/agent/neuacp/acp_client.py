@@ -15,6 +15,7 @@ import time
 from collections import deque
 from typing import Any, Callable, Dict, List, Optional
 
+from neurova.agent.neuacp import codec_v2
 from neurova.agent.neuacp.child_env import buildChildEnvironment
 from neurova.agent.neuacp.process_governance import (
     TIMEOUT_MATRIX,
@@ -88,6 +89,10 @@ class NeuacpClient:
         self._lock = threading.RLock()
         self._next_id = 0
         self._waiters: Dict[int, "queue.Queue"] = {}
+        # G6：编解码器（None = v1 既有路径）；握手协商出整数版本后选择。
+        self._codec: Optional[codec_v2.V2Codec] = None
+        # G6：最近一次发出的请求 id（v2 取消按 requestId 取消在途回合）。
+        self._last_request_id: Optional[int] = None
         self._closed = False
         self._crash_reported = False
         self._stderr_tail: deque = deque(maxlen=50)
@@ -108,6 +113,20 @@ class NeuacpClient:
     def started(self) -> bool:
         """握手完成且进程存活（复用判定单点）。"""
         return self._handshake is not None and self.is_alive
+
+    @property
+    def codec(self) -> Optional[codec_v2.V2Codec]:
+        """当前编解码器：v2 会话为 V2Codec 实例；v1（及未握手）为 None。
+
+        执行体据此做版本化分发——None 走既有 v1 线上形状，非 None 走
+        codec_v2 的形状构造与 SessionUpdate 映射。
+        """
+        return self._codec
+
+    def lastRequestId(self) -> Optional[int]:
+        """最近一次发出的请求 id（v2 按 requestId 取消在途回合的取数单点）。"""
+        with self._lock:
+            return self._last_request_id
 
     def start(self, *, protocol_version: str = "1", client_capabilities: Optional[dict] = None) -> dict:
         """拉起子进程并完成 initialize 握手；版本不兼容 fail-closed。
@@ -136,6 +155,7 @@ class NeuacpClient:
 
     def _startLocked(self, protocol_version: str, client_capabilities: Optional[dict]) -> dict:
         self._handshake = None
+        self._codec = None
         self._closed = False
         self._crash_reported = False
         self._exit_observed = False
@@ -180,10 +200,16 @@ class NeuacpClient:
             except (TypeError, ValueError):
                 raise NeuacpError(
                     f"ACP protocolVersion 必须是整数（收到 {protocol_version!r}）")
-            result = self.request(
-                "initialize",
-                {"protocolVersion": version_wire, "clientCapabilities": client_capabilities or {}},
-            )
+            # G6：v2 握手形状经 codec 构造（info 必填、能力字段为 capabilities）；
+            # v1 保持既有 params 字面量逐字节不变。
+            if version_wire == codec_v2.PROTOCOL_VERSION:
+                init_params = codec_v2.buildInitializeParams(version_wire, client_capabilities)
+            else:
+                init_params = {
+                    "protocolVersion": version_wire,
+                    "clientCapabilities": client_capabilities or {},
+                }
+            result = self.request("initialize", init_params)
         except NeuacpError:
             self.terminate()
             raise
@@ -197,6 +223,18 @@ class NeuacpClient:
             raise NeuacpProtocolError(
                 f"ACP 版本协商失败: 期望 {version_wire!r}，实际 {remote_version!r}"
             )
+        # G6：按协商出的整数版本选择编解码器——v2 启用 codec_v2（握手形状、
+        # prompt 应答回执、$/cancel_request、SessionUpdate 24 分支映射）；
+        # 其余版本一律 None（既有 v1 路径，线上逐字节不变）。
+        if version_wire == codec_v2.PROTOCOL_VERSION:
+            self._codec = codec_v2.V2Codec()
+            try:
+                self._codec.parseInitializeResponse(result or {})
+            except codec_v2.V2ProtocolError as exc:
+                self.terminate()
+                raise NeuacpProtocolError(f"ACP v2 initialize 应答形状违规: {exc}") from exc
+        else:
+            self._codec = None
         self._handshake = result or {}
         return self._handshake
 
@@ -205,6 +243,7 @@ class NeuacpClient:
         with self._lock:
             self._closed = True
             self._handshake = None
+            self._codec = None
             proc = self._process
             self._process = None
         if proc is None:
@@ -264,6 +303,8 @@ class NeuacpClient:
             msg_id = self._next_id
             waiter: "queue.Queue" = queue.Queue()
             self._waiters[msg_id] = waiter
+            # G6：记录最近请求 id（v2 取消按 requestId 定位在途回合）。
+            self._last_request_id = msg_id
         try:
             self._sendFrame({"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params or {}})
         except NeuacpError:

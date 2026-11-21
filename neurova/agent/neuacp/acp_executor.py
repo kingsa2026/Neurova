@@ -1,18 +1,26 @@
 # -*- coding: utf-8 -*-
-"""NeuacpStdioExecutor：以 ACP v1 驱动一个外部编码代理子进程。
+"""NeuacpStdioExecutor：以 ACP（v1 / v2）驱动一个外部编码代理子进程。
 
 事件映射（设计文档 §4.4）：session/update 的 agent_message_chunk →
 emitter("content")、agent_thought_chunk → emitter("reasoning")、
 tool_call(_update) → on_tool_call 镜像（B2 接轨迹/账本）；
 session/request_permission → on_permission 同步裁决（B1 接审批链），
 未注册或裁决异常一律 deny（fail-closed）。
+
+G6（v2 适配）：握手协商出 v2 时经 codec_v2 分发——出站形状（info 握手、
+内容块 prompt、$/cancel_request 按 requestId 取消）与入站 24 分支归一化
+（见 codec_v2.parseSessionUpdate）都收口在 codec；本模块只做内部事件路由，
+v1 线上路径保持逐字节不变。v2 语义差异：session/prompt 应答只是插入回执
+（messageId），回合完成以 state_update(idle, stopReason) 为准。
 """
 import asyncio
 import json
 import logging
+import threading
 from typing import Any, Callable, List, Optional
 
-from neurova.agent.neuacp.acp_client import NeuacpClient, NeuacpError
+from neurova.agent.neuacp.acp_client import NeuacpClient, NeuacpError, NeuacpTimeoutError
+from neurova.agent.neuacp.codec_v2 import V2ProtocolError, parseSessionUpdate
 from neurova.agent.neuacp.executor import NeuacpExecResult, NeuacpSessionContext
 
 logger = logging.getLogger(__name__)
@@ -59,6 +67,9 @@ class NeuacpStdioExecutor:
         # F2 帧留痕键（§3.2/F5）：start(ctx) 时从 metadata["subagent_id"] 取；
         # 未绑定（空）一律不落盘——无主会话（如管理面 /test）不留痕。
         self._frame_key: Optional[str] = None
+        # G6：v2 回合收口等待（state_update idle）与捕获的停止原因。
+        self._stop_reason: Optional[str] = None
+        self._turn_wait: Optional[threading.Event] = None
         self._client = self._newClient()
 
     # ---------- NeuacpExecutor 协议 ----------
@@ -99,6 +110,11 @@ class NeuacpStdioExecutor:
         self._permission_asker = on_permission
         self._text_buffer = ""
         self._crash_reason = None
+        # G6：v2 会话经 codec 分发（应答为 messageId 回执、完成以 idle 为准）；
+        # v1 走既有路径（线上逐字节不变）。
+        codec = self._client.codec
+        if codec is not None:
+            return await self._promptV2(task_text, codec)
         session = await asyncio.to_thread(
             self._client.request, "session/new", {"cwd": self._cwd, "mcpServers": []}
         )
@@ -119,7 +135,73 @@ class NeuacpStdioExecutor:
             raw=result,
         )
 
+    async def _promptV2(self, task_text: str, codec: Any) -> NeuacpExecResult:
+        """v2 回合：session/prompt 应答只是插入回执（messageId），回合完成以
+        state_update(idle, stopReason) 为准——发完 prompt 后等 idle 再收口。
+
+        这是 v2 协议语义变化（完成信号从应答移到通知），不是行为改写；
+        停止原因缺省 end_of_turn，与 v1 的缺省口径一致。
+        """
+        session = await asyncio.to_thread(
+            self._client.request, "session/new", codec.newSessionParams(self._cwd)
+        )
+        try:
+            session = codec.parseNewSessionResponse(session)
+        except V2ProtocolError as exc:
+            raise NeuacpError(f"external agent invalid session/new response: {exc}") from exc
+        self._session_id = session["sessionId"]
+        # 就绪旗标在发出 prompt 前武装；此后到达的当前会话 idle 才是本回合
+        # 收口。（v2 规定新会话缺省 idle、无需先导 state_update，武装窗口内
+        # 理论上可能混入的初始 idle 快照按「回合未开始」忽略——见 _onEventV2
+        # 的 sessionId 过滤。）
+        self._stop_reason = None
+        turn_wait = threading.Event()
+        self._turn_wait = turn_wait
+        try:
+            ack = await asyncio.to_thread(
+                self._client.request, "session/prompt",
+                codec.promptParams(self._session_id, task_text), self._prompt_timeout,
+            )
+        except NeuacpError:
+            self._turn_wait = None
+            if self._crash_reason:
+                raise NeuacpError(f"external agent crashed during prompt: {self._crash_reason}") from None
+            raise
+        try:
+            ack = codec.parsePromptResponse(ack)
+        except V2ProtocolError as exc:
+            self._turn_wait = None
+            raise NeuacpError(f"external agent invalid prompt response: {exc}") from exc
+        wait_s = self._prompt_timeout if self._prompt_timeout is not None else self._request_timeout
+        # 阻塞等待必须挪出事件循环线程（to_thread）：否则等 idle 期间整个
+        # loop 被卡死——cancel()/emitter 等一切协程都无法推进。
+        finished = await asyncio.to_thread(turn_wait.wait, wait_s)
+        self._turn_wait = None
+        if not finished:
+            raise NeuacpTimeoutError("ACP v2 prompt timeout: 等待 state_update idle 超时")
+        if self._crash_reason:
+            raise NeuacpError(f"external agent crashed during prompt: {self._crash_reason}")
+        stop_reason = self._stop_reason or "end_of_turn"
+        return NeuacpExecResult(
+            text=self._text_buffer,
+            stop_reason=str(stop_reason),
+            raw={"messageId": ack.get("messageId"), "stopReason": stop_reason},
+        )
+
     async def cancel(self) -> None:
+        codec = self._client.codec
+        if codec is not None:
+            # G6：v2 按 requestId 取消在途回合（$/cancel_request 通知）。
+            request_id = self._client.lastRequestId()
+            if request_id is not None and self._client.is_alive:
+                try:
+                    await asyncio.to_thread(
+                        self._client.notify, codec.cancel_method,
+                        codec.cancelRequestParams(request_id),
+                    )
+                except NeuacpError:
+                    pass
+            return
         if self._session_id and self._client.is_alive:
             try:
                 await asyncio.to_thread(self._client.notify, "session/cancel", {"sessionId": self._session_id})
@@ -202,9 +284,17 @@ class NeuacpStdioExecutor:
 
     def _onCrash(self, reason: str) -> None:
         self._crash_reason = reason
+        # G6：v2 回合在等 idle 时崩溃——唤醒等待线程，走 crash 诚实上抛路径。
+        wait = self._turn_wait
+        if wait is not None:
+            wait.set()
 
     def _onEvent(self, method: str, params: dict) -> None:
         if method != "session/update":
+            return
+        # G6：v2 会话经 codec 归一化 24 分支后路由；v1 走既有分支名（不变）。
+        if self._client.codec is not None:
+            self._onEventV2(params)
             return
         update = params.get("update") or {}
         kind = update.get("sessionUpdate")
@@ -229,20 +319,93 @@ class NeuacpStdioExecutor:
             except Exception:
                 pass
 
+    def _onEventV2(self, params: dict) -> None:
+        """v2 session/update → 内部事件路由（codec 归一化后的单一形状）。
+
+        content/reasoning → emitter 流式（并累积结果文本）；tool_call →
+        镜像；stop → 记录停止原因并唤醒回合等待；message/plan/usage/
+        compaction/skip 本仓暂无消费面——按「未知类型跳过」纪律归档
+        （debug 留痕），不臆造下游事件。
+        """
+        update_session = params.get("sessionId")
+        if isinstance(update_session, str) and update_session and update_session != self._session_id:
+            return  # 非当前会话的更新（旧会话残留/多会话进程）不消费
+        event = parseSessionUpdate(params)
+        kind = event.get("event")
+        if kind == "content":
+            text = event.get("text") or ""
+            if not text:
+                return
+            self._text_buffer += text
+            emitter = self._emitter
+            if emitter is not None:
+                try:
+                    emitter("content", text)
+                except Exception:
+                    pass
+        elif kind == "reasoning":
+            text = event.get("text") or ""
+            if not text:
+                return
+            emitter = self._emitter
+            if emitter is not None:
+                try:
+                    emitter("reasoning", text)
+                except Exception:
+                    pass
+        elif kind == "tool_call":
+            if self._on_tool_call is not None:
+                try:
+                    self._on_tool_call(event.get("update") or {})
+                except Exception:
+                    pass
+        elif kind == "stop":
+            stop_reason = event.get("stopReason") or ""
+            if stop_reason:
+                self._stop_reason = stop_reason
+            wait = self._turn_wait
+            if wait is not None:
+                wait.set()
+        else:
+            logger.debug(
+                "neuacp v2 update 归档不消费: event=%s type=%s reason=%s",
+                kind, (event.get("update") or {}).get("sessionUpdate"),
+                event.get("reason"),
+            )
+
+    def _permissionDenyResponse(self, params: dict) -> dict:
+        """fail-closed 拒绝应答（按协商版本选线上形状）。"""
+        codec = self._client.codec
+        if codec is not None:
+            return codec.permissionResponse({"approved": False}, params)
+        return {"outcome": {"choice": "deny"}}
+
     def _handlePermissionRequest(self, params: dict) -> dict:
+        codec = self._client.codec
         asker = self._permission_asker
         if asker is None:
-            return {"outcome": {"choice": "deny"}}
-        tool = params.get("toolCall") or {}
-        toolName = tool.get("title") or tool.get("toolCallId") or "unknown"
+            return self._permissionDenyResponse(params)
+        if codec is not None:
+            # v2：主体在 subject 面包（tool_call/command），标题提至顶层 title。
+            subject = params.get("subject") or {}
+            tool = subject.get("toolCall") or {} if subject.get("type") == "tool_call" else {}
+            toolName = (tool.get("title") or tool.get("name")
+                        or params.get("title") or tool.get("toolCallId") or "unknown")
+            reason_text = str(params.get("description") or "")
+        else:
+            tool = params.get("toolCall") or {}
+            toolName = tool.get("title") or tool.get("toolCallId") or "unknown"
+            reason_text = str(params.get("reason") or "")
         # B1（§4.4）：action 命名空间 acp:{tool}:{kind}；kind 为 ACP 工具调用
         # 类别（read/edit/delete/move/search/execute/think/fetch/other），
         # 未声明按 other（审批档由适配器按 kind 声明、链内危险正则统一升档）。
         kind = str(tool.get("kind") or "other")
         action = f"acp:{toolName}:{kind}"
         try:
-            decision = asker(action, str(params.get("reason") or ""), json.dumps(params, ensure_ascii=False))
+            decision = asker(action, reason_text, json.dumps(params, ensure_ascii=False))
         except Exception:
-            return {"outcome": {"choice": "deny"}}
+            return self._permissionDenyResponse(params)
         approved = bool((decision or {}).get("approved"))
+        if codec is not None:
+            return codec.permissionResponse(decision, params)
         return {"outcome": {"choice": "allow" if approved else "deny"}}
