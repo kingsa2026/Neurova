@@ -1,6 +1,6 @@
 # reference_ad：LobeHub（lobehub/lobehub）vs Neurova 全方位代码级对照评测
 
-- 日期：2026-11-21（v2：同日增补 D11 自我进化/RSI 维）
+- 日期：2026-11-21（v2：增补 D11 自我进化/RSI 维；v3：增补 D2 上下文活水池专项）
 - 对象：[lobehub/lobehub](https://github.com/lobehub/lobehub)（代号 reference_ad；LobeChat 同源演进后的 agent 平台主线仓库）
 - 快照：canary 分支浅克隆，版本 2.3.4，pushed_at 2026-11-21；85.9k stars / 16.3k forks；TypeScript
 - 体量：124 个 pnpm 子包；ts/tsx 共 **3,777,641 行**；`*.test.*` 文件 **7,321** 个；18 种界面语言；32 条 GitHub workflow
@@ -10,7 +10,7 @@
 
 ## 0. 结论摘要
 
-**总分（11 维 120 分）：LobeHub 98.5 vs Neurova 89.5。**（v2 增补 D11 自我进化/RSI 维：L 5.5 / N 8.5）
+**总分（11 维 120 分）：LobeHub 98.5 vs Neurova 90.0。**（v2 增补 D11 自我进化/RSI 维：L 5.5 / N 8.5；v3 增补 D2 上下文活水池专项，本仓上下文工程子项 4.0→4.5）
 
 - LobeHub 是当前公开仓里**工程完成度最高**的 agent 平台之一：agent 运行时（分布式步调度/parked-resume/成本预算）、44 个全真内置工具、三档沙箱、91 家模型 provider、7,321 个测试文件、四通道桌面 OTA 发布，均为第一梯队。
 - Neurova 反超的六处：**多智能体治理深度**（审批链 L0-L2/候选 CAS/依赖门控/评审相位/台账重放）、**记忆生命周期**（睡眠整理/遗忘/污染清除/纪律准入 vs 对方无遗忘无衰减）、**本体知识图谱**（对方为零）、**租户隔离的真实执行**（对方 OSS 侧 RBAC 是空壳 stub）、**MCP server 面**（对方仅 client）、**自我进化/RSI**（对方=默认关闭的受控自改进：无评测闭环、无影子/灰度、回滚靠人；本仓=门禁链+影子验证+回滚+存活探针的世代闭环）。
@@ -28,7 +28,7 @@
 | # | 维度 | 满分 | LobeHub | Neurova | 判定 |
 |---|------|-----:|--------:|--------:|------|
 | D1 | 架构与模块化 | 12 | 10.0 | 8.0 | L 胜 |
-| D2 | Agent 核心与对话管线 | 14 | 12.0 | 11.0 | L 小胜 |
+| D2 | Agent 核心与对话管线 | 14 | 12.0 | 11.5 | L 小胜 |
 | D3 | 多智能体编排 | 12 | 8.5 | 10.5 | **N 胜** |
 | D4 | 工具生态与执行安全 | 14 | 12.5 | 10.0 | L 胜 |
 | D5 | 知识库与 RAG | 10 | 7.0 | 6.5 | L 小胜 |
@@ -38,7 +38,7 @@
 | D9 | 数据/租户/认证/安全 | 12 | 9.0 | 8.0 | L 小胜 |
 | D10 | 工程纪律 | 14 | 12.5 | 11.0 | L 胜 |
 | D11 | 自我进化/RSI | 10 | 5.5 | 8.5 | **N 胜** |
-| | **合计** | **120** | **98.5** | **89.5** | |
+| | **合计** | **120** | **98.5** | **90.0** | |
 
 ## 3. 分域详评
 
@@ -52,7 +52,19 @@
 
 **LobeHub**：生产级状态机 `AgentState.status = idle|running|waiting_for_human|waiting_for_async_tool|waiting_for_client|done|error|interrupted`（`packages/agent-runtime/src/types/state.ts:593-601`），parked 三态可恢复不盖 completedAt（`src/utils/status.ts:6-15`）；host 无关 step 循环（`src/loop/index.ts:37-55`），服务端 QStash 步调度+分布式锁+恢复（`apps/server/src/router-hono/agent/handlers/runStep.ts:185-215`）；指令集含 call_llm/call_tool(_batch)/exec_sub_agent(s)/request_human_prompt|select|approve/compress_context/finish（`src/types/instruction.ts:244-435`）；上下文工程=ContextEngine 25 处理器管线（`packages/context-engine/src/pipeline.ts:17-27`）+ compress_context 迟滞压缩（`agents/GeneralChatAgent.ts:513-515`）+ tokenAccounting 漂移系数 1.25。成本预算与重复调用守卫俱全。弱点：单 agent 内无 ReAct 式反思循环，反思是后台 agent（self-reflection/nightly-review）形态。
 **Neurova**：增长门+主动压缩水位+溢出兜底重试+严格变小守卫+CompressionEvent 落时间线；StopGate 体系（IterationGate/TokenBudgetGate/DoomLoopGate/GoalGate，`neurova/agent/gates.py:77-394`）+ 续跑（`resumeFinishedRun` swarm.py:2321、continuation_rounds.py）；任务自评与自我模型注入（自我模型接线批）。SSE 流式管线完整。弱点：分布式调度/多实例水平扩展面弱于对方（单进程假设）。
-**子项**：运行时状态机与可靠性 4.5/4.0；上下文工程 4.0/4.0；规划与反思 3.5/3.0。
+**子项**：运行时状态机与可靠性 4.5/4.0；上下文工程 4.0/4.5；规划与反思 3.5/3.0。
+
+#### D2 专项：上下文活水池 vs ContextEngine（v3 增补）
+
+应评审要求，把本仓活水池与对方上下文管理单独同框。
+
+**本仓（活水池，生产主链路默认开）**：`neurova/context_pool.py`（2134 行）+ `neurova/context/` 36 文件（orchestrator/fold_trigger/semantic_drawer/eviction_ledger_db 等）。机制链：每轮**归档先行**——整轮对话/工具结果/记忆/经验/反思经唯一写入咽喉 `add_context`（`context_pool.py:538-655`）无损入池并写穿 SQLite WAL+FTS5 台账（`eviction_ledger_db.py:57-78`，跨重启可召回）；**折叠只是视图操作，原始消息永不删**（`orchestrator.py:2877-2878`）；摘要以带 covers 指纹的 SUMMARY 节点回池，`recall_context_span` 按 covers_ref 确定性下钻取回原文（`context_pool.py:1555-1668`）；工具结果 >8000 token microcompact 成占位指针，凭 `recall_history` 直取（`orchestrator.py:2354-2379`）。召回双通道：被动=每轮 `pool.draw` 语义注入（输入锚 0.65 + 近轮 0.75/30% 预算，bge-small-zh 向量，`semantic_drawer.py:77,316-334`）；主动=`recall_history`（FTS/LIKE）/`pool_search`/`recall_context_span`/`context_status` 四工具（`tool_executor.py:5705-6143`）+ 压缩回执带 recall_guide + 防自污染（召回结果不再参与召回，`context_pool.py:304-307`）。折叠触发七步判据（`fold_trigger.py:146-207`；0.85 水位线 `chat_pipeline.py:3133-3135`）+ 溢出兜底重试 + 严格变小守卫（`context_pool.py:60-65`）+ CompressionEvent 落时间线。测试：tests/unit/context/ 160+ 文件。
+
+**LobeHub（ContextEngine）**：约 27 个处理器全部 payload 级、不改库内原文；压缩非破坏可回滚（`markMessagesAsCompressed` 只改 messageGroupId 指针，`cancelCompression` 一键还原，`compression/index.ts:238,311`）；迟滞阈值 0.5→0.65 防压缩抖动 + 既有摘要续压 + 最新 user 消息永保；**缓存经济学修剪**是独门——StaleToolResultTrim 按 provider 缓存 TTL/价格做盈亏平衡（预估剩余步数×节省×readPrice > 重写成本×1.5 才新增修剪）且字节稳定保前缀缓存（`StaleToolResultTrim.ts:194-230,671-720`）；附件真卸载（超 4000 字符转预览+`readAttachment(fileId,offset,limit)` 翻页，按剩余预算动态决策，`attachmentBudget.ts:53-96`）；Topic Doctor 守消息树结构完整性（四类结构病诊断+可回退修补）。短板：HistoryTruncate **按条数不按 token**；**被压内容对模型不可自动召回**（原文在库，但需人工展开/回滚/重新调工具）；大工具结果无句柄化卸载；无显著性/分池机制。
+
+**三问判定**：① 原文级找回——双方都能（原文都在存储层），但本仓**自动回灌模型上下文**（被动向量注入+主动召回工具），对方需人工动作；② 可逆降权——本仓"折叠即可逆降权"三形态成立（视图折叠原文保留/SUMMARY+covers 下钻/seen_confirmed 权重+restoreDedup），对方仅二元降档（预览/全文、修剪/原文）；③ 大结果句柄化——本仓工具结果有（microcompact 占位指针），对方附件有、工具结果无。
+
+**子项影响**：本仓上下文工程 4.0→4.5——活水池的"自动召回回灌 + 工具结果句柄化"是对"截断+摘要"范式的结构性增量，补齐了"压掉即失联"缺口；对方的缓存经济学修剪与附件卸载亦为独门，双方各有所长，但池机制改变了被压内容的可及性。D2 合计 L 12.0 / N 11.5。
 
 ### D3 多智能体编排（L 8.5 / N 10.5）——本仓反超
 
@@ -160,3 +172,4 @@ P2：
 - D3/D6/D9 的本仓反超均有对方代码内"自认"证据（"Voting is not yet implemented"、"Status: design, not built"、RBAC stub 注释），不是推测。
 - 对方当日仍有推送（pushed_at 2026-11-21T15:06Z），本报告为当日快照结论；复评时应以当期主干重跑关键计数。
 - v2（同日）：应评审指出补 D11 自我进化/RSI 维（对方侧证据来自对 agentSignal/self-iteration/skill-store/eval-rubric 簇的专项只读深读），总分口径由 10 维 110 分改为 11 维 120 分；D1–D10 各子项分未变。
+- v3（同日）：应评审指出补 D2 上下文活水池专项（双方各一路专项只读深读：本仓 context_pool/context 36 文件 vs 对方 context-engine 27 处理器+压缩库+修剪链），本仓上下文工程子项 4.0→4.5，总分 89.5→90.0；其余子项分未变。
