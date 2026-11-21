@@ -119,6 +119,9 @@ def resolveEffectivePermissionMode(agent) -> PermissionMode:
     3. 默认 BUILD。
 
     子代理：继承上下文（父生效模式）对自身模式**只收窄不升级**。
+    最终统一套组织天花板（D2 收尾：跨环境请求入口与 MCP 工具/子任务各层
+    的共同解析口——请求体传 yolo 也不得越过 NEUROVA_PERMISSION_CEILING；
+    天花板未设时行为不变）。
     """
     agentId = str(getattr(getattr(agent, "config", None), "agent_id", "") or "")
     own = resolvePermissionModeFor(agentId)
@@ -126,9 +129,12 @@ def resolveEffectivePermissionMode(agent) -> PermissionMode:
     if requestMode is not None:
         own = requestMode
     inherited = _coerceMode(_INHERITED_MODE.get())
-    if inherited is not None:
-        return inheritPermissionMode(inherited, own)
-    return own
+    effective = (
+        inheritPermissionMode(inherited, own)
+        if inherited is not None
+        else own
+    )
+    return applyOrgCeiling(effective, orgCeiling())
 
 
 @contextmanager

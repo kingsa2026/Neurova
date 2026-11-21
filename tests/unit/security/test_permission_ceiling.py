@@ -193,3 +193,65 @@ class TestResultsAreLegalModes:
             assert isinstance(result, PermissionMode)
             assert result.value in VALID_MODE_VALUES
             assert result is not PermissionMode.AUTO  # 未实现档位不启用
+
+
+class TestResolveEffectiveModeClampedByCeiling:
+    """D2 收尾（跨环境请求入口 + MCP 工具/子任务两层收窄的共同根）：
+
+    resolveEffectivePermissionMode 是治理预检（tool_executor 治理预检与
+    _applyPermissionMode 均裸调本函数）的唯一模式解析口——组织天花板必须
+    在解析口生效，否则请求体传 yolo 即可越过
+    NEUROVA_PERMISSION_CEILING=guarded（勘察实证的越权路径）。
+    """
+
+    @staticmethod
+    def _agent(agent_id="agent-ceiling-1"):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(config=SimpleNamespace(agent_id=agent_id))
+
+    def test_requestModeAboveCeilingClamped(self, monkeypatch):
+        from neurova.security.permission_mode import (
+            clearRequestPermissionMode,
+            resolveEffectivePermissionMode,
+            setRequestPermissionMode,
+        )
+
+        monkeypatch.setenv(ORG_CEILING_ENV, "guarded")
+        setRequestPermissionMode(PermissionMode.YOLO)
+        try:
+            assert (
+                resolveEffectivePermissionMode(self._agent())
+                is PermissionMode.GUARDED
+            )
+        finally:
+            clearRequestPermissionMode()
+
+    def test_noCeilingKeepsRequestMode(self, monkeypatch):
+        from neurova.security.permission_mode import (
+            clearRequestPermissionMode,
+            resolveEffectivePermissionMode,
+            setRequestPermissionMode,
+        )
+
+        clean = {k: v for k, v in os.environ.items() if k != ORG_CEILING_ENV}
+        monkeypatch.setattr(os, "environ", clean)
+        setRequestPermissionMode(PermissionMode.YOLO)
+        try:
+            assert (
+                resolveEffectivePermissionMode(self._agent()) is PermissionMode.YOLO
+            )
+        finally:
+            clearRequestPermissionMode()
+
+    def test_inheritedModeAboveCeilingClamped(self, monkeypatch):
+        from neurova.security.permission_mode import (
+            inheritedModeScope,
+            resolveEffectivePermissionMode,
+        )
+
+        monkeypatch.setenv(ORG_CEILING_ENV, "guarded")
+        with inheritedModeScope(PermissionMode.YOLO):
+            assert (
+                resolveEffectivePermissionMode(self._agent()) is PermissionMode.GUARDED
+            )
