@@ -362,7 +362,8 @@
 
 | 卡 | 状态 | commit | 备注 |
 |---|---|---|---|
-| B2 | 未开工 | — | |
-| C5 | 未开工 | — | |
-| A3 | 未开工 | — | |
-| 其余 | 未开工 | — | |
+| B2 | **已实施（本笔）** | 本笔提交 | 模块 `neurova/agent/context_transfer.py`（285 行：ContextTransfer/ContextHandoff/预算/三态投递）+ 34 测试；接线点=`resumeFinishedRun`（旧 `report[:4000]` 裸截断升级为工件化交接：登记/预算/inline 投递/`context_transfer` 事件留痕；预算失败诚实降级不静默截断）；待拍板 D-A 按建议值落地（16k token 上限，`NEUROVA_CONTEXT_HANDOFF_TOKEN_CAP` 可配） |
+| C5 | **已实施（本笔）** | 本笔提交 | `catalog.decideProviderTransition` 五结果决策（+46 行，纯追加）+ 19 测试；接线点=`resumeFinishedRun` 续跑能力门（外部成员无 session_reuse/resume 诚实拒绝，本仓 agent 不设限）；D-B 按建议值落地（本轮未开放非 admin 切换，跨 executor 因 `handoff_inject` 未声明暂 reject——保守正确，待 C2 补声明） |
+| A3 | **已实施（本笔）** | 本笔提交 | `neurova/core/command_receipt.py`（running/accepted/rejected 三态回执 + 同步/async 双入口 + db_migration v1 独立域）+ 13 测试；接线点=`dispatchTeam`/`updateSubagent`/`cancelRun` 可选 `command_id`（缺省原行为零破坏）+ `dispatch_team`/`continue_subagent`/`cancel_subagent` 工具面透传 |
+| 集成 | **已验证（本笔）** | 本笔提交 | 接线集成测试 8 用例全绿；agent 域全量回归 2390 passed（2 失败经 A/B stash 证实为预存、与本批无关：turnIdentity 守卫系其他在途域新增读方未登记、acp_client 帧钩子系顺序污染 flaky）；live-verify 真 create_app+uvicorn 14/14 PASS（health/providers/建队 REST/回执三态/续跑交接/能力门两态） |
+| 其余 | 未开工 | — | 批二（A5/B3/A2/E2/D2/C1）、批三待排产 |

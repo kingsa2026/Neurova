@@ -250,3 +250,49 @@ def probeTool(tool: str) -> Dict[str, Any]:
 def listCatalog() -> List[Dict[str, Any]]:
     """全量目录（每项附本机探测结果与能力声明），供管理面/前端下拉。"""
     return [probeTool(tool) for tool in CATALOG]
+
+
+# ── C5：provider 切换五结果决策（纯函数，能力数据驱动，无 IO） ─────────────
+
+#: provider 切换决策结果（参照系 ac 借鉴 C5）。
+TRANSITION_RESULTS = ("reuse", "switch_model_in_session", "restart_and_resume", "create_with_handoff", "reject")
+
+
+def _handoffCapable(caps: Dict[str, Any]) -> bool:
+    """handoff 工件产出能力（C5 新增维度）：键缺失按 False 保守处理（fail-closed）。"""
+    return bool((caps or {}).get("handoff_inject", False))
+
+
+def decideProviderTransition(current_caps: Dict[str, Any], target_caps: Dict[str, Any], *,
+                             same_executor: bool, target_installed: bool = True,
+                             model_changed: bool = False) -> str:
+    """provider 切换/接续五结果决策（纯函数，能力数据驱动，无 IO）。
+
+    判定顺序：
+    1. not target_installed → "reject"
+    2. not same_executor → 跨 executor：双方 capabilities 的 handoff 能力均可用
+       （_handoffCapable：capabilities.get("handoff_inject", False) 为真——保守缺省 False）
+       → "create_with_handoff"，否则 "reject"
+    3. model_changed and session_reuse(target) → "switch_model_in_session"
+    4. session_reuse(target) → "reuse"
+    5. resume(target) → "restart_and_resume"
+    6. 兜底 → "reject"（同 executor 但既不能复用也不能续跑，且无 handoff 能力）
+
+    capabilities dict 键缺失按保守值处理（session_reuse/resume/handoff_inject 缺省 False）。
+    返回值必须属于 TRANSITION_RESULTS。
+    """
+    if not target_installed:
+        return "reject"
+    if not same_executor:
+        if _handoffCapable(current_caps) and _handoffCapable(target_caps):
+            return "create_with_handoff"
+        return "reject"
+    target = target_caps or {}
+    session_reuse = bool(target.get("session_reuse", False))
+    if model_changed and session_reuse:
+        return "switch_model_in_session"
+    if session_reuse:
+        return "reuse"
+    if bool(target.get("resume", False)):
+        return "restart_and_resume"
+    return "reject"

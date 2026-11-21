@@ -1330,6 +1330,10 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                     "type": "boolean",
                     "description": "是否后台执行（默认 true=立即返回各成员 subagent_id；false=等待全部完成）",
                 },
+                "command_id": {
+                    "type": "string",
+                    "description": "幂等命令 ID（可选）：网络重试/断线重发时传同一 ID，只有第一次会真正派活，后续重试返回上次结果（replayed=true）；不传则不做幂等去重",
+                },
             },
             "required": ["team_id", "task"],
         },
@@ -1572,6 +1576,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "message": {"type": "string", "description": "续跑/修正指令：接着做什么/修正什么/补充什么约束"},
                 "background": {"type": "boolean", "description": "是否后台执行（默认 false，前台等结果；仅终态续跑时有效）"},
                 "mode": {"type": "string", "enum": ["steer", "restart"], "description": "运行中子代理的改需求方式：steer 注入会话（下一工具轮生效，尽力而为，默认）/ restart 先叫停再按新指令重派（保留溯源）。已终态的子代理忽略本参数，直接走续跑链"},
+                "command_id": {"type": "string", "description": "幂等命令 ID（可选）：重试时传同一 ID 防重复注入/重派；不传则不做幂等去重"},
             },
             "required": ["subagent_id", "message"],
         },
@@ -1585,6 +1590,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "properties": {
                 "subagent_id": {"type": "string", "description": "要叫停的子代理 ID（spawn_subagent/subagent_status 返回的 subagent_id）"},
                 "reason": {"type": "string", "description": "叫停原因（留痕进事件账本与失败交接文案）"},
+                "command_id": {"type": "string", "description": "幂等命令 ID（可选）：重试时传同一 ID 防重复执行；不传则不做幂等去重"},
             },
             "required": ["subagent_id"],
         },

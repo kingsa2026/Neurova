@@ -261,6 +261,71 @@ def _settingsDefaultSubagentDepth() -> int:
     return int(DEFAULTS["max_subagent_depth"])
 
 
+# ── A3 命令回执（参照系 ac 借鉴）：连接装配 ─────────────────────────────
+
+_RECEIPT_CONN = None
+_RECEIPT_CONN_LOCK = threading.RLock()
+
+
+def _receiptConnection():
+    """命令回执库连接（按数据根派生单文件；command_receipt 独立版本域）。
+
+    与 mobile_ws_ledger 同范式：每域一库，user_version 互不干扰。
+    """
+    global _RECEIPT_CONN
+    if _RECEIPT_CONN is not None:
+        return _RECEIPT_CONN
+    with _RECEIPT_CONN_LOCK:
+        if _RECEIPT_CONN is None:
+            import sqlite3
+
+            from neurova.core.command_receipt import ensureReceiptStore
+            from neurova.core.data_root import get_data_root
+
+            path = get_data_root() / "command_receipt.db"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(str(path), check_same_thread=False)
+            ensureReceiptStore(conn)
+            _RECEIPT_CONN = conn
+    return _RECEIPT_CONN
+
+
+def _receiptRejection(exc: Exception) -> Dict[str, Any]:
+    """回执类错误 → 蜂群统一拒绝结构（诚实点名原因，不吞不改写）。"""
+    from neurova.core.command_receipt import (
+        CommandIdConflictError,
+        PreviouslyRejectedError,
+    )
+
+    reason = "COMMAND_IN_FLIGHT"
+    if isinstance(exc, CommandIdConflictError):
+        reason = "COMMAND_ID_CONFLICT"
+    elif isinstance(exc, PreviouslyRejectedError):
+        reason = "COMMAND_PREVIOUSLY_REJECTED"
+    return {
+        "rejected": True,
+        "rejection": reason,
+        "success": False,
+        "error": f"[{reason}] {exc}",
+    }
+
+
+def _handoffTokenCap() -> int:
+    """续跑交接的 token 预算上限（B2）：环境变量可覆盖，缺省取工件模块单源。
+
+    非法值回落缺省；夹取（[1024, 64000]）由 buildHandoff 内的 clampTokenCap 兜住。
+    """
+    raw = (os.environ.get("NEUROVA_CONTEXT_HANDOFF_TOKEN_CAP") or "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            logger.warning("NEUROVA_CONTEXT_HANDOFF_TOKEN_CAP=%r 不是整数，回落缺省", raw)
+    from neurova.agent.context_transfer import DEFAULT_TOKEN_CAP
+
+    return DEFAULT_TOKEN_CAP
+
+
 class SwarmManager:
     """蜂群管理器：派生、执行、事件广播、结果回流
 
@@ -719,6 +784,56 @@ class SwarmManager:
         self,
         teamId: str,
         task: str,
+        taskUnit: Optional[dict] = None,
+        session_id: Optional[str] = None,
+        initiator_agent: Optional[Any] = None,
+        background: bool = True,
+        subagentType: str = "general",
+        runtimeBudgetSec: Optional[float] = None,
+        command_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """把固定团队整体派活（A3 回执幂等包装）。
+
+        ``command_id`` 非空时整段派活走命令回执：同 ID 重试按回执重放结果、
+        不重复 spawn；跨会话复用同 ID 报 COMMAND_ID_CONFLICT；曾拒绝的 ID
+        不可重试（COMMAND_PREVIOUSLY_REJECTED）。空（缺省）保持原行为。
+        """
+        cid = str(command_id or "").strip()
+        if not cid:
+            return await self._dispatchTeamInner(
+                teamId, task, taskUnit=taskUnit, session_id=session_id,
+                initiator_agent=initiator_agent, background=background,
+                subagentType=subagentType, runtimeBudgetSec=runtimeBudgetSec,
+            )
+        from neurova.core.command_receipt import executeWithReceiptAsync
+
+        async def _afn() -> Dict[str, Any]:
+            return await self._dispatchTeamInner(
+                teamId, task, taskUnit=taskUnit, session_id=session_id,
+                initiator_agent=initiator_agent, background=background,
+                subagentType=subagentType, runtimeBudgetSec=runtimeBudgetSec,
+            )
+
+        try:
+            result, replayed = await executeWithReceiptAsync(
+                _receiptConnection(),
+                command_id=cid,
+                command_type="dispatch_team",
+                thread_id=str(session_id or teamId or ""),
+                afn=_afn,
+            )
+        except Exception as exc:  # noqa: BLE001 - 回执三态错误如实转拒绝结构
+            return _receiptRejection(exc)
+        if replayed:
+            result = dict(result or {})
+            result["replayed"] = True
+        return result
+
+    async def _dispatchTeamInner(
+        self,
+        teamId: str,
+        task: str,
+        *,
         taskUnit: Optional[dict] = None,
         session_id: Optional[str] = None,
         initiator_agent: Optional[Any] = None,
@@ -1481,7 +1596,33 @@ class SwarmManager:
 
     # ── H 批补差（异步任务更新/叫停对照批）──────
 
-    def cancelRun(self, subagent_id: str, reason: str = "") -> Dict[str, Any]:
+    def cancelRun(self, subagent_id: str, reason: str = "", command_id: Optional[str] = None) -> Dict[str, Any]:
+        """父侧叫停一个子代理运行（A3 回执幂等包装）。
+
+        ``command_id`` 非空时走命令回执（同 ID 重试重放结果、不重复执行取消
+        副作用）；空（缺省）保持原行为。
+        """
+        cid = str(command_id or "").strip()
+        if not cid:
+            return self._cancelRunInner(subagent_id, reason=reason)
+        from neurova.core.command_receipt import executeWithReceipt
+
+        try:
+            result, replayed = executeWithReceipt(
+                _receiptConnection(),
+                command_id=cid,
+                command_type="cancel_run",
+                thread_id=str(subagent_id or ""),
+                fn=lambda: self._cancelRunInner(subagent_id, reason=reason),
+            )
+        except Exception as exc:  # noqa: BLE001 - 回执三态错误如实转拒绝结构
+            return _receiptRejection(exc)
+        if replayed:
+            result = dict(result or {})
+            result["replayed"] = True
+        return result
+
+    def _cancelRunInner(self, subagent_id: str, reason: str = "") -> Dict[str, Any]:
         """父侧叫停一个子代理运行。
 
         - 运行中（pending/running/in_review）：取消其 asyncio 任务——CancelledError
@@ -1607,6 +1748,52 @@ class SwarmManager:
         background: bool = False,
         session_id: Optional[str] = None,
         initiator_agent: Optional[Any] = None,
+        command_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """改需求（A3 回执幂等包装）。
+
+        ``command_id`` 非空时整段改需求走命令回执（同 ID 重试重放、不重复
+        注入/重派）；空（缺省）保持原行为。restart 内部的二次续跑调用走
+        inner，不再进回执（同一命令的组成部分，不是新命令）。
+        """
+        cid = str(command_id or "").strip()
+        if not cid:
+            return await self._updateSubagentInner(
+                subagentId, message, mode=mode, background=background,
+                session_id=session_id, initiator_agent=initiator_agent,
+            )
+        from neurova.core.command_receipt import executeWithReceiptAsync
+
+        async def _afn() -> Dict[str, Any]:
+            return await self._updateSubagentInner(
+                subagentId, message, mode=mode, background=background,
+                session_id=session_id, initiator_agent=initiator_agent,
+            )
+
+        try:
+            result, replayed = await executeWithReceiptAsync(
+                _receiptConnection(),
+                command_id=cid,
+                command_type="update_subagent",
+                thread_id=str(session_id or subagentId or ""),
+                afn=_afn,
+            )
+        except Exception as exc:  # noqa: BLE001 - 回执三态错误如实转拒绝结构
+            return _receiptRejection(exc)
+        if replayed:
+            result = dict(result or {})
+            result["replayed"] = True
+        return result
+
+    async def _updateSubagentInner(
+        self,
+        subagentId: str,
+        message: str,
+        *,
+        mode: str = "steer",
+        background: bool = False,
+        session_id: Optional[str] = None,
+        initiator_agent: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """改需求（interrupt|enqueue 双策略，对照批）。
 
@@ -1628,7 +1815,7 @@ class SwarmManager:
             return {"success": False, "error": f"未找到子 Agent 运行记录: {sid}"}
         if run.status in SUBAGENT_ACTIVE_STATUSES:
             if mode == "restart":
-                cancelResult = self.cancelRun(sid, reason="改需求重派（先叫停再重派）")
+                cancelResult = self._cancelRunInner(sid, reason="改需求重派（先叫停再重派）")
                 if not cancelResult.get("success"):
                     return {"success": False,
                             "error": f"叫停失败：{cancelResult.get('error', '')}"}
@@ -1639,7 +1826,7 @@ class SwarmManager:
                     if cur is None or cur.status in SUBAGENT_FINISHED_STATUSES:
                         break
                     await asyncio.sleep(0.02)
-                return await self.updateSubagent(
+                return await self._updateSubagentInner(
                     sid, message, mode="steer", background=background,
                     session_id=session_id, initiator_agent=initiator_agent)
             from neurova.core.steer_queue import get_steer_queue
@@ -1687,13 +1874,40 @@ class SwarmManager:
                 "error": f"子 Agent {subagentId} 仍在运行（status={old.status}）——"
                          "续跑只针对已终态的运行；进行中的请用 subagent_status 等待",
             }
-        handoff = old.report.strip()
-        task = message.strip()
-        if handoff:
-            task = (
-                f"[续跑衔接] 这是上一次执行的产出（{'失败前部分' if old.status == SUBAGENT_FAILED else '已完成部分'}），"
-                f"供你衔接，不要从头重复：\n{handoff[:4000]}\n\n[续跑指令]\n{task}"
+        # C5（参照系 ac 借鉴）：续跑方式由执行体能力声明单源决策。外部成员
+        # 能力档既无 session_reuse 也无 resume 时诚实拒绝（不静默硬续）；
+        # 本仓 agent / 无名册归属不设限（走既有续跑链）。
+        memberCaps = self._memberExecutorCaps(old)
+        if memberCaps is not None:
+            from neurova.agent.neuacp.catalog import decideProviderTransition
+
+            decision = decideProviderTransition(
+                memberCaps, memberCaps,
+                same_executor=True, target_installed=True, model_changed=False,
             )
+            self._logRunEvent(old, "resume_decision", {"decision": decision})
+            if decision == "reject":
+                return {
+                    "success": False,
+                    "error": "该外部成员执行体能力档不支持续跑（无 session_reuse/resume "
+                             "声明）——请重派全新任务或调整其 executor 配置",
+                }
+
+        # B2（参照系 ac 借鉴）：续跑衔接升级为上下文传递工件（登记/预算/省略
+        # 可恢复/inline 投递/事件留痕），替代旧的 report[:4000] 裸截断。
+        task = message.strip()
+        handoffText, handoffMeta = self._buildResumeHandoff(old)
+        if handoffText:
+            task = f"{handoffText}\n\n[续跑指令]\n{task}"
+        elif handoffMeta.get("failed"):
+            # 诚实降级：交接工件构建失败（如预算不足）不静默截断——旧产出仍可
+            # 经 member 会话恢复机制带回，但本次续跑如实标注未带衔接工件。
+            return {
+                "success": False,
+                "error": f"上下文交接工件构建失败：{handoffMeta.get('reason', '')}"
+                         "（可调大 NEUROVA_CONTEXT_HANDOFF_TOKEN_CAP 后重试；"
+                         "旧产出仍可经成员会话历史 recall）",
+            }
         return await self.spawn(
             task,
             agent_id=old.agent_id,
@@ -1710,6 +1924,111 @@ class SwarmManager:
             room_id=old.room_id or None,
             project_id=old.project_id or None,
         )
+
+    def _memberExecutorCaps(self, run: SubAgentRun) -> Optional[Dict[str, Any]]:
+        """外部成员的执行体能力档（C5 消费点）；本仓 agent / 无名册 → None。
+
+        能力档只来自 neuacp 目录声明（单一事实源）：按 run.team_id 查名册、
+        按 agent_id 对位成员，取其 executor.tool 的目录声明。查询失败一律
+        None（不设限，不因名册读故障阻断续跑）。
+        """
+        try:
+            teamId = str(getattr(run, "team_id", "") or "").strip()
+            if not teamId:
+                return None
+            from neurova.agent.neuacp.catalog import capabilitiesFor
+            from neurova.api.endpoints.teams_api import getTeamRoster
+
+            roster = getTeamRoster(teamId)
+            for member in (roster or {}).get("members_detail") or []:
+                if str(member.get("user_id") or "") != str(run.agent_id or ""):
+                    continue
+                spec = member.get("executor")
+                if not isinstance(spec, dict) or not str(spec.get("tool") or "").strip():
+                    return None
+                return capabilitiesFor(str(spec.get("tool")))
+        except Exception as exc:  # noqa: BLE001 - 名册/目录读故障不阻断续跑主链
+            logger.debug("成员执行体能力档读取失败（不设限）: %s", exc)
+            return None
+        return None
+
+    def _buildResumeHandoff(self, old: SubAgentRun) -> tuple:
+        """B2（参照系 ac 借鉴）：续跑衔接升级为上下文传递工件。
+
+        旧任务书 + 旧产出（report）作为两条历史条目，按预算物化 ContextHandoff
+        并 inline 投递（替代旧 report[:4000] 裸截断——预算内完整衔接，省略
+        如实记录）。返回 (inline_text, meta)；meta.failed=True 表示构建失败
+        （预算不足等），调用方诚实降级（不静默截断）。report 为空 → ("", {})。
+        事件留痕：context_transfer / context_transfer_failed 入 H-4 账本。
+        """
+        report = str(getattr(old, "report", "") or "").strip()
+        oldTask = str(getattr(old, "task", "") or "").strip()
+        if not report:
+            return "", {}
+        from neurova.agent.context_transfer import (
+            ContextHandoffBudgetError,
+            ContextSourcePoint,
+            ContextTransfer,
+            ContextTransferError,
+            buildHandoff,
+            markDelivery,
+            renderInlinePrefix,
+        )
+
+        transfer = ContextTransfer(
+            transfer_id=f"tr_{uuid.uuid4().hex[:12]}",
+            type="subagent_result",
+            source_point=ContextSourcePoint(
+                thread_id=str(old.member_session_id or old.subagent_id or ""),
+                run_id=str(old.subagent_id or ""),
+            ),
+        )
+        items: List[Dict[str, Any]] = []
+        if oldTask:
+            items.append({
+                "id": f"{old.subagent_id}:task", "role": "user", "content": oldTask,
+            })
+        items.append({
+            "id": f"{old.subagent_id}:report", "role": "assistant", "content": report,
+        })
+        stateLabel = "失败前部分" if old.status == SUBAGENT_FAILED else "已完成部分"
+        tokenCap = _handoffTokenCap()
+        try:
+            handoff = buildHandoff(
+                transfer,
+                thread_id=str(old.member_session_id or old.subagent_id or ""),
+                target_run_id=None,
+                strategy="delta_since_last_seen",
+                items=items,
+                token_cap=tokenCap,
+                window_tokens=tokenCap,
+            )
+            prefix = renderInlinePrefix(handoff)
+            markDelivery(handoff, "inline")
+        except (ContextHandoffBudgetError, ContextTransferError) as exc:
+            self._logRunEvent(old, "context_transfer_failed", {
+                "reason": str(exc), "report_chars": len(report),
+                "token_cap": tokenCap,
+            })
+            return "", {"failed": True, "reason": str(exc)}
+        self._logRunEvent(old, "context_transfer", {
+            "transfer_id": transfer.transfer_id,
+            "handoff_id": handoff.handoff_id,
+            "type": transfer.type,
+            "strategy": handoff.strategy,
+            "delivery": handoff.delivery_status,
+            "omitted_item_ids": list(handoff.omitted_item_ids),
+            "budget_tokens": handoff.budget_tokens,
+            "budget_bytes": handoff.budget_bytes,
+        })
+        return (
+            f"[续跑衔接] 这是上一次执行的产出（{stateLabel}），"
+            f"供你衔接，不要从头重复：\n{prefix}"
+        ), {
+            "handoff_id": handoff.handoff_id,
+            "transfer_id": transfer.transfer_id,
+            "omitted": list(handoff.omitted_item_ids),
+        }
 
     # ── 内部实现 ──────────────────────────────────────────────
 

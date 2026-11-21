@@ -3202,6 +3202,7 @@ class ToolExecutor:
                 session_id=session_id,
                 initiator_agent=self._agent,
                 background=bool(params.get("background", True)),
+                command_id=str(params.get("command_id") or "").strip() or None,
             )
         return result
 
@@ -3643,6 +3644,7 @@ class ToolExecutor:
                 session_id=session_id,
                 initiator_agent=self._agent,
                 background=bool(params.get("background", False)),
+                command_id=str(params.get("command_id") or "").strip() or None,
             )
         return result
 
@@ -3658,7 +3660,9 @@ class ToolExecutor:
         if not subagentId:
             return {"success": False, "error": "cancel_subagent 需要 subagent_id"}
         return get_swarm_manager().cancelRun(
-            subagentId, reason=str(params.get("reason") or "")
+            subagentId,
+            reason=str(params.get("reason") or ""),
+            command_id=str(params.get("command_id") or "").strip() or None,
         )
 
     async def _execute_list_agents(self, params: Dict) -> Dict:
