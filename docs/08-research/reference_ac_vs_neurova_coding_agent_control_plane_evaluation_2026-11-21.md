@@ -660,8 +660,11 @@ T3 当期主干与原快照相隔约四小时（e19193db → 6f94a063），20 �
 安卓/鸿蒙取值单源化已实施（29cf18ef1，含安卓心跳循环 pong 超时硬拼周期的
 修正）；鸿蒙 scope 按需订阅消费已接线（5dbe7f910，重连补拉随 scope，
 ChatPage 进已落库会话收窄、离页恢复 global）。**剩余登记**：安卓端
-`sync_resume` 游标重放/快照降级整体缺失（D3 客户端语义，鸿蒙已有——
-补齐后 scope 消费随之可用），待立卡。D2「跨环境请求头 + MCP 子任务两层
+`sync_resume` 游标重放/快照降级已补齐（16be84207：出站帧游标 lastServerSeq、
+重连 onOpen 补拉 sync_resume{last_seq, scope?, scope_key?}、
+setSubscriptionScope 与服务端同规、sync_snapshot_required 弃游标拆线重连、
+onClosing 应答完成关闭握手——OkHttp 不代答 close 帧），安卓全量单测绿。
+D2「跨环境请求头 + MCP 子任务两层
 收窄」已实施（fd4dbb40c：组织天花板在 resolveEffectivePermissionMode
 解析口统一收窄——治理预检、MCP 工具裁决、子任务派活各层的共同解析口，
 请求体传 yolo 不得越过 NEUROVA_PERMISSION_CEILING）。
