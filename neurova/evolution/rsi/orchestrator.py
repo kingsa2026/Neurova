@@ -427,9 +427,17 @@ class RSIOrchestrator:
 
         # P1-3 世代编排器（可选挂接件）：None 时零行为变化（向后兼容旧测试）。
         # 生产装配点在 agent_wiring.wireAgentRsi；接线点为 run_iteration 建议
-        # 产出点与 applyApprovedOptimizations 人工批准通道（见三个 _generation*
-        # 辅助方法），世代管线故障一律 fail-soft，不阻断迭代与生产链路。
+        # 产出点、applyApprovedOptimizations 人工批准通道、自动档应用落地与
+        # 每轮迭代的金丝雀观测驱动（P1-4），世代管线故障一律 fail-soft，
+        # 不阻断迭代与生产链路。
         self.generationOrchestrator: Optional[Any] = None
+        # P1-4 金丝雀观测窗的回滚恢复源：应用段每次应用前自拍的全量参数快照
+        # （R1 单源，不另造第二份）；世代编排器开窗时引用，窗内越界自动回滚
+        # 时经 _restore_optimizable 恢复到父代参数实值。
+        self._lastPreApplySnapshot: Dict[str, Any] = {}
+        # P1-4：上一轮的实测读数（本轮开代前结算金丝雀观测窗用——先结算
+        # 上一代，新一代的 parentNo 才能指到晋升/回滚后的基线）。
+        self._lastCanaryReadings: Dict[str, Any] = {}
 
         logger.info("RSIOrchestrator initialized")
 
@@ -989,6 +997,9 @@ class RSIOrchestrator:
 
         # 3. 生成优化建议
         optimizations = self.generate_optimizations(feedback_signals)
+        # P1-4：本轮开代前先结算上一轮开窗的金丝雀世代（窗满晋升/越界自动
+        # 回滚）——新一代的 parentNo 必须指到结算后的生产基线。
+        self._observeCanaryWindows(self._lastCanaryReadings)
         # R1：登记为本轮待批提案——phase 1（手动档）不自动应用，
         # 这里是治理端点"人工批准后应用"的唯一数据源。
         self._recordRoundProposals(optimizations)
@@ -1049,6 +1060,9 @@ class RSIOrchestrator:
             self._markRoundProposalsConsumed(
                 "rolled_back" if _outcome["rolled_back"] else "applied_auto"
             )
+            # P1-4：自动档应用落地 → 世代金丝雀观测窗开启（与人工通道同一套
+            # 观测窗语义；轮次号与建议产出点同源：本轮 = 当前计数 + 1）。
+            self._generationRecordAutoOutcome(self._iteration_count + 1, _outcome)
         else:
             eval_before = None
             eval_after = None
@@ -1079,6 +1093,16 @@ class RSIOrchestrator:
         # 而第 6 步就在对外报这份读数（工单 012 前它写在第 8 步，于是指标恒比
         # 实际轮次少 1，首轮读数报 0）。
         self._iteration_count += 1
+
+        # P1-4：缓存本轮实测读数，供下一轮开代前的金丝雀观测检查点使用
+        # （窗内参数已应用，最新实测读数就是观测信号；本轮已开窗的世代
+        # 在下一轮开代前被观测，保证世代 parent 链随基线推进）。
+        self._lastCanaryReadings = self._canaryObservationReadings(
+            gain=gain,
+            eval_after=eval_after,
+            convergenceStatus=str(convergence.get("status", "")),
+            roi=roi_readout,
+        )
 
         # D2 审计预定表：命中预定时刻时封存时点快照（sealed evidence＋eval
         # outcome＋cost vector）——事后审计只读预定时刻，表外请求被拒（§7.2
@@ -1732,6 +1756,9 @@ class RSIOrchestrator:
         perf_before = self._measure_performance()
         eval_before = self._last_eval_outcome
         snapshot = self._snapshot_optimizable()
+        # P1-4：金丝雀观测窗的回滚恢复源＝应用前参数快照（R1 单源自拍；
+        # 世代编排器开窗时引用，窗内越界时经 _restore_optimizable 恢复父代实值）。
+        self._lastPreApplySnapshot = snapshot
 
         assertRsiOptimizationIdentity(optimizations)
         applied_results = self.apply_optimizations(optimizations)
@@ -1959,6 +1986,77 @@ class RSIOrchestrator:
             )
         except Exception as e:  # noqa: BLE001 - 留痕故障不改变应用结果
             logger.warning("世代部署留痕失败（不改变应用结果）: %s", e)
+            setattr(generationOrchestrator, "lastPipelineError",
+                    f"manual approval settle: {type(e).__name__}: {e}")
+
+    def _generationRecordAutoOutcome(
+        self, roundNo: int, outcome: Dict[str, Any]
+    ) -> None:
+        """自动档应用段落定后的世代挂接（P1-4）：金丝雀观测窗随应用落地开启。
+
+        与人工通道（_generationRecordApprovalOutcome）同一套观测窗语义；
+        fail-soft，不改变应用结果。
+        """
+        generationOrchestrator = getattr(self, "generationOrchestrator", None)
+        if generationOrchestrator is None:
+            return
+        try:
+            generationOrchestrator.onAutoApplyOutcome(
+                roundNo=int(roundNo), outcome=outcome
+            )
+        except Exception as e:  # noqa: BLE001 - 挂接故障不阻断迭代
+            logger.warning("世代自动档部署挂接失败（不改变应用结果）: %s", e)
+            setattr(generationOrchestrator, "lastPipelineError",
+                    f"auto apply settle: {type(e).__name__}: {e}")
+
+    def _observeCanaryWindows(self, readings: Optional[Dict[str, Any]]) -> None:
+        """金丝雀观测窗检查点驱动（P1-4）：观测全部开窗世代（fail-soft）。
+
+        ``readings`` 是最近一轮的实测读数（gain/CI/e2e/例级退化/收敛/roi），
+        喂给 should_rollback 单源判据；窗满晋升、越界自动回滚均在世代编排器
+        内落账。观测面故障不阻断迭代主体。
+        """
+        generationOrchestrator = getattr(self, "generationOrchestrator", None)
+        if generationOrchestrator is None:
+            return
+        try:
+            generationOrchestrator.observeOpenCanaries(readings=readings or {})
+        except Exception as e:  # noqa: BLE001 - 观测驱动故障不阻断迭代
+            logger.warning("金丝雀观测检查点失败（不阻断迭代）: %s", e)
+            setattr(generationOrchestrator, "lastPipelineError",
+                    f"canary observe: {type(e).__name__}: {e}")
+
+    @staticmethod
+    def _canaryObservationReadings(
+        *,
+        gain: float,
+        eval_after: Optional[Dict[str, Any]],
+        convergenceStatus: str,
+        roi: Optional[float],
+    ) -> Dict[str, Any]:
+        """组装金丝雀观测读数（本轮实测：判据要吃的键，缺席不硬造）。"""
+        readings: Dict[str, Any] = {
+            "gain": gain,
+            "convergence_status": convergenceStatus,
+        }
+        if isinstance(eval_after, dict):
+            for key in ("gain_ci", "e2e_gain", "case_regressions"):
+                if key in eval_after:
+                    readings[key] = eval_after[key]
+        if roi is not None:
+            readings["roi"] = roi
+        return readings
+
+    def _canaryReadout(self) -> Optional[Dict[str, Any]]:
+        """金丝雀观测面读数（get_status 呈报）：开窗世代与观测进度。"""
+        generationOrchestrator = getattr(self, "generationOrchestrator", None)
+        if generationOrchestrator is None:
+            return None
+        try:
+            return generationOrchestrator.canaryReadout()
+        except Exception as e:  # noqa: BLE001 - 读面故障如实降级，不阻断状态面
+            logger.debug("金丝雀观测面读取失败: %s", e)
+            return None
 
     def applyApprovedOptimizations(
         self,
@@ -2197,6 +2295,8 @@ class RSIOrchestrator:
             # "有提案没人批"必须在状态面上可见，否则手动档的停滞无从归因。
             "pending_manual_optimizations": len(self.pendingManualOptimizations()),
             "last_round_proposals": self._roundProposalsReadout(),
+            # P1-4 金丝雀观测面：开窗世代与观测进度（世代管线未挂接时 None）。
+            "canary": self._canaryReadout(),
             # 负债读数（003 M3 的读侧）：只写不读的字段是 AGENTS.md §2 点名的断点。
             "debt": self._debt_readout(),
             # 决策档评测读数（D1 的读侧）：`_last_eval_outcome` 此前只进 gain 内部

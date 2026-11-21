@@ -15,10 +15,21 @@
         数据）→ G2 业务（eval_harness 决策档 A/B，复用 R1 测量机）→
         G3 回归（与父代基线例级 A/B 零退化）→ 落账 gated
       → G0/门禁不过 → markRejected（影子失败候选自动淘汰，总纲）
-      → 裁决（按 TargetRegistry.gateLevel：approval 记审批人；auto 全绿自动晋升）
+      → 裁决（按 TargetRegistry.gateLevel：approval 记审批人；auto 全绿自动放行）
       → 人工批准（applyApprovedOptimizations 挂接点）→ canary
-      → 应用落地 → markDeployed（deployed）/ 回滚或未落地 → markRejected
-      → markRolledBack（部署后回滚留档，P1-4 自动回滚通道消费）
+      → 应用落地 → 开启金丝雀观测窗（P1-4：观测窗内参数已应用，受限发布）
+      → 窗满无异常 → markDeployed（promotedAt 落定）
+      → 窗内检查点命中 should_rollback / 健康越界 → 自动回滚（恢复 R1 参数
+        快照 + markRolledBack(restoredTo=parentNo) + 留痕原因，无人工确认）
+      → markRolledBack（部署后回滚留档）
+
+金丝雀观测窗（P1-4，详案 §2.0/§3.9/§5 L4-L5/§8-4）：世代过门禁且裁决为晋升后
+不立即 markDeployed——先进入 canary 态并记录窗口起点；窗长读
+``resolveRsiCanaryWindowSeconds()``（默认 300s，测试可经构造参数注入小值/0）。
+窗内由既有 ``rollback_manager.should_rollback`` 判据观测（每轮 RSI 迭代即一个
+检查点，见 ``observeOpenCanaries``），另可注入健康读数回调消费
+``rsi_canary_rollback_thresholds``（当前无生产错误率信号源，默认 None 不参与
+判定——诚实预留，不造假信号）。
 
 phase 1 手动档语义不变：世代管线只做记录与验证，实际参数应用仍走 R1 的
 人工批准端点；本件不改变应用触发条件——人工批准仍是应用的第一触发，
@@ -36,8 +47,10 @@ import copy
 import shutil
 import subprocess
 import threading
+import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.evolution.rsi.gate_chain import (
@@ -147,8 +160,10 @@ class GenerationOrchestrator:
     挂接方式（最小侵入）：RSIOrchestrator 持有本件**可选引用**
     （``orchestrator.generationOrchestrator``，默认 None 时 RSI 行为零变化）；
     生产装配点在 ``agent_wiring.wireAgentRsi``。本件不重构 run_iteration 主体，
-    只在两个挂接点被调用：建议产出点（``onRoundProposals``）与人工批准通道
-    （``gateManualApproval`` / ``onManualApprovalApplied``）。
+    挂接点：建议产出点（``onRoundProposals``）、人工批准通道
+    （``gateManualApproval`` / ``onManualApprovalApplied``）、自动档应用落地
+    （``onAutoApplyOutcome``）与每轮迭代的金丝雀观测驱动
+    （``observeOpenCanaries``，P1-4）。
     """
 
     def __init__(
@@ -158,6 +173,8 @@ class GenerationOrchestrator:
         ledger: Optional[GenerationLedger] = None,
         registry: Optional[EvolutionTargetRegistry] = None,
         shadowVerify: Optional[Any] = None,
+        canaryWindowSeconds: Optional[float] = None,
+        canaryHealthCallback: Optional[Callable[[], Optional[Dict[str, Any]]]] = None,
     ):
         """
         Args:
@@ -167,15 +184,28 @@ class GenerationOrchestrator:
                 未配置纯内存零 IO）。
             registry: 演化对象注册表（缺省取模块级单例）。
             shadowVerify: 影子验证执行器（缺省惰性构造，注入本件的业务判据回调）。
+            canaryWindowSeconds: 金丝雀观测窗长（秒）的测试注入口；None＝读治理
+                设置 ``resolveRsiCanaryWindowSeconds()``（决策时刻读取，默认 300s）。
+                0＝窗即刻满足（批准应用后直接晋升）。
+            canaryHealthCallback: 窗内健康读数回调（P1-4 阈值消费的可注入面）。
+                返回 ``{"error_rate": x, "success_rate": y, "baseline_success_rate": z}``
+                或 None；缺省 None＝阈值不参与判定（当前无生产错误率信号源，
+                诚实预留，不造假信号）。
         """
         self._rsi = rsiOrchestrator
         self._ledger = ledger if ledger is not None else GenerationLedger()
         self._registry = registry if registry is not None else get_target_registry()
         self._shadowVerify = shadowVerify
+        self._canaryWindowSeconds = canaryWindowSeconds
+        self._canaryHealthCallback = canaryHealthCallback
         self._lock = threading.RLock()
         self._roundGenerations: Dict[int, EvolutionGeneration] = {}
         self._roundChanges: Dict[int, List[ShadowChange]] = {}
         self._roundShadow: Dict[int, Dict[str, ShadowRunResult]] = {}
+        # P1-4：开着的金丝雀观测窗，按 RSI 轮次索引。
+        # 值：{generationNo, startedMonotonic, startedAtIso, windowSeconds,
+        #      snapshot(应用前参数快照，回滚恢复源), parentNo}
+        self._canaryWindows: Dict[int, Dict[str, Any]] = {}
         self._evalHarness: Optional[Any] = None
         #: 最近一次管线故障的诚实留痕（开代失败不阻断迭代，但必须可见）。
         self.lastPipelineError: Optional[str] = None
@@ -285,14 +315,10 @@ class GenerationOrchestrator:
             # 影子失败在此短路（G0 failed 时 chain 只有 g0/overall）。
             self._ledger.markRejected(gen.generationNo, overall.reason)
         elif self._decisionKindFor(roundNo) == "auto":
-            # auto 档（当前注册表首批无）：全绿自动晋升——裁决与部署留痕在
-            # 开代时完成；实际参数应用仍由 RSI 既有自动通道按相位执行
-            # （本卡不改应用触发条件）。
+            # auto 档（当前注册表首批无）：门禁全绿即自动放行进入金丝雀——
+            # P1-4 起晋升不再在开代时落定：参数应用落地后开启观测窗
+            # （onAutoApplyOutcome），窗满无异常才 markDeployed。
             self._ledger.recordDecision(gen.generationNo, DecisionRef(kind="auto"))
-            self._ledger.markDeployed(
-                gen.generationNo,
-                DeploymentRef(canaryConclusion="auto 档门禁全绿，自动晋升"),
-            )
         self._cleanupShadowRoots(roundNo)
         return self._ledger.get(gen.generationNo)
 
@@ -357,40 +383,312 @@ class GenerationOrchestrator:
     def onManualApprovalApplied(
         self, *, roundNo: int, approvedBy: str, outcome: Dict[str, Any]
     ) -> Optional[EvolutionGeneration]:
-        """应用段落定后的部署留痕：成功 → markDeployed；回滚/未落地 → markRejected。"""
+        """应用段落定后的部署挂接（P1-4）：应用落地 → 开金丝雀观测窗；
+        回滚/未落地 → markRejected。晋升改由窗满检查点落定。"""
+        return self._settlePostApply(
+            roundNo, outcome, channel="人工批准",
+            channelNote=f"approved_by={approvedBy}",
+        )
+
+    def onAutoApplyOutcome(
+        self, *, roundNo: int, outcome: Dict[str, Any]
+    ) -> Optional[EvolutionGeneration]:
+        """自动档应用段落定后的部署挂接（P1-4）：与人工通道同一套观测窗语义。"""
+        return self._settlePostApply(roundNo, outcome, channel="自动档", channelNote="")
+
+    def _settlePostApply(
+        self,
+        roundNo: int,
+        outcome: Dict[str, Any],
+        *,
+        channel: str,
+        channelNote: str,
+    ) -> Optional[EvolutionGeneration]:
+        """应用段落定共通处理：落地 → 开观测窗；回滚/未落地 → 拒绝留档。
+
+        金丝雀＝受限发布：观测窗内参数**已应用**（非影子重跑）。窗口起点在
+        此刻记录；恢复源取 R1 应用段的应用前参数快照（``_lastPreApplySnapshot``，
+        R1 在每次应用前自拍），不另造第二份快照。
+        """
         gen = self.generationForRound(roundNo)
         if gen is None:
             return None
         if outcome.get("rolled_back"):
             self._ledger.markRejected(
-                gen.generationNo, "参数应用后触发回滚判据，世代淘汰（未部署）"
+                gen.generationNo, f"{channel}应用段触发回滚判据，世代淘汰（未部署）"
             )
         elif int(outcome.get("applied_count") or 0) >= 1 and (
             gen.status == GenerationStatus.CANARY.value
         ):
-            self._ledger.markDeployed(
-                gen.generationNo,
-                DeploymentRef(
-                    canaryConclusion=(
-                        f"人工批准应用落地：applied_count={outcome.get('applied_count')}，"
-                        f"gain={outcome.get('gain')}，approved_by={approvedBy}"
-                    )
-                ),
-            )
+            if int(roundNo) in self._canaryWindows:
+                return gen  # 应用中断重试：窗口已在观测，不重复开窗
+            self._openCanaryWindow(int(roundNo), gen)
         elif gen.status == GenerationStatus.CANARY.value:
             self._ledger.markRejected(
                 gen.generationNo,
-                f"人工批准后应用未落地（applied_count={outcome.get('applied_count')}）",
+                f"{channel}后应用未落地（applied_count={outcome.get('applied_count')}）",
             )
         return self._ledger.get(gen.generationNo)
 
-    def markRolledBack(self, generationNo: int, restoredTo: int) -> None:
-        """部署后回滚留档（deployed → rolledBack，记录回滚落点）。
+    # ── P1-4：金丝雀观测窗与自动回滚 ──────────────────────────
 
-        本卡的回滚留痕入口：apply 段棘轮回滚的世代走 markRejected（未部署）；
-        部署后金丝雀观测越界的自动回滚（P1-4）经此落账。
+    def _resolveCanaryWindowSeconds(self) -> float:
+        """观测窗长：测试注入值优先，否则决策时刻读治理设置（活旋钮，不缓存）。"""
+        if self._canaryWindowSeconds is not None:
+            return float(self._canaryWindowSeconds)
+        from neurova.security.governance_settings import resolveRsiCanaryWindowSeconds
+
+        return float(resolveRsiCanaryWindowSeconds())
+
+    def _openCanaryWindow(
+        self, roundNo: int, gen: EvolutionGeneration
+    ) -> None:
+        """开启观测窗并记录起点（参数已应用）；窗长 0 视为即刻满足，直接晋升。"""
+        windowSeconds = self._resolveCanaryWindowSeconds()
+        startedAtIso = datetime.now(timezone.utc).isoformat()
+        snapshot: Dict[str, Any] = {}
+        if self._rsi is not None:
+            snapshot = dict(getattr(self._rsi, "_lastPreApplySnapshot", None) or {})
+        self._canaryWindows[int(roundNo)] = {
+            "generationNo": gen.generationNo,
+            "startedMonotonic": time.monotonic(),
+            "startedAtIso": startedAtIso,
+            "windowSeconds": float(windowSeconds),
+            "snapshot": snapshot,
+            "parentNo": gen.parentNo,
+        }
+        try:
+            self._ledger.annotateCanaryWindow(gen.generationNo, startedAtIso)
+        except Exception as exc:  # noqa: BLE001 - 注记失败不阻断观测，但必须留痕
+            self.lastPipelineError = (
+                f"generation {gen.generationNo} canary annotate: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            logger.warning(
+                "世代 %s 观测窗起点落账失败（观测继续，但结算对账缺起点）: %s",
+                gen.generationNo, exc,
+            )
+        logger.info(
+            "世代 %s 金丝雀观测窗开启（round=%s 窗长=%.1fs 参数已应用）",
+            gen.generationNo, roundNo, windowSeconds,
+        )
+        if windowSeconds <= 0:
+            # 窗长 0：观测窗即刻满足（演练一）——无需等待检查点，直接晋升。
+            self._promoteCanary(int(roundNo), self._canaryWindows[int(roundNo)], gen)
+
+    def canaryCheckpoint(
+        self, roundNo: int, readings: Optional[Dict[str, Any]] = None
+    ) -> Optional[EvolutionGeneration]:
+        """金丝雀观测检查点：窗内判据观测；越界自动回滚，窗满晋升。
+
+        - 检查点命中 ``rollback_manager.should_rollback``（读数由调用方/迭代
+          驱动注入）或健康阈值越界 → **全自动回滚**（恢复 R1 应用前参数快照
+          + markRolledBack(restoredTo=parentNo) + 留痕原因，无人工确认，总纲）；
+        - 窗满且无异常 → markDeployed（promotedAt 落定）；
+        - 窗未满且判据未命中 → 保持 canary；
+        - 该轮无开窗（未开代/已结算）→ 幂等返回当前世代档案。
         """
-        self._ledger.markRolledBack(generationNo, restoredTo)
+        with self._lock:
+            return self._canaryCheckpointLocked(roundNo, readings)
+
+    def _canaryCheckpointLocked(
+        self, roundNo: int, readings: Optional[Dict[str, Any]]
+    ) -> Optional[EvolutionGeneration]:
+        window = self._canaryWindows.get(int(roundNo))
+        if window is None:
+            return self.generationForRound(roundNo)
+        gen = self._ledger.get(window["generationNo"])
+        if gen is None or gen.status != GenerationStatus.CANARY.value:
+            # 窗口对应的世代已不在观测态（外部处置/重启后账本回放）：关窗防漏。
+            self._canaryWindows.pop(int(roundNo), None)
+            return gen
+        reason = self._canaryRollbackReason(readings)
+        if reason:
+            return self._executeCanaryRollback(int(roundNo), window, gen, reason)
+        elapsed = time.monotonic() - window["startedMonotonic"]
+        if elapsed >= window["windowSeconds"]:
+            return self._promoteCanary(int(roundNo), window, gen)
+        return gen
+
+    def observeOpenCanaries(
+        self, readings: Optional[Dict[str, Any]] = None
+    ) -> List[EvolutionGeneration]:
+        """观测全部开窗世代（生产驱动：RSI 每轮迭代调用一次，fail-soft 由调用方兜）。
+
+        ``readings`` 是本轮迭代的健康读数（gain/gain_ci/e2e_gain/
+        case_regressions/convergence_status/roi），喂给每个开窗世代的
+        should_rollback 判据——金丝雀窗内参数已应用，后续迭代的实测读数
+        就是窗内观测信号。
+        """
+        settled: List[EvolutionGeneration] = []
+        with self._lock:
+            rounds = sorted(self._canaryWindows.keys())
+        for roundNo in rounds:
+            result = self.canaryCheckpoint(roundNo, readings)
+            if result is not None:
+                settled.append(result)
+        return settled
+
+    def canaryReadout(self) -> Dict[str, Any]:
+        """开窗观测面（get_status 呈报用）：哪几代在观测、观测了多久。"""
+        with self._lock:
+            windows = []
+            for roundNo, window in sorted(self._canaryWindows.items()):
+                gen = self._ledger.get(window["generationNo"])
+                windows.append(
+                    {
+                        "roundNo": roundNo,
+                        "generationNo": window["generationNo"],
+                        "status": gen.status if gen is not None else "unknown",
+                        "windowSeconds": window["windowSeconds"],
+                        "elapsedSeconds": round(
+                            time.monotonic() - window["startedMonotonic"], 3
+                        ),
+                        "startedAt": window["startedAtIso"],
+                    }
+                )
+            return {"openWindows": windows, "count": len(windows)}
+
+    def _canaryRollbackReason(
+        self, readings: Optional[Dict[str, Any]]
+    ) -> Optional[str]:
+        """窗内回滚判据：先健康阈值（可注入回调），再 should_rollback 单源。
+
+        返回 None＝继续观测；返回字符串＝回滚原因（留痕进 canaryConclusion）。
+        """
+        if self._canaryHealthCallback is not None:
+            try:
+                health = self._canaryHealthCallback()
+            except Exception as exc:  # noqa: BLE001 - 健康读数失败不造假、如实降级
+                logger.warning("金丝雀健康回调执行失败（阈值判据跳过本轮）: %s", exc)
+                health = None
+            if isinstance(health, dict):
+                thresholds = self._canaryThresholds()
+                errorRate = health.get("error_rate")
+                if isinstance(errorRate, (int, float)) and not isinstance(errorRate, bool):
+                    if float(errorRate) > thresholds["max_error_rate"]:
+                        return (
+                            f"金丝雀健康越界: error_rate={errorRate} > "
+                            f"max_error_rate={thresholds['max_error_rate']}"
+                        )
+                success = health.get("success_rate")
+                baseline = health.get("baseline_success_rate")
+                if (
+                    isinstance(success, (int, float)) and not isinstance(success, bool)
+                    and isinstance(baseline, (int, float)) and not isinstance(baseline, bool)
+                ):
+                    drop = float(baseline) - float(success)
+                    if drop > thresholds["min_success_rate_drop"]:
+                        return (
+                            f"金丝雀健康越界: success_rate 较基线下降 {drop:.4f} > "
+                            f"min_success_rate_drop={thresholds['min_success_rate_drop']}"
+                        )
+        metrics = dict(readings or {})
+        if not metrics:
+            return None
+        manager = self._rollbackManager()
+        if manager is None:
+            return None
+        if manager.should_rollback(metrics):
+            hit = [
+                f"{key}={metrics[key]}"
+                for key in ("convergence_status", "roi", "gain", "e2e_gain")
+                if key in metrics
+            ]
+            if isinstance(metrics.get("case_regressions"), list) and metrics["case_regressions"]:
+                hit.append(f"case_regressions={metrics['case_regressions'][:4]}")
+            return f"金丝雀观测命中回滚判据(should_rollback): {'；'.join(hit)}"
+        return None
+
+    @staticmethod
+    def _canaryThresholds() -> Dict[str, float]:
+        """回滚阈值族唯一读法（governance_settings.resolveRsiCanaryRollbackThresholds）。"""
+        from neurova.security.governance_settings import (
+            resolveRsiCanaryRollbackThresholds,
+        )
+
+        return resolveRsiCanaryRollbackThresholds()
+
+    def _rollbackManager(self):
+        """should_rollback 判据的单一事实源：优先 RSI 编排器手上的那只。"""
+        if self._rsi is not None:
+            manager = getattr(self._rsi, "rollback_manager", None)
+            if manager is not None:
+                return manager
+        if getattr(self, "_fallbackRollbackManager", None) is None:
+            from neurova.evolution.rsi.rollback_manager import RSIRollbackManager
+
+            self._fallbackRollbackManager = RSIRollbackManager()
+        return self._fallbackRollbackManager
+
+    def _executeCanaryRollback(
+        self,
+        roundNo: int,
+        window: Dict[str, Any],
+        gen: EvolutionGeneration,
+        reason: str,
+    ) -> EvolutionGeneration:
+        """窗内越界 → 全自动回滚（无人工确认）：恢复 R1 应用前快照 + 留档。
+
+        恢复路径复用 R1 的 ``_restore_optimizable``；rollback_manager 的
+        create_snapshot/execute_rollback 留痕（阶段晋升判据"距上次回滚天数"
+        的唯一数据源，工单 004）。回滚后该世代终止，下一代以恢复后的基线为父。
+        """
+        self._canaryWindows.pop(int(roundNo), None)
+        snapshot = window.get("snapshot") or {}
+        if self._rsi is not None and snapshot:
+            snapshotId = self._rsi.rollback_manager.create_snapshot(snapshot)
+            self._rsi._restore_optimizable(snapshot)
+            if not self._rsi.rollback_manager.execute_rollback(snapshotId):
+                logger.error(
+                    "金丝雀回滚已执行但 rollback_manager 留痕失败（snapshot_id=%s）",
+                    snapshotId,
+                )
+        parentNo = window.get("parentNo")
+        if parentNo is None:
+            # 根代无父代世代可指认：诚实走拒绝留痕，不伪装 rolledBackTo。
+            logger.warning(
+                "世代 %s 金丝雀越界但无父代可回滚（根代），按拒绝留档: %s",
+                gen.generationNo, reason,
+            )
+            self._ledger.markRejected(
+                gen.generationNo, f"金丝雀观测越界且无父代可回滚（根代）：{reason}"
+            )
+        else:
+            logger.warning(
+                "世代 %s 金丝雀观测越界，自动回滚至父代 %s: %s",
+                gen.generationNo, parentNo, reason,
+            )
+            self._ledger.markRolledBack(
+                gen.generationNo, restoredTo=int(parentNo), reason=reason
+            )
+        return self._ledger.get(gen.generationNo)
+
+    def _promoteCanary(
+        self, roundNo: int, window: Dict[str, Any], gen: EvolutionGeneration
+    ) -> EvolutionGeneration:
+        """窗满无异常 → 晋升生产（markDeployed，promotedAt 落定）。"""
+        self._canaryWindows.pop(int(roundNo), None)
+        self._ledger.markDeployed(
+            gen.generationNo,
+            DeploymentRef(
+                canaryConclusion=(
+                    f"金丝雀观测窗通过（{window['windowSeconds']:.1f}s 无越界），晋升生产"
+                )
+            ),
+        )
+        logger.info("世代 %s 金丝雀观测窗通过，晋升生产", gen.generationNo)
+        return self._ledger.get(gen.generationNo)
+
+    def markRolledBack(
+        self, generationNo: int, restoredTo: int, reason: str = ""
+    ) -> None:
+        """部署后回滚留档（deployed/canary → rolledBack，记录回滚落点）。
+
+        金丝雀窗内越界的自动回滚（P1-4）多经 ``canaryCheckpoint`` 走
+        ``_executeCanaryRollback``（带恢复动作）；本方法保留为显式留痕入口。
+        """
+        self._ledger.markRolledBack(generationNo, restoredTo, reason=reason)
 
     # ── 世代要素构建 ──────────────────────────────────────────
 

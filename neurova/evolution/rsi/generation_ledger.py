@@ -14,6 +14,7 @@ RSI 既有的回执/指标/摘要继续各司其职，本账本不复制它们�
 
     proposed → shadowTesting → gated → canary → deployed
         ↘ rejected（任一未部署环节可拒，留档）
+    canary → rolledBack（P1-4：金丝雀观测窗内越界自动回滚，留档）
     deployed → rolledBack（留档）
 
 rejected / rolledBack 是终态：只留档，不再转移。
@@ -116,8 +117,12 @@ _ACTION_TRANSITIONS: Dict[str, Dict[GenerationStatus, GenerationStatus]] = {
         GenerationStatus.GATED: GenerationStatus.REJECTED,
         GenerationStatus.CANARY: GenerationStatus.REJECTED,
     },
-    # 回滚：仅已部署代可回滚，留档
-    "markRolledBack": {GenerationStatus.DEPLOYED: GenerationStatus.ROLLED_BACK},
+    # 回滚：已部署代或金丝雀观测中的代可回滚，留档（P1-4：窗内越界
+    # 自动回滚发生在 canary 态——观测窗内参数已应用，回滚是恢复安全态）。
+    "markRolledBack": {
+        GenerationStatus.DEPLOYED: GenerationStatus.ROLLED_BACK,
+        GenerationStatus.CANARY: GenerationStatus.ROLLED_BACK,
+    },
 }
 
 
@@ -221,17 +226,21 @@ class DecisionRef:
 
 @dataclass(frozen=True)
 class DeploymentRef:
-    """部署引用：金丝雀观测结论 / 晋升时刻 / 回滚落点。"""
+    """部署引用：金丝雀观测结论 / 观测窗起点 / 晋升时刻 / 回滚落点。"""
 
     promotedAt: str = ""
     canaryConclusion: str = ""
     rolledBackTo: Optional[int] = None
+    # P1-4：金丝雀观测窗起点（ISO 时刻）。观测窗内参数已应用（受限发布），
+    # 起点随世代落盘，晋升/回滚结论据此可对账。
+    canaryStartedAt: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "promotedAt": self.promotedAt,
             "canaryConclusion": self.canaryConclusion,
             "rolledBackTo": self.rolledBackTo,
+            "canaryStartedAt": self.canaryStartedAt,
         }
 
     @classmethod
@@ -241,6 +250,7 @@ class DeploymentRef:
             promotedAt=str(raw.get("promotedAt", "")),
             canaryConclusion=str(raw.get("canaryConclusion", "")),
             rolledBackTo=None if rolled_back_to is None else int(rolled_back_to),
+            canaryStartedAt=str(raw.get("canaryStartedAt", "")),
         )
 
 
@@ -471,8 +481,15 @@ class GenerationLedger:
             gen = self._require(generationNo)
             self._markRejectedLocked(gen, str(reason))
 
-    def markRolledBack(self, generationNo: int, restoredTo: int) -> None:
-        """部署后回滚留档：deployed→rolledBack，记录回滚落点 restoredTo。"""
+    def markRolledBack(
+        self, generationNo: int, restoredTo: int, reason: str = ""
+    ) -> None:
+        """回滚留档：deployed/canary → rolledBack，记录回滚落点 restoredTo。
+
+        P1-4：金丝雀观测窗内越界的自动回滚从 canary 态发起（观测窗内参数
+        已应用，回滚是恢复安全态）；``reason`` 必写进 canaryConclusion，
+        事故复盘据此归因（§3.9：回滚必须留痕 rolledBackTo + 原因）。
+        """
         with self._lock:
             gen = self._require(generationNo)
             target = _requireTransition(gen.status, "markRolledBack")
@@ -481,8 +498,31 @@ class GenerationLedger:
             if int(restoredTo) == gen.generationNo:
                 raise ValueError("回滚目标不能是当前世代自身")
             base = gen.deployment if gen.deployment is not None else DeploymentRef()
-            gen.deployment = replace(base, rolledBackTo=int(restoredTo))
+            conclusion = base.canaryConclusion
+            if str(reason or "").strip():
+                conclusion = (
+                    f"{conclusion}；{reason.strip()}" if conclusion else reason.strip()
+                )
+            gen.deployment = replace(
+                base, rolledBackTo=int(restoredTo), canaryConclusion=conclusion
+            )
             gen.status = target
+            self._persist()
+
+    def annotateCanaryWindow(self, generationNo: int, startedAtIso: str) -> None:
+        """记录金丝雀观测窗起点（canary 态内的部署注记，不改状态机落定态）。
+
+        窗口起点随世代落盘：观测中的代在晋升/回滚结算时能对出"观测了多久"。
+        非 canary 态调用即点名拒绝——窗口起点只属于"参数已应用、观测中"的代。
+        """
+        with self._lock:
+            gen = self._require(generationNo)
+            if gen.status != GenerationStatus.CANARY.value:
+                raise GenerationTransitionError(
+                    f"观测窗起点只能在 canary 态记录，当前状态 {gen.status}"
+                )
+            base = gen.deployment if gen.deployment is not None else DeploymentRef()
+            gen.deployment = replace(base, canaryStartedAt=str(startedAtIso or ""))
             self._persist()
 
     # ── 内部 ──────────────────────────────────────────────────

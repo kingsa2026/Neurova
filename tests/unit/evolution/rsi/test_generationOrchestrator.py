@@ -165,8 +165,12 @@ class _StubShadowVerify:
 
 
 def _attach(orch: RSIOrchestrator, shadow, *, ledger=None) -> GenerationOrchestrator:
+    # canaryWindowSeconds=0：P1-4 起批准应用后先进金丝雀观测窗；本文件钉的是
+    # P1-3 的"世代记录/门禁/谱系"契约，窗长置 0（窗即刻满足）让部署在应用后
+    # 即落定，保持断言确定性。观测窗本身的晋升/回滚语义在 test_canaryWindowDrill.py。
     genOrch = GenerationOrchestrator(
-        rsiOrchestrator=orch, shadowVerify=shadow, ledger=ledger
+        rsiOrchestrator=orch, shadowVerify=shadow, ledger=ledger,
+        canaryWindowSeconds=0,
     )
     orch.generationOrchestrator = genOrch
     return genOrch
