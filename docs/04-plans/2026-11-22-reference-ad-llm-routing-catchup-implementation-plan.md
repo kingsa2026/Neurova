@@ -121,3 +121,24 @@
 - 每卡：红灯（对现状失败的断言）→ 绿灯（最小实现）→ live-verify（真后端 9527 + 假 LLM 桩；多 provider 桩目录置于测试数据根）。
 - 批验收：批一=轴 4 复测（选型链路+attempt 轨迹+hold 换路三场景）；批二=计量/流式桩全链路；批三=安全开关两态。
 - 总验收：三批后按专项十轴同口径复评，目标总分 70.0→80.0+、轴 4 ≥8.0、容错轴保持 ≥9.0；复评结论回写专项文档与总报告 D7。
+
+## 8. 执行记录
+
+### 批一（2026-11-22，三卡全部完成，本地未推）
+
+| 卡 | 提交 | 内容 | 验证 |
+|----|------|------|------|
+| R1 | f89d965dc | 错误路由语义表封闭集（neurova/llm/routing/error_policy.py）；chat/stream 双路径改读单源；auth/408/409/423/425 纳入回退（契约变更已在提交说明与改约测试中声明） | 单测 14 用例；全量 llm 946 passed 零回归；live-verify PASS（真 socket 桩 401→跨服务商切换） |
+| R2 | 1f48b853a | attempt 生命周期账本（routing/attempt.py，结局五态）+ 流式空响应换路 + chat() 接线 | 单测 5 用例；全量 llm 933 passed 零回归；live-verify PASS（空流桩→切好服务商，台账 ['empty','completed']） |
+| R3 | d9d5b6a20 | 能力驱动选型进主聊天链路（routing/auto_selector.py + agent_core 接线，仅 auto 请求生效）+ register_provider_from_config/sync_llm_router 透传 provider 优先级 | 单测 10 用例；全量 llm 941 passed 零回归；live-verify PASS（带工具→tool 服务商，无工具→text 服务商，真 socket 双向） |
+
+执行中实测发现并当场修复的额外缺陷（均在对应卡提交内）：
+1. **跨服务商回退候选解析断链**（R1 live-verify 暴露）：候选只在已初始化 `_clients` 里找、按模型名排除（同名模型跨服务商互顶）——改为 provider/model 复合键 + 按优先级懒建候选 + chat() 可尝试次数以已配置模型数托底。
+2. **provider 优先级进不了路由表**（R3 live-verify 暴露）：`register_provider_from_config` 把 priority 硬编码为 1，选型排序退化为插入序——补 priority 透传（sync_llm_router → register_provider_from_config）。
+3. 首块耗时毫秒数对瞬时桩会截断为 0——空响应判据改用「内容/推理/工具调用任一实际到达」，不以 `first_token_ms == 0` 判空。
+
+执行中的偏离与遗留：
+- R2 的「静默看门狗触发换路」**未实施**：长思考模型合法静默可达数分钟，误切风险大于收益；看门狗维持告警面，是否换路留批二结合实测数据评估。
+- R2 的 CANCELLED 结局枚举已备但消费方中断路径未单独标定（GeneratorExit 经 finally 收尾，记录保持 started 态）。
+- 批一验证期间发现并行会话已提交批次新增了 4 处身份读方未同步 `test_turnIdentitySingleSource` 台账（asr/minutes、cognitive_layers/dreaming、computer_use/lane_mutex、core/tool_call_journal），致 tests/unit/agent 存量 1 红——非本批引入（git log 归属已核：a16ff1c91/ead7506bf/bae2b703c），移交台账处置。
+- 待拍板 D-R1…D-R5 仍开放；批二/批三未启动。
