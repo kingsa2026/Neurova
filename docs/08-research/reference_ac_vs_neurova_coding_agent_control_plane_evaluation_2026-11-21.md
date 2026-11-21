@@ -330,3 +330,91 @@ checkpoint 协同回滚（B3，−2.5）。本仓反超的两个半子项：并�
   （九篇目标架构文档）、`docs/internals/providers.md`（协议陷阱与所有权纪律）。
 - 评分为主观校准的专家评分（20 子项，逐项列证据），非基准测试跑分；子代理三路深读
   交叉验证了编排核心、provider 层、协作面的关键结论。
+
+---
+
+## 复评记录（2026-11-21，对照 T3 当期主干 6f94a063）
+
+> 复评时点：追平计划三批 19 卡实施完毕后（本仓 b224e856b 批一 → 9d826dc98 批二 → 13facd9c2 批三，
+> 另有 d00e0e836 投递销账闭环、f1a9a2dc9 接线覆盖补强两笔收口）。T3 浅克隆已更新至当期主干：
+> `6f94a063845021634c35d8f2d97db558290fdb1d`（2026-11-20 20:42 -0800，"fix(vcs): explain checkout
+> failures caused by local changes (#23346)"；原报告快照为 e19193db，2026-11-20 16:17 -0800）。
+> 评分口径沿用原卡（每子项 0-10、五大类 A-E 同权重），证据全部按当期代码重取，行号为复评现场读数。
+> 口径修正一处：原表 T3 D 类合计 27.5、E 类合计 26.0 与子项和（28.0、27.0）不符，本次按子项和计，
+> T3 总分相应由 92.0 修正为 91.8——属笔误修正，非 T3 退步。
+
+### 20 子项对照（原分 → 新分）
+
+| 子项 | Neurova | T3 Code | 关键证据（本次现场读数） | 变化原因 |
+|---|---|---|---|---|
+| A1 生命周期状态机 | 8.0 → **9.0** | 9.5 → 9.5 | 本仓 `swarm_support.py:60`（RUN_STATUS_TRANSITIONS）、`:122` classifyTerminalQuality、`:147` requiresReviewConfirmation、`:183` transitionRun 写 terminal_quality；T3 `orchestrationV2.ts:682-691`（run 十态）、`:866-880`（节点 11 kind） | 本方新能力：终态质量分级（strong/weak/none）入状态机+复核判定，补齐原判据；T3 十态+attempt 代际+节点图无实质漂移，仍略深 |
+| A2 事件溯源与审计 | 7.5 → **8.5** | 9.5 → 9.5 | 本仓 `swarm_event_store.py:181-198`（after_seq 重放/预算降级）、`:78` pruned-through、`swarm.py:348` 双写镜像；T3 `EventSink.ts:788` 单事务提交 | 本方新能力：全局单调 seq 事件库+重放协议+先发布后清理+流头保护；差距：本方事件库是 JSONL 账本的 fail-open 镜像，非 T3 式单写路径事件溯源 |
+| A3 幂等与恢复 | 6.5 → **8.5** | 9.5 → 9.5 | 本仓 `core/command_receipt.py`（running/accepted/rejected 三态）、`swarm.py:860-887`（dispatchTeam 接线）、`:1736-1742`（cancelRun 接线）；T3 `CommandReceiptStore.ts:43-68`、`Orchestrator.ts:16022/:16164/:15994` | 本方新能力：命令回执+同 ID 重放不重跑副作用+跨 thread conflict+拒绝落回执；差距：T3 另有 effect outbox 租约/退避/崩溃对账（本方 P2 未立项） |
+| A4 并发治理 | 8.0 → 8.0 | 7.0 → 7.0 | 本仓 `agent_run_ledger.py:64-77`（turn 准入/park）；T3 `EffectWorker.ts:802/:1054`（maxAttempts=5、effect 并发上限，全仓无全局配额） | 双方无漂移：本方 turn 准入治理保持领先；T3 仍无全局并发配额 |
+| A5 结算与收敛 | 5.5 → **8.0** | 9.0 → 9.0 | 本仓 `run_settlement.py`（九护栏纯函数）、`swarm.py:442-450`（TaskScheduler 每小时）、`:1194` settleIdleRuns；T3 `ThreadSettlementService.ts:346` sweep、`:165/:223` 护栏 | 本方新能力：idle sweep+九护栏一票否决+提交前 live 复核+幂等；差距：T3 四驱动（含 PR merge 事件流）且常开，本方默认关、仅 idle 驱动 |
+| B1 子代理建模 | 8.0 → **9.0** | 9.5 → 9.5 | 本仓 `delegated_delivery.py`（投递状态机+审计+messageId 幂等）、`swarm.py:359-360`（pushParentMail 唯一写点）、`:3351` catchUp；T3 `orchestrationV2.ts:890` countsForRun、DelegatedCompletionDelivery（Orchestrator/ProviderContinuationService/ProviderSessionManager） | 本方新能力：完成投递 cohort pending→claimed→acknowledged\|disposed+父闲补投+ack 镜像生产闭环；T3 执行图节点树+确定性派生 id 仍领先 |
+| B2 上下文传递 | 4.5 → **8.0** | 9.5 → 9.5 | 本仓 `context_transfer.py:21-23`（16k/64KiB 预算常量）、`:101` computeHandoffBudget、`:148` selectHistory、`swarm.py:2036-2044/:2095-2132`（续跑接线+事件留痕）；T3 `orchestrationV2.ts:181-187`（五类型）、`ContextHandoffService.ts`、`handoffBudget.ts:100-140`（活窗口预算） | 本方新能力：交接工件+双预算（超限报错不静默截断）+omitted 留痕+三态投递；差距：本方接线仅续跑路径、静态预算；T3 五类型贯通 fork/切换/spawn/result 全链路且预算按活窗口动态计算+图片预留 |
+| B3 checkpoint 回滚 | 7.0 → **8.5** | 9.5 → 9.5 | 本仓 `checkpoints/service.py:44` scopeRefFor、`:347` captureScope、`:364` restoreScope、`:388` pruneScope(保留 20)；T3 `CheckpointService.ts:28`（refs/t3 隐藏 ref）、`CheckpointRestoreSafety.ts` | 本方新能力：隐藏 ref scope 检查点+ordinal 增量+共享工作区隔离回退+诚实拒绝；差距：T3 的 provider 会话协同回退真执行+worktree 重建，本方 conversation_rollback 维度保守缺省、协同回退未活 |
+| B4 依赖与队列 | 7.5 → **8.5** | 8.5 → 8.5 | 本仓 `run_queue.py`（优先级/位次/取消/修订三态）、`swarm.py:3220-3251`（管理面）；T3 `Orchestrator.ts:681-686`（queued-run start/reorder/cancel/edit、promote-to-steer、queue.resume） | 本方新能力：队列管理面落地；与 T3 queued-run 治理拉平（T3 另有 promote-to-steer 细分，本方以 edit 走 steer/重排三态覆盖） |
+| C1 协议覆盖 | 7.5 → **8.0** | 9.5 → 9.5 | 本仓 `catalog.py:400` probeToolHealth、`:494` presetHandshakeProfiles（Gemini/Claude/Codex 档案）；T3 provider-* 10 包+effect-codex-app-server+provider-acp-registry+`contracts/acpRegistry.ts` | 本方新能力：三家握手预设+无副作用健康探测；三家真 CLI 握手 live 未启用（计划登记另做），T3 十一家原生适配+registry 任意 agent 仍代差 |
+| C2 能力声明与降级 | 8.5 → **9.0** | 9.5 → 9.5 | 本仓 `catalog.py:33-39`（BOOLEAN_CAPABILITY_DIMS 九维单源）、`:225/:276` refuseExecutorSpec 逐维双闸、`:325` 决策消费；T3 `orchestrationV2.ts:405-422`（12 维能力组） | 本方新能力：能力维度扩至九维+保守缺省+打开前逐维校验+决策消费一致；T3 12 维按域嵌套分组结构仍略深 |
+| C3 进程治理 | 8.0 → **9.0** | 9.5 → 9.5 | 本仓 `process_governance.py`（TIMEOUT_MATRIX/terminateProcessGroup/RetryBudget/classifyFailure OOM 改写）+真子孙进程活体测试；T3 `AcpSessionRuntime.ts:255-429`（cgroup lease）、`:996-1009`（SIGTERM→SIGKILL）、`:1042-1069`（taskkill /T /F） | 本方新能力：进程组级回收（含孙进程）+超时矩阵单源+重试总预算+OOM 诚实改写；差距：T3 另有 cgroup lease+POSIX 所有权台账 |
+| C4 认证与凭据 | 8.0 → **8.5** | 9.0 → 9.0 | 本仓 `credential_gate.py`（轮换闸门 RLock）、`acp_member.py:303` assertNoRotation 接线、`catalog.py:400`（探测浅/深分级）；T3 `provider-core/server/auth.ts`、`providerAuthFlow.ts`、`apps/server/src/provider/ProviderAuthService.ts`（withAccess） | 本方新能力：凭据轮换闸门（变更期拒绝新会话）+探测默认零子进程；差距：T3 auth 全生命周期控制器+实例间 binding 隔离 |
+| C5 provider 切换与接续 | 4.5 → **8.0** | 9.5 → 9.5 | 本仓 `catalog.py:328` decideProviderTransition（五结果）+resumeFinishedRun 续跑能力门；T3 `ProviderSessionTransitionPolicy.ts:15-20`（五结果）、`:37` decideProviderSessionTransition | 本方新能力：五结果决策函数+能力声明驱动的续跑门（缺声明诚实拒绝）；差距：跨 executor handoff 因 handoff_inject 无声明保守 reject（保守正确），实际跨家接续未活；T3 活体交割+选择迁移计划仍领先 |
+| D1 审批链 | 8.5 → **9.0** | 9.0 → 9.0 | 本仓 `approval_chain.py:411` acceptForSession、`:446` acceptAlways、`:481` revokeGrant、`:555` matchGrant、`:731`（L2 永不记忆红线）；T3 `providerPolicy.ts:45-63`（请求 kind+五档决策）、`orchestrationV2.ts:1355` responseCapability | 本方新能力：记忆式批准两档（只降不升、L2 红线、可撤销、团队档原子持久化）+投影读面+decision_source 审计；与 T3 五档+持久化拉平（本方房间多人在环占优，T3 手机推送占优） |
+| D2 权限天花板 | 7.5 → **8.5** | 9.5 → 9.5 | 本仓 `security/permission_mode.py:164` orgCeiling、`:180` applyOrgCeiling、`:199-200` delegateMode、`tool_executor.py:553-566` delegatedModeScope（三入口 `:3132/:3209/:3651`）；T3 `DispatchModeLimit.ts:49-71`（ceiling 收窄）+T3-Mode-Limit 头三处 | 本方新能力：rank 天花板+组织封顶+派活链单入口（只降不升、不支持档位诚实降档）；差距：T3 四层收窄另含跨环境请求头与 MCP 子任务不得宽于父 |
+| D3 多端与远程 | 8.0 → **8.5** | 9.5 → 9.5 | 本仓 `api/subscription_resume.py`（resolveResumeMode 三态/reconnectBackoff/dedupBySequence）、`mobile_ws_ledger.py:219` oldestSeq、`:237-247` sync_resume；T3 `docs/internals/t3-connect.md:48-69`（DPoP）、`remote.md`、`connection-runtime.md` | 本方新能力：cursor 续传三态决策+三端退避单源+去重保序+诚实 sync_snapshot_required（不做部分重放）；差距：T3 三路由热切换+learned routes+DPoP 云中继是完整远程产品面 |
+| E1 评测体系 | 7.5 → **8.5** | 8.5 → 8.5 | 本仓 `benchmark/suite_eval.py:138` EvalCase、`:175` registerEvalCase+validateCaseFirst+assertCaseRedGreen+costNote；T3 `evals/README.md`（"Add the case before the fix"+成本标注+CI 只跑 grader 单测） | 本方新能力：先 case 后修机制+来源/成本标注+纪律三落点同步；与 T3 evals 纪律拉平（T3 真模型套件更多） |
+| E2 契约与兼容 | 7.0 → **8.0** | 9.5 → 9.5 | 本仓 `tests/unit/api/test_wire_backward_compat.py`（14 守卫+红灯实证）、`docs/09-dev-progress/contract-change-log.md`；T3 `packages/contracts` 34,497 行、`orchestrationV2.ts:419-421`（replay 解码缺省） | 本方新能力：wire 向后兼容守卫+历史样例回归+契约变更登记表；差距：T3 契约单源包被服务端+三端共同消费、双向兼容纪律成体系 |
+| E3 性能与资源治理 | 7.0 → **8.0** | 9.0 → 9.0 | 本仓 `api/ws_stream_budget.py`（gzip 协商/单帧 64KiB 上限/ReplayByteBudget）、`realtime_push.py:33/:107-169`（ssePushStream 接线+snapshot_downgrade 通告）；T3 `docs/internals/performance-regressions.md`（v2-wire 字节预算回归门） | 本方新能力：WS 压缩协商+回放字节预算+快照降级通告（游标只按已外发帧推进防漏帧）；差距：T3 有真构建性能回归审计门，本方无同级回归套件 |
+
+### 总分对照
+
+| | Neurova | T3 Code（reference_ac） |
+|---|---|---|
+| A 编排模型 | 35.5 → **42.0** / 50 | 44.5 → 44.5 / 50 |
+| B 执行图与上下文 | 27.0 → **34.0** / 40 | 37.0 → 37.0 / 40 |
+| C 外部 agent 接入 | 36.5 → **42.5** / 50 | 47.0 → 47.0 / 50 |
+| D 协作与人在环 | 24.0 → **26.0** / 30 | 27.5 → **28.0** / 30（口径修正：按子项和） |
+| E 工程方法 | 21.5 → **24.5** / 30 | 26.0 → **27.0** / 30（同上） |
+| **合计（百分制）** | **72.0 → 84.5** | **92.0 → 91.8**（口径修正） |
+
+T3 当期主干与原快照相隔约四小时（e19193db → 6f94a063），20 子项逐项重读无实质漂移
+（节点 kind 由 9 种增至 11 种等属增量演化），T3 各项维持原分。
+
+### 仍未达标子项（16 项，按差距排序）
+
+| 子项 | 差距 | 剩余差距原因 |
+|---|---|---|
+| B2 上下文传递 | −1.5 | 接线仅续跑单路径；T3 五类型贯通 fork/provider 切换/spawn/result 全链路，预算按活窗口动态计算+图片预留 |
+| C1 协议覆盖 | −1.5 | Gemini/Claude/Codex 仅预设+探测，真 CLI 握手 live 未启用；T3 十一家原生+ACP registry 任意 agent |
+| C5 切换与接续 | −1.5 | 决策函数已建并作续跑门，但跨 executor handoff 因 handoff_inject 无声明保守 reject，实际跨家接续未活；T3 活体交割 |
+| E2 契约与兼容 | −1.5 | 本方为守卫测试+变更登记；T3 是 3.4 万行契约单源包+服务端三端共同消费+双向兼容纪律 |
+| A2 事件溯源 | −1.0 | 本方事件库为 JSONL 账本 fail-open 双写镜像，非单写路径事件溯源；无全量投影重建 |
+| A3 幂等与恢复 | −1.0 | 回执已覆盖派活/续跑/取消三写路径；effect outbox（租约/退避/崩溃对账）属 P2 未立项 |
+| A5 结算与收敛 | −1.0 | 仅 idle sweep 且默认关；T3 为 PR merge 事件流等四驱动且常开 |
+| B3 checkpoint 回滚 | −1.0 | 隐藏 ref+隔离回退已落地；provider 会话协同回退依赖能力声明（保守缺省 False），未真执行 |
+| D2 权限天花板 | −1.0 | 派活链封顶已落地；T3 另覆盖跨环境请求头与 MCP 子任务两层收窄 |
+| D3 多端与远程 | −1.0 | cursor 续传已落地；T3 三路由热切换+DPoP 云中继为完整远程面 |
+| E3 性能治理 | −1.0 | WS 预算/压缩已落地；T3 有真构建性能回归审计门 |
+| A1 状态机 | −0.5 | 终态质量分级已补齐；T3 另有 attempt 代际+执行图节点状态 |
+| B1 子代理建模 | −0.5 | 投递 cohort 已补齐；T3 执行图节点树+确定性派生 id 更深 |
+| C2 能力声明 | −0.5 | 九维单源已落地；T3 12 维按域嵌套分组 |
+| C3 进程治理 | −0.5 | 进程组回收+超时矩阵+重试预算已落地；T3 另有 cgroup lease+所有权台账 |
+| C4 认证与凭据 | −0.5 | 轮换闸门+探测分级已落地；T3 auth 生命周期+binding 隔离更深 |
+
+### 达成判定
+
+- **未全面达标（部分达成）**。追平目标口径「20 子项全部 ≥ T3 当期读数」不成立：
+  16 项落后（子项分合计尾差 14.5，折百分制约 7.3 分）、3 项拉平（B4/D1/E1）、
+  1 项反超保持（A4，+1.0）。
+- 总分：Neurova **72.0 → 84.5**，T3 **92.0 → 91.8**（口径修正后），净差由 20.0 收窄至 **7.3**。
+- 追平计划预计「第三批完成 ≈93 分」系按全部子项追平的乐观口径；本次客观复评为 **84.5**。
+  机制面（命令回执、上下文工件、切换决策、权限天花板、投递账本、流预算、终态分级、
+  记忆式批准、evals 纪律）已系统性补齐；剩余差距集中在两类：
+  **接线广度**（B2 多触发点、C5 活体 handoff、C1 三家真握手）与
+  **体系深度**（A2 单写事件溯源、A3 effect outbox、E2 契约单源、E3 性能回归门、C3 cgroup），
+  均为可继续立项的明确后续，不是机制缺失。
+- 复评纪律说明：本次不为追分放水——B2/C1/C5 虽已实施，因接线广度/活体启用未达
+  「生产可用无短板」档位，未给 9 分档；T3 侧逐项重读无退步证据，各项维持原分；
+  唯一分数变动是 D/E 类合计的笔误修正（27.5→28.0、26.0→27.0）。

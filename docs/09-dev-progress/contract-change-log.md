@@ -23,6 +23,9 @@
 | 2026-11-21 | 移动 WS sync_resume | 快照必要（cursor 过旧/非法/预算尽）时下发 `sync_snapshot_required {reason, note, head_seq}`（D3，决策单源 `subscription_resume.resolveResumeMode`；三端重连退避按 `reconnectBackoff` 语义实现） | 行为澄清：此前游标过旧无明确语义 | 客户端收到后丢弃游标、退避重连、以首屏快照恢复；绝不部分重放 |
 | 2026-11-21 | 评测运行记录 | suite_eval `/run` 记录新增可选 `cost_note`（E1，手动跑成本标注；不传不含该键） | 向后兼容（新增可选键） | 消费方按需读取 |
 | 2026-11-21 | neuacp 失败文案 | 外部代理失败原因经 classifyFailure 诚实改写：OOM 类标注「内存资源耗尽」并保留原始证据（C3） | 文案变化（结构不变，error 仍为字符串） | 消费方如按旧文案匹配需改为含「资源耗尽」关键词判定 |
+| 2026-11-21 | run 状态投影 | `subagent_status`/`SwarmManager.status()` 结果新增 `queue_position`（排队位次，从 1 起；0=不在队列；B4 管理面） | 向后兼容（新增可选键） | 消费方按需读取 |
+| 2026-11-21 | REST 新增 | `GET/PATCH/DELETE/POST /api/v1/swarm-queue[...]`（B4 管理面：队列快照/优先级/取消/任务书修订；admin 门；未知 id 404；在跑 steer 不可达 200+`mode=rejected`） | 向后兼容（纯新增端点） | 前端/运维面按需接入 |
+| 2026-11-21 | spawn 依赖门 | `DEPENDENCY_FAILED` 拒绝范围扩大：前置为 weak/none 终态（超时/取消兜底、来路不明）的 completion 也不再自动放行下游，须复核（A1）；历史空质量（未经迁移收口的直接构造）行为不变；另根修「依赖全部已满足时 spawn 崩溃（blockedId 未赋值）」的预存 bug | 行为收紧（弱终态不再被当强终态消费）+ 崩溃修复 | 依赖弱终态前端的下游任务需先复核/重派前置 |
 
 ## 待登记（ upcoming）
 
