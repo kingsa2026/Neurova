@@ -1648,9 +1648,10 @@ class SwarmManager:
     async def _approveMerge(self, run: SubAgentRun, candidate) -> tuple:
         """merge 动作纳入既有审批链（L0 自动放行留痕；env 可调 L1/L2）。
 
-        审批通道故障时按放行留痕处理（warning 可见 + merged 事件带 approval
-        注记）——候选板与事件账本仍完整可查，集成主流程不因审批基础设施抖动
-        而卡死；审批分级本身不受影响（L1/L2 的等待与拒绝语义照常生效）。
+        M4（修复计划 2026-11-21）：审批通道故障一律 **fail-closed**——按未获准
+        处理，候选保留在候选板（submitted）待人工处置（人可经房间候选卡或
+        decide 工具在通道恢复后继续裁决）。原实现在通道故障时放行留痕，等于
+        基础设施抖动豁免「需人审」语义（尤其 L2 强制人工）——已废弃。
         """
         import os as _os
 
@@ -1671,10 +1672,10 @@ class SwarmManager:
                 return True, f"approved:{verdict.get('level', level)}"
             return False, (verdict.get("pending_reason")
                            or verdict.get("status") or "not_approved")
-        except Exception as e:  # noqa: BLE001 - 审批通道故障不阻断集成（留痕可见）
-            logger.warning("Swarm: merge 审批通道故障，按放行留痕处理 (%s): %s",
+        except Exception as e:  # noqa: BLE001 - 通道故障按未获准处理（fail-closed，候选保留）
+            logger.warning("Swarm: merge 审批通道故障，按未获准处理（候选保留待人工）(%s): %s",
                            candidate.candidateId, e)
-            return True, "approval_channel_unavailable"
+            return False, "approval_channel_unavailable"
 
     def applyRoomCandidateAction(self, candidateId: str, action: str, actor: str = "") -> Dict[str, Any]:
         """S9：人在房间对候选的直接处置（拦截=否决 / 采纳=CAS 合入）。

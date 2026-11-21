@@ -273,3 +273,35 @@ class TestSwarmCandidateFlow:
         assert "revision" in rep
         assert rep["revision"] >= 1
         assert len(rep["candidates"]) == 1
+
+
+class TestApprovalChannelFailClosed:
+    """修复计划 M4：审批通道故障时不得放行合入（原实现 fail-open 返回
+    approval_channel_unavailable=True，L2「强制人工」语义被基础设施抖动豁免）。
+    修后：通道故障 → merge_blocked，候选保留 submitted 待人工处置。"""
+
+    @pytest.mark.asyncio
+    async def test_channel_failure_blocks_merge_and_keeps_candidate(self, swarm, monkeypatch):
+        agent = make_agent(reply="需人审的产出")
+        with patch("neurova.api.endpoints.get_agent_instance", return_value=agent):
+            result = await swarm.spawn(
+                task="人审任务", agent_id="researcher",
+                task_unit={"goal": "g", "artifactOwnership": "doc-l2"})
+        assert result["status"] == "completed"
+        sid = result["subagent_id"]
+
+        monkeypatch.setenv("NEUROVA_SWARM_MERGE_APPROVAL_LEVEL", "L2")
+
+        async def brokenChannel(*a, **k):
+            raise RuntimeError("审批基础设施不可用（模拟通道故障）")
+
+        monkeypatch.setattr(
+            "neurova.agent.approval_chain.requestRunApproval", brokenChannel)
+
+        cand = swarm._candidates.submitCandidate(sid, "需人审的产出", ["doc-l2"])
+        outcome = await swarm._mergeCandidateForRun(swarm._runs[sid], cand)
+
+        assert outcome["merged"] is False, "审批通道故障不得放行合入（L2 必须人工）"
+        assert outcome["cause"] == "merge_blocked"
+        assert swarm._candidates.candidate(cand.candidateId).status == CANDIDATE_SUBMITTED, \
+            "候选必须保留在板上待人工处置（候选板即等待态载体）"
