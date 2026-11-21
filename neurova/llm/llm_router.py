@@ -413,12 +413,15 @@ def register_provider_from_config(
     model_names: List[str],
     model_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
     scope: str = "admin",
+    priority: int = 0,
 ) -> None:
     """将 ProviderConfig 风格的 providers 注册到全局 LLMRouter。
 
     能力来源：provider.model_metadata 中已持久化的 capabilities 优先
     （模型管理页"自动检测"写入），缺失时名称推断兜底 —— 路由与标记同源。
     scope 透传给注册表复合键（P2-10），缺省 "admin"＝全局表。
+    priority 透传 provider 配置的优先级（R3，2026-11-22：此前硬编码 1，
+    provider 优先级进不了路由表，选型排序退化为插入序）。
     """
     from neurova.llm.capability_detector import detect_model_capabilities
 
@@ -438,7 +441,7 @@ def register_provider_from_config(
             {
                 "name": m,
                 "capabilities": [c for c in caps if c in {mc.value for mc in ModelCapability}],
-                "priority": 1,
+                "priority": priority,
                 "health_status": "healthy",
                 "response_time": 0.0,
                 "weight": 1.0,
@@ -463,7 +466,10 @@ def sync_llm_router(scope: Optional[str] = None) -> None:
             return
         target_scope = scope or "admin"
         for pid, pconf in mgr._providers.items():
-            register_provider_from_config(pid, pconf.name, pconf.models, pconf.model_metadata, scope=target_scope)
+            register_provider_from_config(
+                pid, pconf.name, pconf.models, pconf.model_metadata,
+                scope=target_scope, priority=getattr(pconf, "priority", 0),
+            )
     except Exception as e:  # noqa: BLE001
         logger.warning("sync_llm_router 失败（多模态路由将惰性回退）: %s", e)
 

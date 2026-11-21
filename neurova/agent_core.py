@@ -156,6 +156,20 @@ class AgentLLMClient:
         if override:
             return override[1], None
 
+        if self.model == "auto":
+            # R3（参照系 ad 追平）：auto 请求走能力驱动选型（带工具→要求
+            # TOOL_USE）。选不出可满足候选时返回 None，落回既有兜底链；
+            # 命中时只传模型名、不携带 provider_id（与视觉轮覆盖同理由：
+            # 钉死 provider 会禁用 auto-failover，保留跨服务商切换链）。
+            from neurova.llm.routing.auto_selector import resolveAutoChatModel
+
+            picked = resolveAutoChatModel(
+                scope=self._scope,
+                needs_tools=bool(kwargs.get("tools")),
+            )
+            if picked:
+                return picked[1], None
+
         return (self.model if self.model != "auto" else None), self.provider_id or None
 
     def requestCompatCandidates(self, model=None, provider_id=None) -> list:
