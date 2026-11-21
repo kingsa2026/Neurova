@@ -492,8 +492,20 @@ class SwarmManager:
         # 不占派生槽、不入 _runs；依赖终态结算时放行或判失败。status() 可查。
         self._blocked: Dict[str, Dict[str, Any]] = {}
         # S4 结果候选板：member 结果先落候选（submitted），主侧 CAS 合入；
-        # 冲突保留升级。随管理器单例存活，留痕经 H-4 run 事件账本。
-        self._candidates = CandidateMergeBoard()
+        # 冲突保留升级。M7（拍板乙）：NEUROVA_SWARM_CANDIDATE_DB 开启时整板落
+        # SQLite（候选含正文与集成版本跨进程/重启可见，多副本 CAS 判定权随库）；
+        # 缺省内存形态（单进程语义不变，测试零串扰）。
+        candidateDb = (os.environ.get("NEUROVA_SWARM_CANDIDATE_DB") or "").strip()
+        if candidateDb:
+            from pathlib import Path as _Path
+
+            from neurova.core.data_root import dataPath
+
+            dbPath = (candidateDb if candidateDb.lower() not in ("1", "true", "on")
+                      else str(_Path(dataPath("swarm_runs")) / "candidate_board.db"))
+            self._candidates = CandidateMergeBoard(db_path=dbPath)
+        else:
+            self._candidates = CandidateMergeBoard()
         # B3：外部编码代理成员的适配器登记（subagent_id → (adapter, spawnLoop)）。
         # cancelRun 据此把叫停传导进外部代理进程（adapter.cancel → executor.cancel
         # → ACP session/cancel）；run 到终态即摘除。spawnLoop 是派生时的事件循环，

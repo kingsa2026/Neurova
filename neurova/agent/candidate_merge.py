@@ -25,6 +25,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 #: 候选状态域：submitted（在途）→ accepted（已合入）/ rejected（人工否决）/
@@ -107,38 +108,166 @@ class CandidateMergeBoard:
 
     revision 是集成版本的单源计数：每次合入 +1；候选提交时以当时的 revision
     作为 ``baseRevision``——合入时二者不一致即说明集成面已被别人推进（CAS 失败）。
+
+    M7（修复计划 2026-11-21，拍板乙）：传 ``db_path`` 时整板落 SQLite（WAL，
+    跨进程可见）——候选（含正文）与集成版本重启/跨进程均在，多副本部署下
+    CAS 判定权随库；不传时保持进程内内存形态（单测零污染）。两种形态同一份
+    判定逻辑与同一套公开接口。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, db_path: Optional[str] = None) -> None:
+        self._db_path = str(db_path or "").strip()
         self._candidates: Dict[str, CandidateReport] = {}
         self._revision: int = 0
         self._lock = threading.RLock()
+        self._conn: Any = None
+        if self._db_path:
+            self._initDb()
+
+    # ── SQLite 形态（M7） ──────────────────────────────────────────────
+
+    def _initDb(self) -> None:
+        import json as _json
+        import os as _os
+        import sqlite3 as _sqlite3
+
+        self._json = _json
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        conn = _sqlite3.connect(self._db_path, check_same_thread=False, timeout=30.0)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=10000")
+        except _sqlite3.Error:
+            pass
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS swarm_board_meta ("
+            " id INTEGER PRIMARY KEY CHECK (id=1),"
+            " revision INTEGER NOT NULL DEFAULT 0, updated_at REAL NOT NULL DEFAULT 0)")
+        conn.execute(
+            "INSERT OR IGNORE INTO swarm_board_meta (id, revision, updated_at) VALUES (1, 0, 0)")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS swarm_candidates ("
+            " candidate_id TEXT PRIMARY KEY, run_id TEXT NOT NULL DEFAULT '',"
+            " content TEXT NOT NULL DEFAULT '', artifact_keys TEXT NOT NULL DEFAULT '[]',"
+            " base_revision INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'submitted',"
+            " conflict_with TEXT NOT NULL DEFAULT '[]', note TEXT NOT NULL DEFAULT '',"
+            " created_at REAL NOT NULL DEFAULT 0, decided_at REAL NOT NULL DEFAULT 0)")
+        conn.commit()
+        self._conn = conn
+        # 依赖 os/pathlib 的旁路引用保留（未来清理任务用）；当前仅建目录。
+        _ = (_os, Path)
+
+    def _rowToReport(self, row: Any) -> CandidateReport:
+        return CandidateReport(
+            candidateId=str(row[0]),
+            runId=str(row[1] or ""),
+            content=str(row[2] or ""),
+            artifactKeys=list(self._json.loads(row[3] or "[]")),
+            baseRevision=int(row[4] or 0),
+            status=str(row[5] or CANDIDATE_SUBMITTED),
+            conflictWith=list(self._json.loads(row[6] or "[]")),
+            note=str(row[7] or ""),
+            createdAt=float(row[8] or 0.0),
+            decidedAt=float(row[9] or 0.0),
+        )
+
+    def _dbLoad(self, candidateId: str) -> Optional[CandidateReport]:
+        row = self._conn.execute(
+            "SELECT candidate_id, run_id, content, artifact_keys, base_revision,"
+            " status, conflict_with, note, created_at, decided_at"
+            " FROM swarm_candidates WHERE candidate_id=?",
+            (str(candidateId or "").strip(),),
+        ).fetchone()
+        return self._rowToReport(row) if row is not None else None
+
+    def _dbPersist(self, candidate: CandidateReport) -> None:
+        self._conn.execute(
+            "INSERT INTO swarm_candidates (candidate_id, run_id, content, artifact_keys,"
+            " base_revision, status, conflict_with, note, created_at, decided_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(candidate_id) DO UPDATE SET run_id=excluded.run_id,"
+            " content=excluded.content, artifact_keys=excluded.artifact_keys,"
+            " base_revision=excluded.base_revision, status=excluded.status,"
+            " conflict_with=excluded.conflict_with, note=excluded.note,"
+            " decided_at=excluded.decided_at",
+            (candidate.candidateId, candidate.runId, candidate.content,
+             self._json.dumps(candidate.artifactKeys), candidate.baseRevision,
+             candidate.status, self._json.dumps(candidate.conflictWith),
+             candidate.note, candidate.createdAt, candidate.decidedAt),
+        )
+        self._conn.commit()
+
+    def _dbRevision(self) -> int:
+        row = self._conn.execute(
+            "SELECT revision FROM swarm_board_meta WHERE id=1").fetchone()
+        return int(row[0] or 0)
+
+    def _dbBumpRevision(self) -> int:
+        self._conn.execute(
+            "UPDATE swarm_board_meta SET revision=revision+1, updated_at=? WHERE id=1",
+            (time.time(),))
+        self._conn.commit()
+        return self._dbRevision()
+
+    # ── 公开接口（两形态共用签名） ─────────────────────────────────────
 
     @property
     def revision(self) -> int:
         with self._lock:
+            if self._conn is not None:
+                return self._dbRevision()
             return self._revision
 
     def candidate(self, candidateId: str) -> Optional[CandidateReport]:
         with self._lock:
+            if self._conn is not None:
+                return self._dbLoad(candidateId)
             return self._candidates.get(str(candidateId or "").strip())
 
     def candidatesForRun(self, runId: str) -> List[CandidateReport]:
         with self._lock:
+            if self._conn is not None:
+                rows = self._conn.execute(
+                    "SELECT candidate_id, run_id, content, artifact_keys, base_revision,"
+                    " status, conflict_with, note, created_at, decided_at"
+                    " FROM swarm_candidates WHERE run_id=? ORDER BY created_at ASC",
+                    (str(runId or ""),),
+                ).fetchall()
+                return [self._rowToReport(r) for r in rows]
             return [c for c in self._candidates.values() if c.runId == str(runId or "")]
 
     def allCandidates(self) -> List[CandidateReport]:
         with self._lock:
+            if self._conn is not None:
+                rows = self._conn.execute(
+                    "SELECT candidate_id, run_id, content, artifact_keys, base_revision,"
+                    " status, conflict_with, note, created_at, decided_at"
+                    " FROM swarm_candidates ORDER BY created_at ASC").fetchall()
+                return [self._rowToReport(r) for r in rows]
             return list(self._candidates.values())
 
     def conflicts(self) -> List[Dict[str, Any]]:
         """当前带冲突标记的候选（含已合入一方的历史标记）投影。"""
         with self._lock:
+            if self._conn is not None:
+                rows = self._conn.execute(
+                    "SELECT candidate_id, run_id, content, artifact_keys, base_revision,"
+                    " status, conflict_with, note, created_at, decided_at"
+                    " FROM swarm_candidates WHERE conflict_with != '[]' ORDER BY created_at ASC"
+                ).fetchall()
+                return [self._rowToReport(r).toDict() for r in rows]
             return [c.toDict() for c in self._candidates.values() if c.conflictWith]
 
     def snapshot(self) -> Dict[str, Any]:
         """integrationReport 的 candidates/conflicts/revision 字段源。"""
         with self._lock:
+            if self._conn is not None:
+                allReports = self.allCandidates()
+                return {
+                    "revision": self._dbRevision(),
+                    "candidates": [c.toDict() for c in allReports],
+                    "conflicts": [c.toDict() for c in allReports if c.conflictWith],
+                }
             return {
                 "revision": self._revision,
                 "candidates": [c.toDict() for c in self._candidates.values()],
@@ -151,6 +280,19 @@ class CandidateMergeBoard:
     ) -> CandidateReport:
         """落一份候选（submitted）。同 key 同基准的在途候选 → 双方标记冲突保留。"""
         with self._lock:
+            if self._conn is not None:
+                revision = self._dbRevision()
+                candidate = CandidateReport(
+                    candidateId=f"cand_{uuid.uuid4().hex[:12]}",
+                    runId=str(runId or ""),
+                    content=str(content or ""),
+                    artifactKeys=[str(k) for k in (artifactKeys or []) if str(k or "").strip()],
+                    baseRevision=int(baseRevision if baseRevision is not None else revision),
+                    status=CANDIDATE_SUBMITTED,
+                )
+                self._dbPersist(candidate)
+                self._dbFlagSameKeyClash(candidate)
+                return self._dbLoad(candidate.candidateId) or candidate
             candidate = CandidateReport(
                 candidateId=f"cand_{uuid.uuid4().hex[:12]}",
                 runId=str(runId or ""),
@@ -168,6 +310,18 @@ class CandidateMergeBoard:
     ) -> CandidateReport:
         """回炉修正后重新提交：回到 submitted、换新基准；旧冲突标记随新基准清除。"""
         with self._lock:
+            if self._conn is not None:
+                candidate = self._dbMustGet(candidateId)
+                candidate.content = str(content or "")
+                candidate.baseRevision = int(
+                    baseRevision if baseRevision is not None else self._dbRevision())
+                candidate.status = CANDIDATE_SUBMITTED
+                candidate.conflictWith = []
+                candidate.note = ""
+                candidate.decidedAt = 0.0
+                self._dbPersist(candidate)
+                self._dbFlagSameKeyClash(candidate)
+                return self._dbLoad(candidate.candidateId) or candidate
             candidate = self._mustGet(candidateId)
             candidate.content = str(content or "")
             candidate.baseRevision = int(
@@ -182,6 +336,9 @@ class CandidateMergeBoard:
     def mergeCandidate(self, candidateId: str) -> Dict[str, Any]:
         """CAS 合入：候选.baseRevision == 当前 revision 才合入；不一致判冲突。
 
+        SQLite 形态下整个判定在 ``BEGIN IMMEDIATE`` 事务内完成——多进程并发
+        合入由库级写锁串行化，CAS 判定权随库（M7 乙）。
+
         Returns:
             {"merged": True, "candidate_id": …, "revision": 合入后的新版本}
         Raises:
@@ -190,6 +347,8 @@ class CandidateMergeBoard:
             CandidateConflictError: CAS 失败——集成面已被推进，候选保留待人工裁决。
         """
         with self._lock:
+            if self._conn is not None:
+                return self._dbMergeCandidate(candidateId)
             candidate = self._mustGet(candidateId)
             if candidate.status == CANDIDATE_ACCEPTED:
                 raise CandidateMergeError(
@@ -217,9 +376,57 @@ class CandidateMergeBoard:
             return {"merged": True, "candidate_id": candidate.candidateId,
                     "revision": self._revision}
 
+    def _dbMergeCandidate(self, candidateId: str) -> Dict[str, Any]:
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            candidate = self._dbLoad(candidateId)
+            if candidate is None:
+                raise CandidateMergeError(f"候选不存在: {candidateId!r}")
+            if candidate.status == CANDIDATE_ACCEPTED:
+                raise CandidateMergeError(
+                    f"候选 {candidate.candidateId} 已合入，不重复受理")
+            if candidate.status != CANDIDATE_SUBMITTED:
+                raise CandidateMergeError(
+                    f"候选 {candidate.candidateId} 状态为 {candidate.status}，"
+                    "不可合入（reviseRequired 请先 resubmitCandidate）")
+            revision = self._dbRevision()
+            if candidate.baseRevision != revision:
+                clashing = self._dbAcceptedWithSameKeys(candidate)
+                candidate.conflictWith = [c.candidateId for c in clashing]
+                candidate.note = (
+                    f"CAS 冲突：候选基准 {candidate.baseRevision} ≠ "
+                    f"当前集成版本 {revision}；候选保留待人工裁决")
+                self._dbPersist(candidate)
+                raise CandidateConflictError(
+                    candidate.note
+                    + (f"（冲突对象：{candidate.conflictWith}）" if clashing else ""),
+                    candidateId=candidate.candidateId,
+                    conflictWith=candidate.conflictWith,
+                )
+            self._conn.execute(
+                "UPDATE swarm_board_meta SET revision=revision+1, updated_at=? WHERE id=1",
+                (time.time(),))
+            candidate.status = CANDIDATE_ACCEPTED
+            candidate.decidedAt = time.time()
+            candidate.note = ""
+            self._dbPersist(candidate)
+            newRevision = self._dbRevision()
+            return {"merged": True, "candidate_id": candidate.candidateId,
+                    "revision": newRevision}
+        except Exception:
+            self._conn.rollback()
+            raise
+
     def markReviseRequired(self, candidateId: str, reason: str = "") -> CandidateReport:
         """验收/评审驳回：候选置 reviseRequired（回炉链由 swarm/acceptance 侧既有机制承接）。"""
         with self._lock:
+            if self._conn is not None:
+                candidate = self._dbMustGet(candidateId)
+                candidate.status = CANDIDATE_REVISE_REQUIRED
+                candidate.note = str(reason or "验收驳回")
+                candidate.decidedAt = time.time()
+                self._dbPersist(candidate)
+                return candidate
             candidate = self._mustGet(candidateId)
             candidate.status = CANDIDATE_REVISE_REQUIRED
             candidate.note = str(reason or "验收驳回")
@@ -229,13 +436,67 @@ class CandidateMergeBoard:
     def rejectCandidate(self, candidateId: str, reason: str = "") -> CandidateReport:
         """人工否决一份候选（冲突裁决/审批拒绝的落点；结果不再进入集成）。"""
         with self._lock:
+            if self._conn is not None:
+                candidate = self._dbMustGet(candidateId)
+                candidate.status = CANDIDATE_REJECTED
+                candidate.note = str(reason or "人工否决")
+                candidate.decidedAt = time.time()
+                self._dbPersist(candidate)
+                return candidate
             candidate = self._mustGet(candidateId)
             candidate.status = CANDIDATE_REJECTED
             candidate.note = str(reason or "人工否决")
             candidate.decidedAt = time.time()
             return candidate
 
-    # ── 内部 ─────────────────────────────────────────────────
+    # ── SQLite 内部 ───────────────────────────────────────────
+
+    def _dbMustGet(self, candidateId: str) -> CandidateReport:
+        candidate = self._dbLoad(candidateId)
+        if candidate is None:
+            raise CandidateMergeError(f"候选不存在: {candidateId!r}")
+        return candidate
+
+    def _dbFlagSameKeyClash(self, candidate: CandidateReport) -> None:
+        """同 artifactKey 且同 baseRevision 的在途候选互相标记冲突（都保留，不裁决）。"""
+        if not candidate.artifactKeys:
+            return
+        rows = self._conn.execute(
+            "SELECT candidate_id, run_id, content, artifact_keys, base_revision,"
+            " status, conflict_with, note, created_at, decided_at"
+            " FROM swarm_candidates WHERE base_revision=? AND candidate_id != ?",
+            (candidate.baseRevision, candidate.candidateId),
+        ).fetchall()
+        for row in rows:
+            other = self._rowToReport(row)
+            if other.baseRevision != candidate.baseRevision:
+                continue
+            if not set(other.artifactKeys) & set(candidate.artifactKeys):
+                continue
+            for a, b in ((candidate, other), (other, candidate)):
+                if a.candidateId not in a.conflictWith:
+                    a.conflictWith.append(b.candidateId)
+                if not a.note:
+                    a.note = (f"与候选 {b.candidateId} 主张同一产物 "
+                              f"{sorted(set(a.artifactKeys) & set(b.artifactKeys))}"
+                              f" 且基准版本相同（{a.baseRevision}），待人工裁决")
+                self._dbPersist(a)
+
+    def _dbAcceptedWithSameKeys(self, candidate: CandidateReport) -> List[CandidateReport]:
+        if not candidate.artifactKeys:
+            return []
+        rows = self._conn.execute(
+            "SELECT candidate_id, run_id, content, artifact_keys, base_revision,"
+            " status, conflict_with, note, created_at, decided_at"
+            " FROM swarm_candidates WHERE status=? AND candidate_id != ?",
+            (CANDIDATE_ACCEPTED, candidate.candidateId),
+        ).fetchall()
+        return [
+            self._rowToReport(r) for r in rows
+            if set(self._rowToReport(r).artifactKeys) & set(candidate.artifactKeys)
+        ]
+
+    # ── 内存形态内部 ─────────────────────────────────────────
 
     def _mustGet(self, candidateId: str) -> CandidateReport:
         candidate = self._candidates.get(str(candidateId or "").strip())

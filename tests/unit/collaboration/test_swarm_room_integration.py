@@ -67,14 +67,12 @@ class _FakeRepo:
 
 @pytest.fixture(autouse=True)
 def _cleanRoomBridge():
-    """房间桥接的 pending 登记表是进程内模块级索引——用例间必须清场。"""
+    """房间桥接的 pending 登记表（内存 dict + SQLite 形态）用例间必须清场。"""
     from neurova.agent import approval_chain as ac
 
-    ac._roomApprovalRegistry.clear()
-    ac._roomCandidateRegistry.clear()
+    ac._roomBridgeClearAllForTests()
     yield
-    ac._roomApprovalRegistry.clear()
-    ac._roomCandidateRegistry.clear()
+    ac._roomBridgeClearAllForTests()
 
 
 @pytest.fixture
@@ -367,7 +365,7 @@ class TestRoomApprovalBackfillLandsGovernance:
             project_id=ROOM, owner_id=OWNER,
             members={OWNER: {"role": "owner"}, MEMBER: {"role": "member"}},
             visibility="private", updated_at=0.0,
-            _added=[],
+            metadata={}, _added=[],
         )
         project.is_member = lambda uid: uid in project.members
 

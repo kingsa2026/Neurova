@@ -918,14 +918,101 @@ ROOM_APPROVE_KEYWORDS = ("同意", "批准", "通过", "采纳", "准许", "appr
 ROOM_INTERCEPT_KEYWORDS = ("拦截", "叫停", "否决", "驳回", "拒绝", "intercept", "reject")
 ROOM_MERGE_KEYWORDS = ("采纳", "合入", "合并", "通过", "同意", "accept", "merge", "approve")
 
-#: pending 匹配登记表：request_id/candidate_id → room_id（进程内索引，终态即清）
+#: pending 匹配登记表：request_id/candidate_id → room_id。M7（拍板乙）：
+#: NEUROVA_SWARM_ROOM_PENDING_DB 开启（1/true=数据根缺省路径，或显式路径）时
+#: 落 SQLite（多副本部署跨进程可见）；缺省进程内 dict（单进程语义不变）。
+#: 裁决一律回灌单源（ApprovalManager / 候选板），本表只是
+#: "哪张卡上墙在哪个房间"的索引，终态即清。
 _roomApprovalRegistry: Dict[str, str] = {}
 _roomCandidateRegistry: Dict[str, str] = {}
 _roomBridgeLock = threading.RLock()
 _ROOM_REGISTRY_MAX = 500
+_roomBridgeStoreInstance: Optional["_RoomPendingStore"] = None
 
 
-def _roomRegistryPut(registry: Dict[str, str], key: str, roomId: str) -> None:
+class _RoomPendingStore:
+    """房间 pending 卡索引的 SQLite 形态（M7：多副本部署下跨进程可见）。"""
+
+    def __init__(self, db_path: str) -> None:
+        import sqlite3
+
+        from pathlib import Path
+
+        path = Path(db_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(path), check_same_thread=False, timeout=30.0)
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=10000")
+        except sqlite3.Error:
+            pass
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS swarm_room_pending ("
+            " kind TEXT NOT NULL, target_id TEXT NOT NULL, room_id TEXT NOT NULL,"
+            " created_at REAL NOT NULL, PRIMARY KEY (kind, target_id))")
+        self._conn.commit()
+
+    def put(self, kind: str, targetId: str, roomId: str) -> None:
+        self._conn.execute(
+            "INSERT INTO swarm_room_pending (kind, target_id, room_id, created_at)"
+            " VALUES (?,?,?,?) ON CONFLICT(kind, target_id) DO UPDATE SET room_id=excluded.room_id",
+            (kind, str(targetId), str(roomId), time.time()))
+        self._conn.commit()
+
+    def pop(self, kind: str, targetId: str) -> None:
+        self._conn.execute(
+            "DELETE FROM swarm_room_pending WHERE kind=? AND target_id=?",
+            (kind, str(targetId)))
+        self._conn.commit()
+
+    def idsForRoom(self, kind: str, roomId: str) -> List[str]:
+        rows = self._conn.execute(
+            "SELECT target_id FROM swarm_room_pending WHERE kind=? AND room_id=?"
+            " ORDER BY created_at ASC",
+            (kind, str(roomId))).fetchall()
+        return [str(r[0]) for r in rows]
+
+    def has(self, kind: str, targetId: str) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM swarm_room_pending WHERE kind=? AND target_id=?",
+            (kind, str(targetId))).fetchone()
+        return row is not None
+
+    def clearAll(self) -> None:
+        self._conn.execute("DELETE FROM swarm_room_pending")
+        self._conn.commit()
+
+
+def _roomBridgeStore() -> Optional[_RoomPendingStore]:
+    """惰性单例：NEUROVA_SWARM_ROOM_PENDING_DB 未开启时返回 None（走内存兜底）。"""
+    global _roomBridgeStoreInstance
+    if _roomBridgeStoreInstance is not None:
+        return _roomBridgeStoreInstance
+    raw = (os.environ.get("NEUROVA_SWARM_ROOM_PENDING_DB") or "").strip()
+    if not raw:
+        return None
+    from pathlib import Path
+
+    from neurova.core.data_root import dataPath
+
+    dbPath = (raw if raw.lower() not in ("1", "true", "on")
+              else str(Path(dataPath("swarm_runs")) / "room_pending.db"))
+    with _roomBridgeLock:
+        if _roomBridgeStoreInstance is None:
+            _roomBridgeStoreInstance = _RoomPendingStore(dbPath)
+    return _roomBridgeStoreInstance
+
+
+def _roomBridgeRegistry(kind: str) -> Dict[str, str]:
+    return _roomApprovalRegistry if kind == "approval" else _roomCandidateRegistry
+
+
+def _roomBridgePut(kind: str, key: str, roomId: str) -> None:
+    store = _roomBridgeStore()
+    if store is not None:
+        store.put(kind, key, roomId)
+        return
+    registry = _roomBridgeRegistry(kind)
     with _roomBridgeLock:
         if key not in registry and len(registry) >= _ROOM_REGISTRY_MAX:
             oldest = next(iter(registry))
@@ -933,35 +1020,65 @@ def _roomRegistryPut(registry: Dict[str, str], key: str, roomId: str) -> None:
         registry[key] = roomId
 
 
-def _roomRegistryPop(registry: Dict[str, str], key: str) -> None:
+def _roomBridgePop(kind: str, key: str) -> None:
+    store = _roomBridgeStore()
+    if store is not None:
+        store.pop(kind, key)
+        return
+    registry = _roomBridgeRegistry(kind)
     with _roomBridgeLock:
         registry.pop(key, None)
 
 
+def _roomBridgeIds(kind: str, roomId: str) -> List[str]:
+    store = _roomBridgeStore()
+    if store is not None:
+        return store.idsForRoom(kind, roomId)
+    registry = _roomBridgeRegistry(kind)
+    with _roomBridgeLock:
+        return [k for k, r in registry.items() if r == roomId]
+
+
+def _roomBridgeHas(kind: str, key: str) -> bool:
+    store = _roomBridgeStore()
+    if store is not None:
+        return store.has(kind, key)
+    registry = _roomBridgeRegistry(kind)
+    with _roomBridgeLock:
+        return key in registry
+
+
+def _roomBridgeClearAllForTests() -> None:
+    """测试清场：SQLite 形态清表 + 内存形态清 dict。"""
+    store = _roomBridgeStore()
+    if store is not None:
+        store.clearAll()
+    with _roomBridgeLock:
+        _roomApprovalRegistry.clear()
+        _roomCandidateRegistry.clear()
+
+
 def roomPendingApprovals(roomId: str) -> list:
     """某房间当前上墙待裁决的审批单 id（读面；API/前端刷新用）。"""
-    with _roomBridgeLock:
-        return [rid for rid, r in _roomApprovalRegistry.items() if r == roomId]
+    return _roomBridgeIds("approval", roomId)
 
 
 def roomPendingCandidates(roomId: str) -> list:
     """某房间当前可拦截的候选 id（读面；API/前端刷新用）。"""
-    with _roomBridgeLock:
-        return [cid for cid, r in _roomCandidateRegistry.items() if r == roomId]
+    return _roomBridgeIds("candidate", roomId)
 
 
 def clearRoomApprovalPending(requestId: str) -> None:
     """审批单裁决完成后注销房间 pending 索引（显式判定端点路径用）。"""
-    _roomRegistryPop(_roomApprovalRegistry, requestId)
+    _roomBridgePop("approval", requestId)
 
 
 def _matchRoomTarget(
-    registry: Dict[str, str], roomId: str, text: str, exactOnly: bool = False,
+    kind: str, roomId: str, text: str, exactOnly: bool = False,
 ) -> str:
     """pending-approval/candidate 匹配：文本点名 id 优先；``exactOnly=False`` 时
     唯一 pending 直接匹配（多单歧义且未点名 → 空串，宁缺毋滥）。"""
-    with _roomBridgeLock:
-        ids = [k for k, r in registry.items() if r == roomId]
+    ids = _roomBridgeIds(kind, roomId)
     if not ids:
         return ""
     for key in ids:
@@ -1054,7 +1171,7 @@ async def notifyRoomApproval(
         logger.debug("审批卡房间投递失败 (%s): %s", request.request_id, e)
         return False
     if ok:
-        _roomRegistryPut(_roomApprovalRegistry, request.request_id, roomId)
+        _roomBridgePut("approval", request.request_id, roomId)
     return ok
 
 
@@ -1106,9 +1223,9 @@ def notifyRoomCandidate(run: Any, status: str, candidateId: str, detail: str = "
         return False
     if ok:
         if status == "submitted":
-            _roomRegistryPut(_roomCandidateRegistry, candidateId, roomId)
+            _roomBridgePut("candidate", candidateId, roomId)
         elif status in ("merged", "rejected", "reviseRequired"):
-            _roomRegistryPop(_roomCandidateRegistry, candidateId)
+            _roomBridgePop("candidate", candidateId)
     return ok
 
 
@@ -1129,15 +1246,15 @@ def _syncRoomRegistryFromHistory(roomId: str) -> None:
             kind = meta.get("kind")
             if kind == ROOM_MSG_KIND_APPROVAL and meta.get("request_id"):
                 rid = str(meta["request_id"])
-                if rid in _roomApprovalRegistry:
+                if _roomBridgeHas("approval", rid):
                     continue
                 req = manager.get_request(rid)
                 if (req is not None and req.status == ApprovalStatus.PENDING
                         and (req.metadata or {}).get("source") == "swarm"):
-                    _roomRegistryPut(_roomApprovalRegistry, rid, roomId)
+                    _roomBridgePut("approval", rid, roomId)
             elif (kind == ROOM_MSG_KIND_CANDIDATE and meta.get("candidate_id")
                     and meta.get("status") == "submitted"):
-                _roomRegistryPut(_roomCandidateRegistry, str(meta["candidate_id"]), roomId)
+                _roomBridgePut("candidate", str(meta["candidate_id"]), roomId)
     except Exception as e:  # noqa: BLE001 - 补建失败不阻断回灌（登记表仍在的照常工作）
         logger.debug("房间 pending 索引补建失败 (room=%s): %s", roomId, e)
 
@@ -1163,12 +1280,12 @@ def handleRoomSwarmReply(
 
     # 匹配顺序：文本点名 id 精确命中（审批/候选都可）优先；无点名时按唯一
     # pending 兜底（审批优先于候选）——防"拦截 <候选id>"被唯一审批单误吞。
-    rid = _matchRoomTarget(_roomApprovalRegistry, roomId, text, exactOnly=True)
-    cid = "" if rid else _matchRoomTarget(_roomCandidateRegistry, roomId, text, exactOnly=True)
+    rid = _matchRoomTarget("approval", roomId, text, exactOnly=True)
+    cid = "" if rid else _matchRoomTarget("candidate", roomId, text, exactOnly=True)
     if not rid and not cid:
-        rid = _matchRoomTarget(_roomApprovalRegistry, roomId, text)
+        rid = _matchRoomTarget("approval", roomId, text)
     if not rid and not cid:
-        cid = _matchRoomTarget(_roomCandidateRegistry, roomId, text)
+        cid = _matchRoomTarget("candidate", roomId, text)
 
     # ── 审批单匹配 ──
     if rid:
@@ -1188,7 +1305,7 @@ def handleRoomSwarmReply(
             rid, decision, note=text[:200], decidedBy=str(userId or ""),
             decidedByChannel="room",
         )
-        _roomRegistryPop(_roomApprovalRegistry, rid)
+        _roomBridgePop("approval", rid)
         # M1（修复计划 2026-11-21）：与显式裁决端点（collaboration_room_api
         # decide_room_approval）同效力——批准即回灌团队沉淀与项目治理，
         # 杜绝「同一裁决，房间文本批准不落地」的语义分叉；回灌失败不影响裁决本身。
