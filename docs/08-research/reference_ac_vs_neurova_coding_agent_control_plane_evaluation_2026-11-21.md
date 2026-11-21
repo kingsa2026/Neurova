@@ -661,5 +661,7 @@ T3 当期主干与原快照相隔约四小时（e19193db → 6f94a063），20 �
 修正）；鸿蒙 scope 按需订阅消费已接线（5dbe7f910，重连补拉随 scope，
 ChatPage 进已落库会话收窄、离页恢复 global）。**剩余登记**：安卓端
 `sync_resume` 游标重放/快照降级整体缺失（D3 客户端语义，鸿蒙已有——
-补齐后 scope 消费随之可用），待立卡；D2「跨环境请求头 + MCP 子任务两层
-收窄」另行处理。
+补齐后 scope 消费随之可用），待立卡。D2「跨环境请求头 + MCP 子任务两层
+收窄」已实施（fd4dbb40c：组织天花板在 resolveEffectivePermissionMode
+解析口统一收窄——治理预检、MCP 工具裁决、子任务派活各层的共同解析口，
+请求体传 yolo 不得越过 NEUROVA_PERMISSION_CEILING）。
