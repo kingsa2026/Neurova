@@ -411,6 +411,16 @@ class GenerationLedger:
                 )
             return chain
 
+    def listAll(self) -> List[EvolutionGeneration]:
+        """全部世代按序号升序（P1-5 治理读面的只读访问器；查询面不抛）。
+
+        P0-3 的账本接口只有逐代 get / 基线 / 谱系，列表读面（governance
+        GET /rsi/generations）需要一个全量枚举口——最小追加，不改任何
+        状态转移逻辑。
+        """
+        with self._lock:
+            return [self._generations[no] for no in sorted(self._generations)]
+
     # ── 状态转移 ──────────────────────────────────────────────
 
     def recordVerdicts(self, generationNo: int, verdicts: Dict[str, Any]) -> None:

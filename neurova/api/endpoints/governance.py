@@ -46,6 +46,8 @@ from neurova.api.deps import require_admin
 # RSI 人工批准应用通道的业务异常（R1）：端点按 status_code 映射 HTTP 状态。
 # 演化层不依赖 API 层，此处单向引用无环。
 from neurova.evolution.rsi.orchestrator import RSIManualApplyError
+# P1-5 世代读面：状态词表取账本单源（GenerationStatus），端点不重打第二份。
+from neurova.evolution.rsi.generation_ledger import GenerationStatus
 
 # 模块级依赖实例：测试可用 dependency_overrides 覆盖
 _governance_admin_dep = require_admin()
@@ -678,6 +680,127 @@ async def reject_rsi_proposal(
         )
     logger.info("RSI 提案 %s 已拒绝", proposal_id)
     return {"code": 0, "data": {"rejected": True}}
+
+
+# ── 世代谱系与门禁结果读面（P1-5，详案 §6 P1-5 / §10.5 租户可见性）──
+# 数据源 GenerationLedger，经 agent.rsi_orchestrator.generationOrchestrator
+# 的只读访问器取。读面诚实（教义第 2 条）：账本空 → 空列表/404，不造数据；
+# 世代管线未装配 → 503 点名，不把"没装配"折成"没有世代"。
+
+_GENERATION_PIPELINE_NOT_ASSEMBLED = (
+    "世代管线未装配：该 agent 的 RSI 未挂接世代编排器（P1-3 管线缺席，读面不造数据）"
+)
+
+_GENERATION_STATUSES = tuple(s.value for s in GenerationStatus)
+
+
+def _generationPipelineNotAssembled(agentId: Optional[str]) -> HTTPException:
+    """RSI 编排器在池但没挂世代编排器（与"RSI 没装配"是两条相反事实）。"""
+    return HTTPException(
+        status_code=503,
+        detail=f"agent {_agentLabel(agentId)} 上{_GENERATION_PIPELINE_NOT_ASSEMBLED}",
+    )
+
+
+def _requireGenerationLedger(agentId: Optional[str] = None):
+    """世代账本定位器：RSI 在池且挂了世代编排器才可读，否则按真因 503。"""
+    rsi = _requireRsiOrchestrator(agentId)
+    genOrchestrator = getattr(rsi, "generationOrchestrator", None)
+    if genOrchestrator is None:
+        raise _generationPipelineNotAssembled(agentId)
+    ledger = genOrchestrator.generationLedger()
+    if ledger is None:
+        raise _generationPipelineNotAssembled(agentId)
+    return ledger
+
+
+def _generationSummary(gen: Any) -> Dict[str, Any]:
+    """列表条目：序号/父代/状态/裁决/晋升时间（全量档案只在详情面出街）。"""
+    return {
+        "generationNo": gen.generationNo,
+        "parentNo": gen.parentNo,
+        "status": gen.status,
+        "decision": gen.decision.to_dict() if gen.decision is not None else None,
+        "promotedAt": gen.deployment.promotedAt if gen.deployment is not None else "",
+    }
+
+
+@router.get("/rsi/generations")
+async def list_rsi_generations(
+    limit: int = Query(default=50, ge=1, le=500),
+    status: Optional[str] = Query(
+        default=None,
+        description=f"按世代状态过滤，可选值: {list(_GENERATION_STATUSES)}",
+    ),
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """世代列表（P1-5）：序号/父代/状态/裁决/晋升时间，支持 limit 与 status 过滤。
+
+    limit 截取**最近** N 代（账本自然升序的尾部）；status 非法 422；
+    账本空 → 空列表（200），世代管线未装配 → 503。
+    """
+    ledger = _requireGenerationLedger(agent_id)
+    if status is not None and status not in _GENERATION_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"非法世代状态 {status!r}，可选值: {list(_GENERATION_STATUSES)}",
+        )
+    generations = ledger.listAll()
+    if status:
+        generations = [g for g in generations if g.status == status]
+    if limit < len(generations):
+        generations = generations[-limit:]
+    items = [_generationSummary(g) for g in generations]
+    return {"code": 0, "data": {"generations": items, "count": len(items)}}
+
+
+@router.get("/rsi/generations/current")
+async def get_current_baseline_generation(
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """当前生产基线代（P1-5）：序号最大的 deployed 代；尚无部署 404（不编造）。
+
+    声明序刻意排在 /{generation_no} 之前：FastAPI 按声明序匹配，
+    "current" 落到本端点，不会被路径参数吞成 422。
+    """
+    ledger = _requireGenerationLedger(agent_id)
+    gen = ledger.currentBaseline()
+    if gen is None:
+        raise HTTPException(
+            status_code=404,
+            detail="尚无已部署的生产基线世代（账本空或没有 deployed 代）",
+        )
+    return {"code": 0, "data": gen.to_dict()}
+
+
+@router.get("/rsi/generations/{generation_no}")
+async def get_rsi_generation(
+    generation_no: int,
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """单代详情（P1-5）：signals/changes/verdicts 全量/decision/deployment。"""
+    ledger = _requireGenerationLedger(agent_id)
+    gen = ledger.get(generation_no)
+    if gen is None:
+        raise HTTPException(status_code=404, detail=f"世代不存在: {generation_no}")
+    return {"code": 0, "data": gen.to_dict()}
+
+
+@router.get("/rsi/generations/{generation_no}/lineage")
+async def get_rsi_generation_lineage(
+    generation_no: int,
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """谱系回溯链（P1-5）：从指定代起沿 parentNo 向上到根代（含自身）。"""
+    ledger = _requireGenerationLedger(agent_id)
+    if ledger.get(generation_no) is None:
+        raise HTTPException(status_code=404, detail=f"世代不存在: {generation_no}")
+    chain = ledger.lineage(generation_no)
+    return {"code": 0, "data": {"lineage": [g.to_dict() for g in chain]}}
 
 
 # ── 技能归档读面 + 回滚写面（工单 011）────────────────────────

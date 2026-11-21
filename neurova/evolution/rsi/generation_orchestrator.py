@@ -187,6 +187,14 @@ class GenerationOrchestrator:
         with self._lock:
             return self._roundGenerations.get(int(roundNo))
 
+    def generationLedger(self) -> GenerationLedger:
+        """只读访问器：世代账本（P1-5 治理读面 GET /rsi/generations* 的数据源）。
+
+        账本在本件构造时必装配（缺省按 env 解析，未配置纯内存零 IO），
+        本访问器只暴露读取入口，不新增状态。
+        """
+        return self._ledger
+
     # ── 挂接点 1：run_iteration 建议产出点 ────────────────────
 
     def onRoundProposals(
