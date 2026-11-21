@@ -25,7 +25,6 @@ import { TopNavMenu, GlassCard, GlassButton } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { CollaborationHistoryDto } from '../libs/api/modules/CollaborationApi';
 import { Router, RouteNames } from '../routing/Router';
-import { StateManager } from '../libs/state/StateManager';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
@@ -220,14 +219,16 @@ export struct CollaborationHistoryPage {
   }
 
   /**
-   * 进入协作会话聊天窗口：新开会话（标题带协作名），可查看/发送内容。
-   * 移动端聊天面暂不支持协作房间通道——先以命名会话承接查看/发送诉求。
+   * 进入协作房间（M13 对等）：携带 roomId/roomName 跳协作房间页——
+   * 房间消息流 + 蜂群卡片（审批/升级/候选）+ 裁决与升级处置入口。
+   * 原"命名会话承接"路径退役（移动端房间面已补齐）。
    */
   private openCollabChat(h: CollaborationHistoryDto): void {
-    const state = StateManager.getInstance();
-    state.set('chat:active_session_id', '');
-    state.set('chat:active_session_title', '协作 · ' + h.name);
-    this.router.push(RouteNames.CHAT);
+    const params: Record<string, Object> = {
+      'roomId': h.id,
+      'roomName': h.name,
+    };
+    this.router.push(RouteNames.COLLABORATION_ROOM, params);
   }
 
   build() {

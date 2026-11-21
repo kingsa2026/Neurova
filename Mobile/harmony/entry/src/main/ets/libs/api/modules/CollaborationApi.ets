@@ -246,6 +246,61 @@ interface CreateBoardBody {
   name: string;
 }
 
+/** M13 对等：房间信息行（GET /rooms/{id} 投影；字段名与 PC 端 RoomInfo 同源） */
+export interface RoomInfoDto {
+  room_id: string;
+  name: string;
+  description: string;
+  owner: string;
+  responder_agent_id: string;
+  members: Array<Record<string, Object>>;
+}
+
+/** M13 对等：房间消息行（GET /rooms/{id}/messages 的 RoomStore 历史行 + meta 平铺） */
+export interface RoomMessageDto {
+  id: string;
+  sender_type: string;
+  sender_id: string;
+  content: string;
+  kind: string;
+  status: string;
+  level: string;
+  request_id: string;
+  candidate_id: string;
+  subagent_id: string;
+  agent_name: string;
+}
+
+/** M13 对等：房间待裁决读数（GET /rooms/{id}/swarm/pending 投影） */
+export interface SwarmPendingDto {
+  approvals: string[];
+  candidates: string[];
+}
+
+/** 房间历史行 → 消息 DTO（meta 平铺；id 用 序号+ts 稳定生成，同 PC 契约） */
+function toRoomMessage(row: Record<string, Object>, index: number): RoomMessageDto {
+  const meta = (row['meta'] ?? {}) as Record<string, Object>;
+  const senderType = String(row['sender_type'] ?? (String(row['role'] ?? '') === 'user' ? 'user' : 'agent'));
+  const pick = (key: string): string => {
+    const v = meta[key];
+    return v === undefined || v === null || String(v) === '' ? '' : String(v);
+  };
+  const msg: RoomMessageDto = {
+    id: `h${index}-${String(row['ts'] ?? '')}`,
+    sender_type: senderType,
+    sender_id: String(row['sender_id'] ?? ''),
+    content: String(row['content'] ?? ''),
+    kind: pick('kind'),
+    status: pick('status'),
+    level: pick('level'),
+    request_id: pick('request_id'),
+    candidate_id: pick('candidate_id'),
+    subagent_id: pick('subagent_id'),
+    agent_name: pick('agent_name'),
+  };
+  return msg;
+}
+
 /** 创建任务 body（/tasks/boards/{id}/tasks 契约字段） */
 interface CreateTaskBody {
   title: string;
@@ -622,5 +677,70 @@ export class CollaborationApi {
   async executeWorkflow(id: string, inputs: Record<string, Object>): Promise<ApiResponse<Object>> {
     const res = await this.client.post<Object>(`/neurflow/workflows/${id}/execute`, inputs);
     return asEnvelope<Object>(res, ['execution_id']) as ApiResponse<Object>;
+  }
+
+  // ========== M13 对等：协作房间（collaboration_room_api.py @ /v1/collaboration/rooms）==========
+
+  /** 房间信息（GET /collaboration/rooms/{id}，裸对象边界归一） */
+  async getRoom(roomId: string): Promise<ApiResponse<RoomInfoDto>> {
+    const res = await this.client.get<Object>(`/collaboration/rooms/${roomId}`);
+    const ok = asEnvelope<Object>(res, ['name']);
+    const dto = (ok.data ?? {}) as Record<string, Object>;
+    const info: RoomInfoDto = {
+      room_id: String(dto['room_id'] ?? roomId),
+      name: String(dto['name'] ?? ''),
+      description: String(dto['description'] ?? ''),
+      owner: String(dto['owner'] ?? dto['owner_id'] ?? ''),
+      responder_agent_id: String(dto['responder_agent_id'] ?? ''),
+      members: (dto['members'] ?? []) as Array<Record<string, Object>>,
+    };
+    return { code: ok.code, message: ok.message, data: info } as ApiResponse<RoomInfoDto>;
+  }
+
+  /** 房间消息历史（GET /collaboration/rooms/{id}/messages?limit=，裸数组边界归一） */
+  async listRoomMessages(roomId: string, limit: number): Promise<ApiResponse<RoomMessageDto[]>> {
+    const query: Record<string, Object> = { 'limit': limit };
+    const res = await this.client.get<Object[]>(`/collaboration/rooms/${roomId}/messages`, query);
+    const rows = (res.data ?? []) as Array<Record<string, Object>>;
+    const messages: RoomMessageDto[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      messages.push(toRoomMessage(rows[i], i));
+    }
+    return { code: res.code, message: res.message, data: messages } as ApiResponse<RoomMessageDto[]>;
+  }
+
+  /** 房间发言（POST /collaboration/rooms/{id}/messages，body={text}） */
+  async postRoomMessage(roomId: string, text: string): Promise<ApiResponse<Object>> {
+    const body: Record<string, Object> = { 'text': text };
+    return this.client.post<Object>(`/collaboration/rooms/${roomId}/messages`, body);
+  }
+
+  /** 待裁决读数（GET /collaboration/rooms/{id}/swarm/pending） */
+  async getSwarmPending(roomId: string): Promise<ApiResponse<SwarmPendingDto>> {
+    const res = await this.client.get<Object>(`/collaboration/rooms/${roomId}/swarm/pending`);
+    const dto = (res.data ?? {}) as Record<string, Object>;
+    const pending: SwarmPendingDto = {
+      approvals: (dto['approvals'] ?? []) as string[],
+      candidates: (dto['candidates'] ?? []) as string[],
+    };
+    return { code: res.code, message: res.message, data: pending } as ApiResponse<SwarmPendingDto>;
+  }
+
+  /** 审批判定（POST /collaboration/rooms/{id}/approvals/{rid}/decide，body={decision,note}） */
+  async decideRoomApproval(roomId: string, requestId: string, decision: string, note: string): Promise<ApiResponse<Object>> {
+    const body: Record<string, Object> = { 'decision': decision, 'note': note };
+    return this.client.post<Object>(`/collaboration/rooms/${roomId}/approvals/${requestId}/decide`, body);
+  }
+
+  /** 候选处置（POST /collaboration/rooms/{id}/candidates/{cid}/{intercept|merge}） */
+  async roomCandidateAction(roomId: string, candidateId: string, action: string): Promise<ApiResponse<Object>> {
+    const body: Record<string, Object> = {};
+    return this.client.post<Object>(`/collaboration/rooms/${roomId}/candidates/${candidateId}/${action}`, body);
+  }
+
+  /** 升级处置（POST /collaboration/rooms/{id}/escalations/{sid}/resolve，body={action,note}；M13 新端点） */
+  async resolveRoomEscalation(roomId: string, subagentId: string, action: string, note: string): Promise<ApiResponse<Object>> {
+    const body: Record<string, Object> = { 'action': action, 'note': note };
+    return this.client.post<Object>(`/collaboration/rooms/${roomId}/escalations/${subagentId}/resolve`, body);
   }
 }

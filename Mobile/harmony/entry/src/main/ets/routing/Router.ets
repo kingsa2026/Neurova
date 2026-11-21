@@ -89,6 +89,8 @@ export class RouteNames {
   static readonly COLLABORATION_TEMPLATE: string = 'CollaborationTemplatePage';
   static readonly COLLABORATION_HISTORY: string = 'CollaborationHistoryPage';
   static readonly COLLABORATION_INITIATE: string = 'CollaborationInitiatePage';
+  // M13 对等：协作房间页（蜂群卡片 + 裁决/升级处置）
+  static readonly COLLABORATION_ROOM: string = 'CollaborationRoomPage';
   static readonly WEBHOOK: string = 'WebhookPage';
   static readonly MARKETPLACE: string = 'MarketplacePage';
   // M5 P3 系统监控扩展
@@ -165,6 +167,7 @@ const PROTECTED_ROUTES: string[] = [
   RouteNames.COLLABORATION_TEMPLATE,
   RouteNames.COLLABORATION_HISTORY,
   RouteNames.COLLABORATION_INITIATE,
+  RouteNames.COLLABORATION_ROOM,
   RouteNames.WEBHOOK,
   RouteNames.MARKETPLACE,
   // M5 P3 系统监控扩展（全部受保护）

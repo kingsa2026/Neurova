@@ -69,6 +69,8 @@ import { WorkflowEditPage } from '../pages/WorkflowEditPage';
 import { CollaborationTemplatePage } from '../pages/CollaborationTemplatePage';
 import { CollaborationHistoryPage } from '../pages/CollaborationHistoryPage';
 import { CollaborationInitiatePage } from '../pages/CollaborationInitiatePage';
+// M13 对等：协作房间页
+import { CollaborationRoomPage } from '../pages/CollaborationRoomPage';
 import { WebhookPage } from '../pages/WebhookPage';
 // M4.6 渠道系统
 import { ChannelIntegrationPage } from '../pages/ChannelIntegrationPage';
@@ -195,6 +197,8 @@ export function pageMap(name: string) {
     NavDestination() { CollaborationHistoryPage() }.hideTitleBar(true)
   } else if (name === RouteNames.COLLABORATION_INITIATE) {
     NavDestination() { CollaborationInitiatePage() }.hideTitleBar(true)
+  } else if (name === RouteNames.COLLABORATION_ROOM) {
+    NavDestination() { CollaborationRoomPage() }.hideTitleBar(true)
   } else if (name === RouteNames.WEBHOOK) {
     NavDestination() { WebhookPage() }.hideTitleBar(true)
   } else if (name === RouteNames.CHANNEL_INTEGRATION) {
