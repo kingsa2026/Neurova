@@ -243,11 +243,13 @@ _FIRST_BATCH_TARGETS = (
         targetId="text.soul",
         layer="L1",
         kind="promptTemplate",
-        locator="neurova/core/agent_workspaces.py:get_agent_soul_path",
+        # soul 的运行时载体是 <agent_root>/soul.md（agent_core.py:1327 读取）；
+        # get_agent_soul_path 指向的 soul.json 是半闲置结构化配置，不作演化定位。
+        locator="neurova/agent_core.py",
         scope="global",
         gateLevel="approval",
         survivalCritical=False,
-        fallbackRef="neurova/core/agent_workspaces.py:get_agent_soul_path",
+        fallbackRef="neurova/agent_core.py",
         verdictSuite="suite_eval.chat",
     ),
     EvolutionTarget(
