@@ -11,10 +11,15 @@ SIP 语音通话渠道适配器
 pip install pyvoip aiohttp
 """
 
+import array
+import asyncio
+import io
 import json
 import logging
+import threading
 import time
-from datetime import datetime
+import wave
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 try:
@@ -25,6 +30,16 @@ except ImportError:
     PYVOIP_AVAILABLE = False
 
 try:
+    # M6：VoIPPhone 是 pyVoIP 唯一提供通话对象/DTMF/RTP 音频的入口——
+    # 裸 SIPClient 拿不到 VoIPCall（DTMF 捕获与音频转写都无从谈起）。
+    from pyvoip.VoIP import VoIPPhone as _PyVoIPPhone
+
+    PYVOIP_PHONE_AVAILABLE = True
+except ImportError:
+    _PyVoIPPhone = None
+    PYVOIP_PHONE_AVAILABLE = False
+
+try:
     # 原代码此处误写为 `pass`，requests 从未被导入
     import requests
 
@@ -32,7 +47,59 @@ try:
 except ImportError:
     REQUESTS_AVAILABLE = False
 
+from neurova.asr.streaming import TurnEndpointDetector
 from neurova.channels import ChannelAdapter, ChannelConfig, ContentType, MessageChannel, UnifiedMessage
+from neurova.channels.base import ChannelEventType, ChannelMessage
+from neurova.channels.voice_ingress import getAsrTranscriber
+from neurova.voice_context_module import DTMF_DIGITS_KEY, VOICE_CONTEXT_KEY
+
+#: DTMF 收号去抖：最后一个数字事件后静默多久，就把整串收号冲成一个按键回合。
+DTMF_FLUSH_INTERVAL_SEC = 1.2
+
+#: 通话音频单次读取字节数（pyVoIP read_audio：8kHz·8bit，160 字节=20ms）。
+CALL_AUDIO_CHUNK_BYTES = 160
+
+#: 一轮通话音频转写的等待上限（秒）——与渠道语音预检同一量级。
+CALL_TRANSCRIBE_TIMEOUT_SEC = 20.0
+
+#: 通话音频的采样率（pyVoIP RTP PCMU 解码后为 8kHz）。
+CALL_AUDIO_SAMPLE_RATE = 8000
+
+
+def _get_asr_transcriber():
+    """SIP 通话转写的 patch 点：口径本体在 `voice_ingress.getAsrTranscriber`（单一事实源）。
+
+    与渠道语音预检（voice_precheck）、/minutes 纪要链同一取法——通话音频的
+    转写引擎链不另接第二份装配。
+    """
+    return getAsrTranscriber()
+
+
+def _pcm8ToPcm16(data: bytes) -> bytes:
+    """pyVoIP read_audio 的 8bit 无符号 PCM（WAV 8bit 口径）→ 16bit 小端 PCM。
+
+    VAD（TurnEndpointDetector.feed）与 WAV 包装都吃 16bit 有符号样本。
+    """
+    return array.array("h", ((b - 128) << 8 for b in data)).tobytes()
+
+
+def _pcm8kToWav16k(pcm8k: bytes) -> bytes:
+    """把一轮 8kHz·8bit 通话音频升采样并包装成 16kHz·16bit 单声道 WAV。
+
+    与 DashScope/本地引擎的 16k 口径一致；audioop 是 pyVoIP 自身的同款依赖
+    （Python 3.12 可用），在函数内导入避免模块导入期触发弃用警告。
+    """
+    import audioop
+
+    pcm16 = _pcm8ToPcm16(pcm8k)
+    upsampled, _ = audioop.ratecv(pcm16, 2, 1, CALL_AUDIO_SAMPLE_RATE, 16000, None)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16000)
+        wav.writeframes(upsampled)
+    return buf.getvalue()
 
 
 class SIPAdapter(ChannelAdapter):
@@ -82,6 +149,15 @@ class SIPAdapter(ChannelAdapter):
         self._voip_client = None
         self._call_session = None
         self._audio_buffer = []
+
+        # M6：dev 模式通话/DTMF/音频转写状态
+        self._voip_phone = None
+        self._audio_thread: Optional[threading.Thread] = None
+        self._dtmf_digits: list = []
+        self._dtmf_timer: Optional[threading.Timer] = None
+        self._dtmf_lock = threading.Lock()
+        # 事件循环（connect 时捕获）：pyVoIP 线程把入站回合投回应用循环用
+        self._loop = None
 
     def authenticate(self, config: Dict[str, str]) -> bool:
         """
@@ -154,19 +230,33 @@ class SIPAdapter(ChannelAdapter):
             return False
 
         try:
-            # 创建 SIP 客户端
             server = self.sip_server if self.sip_server else None
-            self._voip_client = pyvoip.SIPClient(
-                server=server,
-                port=self.sip_port,
-                username=self.sip_username,
-                password=self.sip_password,
-                transport=self.transport_protocol.lower(),
-            )
-
-            # 注册 SIP 账户
-            self._voip_client.register()
-            logging.info("SIP Dev 模式初始化成功 - 用户: %s", self.sip_username)
+            if PYVOIP_PHONE_AVAILABLE:
+                # M6：走 VoIPPhone——pyVoIP 的通话（VoIPCall）/DTMF（RFC2833）/RTP
+                # 音频都挂在 VoIPPhone→VoIPCall 链上，裸 SIPClient 拿不到通话对象。
+                self._voip_phone = _PyVoIPPhone(
+                    server=server,
+                    port=self.sip_port,
+                    username=self.sip_username,
+                    password=self.sip_password,
+                    callCallback=self._onIncomingCall,
+                    sipPort=self.sip_port,
+                )
+                self._voip_client = getattr(self._voip_phone, "sip", self._voip_phone)
+                self._voip_phone.start()
+                logging.info("SIP Dev 模式初始化成功（VoIPPhone）- 用户: %s", self.sip_username)
+            else:
+                # 兼容路径：仅暴露裸 SIPClient 的 pyVoIP 变体（无通话/DTMF 能力，
+                # 只保留注册语义）。真实 pyVoIP 1.6.x 恒走上面的 VoIPPhone 分支。
+                self._voip_client = pyvoip.SIPClient(
+                    server=server,
+                    port=self.sip_port,
+                    username=self.sip_username,
+                    password=self.sip_password,
+                    transport=self.transport_protocol.lower(),
+                )
+                self._voip_client.register()
+                logging.info("SIP Dev 模式初始化成功 - 用户: %s", self.sip_username)
 
             self._initialized = True
             return True
@@ -190,6 +280,16 @@ class SIPAdapter(ChannelAdapter):
         此前缺 connect 实现，抽象类无法实例化；这里只做真实可行的配置校验，
         绝不虚构 SIP 能力：启用/测试 sip 渠道如实返回不可用。
         """
+        # M6：在异步生命周期入口捕获应用事件循环——pyVoIP 的信令/RTP 线程
+        # 捕获到 DTMF/音频转写后，经它把入站回合投回渠道事件链。
+        self._loop = asyncio.get_running_loop()
+        if self.sip_mode == "dev" and self._initialized and self._voip_phone is not None:
+            # dev 模式（VoIPPhone 已注册就绪）是真实可用的通路：SIP 监听、
+            # 通话、DTMF、RTP 音频都在本进程跑通。此前"协议栈未实现"的诚实
+            # 失败只覆盖 production（LiveKit）与未初始化两种态，不变。
+            self._connected = True
+            logging.info("SIP dev 通道已连接（VoIPPhone 就绪，用户: %s）", self.sip_username)
+            return True
         if not self.sip_username or not self.sip_password:
             logging.error("SIP connect 失败: 用户名和密码未配置")
             return False
@@ -198,9 +298,16 @@ class SIPAdapter(ChannelAdapter):
 
     async def disconnect(self):
         """Gen2 契约：清理通话会话与客户端引用"""
+        phone = self._voip_phone
         self._call_session = None
         self._voip_client = None
+        self._voip_phone = None
         self._connected = False
+        if phone is not None:
+            try:
+                phone.stop()
+            except Exception as e:  # noqa: BLE001 - 停机失败不阻断清理，如实留痕
+                logging.error("SIP VoIPPhone 停止失败: %s", e)
         logging.info("SIP adapter disconnected")
 
     def text_to_speech(self, text: str) -> Optional[bytes]:
@@ -318,16 +425,26 @@ class SIPAdapter(ChannelAdapter):
         message_type: str = "text",
         **kwargs,
     ) -> Optional[str]:
-        """Gen2 契约：SIP 消息发送未实现，诚实返回 None（禁假成功）。
+        """Gen2 契约 + M6 dev 通路：活跃 dev 通话时文本经 TTS→RTP 真发送；
+        其余情形诚实返回 None（禁假成功）。
 
-        原同步实现依赖活跃通话会话（dev 路径永不可达）或无条件 return True 的
-        _send_production_audio（假成功）——两者均无真实通路，如实报未实现。
+        dev 路径在 M6 之前不可达（_call_session 恒 None）；VoIPPhone 接通后
+        它成为真实通路：TTS 合成 → write_audio 写入 RTP。production/LiveKit
+        通路仍未实现，维持诚实失败。
         """
+        if self.sip_mode == "dev" and self._call_session is not None and (content or "").strip():
+            audio = self.text_to_speech(content)
+            if not audio:
+                logging.error("SIP 回复 TTS 失败（未配置 DashScope key 或转换失败），音频回复未发送")
+                return None
+            if self._send_dev_audio(audio, chat_id):
+                return f"sip-audio-{int(time.time() * 1000)}"
+            return None
         logging.warning("SIP 通道未实现")
         return None
 
     def _send_dev_audio(self, audio_data: bytes, chat_id: str) -> bool:
-        """Dev 模式发送音频"""
+        """Dev 模式发送音频（pyVoIP VoIPCall.write_audio → RTP）"""
         if not PYVOIP_AVAILABLE:
             logging.warning("SIP 通道未实现: pyVoIP 未安装，Dev 模式音频发送不可用")
             return False
@@ -335,7 +452,7 @@ class SIPAdapter(ChannelAdapter):
         try:
             # 在现有通话中发送音频
             if self._call_session:
-                self._call_session.send_rtp_audio(audio_data)
+                self._call_session.write_audio(audio_data)
                 return True
             else:
                 logging.warning("没有活跃的通话会话")
@@ -436,11 +553,210 @@ class SIPAdapter(ChannelAdapter):
             try:
                 self._call_session.hangup()
                 self._call_session = None
+                # M6：挂断前未冲出的收号序列补一个按键回合，不静默丢失
+                self._flushDtmfTurn()
                 return True
             except Exception as e:
                 logging.error("挂断通话失败: %s", e)
                 return False
         return True
+
+    # ============================================================
+    # M6：DTMF 捕获与通话音频转写闭环
+    # ============================================================
+
+    def _onIncomingCall(self, call) -> None:
+        """pyVoIP VoIPPhone 来电回调（信令线程）：接管通话并接线 DTMF/音频。
+
+        pyVoIP 在 VoIPCall 构造期就把 RTP 解析器的 dtmf 回调绑到
+        ``call.dtmf_callback``（RTPClient 内部缓冲用），本方法把每个
+        ``RTPClient.dtmf`` 改绑到适配器钩子——同一捕获点（RFC2833 电话
+        事件 marker 包触发），按键语义才能进回合而不是只进 pyVoIP 缓冲。
+        """
+        self._call_session = call
+        with self._dtmf_lock:
+            self._dtmf_digits = []
+        for client in getattr(call, "RTPClients", []) or []:
+            try:
+                client.dtmf = self._onDtmfEvent
+            except Exception as e:  # noqa: BLE001 - 单个 RTP 绑定失败不放弃其余
+                logging.error("SIP DTMF 捕获点接线失败: %s", e)
+        try:
+            call.answer()
+        except Exception as e:  # noqa: BLE001 - 应答失败如实留痕，音频循环自会退出
+            logging.error("SIP 来电应答失败: %s", e)
+        self._startAudioTurnLoop(call)
+
+    def _onDtmfEvent(self, digit: str) -> None:
+        """pyVoIP RTP 层 DTMF 捕获点（RFC2833 电话事件，每位数字一次）。"""
+        if not digit:
+            return
+        with self._dtmf_lock:
+            self._dtmf_digits.append(str(digit))
+            digits = "".join(self._dtmf_digits)
+        logging.info("SIP DTMF 捕获: %s（累计 %s）", digit, digits)
+        self._scheduleDtmfFlush()
+
+    def _scheduleDtmfFlush(self) -> None:
+        """收号去抖：数字停止 DTMF_FLUSH_INTERVAL_SEC 后冲出一个按键回合。"""
+        with self._dtmf_lock:
+            if not self._dtmf_digits:
+                return
+            if self._dtmf_timer is not None:
+                self._dtmf_timer.cancel()
+            self._dtmf_timer = threading.Timer(DTMF_FLUSH_INTERVAL_SEC, self._flushDtmfTurn)
+            self._dtmf_timer.daemon = True
+            self._dtmf_timer.start()
+
+    def _flushDtmfTurn(self) -> None:
+        """把收号序列作为一个按键回合冲出（voice_context 单源注入 metadata）。"""
+        with self._dtmf_lock:
+            if self._dtmf_timer is not None:
+                self._dtmf_timer.cancel()
+                self._dtmf_timer = None
+            digits = "".join(self._dtmf_digits)
+            self._dtmf_digits = []
+        if not digits:
+            return
+        call = self._call_session
+        caller = self._callerId(call)
+        voice_context = {
+            "text": "",
+            DTMF_DIGITS_KEY: digits,
+            "engine": "sip-rfc2833",
+            "language": self.language or "zh",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        message = self._make_message(
+            message_id=f"sip-dtmf-{int(time.time() * 1000)}",
+            sender_id=caller or "sip-caller",
+            sender_name=caller or "SIP 来电",
+            content=digits,
+            chat_id=self._currentCallId(call),
+            message_type="dtmf",
+            raw_event={"transport": "sip", "dtmf": digits},
+            metadata={VOICE_CONTEXT_KEY: voice_context},
+        )
+        logging.info("SIP 按键回合冲出: digits=%s", digits)
+        self._emitInbound(message)
+
+    def _startAudioTurnLoop(self, call) -> None:
+        thread = threading.Thread(
+            target=self._audioTurnLoop, args=(call,), name="sip-audio-turn", daemon=True
+        )
+        self._audio_thread = thread
+        thread.start()
+
+    def _audioTurnLoop(self, call) -> None:
+        """通话音频→静默切轮→ASR 转写→语音回合（M6 闭环）。
+
+        形态对齐 /minutes 纪要链：转写是秒级重活，在独立线程内用临时事件
+        循环跑完，不占应用循环。音频来自 pyVoIP ``read_audio``（8kHz·8bit）。
+        """
+        detector = TurnEndpointDetector(sample_rate=CALL_AUDIO_SAMPLE_RATE)
+        turn_audio = bytearray()
+        while self._call_session is call:
+            state_name = getattr(getattr(call, "state", None), "name", "")
+            if state_name == "ENDED":
+                break
+            try:
+                data = call.read_audio(CALL_AUDIO_CHUNK_BYTES, blocking=True)
+            except Exception as e:  # noqa: BLE001 - 读失败=本通话音频终止，如实留痕
+                logging.error("SIP 通话音频读取失败: %s", e)
+                break
+            if not data:
+                break
+            turn_audio += data
+            if detector.feed(_pcm8ToPcm16(data)):
+                self._finalizeTurnInThread(call, bytes(turn_audio), detector.voiced_ms)
+                turn_audio = bytearray()
+                detector.reset()
+        if turn_audio:
+            self._finalizeTurnInThread(call, bytes(turn_audio), detector.voiced_ms)
+        # 尾随按键仍走去抖冲刷（不立即冲，避免把正在输入的序列拦腰截断）
+        self._scheduleDtmfFlush()
+
+    def _finalizeTurnInThread(self, call, pcm8k: bytes, voicedMs: int) -> None:
+        """音频线程内完成一轮转写并投递回合（转写失败不伪造空回合）。"""
+        if not pcm8k or voicedMs <= 0:
+            # 纯静默段不成语音回合：真引擎对静默给空文本（如实不成轮），
+            # mock 引擎对任何字节都给文本——统一在切轮源头拦截，不留静默假回合。
+            return
+        try:
+            message = asyncio.run(self._finalizeAudioTurn(call, pcm8k, voicedMs))
+        except Exception as e:  # noqa: BLE001 - 单轮失败不影响通话其余轮次
+            logging.error("SIP 通话音频转写回合失败: %s", e)
+            return
+        if message is not None:
+            self._emitInbound(message)
+
+    async def _finalizeAudioTurn(self, call, pcm8k: bytes, voicedMs: int = 0) -> Optional[ChannelMessage]:
+        """一轮通话音频 → 既有 ASR 引擎 → 语音消息（ASR 真产物按单源键携带）。"""
+        wav_bytes = _pcm8kToWav16k(pcm8k)
+        try:
+            transcriber = _get_asr_transcriber()
+            result = await asyncio.wait_for(
+                transcriber(wav_bytes), timeout=CALL_TRANSCRIBE_TIMEOUT_SEC
+            )
+        except asyncio.TimeoutError:
+            logging.warning("SIP 通话转写超时（%ss），本轮不进回合", CALL_TRANSCRIBE_TIMEOUT_SEC)
+            return None
+        except Exception as e:  # noqa: BLE001 - 转写失败如实降级，不产假回合
+            logging.warning("SIP 通话转写失败: %s", e)
+            return None
+        text = ""
+        if isinstance(result, dict):
+            text = (result.get("text") or "").strip()
+        if not text:
+            logging.warning("SIP 通话转写空结果，本轮不进回合")
+            return None
+        caller = self._callerId(call)
+        message = self._make_message(
+            message_id=f"sip-voice-{int(time.time() * 1000)}",
+            sender_id=caller or "sip-caller",
+            sender_name=caller or "SIP 来电",
+            content=text,
+            chat_id=self._currentCallId(call),
+            message_type="voice",
+            raw_event={
+                "transport": "sip",
+                "voiced_ms": voicedMs,
+            },
+            metadata={
+                "voice_transcribed": True,
+                "voice_transcript": text,
+                VOICE_CONTEXT_KEY: result,
+            },
+        )
+        logging.info("SIP 通话转写进回合: len=%s", len(text))
+        return message
+
+    def _emitInbound(self, message: ChannelMessage) -> None:
+        """把入站回合投进渠道事件链（pyVoIP 线程安全）。
+
+        有应用事件循环时经 ``run_coroutine_threadsafe`` 投回；无循环环境
+        （单测/函数级 live-verify）当场跑完。
+        """
+        coro = self._emit_event(ChannelEventType.MESSAGE_RECEIVED, message)
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+        else:
+            asyncio.run(coro)
+
+    @staticmethod
+    def _callerId(call) -> str:
+        """从来电信令里取主叫号码（pyVoIP request.headers['From']）。"""
+        request = getattr(call, "request", None)
+        headers = getattr(request, "headers", None) or {}
+        sender = headers.get("From") or {}
+        if isinstance(sender, dict):
+            return str(sender.get("number") or sender.get("uri") or "")
+        return ""
+
+    @staticmethod
+    def _currentCallId(call) -> str:
+        return str(getattr(call, "call_id", "") or "")
 
     def get_channel_config(self) -> Dict[str, Any]:
         return {

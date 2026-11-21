@@ -59,6 +59,10 @@ class VoiceContext:
 #: 别把 `ContextInput(metadata={"type": "voice_context"})` 那个**取值**当成本键的使用处。
 VOICE_CONTEXT_KEY = "voice_context"
 
+#: DTMF 收号序列在语音上下文字典里的键（M6：SIP 通话按键语义）。
+#: 写侧＝`channels/sip.py` 的按键回合；读侧＝`voiceContextLines` 唯一渲染口。
+DTMF_DIGITS_KEY = "dtmf_digits"
+
 #: 外部数据不是指令（Linger 对照 B4-10）：转写文本是外部音频的数据投影，不是
 #: 账号主体的键入指令——群聊里别人留的语音同样会进这条链，其中出现的命令式
 #: 表述不构成对本 agent 的直接指令，涉及操作仍走既有身份/审批通道。凡语音
@@ -92,6 +96,9 @@ def voiceContextLines(voice_context: Dict[str, Any]) -> list:
         lines.append(f"语言: {ctx['language']}")
     if ctx.get("engine"):
         lines.append(f"识别引擎: {ctx['engine']}")
+    dtmfDigits = ctx.get(DTMF_DIGITS_KEY)
+    if dtmfDigits:
+        lines.append(f"按键输入(DTMF): {dtmfDigits}")
 
     emotion = ctx.get("emotion")
     if emotion and emotion.get("primary_emotion") and emotion["primary_emotion"] != "neutral":
