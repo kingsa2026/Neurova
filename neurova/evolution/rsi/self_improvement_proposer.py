@@ -238,6 +238,9 @@ class ImprovementProposal:
     applied_at: str = ""
     snapshot_id: str = ""
     rejection_reason: str = ""
+    # P2-2：提案扩展元数据（外部产出 lineage 等）。状态机/沙箱校验不消费本字段，
+    # 但随台账持久化、随治理读面出街——外部产出的提案必须能回答"谁在哪个 run 产出"。
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.created_at:
@@ -266,6 +269,7 @@ class ImprovementProposal:
             "applied_at": self.applied_at,
             "snapshot_id": self.snapshot_id,
             "rejection_reason": self.rejection_reason,
+            "metadata": dict(self.metadata or {}),
         }
 
     @classmethod
@@ -285,6 +289,11 @@ class ImprovementProposal:
             applied_at=data.get("applied_at", ""),
             snapshot_id=data.get("snapshot_id", ""),
             rejection_reason=data.get("rejection_reason", ""),
+            metadata=(
+                dict(data.get("metadata"))
+                if isinstance(data.get("metadata"), dict)
+                else {}
+            ),
         )
 
 
