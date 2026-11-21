@@ -70,3 +70,44 @@ def test_non_owner_and_missing_row_fail_closed(tmp_path):
     for client in _makeClient(store, {"user_id": "u9", "role": "admin"}):
         assert client.get("/chat/subagents/swarm_evt_c/events").status_code == 200
         assert client.get("/chat/subagents/swarm_norow/events").status_code == 200
+
+
+# ── M5：after_seq 游标 → 全局事件库 replayThrough（A2 能力的生产消费点） ───
+
+
+def _seedMirrorStore(tmp_path, monkeypatch):
+    from neurova.agent import swarm as swarm_mod
+    from neurova.agent.swarm_event_store import SwarmEventStore
+
+    store = SwarmEventStore(str(tmp_path / "evt_mirror.db"))
+    monkeypatch.setattr(swarm_mod, "_EVENT_STORE", store)
+    return store
+
+
+def test_events_after_seq_reads_store_replay(tmp_path, monkeypatch):
+    store = _seedMirrorStore(tmp_path, monkeypatch)
+    store.append("swarm_evt_r", "spawned", {"task": "t"})
+    store.append("swarm_evt_r", "terminal", {"status": "completed"})
+    store2 = AgentRunStore(tmp_path / "runs.db")
+    for client in _makeClient(store2, {"user_id": "admin", "role": "admin"}):
+        resp = client.get("/chat/subagents/swarm_evt_r/events?after_seq=1")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert data["mode"] == "replay"
+        assert data["high_water"] == 2
+        assert data["degraded"] is False
+        assert [e["seq"] for e in data["events"]] == [2]
+
+
+def test_events_after_seq_too_old_degrades_honestly(tmp_path, monkeypatch):
+    store = _seedMirrorStore(tmp_path, monkeypatch)
+    store.append("swarm_evt_d", "spawned", {"task": "t"})
+    store.markPrunedThrough(store.highWater())  # 游标若低于边界 → 必须降级
+    store2 = AgentRunStore(tmp_path / "runs.db")
+    for client in _makeClient(store2, {"user_id": "admin", "role": "admin"}):
+        resp = client.get("/chat/subagents/swarm_evt_d/events?after_seq=0")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert data["mode"] == "replay"
+        assert data["degraded"] is True and data["events"] == [], \
+            "游标过旧必须诚实降级（绝不部分回放）"

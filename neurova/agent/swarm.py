@@ -354,6 +354,35 @@ def _eventStore():
     return _EVENT_STORE
 
 
+def getSwarmEventStore():
+    """全局事件库单例的公开访问器（M5：console 读面/清理任务消费）。"""
+    return _eventStore()
+
+
+def pruneSwarmEventStoreOnce() -> int:
+    """清理全局事件库超窗事件（M5）：仅镜像库（重放用途，保留窗默认 1 天
+    env 可调），JSONL 一手账本不动——超窗事件的事实源仍在。先发布
+    pruned-through 边界再删（A2 语义：游标过旧的客户端诚实降级快照）。"""
+    from neurova.agent.swarm_event_store import envKeepWindowSeconds
+
+    removed = _eventStore().pruneCovered(keep_window_s=envKeepWindowSeconds())
+    if removed:
+        logger.info("Swarm: 全局事件库清理 %s 条超窗事件（保留窗 %ss）",
+                    removed, envKeepWindowSeconds())
+    return removed
+
+
+def registerSwarmEventPruneJob(scheduler: Any) -> bool:
+    """把镜像库清理挂成小时级系统 job（M5；同 jobId replace_existing 幂等）。
+
+    挂 app lifespan（同企业源巡检范式）而非 SwarmManager 构造器——不拉起
+    调度器，单测零污染。"""
+    if scheduler is None or not hasattr(scheduler, "addSystemJob"):
+        return False
+    scheduler.addSystemJob(pruneSwarmEventStoreOnce, "swarm_event_store_prune", 3600)
+    return True
+
+
 def _deliveryLedger():
     """子代理完成投递账本（B1）：投递单 pending→claimed→acknowledged|disposed
     的状态机与父闲补投，接在 pushParentMail 唯一写点与邮箱消费侧 ack 镜像。

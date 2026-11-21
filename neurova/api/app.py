@@ -1007,6 +1007,20 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as _audit_err:  # noqa: BLE001 - 审计故障不阻断启动
         logger.warning("企业源同步审计装配失败（忽略）: %s", _audit_err)
 
+    # M5（修复计划 2026-11-21）：全局事件库镜像周期清理——小时级 job，
+    # 保留窗 NEUROVA_SWARM_EVENT_KEEP_WINDOW_S 默认 1 天（D-E 拍板值）。
+    # 镜像库只服务断线重放；JSONL 一手账本永久留痕不受影响。
+    # fail-soft：注册失败不阻断启动。
+    try:
+        from neurova.agent.scheduler import init_scheduler
+
+        from neurova.agent.swarm import registerSwarmEventPruneJob
+
+        if registerSwarmEventPruneJob(init_scheduler()):
+            logger.info("Swarm 事件库清理 job 已注册（jobId=swarm_event_store_prune, seconds=3600）")
+    except Exception as _prune_err:  # noqa: BLE001 - 清理装配故障不阻断启动
+        logger.warning("Swarm 事件库清理 job 注册失败（忽略）: %s", _prune_err)
+
 # 知识摄取队列排水循环（sync=false 入队任务的后台执行；
 # NEUROVA_KNOWLEDGE_ASYNC=off 显式停用）。fail-open 不阻断启动
     if (os.environ.get("NEUROVA_KNOWLEDGE_ASYNC") or "on").strip().lower() != "off":

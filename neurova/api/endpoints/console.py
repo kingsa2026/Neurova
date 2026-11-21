@@ -1614,6 +1614,7 @@ async def get_console_tool_result(
 async def get_console_subagent_events(
     subagent_id: str,
     request: Request,
+    after_seq: Optional[int] = None,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """子任务事件账本读面（H-4 闭环）：该 run 的全程事件 + 因果链。
@@ -1623,6 +1624,11 @@ async def get_console_subagent_events(
     → 按行内 user_id 判；台账无行（gate off/早期运行）→ 非管理员 fail-closed。
     C2 接线：事件读数经 G3 收敛面（NeuacpMemberSurface.snapshot）取数——
     同一账本单源，读面换道、响应形状不变。
+
+    M5：带 ``after_seq`` 时改走全局事件库游标增量重放（A2 replayThrough 的
+    生产消费点）——``mode=replay``，返回 ``high_water``/``degraded``；
+    ``degraded=true``（游标过旧/超预算）时调用方应回退全量（不带 after_seq）
+    读法，绝不部分回放。
     """
     from neurova.core import agent_run_store as _ars
 
@@ -1633,6 +1639,26 @@ async def get_console_subagent_events(
         if row is None:
             raise HTTPException(status_code=403, detail="Forbidden")
         _check_session_ownership({"user_id": row.get("user_id") or ""}, user_id)
+
+    if after_seq is not None:
+        from neurova.agent.swarm import getSwarmEventStore
+
+        replay = await asyncio.to_thread(
+            lambda: getSwarmEventStore().replayThrough(
+                int(after_seq), stream_id=subagent_id))
+        events = replay.get("events", [])
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {
+                "subagent_id": subagent_id,
+                "mode": "replay",
+                "high_water": replay.get("high_water", 0),
+                "degraded": replay.get("degraded", False),
+                "count": len(events),
+                "events": events,
+            },
+        }
 
     # C2 接线（G3 收敛面）：读数换道经 memberSurface().snapshot()——run 在册
     # 走面，已逐出的存量 run 由面内以最小标识补位（账本读数不设能力维度）。

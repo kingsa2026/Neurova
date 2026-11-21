@@ -470,3 +470,55 @@ class TestSchemaRegistration:
         conn.close()
         with pytest.raises(SchemaVersionError):
             SwarmEventStore(dbPath)
+
+
+# ── M5：镜像库周期清理（保留窗 env 可调）+ 生产 prune 函数 ─────────────────
+
+
+class TestPruneWiring:
+    def test_env_keep_window_seconds(self, monkeypatch):
+        import math
+
+        from neurova.agent.swarm_event_store import (
+            DEFAULT_KEEP_WINDOW_S,
+            envKeepWindowSeconds,
+        )
+
+        monkeypatch.setenv("NEUROVA_SWARM_EVENT_KEEP_WINDOW_S", "3600")
+        assert envKeepWindowSeconds() == 3600.0
+        monkeypatch.setenv("NEUROVA_SWARM_EVENT_KEEP_WINDOW_S", "0")
+        assert envKeepWindowSeconds() == math.inf, "0 = 不清理（无限保留）"
+        monkeypatch.setenv("NEUROVA_SWARM_EVENT_KEEP_WINDOW_S", "bogus")
+        assert envKeepWindowSeconds() == DEFAULT_KEEP_WINDOW_S
+        monkeypatch.delenv("NEUROVA_SWARM_EVENT_KEEP_WINDOW_S", raising=False)
+        assert envKeepWindowSeconds() == DEFAULT_KEEP_WINDOW_S
+
+    def test_prune_once_removes_expired_keeps_stream_head(self, tmp_path, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+
+        from neurova.agent import swarm as swarm_mod
+        from neurova.agent.swarm_event_store import SwarmEventStore
+
+        store = SwarmEventStore(str(tmp_path / "evt_prune.db"))
+        oldIso = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+        store.append("s1", "spawned", {"n": 1}, occurred_at=oldIso)
+        store.append("s1", "terminal", {"n": 2})  # 新鲜事件（流头保护）
+        monkeypatch.setattr(swarm_mod, "_EVENT_STORE", store)
+        monkeypatch.setenv("NEUROVA_SWARM_EVENT_KEEP_WINDOW_S", "3600")
+
+        removed = swarm_mod.pruneSwarmEventStoreOnce()
+
+        assert removed == 1, "超窗非流头事件应被清理"
+        remaining = store.readStream("s1")
+        assert [e["type"] for e in remaining] == ["terminal"]
+
+    def test_prune_job_registered(self):
+        from unittest.mock import MagicMock
+
+        from neurova.agent import swarm as swarm_mod
+
+        sched = MagicMock()
+        assert swarm_mod.registerSwarmEventPruneJob(sched) is True
+        args, kwargs = sched.addSystemJob.call_args
+        assert args[1] == "swarm_event_store_prune"
+        assert args[2] == 3600

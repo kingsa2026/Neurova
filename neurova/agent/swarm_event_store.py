@@ -20,6 +20,7 @@ schema 经 `db_migration.register_migration` 登记（domain=swarm_event_store�
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -33,8 +34,24 @@ from neurova.core.db_migration import register_migration
 EVENT_STORE_DB_DOMAIN = "swarm_event_store"
 
 DEFAULT_KEEP_WINDOW_S = 24 * 3600.0        # D-E 拍板：保留 1 天
+#: M5：保留窗 env 覆盖（秒）；<=0 = 不清理（无限保留）。
+KEEP_WINDOW_ENV = "NEUROVA_SWARM_EVENT_KEEP_WINDOW_S"
 DEFAULT_REPLAY_MAX_EVENTS = 5000
 DEFAULT_REPLAY_MAX_BYTES = 4 * 1024 * 1024
+
+
+def envKeepWindowSeconds() -> float:
+    """镜像库保留窗（M5）：env 显式值最优先；非法回落默认；<=0 = inf（不清理）。"""
+    import math
+
+    raw = (os.environ.get(KEEP_WINDOW_ENV) or "").strip()
+    if not raw:
+        return DEFAULT_KEEP_WINDOW_S
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_KEEP_WINDOW_S
+    return math.inf if value <= 0 else value
 
 _SCHEMA_VERSION = 2
 
