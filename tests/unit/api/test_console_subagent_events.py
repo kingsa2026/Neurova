@@ -111,3 +111,53 @@ def test_events_after_seq_too_old_degrades_honestly(tmp_path, monkeypatch):
         assert data["mode"] == "replay"
         assert data["degraded"] is True and data["events"] == [], \
             "游标过旧必须诚实降级（绝不部分回放）"
+
+
+# ── M8：lineage 租户/房间维度审计聚合读面（admin 门） ─────────────────────
+
+
+def _seedAuditRun(store, subagentId, userId, tenantId, projectId, teamId=""):
+    store.intake("sess-" + subagentId, userId, "agentX", "任务",
+                 subagent_id=subagentId, parent_session_id="p-" + subagentId)
+    with store._lock:
+        store._conn.execute(
+            "UPDATE agent_runs SET tenant_id=?, project_id=?, team_id=? WHERE subagent_id=?",
+            (tenantId, projectId, teamId, subagentId))
+        store._conn.commit()
+
+
+def test_lineage_audit_aggregates_runs_and_events(tmp_path):
+    store = AgentRunStore(tmp_path / "runs_audit.db")
+    _seedAuditRun(store, "swarm_au1", "u1", "dept_x", "room_p1", "team_9")
+    _seedAuditRun(store, "swarm_au2", "u2", "dept_y", "room_p2")
+    appendRunEvent("swarm_au1", "spawned", {"task": "t"},
+                   lineage={"tenant_id": "dept_x", "room_id": "room_p1",
+                            "agent_path": "main>child", "depth": 1})
+    appendRunEvent("swarm_au1", "terminal", {"status": "completed"},
+                   lineage={"tenant_id": "dept_x", "room_id": "room_p1",
+                            "agent_path": "main>child", "depth": 1})
+
+    for client in _makeClient(store, {"user_id": "admin", "role": "admin"}):
+        resp = client.get("/chat/swarm/lineage-audit?tenant_id=dept_x")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert data["count"] == 1, "租户过滤应只命中 dept_x 的 run"
+        row = data["runs"][0]
+        assert row["subagent_id"] == "swarm_au1"
+        assert row["tenant_id"] == "dept_x" and row["project_id"] == "room_p1"
+        assert row["team_id"] == "team_9"
+        assert row["event_counts"].get("spawned") == 1
+        assert row["event_counts"].get("terminal") == 1
+        assert row["lineage_sample"]["agent_path"] == "main>child"
+        assert row["lineage_sample"]["tenant_id"] == "dept_x"
+
+        resp2 = client.get("/chat/swarm/lineage-audit?room_id=room_p2")
+        assert resp2.json()["data"]["runs"][0]["subagent_id"] == "swarm_au2"
+        resp3 = client.get("/chat/swarm/lineage-audit?tenant_id=dept_none")
+        assert resp3.json()["data"]["count"] == 0
+
+
+def test_lineage_audit_requires_admin(tmp_path):
+    store = AgentRunStore(tmp_path / "runs_audit.db")
+    for client in _makeClient(store, {"user_id": "u2", "role": "user"}):
+        assert client.get("/chat/swarm/lineage-audit").status_code == 403

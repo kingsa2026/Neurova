@@ -1675,6 +1675,65 @@ async def get_console_subagent_events(
     }
 
 
+@router.get("/chat/swarm/lineage-audit")
+async def get_console_swarm_lineage_audit(
+    request: Request,
+    tenant_id: str = "",
+    room_id: str = "",
+    limit: int = 50,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """M8（修复计划 2026-11-21）：lineage 租户/房间维度审计聚合读面（admin 门）。
+
+    H-4 事件的 lineage（tenant_id/room_id/agent_path/depth）此前只写不读；
+    本面按租户段/项目标（room_id=project_id 等式）聚合台账 run 行与各 run 的
+    H-4 事件族计数 + 谱系样本，供跨租户审计。非 admin 403；单 run 事件全量
+    计数（JSONL 一手账本），run 数上限 200。
+    """
+    if not _isAdminIdentity(current_user):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    limit = max(1, min(int(limit or 50), 200))
+    from neurova.core import agent_run_store as _ars
+    from neurova.agent.swarm_event_log import readRunEvents
+
+    rows = await asyncio.to_thread(
+        lambda: _ars.get_agent_run_store().list_runs_for_audit(
+            tenant_id=tenant_id, project_id=room_id, limit=limit))
+
+    def _aggregate():
+        out = []
+        for row in rows:
+            sid = str(row.get("subagent_id") or "")
+            counts: Dict[str, int] = {}
+            lineageSample: Dict[str, Any] = {}
+            if sid:
+                for evt in readRunEvents(sid):
+                    etype = str(evt.get("type") or "")
+                    counts[etype] = counts.get(etype, 0) + 1
+                    lin = evt.get("lineage") or {}
+                    if lin and not lineageSample:
+                        lineageSample = {
+                            k: lin.get(k)
+                            for k in ("tenant_id", "room_id", "agent_path", "depth")
+                            if k in lin
+                        }
+            out.append({
+                "subagent_id": sid,
+                "agent_id": row.get("agent_id"),
+                "status": row.get("status"),
+                "tenant_id": row.get("tenant_id") or "",
+                "project_id": row.get("project_id") or "",
+                "team_id": row.get("team_id") or "",
+                "trace_id": row.get("trace_id") or "",
+                "event_counts": counts,
+                "lineage_sample": lineageSample,
+            })
+        return out
+
+    runs = await asyncio.to_thread(_aggregate)
+    return {"code": 0, "message": "success", "data": {"count": len(runs), "runs": runs}}
+
+
 def _graphMemberProfiles(rows: typing.List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """图节点成员档案装配（P1-1）：团队名册（用户资产单源）+ 内存 run 态。
 

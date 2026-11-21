@@ -526,6 +526,29 @@ class AgentRunStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_runs_for_audit(self, *, tenant_id: str = "", project_id: str = "",
+                            limit: int = 100) -> List[Dict[str, Any]]:
+        """M8 审计聚合读面：按租户段/项目标过滤 run 行（admin 面专用）。
+
+        两段可单用或组合；都不传 = 最近 limit 条（审计全貌）。结果按 seq 倒序。
+        """
+        limit = max(1, min(int(limit or 100), 500))
+        where, params = [], []
+        if str(tenant_id or "").strip():
+            where.append("tenant_id=?")
+            params.append(str(tenant_id).strip())
+        if str(project_id or "").strip():
+            where.append("project_id=?")
+            params.append(str(project_id).strip())
+        sql = "SELECT * FROM agent_runs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY seq DESC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
     def count_runs_by_project(self, project_id: str) -> int:
         """项目标 run 计数（get_project_stats 的 runs_count 口径单源）。"""
         pid = str(project_id or "").strip()
