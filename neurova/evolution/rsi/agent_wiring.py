@@ -73,6 +73,21 @@ def wireAgentRsi(agent) -> None:
             tool_memory_system=tool_memory_system or _NullSystem(),
             agent_id=str(getattr(config, "agent_id", "") or ""),
         )
+        # P1-3：世代编排器挂接（世代账本+门禁链+影子验证接进 RSI 迭代）。
+        # 可选件：装配失败只降级为"无世代管线"（generationOrchestrator 保持
+        # None，RSI 零行为变化），不阻断 agent 构造与生产 chat 链路。
+        try:
+            from neurova.evolution.rsi.generation_orchestrator import (
+                GenerationOrchestrator,
+            )
+
+            agent.rsi_orchestrator.generationOrchestrator = GenerationOrchestrator(
+                rsiOrchestrator=agent.rsi_orchestrator
+            )
+        except Exception as e:  # noqa: BLE001 - 世代管线缺席不阻断 RSI
+            logger.warning(
+                "Agent %s: 世代编排器装配失败（RSI 无世代管线运行）: %s", label, e
+            )
         logger.info(
             "Agent %s: RSI 编排器已初始化 (%s/4 闭环系统可用)",
             label, len(available_systems),

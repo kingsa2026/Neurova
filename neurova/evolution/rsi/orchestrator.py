@@ -425,6 +425,12 @@ class RSIOrchestrator:
         # 只留最近一轮（人工批准的对象是"当前这轮的建议"，不是历史累积）。
         self._last_round_proposals: Optional[Dict[str, Any]] = None
 
+        # P1-3 世代编排器（可选挂接件）：None 时零行为变化（向后兼容旧测试）。
+        # 生产装配点在 agent_wiring.wireAgentRsi；接线点为 run_iteration 建议
+        # 产出点与 applyApprovedOptimizations 人工批准通道（见三个 _generation*
+        # 辅助方法），世代管线故障一律 fail-soft，不阻断迭代与生产链路。
+        self.generationOrchestrator: Optional[Any] = None
+
         logger.info("RSIOrchestrator initialized")
 
     #: RSI gain 置信区间的 z 值（B3）：≈97.5% 单侧置信，口径镜像
@@ -986,6 +992,9 @@ class RSIOrchestrator:
         # R1：登记为本轮待批提案——phase 1（手动档）不自动应用，
         # 这里是治理端点"人工批准后应用"的唯一数据源。
         self._recordRoundProposals(optimizations)
+        # P1-3：建议产出点挂接世代管线（一次迭代 → 一个世代；fail-soft，
+        # 不阻断迭代主体，详见 generation_orchestrator.py）。
+        self._notifyGenerationRound(feedback_signals, optimizations, convergence)
 
         # 4. 应用优化（部署控制器允许时）+ 实测增益 + 棘轮保留/回滚
         applied_results: List[Dict[str, Any]] = []
@@ -1896,6 +1905,61 @@ class RSIOrchestrator:
             "applied_by": store.get("applied_by"),
         }
 
+    # ── P1-3：世代编排器挂接点（可选件，generationOrchestrator=None 时零行为变化）──
+
+    def _notifyGenerationRound(
+        self,
+        feedback_signals: Dict[str, Any],
+        optimizations: List[Dict[str, Any]],
+        convergence: Dict[str, Any],
+    ) -> None:
+        """run_iteration 建议产出点 → 世代编排器开代+影子验证+门禁链（fail-soft）。
+
+        世代管线任何异常都不得阻断 RSI 迭代本身（AGENTS §2 断点纪律的正面：
+        管线缺席/故障时迭代照常，故障留痕在 generationOrchestrator.lastPipelineError）。
+        """
+        generationOrchestrator = getattr(self, "generationOrchestrator", None)
+        if generationOrchestrator is None or not optimizations:
+            return
+        try:
+            generationOrchestrator.onRoundProposals(
+                roundNo=self._iteration_count + 1,
+                feedbackSignals=feedback_signals,
+                optimizations=optimizations,
+                convergenceStatus=str(convergence.get("status", "")),
+            )
+        except Exception as e:  # noqa: BLE001 - 挂接面故障不阻断迭代主体
+            logger.warning("世代管线挂接失败（不阻断迭代）: %s", e)
+
+    def _generationGateForApproval(self, store: Dict[str, Any], approved_by: str) -> None:
+        """人工批准应用前的世代门禁：门禁未通过的世代拒绝应用（参数不落地）。
+
+        世代被拒时抛 `RSIManualApplyError`（409，治理端点原样映射）——这是
+        P1-3 唯一新增的"不落地"路径，且仅作用于已挂接世代管线的轮次。
+        """
+        generationOrchestrator = getattr(self, "generationOrchestrator", None)
+        if generationOrchestrator is None:
+            return
+        generationOrchestrator.gateManualApproval(
+            roundNo=int(store["round"]), approvedBy=str(approved_by)
+        )
+
+    def _generationRecordApprovalOutcome(
+        self, store: Dict[str, Any], outcome: Dict[str, Any]
+    ) -> None:
+        """应用段落定后的世代部署/拒绝留痕（fail-soft，不改变应用结果）。"""
+        generationOrchestrator = getattr(self, "generationOrchestrator", None)
+        if generationOrchestrator is None:
+            return
+        try:
+            generationOrchestrator.onManualApprovalApplied(
+                roundNo=int(store["round"]),
+                approvedBy=str(outcome.get("approved_by") or ""),
+                outcome=outcome,
+            )
+        except Exception as e:  # noqa: BLE001 - 留痕故障不改变应用结果
+            logger.warning("世代部署留痕失败（不改变应用结果）: %s", e)
+
     def applyApprovedOptimizations(
         self,
         optimization_ids: Optional[List[str]] = None,
@@ -1954,6 +2018,10 @@ class RSIOrchestrator:
             raise RSIManualApplyError(
                 f"反向闸拦截：{debt.reason}（未清余额={debt.outstanding}）", 409)
 
+        # P1-3：世代门禁（挂接点）——门禁未通过的世代拒绝应用（参数不落地）。
+        # generationOrchestrator 未挂接时零行为变化（向后兼容旧测试）。
+        self._generationGateForApproval(store, approved_by=approved_by)
+
         convergence = self.convergence_analyzer.analyze_convergence()
         # 传提案的**拷贝**进应用段：提案登记保持申请时原貌，不随应用回写变形。
         outcome = self._applyOptimizationsWithMeasurement(
@@ -1975,6 +2043,8 @@ class RSIOrchestrator:
                 else [str(o["optimization_id"]) for o in selected]
             ),
         })
+        # P1-3：世代部署/拒绝留痕（挂接点，fail-soft，不改变应用结果）。
+        self._generationRecordApprovalOutcome(store, outcome)
         return outcome
 
     def apply_optimizations(self, optimizations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
