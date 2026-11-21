@@ -48,6 +48,12 @@ CheckFn = Callable[[str], Tuple[bool, float, dict]]
 _ANSWER_SNIPPET_LEN = 400
 _SCORE_DIGITS = 6
 
+#: 白名单判据模板的标记属性：由本模块判据模板工厂（`exactAnswer` /
+#: `markersPresent`）产出的 check 携带此属性，值为模板名。评测棘轮
+#: （`benchmark/ratchet.py`）据此核验「自动立案的判据只来自白名单模板」；
+#: 任意手写判据没有该标记，自动通道拒收（裁判件保护，P3-3）。
+CRITERION_TEMPLATE_ATTR = "_criterion_template"
+
 
 # ── 任务与判据 ─────────────────────────────────────────────────────
 
@@ -82,6 +88,7 @@ def exactAnswer(gold: str) -> CheckFn:
         passed = normalized == normalizeAnswer(gold)
         return passed, (1.0 if passed else 0.0), {"gold": gold, "answer": normalized}
 
+    setattr(_check, CRITERION_TEMPLATE_ATTR, "exactAnswer")
     return _check
 
 
@@ -94,6 +101,7 @@ def markersPresent(markers: Sequence[str]) -> CheckFn:
         score = round((len(markers) - len(missing)) / max(len(markers), 1), _SCORE_DIGITS)
         return (not missing), score, {"missing_markers": missing}
 
+    setattr(_check, CRITERION_TEMPLATE_ATTR, "markersPresent")
     return _check
 
 
