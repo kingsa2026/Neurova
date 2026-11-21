@@ -615,3 +615,43 @@ T3 当期主干与原快照相隔约四小时（e19193db → 6f94a063），20 �
   不给下一档」口径维持 9.0；B2 收敛面换道非新触发点不调分；D2 原生模式纪律经提交自证
   系既有覆盖确认不调分；T3 侧 25 笔漂移逐项核对无能力面变化，各项维持原分。
   本轮调分仅 C1/D3/E2 三项各 +0.5。
+
+### 待立项后续活体复核（2026-11-21 同日补测，只测+清理，未改生产代码）
+
+对上表「体系深度」类后续中两项做了真环境活体复核，结论如下（证据：测试脚本与输出
+原文存于会话记录；服务器与模拟器临时产物测后即清）。
+
+**D2/D3 远程路由面——缺口机制实锤 + 立卡通路已证**（测试机：官网服务器
+47.252.31.69，SSH 密钥 `E:/Projects/web/SSH01.pem`）：
+
+- **缺口实锤**：以 neuacp 真实链路（`resolveSpawnCommand` → `buildChildEnvironment`
+  → `Popen(env=...)`）经 `transport=ssh` 在远程机拉起成员进程，C4 的 run 凭据
+  （`NEUROVA_RUN_CREDENTIAL`）止步于本地 ssh 客户端进程环境，远端成员实测读不到
+  （探针 `has_cred:false`）——根因是 `acp_client._startLocked` 的 env 只作用本地
+  ssh.exe，OpenSSH 默认不转发任意环境变量。「远程身份路由面未覆盖」由登记推测
+  升级为机制级实证。
+- **通路已证**：把凭据以远端命令行 env 前缀（`ssh … -- NEUROVA_RUN_CREDENTIAL=<tok>
+  python3 probe.py`）传递，远程成员完整收到并自解 `run_id/tenant_id/ttl`，宿主侧
+  `verifyRunCredential` 验签闭环（HMAC 域隔离与有效期咬合）——在
+  `resolveRemoteCommand` 层拼远端 env 前缀即为立卡候选方案的最小实证。
+- **拓扑事实**：宿主无公网入站（NAT 之后），远程成员只能由宿主经 SSH 主动连入
+  （与 ssh transport 模式天然一致）；「三路由热切换 / DPoP 云中继」仍是真机制缺口
+  （本仓 scope 已排除云中继推送依赖，见 catchup 计划防扩 scope 节）。
+
+**D5（IDE 接入计划拍板项 D-5 三端落地）——服务端契约活体全过，移动端差距清单落定**
+（测试机：本机安卓模拟器 AVD neurova35 跑真 App `top.neurova.mobile`；后端 9527 同数据根）：
+
+- **App→后端活体**：真 App 经 `10.0.2.2:9527` 直连，HTTP 全链路 200
+  （`/api/v1/mobile/pairing/list`、`/api/v1/console/chat/history`、
+  `/api/v1/console/chat/sessions`），鉴权与连通性真实可用。
+- **G4 契约协议级活体**（走真实配对链路：`pairing/generate` → `pairing/confirm`
+  取一次性 `connect_ticket` → WS 以 `Authorization: Bearer` 握手，与鸿蒙端同通道）：
+  心跳 `{"type":"ping"}`→`pong` ✓；`sync_resume(afterSequence=0)` 空账本 0 帧
+  （重放窗口语义诚实）✓；**伪造 `scope_key` → 403 `scope_forbidden`（D3 越权防线
+  真实咬合）** ✓；非法 scope → 400 `invalid_scope`（fail-closed）✓。
+- **移动端差距清单**（D-5「移动端另行排产」的排产依据）：安卓心跳 30s 手抄
+  （`MobileWsChannel.kt` `HEARTBEAT_MS=30_000`）vs 服务端单源
+  `connection_runtime.HEARTBEAT_INTERVAL_S=15`；鸿蒙同 30s 且重连退避参数手抄
+  （`WebSocketAdapter.ets`）；两端均未消费 scope 按需订阅；鸿蒙已有
+  `lastServerSeq` 重放消费。三端应对齐 `describeForClients` 下发契约取值，
+  不再各自手抄。
