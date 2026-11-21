@@ -589,6 +589,12 @@ class SwarmManager:
             return {"error": f"未找到可用的子 Agent（请求: {agent_id or 'default'}）"}
 
         model = self._resolve_model_name(agent)
+        # D-B：外部成员在 spawn 时刻冻结执行体档案（能力档/工具标识/模型名）
+        # ——续跑时与名册现值比较得出切换决策，名册中途改动不再被无感吞掉。
+        executorProfile = (
+            self._executorProfileFor(externalId, team_id)
+            if externalAdapter is not None else None
+        )
         cap = self.MAX_CONCURRENT_PER_MODEL
 
         # ── fan-out 治理闸（预算/冷却/并发/间隔；全部 fail-open，可 kill-switch）──
@@ -689,7 +695,10 @@ class SwarmManager:
                         "data_fence": dataFence,
                         "room_id": str(room_id or "").strip(),
                         "project_id": effectiveProjectId,
-                        "team_id": str(team_id or "").strip() if teamMember else "",
+                        # D-B：外部成员（即使未走团队选人）也保留名册归属——
+                        # 续跑/切换按名册现值决策与租户判定都要用它。
+                        "team_id": str(team_id or "").strip()
+                        if (teamMember or externalAdapter is not None) else "",
                         "team_role": teamRoleLabel,
                         "team_member": dict(teamMember) if teamMember else None,
                         "runtime_budget_sec": max(0.0, float(runtimeBudgetSec or 0.0)),
@@ -736,10 +745,17 @@ class SwarmManager:
             resumed_from=resumed_from or "",
             room_id=str(room_id or "").strip(),
             project_id=effectiveProjectId,
-            team_id=str(team_id or "").strip() if teamMember else "",
+            # D-B：外部成员（即使未走团队选人）也保留名册归属——续跑/切换的
+            # 决策与租户判定都要用它。
+            team_id=str(team_id or "").strip()
+            if (teamMember or externalAdapter is not None) else "",
             team_role=teamRoleLabel,
             team_member=dict(teamMember) if teamMember else None,
             runtime_budget_sec=max(0.0, float(runtimeBudgetSec or 0.0)),
+            # D-B：spawn 时刻执行体档案快照（外部成员专有；本仓 agent 为 None/""）
+            executor_caps_snapshot=dict(executorProfile["caps"]) if executorProfile else None,
+            executor_tool=executorProfile["tool"] if executorProfile else "",
+            executor_model=model or "",
             # F5 谱系：spawn 时刻单源（租户/父链只在此读一次）
             tenant_id=self._currentTenantId(),
             parent_subagent_id=parentSubagentId,
@@ -1654,6 +1670,12 @@ class SwarmManager:
         else:
             agent, resolved_id, _fallback = self._resolve_agent(info["agent_id"])
         model = self._resolve_model_name(agent) if agent is not None else ""
+        # D-B：blocked 放行的外部成员同样在落 run 时冻结执行体档案（与主
+        # spawn 同口径；登记时的 team_id 已随等待件携带）。
+        executorProfile = (
+            self._executorProfileFor(str(info["agent_id"]), info.get("team_id"))
+            if externalAdapter is not None else None
+        )
         run = SubAgentRun(
             subagent_id=info["subagent_id"],
             depth=info["depth"],
@@ -1677,6 +1699,10 @@ class SwarmManager:
             team_role=info.get("team_role") or "",
             team_member=info.get("team_member"),
             runtime_budget_sec=float(info.get("runtime_budget_sec") or 0.0),
+            # D-B：spawn 时刻执行体档案快照（外部成员专有；本仓 agent 为 None/""）
+            executor_caps_snapshot=dict(executorProfile["caps"]) if executorProfile else None,
+            executor_tool=executorProfile["tool"] if executorProfile else "",
+            executor_model=model or "",
             # F5 谱系：blocked 放行时父链取 spawn（登记）时刻的固定值
             tenant_id=self._currentTenantId(),
             parent_subagent_id=info.get("parent_subagent_id") or "",
@@ -1706,6 +1732,12 @@ class SwarmManager:
 
     def _failBlocked(self, bid: str, info: Dict[str, Any], upstream: SubAgentRun) -> None:
         """依赖失败/未验收 → 下游不执行、不归档，直接以 failed 终态落账（η 门语义）。"""
+        # D-B：依赖门判失败的 run 也落执行体档案快照（外部成员专有）——该 run
+        # 终态可续跑，续跑决策需要与 spawn（登记）时刻同口径的快照。
+        failedProfile = (
+            self._executorProfileFor(str(info.get("agent_id") or ""), info.get("team_id"))
+            if info.get("external_adapter") is not None else None
+        )
         run = SubAgentRun(
             subagent_id=bid,
             depth=info["depth"],
@@ -1725,6 +1757,10 @@ class SwarmManager:
             team_id=info.get("team_id") or "",
             team_role=info.get("team_role") or "",
             team_member=info.get("team_member"),
+            # D-B：spawn（登记）时刻执行体档案快照；未执行过，模型名留空
+            executor_caps_snapshot=dict(failedProfile["caps"]) if failedProfile else None,
+            executor_tool=failedProfile["tool"] if failedProfile else "",
+            executor_model="",
             # F5 谱系：同 blocked 登记时刻的固定值
             tenant_id=self._currentTenantId(),
             parent_subagent_id=info.get("parent_subagent_id") or "",
@@ -1790,6 +1826,13 @@ class SwarmManager:
         if run is None and blocked is None:
             return {"success": False, "error": f"未找到子 Agent 运行记录: {sid}"}
         if run is None:
+            # D-B：blocked 等待件被叫停也落执行体档案快照（外部成员专有）——
+            # 该 run 落终态后仍可续跑，续跑决策需要与登记时刻同口径的快照。
+            blockedProfile = (
+                self._executorProfileFor(str(blocked.get("agent_id") or ""),
+                                         blocked.get("team_id"))
+                if blocked.get("external_adapter") is not None else None
+            )
             failed = SubAgentRun(
                 subagent_id=sid, depth=blocked.get("depth", 1),
                 agent_id=blocked.get("agent_id", ""),
@@ -1802,6 +1845,11 @@ class SwarmManager:
                 subagent_type=blocked.get("subagent_type", "general"),
                 task_unit=blocked.get("task_unit"),
                 parent_trace_id=blocked.get("parent_trace_id", ""),
+                team_id=str(blocked.get("team_id") or ""),
+                # D-B：spawn（登记）时刻执行体档案快照；未执行过，模型名留空
+                executor_caps_snapshot=dict(blockedProfile["caps"]) if blockedProfile else None,
+                executor_tool=blockedProfile["tool"] if blockedProfile else "",
+                executor_model="",
                 # F5 谱系：同 blocked 登记时刻的固定值
                 tenant_id=self._currentTenantId(),
                 parent_subagent_id=blocked.get("parent_subagent_id", ""),
@@ -2005,10 +2053,19 @@ class SwarmManager:
     ) -> Dict[str, Any]:
         """续跑一条已终态（completed/failed）的子 Agent（工具清单 3.1-3 续）。
 
-        终态子 Agent 复活语义：member 会话键原样
-        复用——子 Agent 上一段的对话历史由既有会话恢复机制带回，续跑不是从零
-        重派；上一段的 report（失败时为部分交接件）附在续跑任务里作衔接上下文。
-        治理闸（深度/广度/预算/冷却/并发/错峰）与全新派生走同一条 spawn 路径。
+        终态子 Agent 复活语义：member 会话键按决策复用——子 Agent 上一段的
+        对话历史由既有会话恢复机制带回，续跑不是从零重派；上一段的 report
+        （失败时为部分交接件）附在续跑任务里作衔接上下文。治理闸（深度/广度/
+        预算/冷却/并发/错峰）与全新派生走同一条 spawn 路径。
+
+        D-B（provider 中途切换放开·按租户隔离）：
+        - 租户红线先于一切：非 admin 跨租户（run 谱系租户 / 团队租户不匹配）
+          与「未找到」同形拒绝（不泄露存在性）；admin 豁免但落审计事件；
+        - 续跑方式由「spawn 时刻执行体快照 vs 名册现值」经
+          decideProviderTransition 五结果决策：reuse / switch_model_in_session
+          （复用 member 会话）、restart_and_resume / create_with_handoff
+          （重开 member 会话、交接工件随行）、reject（诚实拒绝带指引）；
+        - 快照缺失的存量 run 按同 executor 同模型处理（向后兼容）。
         """
         if not (subagentId or "").strip():
             return {"error": "subagent_id 不能为空"}
@@ -2018,29 +2075,100 @@ class SwarmManager:
             old = self._runs.get(subagentId)
         if old is None:
             return {"error": f"未找到子 Agent 运行记录: {subagentId}"}
+        # ── D-B 租户隔离红线（§6.4；先于终态判定——跨租户连状态都不许探）──
+        # 目标租户 = run 谱系租户 + 目标 agent 配置租户（外部成员=团队租户）。
+        # 非 admin 跨租户一律拒绝，应答与「未找到」同形（teams_api 404 同纪律，
+        # 不泄露目标存在性）；admin 豁免但落审计事件（resume_cross_tenant_admin）。
+        from neurova.core.identity_context import get_request_user_id
+
+        initiatorTenant = self._currentTenantId()
+        targetTenant = str(getattr(old, "tenant_id", "") or "default")
+        teamTenant = self._teamTenantId(old.team_id)
+        crossTenant = (
+            targetTenant != initiatorTenant
+            or (teamTenant is not None and teamTenant != initiatorTenant)
+        )
+        if crossTenant:
+            if self._initiatorIsPlatformAdmin():
+                self._logRunEvent(old, "resume_cross_tenant_admin", {
+                    "initiator": str(get_request_user_id() or ""),
+                    "initiator_tenant": initiatorTenant,
+                    "target_tenant": targetTenant,
+                    "team_tenant": teamTenant,
+                })
+                logger.warning(
+                    "Swarm: admin 跨租户续跑豁免 run=%s initiator=%s@%s "
+                    "target_tenant=%s team_tenant=%s",
+                    old.subagent_id, get_request_user_id(), initiatorTenant,
+                    targetTenant, teamTenant,
+                )
+            else:
+                logger.warning(
+                    "Swarm: 跨租户续跑被拒（§6.4）run=%s initiator=%s@%s "
+                    "target_tenant=%s team_tenant=%s",
+                    old.subagent_id, get_request_user_id(), initiatorTenant,
+                    targetTenant, teamTenant,
+                )
+                return {"error": f"未找到子 Agent 运行记录: {subagentId}"}
         if old.status not in SUBAGENT_FINISHED_STATUSES:
             return {
                 "error": f"子 Agent {subagentId} 仍在运行（status={old.status}）——"
                          "续跑只针对已终态的运行；进行中的请用 subagent_status 等待",
             }
-        # C5（参照系 ac 借鉴）：续跑方式由执行体能力声明单源决策。外部成员
-        # 能力档既无 session_reuse 也无 resume 时诚实拒绝（不静默硬续）；
-        # 本仓 agent / 无名册归属不设限（走既有续跑链）。
-        memberCaps = self._memberExecutorCaps(old)
-        if memberCaps is not None:
+        # ── D-B 五结果决策：spawn 时刻执行体快照 vs 名册现值 ─────────────
+        # 快照在（新外部成员 run）：tool/model 现值比对得 same_executor /
+        # model_changed，installed 取 which 浅探测，走 decideProviderTransition。
+        # 快照缺（存量 run / 本仓 agent）：按同 executor 同模型处理（向后兼容，
+        # C5 原判定——能力档既无 session_reuse 也无 resume 时诚实拒绝）。
+        snapshotCaps = getattr(old, "executor_caps_snapshot", None)
+        sameExecutor, modelChanged, targetInstalled = True, False, True
+        currentTool, currentModel = "", ""
+        decision = None
+        if isinstance(snapshotCaps, dict) and snapshotCaps:
+            current = self._resumeTargetProfile(old)
+            if current is None:
+                return {
+                    "success": False,
+                    "error": "续跑目标执行体档案已不可得（名册成员或 executor 已"
+                             "移除/禁用）——请重派全新任务或恢复其 executor 配置",
+                }
+            currentTool = str(current.get("tool") or "")
+            currentModel = str(current.get("model") or "")
+            sameExecutor = currentTool == str(getattr(old, "executor_tool", "") or "")
+            modelChanged = currentModel != str(getattr(old, "executor_model", "") or "")
+            targetInstalled = bool(current.get("installed"))
             from neurova.agent.neuacp.catalog import decideProviderTransition
 
             decision = decideProviderTransition(
-                memberCaps, memberCaps,
-                same_executor=True, target_installed=True, model_changed=False,
+                snapshotCaps, current.get("caps") or {},
+                same_executor=sameExecutor, target_installed=targetInstalled,
+                model_changed=modelChanged,
             )
-            self._logRunEvent(old, "resume_decision", {"decision": decision})
-            if decision == "reject":
-                return {
-                    "success": False,
-                    "error": "该外部成员执行体能力档不支持续跑（无 session_reuse/resume "
-                             "声明）——请重派全新任务或调整其 executor 配置",
-                }
+        else:
+            memberCaps = self._memberExecutorCaps(old)
+            if memberCaps is not None:
+                from neurova.agent.neuacp.catalog import decideProviderTransition
+
+                decision = decideProviderTransition(
+                    memberCaps, memberCaps,
+                    same_executor=True, target_installed=True, model_changed=False,
+                )
+        # 决策事件（D-B 增补 same_executor/model_changed/tenant_checked 键；
+        # decision 键维持原名，向后兼容）
+        self._logRunEvent(old, "resume_decision", {
+            "decision": decision,
+            "same_executor": sameExecutor,
+            "model_changed": modelChanged,
+            "tenant_checked": True,
+        })
+        if decision == "reject":
+            return {
+                "success": False,
+                "error": self._resumeRejectReason(
+                    old, sameExecutor=sameExecutor, modelChanged=modelChanged,
+                    targetInstalled=targetInstalled, currentTool=currentTool,
+                    currentModel=currentModel),
+            }
 
         # B2（参照系 ac 借鉴）：续跑衔接升级为上下文传递工件（登记/预算/省略
         # 可恢复/inline 投递/事件留痕），替代旧的 report[:4000] 裸截断。
@@ -2057,7 +2185,19 @@ class SwarmManager:
                          "（可调大 NEUROVA_CONTEXT_HANDOFF_TOKEN_CAP 后重试；"
                          "旧产出仍可经成员会话历史 recall）",
             }
-        return await self.spawn(
+        # D-B 落地：reuse / switch_model_in_session 复用 member 会话（历史由
+        # 既有会话恢复带回；后者换模型发生在同一会话内）；restart_and_resume /
+        # create_with_handoff 重开 member 会话（旧产出经上方交接工件随行，
+        # resumed_from 溯源保留）；decision None（本仓 agent / 无名册）维持原样复用。
+        reuseSession = decision is None or decision in ("reuse", "switch_model_in_session")
+        # 团队谱系随行：team_id 原样回传并显式点名原成员（不重走自动选人——
+        # 旧「team_id 不随行」的顾虑由点名化解；外部成员由此解析到名册现值
+        # 执行体，正是 D-B 中途切换的落点）。
+        teamOverride = None
+        if old.team_id:
+            teamOverride = (dict(old.team_member) if old.team_member
+                            else self._rosterMemberOverride(old.team_id, old.agent_id))
+        result = await self.spawn(
             task,
             agent_id=old.agent_id,
             session_id=session_id if session_id is not None else old.session_id,
@@ -2066,13 +2206,19 @@ class SwarmManager:
             stream=True,
             initiator_agent=initiator_agent,
             subagent_type=old.subagent_type,
-            reuse_member_session_id=old.member_session_id,
+            reuse_member_session_id=old.member_session_id if reuseSession else None,
             resumed_from=old.subagent_id,
             # S12：续跑是同一条协作的延续，project/room 归属标随行（档案才不断链）；
-            # team_id 不随行——重走选人会改变续跑语义（团队续跑属需人裁，未立项）。
+            # team_id 随行 + 点名原成员（D-B：外部成员续跑须重解析名册现值执行体）。
             room_id=old.room_id or None,
             project_id=old.project_id or None,
+            team_id=old.team_id or None,
+            team_role=old.team_role or None,
+            teamMemberOverride=teamOverride,
         )
+        if isinstance(result, dict) and not result.get("error") and not result.get("rejected"):
+            result["provider_transition"] = decision
+        return result
 
     def _memberExecutorCaps(self, run: SubAgentRun) -> Optional[Dict[str, Any]]:
         """外部成员的执行体能力档（C5 消费点）；本仓 agent / 无名册 → None。
@@ -2081,25 +2227,141 @@ class SwarmManager:
         按 agent_id 对位成员，取其 executor.tool 的目录声明。查询失败一律
         None（不设限，不因名册读故障阻断续跑）。
         """
+        profile = self._executorProfileFor(run.agent_id, run.team_id)
+        return profile["caps"] if profile else None
+
+    def _executorProfileFor(self, agentId: Optional[str],
+                            teamId: Optional[str]) -> Optional[Dict[str, Any]]:
+        """外部成员执行体档案单源（D-B）：{"tool", "caps"}；不可得 → None。
+
+        能力档只来自 neuacp 目录声明（单一事实源）：按 team_id 查名册、按
+        agent_id 对位成员，取其 executor.tool 与目录能力档出口拷贝。查询失败
+        一律 None——调用方按各自语义处置（spawn 不落快照、续跑 fail-closed）。
+        """
         try:
-            teamId = str(getattr(run, "team_id", "") or "").strip()
-            if not teamId:
+            if not agentId or not teamId:
                 return None
             from neurova.agent.neuacp.catalog import capabilitiesFor
             from neurova.api.endpoints.teams_api import getTeamRoster
 
-            roster = getTeamRoster(teamId)
+            roster = getTeamRoster(str(teamId))
             for member in (roster or {}).get("members_detail") or []:
-                if str(member.get("user_id") or "") != str(run.agent_id or ""):
+                if str(member.get("user_id") or "") != str(agentId):
                     continue
                 spec = member.get("executor")
                 if not isinstance(spec, dict) or not str(spec.get("tool") or "").strip():
                     return None
-                return capabilitiesFor(str(spec.get("tool")))
-        except Exception as exc:  # noqa: BLE001 - 名册/目录读故障不阻断续跑主链
-            logger.debug("成员执行体能力档读取失败（不设限）: %s", exc)
+                tool = str(spec.get("tool"))
+                return {"tool": tool, "caps": capabilitiesFor(tool)}
+        except Exception as exc:  # noqa: BLE001 - 名册/目录读故障不阻断主链
+            logger.debug("成员执行体档案读取失败: %s", exc)
             return None
         return None
+
+    def _resumeTargetProfile(self, run: SubAgentRun) -> Optional[Dict[str, Any]]:
+        """续跑时刻的目标执行体档案（D-B）：{tool, caps, model, installed}。
+
+        与 spawn 时刻快照（executor_caps_snapshot/executor_tool/executor_model）
+        同口径：tool/caps 取名册现值（_executorProfileFor 单源），model 经既有
+        解析链从当前执行体适配器读数，installed 取 which 浅探测。名册不可得
+        → None（调用方 fail-closed 拒绝，不猜）。
+        """
+        profile = self._executorProfileFor(run.agent_id, run.team_id)
+        if profile is None:
+            return None
+        tool = profile["tool"]
+        try:
+            from neurova.agent.neuacp.catalog import probeToolHealth
+
+            installed = bool(probeToolHealth(tool, deep=False).get("installed"))
+        except Exception:  # noqa: BLE001 - 探测故障按未安装处理（fail-closed）
+            installed = False
+        model = ""
+        try:
+            adapter, _error = self._resolveExternalMember(run.agent_id, run.team_id)
+            if adapter is not None:
+                model = self._resolve_model_name(adapter) or ""
+        except Exception as exc:  # noqa: BLE001 - 模型读数失败按空串比较（不阻断决策）
+            logger.debug("续跑目标模型名读取失败（按空串比较）: %s", exc)
+        return {"tool": tool, "caps": profile["caps"], "model": model,
+                "installed": installed}
+
+    def _rosterMemberOverride(self, teamId: str, agentId: str) -> Optional[Dict[str, Any]]:
+        """从名册现值构造 teamMemberOverride（续跑点名原成员，不重走自动选人）。
+
+        旧续跑「team_id 不随行」是怕重走选人改变续跑语义；显式点名同名成员后
+        team_id 可安全随行——外部成员由此重新解析到名册现值执行体（D-B 中途
+        切换的落点）。成员已不在名册 → None（spawn 侧按各自闸门诚实处置）。
+        """
+        try:
+            from neurova.api.endpoints.teams_api import getTeamRoster
+
+            roster = getTeamRoster(str(teamId)) or {}
+            for member in (roster.get("members_detail") or []):
+                if str(member.get("user_id") or "") == str(agentId or ""):
+                    return {
+                        "user_id": str(member.get("user_id") or ""),
+                        "name": str(member.get("name") or ""),
+                        "role": str(member.get("role") or "member"),
+                        "prompt": str(member.get("prompt") or ""),
+                    }
+        except Exception as exc:  # noqa: BLE001 - 名册读故障回退 None
+            logger.debug("续跑点名成员读取失败: %s", exc)
+        return None
+
+    def _teamTenantId(self, teamId: Optional[str]) -> Optional[str]:
+        """团队租户（部门根，§6.4）；无团队 / 读失败 → None（只按 run 租户判定）。"""
+        tid = str(teamId or "").strip()
+        if not tid:
+            return None
+        try:
+            from neurova.api.endpoints.teams_api import getTeamRoster
+
+            team = getTeamRoster(tid) or {}
+            return str(team.get("tenant_id") or "default")
+        except Exception:  # noqa: BLE001 - 读失败不猜租户，交由 run 租户判定
+            return None
+
+    def _initiatorIsPlatformAdmin(self) -> bool:
+        """当前请求者是否平台 admin（users 表 role 单源；fail-closed 非 admin）。
+
+        判定复用 approval_chain._deciderIsPlatformAdmin（同包既有实现，同读
+        users 表 role 列；其模块未列本卡白名单不许改导出，故经惰性 import
+        复用，不另写第二份 users 表判定）。
+        """
+        try:
+            from neurova.core.identity_context import get_request_user_id
+
+            userId = str(get_request_user_id() or "").strip()
+            if not userId:
+                return False
+            from neurova.agent.approval_chain import _deciderIsPlatformAdmin
+
+            return bool(_deciderIsPlatformAdmin(userId))
+        except Exception:  # noqa: BLE001 - 判定失败按非 admin（fail-closed）
+            return False
+
+    def _resumeRejectReason(self, run: SubAgentRun, *, sameExecutor: bool,
+                            modelChanged: bool, targetInstalled: bool,
+                            currentTool: str, currentModel: str) -> str:
+        """续跑被拒的诚实原因（D-B）：点名挡在哪个判定分支，并给下一步指引。"""
+        snapshotTool = str(getattr(run, "executor_tool", "") or "")
+        snapshotModel = str(getattr(run, "executor_model", "") or "")
+        if not targetInstalled:
+            return (f"目标执行体 {currentTool or '(未知)'} 当前未安装或不可用"
+                    "（which 探测未命中）——请安装后重试、改派其他成员或重派全新任务")
+        if not sameExecutor:
+            return (f"执行体已从 {snapshotTool or '(未知)'} 切换为 "
+                    f"{currentTool or '(未知)'}，且双方能力档未同时声明 "
+                    "handoff_inject——不支持跨执行体交接续跑；请恢复原 executor "
+                    "配置或重派全新任务")
+        if modelChanged:
+            return (f"模型已从 {snapshotModel or '(空)'} 变更为 "
+                    f"{currentModel or '(空)'}，目标执行体能力档未声明 "
+                    "model_switch_in_session——保守拒绝会话内换模型；请恢复原模型 "
+                    "配置或重派全新任务")
+        return ("该外部成员执行体能力档不支持续跑（无 session_reuse/resume 声明）"
+                "——请重派全新任务或调整其 executor 配置")
 
     def _buildResumeHandoff(self, old: SubAgentRun) -> tuple:
         """B2（参照系 ac 借鉴）：续跑衔接升级为上下文传递工件。
@@ -2424,10 +2686,18 @@ class SwarmManager:
         initiator_tenant = self._currentTenantId()
         team_tenant = str(team.get("tenant_id") or "default")
         if initiator_tenant != team_tenant:
-            return None, (
-                f"跨租户派活被拒：发起者租户 {initiator_tenant!r} != "
-                f"团队租户 {team_tenant!r}（§6.4 租户隔离红线）"
-            )
+            # D-B：平台 admin 豁免跨租户限制（users 表 role 单源判定，留审计
+            # 日志）——续跑链的租户闸已先行拦截/放行并留痕，这里豁免才能让
+            # admin 的跨租户续跑在派生闸不二次死锁；非 admin 维持 §6.4 红线。
+            if self._initiatorIsPlatformAdmin():
+                logger.warning(
+                    "Swarm: 跨租户派活 admin 豁免 team=%s initiator_tenant=%s "
+                    "team_tenant=%s", team_id, initiator_tenant, team_tenant)
+            else:
+                return None, (
+                    f"跨租户派活被拒：发起者租户 {initiator_tenant!r} != "
+                    f"团队租户 {team_tenant!r}（§6.4 租户隔离红线）"
+                )
         # F1 第二闸（拍板 D-D，设计文档 §3.1）：租户闸之后、提取 kind/构造执行体
         # 之前——名册经旧数据/旁路写入的不支持组合在这里 fail-closed，
         # 「refused before anything opens」，绝不为其开进程。

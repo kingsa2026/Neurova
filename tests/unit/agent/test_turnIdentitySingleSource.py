@@ -101,6 +101,13 @@ READERS: Dict[str, Set[str]] = {
         "neurova/post_chat_pipeline.py::resolveSessionOwner",
         "neurova/tool_executor.py::ToolExecutor._execute_computer_ssh_exec",
         "neurova/tool_layers/mcp_server.py::NeurovaMCPServer._current_user_id",
+        # 2026-11-21 增 swarm 两处（D-B 拍板：provider 中途切换放开·按租户隔离）：
+        # resumeFinishedRun 读发起者身份落跨租户审计事件（resume_cross_tenant_admin，
+        # admin 豁免留痕）；_initiatorIsPlatformAdmin 读发起者身份判平台 admin
+        # （users 表 role 单源判定，判定失败按非 admin fail-closed）。租户红线与
+        # 五结果决策见 tests/unit/agent/test_provider_switch_tenant.py。
+        "neurova/agent/swarm.py::SwarmManager.resumeFinishedRun",
+        "neurova/agent/swarm.py::SwarmManager._initiatorIsPlatformAdmin",
     },
 }
 

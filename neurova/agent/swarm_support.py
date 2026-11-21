@@ -370,6 +370,19 @@ class SubAgentRun:
     # S10/S11：单条 run 的运行窗口覆盖（秒；0 = 用治理面默认读数）。房间协作发起人
     # 显式给预算时落在这里——只影响本 run，不改进程级 env（避免并发互踩）。
     runtime_budget_sec: float = 0.0
+    # D-B（provider 中途切换放开·按租户隔离）：派生时刻的执行体档案快照，
+    # 仅外部成员 run 落值（spawn 时刻单源冻结，运行中不重读）。
+    # - executor_caps_snapshot：spawn 时刻 capabilitiesFor(executor.tool) 的能力档
+    #   拷贝（dict）或 None；None = 本仓 agent / 存量 run（续跑按同 executor 同
+    #   模型处理，向后兼容）；
+    # - executor_tool：执行体目录标识（如 "opencode"），续跑时与名册现值比对得
+    #   出 same_executor；
+    # - executor_model：spawn 时刻解析的模型名（取不到为空串；run.model 的快照
+    #   别名，续跑比较专用契约键，落值后不改写）。
+    # resumeFinishedRun 据此走 decideProviderTransition 五结果决策。
+    executor_caps_snapshot: Optional[Dict[str, Any]] = None
+    executor_tool: str = ""
+    executor_model: str = ""
 
     @property
     def duration(self) -> float:
@@ -413,4 +426,8 @@ class SubAgentRun:
             "project_id": self.project_id,
             "team_id": self.team_id,
             "team_role": self.team_role,
+            # D-B：执行体档案快照（新增可选键——存量消费方按缺省 None/"" 兼容）
+            "executor_caps_snapshot": self.executor_caps_snapshot,
+            "executor_tool": self.executor_tool,
+            "executor_model": self.executor_model,
         }
