@@ -12,6 +12,8 @@
   （配置期 422 + 派活期拒绝）；声明是本仓已验证支持面的单一事实源。
 """
 import shutil
+import subprocess
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 #: 执行体类型取值唯一事实源（名册/管理面/派活同口径，教义第 6 条）。
@@ -296,3 +298,129 @@ def decideProviderTransition(current_caps: Dict[str, Any], target_caps: Dict[str
     if bool(target.get("resume", False)):
         return "restart_and_resume"
     return "reject"
+
+
+# ── C1：provider 目录健康探测与握手档案 ─────────────────────────────────────
+
+#: 健康探测子进程超时（秒）：只读 ``--version`` 探测，超时即杀，不拖住调用方。
+PROBE_TIMEOUT_S = 10.0
+
+
+def _defaultProbeRun(cmd_list: List[str], timeout_s: float) -> tuple:
+    """缺省探测执行：``subprocess.run`` 只读子进程，超时强杀。
+
+    超时（``TimeoutExpired``，run 内部已 kill 子进程）转译为返回码 124
+    （与 GNU timeout 口径一致）；命令不可执行（``OSError``）转译为 127。
+    探测纪律：绝不 spawn 会话/登录/MCP，只执行调用方给定的只读命令。
+    """
+    try:
+        proc = subprocess.run(
+            cmd_list, capture_output=True, text=True, timeout=timeout_s
+        )
+        return proc.returncode, proc.stdout or "", proc.stderr or ""
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", "replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", "replace")
+        return 124, stdout, stderr or f"timeout after {timeout_s}s"
+    except OSError as exc:
+        return 127, "", str(exc)
+
+
+def probeToolHealth(tool: str, *, timeout_s: float = PROBE_TIMEOUT_S,
+                    which_fn=None, run_fn=None) -> Dict[str, Any]:
+    """目录工具健康探测（C1）：installed + version，无副作用。
+
+    - which_fn/run_fn 供测试注入（缺省 ``shutil.which`` / ``_defaultProbeRun``）；
+      run_fn 约定：``run_fn(cmd_list, timeout_s) -> (returncode, stdout, stderr)``。
+    - 探测只读目录既有 command 声明：which 命中 ``command[0]``，再运行
+      ``command[0] + ["--version"]``；绝不发送目录 command 的完整参数
+      （不触发登录/会话/MCP 启动）。
+    - 未知/禁用工具 → ``{"tool", "installed": False, "install_hint",
+      "version": None, "error": "unknown_tool"|"disabled"}``；
+    - 已知但未安装 → 同形态且 ``error=None``（install_hint 取目录声明）；
+    - 已安装 → ``{"installed": True, "version": stdout 首行截 200 字符,
+      "error": None}``；运行失败/超时 → ``{"installed": True, "version": None,
+      "error": "<原因>"}``（installed 与 version 独立：装了但 version 探测
+      失败仍是 installed=True）。
+    """
+    tool = str(tool or "").strip()
+    entry = CATALOG.get(tool)
+    if entry is None:
+        return {"tool": tool, "installed": False, "install_hint": "",
+                "version": None, "error": "unknown_tool"}
+    if entry.get("disabled"):
+        return {"tool": tool, "installed": False,
+                "install_hint": str(entry.get("install_hint") or ""),
+                "version": None, "error": "disabled"}
+    which_fn = which_fn or shutil.which
+    run_fn = run_fn or _defaultProbeRun
+    command = list(entry.get("command") or [])
+    head = command[0] if command else ""
+    install_hint = str(entry.get("install_hint") or "")
+    if not head or not which_fn(head):
+        return {"tool": tool, "installed": False, "install_hint": install_hint,
+                "version": None, "error": None}
+    try:
+        returncode, stdout, stderr = run_fn([head, "--version"], timeout_s)
+    except subprocess.TimeoutExpired:
+        return {"tool": tool, "installed": True, "install_hint": install_hint,
+                "version": None,
+                "error": f"version 探测超时: {timeout_s}s（子进程已终止）"}
+    except OSError as exc:
+        return {"tool": tool, "installed": True, "install_hint": install_hint,
+                "version": None, "error": f"version 探测失败: {exc}"}
+    if returncode != 0:
+        return {"tool": tool, "installed": True, "install_hint": install_hint,
+                "version": None,
+                "error": f"version 探测失败: rc={returncode} stderr={str(stderr or '')[:200]}"}
+    lines = str(stdout or "").splitlines()
+    version = lines[0].strip()[:200] if lines else ""
+    if not version:
+        return {"tool": tool, "installed": True, "install_hint": install_hint,
+                "version": None, "error": "version 探测无输出"}
+    return {"tool": tool, "installed": True, "install_hint": install_hint,
+            "version": version, "error": None}
+
+
+#: 三家 P1 预设握手档案（C1，目录声明扩展、单一事实源）：initialize 参数 /
+#: 鉴权形态 / 会话方法名。键为 provider 短名，与 CATALOG 的映射：
+#: gemini→gemini-cli、claude→claude-code、codex→codex。
+#: 确证程度：
+#: - protocolVersion "1" 与 session 方法名（session/new、session/prompt）：
+#:   本仓 acp_client/acp_executor 现行实现 + ACP 规范通用方法名（确证）；
+#: - clientCapabilities：本仓 ACP 客户端现以空能力发起 initialize
+#:   （acp_client.start 的 client_capabilities 缺省 {}），故为空表，
+#:   真握手卡按各家 agentCapabilities 回填；
+#: - auth：各家官方公开口径的主形态（gemini=Google OAuth 登录；
+#:   claude=Claude 订阅登录；codex=ChatGPT 订阅登录），属公开文档推断，
+#:   api_key 为各家亦有支持的备选形态；不确定处不臆造。
+_PRESET_HANDSHAKE_PROFILES: Dict[str, Dict[str, Any]] = {
+    "gemini": {
+        "initialize": {"protocolVersion": "1", "clientCapabilities": []},
+        "auth": "oauth",
+        "session": {"new": "session/new", "prompt": "session/prompt"},
+    },
+    "claude": {
+        "initialize": {"protocolVersion": "1", "clientCapabilities": []},
+        "auth": "subscription",
+        "session": {"new": "session/new", "prompt": "session/prompt"},
+    },
+    "codex": {
+        "initialize": {"protocolVersion": "1", "clientCapabilities": []},
+        "auth": "subscription",
+        "session": {"new": "session/new", "prompt": "session/prompt"},
+    },
+}
+
+
+def presetHandshakeProfiles() -> Dict[str, Dict[str, Any]]:
+    """三家 P1 预设的握手档案（目录声明扩展，单一事实源）。
+
+    返回深拷贝：外部改写不影响目录声明。键为 provider 短名
+    （gemini/claude/codex ↔ CATALOG 的 gemini-cli/claude-code/codex）。
+    """
+    return deepcopy(_PRESET_HANDSHAKE_PROFILES)

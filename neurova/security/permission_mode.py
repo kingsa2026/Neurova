@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import contextvars
 import enum
+import os
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 
 class PermissionMode(str, enum.Enum):
@@ -152,3 +153,77 @@ def effectiveModeInContext() -> Optional[PermissionMode]:
 def contextForcesGuardedGate() -> bool:
     """当前上下文是否强制开语法级危险门（guarded 模式，设置关也开）。"""
     return effectiveModeInContext() == PermissionMode.GUARDED
+
+
+# ── D2 权限天花板：组织封顶 + 派活链单入口 + 旧审批档映射 ──
+
+#: 组织天花板注入口（值 = PermissionMode 的 value，如 "guarded"/"plan"）
+ORG_CEILING_ENV = "NEUROVA_PERMISSION_CEILING"
+
+
+def orgCeiling(env: Optional[Dict[str, str]] = None) -> Optional[PermissionMode]:
+    """读组织天花板：env 缺省 os.environ。未设/非法值 → None（不封顶）。
+
+    GUARDED/PLAN 这类限制型值作为天花板合法（把全员压严）。
+    "auto" 是预留档：按其既定语义（"按 BUILD 走"）落 BUILD 封顶——
+    不返回未实现的 AUTO 档，也不因写了 auto 就静默放弃封顶。
+    """
+    source = os.environ if env is None else env
+    mode = _coerceMode(source.get(ORG_CEILING_ENV))
+    if mode is None:
+        return None
+    if mode is PermissionMode.AUTO:
+        return PermissionMode.BUILD
+    return mode
+
+
+def applyOrgCeiling(mode: PermissionMode, ceiling: Optional[PermissionMode]) -> PermissionMode:
+    """按 _STRICTNESS 序封顶：mode 比 ceiling 宽松（strictness 更小）→ 返回 ceiling；
+    否则原样。ceiling None → 原样。只收紧、不放宽。
+
+    AUTO 预留档不作为封顶结果启用：ceiling 为 AUTO 时按其既定语义落 BUILD；
+    mode 为 AUTO 时按 BUILD 参与比较，比天花板严则按契约原样返回。
+    """
+    if ceiling is None:
+        return mode
+    if ceiling is PermissionMode.AUTO:
+        ceiling = PermissionMode.BUILD
+    modeRank = _STRICTNESS[PermissionMode.BUILD] if mode is PermissionMode.AUTO else _STRICTNESS[mode]
+    if modeRank < _STRICTNESS[ceiling]:
+        return ceiling
+    return mode
+
+
+def delegateMode(parent: PermissionMode, child: PermissionMode, *,
+                 ceiling: Optional[PermissionMode] = None) -> PermissionMode:
+    """派活链单入口：先 inheritPermissionMode(parent, child)，再 applyOrgCeiling(·, ceiling)。"""
+    return applyOrgCeiling(inheritPermissionMode(parent, child), ceiling)
+
+
+def approvalModeToPermission(mode: str) -> PermissionMode:
+    """旧审批模式映射进 PermissionMode（D-F 拍板：映射、不并存，不建第二套枚举）：
+
+    interactive（approval_chain.MODE_INTERACTIVE，要人审）→ GUARDED；
+    auto_approve（approval_chain.MODE_AUTO_APPROVE，自动放行例行操作）→ BUILD；
+    未知/空 → GUARDED（保守缺省）。永不返回未实现的 AUTO 档。
+    """
+    from neurova.agent.approval_chain import MODE_AUTO_APPROVE, MODE_INTERACTIVE
+
+    normalized = str(mode or "").strip().lower()
+    if normalized == MODE_AUTO_APPROVE:
+        return PermissionMode.BUILD
+    if normalized == MODE_INTERACTIVE:
+        return PermissionMode.GUARDED
+    return PermissionMode.GUARDED
+
+
+def neuacpPermissionToPermission(permission_mode: str) -> PermissionMode:
+    """外部成员 executor.permission_mode 映射（协议值 "chain"（审批链）| "auto"（仅 L0），
+    见 neuacp executor/catalog 与 external_agents_api）：
+
+    chain → GUARDED；auto → BUILD（AUTO 枚举未实现，不启用）；
+    未知/空 → GUARDED（保守）。永不返回未实现的 AUTO 档。
+    """
+    if str(permission_mode or "").strip().lower() == "auto":
+        return PermissionMode.BUILD
+    return PermissionMode.GUARDED

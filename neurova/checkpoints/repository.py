@@ -200,3 +200,16 @@ class CheckpointRepository:
     def last_commit_time(self, commit_sha: str) -> float:
         out = self._git("show", "-s", "--format=%ct", commit_sha)
         return float(out.decode("ascii").strip())
+
+    def updateRefRaw(self, ref: str, commit_sha: str) -> None:
+        """无 kind 白名单的 ref 更新（scope 检查点等扩展 ref 形态用）。
+
+        既有 update_ref 钉死 refs/{kind}/{session}/{ts} 四段规范；scope 检查点
+        ref 为 refs/neurova/checkpoints/<digest>/ordinal/<N> 六段，走本方法。
+        仍要求 refs/ 前缀且各段经消毒，防 ref 注入。
+        """
+        if not ref.startswith("refs/"):
+            raise ValueError(f"非法 ref（须以 refs/ 开头）: {ref!r}")
+        for part in ref.split("/")[1:]:
+            _sanitize_part(part)
+        self._git("update-ref", ref, commit_sha)

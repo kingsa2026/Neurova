@@ -57,15 +57,15 @@ test_*.txt
 token.txt
 _cfg.json
 
-# 临时脚本
-quick_*.py
-simple_*.py
-reset_*.py
-fix_*.py
-migrate_*.py
-cleanup_*.py
-run_*.py
-upload_*.py
+# 临时脚本（锚定仓库根：不锚定会误吞子目录正式模块，如 neurova/agent/run_settlement.py）
+/quick_*.py
+/simple_*.py
+/reset_*.py
+/fix_*.py
+/migrate_*.py
+/cleanup_*.py
+/run_*.py
+/upload_*.py
 
 # 测试输出
 pytest_output.txt

@@ -326,6 +326,33 @@ def _handoffTokenCap() -> int:
     return DEFAULT_TOKEN_CAP
 
 
+# ── A2 全局事件库（参照系 ac 借鉴）：H-4 账本双写镜像 ────────────────────
+
+_EVENT_STORE = None
+_EVENT_STORE_LOCK = threading.RLock()
+
+
+def _eventStore():
+    """全局事件库连接（惰性单例；库文件落 swarm_runs 目录下专用文件）。
+
+    双写纪律：JSONL 账本仍是 H-4 一手事实源，本库是全局序镜像（重放/快照
+    协议用）；镜像 fail-open，绝不阻断蜂群主流程。
+    """
+    global _EVENT_STORE
+    if _EVENT_STORE is not None:
+        return _EVENT_STORE
+    with _EVENT_STORE_LOCK:
+        if _EVENT_STORE is None:
+            from pathlib import Path
+
+            from neurova.agent.swarm_event_store import SwarmEventStore
+            from neurova.core.data_root import dataPath
+
+            store = SwarmEventStore(str(Path(dataPath("swarm_runs")) / "event_store.db"))
+            _EVENT_STORE = store
+    return _EVENT_STORE
+
+
 class SwarmManager:
     """蜂群管理器：派生、执行、事件广播、结果回流
 
@@ -385,6 +412,18 @@ class SwarmManager:
         # P1 移交清偿：run 终态后释放外部适配器的后台任务强引用集（防 GC 吞任务）。
         self._adapterCloseTasks: set = set()
         self._lock = threading.RLock()
+        # A5：自动结算开启时才挂定时 sweep（默认关——不拉起调度器，测试零污染）。
+        # 每小时一轮；管理面也可直接调 settleIdleRuns() 手动触发。
+        try:
+            from neurova.agent.run_settlement import readSettleSettings
+
+            if readSettleSettings()[0]:
+                from neurova.agent.scheduler import get_scheduler
+
+                get_scheduler().addSystemJob(
+                    self.settleIdleRuns, "swarm_run_settlement_sweep", 3600)
+        except Exception as initError:  # noqa: BLE001 - 注册失败不阻断编排
+            logger.debug("Swarm: 结算 job 注册失败: %s", initError)
 
     # ── 公共接口 ──────────────────────────────────────────────
 
@@ -1092,6 +1131,8 @@ class SwarmManager:
 
         F5：全部 run 事件统一携带 lineage 谱系（spawned/started/terminal/
         cancelled/tool_call/member_chunk/permission_decided… 自动带上）。
+        A2：同事件镜像进全局事件库（全局单调 seq，重放/快照协议用）——
+        JSONL 账本仍是一手事实源，镜像 fail-open 不阻断主流程。
         """
         try:
             from neurova.agent.swarm_event_log import appendRunEvent
@@ -1102,6 +1143,14 @@ class SwarmManager:
                 lineage=self._runLineage(run),
             )
             run.last_event_id = eventId
+            try:
+                _eventStore().append(
+                    str(run.subagent_id or ""), eventType,
+                    dict(payload or {}), event_id=str(eventId or ""),
+                )
+            except Exception as mirrorError:  # noqa: BLE001 - 镜像 fail-open
+                logger.debug("Swarm: 事件库镜像失败 (%s/%s): %s",
+                             run.subagent_id, eventType, mirrorError)
         except Exception as e:  # noqa: BLE001
             logger.debug("Swarm: 事件归档失败 (%s/%s): %s", run.subagent_id, eventType, e)
 
@@ -1113,6 +1162,64 @@ class SwarmManager:
 
         events = readRunEvents(sid) if sid else []
         return {"subagent_id": sid, "count": len(events), "events": events}
+
+    def settleIdleRuns(self, *, now_ts: Optional[float] = None) -> Dict[str, Any]:
+        """A5：闲置终态 run 自动收敛（定时入口=TaskScheduler 每小时；可手动触发）。
+
+        结算语义按本仓状态机裁剪：completed/failed 已是终态且无出边，**不新增
+        "settled" 状态词**——结算动作 = 把闲置超阈值的终态 run 从内存台账逐出
+        （事件/帧/归档账本在磁盘，逐出后仍可查）并留痕 `auto_settled` 事件。
+        护栏与阈值判定单源在 run_settlement.evaluateSettlement；开关
+        NEUROVA_SWARM_AUTO_SETTLE 默认关（D-C 拍板），阈值
+        NEUROVA_SWARM_SETTLE_IDLE_DAYS 默认 3 天。
+        """
+        from neurova.agent.run_settlement import (
+            SettlementCandidate,
+            readSettleSettings,
+            sweep,
+        )
+
+        enabled, idleDays = readSettleSettings()
+        if not enabled:
+            return {"enabled": False, "settled": [], "skipped": [], "failed": []}
+        now = float(now_ts) if now_ts is not None else time.time()
+        candidates: List[Any] = []
+        with self._lock:
+            runs = list(self._runs.values())
+        for run in runs:
+            if run.status not in SUBAGENT_FINISHED_STATUSES:
+                continue
+            finishedAt = float(getattr(run, "finished_at", 0) or 0)
+            candidates.append(SettlementCandidate(
+                subagent_id=str(run.subagent_id or ""),
+                status=str(run.status or ""),
+                last_activity_at=finishedAt,
+                guards={
+                    "active_run": False,   # 已终态
+                    "pending_approval": any(
+                        str((entry or {}).get("status") or "") == "pending"
+                        for entry in (getattr(run, "approvals", None) or [])
+                    ),
+                    "pinned": False,           # 本仓 run 无置顶概念
+                    "explicit_override": False,
+                    "queued_turn": False,      # 终态 run 无排队轮
+                    "snoozed": False,          # 本仓 run 无 snooze 概念
+                    "background_work": False,  # 终态即后台工作已收口
+                    "grace_period": bool(finishedAt) and (now - finishedAt) < 120.0,
+                },
+            ))
+
+        def _settle(subagentId: str) -> None:
+            with self._lock:
+                run = self._runs.pop(subagentId, None)
+            if run is not None:
+                self._logRunEvent(run, "auto_settled", {
+                    "idle_days": idleDays,
+                    "status": run.status,
+                    "finished_at": run.finished_at,
+                })
+
+        return sweep(candidates, now_ts=now, idle_days=idleDays, settle_fn=_settle)
 
     def runFrames(self, subagent_id: str, afterSeq: int = 0,
                   limit: int = 1000) -> Dict[str, Any]:

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from typing import Any, Dict, List, Optional
@@ -21,6 +22,32 @@ logger = get_logger(__name__)
 
 # 会话 JSON 在 tree 中的固定文件名
 _SESSION_ENTRY = "_session.json"
+
+
+# ── scope 化检查点（任务卡 B3，对齐 T3 Code 编排检查点）──
+
+# scope 检查点 ref 前缀：refs/neurova/checkpoints/<scope 摘要>/ordinal/<N>
+SCOPE_REF_PREFIX = "refs/neurova/checkpoints"
+# 每 scope 默认保留的 ordinal 数（pruneScope 缺省）
+DEFAULT_SCOPE_KEEP = 20
+
+
+class CheckpointNotFoundError(Exception):
+    """目标检查点 ref 不存在（restore/rollback 显式失败，绝不静默回退）。"""
+
+
+def _scopeDigest(scope_id: str) -> str:
+    """scope_id → 32 位十六进制摘要（sha256 前 32 hex；ref 段安全字符集）。"""
+    return hashlib.sha256(scope_id.encode("utf-8")).hexdigest()[:32]
+
+
+def scopeRefFor(scope_id: str, ordinal: int) -> str:
+    """scope+ordinal 的确定性 ref 名。
+
+    同 scope 同 ordinal 恒得同一 ref（重捕获即覆盖同一 ref）；
+    不同 scope 摘要不同，ref 空间天然隔离。
+    """
+    return f"{SCOPE_REF_PREFIX}/{_scopeDigest(scope_id)}/ordinal/{int(ordinal)}"
 
 
 class CheckpointService:
@@ -282,3 +309,134 @@ class CheckpointService:
             logger.info("检查点 GC 清理 %d 个快照（keep_count=%d keep_days=%d）",
                         removed, keep_count, keep_days)
         return removed
+
+    # ── scope 化检查点（B3）──
+
+    @staticmethod
+    def _scopeEncodePayload(payload: Dict[str, bytes]) -> Dict[str, bytes]:
+        """{文件名: bytes} → flat tree 键值。
+
+        tree 键不含 '/'（git flat tree 限制），原文件名（可含路径分隔符）
+        记入 _index.json，恢复时按索引还原——与 snapshot() 的 f{i} 映射同构。
+        """
+        index = {"files": []}
+        tree_files: Dict[str, bytes] = {}
+        for i, (path, content) in enumerate(sorted(payload.items())):
+            key = f"f{i}"
+            index["files"].append({"key": key, "path": path})
+            tree_files[key] = (
+                content if isinstance(content, bytes) else str(content).encode("utf-8")
+            )
+        tree_files["_index.json"] = json.dumps(index, ensure_ascii=False).encode("utf-8")
+        return tree_files
+
+    def _scopeDecodePayload(self, commit_sha: str) -> Dict[str, bytes]:
+        """commit → {文件名: bytes}（bytes 原样返回，不做 str 强转）。"""
+        tree_files = self.repo.list_tree(commit_sha)
+        index_blob = tree_files.get("_index.json")
+        if index_blob is None:
+            # 无索引（直存形态）：tree 键即文件名
+            return {path: self.repo.cat_blob(b) for path, b in tree_files.items()}
+        index = json.loads(self.repo.cat_blob(index_blob).decode("utf-8"))
+        return {
+            item["path"]: self.repo.cat_blob(tree_files[item["key"]])
+            for item in index.get("files", [])
+            if item["key"] in tree_files
+        }
+
+    def captureScope(self, scope_id: str, ordinal: int, payload: Dict[str, bytes],
+                     message: str = "") -> str:
+        """按 scope+ordinal 写检查点，返回 ref。payload 为 {文件名: bytes}。
+
+        同 scope 同 ordinal 重捕获：更新同一 ref 指向新 commit
+        （旧 commit 成垃圾由 gc 管）。
+        """
+        ref = scopeRefFor(scope_id, ordinal)
+        tree = self.repo.write_tree_from_files(self._scopeEncodePayload(payload))
+        parent = self.repo.rev_parse(ref)
+        commit = self.repo.commit_tree(
+            tree, message or f"scope: {scope_id} ordinal={ordinal}", parent=parent
+        )
+        self.repo.updateRefRaw(ref, commit)
+        logger.info("scope 检查点 %s (ordinal=%s)", ref, ordinal)
+        return ref
+
+    def restoreScope(self, scope_id: str, ordinal: int) -> Dict[str, bytes]:
+        """按 ref 恢复，返回 {文件名: bytes}。
+
+        ref 不存在 → CheckpointNotFoundError（绝不静默回退 HEAD/空）。
+        """
+        ref = scopeRefFor(scope_id, ordinal)
+        sha = self.repo.rev_parse(ref)
+        if sha is None:
+            raise CheckpointNotFoundError(f"scope 检查点不存在: {ref}")
+        return self._scopeDecodePayload(sha)
+
+    def listScopeOrdinals(self, scope_id: str) -> List[int]:
+        """该 scope 现存 ordinal 升序列表（从 ref 名解析）。"""
+        rows = self.repo.list_refs(f"neurova/checkpoints/{_scopeDigest(scope_id)}")
+        ordinals = set()
+        for row in rows:
+            if row.get("session_key") != "ordinal":
+                continue
+            try:
+                ordinals.add(int(row["ts"]))
+            except (TypeError, ValueError):
+                continue
+        return sorted(ordinals)
+
+    def pruneScope(self, scope_id: str, keep: int = DEFAULT_SCOPE_KEEP) -> int:
+        """每 scope 只保留最近 keep 个 ordinal（删除更老 ref），返回删除数。"""
+        keep = int(keep)
+        ordinals = self.listScopeOrdinals(scope_id)
+        stale = list(ordinals) if keep <= 0 else ordinals[: max(0, len(ordinals) - keep)]
+        for o in stale:
+            self.repo.delete_ref(scopeRefFor(scope_id, o))
+        if stale:
+            logger.info("scope 检查点修剪 %s：删除 %d 个旧 ordinal", scope_id, len(stale))
+        return len(stale)
+
+    def rollbackScope(self, scope_id: str, target_ordinal: int, apply_fn=None, *,
+                      isolation_check=None) -> Dict[str, Any]:
+        """回滚到 target_ordinal。
+
+        - isolation_check: Callable[[], Optional[str]]——返回非空字符串=存在
+          共享冲突（如其他活跃 run 共享同一工作区）→ 只做会话级回退：不恢复
+          文件、不删 ref，返回 {"files_restored": False, "conversation_only":
+          True, "reason": <该字符串>}，会话级回退动作由调用方执行。
+        - 无冲突：restoreScope 恢复文件；apply_fn 非 None 时调 apply_fn(payload)
+          （异常上抛，由调用方决定回滚事务）；然后删除 target 之后
+          （>target_ordinal）的 stale ordinal refs。返回 {"files_restored": True,
+          "conversation_only": False, "restored_ordinal": N, "pruned": 删除数}。
+        - target ordinal 不存在 → CheckpointNotFoundError。
+        """
+        ref = scopeRefFor(scope_id, target_ordinal)
+        if self.repo.rev_parse(ref) is None:
+            raise CheckpointNotFoundError(f"scope 检查点不存在: {ref}")
+        if isolation_check is not None:
+            reason = isolation_check()
+            if reason:
+                logger.warning(
+                    "scope 回滚受隔离约束，仅会话级回退（scope=%s target=%s）: %s",
+                    scope_id, target_ordinal, reason,
+                )
+                return {
+                    "files_restored": False,
+                    "conversation_only": True,
+                    "reason": reason,
+                }
+        payload = self.restoreScope(scope_id, target_ordinal)
+        if apply_fn is not None:
+            apply_fn(payload)
+        stale = [o for o in self.listScopeOrdinals(scope_id) if o > target_ordinal]
+        for o in stale:
+            self.repo.delete_ref(scopeRefFor(scope_id, o))
+        if stale:
+            logger.info("scope 回滚清理 %d 个 stale ordinal（scope=%s target=%s）",
+                        len(stale), scope_id, target_ordinal)
+        return {
+            "files_restored": True,
+            "conversation_only": False,
+            "restored_ordinal": int(target_ordinal),
+            "pruned": len(stale),
+        }

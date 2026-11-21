@@ -550,6 +550,22 @@ def _get_approval_manager():
     return get_approval_manager()
 
 
+def delegatedModeScope(agent):
+    """D2 权限天花板：派活作用域 = 生效模式经组织天花板封顶后再入链。
+
+    天花板读 NEUROVA_PERMISSION_CEILING（未设不封顶）；子任务/团队派活
+    的权限只收窄不放大（组织封顶叠加在既有继承语义之上）。
+    """
+    from neurova.security.permission_mode import (
+        applyOrgCeiling,
+        inheritedModeScope,
+        orgCeiling,
+        resolveEffectivePermissionMode,
+    )
+
+    return inheritedModeScope(applyOrgCeiling(resolveEffectivePermissionMode(agent), orgCeiling()))
+
+
 class ToolExecutor:
     """统一工具执行器
 
@@ -3110,14 +3126,10 @@ class ToolExecutor:
         session_id = getattr(self._agent, "current_session_id", None)
         # P1（蜂群对照）：子代理类型——general（全工具面）/ explore（只读白名单）
         subagentType = str(params.get("subagent_type") or "general").strip().lower()
-        # P1-4：子代理权限只收窄不升级——把父会话生效模式作为继承上下文
+        # P1：子代理权限只收窄不升级——把父会话生效模式作为继承上下文
         # 传给派生任务（随 ContextVar 传播到子代理的每次治理预检）。
-        from neurova.security.permission_mode import (
-            inheritedModeScope,
-            resolveEffectivePermissionMode,
-        )
-
-        with inheritedModeScope(resolveEffectivePermissionMode(self._agent)):
+        # D2：生效模式先经组织天花板（NEUROVA_PERMISSION_CEILING）封顶。
+        with delegatedModeScope(self._agent):
             result = await swarm.spawn(
                 task=str(task),
                 agent_id=params.get("agent_id") or None,
@@ -3194,7 +3206,7 @@ class ToolExecutor:
             return {"error": "缺少 task 参数"}
         swarm = get_swarm_manager()
         session_id = getattr(self._agent, "current_session_id", None)
-        with inheritedModeScope(resolveEffectivePermissionMode(self._agent)):
+        with delegatedModeScope(self._agent):
             result = await swarm.dispatchTeam(
                 teamId=teamId,
                 task=task,
@@ -3636,7 +3648,7 @@ class ToolExecutor:
 
         swarm = get_swarm_manager()
         session_id = getattr(self._agent, "current_session_id", None)
-        with inheritedModeScope(resolveEffectivePermissionMode(self._agent)):
+        with delegatedModeScope(self._agent):
             result = await swarm.updateSubagent(
                 subagentId,
                 message,
