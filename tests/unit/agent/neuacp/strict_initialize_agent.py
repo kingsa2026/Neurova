@@ -36,7 +36,7 @@ def main():
                     "code": -32602, "message": "Invalid params: protocolVersion must be integer"}})
                 continue
             send(out, {"jsonrpc": "2.0", "id": msg_id, "result": {
-                "protocolVersion": pv, "serverCapabilities": {}}})
+                "protocolVersion": pv, "agentCapabilities": {}}})
         elif msg_id is not None:
             send(out, {"jsonrpc": "2.0", "id": msg_id, "result": {}})
 

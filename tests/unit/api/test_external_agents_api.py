@@ -111,6 +111,9 @@ def test_testAcpHandshakeWithFakeAgent(client):
     assert data["ok"] is True, data
     assert data["protocolVersion"] == "1"
     assert isinstance(data.get("serverCapabilities"), dict)
+    # 真机 CLIs 的握手回包字段是 agentCapabilities（G2 录制实证）——
+    # /test 必须把规范字段的能力透传出来，而非静默给空 dict。
+    assert "tools" in data["serverCapabilities"], data
 
 
 def test_testAcpNonAgentProcessFailsHonestly(client):

@@ -95,7 +95,8 @@ def test_startHandshakeSucceedsAndReturnsCapabilities():
     try:
         result = client.start()
         assert result["protocolVersion"] == "1"
-        assert "tools" in result["serverCapabilities"]
+        # ACP 规范字段是 agentCapabilities（真机 CLIs 回包即此；G2 录制实证）
+        assert "tools" in result["agentCapabilities"]
         assert client.is_alive
     finally:
         client.terminate()

@@ -276,10 +276,13 @@ async def _probeAcp(command: List[str], cwd: str, timeout_s: float,
     finally:
         await asyncio.to_thread(client.terminate)
     result = result or {}
+    # ACP 规范字段是 agentCapabilities（真机 CLIs 实测回包即此）；serverCapabilities
+    # 为本仓早期假 agent/旧形状的兼容回退——真机上只读旧键会静默拿空能力。
+    caps = result.get("agentCapabilities") or result.get("serverCapabilities") or {}
     return {
         "ok": True,
         "protocolVersion": str(result.get("protocolVersion", "")),
-        "serverCapabilities": dict(result.get("serverCapabilities") or {}),
+        "serverCapabilities": dict(caps),
     }
 
 

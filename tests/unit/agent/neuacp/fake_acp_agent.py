@@ -42,11 +42,11 @@ def main():
 
         if method == "initialize":
             if mode == "bad_version":
-                result = {"protocolVersion": "9", "serverCapabilities": {}}
+                result = {"protocolVersion": "9", "agentCapabilities": {}}
             elif mode == "no_version":
-                result = {"serverCapabilities": {}}
+                result = {"agentCapabilities": {}}
             else:
-                result = {"protocolVersion": "1", "serverCapabilities": {"tools": {}}}
+                result = {"protocolVersion": "1", "agentCapabilities": {"tools": {}}}
             send(out, {"jsonrpc": "2.0", "id": msg_id, "result": result})
             if mode == "crash_after_init":
                 sys.exit(3)
