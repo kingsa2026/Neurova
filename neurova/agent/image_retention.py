@@ -14,6 +14,8 @@ Neurova 的图片 base64 只挂当轮请求（请求级 vision parts，2026-09-0
 
 from typing import Any, Dict, List, Tuple
 
+from neurova.llm.model_limits import MULTIMODAL_IMAGE_RETAIN_PER_TURN
+
 IMAGE_OMITTED_PLACEHOLDER = "[图片已省略——早于最近保留窗口，图片随当轮请求附上过]"
 
 
@@ -32,7 +34,8 @@ def count_images(messages: List[Dict[str, Any]]) -> int:
 
 
 def apply_image_retention(
-    messages: List[Dict[str, Any]], keep_last: int = 4
+    messages: List[Dict[str, Any]],
+    keep_last: int = MULTIMODAL_IMAGE_RETAIN_PER_TURN,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     """只保留最近 keep_last 条含图消息的图片部件，更早的置空占位。
 

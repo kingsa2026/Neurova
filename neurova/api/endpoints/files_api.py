@@ -17,7 +17,6 @@
 
 from neurova.core.logger import get_logger
 import mimetypes
-import os
 import re
 import threading
 import time
@@ -30,6 +29,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from neurova.api.auth import get_current_user
+from neurova.llm.model_limits import MULTIMODAL_ATTACHMENT_MAX_UPLOAD_BYTES
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -50,7 +50,9 @@ STORAGE_ROOT = _defaultStorageRoot()
 
 # BUG AUDIT S-15: 上传原先 await file.read() 全量读内存且无大小/类型限制，
 # 恶意/超大上传可打满内存与磁盘。改为分块流式落盘 + 大小上限 + 危险扩展名黑名单。
-_MAX_UPLOAD_BYTES = int(os.environ.get("NEUROVA_MAX_UPLOAD_MB", "100")) * 1024 * 1024
+# 上限数值的唯一出处是 model_limits 多模态输入预算段（单源）——环境变量
+# NEUROVA_MAX_UPLOAD_MB 的覆盖语义随表达式原样上收，此处只留绑定别名。
+_MAX_UPLOAD_BYTES = MULTIMODAL_ATTACHMENT_MAX_UPLOAD_BYTES
 _UPLOAD_CHUNK = 1024 * 1024  # 1 MiB
 _DANGEROUS_EXTENSIONS = {
     ".exe", ".bat", ".cmd", ".com", ".scr", ".msi", ".ps1", ".vbs", ".vbe",

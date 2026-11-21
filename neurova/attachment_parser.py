@@ -18,6 +18,11 @@ import io
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+from neurova.llm.model_limits import (
+    MULTIMODAL_IMAGE_MAX_DIMENSION,
+    MULTIMODAL_IMAGE_MAX_PAYLOAD_BYTES,
+)
+
 MAX_EXTRACT_CHARS = 200_000  # 20 万字符上限（真正的上下文闸门）
 
 #: 文本抽取通道结构上打不开的原始二进制容器（不是"解析失败"，是"不该走这条通道"）。
@@ -366,8 +371,10 @@ def _extract_html(data: bytes) -> str:
 # 直到 base64 载荷进限；解码失败原样返回（与模块整体降级语义一致）。
 # ---------------------------------------------------------------------------
 
-LLM_IMAGE_MAX_PAYLOAD_BYTES = 3 * 1024 * 1024   # base64 前的原始字节闸门（3MB）
-LLM_IMAGE_MAX_DIMENSION = 2048                  # 降采样长边上限
+# 闸门数值的唯一出处是 model_limits 多模态输入预算段（单源）；下面两个历史名
+# 只是绑定到单源的兼容别名（既有测试仍从本模块导入），不是第二份定义。
+LLM_IMAGE_MAX_PAYLOAD_BYTES = MULTIMODAL_IMAGE_MAX_PAYLOAD_BYTES
+LLM_IMAGE_MAX_DIMENSION = MULTIMODAL_IMAGE_MAX_DIMENSION
 # 闸门靠阶梯兑现，不靠一趟编码：实测 2048×2048 高熵图 JPEG q85 出 3,169,770 B、
 # 1000×800 RGBA 噪声 PNG 出 3,205,312 B，两者**都超闸门**——尺寸帽对已经等于帽的图
 # 不做任何事，而 JPEG/PNG 在噪声内容上压不动。超限的图照发出去就是 413。
@@ -409,7 +416,7 @@ def normalize_image_for_llm(data: bytes, mime_type: str = "image/png") -> Tuple[
     未超限或解码失败时原样返回。触底后交最小的一版（仍是努力过的最小字节），
     而不是超限的原件——发出去至少有机会不被 413 打死整轮。
     """
-    if len(data) <= LLM_IMAGE_MAX_PAYLOAD_BYTES:
+    if len(data) <= MULTIMODAL_IMAGE_MAX_PAYLOAD_BYTES:
         return data, mime_type
     try:
         from PIL import Image
@@ -420,14 +427,14 @@ def normalize_image_for_llm(data: bytes, mime_type: str = "image/png") -> Tuple[
             img.mode == "P" and "transparency" in img.info
         )
         best: Tuple[bytes, str] = (data, mime_type)
-        longEdge = min(max(img.size), LLM_IMAGE_MAX_DIMENSION)
+        longEdge = min(max(img.size), MULTIMODAL_IMAGE_MAX_DIMENSION)
         for _round in range(_PAYLOAD_MAX_ROUNDS):
             encoded = _encodeWithinPayload(_resizeToLongEdge(img, longEdge), hasAlpha)
             if encoded is None:
                 break
             if len(encoded[0]) < len(best[0]):
                 best = encoded
-            if len(best[0]) <= LLM_IMAGE_MAX_PAYLOAD_BYTES:
+            if len(best[0]) <= MULTIMODAL_IMAGE_MAX_PAYLOAD_BYTES:
                 return best
             if longEdge <= _PAYLOAD_MIN_LONG_EDGE:
                 break

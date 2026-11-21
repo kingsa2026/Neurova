@@ -8,6 +8,8 @@
 `model_metadata[model].max_output_tokens`（模型管理一次性探测写入），不在此表重复。
 """
 
+import os
+
 from neurova.core.logger import get_logger
 
 # 模型 ID → max_tokens (输出 token 上限)
@@ -64,6 +66,30 @@ MIN_MAX_TOKENS = 256
 
 # 全局最大值保护（任何模型不高于此值）
 MAX_MAX_TOKENS = 200000
+
+# ── 多模态输入预算（单源）─────────────────────────────────────────────
+# 多模态输入侧尺寸/数量上限的唯一出处（多模态追平批二卡 M5）。三个消费点
+# 一律从这里取值，禁止再写第二份字面量：
+# - 图片归一化闸门：neurova/attachment_parser.py::normalize_image_for_llm
+#   （该模块保留兼容名 LLM_IMAGE_MAX_PAYLOAD_BYTES / LLM_IMAGE_MAX_DIMENSION）
+# - 历史图片保留窗口：neurova/agent/image_retention.py::apply_image_retention
+# - 附件上传限幅：neurova/api/endpoints/files_api.py（_MAX_UPLOAD_BYTES）
+# 下列数值是 2026-09-09 413 事故防线与 BUG AUDIT S-15 上传限幅的**原样平移**：
+# 本段只收拢口径，不改变任何现有限幅行为；调值必须同步评估三条链路。
+
+#: 单图进入 LLM 请求前的原始字节闸门（base64 膨胀前 3MB；超限走降采样+重编码阶梯）
+MULTIMODAL_IMAGE_MAX_PAYLOAD_BYTES = 3 * 1024 * 1024
+
+#: 归一化降采样的长边上限（像素）
+MULTIMODAL_IMAGE_MAX_DIMENSION = 2048
+
+#: 每轮请求保留含图消息的窗口（keep_last；更早的图片部件置占位文本）
+MULTIMODAL_IMAGE_RETAIN_PER_TURN = 4
+
+#: 附件上传字节上限（默认 100MB；环境变量 NEUROVA_MAX_UPLOAD_MB 可调，语义与收拢前一致）
+MULTIMODAL_ATTACHMENT_MAX_UPLOAD_BYTES = (
+    int(os.environ.get("NEUROVA_MAX_UPLOAD_MB", "100")) * 1024 * 1024
+)
 
 logger = get_logger(__name__)
 
