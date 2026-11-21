@@ -203,3 +203,53 @@ class TestAPIKey:
             expires_at=future,
         )
         assert key.expires_at > now
+
+
+class TestApiKeyTenantSegment:
+    """修复计划 M3（拍板乙）：APIKey 增 tenant_id 租户段。
+
+    签发时取签发者租户；验证后身份字典携带该租户（REST/MCP 两面同源）；
+    存量无租户段记录回落 default。"""
+
+    def _manager(self, tmp_path):
+        from neurova.api.api_key_manager import APIKeyManager
+
+        return APIKeyManager(storage_path=tmp_path / "keys_tenant.json")
+
+    def test_dataclass_defaults_to_default_tenant(self):
+        key = APIKey(key_id="k", agent_id="a", user_id="u", key_hash="h",
+                     name="n", created_at=0.0)
+        assert key.tenant_id == "default"
+
+    def test_generate_key_carries_issuer_tenant(self, tmp_path):
+        mgr = self._manager(tmp_path)
+        raw, key = mgr.generate_key(agent_id="agent_1", user_id="u1",
+                                    name="部门钥", permissions=["read"],
+                                    tenant_id="dept_x")
+        assert key.tenant_id == "dept_x"
+        validated = mgr.validate_key(raw)
+        assert validated is not None and validated.tenant_id == "dept_x"
+
+    def test_generate_key_defaults_to_default_tenant(self, tmp_path):
+        mgr = self._manager(tmp_path)
+        _, key = mgr.generate_key(agent_id="agent_1", user_id="u1",
+                                  name="默认钥", permissions=["read"])
+        assert key.tenant_id == "default"
+
+    def test_to_dict_from_dict_roundtrip_preserves_tenant(self, tmp_path):
+        mgr = self._manager(tmp_path)
+        _, key = mgr.generate_key(agent_id="a", user_id="u", name="n",
+                                  permissions=["read"], tenant_id="dept_y")
+        data = key.to_dict()
+        assert data["tenant_id"] == "dept_y"
+        restored = APIKey.from_dict(data)
+        assert restored.tenant_id == "dept_y"
+
+    def test_legacy_record_without_tenant_loads_as_default(self):
+        key = APIKey.from_dict({
+            "key_id": "k9", "agent_id": "a", "user_id": "u", "key_hash": "h",
+            "key_prefix": "pref", "name": "存量钥", "created_at": 0.0,
+            "permissions": ["read"], "rate_limit": 1000, "is_active": True,
+            "metadata": {},
+        })
+        assert key.tenant_id == "default"

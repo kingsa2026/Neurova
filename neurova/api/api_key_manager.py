@@ -47,6 +47,9 @@ class APIKey:
     is_active: bool = True
     permissions: List[str] = field(default_factory=lambda: ["read", "write"])
     rate_limit: int = 1000
+    # M3（修复计划 2026-11-21，拍板乙）：密钥租户段——签发时取签发者租户，
+    # 验证后的身份字典据此携带（REST/MCP 两面同源）；存量无段记录回落 default。
+    tenant_id: str = "default"
     metadata: Dict[str, Any] = field(default_factory=dict)
     key_prefix: str = ""  # 前8位，用于显示
     # 以下五项自 openplatform_keys 的私有存储并入（教义第 7 条"取长补短"）：
@@ -109,6 +112,7 @@ class APIKey:
             "expires_at": self._to_iso(self.expires_at),
             "last_used_at": self._to_iso(self.last_used_at),
             "is_active": self.is_active,
+            "tenant_id": self.tenant_id,
             "metadata": self.metadata,
             "description": self.description,
             "usage_count": self.usage_count,
@@ -123,7 +127,7 @@ class APIKey:
         known = {
             "key_id", "agent_id", "user_id", "key_hash", "key_prefix", "name",
             "permissions", "rate_limit", "created_at", "expires_at",
-            "last_used_at", "is_active", "metadata",
+            "last_used_at", "is_active", "tenant_id", "metadata",
             "description", "usage_count", "creation_request_id", "intent_hash",
             "revoked_at",
         }
@@ -131,6 +135,7 @@ class APIKey:
         filtered["created_at"] = cls._parse_time(filtered.get("created_at")) or time.time()
         filtered["expires_at"] = cls._parse_time(filtered.get("expires_at"))
         filtered["last_used_at"] = cls._parse_time(filtered.get("last_used_at"))
+        filtered["tenant_id"] = str(filtered.get("tenant_id") or "default")
         if "revoked_at" in filtered:
             filtered["revoked_at"] = cls._parse_time(filtered["revoked_at"])
         return cls(**filtered)
@@ -326,6 +331,7 @@ class APIKeyManager:
         description: str = "",
         creation_request_id: Optional[str] = None,
         intent_hash: str = "",
+        tenant_id: str = "default",
     ) -> Tuple[str, APIKey]:
         """
         生成API密钥
@@ -341,6 +347,7 @@ class APIKeyManager:
             creation_request_id: 客户端幂等键（重放由端点判 409/回放，见
                 `find_by_creation_request_id`）
             intent_hash: 创建意图指纹，用于识破"同幂等键换意图"
+            tenant_id: 密钥租户段（签发者租户；M3——验证后身份据此携带）
 
         Returns:
             (原始密钥, APIKey对象)
@@ -374,6 +381,7 @@ class APIKeyManager:
                 permissions=permissions,
                 created_at=time.time(),
                 expires_at=expires_at,
+                tenant_id=str(tenant_id or "default"),
                 metadata=metadata,
                 description=description,
                 creation_request_id=creation_request_id,

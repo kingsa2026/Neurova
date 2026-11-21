@@ -408,3 +408,23 @@ class TestIdentityFailClosed:
 
         user = {"user_id": "u1", "role": "user", "tenant_id": "t1"}
         assert _currentUserFromContext(self._ctx(withUser=user)) is user
+
+
+class TestApiKeyTenantIdentity:
+    """M3：MCP 面 API-key 身份的租户段取自密钥本体（不再硬编码 default）。"""
+
+    def test_api_key_identity_carries_key_tenant(self, monkeypatch):
+        from types import SimpleNamespace as NS
+        from neurova.api import api_key_manager as akm
+        from neurova.mcp_ontology_server import _resolveIdentityFromHeaders
+
+        key = NS(user_id="u9", name="部门钥", agent_id="agent_9", key_id="k9",
+                 tenant_id="dept_z")
+        monkeypatch.setattr(akm, "get_api_key_manager",
+                            lambda: NS(validate_key=lambda raw: key if raw == "RAW9" else None))
+
+        from neurova.api.auth import _API_KEY_HEADER
+
+        ident = _resolveIdentityFromHeaders({_API_KEY_HEADER.lower(): "RAW9"})
+        assert ident is not None
+        assert ident["tenant_id"] == "dept_z", "API-key 身份租户必须取自密钥本体"

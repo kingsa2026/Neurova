@@ -75,7 +75,9 @@ def _resolveIdentityFromHeaders(headers: Dict[str, str]) -> Optional[Dict[str, A
                 "user_id": apiKey.user_id, "username": f"apikey:{apiKey.name}",
                 "role": "user", "neuser_id": apiKey.user_id,
                 "agent_id": apiKey.agent_id, "key_id": apiKey.key_id,
-                "tenant_id": "default", "auth_source": "api_key",
+                # M3：租户段取自密钥本体（签发者租户），不再硬编码 default
+                "tenant_id": str(getattr(apiKey, "tenant_id", "") or "default"),
+                "auth_source": "api_key",
             }
     bearer = (headers.get("authorization") or "").strip()
     if bearer.lower().startswith("bearer "):

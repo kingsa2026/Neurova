@@ -213,6 +213,7 @@ async def create_api_key(
         description=body.description,
         creation_request_id=body.creation_request_id,
         intent_hash=fingerprint,
+        tenant_id=str(user.get("tenant_id") or "default"),
     )
     return {"code": 0, "message": "Key created", "data": _toFace(apiKey, plaintext=plaintext)}
 

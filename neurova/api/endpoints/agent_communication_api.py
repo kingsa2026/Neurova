@@ -201,6 +201,7 @@ async def generate_api_key(
         name=body.name,
         permissions=list(body.permissions),
         expires_in_days=body.expires_in_days,
+        tenant_id=str(auth.get("tenant_id") or "default"),
     )
 
     return GenerateAPIKeyResponse(
