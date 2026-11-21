@@ -1233,6 +1233,26 @@ async def _on_startup(app_state: AppState) -> None:
         except Exception as e:
             logger.warning("Audio engine init error: %s", e)
 
+    # ASR 引擎启动即初始化（修复装配缺口：此前只构造不 initialize，
+    # is_initialized 恒 False → VoiceEngine[ASR] 永不装配，渠道语音
+    # 预检/语音纪要/本轮转写在真实部署中静默不可用——多模态追平批一
+    # 线3 live-verify 发现）。失败诚实降级：初始化失败按既有门控跳过
+    # VoiceEngine[ASR]，端点侧如实报不可用。
+    if app_state.asr_manager:
+        try:
+            initialized = await app_state.asr_manager.initialize()
+            if initialized:
+                logger.info(
+                    "ASR Manager initialized (engine=%s)",
+                    app_state.asr_manager.stats.get("engine"),
+                )
+            else:
+                logger.warning(
+                    "ASR Manager initialize 返回 False（无可用引擎），ASR 能力诚实降级"
+                )
+        except Exception as e:
+            logger.warning("ASR Manager initialize failed: %s", e)
+
     # P2-5: 创建 VoiceEngine 统一接口实例，替代旧的 TTSManager/ASRManager 直接调用
     try:
         from neurova.voice_engine import VoiceEngine, VoiceEngineType
