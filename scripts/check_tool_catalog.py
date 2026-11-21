@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """工具目录快照 verify-diff 门（实施计划项 3，第一步）。
 
-纪律同项 5：门不信任「记得改了」——它从 builtin_tools 声明位**重新推导**
-工具目录（`neurova.tools.catalog.build_snapshot`），与
-`contracts/tool_catalog.json` 逐字节比对；不一致即红，并点名差异路径。
+纪律同项 5：门不信任「记得改了」——它经 **wire 契约单源层**
+（``neurova.contracts.wire.toolCatalogSnapshot``，其投影事实源仍是
+builtin_tools 声明位）重新取期望形状，与 `contracts/tool_catalog.json`
+逐字节比对；不一致即红，并点名差异路径。
 新增/下线工具、改描述/参数/权限投影而不同步快照，此门必红。
 
 用法：
@@ -24,7 +25,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from neurova.tools.catalog import build_snapshot, dump_snapshot  # noqa: E402
+from neurova.contracts.wire import toolCatalogSnapshot  # noqa: E402  契约形状单源（派生自 builtin_tools 声明位）
+from neurova.tools.catalog import dump_snapshot  # noqa: E402  快照规范序列化器（投影层）
 from scripts.check_openapi_snapshot import diffPaths  # noqa: E402  复用项 5 的 diff 判据（单一实现）
 
 DEFAULT_SNAPSHOT_PATH = PROJECT_ROOT / "contracts" / "tool_catalog.json"
@@ -43,7 +45,7 @@ def main(argv=None) -> int:
     snapshotPath = Path(args.snapshot)
 
     try:
-        current = build_snapshot()
+        current = toolCatalogSnapshot()
     except Exception as exc:  # noqa: BLE001 - 推导失败必须红，不许静默
         print(f"[check_tool_catalog] 工具目录推导失败：{type(exc).__name__}: {exc}")
         return 1

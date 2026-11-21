@@ -7,6 +7,11 @@
 3. 蜂群三工具 schema 的 required/既有参数不缩水（新增只许可选增量，
    如批一的 command_id/replayed——新增字段对旧调用方透明）。
 配套登记表：docs/09-dev-progress/contract-change-log.md（破坏性变更须先登记迁移路径）。
+
+期望形状来源（E2 契约单源层）：历史冻结读数（HISTORICAL_*，只增不减的基线）
+仍在本文件钉住；"当前全量形状"的期望一律从 neurova.contracts.wire 派生层取
+（run 投影键集 / 事件类型词值 / continue_subagent mode 枚举 / 工具目录名册），
+不另手抄第二份当前形状。
 """
 import pytest
 
@@ -15,6 +20,7 @@ from neurova.builtin_tools import (
     get_builtin_tool_params,
     get_registered_tool_names,
 )
+from neurova.contracts import wire
 
 # 2026-11-21 冻结读数：SubAgentRun.to_dict 历史键集（批一前既有全集）。
 # 只许增（新增可选字段），不许删/改名——消费方（前端 run 卡、台账、
@@ -58,6 +64,10 @@ class TestRunDictBackwardCompat:
         keys = set(run.to_dict().keys())
         missing = HISTORICAL_RUN_KEYS - keys
         assert missing == set(), f"to_dict 丢失历史键：{sorted(missing)}——wire 契约缩水"
+        # E2 单源：当前全量键集必须与派生层读数全等（键集变更先改事实源再改这里）
+        assert keys == set(wire.runProjectionKeys()), (
+            "to_dict 键集与 neurova.contracts.wire.runProjectionKeys() 派生读数不一致"
+        )
 
     def test_run_dict_accepts_legacy_shape(self):
         """历史调用形态（只传早期字段）仍可构造且 to_dict 可用。"""
@@ -84,6 +94,10 @@ class TestRunEventsShape:
         assert missing == set(), f"事件 record 丢失历史键：{sorted(missing)}"
         assert record["event_id"] == event_id
         assert isinstance(record["seq"], int) and record["seq"] >= 1
+        # E2 单源：写入词值必须在派生层的事件类型全集里（词值全集从写入调用点派生）
+        assert record["type"] in wire.eventTypes(), (
+            f"事件类型 {record['type']!r} 不在 eventTypes() 派生全集——调用点漏登记"
+        )
 
     def test_run_events_unknown_id_returns_empty(self, tmp_path, monkeypatch):
         monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
@@ -97,6 +111,18 @@ class TestSwarmToolSchemas:
         names = set(get_registered_tool_names())
         missing = HISTORICAL_TOOL_NAMES - names
         assert missing == set(), f"工具名册丢失历史工具：{sorted(missing)}"
+        # E2 单源：注册名册与派生工具目录条目同名册（目录形状从同一事实源派生）
+        catalog_names = {entry["name"] for entry in wire.toolCatalogEntries()}
+        assert catalog_names == names, "注册名册与 toolCatalogEntries() 派生名册不一致"
+
+    def test_continue_subagent_mode_enum_matches_wire_contract(self):
+        """continue_subagent 的 mode 枚举期望从派生层取（schema 声明序保留）。"""
+        schema = get_builtin_tool_params("continue_subagent")
+        assert schema is not None, "continue_subagent schema 缺失"
+        props = (schema.get("parameters") or {}).get("properties") or {}
+        assert list(props.get("mode", {}).get("enum") or ()) == list(wire.continueSubagentModes()), (
+            "mode 枚举与 neurova.contracts.wire.continueSubagentModes() 派生读数不一致"
+        )
 
     @pytest.mark.parametrize("tool,required", [
         ("dispatch_team", ["team_id", "task"]),
