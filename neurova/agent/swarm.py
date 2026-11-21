@@ -363,6 +363,40 @@ def _deliveryLedger():
     return getDeliveryLedger()
 
 
+def _mailOutbox():
+    """effect outbox（A3）：崩溃安全的投递**意图层**（SQLite 持久）。
+
+    与 _deliveryLedger 同范式委托：单例单源在 mail_outbox.getMailOutbox。
+    分工——账本记投递的活体状态（进程内），outbox 记投递意图（跨崩溃），
+    邮箱 messageId 幂等是重投去重的安全网。
+    """
+    from neurova.agent.mail_outbox import getMailOutbox
+
+    return getMailOutbox()
+
+
+def redeliverOutboxIntent(intent: Dict[str, Any]) -> bool:
+    """outbox 启动对账的投递函数（swarm.py 是邮箱投递唯一写点，重投也落此）。
+
+    正文/优先级/messageId 均取自登记时的 payload——messageId 不变，邮箱按
+    messageId 幂等去重，崩溃前已入箱的消息重投只补销账、不重复生效
+    （宁重不丢）。
+    """
+    from neurova.agent.mailbox import get_agent_mailbox
+
+    payload = intent.get("payload") or {}
+    envelope = payload.get("envelope")
+    if envelope is None:
+        envelope = {}
+    return get_agent_mailbox().push(
+        str(payload.get("session_id") or ""),
+        f"[{payload.get('tag') or '子Agent结果'}] "
+        + json.dumps(envelope, ensure_ascii=False),
+        priority=str(payload.get("priority") or "normal"),
+        message_id=str(payload.get("message_id") or intent.get("intent_id") or ""),
+    )
+
+
 _RUN_QUEUE = None
 _RUN_QUEUE_LOCK = threading.RLock()
 
@@ -3804,6 +3838,19 @@ class SwarmManager:
         if run.origin not in ("chat", "team_dispatch") or not run.session_id:
             return False
         messageId = f"dlv_{uuid.uuid4().hex[:16]}"
+        # A3 effect outbox：投递前先落持久意图（崩溃时内存账本/邮箱皆丢，意图仍在，
+        # 启动对账按 messageId 重投——邮箱幂等去重，宁重不丢）。fail-open：outbox
+        # 故障不阻断投递主流程（与下方投递单落账同纪律）。
+        try:
+            _mailOutbox().recordIntent(messageId, run.session_id, {
+                "session_id": run.session_id,
+                "message_id": messageId,
+                "tag": tag,
+                "envelope": envelope,
+                "priority": priority,
+            })
+        except Exception as e:  # noqa: BLE001 - outbox 意图登记失败不阻断投递主流程
+            logger.debug("Swarm: outbox 意图登记失败 (%s): %s", run.subagent_id, e)
         ticket = None
         parentRunId = str(getattr(run, "parent_subagent_id", "") or "")
         if parentRunId:
@@ -3826,6 +3873,13 @@ class SwarmManager:
         except Exception as e:  # noqa: BLE001 - 投递失败不影响主流程
             logger.debug("Swarm: 父会话邮箱投递失败 (%s): %s", run.subagent_id, e)
             delivered = False
+        if delivered:
+            # A3：投递成功即销账 outbox 意图；销账失败留 pending，启动对账重投
+            # （重投同 messageId 被邮箱幂等去重，宁重不丢）。fail-open 同上。
+            try:
+                _mailOutbox().markDelivered(messageId)
+            except Exception as e:  # noqa: BLE001 - outbox 销账失败不阻断投递主流程
+                logger.debug("Swarm: outbox 意图销账失败 (%s): %s", messageId, e)
         if ticket is not None:
             if delivered:
                 _deliveryLedger().claim(ticket["ticket_id"])

@@ -272,7 +272,32 @@ def reconcileSwarmRunsAtStartup() -> Dict[str, Any]:
             "Swarm 启动收敛：按事件账本末态校正 %d 条内存 run 状态（只收敛，不复活续跑）",
             len(corrected),
         )
-    return {"checked": len(results), "corrected": len(corrected), "results": results}
+
+    # A3 effect outbox 启动对账：进程崩溃时内存投递账本（delegated_delivery）丢失，
+    # outbox 里的持久投递意图仍在——逐条重投会话邮箱（mailbox 按 messageId 幂等
+    # 去重，宁重不丢、不重复生效），成功即销账。投递函数落 swarm.py（邮箱写点
+    # 全仓唯一）。fail-open：outbox 故障不阻断启动收敛。
+    outboxReport: Dict[str, Any] = {}
+    try:
+        from neurova.agent.mail_outbox import getMailOutbox
+        from neurova.agent.swarm import redeliverOutboxIntent
+
+        outboxReport = getMailOutbox().reconcile(redeliverOutboxIntent)
+        if outboxReport.get("attempted"):
+            logger.warning(
+                "Swarm 启动收敛：outbox 补投投递意图 delivered=%s attempted=%s failed=%s",
+                outboxReport.get("delivered"), outboxReport.get("attempted"),
+                outboxReport.get("failed"),
+            )
+    except Exception as e:  # noqa: BLE001 - outbox 对账故障不阻断启动收敛
+        logger.warning("Swarm 启动收敛：outbox 对账失败（忽略）: %s", e)
+
+    return {
+        "checked": len(results),
+        "corrected": len(corrected),
+        "results": results,
+        "outbox": outboxReport,
+    }
 
 
 @dataclass
