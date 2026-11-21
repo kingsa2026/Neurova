@@ -23,16 +23,29 @@ class TestAgentCoreInjectsRSIToEvolution:
     """根因 3: agent_core.py 必须将 RSI 注入 evolution 单例"""
 
     def test_agent_core_has_rsi_injection_logic(self):
-        """RED: agent_core.py 必须包含把 self.rsi_orchestrator 注入 evolution 单例的代码"""
+        """RED: RSI 注入 evolution 单例的接线必须存在且被 agent_core 调用。
+
+        R1 迁移说明：装配逻辑从 agent_core._init_cognitive_graph 迁到
+        neurova/evolution/rsi/agent_wiring.py——原装配点早于 tool_memory 赋值
+        与 evolution 单例装配 ⇒ experience/tool_memory 两族恒占位（1018 轮
+        生产迭代 0 候选的根因）；且 agent_core 尺寸棘轮要求装配逻辑落独立模块。
+        本用例钉两处：agent_core 必须调用 wireAgentRsi；wiring 模块必须含
+        evolution 单例注入语句。
+        """
         from neurova import agent_core
+        from neurova.evolution.rsi import agent_wiring
 
         source = inspect.getsource(agent_core)
+        assert "wireAgentRsi" in source, (
+            "agent_core 必须调用 wireAgentRsi 装配 RSI（接线点不得消失）"
+        )
+        wiring_source = inspect.getsource(agent_wiring)
         # 关键语句: evolution 单例的 rsi_orchestrator 字段被赋值
         assert (
-            "evolution.rsi_orchestrator" in source
-            or "evolution().rsi_orchestrator" in source
+            "evolution.rsi_orchestrator" in wiring_source
+            or "evolution().rsi_orchestrator" in wiring_source
         ), (
-            "agent_core.py 必须包含 evolution.rsi_orchestrator = ... "
+            "agent_wiring 必须包含 evolution.rsi_orchestrator = ... "
             "注入语句, 否则经验→RSI 闭环永远不生效"
         )
 

@@ -44,6 +44,19 @@ def usageTokensDelta(before: int, after: int) -> int:
 
     return tokensDelta(before, after)
 
+
+class RSIManualApplyError(Exception):
+    """人工批准应用通道的业务失败（R1）。
+
+    `status_code` 供治理端点映射 HTTP 状态：
+    409＝状态冲突（观察期 / 无待批提案 / 重复应用 / 债务闸拦截），
+    422＝请求越界（optimization_id 不属于最近一轮提案、缺署名）。
+    """
+
+    def __init__(self, reason: str, status_code: int = 409):
+        super().__init__(reason)
+        self.status_code = int(status_code)
+
 #: 一次参数动作的代价（与 `convergence_analyzer.record_iteration(cost=1.0)`
 #: 同一计量单位，单源引用，不新造第二个尺度）。
 _PARAM_ACTION_COST = 1
@@ -407,6 +420,10 @@ class RSIOrchestrator:
         self._last_eval_outcome: Optional[Dict[str, Any]] = None
         # 密封档验收证据（D1）：决策（应用/回滚）落定后读一次，随 get_status 呈报。
         self._last_sealed_evidence: Optional[Dict[str, Any]] = None
+        # R1 人工批准应用通道：最近一轮 run_iteration 产出的优化提案登记。
+        # phase 1（手动档）不自动应用，提案在此等待治理端点的人工批准；
+        # 只留最近一轮（人工批准的对象是"当前这轮的建议"，不是历史累积）。
+        self._last_round_proposals: Optional[Dict[str, Any]] = None
 
         logger.info("RSIOrchestrator initialized")
 
@@ -964,6 +981,12 @@ class RSIOrchestrator:
         # 3. 生成优化建议
         optimizations = self.generate_optimizations(feedback_signals)
 
+        # 3. 生成优化建议
+        optimizations = self.generate_optimizations(feedback_signals)
+        # R1：登记为本轮待批提案——phase 1（手动档）不自动应用，
+        # 这里是治理端点"人工批准后应用"的唯一数据源。
+        self._recordRoundProposals(optimizations)
+
         # 4. 应用优化（部署控制器允许时）+ 实测增益 + 棘轮保留/回滚
         applied_results: List[Dict[str, Any]] = []
         applied_count = 0
@@ -975,13 +998,6 @@ class RSIOrchestrator:
         # (潜伏崩溃,test_task_yardstick.py 随 P1-2 同批钉住)。
         eval_before: Optional[Dict[str, Any]] = None
         eval_after: Optional[Dict[str, Any]] = None
-        # 回滚判据要读 roi：取**本轮记数之前**的成本核算读数（本轮增益还没进
-        # 历史，判的是"走到这一步为止"的累积读数）。没有成本记录 → None，
-        # 判据按"没测到"处理，不塞 0。
-        roi_before_apply = (
-            self.convergence_analyzer.compute_roi()
-            if self.convergence_analyzer.cost_history else None
-        )
 
         # 反向闸（003 M2）：上一次动作的代价未清 ⇒ 本次不动作 + 记原因。
         # 灰度复用 deployment_controller 的阶段语义（K3）：phase < 2 时不生效，
@@ -993,6 +1009,7 @@ class RSIOrchestrator:
                 debt_verdict.reason, debt_verdict.outstanding,
             )
             optimizations = []
+            self._markRoundProposalsBlockedByDebt()
             self._last_debt_gate: Dict[str, Any] = {
                 "blocked": True,
                 "reason": debt_verdict.reason,
@@ -1006,102 +1023,23 @@ class RSIOrchestrator:
             }
 
         if optimizations and self.deployment_controller.can_auto_execute("low"):
-            self._attempts_total += 1
-            # E1/E2 成本计量起点：usage 单源快照＋墙钟（应用/度量段的真实消耗）
-            import time as _time
-
-            from neurova.core.usage_accounting import get_usage_accounting
-
-            _cost_t0 = _time.monotonic()
-            _tokens_before = get_usage_accounting().snapshot()["total"]["total_tokens"]
-            perf_before = self._measure_performance()
-            eval_before = self._last_eval_outcome
-            snapshot = self._snapshot_optimizable()
-
-            assertRsiOptimizationIdentity(optimizations)
-            applied_results = self.apply_optimizations(optimizations)
-            assertRsiRoundIdentity(optimizations, applied_results)
-            applied_count = sum(1 for r in applied_results if r.get("applied"))
-            self._applied_total += applied_count
-            if applied_count:
-                # R6：真实应用按"当前相位"记一笔（回滚后 applied_count 归 0 不追溯——
-                # 应用确实发生过，晋升门槛统计的是"做过"，不是"做成了还留着"）。
-                _applied_phase = self.deployment_controller.get_current_phase()
-                self._phase_applied_counts[_applied_phase] = (
-                    self._phase_applied_counts.get(_applied_phase, 0) + 1
-                )
-
-            if applied_count:
-                perf_after = self._measure_performance()
-                eval_after = self._last_eval_outcome
-                gain = perf_after - perf_before
-                # 本轮是否真被量出来：评测集两次都必须报 measured。
-                # 度量失明时 gain 恒为 0，喂进历史就会被当成"没有改善空间"（工单 008）。
-                attempted = True
-                gain_evidenced = bool(
-                    isinstance(eval_before, dict) and eval_before.get("state") == "measured"
-                    and isinstance(eval_after, dict) and eval_after.get("state") == "measured"
-                )
-                # B3 配对置信区间：例级差分的抽样不确定度，喂给回滚判据
-                # （上界<0 确证危害才回滚；带内噪声不出 gain 轴判据）并随
-                # eval_after 出街。CI 缺席（失明/用例失配）时判据回退点规则。
-                gain_ci = self._pairedGainCI(eval_before, eval_after)
-                if isinstance(eval_after, dict) and gain_ci is not None:
-                    eval_after["gain_ci"] = gain_ci
-                # B1 真实结局对齐差分：行为分涨而结局对齐崩必判否（e2e 轴
-                # 只否决不奖励），随 eval_after 出街。
-                e2e_gain = self._pairedE2EGain(eval_before, eval_after)
-                if isinstance(eval_after, dict) and e2e_gain is not None:
-                    eval_after["e2e_gain"] = e2e_gain
-                # C1 跨轮回放门：例级退化清单（共享判据机器出），喂回滚判据。
-                case_metrics = self._caseRegressionMetrics(eval_before, eval_after)
-                if isinstance(eval_after, dict):
-                    eval_after.update(case_metrics)
-                # 回滚判据的单一事实源是 `rollback_manager.should_rollback`：
-                # 编排器只负责把本轮读数喂进去，不自己另写一套比较。
-                _rollback_t0 = _time.monotonic()
-                if self.rollback_manager.should_rollback({
-                    "convergence_status": convergence.get("status", ""),
-                    "roi": roi_before_apply,
-                    "gain": gain,
-                    "gain_ci": gain_ci,
-                    "e2e_gain": e2e_gain,
-                    "case_regressions": case_metrics.get("case_regressions"),
-                }):
-                    # 有害调整：回滚到应用前快照（失控漂移的本质防护）。
-                    # 工单 004：回滚必须同时**留痕到 rollback_manager** ——
-                    # 阶段晋升判据的"距上次回滚多少天"只有这一个真实数据来源；
-                    # 旧实现只改内存不记账，导致该读数恒 0、phase 1→2 永不可达。
-                    snapshot_id = self.rollback_manager.create_snapshot(snapshot)
-                    self._restore_optimizable(snapshot)
-                    if not self.rollback_manager.execute_rollback(snapshot_id):
-                        logger.error(
-                            "RSI 回滚已执行但留痕失败（snapshot_id=%s）：晋升判据将看不到本次回滚",
-                            snapshot_id,
-                        )
-                    # 回滚处置债务（003 票面"连带必改"）：该笔代价必须结清或
-                    # 显式转挂，不许静默消失 —— 否则回滚反而制造"无主欠账"。
-                    if self.debt_ledger is not None:
-                        self.debt_ledger.settle_on_rollback(reason="rollback_restored_snapshot")
-                    applied_count = 0
-                    gain = 0.0
-                    # C5 恢复成本：回滚耗时（重测成本＝决策落定后的密封档重读，
-                    # 与下方 _run_sealed_evidence 同一次调用，此处记时间与次数）。
-                    self._last_recovery = {
-                        "rollback_ms": int((_time.monotonic() - _rollback_t0) * 1000),
-                        "remeasure_evals": 1,
-                    }
-                # 密封档验收证据（D1）：决策（保留/回滚）落定后对最终参数态读一次——
-                # 密封用例从不进 gain/收敛史/候选生成（切分单源 eval_harness.splitSealedCases），
-                # 只作验收证据随状态面呈报。
-                self._last_sealed_evidence = self._run_sealed_evidence()
-                # E1/E2 资源向量：usage 单源差分＋墙钟（确定性 harness 不发 LLM
-                # ⇒ tokens 诚实为 0，不冒领真 token 计数）。
-                _tokens_after = get_usage_accounting().snapshot()["total"]["total_tokens"]
-                self._last_cost_vector = self._iterationCostVector(
-                    wall_ms=int((_time.monotonic() - _cost_t0) * 1000),
-                    tokens_delta=usageTokensDelta(_tokens_before, _tokens_after),
-                )
+            # R1 抽取：应用段公共实现——自动档与人工批准通道共用同一份
+            # "应用 → 前后实测 → 棘轮保留/回滚"，不保留第二套复制粘贴。
+            _outcome = self._applyOptimizationsWithMeasurement(
+                optimizations,
+                convergence_status=str(convergence.get("status", "")),
+            )
+            applied_results = _outcome["applied_results"]
+            applied_count = _outcome["applied_count"]
+            gain = _outcome["gain"]
+            eval_before = _outcome["eval_before"]
+            eval_after = _outcome["eval_after"]
+            gain_evidenced = _outcome["gain_evidenced"]
+            attempted = _outcome["attempted"]
+            # 提案登记随应用段处置：自动档消费后不得再走人工通道重复应用。
+            self._markRoundProposalsConsumed(
+                "rolled_back" if _outcome["rolled_back"] else "applied_auto"
+            )
         else:
             eval_before = None
             eval_after = None
@@ -1759,6 +1697,286 @@ class RSIOrchestrator:
         except Exception as e:  # noqa: BLE001 - 读数失败如实暴露，不编造数值
             return {"available": False, "reason": f"{type(e).__name__}: {e}"}
 
+    # ── R1：应用段公共实现 + 人工批准应用通道 ─────────────────────
+
+    def _applyOptimizationsWithMeasurement(
+        self, optimizations: List[Dict[str, Any]], *, convergence_status: str
+    ) -> Dict[str, Any]:
+        """应用段公共实现：应用 → 前后实测 → 棘轮保留/回滚 → 密封证据/成本向量。
+
+        run_iteration 的自动档与治理端点的人工批准通道（phase 1 手动档）共用
+        本方法——同一份实现、同一套回滚判据、同一本账（教义第 7 条：同功能
+        实现只许一处）。判据与留痕与抽取前的内联块逐行等价。
+
+        Returns:
+            applied_results / applied_count / gain / eval_before / eval_after /
+            gain_evidenced / attempted / rolled_back
+        """
+        import time as _time
+
+        from neurova.core.usage_accounting import get_usage_accounting
+
+        self._attempts_total += 1
+        # E1/E2 成本计量起点：usage 单源快照＋墙钟（应用/度量段的真实消耗）
+        _cost_t0 = _time.monotonic()
+        _tokens_before = get_usage_accounting().snapshot()["total"]["total_tokens"]
+        perf_before = self._measure_performance()
+        eval_before = self._last_eval_outcome
+        snapshot = self._snapshot_optimizable()
+
+        assertRsiOptimizationIdentity(optimizations)
+        applied_results = self.apply_optimizations(optimizations)
+        assertRsiRoundIdentity(optimizations, applied_results)
+        applied_count = sum(1 for r in applied_results if r.get("applied"))
+        self._applied_total += applied_count
+        if applied_count:
+            # R6：真实应用按"当前相位"记一笔（回滚后 applied_count 归 0 不追溯——
+            # 应用确实发生过，晋升门槛统计的是"做过"，不是"做成了还留着"）。
+            _applied_phase = self.deployment_controller.get_current_phase()
+            self._phase_applied_counts[_applied_phase] = (
+                self._phase_applied_counts.get(_applied_phase, 0) + 1
+            )
+
+        attempted = False
+        gain_evidenced = False
+        gain = 0.0
+        eval_after: Optional[Dict[str, Any]] = None
+        rolled_back = False
+        if applied_count:
+            perf_after = self._measure_performance()
+            eval_after = self._last_eval_outcome
+            gain = perf_after - perf_before
+            # 本轮是否真被量出来：评测集两次都必须报 measured。
+            # 度量失明时 gain 恒为 0，喂进历史就会被当成"没有改善空间"（工单 008）。
+            attempted = True
+            gain_evidenced = bool(
+                isinstance(eval_before, dict) and eval_before.get("state") == "measured"
+                and isinstance(eval_after, dict) and eval_after.get("state") == "measured"
+            )
+            # B3 配对置信区间：例级差分的抽样不确定度，喂给回滚判据
+            # （上界<0 确证危害才回滚；带内噪声不出 gain 轴判据）并随
+            # eval_after 出街。CI 缺席（失明/用例失配）时判据回退点规则。
+            gain_ci = self._pairedGainCI(eval_before, eval_after)
+            if isinstance(eval_after, dict) and gain_ci is not None:
+                eval_after["gain_ci"] = gain_ci
+            # B1 真实结局对齐差分：行为分涨而结局对齐崩必判否（e2e 轴
+            # 只否决不奖励），随 eval_after 出街。
+            e2e_gain = self._pairedE2EGain(eval_before, eval_after)
+            if isinstance(eval_after, dict) and e2e_gain is not None:
+                eval_after["e2e_gain"] = e2e_gain
+            # C1 跨轮回放门：例级退化清单（共享判据机器出），喂回滚判据。
+            case_metrics = self._caseRegressionMetrics(eval_before, eval_after)
+            if isinstance(eval_after, dict):
+                eval_after.update(case_metrics)
+            # 回滚判据要读 roi：取**本轮记数之前**的成本核算读数（本轮增益还没进
+            # 历史，判的是"走到这一步为止"的累积读数）。没有成本记录 → None，
+            # 判据按"没测到"处理，不塞 0。
+            roi_before_apply = (
+                self.convergence_analyzer.compute_roi()
+                if self.convergence_analyzer.cost_history else None
+            )
+            # 回滚判据的单一事实源是 `rollback_manager.should_rollback`：
+            # 编排器只负责把本轮读数喂进去，不自己另写一套比较。
+            _rollback_t0 = _time.monotonic()
+            if self.rollback_manager.should_rollback({
+                "convergence_status": convergence_status,
+                "roi": roi_before_apply,
+                "gain": gain,
+                "gain_ci": gain_ci,
+                "e2e_gain": e2e_gain,
+                "case_regressions": case_metrics.get("case_regressions"),
+            }):
+                # 有害调整：回滚到应用前快照（失控漂移的本质防护）。
+                # 工单 004：回滚必须同时**留痕到 rollback_manager** ——
+                # 阶段晋升判据的"距上次回滚多少天"只有这一个真实数据来源；
+                # 旧实现只改内存不记账，导致该读数恒 0、phase 1→2 永不可达。
+                snapshot_id = self.rollback_manager.create_snapshot(snapshot)
+                self._restore_optimizable(snapshot)
+                if not self.rollback_manager.execute_rollback(snapshot_id):
+                    logger.error(
+                        "RSI 回滚已执行但留痕失败（snapshot_id=%s）：晋升判据将看不到本次回滚",
+                        snapshot_id,
+                    )
+                # 回滚处置债务（003 票面"连带必改"）：该笔代价必须结清或
+                # 显式转挂，不许静默消失 —— 否则回滚反而制造"无主欠账"。
+                if self.debt_ledger is not None:
+                    self.debt_ledger.settle_on_rollback(reason="rollback_restored_snapshot")
+                applied_count = 0
+                gain = 0.0
+                rolled_back = True
+                # C5 恢复成本：回滚耗时（重测成本＝决策落定后的密封档重读，
+                # 与下方 _run_sealed_evidence 同一次调用，此处记时间与次数）。
+                self._last_recovery = {
+                    "rollback_ms": int((_time.monotonic() - _rollback_t0) * 1000),
+                    "remeasure_evals": 1,
+                }
+            # 密封档验收证据（D1）：决策（保留/回滚）落定后对最终参数态读一次——
+            # 密封用例从不进 gain/收敛史/候选生成（切分单源 eval_harness.splitSealedCases），
+            # 只作验收证据随状态面呈报。
+            self._last_sealed_evidence = self._run_sealed_evidence()
+            # E1/E2 资源向量：usage 单源差分＋墙钟（确定性 harness 不发 LLM
+            # ⇒ tokens 诚实为 0，不冒领真 token 计数）。
+            _tokens_after = get_usage_accounting().snapshot()["total"]["total_tokens"]
+            self._last_cost_vector = self._iterationCostVector(
+                wall_ms=int((_time.monotonic() - _cost_t0) * 1000),
+                tokens_delta=usageTokensDelta(_tokens_before, _tokens_after),
+            )
+        return {
+            "applied_results": applied_results,
+            "applied_count": applied_count,
+            "gain": gain,
+            "eval_before": eval_before,
+            "eval_after": eval_after,
+            "gain_evidenced": gain_evidenced,
+            "attempted": attempted,
+            "rolled_back": rolled_back,
+        }
+
+    def _recordRoundProposals(self, optimizations: List[Dict[str, Any]]) -> None:
+        """把本轮产出的优化登记成待批提案（R1 人工批准通道的数据源）。
+
+        只保留最近一轮：人工批准的对象是"当前这轮的建议"，不是历史累积。
+        每条提案带唯一 `optimization_id`（轮次+序号，确定性可寻址）与
+        `application_state`（跟随通道状态机）。
+        """
+        import time as _time
+
+        round_no = self._iteration_count + 1
+        proposals: List[Dict[str, Any]] = []
+        for index, optimization in enumerate(optimizations):
+            optimization_id = f"opt-r{round_no}-{index + 1}"
+            # id 同步打在原 dict 上：run_iteration 返回体与提案登记共用同一套
+            # 可寻址 id，观测面两侧对得上账。
+            optimization["optimization_id"] = optimization_id
+            entry = dict(optimization)
+            entry["application_state"] = "pending"
+            proposals.append(entry)
+        self._last_round_proposals = {
+            "round": round_no,
+            "ts": _time.time(),
+            "deployment_phase": self.deployment_controller.get_current_phase(),
+            "state": "pending" if proposals else "empty",
+            "applied_by": None,
+            "optimizations": proposals,
+        }
+
+    def _markRoundProposalsConsumed(self, state: str) -> None:
+        """提案登记随应用段处置（applied_auto / applied_manual / rolled_back）。"""
+        store = self._last_round_proposals
+        if not store:
+            return
+        store["state"] = state
+        for entry in store["optimizations"]:
+            entry["application_state"] = state
+
+    def _markRoundProposalsBlockedByDebt(self) -> None:
+        """反向闸拦下本轮时如实登记——被拦的提案不是"没有提案"。"""
+        self._markRoundProposalsConsumed("blocked_by_debt")
+
+    def pendingManualOptimizations(self) -> List[Dict[str, Any]]:
+        """最近一轮**待人工批准**的优化提案（phase 1 手动档的应用对象）。
+
+        提案已消费（自动应用/人工应用/回滚/被闸）时返回空列表——
+        "没有可批的"与"批过了"在调用侧同形为空，区别由状态读数表达。
+        """
+        store = self._last_round_proposals
+        if not store or store.get("state") != "pending":
+            return []
+        return list(store.get("optimizations") or [])
+
+    def _roundProposalsReadout(self) -> Optional[Dict[str, Any]]:
+        """提案登记的状态读数（get_status 呈报用，不泄露全部明细）。"""
+        store = self._last_round_proposals
+        if not store:
+            return None
+        return {
+            "round": store.get("round"),
+            "state": store.get("state"),
+            "count": len(store.get("optimizations") or []),
+            "applied_by": store.get("applied_by"),
+        }
+
+    def applyApprovedOptimizations(
+        self,
+        optimization_ids: Optional[List[str]] = None,
+        *,
+        expected_round: Optional[int] = None,
+        approved_by: str = "",
+    ) -> Dict[str, Any]:
+        """人工批准后应用最近一轮优化提案（R1：phase 1 的合法应用路径）。
+
+        与 run_iteration 自动档共用 `_applyOptimizationsWithMeasurement`
+        （应用 → 前后实测 → 棘轮保留/回滚），不另写第二套。守卫按 HTTP 语义
+        抛 `RSIManualApplyError`：观察期/无提案/重复应用/债务闸 409，
+        越界 id / 轮次 / 缺署名 422。应用事实按当前相位计入实做次数账
+        （`_phase_applied_counts`），与自动档同账。
+
+        Args:
+            optimization_ids: 要应用的提案 id；None＝最近一轮全部待批提案。
+            expected_round: 指定轮次；与最近一轮不符即 422（本通道只持最近一轮）。
+            approved_by: 批准者署名（人工审批 gate 留痕，必填）。
+        """
+        if not str(approved_by or "").strip():
+            raise RSIManualApplyError("approved_by 必填——无人署名的批准不落地", 422)
+        # 相位语义说明：本通道**就是** phase 1"人工审批"那道门，不再另设相位检查——
+        # 待批提案只在 phase 0/1 的 run_iteration 后处于 pending（phase 2 起自动档
+        # 当轮即消费，重复申请被下方状态检查 409 拒）；而 phase 0 的首轮迭代会按
+        # 晋升判据自动进 phase 1（0→1 无证据门槛，controller 既有设计），故能走到
+        # 这里的 pending 提案必然产生于手动档语义之下。
+        store = self._last_round_proposals
+        if not store or not store.get("optimizations"):
+            raise RSIManualApplyError(
+                "最近一轮没有可应用的优化提案（先 run_iteration 产出提案）", 409)
+        if expected_round is not None and int(expected_round) != int(store["round"]):
+            raise RSIManualApplyError(
+                f"指定轮次 {expected_round} 不是最近一轮（当前持有 r{store['round']}）——"
+                "本通道只持最近一轮提案", 422)
+        if store.get("state") != "pending":
+            raise RSIManualApplyError(
+                f"最近一轮提案已处置（state={store.get('state')}），不可重复应用", 409)
+
+        all_proposals: List[Dict[str, Any]] = list(store["optimizations"])
+        if optimization_ids is None:
+            selected = list(all_proposals)
+        else:
+            wanted = list(dict.fromkeys(str(oid) for oid in optimization_ids))
+            by_id = {str(o["optimization_id"]): o for o in all_proposals}
+            missing = [oid for oid in wanted if oid not in by_id]
+            if missing:
+                raise RSIManualApplyError(
+                    f"optimization_id 越界（不属于最近一轮提案）：{missing}；"
+                    f"可用 id：{sorted(by_id.keys())}", 422)
+            selected = [by_id[oid] for oid in wanted]
+
+        # 反向闸（003 M2）对人工通道同样生效：上次动作的代价未清 ⇒ 本次不动作。
+        debt = self._debt_gate_verdict()
+        if debt.allow is False:
+            raise RSIManualApplyError(
+                f"反向闸拦截：{debt.reason}（未清余额={debt.outstanding}）", 409)
+
+        convergence = self.convergence_analyzer.analyze_convergence()
+        # 传提案的**拷贝**进应用段：提案登记保持申请时原貌，不随应用回写变形。
+        outcome = self._applyOptimizationsWithMeasurement(
+            [dict(proposal) for proposal in selected],
+            convergence_status=str(convergence.get("status", "")),
+        )
+        final_state = "rolled_back" if outcome["rolled_back"] else "applied_manual"
+        self._markRoundProposalsConsumed(final_state)
+        store["applied_by"] = str(approved_by)
+        # 与 run_iteration 返回体同形：eval 以 before/after 成对出街（读数三态
+        # measured/measurement_blind 原样随行，gain_evidenced 判据吃同一份）。
+        outcome["eval"] = {"before": outcome["eval_before"], "after": outcome["eval_after"]}
+        outcome.update({
+            "round": store["round"],
+            "approved_by": str(approved_by),
+            "application_state": final_state,
+            "requested_optimization_ids": (
+                None if optimization_ids is None
+                else [str(o["optimization_id"]) for o in selected]
+            ),
+        })
+        return outcome
+
     def apply_optimizations(self, optimizations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         应用优化建议
@@ -1905,6 +2123,10 @@ class RSIOrchestrator:
                 "pass_rate": ((generated - pruned) / generated) if generated else 0.0,
             },
             "rollback_history": self.rollback_manager.get_rollback_history(),
+            # R1 人工批准应用通道的状态读数：待批提案数与最近一轮登记状态——
+            # "有提案没人批"必须在状态面上可见，否则手动档的停滞无从归因。
+            "pending_manual_optimizations": len(self.pendingManualOptimizations()),
+            "last_round_proposals": self._roundProposalsReadout(),
             # 负债读数（003 M3 的读侧）：只写不读的字段是 AGENTS.md §2 点名的断点。
             "debt": self._debt_readout(),
             # 决策档评测读数（D1 的读侧）：`_last_eval_outcome` 此前只进 gain 内部

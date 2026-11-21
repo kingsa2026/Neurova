@@ -6,11 +6,95 @@ RSI 集成管理器
 
 from neurova.core.logger import get_logger
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .gate_verdict import GateVerdict
 
 logger = get_logger(__name__)
+
+
+# ── 真实信号源（R1 扩信号：让现有 11 参数"有据可调"）──────────────
+# 原则：只接**既有**读数源（tool_weights 真实成败计数 / EKB 质量快照 /
+# 运行台账终态计数），不新造第二套信号采集机制；读数失败一律 fail-soft
+# 返回 None（键不进信号），绝不拿占位默认值冒充读数。
+
+
+def _real_tool_weight_signals(system: Any) -> Optional[Dict[str, Any]]:
+    """从宿主挂载的真实 AdaptiveToolWeights 聚合成败计数（tool_memory 族）。
+
+    返回 None＝宿主没有真实权重对象（占位替身/纯参数桩），不造数。
+    读 `_weights` 走它自己的 `_lock`：该管理器未暴露列全接口，
+    这里按同包只读约定取数，不改它的锁纪律。
+    """
+    weights = getattr(system, "tool_weights", None)
+    if weights is None or not hasattr(weights, "_weights"):
+        return None
+    try:
+        lock = getattr(weights, "_lock", None)
+        if lock is not None:
+            with lock:
+                entries = list(weights._weights.values())
+        else:
+            entries = list(weights._weights.values())
+    except Exception as e:  # noqa: BLE001 - 读数失败不造数
+        logger.debug("tool_weights 成败计数读取失败: %s", e)
+        return None
+    success = sum(max(0, int(getattr(w, "success_count", 0) or 0)) for w in entries)
+    failure = sum(max(0, int(getattr(w, "failure_count", 0) or 0)) for w in entries)
+    total = success + failure
+    return {
+        "tracked_tools": len(entries),
+        "observed_success_count": success,
+        "observed_failure_count": failure,
+        "observed_success_rate": (success / total) if total else None,
+    }
+
+
+def _experience_kb_signals() -> Optional[Dict[str, Any]]:
+    """EKB 质量快照（experience 族的结晶/采纳质量既有算式源，同步 SQLite 读）。"""
+    try:
+        from neurova.skills.experience_knowledge_base import get_experience_knowledge_base
+
+        snapshot = get_experience_knowledge_base().quality_snapshot()
+    except Exception as e:  # noqa: BLE001 - 读数失败不造数
+        logger.debug("EKB 质量快照读取失败: %s", e)
+        return None
+    return {
+        "rows": int(snapshot.get("rows") or 0),
+        "hit_rate": snapshot.get("hit_rate"),
+        "adoption_decisions": int(snapshot.get("adoption_decisions") or 0),
+        "adoption_success_rate": snapshot.get("adoption_success_rate"),
+    }
+
+
+def _run_ledger_signals() -> Optional[Dict[str, Any]]:
+    """运行台账终态计数（agent_run_store.stats 既有源：running/queued/parked/terminal）。"""
+    try:
+        from neurova.core.agent_run_store import get_agent_run_store
+
+        stats = get_agent_run_store().stats()
+    except Exception as e:  # noqa: BLE001 - 读数失败不造数
+        logger.debug("运行台账终态计数读取失败: %s", e)
+        return None
+    return {str(k): int(v) for k, v in stats.items()}
+
+
+def _augment_with_real_sources(
+    system_name: str, system: Any, signal: Dict[str, Any]
+) -> Dict[str, Any]:
+    """把既有真实读数源并进单个系统的反馈信号（只加键，不改既有键）。"""
+    ledger = _run_ledger_signals()
+    if ledger is not None:
+        signal["run_ledger"] = ledger
+    if system_name == "tool_memory":
+        weights_readout = _real_tool_weight_signals(system)
+        if weights_readout is not None:
+            signal["tool_weights"] = weights_readout
+    if system_name == "experience":
+        ekb_readout = _experience_kb_signals()
+        if ekb_readout is not None:
+            signal["experience_kb"] = ekb_readout
+    return signal
 
 
 @dataclass
@@ -231,6 +315,10 @@ class RSIIntegrationManager:
                     f"{system_name} 由缺席闭环系统的占位替身顶位：无参数面，性能读数不可估算"
                 ).to_dict())
                 continue
+
+            # R1 扩信号：接既有真实读数源（tool_weights 成败计数 / EKB 快照 /
+            # 运行台账终态），先于 performance 估算——估算与读数同见一份信号。
+            signal = _augment_with_real_sources(system_name, system, signal)
 
             # 注入 performance_score（系统自身未暴露时由 setpoint 梯度估算）
             if not isinstance(signal.get("performance_score"), (int, float)):

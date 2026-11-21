@@ -43,6 +43,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 import typing
 
 from neurova.api.deps import require_admin
+# RSI 人工批准应用通道的业务异常（R1）：端点按 status_code 映射 HTTP 状态。
+# 演化层不依赖 API 层，此处单向引用无环。
+from neurova.evolution.rsi.orchestrator import RSIManualApplyError
 
 # 模块级依赖实例：测试可用 dependency_overrides 覆盖
 _governance_admin_dep = require_admin()
@@ -579,6 +582,52 @@ async def approve_improver_upgrade(
         result = rsi._applyApprovedImproverUpgrade(approved_by=body.approved_by)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    return {"code": 0, "data": result}
+
+
+class RsiApplyOptimizationsRequest(BaseModel):
+    """参数优化人工批准应用（R1：phase 1 手动档的应用入口）"""
+
+    approved_by: str = Field(..., min_length=1, description="批准者（人工审批 gate 留痕）")
+    optimization_ids: Optional[List[str]] = Field(
+        default=None,
+        description="要应用的优化 id（须属于最近一轮提案）；缺省＝全部待批提案",
+    )
+    round: Optional[int] = Field(
+        default=None,
+        description="指定轮次；本通道只持最近一轮，指定其它轮次按 422 拒绝",
+    )
+    agent_id: Optional[str] = Field(default=None, description="目标 agent；缺省取默认 agent")
+
+
+@router.post("/rsi/optimizations/apply")
+async def apply_rsi_optimizations(
+    body: RsiApplyOptimizationsRequest,
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """人工批准并应用最近一轮 RSI 参数优化（R1 闭环咬合的合法路径）。
+
+    phase 1（手动档）下 run_iteration 只产出提案不自动应用——phase 语义即
+    "生成优化建议，人工审批"，本端点就是那道人工审批：经管理员批准后，走与
+    自动档**同一份**"应用 → 前后实测 → 棘轮保留/回滚"实现落地，并按当前相位
+    计入实做次数账。守卫：RSI 未装配 503；观察期/无待批提案/重复应用/债务闸
+    409；越界 optimization_id / 轮次 / 缺署名 422；非管理员 403。
+    """
+    rsi = _requireRsiOrchestrator(agent_id or body.agent_id)
+    try:
+        result = rsi.applyApprovedOptimizations(
+            optimization_ids=body.optimization_ids,
+            expected_round=body.round,
+            approved_by=body.approved_by,
+        )
+    except RSIManualApplyError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e)) from e
+    logger.info(
+        "RSI 参数优化经人工批准应用：round=%s applied=%s gain=%s evidenced=%s by=%s",
+        result.get("round"), result.get("applied_count"), result.get("gain"),
+        result.get("gain_evidenced"), body.approved_by,
+    )
     return {"code": 0, "data": result}
 
 

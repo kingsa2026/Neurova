@@ -50,6 +50,42 @@ def get_setpoint(system_name: str, param_name: str):
     return SYSTEM_SETPOINTS.get(system_name, {}).get(param_name)
 
 
+def baseFeedbackScore(feedback: Dict[str, Any]) -> float:
+    """基础反馈分（0..1）——estimate 与 setpointDecomposition 的**共用**算式。
+
+    优先级：显式 performance_score > success_rate > 中性 0.5。
+    "有 success_rate 读数但观察数为 0"（如工具记忆空使用史回报 0.0）按
+    **没测过**处理、落中性 0.5：零观察下的成功率是缺席读数，不是
+    "全失败"的证据——把没测到当成测出来是坏的，正是本仓一路在拆的读数病。
+
+    单一算式两处共用（教义第 6 条）：此前 estimate 与 setpointDecomposition
+    各抄一份 base 提取，改口径必漂移。
+    """
+    base_raw = feedback.get("performance_score")
+    if not isinstance(base_raw, (int, float)):
+        base_raw = feedback.get("success_rate")
+        if isinstance(base_raw, (int, float)) and _declaresZeroObservations(feedback):
+            base_raw = None  # 零观察：读数缺席，不冒充"测出来是 0"
+    if not isinstance(base_raw, (int, float)):
+        base_raw = 0.5
+    return max(0.0, min(1.0, float(base_raw)))
+
+
+def _declaresZeroObservations(feedback: Dict[str, Any]) -> bool:
+    """信号是否显式声明"零观察"（total_usages=0，或真实成败计数全为零）。"""
+    total_usages = feedback.get("total_usages")
+    if isinstance(total_usages, (int, float)) and not isinstance(total_usages, bool):
+        return int(total_usages) == 0
+    weights = feedback.get("tool_weights")
+    if isinstance(weights, dict):
+        observed = (
+            int(weights.get("observed_success_count") or 0)
+            + int(weights.get("observed_failure_count") or 0)
+        )
+        return observed == 0
+    return False
+
+
 def estimate_system_performance(
     system_name: str, feedback: Dict[str, Any], params: Dict[str, Any]
 ) -> float:
@@ -66,12 +102,7 @@ def estimate_system_performance(
     无任何已知参数时退化为纯基础分（观察模式仍有意义）。
     """
     # ---- 基础反馈信号 ----
-    base_raw = feedback.get("performance_score")
-    if not isinstance(base_raw, (int, float)):
-        base_raw = feedback.get("success_rate")
-    if not isinstance(base_raw, (int, float)):
-        base_raw = 0.5
-    base = max(0.0, min(1.0, float(base_raw)))
+    base = baseFeedbackScore(feedback)
 
     # ---- 参数贴近度 ----
     setpoints = SYSTEM_SETPOINTS.get(system_name, {})
@@ -110,12 +141,7 @@ def setpointDecomposition(system_name: str, feedback: Dict[str, Any],
     "代理分由什么组成"从此可审计。校准记录字段（calibration）为
     F4 提案 gate 的登记位（无校准记录 = 出厂默认档，如实标注）。
     """
-    base_raw = feedback.get("performance_score")
-    if not isinstance(base_raw, (int, float)):
-        base_raw = feedback.get("success_rate")
-    if not isinstance(base_raw, (int, float)):
-        base_raw = 0.5
-    base = max(0.0, min(1.0, float(base_raw)))
+    base = baseFeedbackScore(feedback)
     setpoints = SYSTEM_SETPOINTS.get(system_name, {})
     per_param: Dict[str, Any] = {}
     distances: List[float] = []

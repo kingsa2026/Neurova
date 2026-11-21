@@ -780,6 +780,13 @@ class SubSystemContainer:
             a.pattern_miner = a.evolution.pattern_miner
             a.genetic_engine = a.evolution.genetic_engine
 
+        # RSI 装配线（R1）：此时 tool_memory（memory 段末尾赋值）与 evolution
+        # 单例均已就位，四闭环系统齐全——原装配点（_init_cognitive_graph）早于
+        # 两者，experience/tool_memory 恒占位（生产 1018 轮 0 候选的根因）。
+        from neurova.evolution.rsi.agent_wiring import wireAgentRsi
+
+        wireAgentRsi(a)
+
         # C3 断链修复（工具侧审计）：不再新建独立实例——此前 tool_executor 触的是
         # 本实例，而 on_before_tool_selection 过滤用 orchestrator 内部实例，主链
         # 活跃度数据永远进不了过滤器（ARCHIVED/DEGRADED 判定失真，过滤形同虚设）。
@@ -1464,45 +1471,11 @@ class Agent:
             evolution.crystallizer = self.crystallizer
             logger.info("PatternCrystallizer 已注入到 EvolutionOrchestrator")
 
-        # 4. 初始化 RSI（递归自我改进）编排器
-        self.rsi_orchestrator = None
-        try:
-            from neurova.evolution.rsi.orchestrator import RSIOrchestrator
-
-            # 获取四大闭环系统
-            sleep_system = getattr(self, "sleep_consolidation", None)
-            emotion_system = getattr(self.memory_manager, "_emotion_module", None) if self.memory_manager else None
-            experience_system = getattr(evolution, "experience_feedback", None) if evolution else None
-            tool_memory_system = getattr(self, "tool_memory", None)
-
-            # 只有当至少一个闭环系统可用时才初始化 RSI
-            available_systems = [
-                s for s in [sleep_system, emotion_system, experience_system, tool_memory_system] if s is not None
-            ]
-            if available_systems:
-                # 情感保护桥（RSI 活表收尾）：EmotionModule 的保护参数此前
-                # 零消费——衰减真正发生在 a.temperature_engine（默认参数构造），
-                # 装桥后 RSI 调整经 setter 转发到引擎（factor/threshold 激活）
-                if emotion_system is not None and hasattr(emotion_system, "attach_temperature_engine"):
-                    emotion_system.attach_temperature_engine(getattr(self, "temperature_engine", None))
-                self.rsi_orchestrator = RSIOrchestrator(
-                    sleep_system=sleep_system or _NullSystem(),
-                    emotion_system=emotion_system or _NullSystem(),
-                    experience_system=experience_system or _NullSystem(),
-                    tool_memory_system=tool_memory_system or _NullSystem(), agent_id=str(self.config.agent_id))
-                logger.info("Agent %s: RSI 编排器已初始化 (%s/4 闭环系统可用)", self.config.name, len(available_systems))
-            else:
-                logger.info("Agent %s: RSI 未初始化（无可用闭环系统）", self.config.name)
-        except Exception as e:
-            logger.warning("Agent %s: RSI 初始化失败: %s", self.config.name, e)
-
-        # 根因 3 修复: 将 RSI 注入到 evolution 单例, 让经验/工具/记忆信号能触发递归进化
-        if self.rsi_orchestrator is not None and evolution is not None:
-            evolution.rsi_orchestrator = self.rsi_orchestrator
-            logger.info(
-                "Agent %s: RSI 已注入到 EvolutionOrchestrator 单例, 闭环已激活",
-                self.config.name,
-            )
+        # RSI 编排器装配已迁出：原在此处（cognitive-graph 段）装配时，
+        # a.tool_memory 尚未赋值、a.evolution 单例尚未存在 ⇒ experience/
+        # tool_memory 两族恒为占位替身（1018 轮生产迭代 0 候选的根因）。
+        # 现由 init_evolution 末尾经 neurova/evolution/rsi/agent_wiring.py
+        # 的 wireAgentRsi 装配——彼时四闭环系统全部就位。
 
         # 5. 初始化 ReasoningTraceManager
         self.trace_manager = ReasoningTraceManager(
