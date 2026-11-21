@@ -148,3 +148,54 @@ class TestA4CharBudget(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMemberAllowlistDeclarationSide(unittest.TestCase):
+    """M11：成员（子代理）回合的工具**声明面**按派生白名单收窄——与执行咽喉
+    成员门同源同集。原实现只在执行期拒绝：子代理 prompt 仍列出主代理专属工具
+    （spawn/dispatch/decide 等），浪费 token 且诱导模型反复撞门。"""
+
+    def test_member_context_hides_main_only_tools(self):
+        import asyncio
+        from neurova.context.orchestrator import ContextOrchestrator
+        from neurova.core.turn_context import set_subagent_tool_allowlist
+
+        orch = object.__new__(ContextOrchestrator)
+        tools = [_tool("web_search"), _tool("spawn_subagent"), _tool("dispatch_team"),
+                 _tool("decide_subagent_approval")]
+        set_subagent_tool_allowlist({"web_search"})
+        try:
+            out = orch._apply_member_allowlist(tools)
+        finally:
+            set_subagent_tool_allowlist(None)
+        names = [t["function"]["name"] for t in out]
+        self.assertEqual(names, ["web_search"], "声明面必须只剩白名单内工具")
+
+    def test_unbound_context_no_narrowing(self):
+        import asyncio
+        from neurova.context.orchestrator import ContextOrchestrator
+
+        orch = object.__new__(ContextOrchestrator)
+        tools = [_tool("spawn_subagent"), _tool("web_search")]
+        out = orch._apply_member_allowlist(tools)
+        self.assertEqual(len(out), 2, "白名单未绑定（顶层主 Agent）不收窄")
+
+    def test_build_pipeline_applies_member_allowlist(self):
+        import asyncio
+        from neurova.context.orchestrator import ContextOrchestrator
+        from neurova.core.turn_context import set_subagent_tool_allowlist
+
+        orch = object.__new__(ContextOrchestrator)
+        orch._agent = MagicMock()
+        tools = [_tool("web_search"), _tool("spawn_subagent")]
+        set_subagent_tool_allowlist({"web_search"})
+        try:
+            with patch.object(ContextOrchestrator, "_apply_tool_lifecycle",
+                              new=lambda self, t: t), \
+                 patch("neurova.context.orchestrator._build_tools_for_llm",
+                       new=AsyncMock(return_value=tools)):
+                out = asyncio.run(orch.build_tools_for_llm())
+        finally:
+            set_subagent_tool_allowlist(None)
+        self.assertEqual([t["function"]["name"] for t in out], ["web_search"],
+                         "装配管道必须在声明面应用成员白名单")

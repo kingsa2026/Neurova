@@ -4161,11 +4161,35 @@ class ContextOrchestrator:
 
         实例方法：委托给底层 `_build_tools_for_llm` 实现，保持 `self` 注入，
         使 agent_core / chat_pipeline / context_facade 等调用方通过实例正常访问。
-        管道顺序：聚合 → 生命周期过滤/排序 → 可见性门控（A2）→ Tool Search 压缩（A6）。
+        管道顺序：聚合 → 生命周期过滤/排序 → 成员白名单收窄（M11）→ 可见性门控
+        （A2）→ Tool Search 压缩（A6）。
         """
         tools = self._apply_tool_lifecycle(await _build_tools_for_llm(self))
+        tools = self._apply_member_allowlist(tools)
         tools = await self._apply_visibility_gate(tools)
         return self._apply_tool_search_compaction(tools)
+
+    def _apply_member_allowlist(self, tools):
+        """M11（修复计划 2026-11-21）：成员（子代理）回合的**声明面**按派生
+        白名单收窄——与执行咽喉（ToolExecutor._execute_single_tool 成员门）同一
+        份白名单（spawn 时冻结进 run.tool_allowlist、_run_member 绑定 ContextVar）。
+        原实现只在执行期结构化拒绝：子代理的 tools 参数仍列出主代理专属工具，
+        浪费 token 且诱导模型反复撞门。白名单未绑定（顶层主 Agent）不收窄。"""
+        try:
+            from neurova.core.turn_context import get_subagent_tool_allowlist
+
+            allowlist = get_subagent_tool_allowlist()
+        except Exception:  # noqa: BLE001 - 上下文不可读按未收窄处理（执行门仍兜底）
+            return tools
+        if not allowlist or not tools:
+            return tools
+        kept = [
+            t for t in tools
+            if t.get("function", {}).get("name", "") in allowlist
+        ]
+        if len(kept) != len(tools):
+            logger.info("成员声明面收窄: 按派生白名单隐藏 %s 个工具", len(tools) - len(kept))
+        return kept if kept else tools
 
     def _apply_tool_search_compaction(self, tools):
         """A6 Tool Search（P2）：env 门控 + 规模阈值触发目录压缩。
