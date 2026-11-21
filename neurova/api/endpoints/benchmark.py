@@ -14,6 +14,10 @@ Benchmark 基准测试框架 API 端点 v1.0.0
   GET  /api/v1/benchmark/baseline-reports/{report_id} (S1-1E 只读：单份基线报告全文)
   POST /api/v1/benchmark/multi-agent/run             (R3 跑批生产入口，admin)
   GET  /api/v1/benchmark/multi-agent/runs/{run_id}   (R3 跑批状态查询，admin)
+
+P1-0（递归自演化第一期）：suite 评测 run 到达终态即原子落盘
+`<数据根>/benchmark/suite_runs/<run_id>.json`（suite_run_store 单点承载）；
+GET /runs、GET /runs/{run_id} 内存优先、未命中读盘，重启后历史仍可查。
 """
 
 import datetime
@@ -22,7 +26,7 @@ import threading
 import typing
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from neurova.api.auth import get_current_user, Depends
 from neurova.api.deps import require_admin
 from pydantic import BaseModel, Field
@@ -103,6 +107,20 @@ def _get_user_id(request: Request) -> str:
     return getattr(request.state, "user_id", "anonymous")
 
 
+def _persistSuiteRun(runData: dict) -> None:
+    """终态 run 原子落盘（P1-0，落 `<数据根>/benchmark/suite_runs/`）。
+
+    持久层故障不回滚内存台账、不掩盖评测已完成的事实：内存仍是进程内权威，
+    读面内存优先；落盘失败以 error 日志如实点名（重启后该条缺失属诚实降级）。
+    """
+    from neurova.benchmark.suite_run_store import saveSuiteRun
+
+    try:
+        saveSuiteRun(runData)
+    except Exception as exc:  # noqa: BLE001 - 落盘失败如实记日志，不静默
+        logger.error("Benchmark run %s 落盘失败: %s", runData.get("run_id"), exc)
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────
 
 
@@ -144,11 +162,15 @@ def _executeBenchmarkRun(runId: str, suiteId: str, answerFn, limit: typing.Optio
         logger.error("Benchmark run %s executor failed: %s", runId, exc)
         updates = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
 
+    persistSnapshot: typing.Optional[dict] = None
     with _RUNS_LOCK:
         run = _RUNS_STORE.get(runId)
         if run is not None:
             run.update(updates)
             run["completed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            persistSnapshot = dict(run)
+    if persistSnapshot is not None:
+        _persistSuiteRun(persistSnapshot)
 
 
 @router.post("/run")
@@ -207,6 +229,7 @@ async def run_benchmark(body: BenchmarkRunRequest, request: Request):
         with _RUNS_LOCK:
             _RUNS_STORE[run_id] = run_data
             _USER_RUNS.setdefault(user_id, []).append(run_id)
+        _persistSuiteRun(dict(run_data))
         logger.info("Benchmark simulated run %s recorded (%s)", run_id, reason)
         return {
             "code": 0,
@@ -255,6 +278,24 @@ async def run_benchmark(body: BenchmarkRunRequest, request: Request):
     }
 
 
+def _mergedUserRuns(user_id: str) -> typing.List[dict]:
+    """某用户的全部 run：内存台账 + 盘上台账按 run_id 合并（P1-0）。
+
+    内存优先——同一 run_id 以内存态为准（终态回写总是最新）；盘上
+    `<数据根>/benchmark/suite_runs/` 是重启后仍可查的持久层，坏文件在
+    listSuiteRuns 内如实跳过。
+    """
+    from neurova.benchmark.suite_run_store import listSuiteRuns
+
+    with _RUNS_LOCK:
+        runIds = list(_USER_RUNS.get(user_id, []))
+        memoryRuns = [dict(_RUNS_STORE[rid]) for rid in runIds if rid in _RUNS_STORE]
+    merged = {r["run_id"]: r for r in listSuiteRuns() if r.get("user_id") == user_id}
+    for run in memoryRuns:
+        merged[run["run_id"]] = run
+    return list(merged.values())
+
+
 @router.get("/runs")
 async def list_runs(
     request: Request,
@@ -262,11 +303,14 @@ async def list_runs(
     suite_id: typing.Optional[str] = None,
     page: int = 1,
     size: int = 20,
+    limit: typing.Optional[int] = Query(
+        default=None, ge=1,
+        description="只返回合并后最近 N 条（按 started_at 倒序截断）",
+    ),
 ):
-    """查询测试运行历史"""
+    """查询测试运行历史（P1-0：内存+盘合并，重启后历史仍可查）。"""
     user_id = _get_user_id(request)
-    run_ids = _USER_RUNS.get(user_id, [])
-    runs = [_RUNS_STORE[rid] for rid in run_ids if rid in _RUNS_STORE]
+    runs = _mergedUserRuns(user_id)
 
     if agent_id:
         runs = [r for r in runs if r.get("agent_id") == agent_id]
@@ -274,6 +318,8 @@ async def list_runs(
         runs = [r for r in runs if r.get("suite_id") == suite_id]
 
     runs.sort(key=lambda x: x.get("started_at", ""), reverse=True)
+    if limit is not None:
+        runs = runs[:limit]
     total = len(runs)
     start = (page - 1) * size
     items = runs[start : start + size]
@@ -288,16 +334,23 @@ async def list_results(
     suite_id: typing.Optional[str] = None,
     page: int = 1,
     size: int = 20,
+    limit: typing.Optional[int] = Query(default=None, ge=1),
 ):
     """查询测试结果（别名）"""
-    return await list_runs(request, agent_id, suite_id, page, size)
+    return await list_runs(request, agent_id, suite_id, page, size, limit)
 
 
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str, request: Request):
-    """查看某次运行详情"""
+    """查看某次运行详情（P1-0：内存未命中读盘，重启后历史仍可查）。"""
+    from neurova.benchmark.suite_run_store import loadSuiteRun
+
     user_id = _get_user_id(request)
-    run = _RUNS_STORE.get(run_id)
+    with _RUNS_LOCK:
+        run = _RUNS_STORE.get(run_id)
+        run = dict(run) if run is not None else None
+    if run is None:
+        run = loadSuiteRun(run_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
     if run.get("user_id") != user_id:
