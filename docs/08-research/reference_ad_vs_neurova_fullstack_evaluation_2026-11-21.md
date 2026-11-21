@@ -1,0 +1,139 @@
+# reference_ad：LobeHub（lobehub/lobehub）vs Neurova 全方位代码级对照评测
+
+- 日期：2026-11-21
+- 对象：[lobehub/lobehub](https://github.com/lobehub/lobehub)（代号 reference_ad；LobeChat 同源演进后的 agent 平台主线仓库）
+- 快照：canary 分支浅克隆，版本 2.3.4，pushed_at 2026-11-21；85.9k stars / 16.3k forks；TypeScript
+- 体量：124 个 pnpm 子包；ts/tsx 共 **3,777,641 行**；`*.test.*` 文件 **7,321** 个；18 种界面语言；32 条 GitHub workflow
+- 定位（README 自述）："Super-Agents on Your Team"——把自主 agent 接入团队已有 IM（钉钉/飞书/企微/iMessage/Line/QQ/微信），自主干活、每周变强
+- 本仓口径：Neurova 主仓（Python FastAPI 后端 + NeurUI Vue3 + 鸿蒙/安卓双端），证据由当日只读核读采集，file:line 见各节
+- 性质：**竞品/外部对标，研究参考**——不作产品事实源，不引入其命名/结构与措辞
+
+## 0. 结论摘要
+
+**总分（10 维 110 分）：LobeHub 93.0 vs Neurova 81.0。**
+
+- LobeHub 是当前公开仓里**工程完成度最高**的 agent 平台之一：agent 运行时（分布式步调度/parked-resume/成本预算）、44 个全真内置工具、三档沙箱、91 家模型 provider、7,321 个测试文件、四通道桌面 OTA 发布，均为第一梯队。
+- Neurova 反超的五处：**多智能体治理深度**（审批链 L0-L2/候选 CAS/依赖门控/评审相位/台账重放）、**记忆生命周期**（睡眠整理/遗忘/污染清除/纪律准入 vs 对方无遗忘无衰减）、**本体知识图谱**（对方为零）、**租户隔离的真实执行**（对方 OSS 侧 RBAC 是空壳 stub）、**MCP server 面**（对方仅 client）。
+- LobeHub 领先的六处：模型接入广度（91 vs 7）、多模态（图像 41 家/视频 24 家/语音/音乐）、工具生态规模与执行安全分层、认证体系（17 SSO+Passkey+自建 OIDC IdP）、数据层工程（242 表 228 迁移）、工程纪律规模（e2e 性能预算/bundle 门禁/语义化发布）。
+- 评分不是体量加分：LobeHub 的 OSS 快照有真实短板（RBAC stub、主站 CSP 缺失、业务 API 无限流、Electron IPC 裸 socket、secret-channel 疑似未接线），均已如实扣分。
+
+## 1. 方法与局限
+
+- 方法：仓库浅克隆后六路并行只读深读（架构编排/工具沙箱/知识记忆/模型多模态/数据安全/工程纪律），每条关键结论须落到 file:line；Neurova 侧同日用只读核读采集对等证据（1273 个路由装饰器、2944 个后端测试文件等 15 项）。
+- 评分：10 维 110 分，与仓内既往 harness 对照系列同口径；每个子项按证据给分，"待核实"不加分。
+- 局限：① 静态只读，未运行对方代码；② canary 单日快照，对方迭代极快（当日仍有推送）；③ 378 万行体量下深读为抽样走读，覆盖面以六域主链路为界；④ 多模态/认证等维度部分依赖目录与类型证据，实现深度按抽读定级。
+
+## 2. 评分卡
+
+| # | 维度 | 满分 | LobeHub | Neurova | 判定 |
+|---|------|-----:|--------:|--------:|------|
+| D1 | 架构与模块化 | 12 | 10.0 | 8.0 | L 胜 |
+| D2 | Agent 核心与对话管线 | 14 | 12.0 | 11.0 | L 小胜 |
+| D3 | 多智能体编排 | 12 | 8.5 | 10.5 | **N 胜** |
+| D4 | 工具生态与执行安全 | 14 | 12.5 | 10.0 | L 胜 |
+| D5 | 知识库与 RAG | 10 | 7.0 | 6.5 | L 小胜 |
+| D6 | 记忆系统 | 8 | 5.5 | 7.0 | **N 胜** |
+| D7 | 多模型接入 | 10 | 9.5 | 5.5 | L 大胜 |
+| D8 | 多模态 | 8 | 6.5 | 3.5 | L 胜 |
+| D9 | 数据/租户/认证/安全 | 12 | 9.0 | 8.0 | L 小胜 |
+| D10 | 工程纪律 | 14 | 12.5 | 11.0 | L 胜 |
+| | **合计** | **110** | **93.0** | **81.0** | |
+
+## 3. 分域详评
+
+### D1 架构与模块化（L 10 / N 8）
+
+**LobeHub**：pnpm monorepo 六 app（auth/cli/desktop/server/share/workbench）+ 124 包；依赖方向干净（agent-runtime 仅依赖 context-engine+types，mecha→agent-runtime+builtin-agents+builtin-tools，未见 packages 反向依赖 apps，见各 package.json）；API 双轨=tRPC 四挂载点（lambda/async/mobile/tools，`src/app/(backend)/trpc/`）+ 独立 Hono 服务（`apps/server/src/router-hono/index.ts:23-28`，standalone 端口 3011）。扣分：三轨 API（Next tRPC+Hono+mobile/tools）与根 app 巨型单体维护面大；40+ 个 builtin-tool 细粒度包需靠 mecha/database 胶水层理解，新贡献者上手成本高。
+**Neurova**：领域分层清晰（api 138 端点模块/agent 106 文件/ontology 45 文件/evolution 87 文件），单进程 FastAPI 边界清楚；扣分：巨型文件集中（`neurova/agent/swarm.py` 4069 行、`evolution/rsi/orchestrator.py` 2532 行，尺寸棘轮只在守新增）、harmony 侧 41.5 万行疑含生成物。
+**子项**：分层与依赖治理 3.5/2.5；API 形态与边界 3.5/3.0；复杂度控制 3.0/2.5。
+
+### D2 Agent 核心与对话管线（L 12 / N 11）
+
+**LobeHub**：生产级状态机 `AgentState.status = idle|running|waiting_for_human|waiting_for_async_tool|waiting_for_client|done|error|interrupted`（`packages/agent-runtime/src/types/state.ts:593-601`），parked 三态可恢复不盖 completedAt（`src/utils/status.ts:6-15`）；host 无关 step 循环（`src/loop/index.ts:37-55`），服务端 QStash 步调度+分布式锁+恢复（`apps/server/src/router-hono/agent/handlers/runStep.ts:185-215`）；指令集含 call_llm/call_tool(_batch)/exec_sub_agent(s)/request_human_prompt|select|approve/compress_context/finish（`src/types/instruction.ts:244-435`）；上下文工程=ContextEngine 25 处理器管线（`packages/context-engine/src/pipeline.ts:17-27`）+ compress_context 迟滞压缩（`agents/GeneralChatAgent.ts:513-515`）+ tokenAccounting 漂移系数 1.25。成本预算与重复调用守卫俱全。弱点：单 agent 内无 ReAct 式反思循环，反思是后台 agent（self-reflection/nightly-review）形态。
+**Neurova**：增长门+主动压缩水位+溢出兜底重试+严格变小守卫+CompressionEvent 落时间线；StopGate 体系（IterationGate/TokenBudgetGate/DoomLoopGate/GoalGate，`neurova/agent/gates.py:77-394`）+ 续跑（`resumeFinishedRun` swarm.py:2321、continuation_rounds.py）；任务自评与自我模型注入（自我模型接线批）。SSE 流式管线完整。弱点：分布式调度/多实例水平扩展面弱于对方（单进程假设）。
+**子项**：运行时状态机与可靠性 4.5/4.0；上下文工程 4.0/4.0；规划与反思 3.5/3.0。
+
+### D3 多智能体编排（L 8.5 / N 10.5）——本仓反超
+
+**LobeHub**：GroupOrchestrationRuntime=Supervisor 状态机+Executor 循环（`packages/agent-runtime/src/groupOrchestration/GroupOrchestrationRuntime.ts:9-22`），决策 speak/broadcast/delegate/execute_task(s)（`GroupOrchestrationSupervisor.ts:24-38`）；并行子代理 exec_sub_agent(s) 带谱系 AgentRunLineage（`types/state.ts:14-40`）；异构外部 agent 接入强——heterogeneous-agents 适配 claudeCode/codex/kimiCode/codeBuddy/amp/antigravity（`packages/heterogeneous-agents/src/adapters/`）；HITL 三指令+InterventionChecker。**扣分硬伤**：投票/协商未实现（`apps/server/src/services/toolExecution/serverRuntimes/groupManagement.ts:217` "Voting is not yet implemented"），delegate 在 manifest 中被注释禁用（`builtin-tool-group-management/src/manifest.ts:66-76`）；无点对点通信；swarm 并行优化仅设计稿（`services/goal/SWARM.md:3` "Status: design, not built"）。
+**Neurova**：SwarmManager（`neurova/agent/swarm.py:446`）spawn/cancelRun/cancelQueuedRun/resumeFinishedRun/steer 全链；TaskUnit（`agent/task_unit.py:22`）+审批链 L0-L2（`agent/approval_chain.py`）+依赖门控（swarm.py:1931 上游未验收→dependency_failed）+评审相位（`agent/review_gate.py`）+候选制 CAS 合并与冲突升级+H-4 事件账本与重放收敛（reconcileRunFromEvents）；房间/项目双入口；neuacp 外部代理（OpenCode/Qoder/CodeBuddy/ZCode+SSH 远程+按租户隔离的进程池）。
+**判定**：对方胜在 supervisor 编排形态与外部 agent 适配广度；本仓胜在治理闭环（审批分级/候选合并/依赖门/评审/台账）与外部代理的租户隔离红线。**子项**：编排形态 3.0/3.5；治理与审批 2.5/4.0；异构外部 agent 3.0/3.0。
+
+### D4 工具生态与执行安全（L 12.5 / N 10）
+
+**LobeHub**：44 个 builtin-tool 全部真实现（每包 manifest+执行体，无空壳；`packages/builtin-tools/src/index.ts` 汇总），manifest 带 Zod 校验+humanIntervention+超时 clamp（`packages/types/src/tool/builtin.ts:211-289`）；双执行面（client 经 device-gateway WS+Redis 等结果，server 侧 serverRuntimes 73 文件）；MCP 仅 client（stdio+StreamableHTTP，`packages/device-mcp`，支持 MCP Apps SEP-1865 UI），**无 MCP server 面**；沙箱三档=云沙箱（market/onlyboxes）+SRT 本地沙箱（文件读写白名单+网络域名白名单+禁 PTY，`packages/device-sandbox/src/policy.ts`）+Pyodide WASM Worker；ssrf-safe-fetch 逐跳重定向过滤+体积上限（`packages/ssrf-safe-fetch/index.ts:182-213`）；凭据脱敏到 `******` 且不进模型上下文（`builtin-tool-creds/src/injectResult.ts:34-58`）；审批三层=声明式 humanIntervention+动态审计（pathScopeAudit/deleteFilesAudit 等，`builtin-tools/src/dynamicInterventionAudits.ts:13-20`）+安全黑名单 auto-run 亦不可绕过（`agent-runtime/src/core/InterventionChecker.ts:60-77`）。扣分：local-system runCommand 在用户主进程直接执行无进程级隔离（靠审批+黑名单+超时）；secret-channel HPKE 实现精良但主链路未见消费方（待核实）。
+**Neurova**：ToolExecutor 单管道零旁路+curated 名册；沙箱族 `neurova/sandbox/`（code_sandbox/exec_sandbox/restricted_token/appcontainer）；凭据 keyring（`security/secret_store.py`）；webhook 验签 8 处（dingtalk/feishu/wechat_kf_crypto/telegram/qq/qclaw/xiaoyi 等）。**MCP client+server 双端**（`tool_layers/mcp_client.py`+`mcp_agent_tools_server.py`/`mcp_ontology_server.py`+`security/mcp_grants.py`）——对方没有的一半。扣分：内置工具数量与执行面规模小于对方；无云沙箱档。
+**子项**：工具框架与生态规模 5.0/3.0；沙箱与隔离 3.5/2.5；MCP 2.0/3.0；凭据与审批 2.0/1.5。
+
+### D5 知识库与 RAG（L 7 / N 6.5）
+
+**LobeHub**：管线完整——12 个 KB 工具 API（`builtin-tool-knowledge-base/src/manifest.ts:6-295`）；文件解析两套加载器覆盖 pdf/docx/xlsx/pptx/epub/ipynb/latex/代码（`packages/file-loaders`+`apps/server/src/libs/document-loaders/`），解析在共享 worker 进程；切片=RecursiveCharacterTextSplitter 复刻，chunkSize=800/overlap=400 全局固定（`loaders/config.ts:1-6`）；异步分批 embedding 1024 维（`apps/server/src/routers/async/file.ts:112-272`）；pgvector 余弦 topK（`packages/database/src/models/chunk.ts:207-253`）+BM25 混合（ParadeDB pg_search/ES，`services/ftsSearch/index.ts:34,143`）；agent 挂载表 agents_knowledge_bases（enabled 开关）。**硬扣分**：无 rerank（`routers/lambda/chunk.ts:195` "TODO: need to rerank the chunks"）、embeddings 表仅 btree 无 ANN 索引（`schemas/rag.ts:76-96`）、无相似度阈值、文件级排序仅每文件 top3 均值、无自动 RAG 注入（纯工具触发）。
+**Neurova**：本体知识图谱 45 文件（rule_engine/sparql_query/turtle·rdf_import/function_engine/decision_ledger/community_graph/vector_index，`neurova/knowledge/ontology/`）——**对方此域为零**（全仓无 ontology/KG 实现，graph 命中均为编排语义）；KnowledgeStorage+graph_bridge+端点双入口+MCP surface。扣分：文档型 RAG 的工程化（异步 embedding 任务/混合检索/评测表）不及对方系统化。
+**子项**：管线完整度 3.5/3.0；检索质量机制 1.5/2.0；评测与治理 2.0/1.5。
+
+### D6 记忆系统（L 5.5 / N 7）——本仓反超
+
+**LobeHub**：五层记忆 activity/context/experience/identity/preference+persona（`packages/types/src/userMemory/shared.ts:48-55`）；写入经 gatekeeper LLM 过滤后按 topic 异步抽取（`memory-user-memory/src/extractors/gatekeeper.ts:12-45`）；user_memories 双 1024 维向量列带 HNSW（`schemas/userMemories/base.ts:9-57`）；实体/别名/关系边（contradicts/supersedes/mentions 等，`schemas/userMemories/edge.ts:10-53`）+consolidation 归组旧行标 superseded（`models/userMemory/consolidation.ts`）；混合召回（向量+BM25+层/标签过滤）+Locomo 基准（`memory-user-memory/benchmarks/locomo/`）。**硬扣分**：无遗忘、无时间衰减（grep decay/forget 无命中，accessedCount 只记不淘汰）。
+**Neurova**：认知存储引擎（`cognitive_layers/memory_layer/cognitive_storage_engine.py:258`）+统一检索/主动召回/语义搜索；**睡眠整理**（`memory_layer/sleep.py:153 SleepConsolidation`+sleep_induction/sleep_writeback）+压缩与**污染清除**（`compression.py:58`、`pollution_purge.py`）+**纪律准入**（`memory_discipline.py:305 screenPendingProposal`、`memory_admission.py:76`）+世代失效。记忆生命周期治理（写入准入→整理→遗忘→回写）完整度高于对方。
+**子项**：模型与结构 2.5/2.5；生命周期治理 1.5/3.0；召回 1.5/1.5。
+
+### D7 多模型接入（L 9.5 / N 5.5）——差距最大维
+
+**LobeHub**：**91 家 provider**（`packages/model-runtime/src/providers/` 目录数=runtimeMap 注册数=model-bank 枚举数，三方互证）；统一接口 LobeRuntimeAI 覆盖 chat/embeddings/generateObject/image/video/music/TTS/ASR/decision 九类（`core/BaseAI.ts:44-126`）；三大线协议（openaiChatCompletions/openaiResponses/anthropicMessages）+两个兼容工厂（589 行 `core/openaiCompatible/index.ts`），新 provider 30~60 行可接入；provider 中立流协议 ModelStreamEvent 16 类事件（`core/streams/events.ts:14-36`）；RouterRuntime 多通道路由=fallback+加权分流+attempt 级生命周期观测+错误分类续切（`core/RouterRuntime/`）；成本链路完整（usageConverters/providerReportedCost/topicUsage 落库，`core/ModelRuntime.ts:116-120` beforeChat 预算中断）；本地模型一等公民（Ollama 原生 SDK 非 OpenAI 垫片+LMStudio/vLLM/Xinference/ComfyUI）。扣分：静态模型卡仅 5 家（其余靠远端拉取+DB）；单通道内自动重试退避未见显式实现。
+**Neurova**：7 provider（anthropic/gemini/openai/openrouter/ollama/lm_studio/opencode+CUSTOM，`llm/providers/types.py:16-24`）；multi_model_client chat_stream（`llm/multi_model_client.py:1086`）+capability_detector+model_rate_limiter+model_limits+presets 预设表；真流式（SSE）与成本记账已有。差距主要在广度、路由容错与协议归一层。
+**子项**：provider 覆盖 4.0/1.5；协议归一与流式 3.0/2.0；路由容错与记账 2.5/2.0。
+
+### D8 多模态（L 6.5 / N 3.5）
+
+**LobeHub**：图像生成 41 个 provider 实现+完整 agent 工具（ExecutionRuntime 622 行任务状态机，`builtin-tool-image-generation/src/ExecutionRuntime/index.ts:36-56`）；视频生成 24 家+727 行运行时（轮询/webhook 回执）；TTS 核心+6 家专用（兼容工厂使 OpenAI 系默认获得 TTS）；ASR 5 家；音乐生成+realtime 模型类型；视觉输入在消息协议原生支持（`types/chat.ts:42-62`）。
+**Neurova**：文本/视觉输入为主；差异项=**computer use 全栈**（截图+UIA+SOM 混合，`neurova/computer_use/`）与 **SIP 语音渠道**（`channels/`），生成类（图像/视频/音乐）缺位。
+**子项**：生成类 3.0/0；语音 1.5/1.0；视觉与环境理解 2.0/2.5（本仓 computer use/设备域反超）。
+
+### D9 数据/租户/认证/安全（L 9 / N 8）
+
+**LobeHub**：数据层强——242 张表、228 个 drizzle 迁移、软删+回收站+FTS outbox+autovacuum 调优（`packages/database/src/schemas/`、`migrations/`）；认证=better-auth 引擎+17 个 SSO/OAuth 提供商+Passkey/WebAuthn+magic link+Email OTP+**自建 OIDC IdP**（`apps/auth/src/libs/better-auth/define-config.ts:132-393`、`src/libs/oidc-provider/`）；API key 的工作区绑定纪律好（个人 key 禁跨工作区、签发者在职校验、RBAC 降权自动收紧，`packages/trpc/src/lambda/context.ts:281-339`）；设备链路三层纵深（deviceId 哈希+token 握手+设备端 symlink 逃逸防护，`device-identity/src/index.ts:54-79`、`device-control/src/workspaceGuard.ts:28-63`）。**硬扣分（OSS 快照）**：RBAC 系统性门禁是空壳——`business-server/src/trpc-middlewares/rbacPermission.ts:14-28` 直通 stub、`workspaceAuth.ts:18-36` 只查 workspaceId 非空，注释明言"Cloud overrides this entire module"；无数据库 RLS，行级隔离全靠应用层 WHERE；主站无实质 CSP（仅 frame-ancestors，`src/libs/next/config/define-config.ts:113-117`）；业务 API 无通用限流；Electron IPC 裸 socket 无对端鉴权（`electron-server-ipc/ipcServer.ts:35-56`）；无原生 SAML/LDAP。
+**Neurova**：JWT 身份单通道（`core/identity_context.py`）+**租户校验在 API 层真实执行**（auth.py:743-751 租户提取、global_auth.py:178-190、8+ 端点文件消费；外部代理全生命周期按租户隔离为强制红线）；RBAC 角色+审计日志（security/audit_logger.py、desktop_audit、endpoints/audit.py）+webhook 验签 8 处+沙箱族+keyring。扣分：SSO 生态（OAuth 提供商矩阵/Passkey/OIDC IdP）缺位；租户隔离为字段级而非行级策略引擎。
+**子项**：数据层工程 3.0/2.0；认证 3.0/1.5；租户与权限执行 1.5/2.5（**本仓反超**：对方 OSS 侧为 stub）；运行安全 1.5/2.0。
+
+### D10 工程纪律（L 12.5 / N 11）
+
+**LobeHub**：7321 个测试文件且分布与业务厚度匹配（database 647/model-runtime 270/heterogeneous-agents 122/context-engine 95；server 1761）；database 测试打真库（PGlite 快照，`vitest.config.mts` globalSetup）；e2e=Cucumber+Playwright 18 feature，含 P0 用户旅程+性能预算+bundle 尺寸基线门禁（`e2e/`、`.github/workflows/e2e.yml`）；32 条 workflow（包矩阵/3 分片/Windows/桌面/PR 准入/多架构 Docker/四通道桌面 OTA/语义化发布 release.yml）；静态检查自研深度高——oxlint 882 行配置+**alint 模型背书 lint**（规则=prompt+结构化输出，按误报率定级，守 pmap-over-promise-all/no-transactions-in-models/no-secret-exposure 等约 20 条架构安全判据，`packages/alint/`）+bundle 边界守卫+eslint-suppressions 保持清零；i18n 18 语言（68 namespace，i18n-extractor 静态可达 key 抽取）；AGENTS.md+30+ skills 路由+验收证据链+单文件 ≤1200 行棘轮+红绿测试写入开发纪律。扣分：knip 死码检测只扫 `src/`（packages 2191 个测试所在域不在守卫内）；i18n 无 key-parity 硬守卫测试；coverage 仅 0.5% 棘轮阈值。
+**Neurova**：2944 后端测试文件（unit 2873/integration 60/e2e 12/perf 13）+前端 360 文件约 2501 用例；.cnb.yml 五门禁（static-gate/protected 单测子集/frontend 四件套/perf-gate 阻断/experience）+commit-msg 红绿证据门+protected_tests 收录门+尺寸棘轮+i18n 一致性守卫测试（11 语言）。扣分：e2e/perf 偏薄；前端 eslint 门实际不可运行（无配置无依赖，AGENTS.md 已自认）；发布通道单一。
+**子项**：测试 4.5/4.0；CI/发布 4.0/3.0；静态检查与守卫 2.5/2.5；i18n 1.5/1.5。
+
+## 4. 可借鉴清单（待拍板，非立即实施）
+
+P0（高价值、改动面可控）：
+1. **跨 provider 路由容错**：RouterRuntime 式多通道路由（fallback+加权+attempt 级观测+错误分类续切）。影响面=`neurova/llm/multi_model_client.py` 与 provider 注册表；可先把"故障切换+尝试记录"立起来，加权分流后置。
+2. **检索质量三件套**：rerank 接口位、相似度阈值、向量 ANN 索引。对方代码里"TODO: need to rerank"正是本仓可做出差异的点；本仓本体图谱+向量混合检索若补 rerank/阈值，D5 可反超。
+3. **auto-run 不可绕过的危险命令黑名单强制层**：独立于审批链的一层（对方 InterventionChecker 先查黑名单再查审批，`InterventionChecker.ts:60-77`），与本仓审批链 L0-L2 叠加而非替代。
+
+P1：
+4. **alint 式"模型背书 lint"**：以小模型+结构化输出守架构/安全判据（误报率定级后才可设 error）。适合守"禁裸 import 重依赖/禁绕过 ToolExecutor/禁第二身份通道"这类现有静态规则表达不了的判据。
+5. **异构外部 agent 名册扩容**：对方 adapters 覆盖 claude code/codex/kimi/amp/antigravity 等；本仓 neuacp 已有 4 家，名册与目录机制可对照补齐。
+6. **前端 bundle/性能基线门禁**：把本仓尺寸棘轮思路扩到 NeurUI 构建产物（对方 e2e 内做 bundle 基线对比，PR 阻断）。
+
+P2：
+7. provider 中立流事件模型（16 类事件归一）作为 llm 层协议演进参考。
+8. 语义化发布与桌面 OTA 通道（本仓移动端已有发版链，桌面端可参考其四通道灰度）。
+9. 验收证据链（acceptance 证据落固定可访问位置，可复用不重跑）与"每 bugfix 先红后绿"的 skills 化路由（本仓已有钩子强制，可补 skills 文档路由）。
+
+不照搬：
+- 三轨 API 与 124 包超细粒度 monorepo（胶水层理解成本高，与本仓"单一事实源"教义相悖）；
+- 云服务强依赖（QStash/Cloudflare Durable Objects/S3 OTA）——本仓自托管优先；
+- local-system 主进程直执行的无隔离 shell（本仓沙箱族路线更对）；
+- 静态模型卡只维护 5 家、其余靠远端拉取的模式（离线/自托管元数据不完整）。
+
+## 5. 本仓守卫提示（对方没有、别被"补齐"掉）
+
+1. **租户隔离真实执行**：本仓租户校验在 API 层落地且外部代理按租户强隔离；对方 OSS 是 stub。引入对方"workspaceAuth"形态时不得退化为直通。
+2. **MCP server 面**：本仓双端齐备，对方仅 client；不要在对齐其工具面时删掉 server 能力。
+3. **记忆遗忘/睡眠整理/纪律准入**：对方无此链路；本仓生命周期治理是差异点。
+4. **本体图谱+SPARQL**：对方为零；知识域演进应以本仓图谱为主干，文档 RAG 为补充。
+5. **审批分级治理（L0-L2+候选 CAS+依赖门+评审相位）**：对方群编排无投票/协商、delegate 被禁用；本仓治理深度是编排维反超的根，勿为"形态对齐"简化。
+
+## 6. 评分复核说明
+
+- D7 给 9.5 vs 5.5 是全场最大分差，依据是 provider 数量（91 vs 7）、协议归一层（3 线协议+16 事件 vs 单层 client）与路由容错（RouterRuntime vs 无对应物）三项均有直接证据。
+- D3/D6/D9 的本仓反超均有对方代码内"自认"证据（"Voting is not yet implemented"、"Status: design, not built"、RBAC stub 注释），不是推测。
+- 对方当日仍有推送（pushed_at 2026-11-21T15:06Z），本报告为当日快照结论；复评时应以当期主干重跑关键计数。
