@@ -184,7 +184,7 @@
 | 卡 | 提交 | 摘要 |
 |---|---|---|
 | M1 | `b4d952208` | 房间文本批准补治理回灌（与显式端点同效力，decidedByChannel=room） |
-| M2 | `a4932645b` | MCP 身份缺省改 fail-closed（McpIdentityMissingError） |
+| M2 | `9f162dbab` | MCP 身份缺省改 fail-closed（McpIdentityMissingError） |
 | M4 | `052cb6243` | merge 审批通道故障改 fail-closed（候选保留待人工） |
 | M3 | `649cadc4e` | APIKey 增 tenant_id（拍板乙）：签发者租户进身份（REST/MCP 两面） |
 | M6+M10 | `5e88d0b1a` | /external-agents/status 接真实池水位 + acquire 有界等待（池裁决不绕过） |

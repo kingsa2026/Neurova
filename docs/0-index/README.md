@@ -171,6 +171,7 @@
 
 ### 04-plans 实施计划
 
+- [2026-11-21-multi-agent-collaboration-repair-plan.md](../04-plans/2026-11-21-multi-agent-collaboration-repair-plan.md) — 多 Agent 协作断点修复计划（备稿待拍板，源自同日实现路径分析报告 §11）：批一 P0 四卡（M1 房间自由文本批准补治理回灌/M2 MCP 身份缺省改 fail-closed/M3 API-key 租户策略收口/M4 L2 审批通道故障改 fail-closed）+ 批二 P1 四卡（M5 事件库读面消费与周期 prune 接线·不重做 reference-ac A2/M6 外部代理池水位接真/M7 多副本约束显性化/M8 只写不读项处置）+ 批三 P2 六卡（泵线程去阻塞/池 acquire 有界等待/成员声明侧过滤/TEAM 可见性补真/前端四小项/文档心智债）；含 6 项待拍板（D-M3/D-M5/D-M7/D-M8/D-M9/D-M13a）、明确不做×4（不建第二编排/不引新中间件/候选板不落新表/不动已实施卡语义）、每卡红绿判据+live-verify 验收
 - [2026-11-21-recursive-self-evolution-plan.md](../04-plans/2026-11-21-recursive-self-evolution-plan.md) — Neurova 递归自进化第一期实施详案（**备稿已评审，2026-11-21 起实施**）：五臂现状盘点（参数 RSI/文本技能进化/工具技能闭环/提案生命周期/dreaming 规则臂）+ 运行数据实证（RSI 1018 迭代 0 应用、EvalCase 生产零立案、multi_agent 零报告、phase 4 顶格与证据脱节）→ **R 批机制咬合（R1 RSI 咬合/R2 EvalCase 立案/R3 跑批入口/R4 metacog 门全局开/R5 回滚持久化参数化/R6 相位回调+实做门槛/R7 RSI 面板参数化）+ P0 安全地基（TargetRegistry 禁改内核/SurvivalProbe 存活探针/GenerationLedger 世代账本）+ P1 L1 闭环（门禁链/影子验证/金丝雀/全自动闭环贯通/P1-7 租户段补齐）+ P2 L2 试点（PrPatchChannel/neuacp 执行体/白名单/提案收口）+ P3 元层**；三原则（内核先于演化/候选不直改基线/裁判在演化集合外）+ 总纲（进化全程自动进行、跑不通自动回滚，人工仅三处保留点）+ 多租户影响面（scope 分级/共性聚类 N=3 已拍板/金丝雀永不碰生产流量）+ 各类对象回滚机制表 + 安全红线 + DoD；11 项待拍板已于 2026-11-21 交互拍板落档
 - [2026-11-21-harness-nth-power-design.md](../04-plans/2026-11-21-harness-nth-power-design.md) — **Harness^N** 第二期设计（备稿挂起；n=无限演化可能/一次演化几何式复合增益/Neurova 自指）：一期六件套底座上做"递归的递归"（演化工具链自身入注册表成为可演化对象）、多臂协同世代、neuacp 执行体并行、信号驱动持续演化、复合增益六指标观测；P4–P6 卡位草案，立项前置=一期验收门（P0–P3 完成+3 个完整世代含 1 次回滚演练+首个被采纳 L2 改进）
 - [2026-11-21-reference-ac-catchup-implementation-plan.md](../04-plans/2026-11-21-reference-ac-catchup-implementation-plan.md) — 参照系 ac（T3 Code）追平与超越实施方案（源自同日对照评测报告，19 卡覆盖全部落后子项，卡号=评分卡子项编号便于对账）：三批走——批一攻三大代差（B2 上下文传递工件化：ContextTransfer/Handoff+预算 min(16k token,64KiB,窗口)+三态投递+omitted 可恢复；C5 provider 切换五结果决策 reuse/switch_model/restart_and_resume/create_with_handoff/reject 全由能力声明驱动；A3 命令回执幂等 insertIfAbsent+按回执重放）→批二体系补强（A5 自动结算护栏组/B3 隐藏 git ref 检查点+会话协同回滚+隔离检查/A2 事件溯源全局 seq+pruned-through+快照降级/E2 契约单源兼容守卫/D2 权限天花板 rank 序四层收窄/C1 三家真握手+registry 评估）→批三扫尾十项（C3 进程组回收+重试预算/E3 WS 压缩+订阅预算/D3 三端 cursor 自适应/B1 完成投递 cohort/A1 终态质量分级/C4 探测无副作用/E1 evals 先 case 后修/B4 队列治理/C2 能力维度扩展/D1 记忆式批准 L2 永不记忆）；含八项待拍板（D-A…D-H）、明确不做×6（不引 Effect-TS/不做巨石/不做云推送/不造第二套 ACP/不引 full-access 缺省/不为追分做表面工程）、每卡红绿判据+live-verify 验收、批复评机制（对照 T3 当期主干同卡复测）
@@ -246,6 +247,7 @@
 - [最终集成总结.md](../05-reports/最终集成总结.md) — 最终集成总结
 - [memory-temperature-convergence-2026-09-21.md](../05-reports/memory-temperature-convergence-2026-09-21.md) — 温度衰减双实现比对与收敛（Issue #74 死码退役）
 - [同名函数盘点台账_2026-09-25.md](../05-reports/同名函数盘点台账_2026-09-25.md) — 跨文件同名函数分档与处置结论（Issue #192 待办项收口）
+- [2026-11-21-multi-agent-collaboration-implementation-analysis.md](../05-reports/2026-11-21-multi-agent-collaboration-implementation-analysis.md) — 多 Agent 协作实现路径分析（六路并行代码级核读）：SwarmManager 编排核心（生命周期/状态机/候选制 CAS/双门/依赖门/父代控制）+ 父子通信（邮箱三层可靠/Steer/房间作用域）+ 四入口簇 + neuacp 外部代理接入（能力双闸/进程池/审批桥接/帧账本/租户红线/SSH）+ 审批治理（L0-L2/裁决单源/D1 记忆式批准）+ 工具面四层防线与 MCP 双面 + 八类台账面与 H-4 事件族 + 辅助编排线（neurflow/进程内 ACP 总线/Supervisor）+ 前端协作面；附 14 项断点与风险清单（P0×4/P1×4/P2×6）与总体评价
 
 ### 06-bugfix 修复记录
 
