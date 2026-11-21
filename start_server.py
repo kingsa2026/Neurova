@@ -171,6 +171,23 @@ def main():
 
     except KeyboardInterrupt:
         print("\nServer stopped by user")
+    except SystemExit as e:
+        # SystemExit 不是 Exception，上面的分支接不住——uvicorn（server.py:118/192
+        # 的 sys.exit(STARTUP_FAILURE)）与部分依赖库会以 sys.exit(1) 终止进程。
+        # 实测（2026-11-21 凌晨）后端两次以退出码 1 零痕迹消失，server.log 无任何
+        # 收尾记录，无法归案。这里把退出码与抛出点 traceback 落进 stdout
+        # （start.py 已把后端 stdout/stderr 重定向进 server.log），并走启动失败
+        # 上报面留底；退出码语义保持不变。
+        print(f"\n[fatal] Server requested exit ({type(e).__name__}): code={e.code}")
+        import traceback
+        traceback.print_exc()
+        try:
+            from neurova.core.crash_report import report_startup_failure
+
+            report_startup_failure(e, stage="runtime-exit", app_version=_get_app_version())
+        except Exception:
+            pass
+        return e.code if isinstance(e.code, int) else 1
     except PortUnavailableError as e:
         # 端口被占是**可自辨的启动失败**：不是崩溃，也不必走启动失败上报
         # （那是给"解释器都起不来"这类故障用的）。一条点名端口的显式提示就够。
