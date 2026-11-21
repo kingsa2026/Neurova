@@ -18,7 +18,9 @@ TRANSFER_TYPES = ("fork", "provider_handoff", "merge_back", "subagent_spawn", "s
 HANDOFF_STRATEGIES = ("delta_since_last_seen", "full_summary", "checkpoint_summary", "manual_context")
 DELIVERY_STATES = ("pending", "injected", "inline", "failed")
 
-DEFAULT_TOKEN_CAP = 16000
+#: D-A 拍板（2026-11-21）：默认交接预算 32k token（原 16k；env
+#: NEUROVA_CONTEXT_HANDOFF_TOKEN_CAP 仍可覆盖）。
+DEFAULT_TOKEN_CAP = 32000
 MIN_TOKEN_CAP, MAX_TOKEN_CAP = 1024, 64000
 DEFAULT_BYTE_CAP = 64 * 1024
 PER_IMAGE_RESERVE_TOKENS = 8192

@@ -38,7 +38,7 @@ def _fiveAssistantItems():
 
 
 def testClampTokenCapNoneFallsBackToDefault():
-    assert clampTokenCap(None) == DEFAULT_TOKEN_CAP == 16000
+    assert clampTokenCap(None) == DEFAULT_TOKEN_CAP == 32000
 
 
 def testClampTokenCapClampsBothSides():
@@ -82,7 +82,7 @@ def testComputeHandoffBudgetDeductsWindowUsage():
     budgetTokens, _ = computeHandoffBudget(
         window_tokens=20000, native_usage_tokens=3000, input_tokens=2000, reserve_tokens=1000
     )
-    assert budgetTokens == 14000  # min(16000, 20000 - 3000 - 2000 - 1000)
+    assert budgetTokens == 14000  # min(32000, 20000 - 3000 - 2000 - 1000)
 
 
 def testComputeHandoffBudgetTakesMinOfClampedCapAndWindow():
