@@ -19,8 +19,14 @@ import {
   getRsiStatus,
   listRsiProposals,
   rejectRsiProposal,
+  listRsiGenerations,
+  getCurrentBaselineGeneration,
+  getRsiGeneration,
+  getRsiGenerationLineage,
   type ProposalStateFilter,
   type RsiApproveEvidence,
+  type RsiGeneration,
+  type RsiGenerationSummary,
   type RsiProposal,
   type RsiStatus,
   approveImproverUpgrade,
@@ -376,9 +382,141 @@ async function saveParams() {
   }
 }
 
+// ── 世代谱系（P1-8，接 P1-5 四条只读端点）────────────────────
+// 只读呈现：列表（limit/status 过滤）/单代详情/谱系链/当前基线代。
+// 写面（审批、参数修改）归提案队列与 R5/R7 参数区，不在此重复建设。
+// 诚实纪律：503 未装配与"账本空"分开呈现；基线代 404 如实说"尚无"，
+// 不拿最大序号充数；门禁三态（passed/failed/unevidenced）不折叠。
+
+const GEN_STATUSES = [
+  'proposed',
+  'shadowTesting',
+  'gated',
+  'canary',
+  'deployed',
+  'rejected',
+  'rolledBack',
+] as const
+type GenStatusFilter = (typeof GEN_STATUSES)[number] | 'all'
+
+const GEN_STATUS_KEYS: Record<(typeof GEN_STATUSES)[number], string> = {
+  proposed: 'genStatusProposed',
+  shadowTesting: 'genStatusShadowTesting',
+  gated: 'genStatusGated',
+  canary: 'genStatusCanary',
+  deployed: 'genStatusDeployed',
+  rejected: 'genStatusRejected',
+  rolledBack: 'genStatusRolledBack',
+}
+
+const genStatusFilter = ref<GenStatusFilter>('all')
+const genLimit = ref(20)
+const generations = ref<RsiGenerationSummary[]>([])
+const genLoading = ref(false)
+/** 世代读面不可用的原因原文（503 未装配等）；不咽成"没有世代" */
+const genNotReady = ref('')
+/** 当前生产基线代；404 → genBaselineMissing（诚实呈现"尚无已部署代"） */
+const currentBaseline = ref<RsiGeneration | null>(null)
+const genBaselineMissing = ref(false)
+/** 展开中的世代：详情 + 谱系链（点开才拉，列表不拖全量档案） */
+const expandedGenNo = ref<number | null>(null)
+const genDetail = ref<RsiGeneration | null>(null)
+const genLineage = ref<RsiGeneration[]>([])
+const genDetailError = ref('')
+const genDetailLoading = ref(false)
+
+const verdictKeys = computed(() => Object.keys(genDetail.value?.verdicts || {}).sort())
+
+function genStatusLabel(status: string): string {
+  const key = GEN_STATUS_KEYS[status as (typeof GEN_STATUSES)[number]]
+  return key ? t(`rsiGovernance.${key}`) : status
+}
+
+function genStatusColor(status: string): string {
+  if (status === 'deployed') return 'success'
+  if (status === 'canary' || status === 'shadowTesting') return 'processing'
+  if (status === 'rejected' || status === 'rolledBack') return 'error'
+  return 'default'
+}
+
+function genDecisionText(gen: RsiGenerationSummary | RsiGeneration): string {
+  const d = gen.decision
+  if (!d) return t('rsiGovernance.genDecisionNone')
+  if (d.kind === 'approval') {
+    return `${t('rsiGovernance.genDecisionApproval')}·${d.approver || '—'}`
+  }
+  if (d.kind === 'rejected') {
+    return `${t('rsiGovernance.genDecisionRejected')}·${d.reason || '—'}`
+  }
+  return t('rsiGovernance.genDecisionAuto')
+}
+
+/** 门禁三态徽标：缺席/无证据必须与"未过"分色分文（与后端三态纪律同形） */
+function verdictColor(state: string | undefined): string {
+  if (state === 'passed') return 'success'
+  if (state === 'failed') return 'error'
+  return 'warning'
+}
+
+function verdictText(state: string | undefined): string {
+  if (state === 'passed') return t('rsiGovernance.verdictPassed')
+  if (state === 'failed') return t('rsiGovernance.verdictFailed')
+  return t('rsiGovernance.verdictUnevidenced')
+}
+
+async function loadGenerations() {
+  genLoading.value = true
+  genNotReady.value = ''
+  try {
+    const resp = await listRsiGenerations({
+      limit: genLimit.value,
+      status: genStatusFilter.value === 'all' ? undefined : genStatusFilter.value,
+      agentId: agentId.value || undefined,
+    })
+    generations.value = unwrap<{ generations: RsiGenerationSummary[]; count: number }>(resp).generations
+  } catch (err) {
+    generations.value = []
+    genNotReady.value = errorText(err)
+  }
+  // 当前基线代单独取：404 是诚实事实（尚无 deployed 代），不当错误横幅
+  currentBaseline.value = null
+  genBaselineMissing.value = false
+  try {
+    const resp = await getCurrentBaselineGeneration(agentId.value || undefined)
+    currentBaseline.value = unwrap<RsiGeneration>(resp)
+  } catch {
+    genBaselineMissing.value = true
+  }
+  genLoading.value = false
+}
+
+async function toggleGenDetail(gen: RsiGenerationSummary) {
+  if (expandedGenNo.value === gen.generationNo) {
+    expandedGenNo.value = null
+    return
+  }
+  expandedGenNo.value = gen.generationNo
+  genDetailLoading.value = true
+  genDetailError.value = ''
+  genDetail.value = null
+  genLineage.value = []
+  try {
+    const [detailResp, lineageResp] = await Promise.all([
+      getRsiGeneration(gen.generationNo, agentId.value || undefined),
+      getRsiGenerationLineage(gen.generationNo, agentId.value || undefined),
+    ])
+    genDetail.value = unwrap<RsiGeneration>(detailResp)
+    genLineage.value = unwrap<{ lineage: RsiGeneration[] }>(lineageResp).lineage
+  } catch (err) {
+    genDetailError.value = errorText(err)
+  }
+  genDetailLoading.value = false
+}
+
 onMounted(() => {
   load()
   loadParams()
+  loadGenerations()
 })
 </script>
 
@@ -466,6 +604,210 @@ onMounted(() => {
           </a-tag>
         </span>
       </div>
+    </GlassCard>
+
+    <!-- 世代谱系（P1-8）：跨臂代际因果只读面（接 P1-5 四条端点）。
+         列表只出摘要字段（序号/父代/状态/裁决/晋升时间），全量档案
+         （信号/变更/门禁三态/部署）点开才拉；503 未装配与空账本分开
+         呈现，基线代 404 如实说"尚无"（教义第 2 条：诚实形态）。 -->
+    <GlassCard :title="t('rsiGovernance.genTitle')" data-testid="rsi-generations">
+      <p class="rsi-hint">{{ t('rsiGovernance.genHint') }}</p>
+
+      <div class="rsi-toolbar">
+        <label>
+          {{ t('rsiGovernance.genStatusLabel') }}
+          <a-select v-model:value="genStatusFilter" data-testid="rsi-gen-status" class="rsi-state-select">
+            <a-select-option value="all">{{ t('rsiGovernance.genStatusAll') }}</a-select-option>
+            <a-select-option v-for="s in GEN_STATUSES" :key="s" :value="s">
+              {{ genStatusLabel(s) }}
+            </a-select-option>
+          </a-select>
+        </label>
+        <label>
+          {{ t('rsiGovernance.genLimitLabel') }}
+          <a-input-number
+            v-model:value="genLimit"
+            :min="1"
+            :max="500"
+            :precision="0"
+            data-testid="rsi-gen-limit"
+            class="rsi-limit-input"
+          />
+        </label>
+        <a-button data-testid="rsi-gen-reload" :loading="genLoading" @click="loadGenerations">
+          {{ t('rsiGovernance.reload') }}
+        </a-button>
+      </div>
+
+      <p v-if="genNotReady" class="rsi-not-ready" data-testid="rsi-gen-not-ready">
+        {{ t('rsiGovernance.genNotReady') }}：{{ genNotReady }}
+      </p>
+
+      <template v-else>
+        <div v-if="currentBaseline" class="rsi-baseline" data-testid="rsi-gen-baseline">
+          <span>
+            {{ t('rsiGovernance.genBaselineLabel') }}:
+            <a-tag data-testid="rsi-gen-baseline-no">#{{ currentBaseline.generationNo }}</a-tag>
+          </span>
+          <span>
+            <a-tag :color="genStatusColor(currentBaseline.status)">
+              {{ genStatusLabel(currentBaseline.status) }}
+            </a-tag>
+          </span>
+          <span v-if="currentBaseline.basisCommit">
+            {{ t('rsiGovernance.genBasisCommit') }}: {{ currentBaseline.basisCommit }}
+          </span>
+          <span v-if="currentBaseline.deployment?.promotedAt">
+            {{ t('rsiGovernance.genPromotedAt') }}: {{ currentBaseline.deployment.promotedAt }}
+          </span>
+        </div>
+        <p v-else-if="genBaselineMissing" class="rsi-hint" data-testid="rsi-gen-baseline-none">
+          {{ t('rsiGovernance.genBaselineNone') }}
+        </p>
+
+        <p v-if="!generations.length" class="rsi-hint" data-testid="rsi-gen-empty">
+          {{ t('rsiGovernance.genEmpty') }}
+        </p>
+        <table v-if="generations.length" class="rsi-table" data-testid="rsi-gen-table">
+          <thead>
+            <tr>
+              <th>{{ t('rsiGovernance.genColNo') }}</th>
+              <th>{{ t('rsiGovernance.genColParent') }}</th>
+              <th>{{ t('rsiGovernance.genColStatus') }}</th>
+              <th>{{ t('rsiGovernance.genColDecision') }}</th>
+              <th>{{ t('rsiGovernance.genColPromotedAt') }}</th>
+              <th>{{ t('rsiGovernance.genColAction') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="g in generations" :key="g.generationNo">
+              <tr :data-testid="`rsi-gen-row-${g.generationNo}`" class="rsi-row">
+                <td>#{{ g.generationNo }}</td>
+                <td>{{ g.parentNo == null ? '—' : `#${g.parentNo}` }}</td>
+                <td>
+                  <a-tag
+                    :color="genStatusColor(g.status)"
+                    :data-testid="`rsi-gen-status-badge-${g.generationNo}`"
+                  >
+                    {{ genStatusLabel(g.status) }}
+                  </a-tag>
+                </td>
+                <td>{{ genDecisionText(g) }}</td>
+                <td>{{ g.promotedAt || '—' }}</td>
+                <td>
+                  <a-button
+                    size="small"
+                    :data-testid="`rsi-gen-detail-${g.generationNo}`"
+                    @click="toggleGenDetail(g)"
+                  >
+                    {{ expandedGenNo === g.generationNo
+                      ? t('rsiGovernance.genHideDetail')
+                      : t('rsiGovernance.genDetail') }}
+                  </a-button>
+                </td>
+              </tr>
+              <tr v-if="expandedGenNo === g.generationNo">
+                <td colspan="6">
+                  <p v-if="genDetailLoading" class="rsi-hint">
+                    {{ t('rsiGovernance.genDetailLoading') }}
+                  </p>
+                  <p v-else-if="genDetailError" class="rsi-not-ready" data-testid="rsi-gen-detail-error">
+                    {{ genDetailError }}
+                  </p>
+                  <div v-else-if="genDetail" class="rsi-gen-detail" data-testid="rsi-gen-detail">
+                    <div class="rsi-gen-meta">
+                      <span v-if="genDetail.basisCommit">
+                        {{ t('rsiGovernance.genBasisCommit') }}: {{ genDetail.basisCommit }}
+                      </span>
+                      <span v-if="genDetail.createdAt">
+                        {{ t('rsiGovernance.genCreatedAt') }}: {{ genDetail.createdAt }}
+                      </span>
+                    </div>
+
+                    <div class="rsi-gen-section" data-testid="rsi-gen-signals">
+                      <strong>{{ t('rsiGovernance.genSignalsLabel') }}</strong>
+                      <div v-for="(s, i) in genDetail.signals" :key="i" class="rsi-gen-line">
+                        <a-tag>{{ s.kind }}</a-tag>
+                        <span>{{ s.summary || s.ref || '—' }}</span>
+                      </div>
+                      <span v-if="!genDetail.signals?.length" class="rsi-hint">
+                        {{ t('rsiGovernance.genNone') }}
+                      </span>
+                    </div>
+
+                    <div class="rsi-gen-section" data-testid="rsi-gen-changes">
+                      <strong>{{ t('rsiGovernance.genChangesLabel') }}</strong>
+                      <div v-for="(c, i) in genDetail.changes" :key="i" class="rsi-gen-line">
+                        <span class="rsi-gen-target">{{ c.targetId }}</span>
+                        <a-tag v-if="c.kind">{{ c.kind }}</a-tag>
+                        <em v-if="c.rationale">{{ c.rationale }}</em>
+                      </div>
+                      <span v-if="!genDetail.changes?.length" class="rsi-hint">
+                        {{ t('rsiGovernance.genNone') }}
+                      </span>
+                    </div>
+
+                    <div class="rsi-gen-section" data-testid="rsi-gen-verdicts">
+                      <strong>{{ t('rsiGovernance.genVerdictsLabel') }}</strong>
+                      <span v-for="k in verdictKeys" :key="k" class="rsi-gen-verdict">
+                        <em>{{ k }}</em>
+                        <a-tag
+                          :color="verdictColor(genDetail.verdicts[k]?.state)"
+                          :data-testid="`rsi-gen-verdict-${k}`"
+                        >
+                          {{ verdictText(genDetail.verdicts[k]?.state) }}
+                        </a-tag>
+                        <em v-if="genDetail.verdicts[k]?.reason">{{ genDetail.verdicts[k]?.reason }}</em>
+                      </span>
+                      <span v-if="!verdictKeys.length" class="rsi-hint">
+                        {{ t('rsiGovernance.genNone') }}
+                      </span>
+                    </div>
+
+                    <div class="rsi-gen-section" data-testid="rsi-gen-decision">
+                      <strong>{{ t('rsiGovernance.genDecisionLabel') }}</strong>
+                      <span>{{ genDecisionText(genDetail) }}</span>
+                    </div>
+
+                    <div class="rsi-gen-section" data-testid="rsi-gen-deployment">
+                      <strong>{{ t('rsiGovernance.genDeploymentLabel') }}</strong>
+                      <span v-if="genDetail.deployment?.canaryStartedAt">
+                        {{ t('rsiGovernance.genCanaryStartedAt') }}: {{ genDetail.deployment.canaryStartedAt }}
+                      </span>
+                      <span v-if="genDetail.deployment?.canaryConclusion">
+                        {{ t('rsiGovernance.genCanaryConclusion') }}: {{ genDetail.deployment.canaryConclusion }}
+                      </span>
+                      <span v-if="genDetail.deployment?.promotedAt">
+                        {{ t('rsiGovernance.genPromotedAt') }}: {{ genDetail.deployment.promotedAt }}
+                      </span>
+                      <span v-if="genDetail.deployment?.rolledBackTo != null">
+                        {{ t('rsiGovernance.genRolledBackTo') }}: #{{ genDetail.deployment.rolledBackTo }}
+                      </span>
+                      <span v-if="!genDetail.deployment" class="rsi-hint">
+                        {{ t('rsiGovernance.genNone') }}
+                      </span>
+                    </div>
+
+                    <div class="rsi-gen-section" data-testid="rsi-gen-lineage">
+                      <strong>{{ t('rsiGovernance.genLineageLabel') }}</strong>
+                      <span
+                        v-for="(l, i) in genLineage"
+                        :key="l.generationNo"
+                        class="rsi-gen-lineage-item"
+                      >
+                        <span v-if="i > 0" class="rsi-gen-lineage-arrow">←</span>
+                        <a-tag :color="genStatusColor(l.status)">
+                          #{{ l.generationNo }} {{ genStatusLabel(l.status) }}
+                        </a-tag>
+                      </span>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </template>
     </GlassCard>
 
     <!-- 运行参数（R7）：演化运行参数的单点写入口。rsi_phase 写控件自
@@ -700,6 +1042,68 @@ onMounted(() => {
 .rsi-state-select,
 .rsi-sequence-input {
   width: 150px;
+}
+.rsi-limit-input {
+  width: 110px;
+}
+.rsi-baseline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+.rsi-gen-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+.rsi-gen-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+.rsi-gen-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+.rsi-gen-section strong {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-right: 4px;
+}
+.rsi-gen-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.rsi-gen-target {
+  font-weight: 600;
+}
+.rsi-gen-verdict {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.rsi-gen-verdict em {
+  font-style: normal;
+  opacity: 0.7;
+  font-size: 12px;
+}
+.rsi-gen-lineage-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.rsi-gen-lineage-arrow {
+  opacity: 0.6;
+  margin: 0 2px;
 }
 .rsi-sequence-input {
   width: 200px;

@@ -6,12 +6,20 @@ const listRsiProposals = vi.fn()
 const getRsiStatus = vi.fn()
 const approveRsiProposal = vi.fn()
 const rejectRsiProposal = vi.fn()
+const listRsiGenerations = vi.fn()
+const getCurrentBaselineGeneration = vi.fn()
+const getRsiGeneration = vi.fn()
+const getRsiGenerationLineage = vi.fn()
 
 vi.mock('@/api/modules/rsiGovernance', () => ({
   getRsiStatus: (...args: unknown[]) => getRsiStatus(...args),
   listRsiProposals: (...args: unknown[]) => listRsiProposals(...args),
   approveRsiProposal: (...args: unknown[]) => approveRsiProposal(...args),
   rejectRsiProposal: (...args: unknown[]) => rejectRsiProposal(...args),
+  listRsiGenerations: (...args: unknown[]) => listRsiGenerations(...args),
+  getCurrentBaselineGeneration: (...args: unknown[]) => getCurrentBaselineGeneration(...args),
+  getRsiGeneration: (...args: unknown[]) => getRsiGeneration(...args),
+  getRsiGenerationLineage: (...args: unknown[]) => getRsiGenerationLineage(...args),
 }))
 const getGovernanceSettings = vi.fn()
 const updateGovernanceSettings = vi.fn()
@@ -88,6 +96,12 @@ getGovernanceSettings.mockResolvedValue({ data: { code: 0, data: {} } })
 getEvolutionSettings.mockResolvedValue({ data: { code: 0, data: {} } })
 updateGovernanceSettings.mockResolvedValue({ data: { code: 0, data: {} } })
 updateEvolutionSettings.mockResolvedValue({ data: { code: 0, data: {} } })
+
+// 世代读面（P1-8）兜底：本文件不关心世代区块，给空账本 + 无基线代（404 诚实态）
+listRsiGenerations.mockResolvedValue({ data: { code: 0, data: { generations: [], count: 0 } } })
+getCurrentBaselineGeneration.mockRejectedValue({
+  response: { data: { detail: '尚无已部署的生产基线世代（账本空或没有 deployed 代）' } },
+})
 
 /**
  * RSI 审批页（工单 011）。

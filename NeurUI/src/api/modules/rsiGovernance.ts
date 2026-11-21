@@ -205,3 +205,124 @@ export function rejectRsiProposal(
     scopedParams(agentId),
   )
 }
+
+// ---------------------------------------------------------------------------
+// 世代谱系读面（P1-8，接 P1-5 四条治理端点）
+//
+// 字段名对齐后端 `EvolutionGeneration.to_dict()` / `_generationSummary()`
+// （generation_ledger.py），前端不另立一套解释。
+// ---------------------------------------------------------------------------
+
+/** 世代状态（GenerationStatus 规范值；终态 rejected/rolledBack 留档） */
+export type RsiGenerationStatus =
+  | 'proposed'
+  | 'shadowTesting'
+  | 'gated'
+  | 'canary'
+  | 'deployed'
+  | 'rejected'
+  | 'rolledBack'
+  | string
+
+/** 一条「为什么改」的信号引用（教训/评测失败/反馈/守卫） */
+export interface RsiGenerationSignal {
+  kind: string
+  ref: string
+  summary: string
+}
+
+/** 一条「改了什么」的变更引用（targetId + 补丁/参数引用 + 理由） */
+export interface RsiGenerationChange {
+  targetId: string
+  kind: string
+  ref: string
+  rationale: string
+}
+
+/** 门禁三态结论（passed / failed / unevidenced——"没证据"永不冒充"通过"） */
+export interface RsiGenerationVerdict {
+  state: 'passed' | 'failed' | 'unevidenced' | string
+  reason?: string
+  evidence?: unknown
+}
+
+/** 裁决引用：auto / approval(approver) / rejected(reason) */
+export interface RsiGenerationDecision {
+  kind: 'auto' | 'approval' | 'rejected' | string
+  approver?: string
+  reason?: string
+}
+
+/** 部署引用：金丝雀观测结论 / 晋升时刻 / 回滚落点 */
+export interface RsiGenerationDeployment {
+  promotedAt?: string
+  canaryConclusion?: string
+  rolledBackTo?: number | null
+  canaryStartedAt?: string
+}
+
+/** 一代演化尝试的完整档案（详情面出街） */
+export interface RsiGeneration {
+  generationNo: number
+  parentNo: number | null
+  basisCommit: string
+  createdAt: string
+  signals: RsiGenerationSignal[]
+  changes: RsiGenerationChange[]
+  verdicts: Record<string, RsiGenerationVerdict>
+  decision: RsiGenerationDecision | null
+  deployment: RsiGenerationDeployment | null
+  status: RsiGenerationStatus
+}
+
+/** 列表条目（序号/父代/状态/裁决/晋升时间；全量档案只在详情面） */
+export interface RsiGenerationSummary {
+  generationNo: number
+  parentNo: number | null
+  status: RsiGenerationStatus
+  decision: RsiGenerationDecision | null
+  promotedAt: string
+}
+
+export interface RsiGenerationListOptions {
+  limit?: number
+  status?: RsiGenerationStatus
+  agentId?: string
+}
+
+/** 世代列表（limit 截取最近 N 代；status 过滤；账本空 → 空列表，未装配 → 503） */
+export function listRsiGenerations(options: RsiGenerationListOptions = {}) {
+  const { limit, status, agentId } = options
+  const params: Record<string, string | number> = {}
+  if (limit != null) params.limit = limit
+  if (status) params.status = status
+  if (agentId) params.agent_id = agentId
+  return api.get<ApiResponse<{ generations: RsiGenerationSummary[]; count: number }>>(
+    `${BASE}/generations`,
+    { params },
+  )
+}
+
+/** 当前生产基线代（序号最大的 deployed 代；尚无部署 404，不编造） */
+export function getCurrentBaselineGeneration(agentId?: string) {
+  return api.get<ApiResponse<RsiGeneration>>(
+    `${BASE}/generations/current`,
+    scopedParams(agentId),
+  )
+}
+
+/** 单代详情（signals/changes/verdicts 全量/decision/deployment） */
+export function getRsiGeneration(generationNo: number, agentId?: string) {
+  return api.get<ApiResponse<RsiGeneration>>(
+    `${BASE}/generations/${generationNo}`,
+    scopedParams(agentId),
+  )
+}
+
+/** 谱系回溯链（从指定代起沿 parentNo 向上到根代，含自身） */
+export function getRsiGenerationLineage(generationNo: number, agentId?: string) {
+  return api.get<ApiResponse<{ lineage: RsiGeneration[] }>>(
+    `${BASE}/generations/${generationNo}/lineage`,
+    scopedParams(agentId),
+  )
+}
