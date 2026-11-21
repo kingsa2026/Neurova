@@ -1636,6 +1636,70 @@ class SwarmManager:
             "reason": str(reason or "")[:EVENT_ERROR_SUMMARY_CHARS],
         })
 
+    def _patchTargetFromTaskUnit(self, run: SubAgentRun) -> str:
+        """任务书工件所有权 → 代码补丁目标（首个仓库路径键；无则空串）。
+
+        artifactOwnership 是人写自由文本（如 "neurova/context/rules_sections.py、
+        记忆:auth"）：记忆键不是代码补丁目标，只有形似仓库相对路径（含 / 或 .）
+        的键才可作为 PR patch 目标——粗筛宁可漏配不可误指。
+        """
+        from neurova.agent.candidate_merge import artifactKeysFromOwnership
+
+        unit = run.task_unit or {}
+        for key in artifactKeysFromOwnership(str(unit.get("artifactOwnership") or "")):
+            patchTarget = key.strip()
+            if not patchTarget or patchTarget.startswith(("记忆:", "记忆：", "memory:")):
+                continue
+            if "/" in patchTarget or "." in patchTarget:
+                return patchTarget
+        return ""
+
+    def _proposeExternalPatchForRun(
+            self, run: SubAgentRun, initiator_agent: Optional[Any], candidate: Any) -> None:
+        """P2-2：外部成员（neuacp）合入成功的代码产出 → 演化提案通道。
+
+        触发条件（全部满足才提交）：本 run 由外部编码成员执行（_externalAdapters
+        在册）+ 任务书工件所有权指名了仓库路径目标。提交经 submitExternalPatch
+        单一入口（沙箱校验 + 禁改/白名单预检 + 双 gate 不变）；proposer 取宿主
+        agent 的 self_improvement_proposer——外部成员不在 agent 池，提案落在
+        发起方的演化台账，lineage 记宿主 agent_id + 本 run id。
+        不阻断主链：此处候选已合入、run 已定案 completed，提案通道任何异常
+        （拒绝/503/校验失败）只记 external_patch_proposal_failed 事件留痕，
+        不改写终态、不影响结算。
+        """
+        targetFile = ""
+        try:
+            if run.subagent_id not in self._externalAdapters:
+                return
+            targetFile = self._patchTargetFromTaskUnit(run)
+            if not targetFile:
+                return
+            from neurova.evolution.rsi.external_candidate_bridge import submitExternalPatch
+
+            proposer = getattr(
+                getattr(initiator_agent, "rsi_orchestrator", None),
+                "self_improvement_proposer", None,
+            )
+            proposalId = submitExternalPatch(
+                agentId=str(getattr(initiator_agent, "agent_id", "") or ""),
+                targetFile=targetFile,
+                patchContent=candidate.content,
+                description=run.task[:EVENT_TASK_SUMMARY_CHARS],
+                runContext={"runId": run.subagent_id, "tenantId": run.tenant_id},
+                proposer=proposer,
+            )
+            self._logRunEvent(run, "external_patch_proposed", {
+                "proposal_id": proposalId,
+                "target_file": targetFile,
+                "candidate_id": candidate.candidateId,
+            })
+        except Exception as e:  # noqa: BLE001 - 提案通道故障不改写已定案的主链
+            self._logRunEvent(run, "external_patch_proposal_failed", {
+                "error": str(e)[:EVENT_ERROR_SUMMARY_CHARS],
+                "target_file": targetFile,
+                "candidate_id": getattr(candidate, "candidateId", ""),
+            })
+
     async def _mergeCandidateForRun(self, run: SubAgentRun, candidate) -> Dict[str, Any]:
         """主侧合入候选：审批链分级（默认 L0 自动留痕）+ CAS；冲突升级人工裁决。
 
@@ -3546,6 +3610,9 @@ class SwarmManager:
             run.report = candidate.content
             transitionRun(run, SUBAGENT_COMPLETED, cause="candidate_merged")
             run.finished_at = time.time()
+            # P2-2 待办清偿：外部成员代码产出接入演化提案通道（失败只留痕）。
+            # 此处候选已合入、run 已定案 completed——提案通道任何异常都不得改写终态。
+            self._proposeExternalPatchForRun(run, initiator_agent, candidate)
         except asyncio.CancelledError:
             # 取消不是「没发生」：`CancelledError` 继承 `BaseException`，改前那一条
             # `except Exception` 抓不到它——run 就永久停在 running，槽位被占死（K 条）。
