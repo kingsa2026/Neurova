@@ -281,6 +281,58 @@ async def room_candidate_action(
     return {"code": 0, "message": "success", "data": outcome}
 
 
+class EscalationResolveBody(BaseModel):
+    """房间升级卡处置请求（M13）。"""
+
+    action: str = "steer"  # steer（注入指示继续）/ cancel（叫停）
+    note: str = ""
+
+
+@router.post("/rooms/{room_id}/escalations/{subagent_id}/resolve")
+async def resolve_room_escalation(
+    room_id: str,
+    subagent_id: str,
+    body: EscalationResolveBody,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """M13（拍板接提交口）：房间升级卡处置——steer（注入指示继续）/ cancel（叫停）。
+
+    复用既有编排单源机制，不新造语义：steer 走 SwarmManager.updateSubagent
+    （SteerQueue 注入，成员下一工具轮可见）；cancel 走 SwarmManager.cancelRun
+    （幂等叫停落账）。判定权 = admin/群主（与审批裁决同口径）；处置结果以
+    system 消息上墙（kind=swarm_escalate、status=resolved）闭环。
+    """
+    project = _require_project(room_id)
+    actor = _room_actor(current_user)
+    _require_room_decisioner(project, actor, current_user)
+    action = str(body.action or "").strip().lower()
+    if action not in ("steer", "cancel"):
+        raise HTTPException(status_code=400, detail="action 仅支持 steer/cancel")
+    note = str(body.note or "").strip()
+    if action == "steer" and not note:
+        raise HTTPException(status_code=400, detail="steer 处置必须附指示内容（note）")
+    from neurova.agent.swarm import get_swarm_manager
+
+    swarm = get_swarm_manager()
+    if action == "cancel":
+        result = swarm.cancelRun(subagent_id, reason=note or f"房间升级处置（{actor}）")
+    else:
+        result = await swarm.updateSubagent(subagent_id, note, mode="steer")
+    if not result.get("success", True):
+        raise HTTPException(status_code=409, detail=str(result.get("error") or "处置未生效"))
+    from neurova.collaboration.room_bus import publishRoomSystemMessage
+
+    verb = "叫停" if action == "cancel" else "注入指示"
+    publishRoomSystemMessage(
+        room_id,
+        f"【升级处置】{actor} 对 {subagent_id} {verb}：{note or '（无备注）'}",
+        meta={"kind": "swarm_escalate", "subagent_id": subagent_id,
+              "status": "resolved", "resolve_action": action, "decided_by": actor},
+    )
+    return {"code": 0, "message": "success",
+            "data": {"success": True, "action": action, "subagent_id": subagent_id}}
+
+
 @router.put("/rooms/{room_id}")
 async def update_room(
     room_id: str,

@@ -13,6 +13,7 @@ AgentTeam 与 Swarm 的边界复核（要点5，教义第7条：编排不双实�
 from __future__ import annotations
 
 import asyncio
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -459,3 +460,68 @@ class TestRoomApprovalBackfillLandsGovernance:
         assert res["decision_result"]["success"] is True
         assert not [t for t in teamsStore._teams_store.values() if t.get("promoted_from_run") == run.subagent_id], \
             "驳回不落团队（与显式端点口径一致）"
+
+
+# ── M13（拍板接提交口）：房间升级卡处置——steer/cancel 复用既有单源机制 ──
+
+
+class TestEscalationResolve:
+    @pytest.mark.asyncio
+    async def test_resolve_steers_run_and_walls_resolution(
+            self, swarm, roomStore, roomBus, roomProject):
+        run = makeRun()
+        swarm._runs[run.subagent_id] = run
+        swarm.recordEscalation(run, reason="need_input", question="要继续读取文件吗", severity="high")
+
+        from neurova.api.endpoints import collaboration_room_api as roomApi
+
+        res = await roomApi.resolve_room_escalation(
+            ROOM, run.subagent_id,
+            roomApi.EscalationResolveBody(action="steer", note="可以继续，先读取 A 文件"),
+            current_user={"user_id": OWNER, "role": "member"})
+        assert res["data"]["success"] is True
+        assert res["data"]["action"] == "steer"
+        rows = roomKinds(roomStore, "swarm_escalate")
+        assert any(r["meta"].get("status") == "resolved" for r in rows), \
+            "处置结果必须上墙（升级卡闭环）"
+
+    @pytest.mark.asyncio
+    async def test_resolve_cancel_fails_run(self, swarm, roomStore, roomBus, roomProject):
+        run = makeRun()
+        swarm._runs[run.subagent_id] = run
+        swarm.recordEscalation(run, reason="blocked", question="需要授权", severity="high")
+        # cancelRun 需要独立任务句柄（无句柄的前台 run 诚实报不可单独叫停）：
+        # 挂一个可取消的后台任务，断言终态异步落账为 failed
+        holder = asyncio.create_task(asyncio.sleep(60))
+        swarm._tasks[run.subagent_id] = holder
+        try:
+            from neurova.api.endpoints import collaboration_room_api as roomApi
+
+            res = await roomApi.resolve_room_escalation(
+                ROOM, run.subagent_id,
+                roomApi.EscalationResolveBody(action="cancel", note="叫停重派"),
+                current_user={"user_id": OWNER, "role": "member"})
+            assert res["data"]["success"] is True
+            deadline = time.time() + 5
+            while swarm._runs[run.subagent_id].status != "failed" and time.time() < deadline:
+                await asyncio.sleep(0.05)
+            assert swarm._runs[run.subagent_id].status == "failed", "叫停后 run 应落 failed 终态"
+        finally:
+            holder.cancel()
+
+    @pytest.mark.asyncio
+    async def test_non_decisioner_rejected(self, swarm, roomStore, roomBus, roomProject):
+        run = makeRun()
+        swarm._runs[run.subagent_id] = run
+        swarm.recordEscalation(run, reason="need_input", question="?", severity="high")
+
+        from fastapi import HTTPException
+
+        from neurova.api.endpoints import collaboration_room_api as roomApi
+
+        with pytest.raises(HTTPException) as ei:
+            await roomApi.resolve_room_escalation(
+                ROOM, run.subagent_id,
+                roomApi.EscalationResolveBody(action="steer", note="试试"),
+                current_user={"user_id": MEMBER, "role": "member"})
+        assert ei.value.status_code == 403

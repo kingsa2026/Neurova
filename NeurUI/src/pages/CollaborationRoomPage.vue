@@ -30,8 +30,14 @@
     </div>
 
     <!-- S11 协作进度区：蜂群 run 的实时状态（subagent_* 事件驱动） -->
-    <div v-if="collabRunList.length" class="collab-progress">
+    <div v-if="collabRunList.length || pendingApprovals.length || pendingCandidates.length" class="collab-progress">
       <span class="collab-progress-title">{{ t('collab.collabProgress') }}</span>
+      <a-tag v-if="pendingApprovals.length" color="orange">
+        {{ t('collab.pendingApprovals') }}: {{ pendingApprovals.length }}
+      </a-tag>
+      <a-tag v-if="pendingCandidates.length" color="blue">
+        {{ t('collab.pendingCandidates') }}: {{ pendingCandidates.length }}
+      </a-tag>
       <span
         v-for="run in collabRunList"
         :key="run.subagentId"
@@ -71,6 +77,12 @@
                 <MessageContent :content="msg.content" bare />
                 <div v-if="canDecideSwarm && isSwarmActionable(msg)" class="swarm-actions">
                   <template v-if="msg.kind === 'swarm_approval' && msg.swarm.request_id">
+                    <a-input
+                      v-model:value="swarmNotes[msg.swarm.request_id]"
+                      size="sm"
+                      :placeholder="t('collab.swarmNotePlaceholder')"
+                      class="swarm-note"
+                    />
                     <GlassButton size="sm" variant="primary" @click="decideApproval(msg, 'approve')">
                       {{ t('collab.swarmApprove') }}
                     </GlassButton>
@@ -86,6 +98,22 @@
                     </GlassButton>
                     <GlassButton size="sm" variant="primary" @click="actCandidate(msg, 'merge')">
                       {{ t('collab.swarmMerge') }}
+                    </GlassButton>
+                  </template>
+                  <template
+                    v-else-if="msg.kind === 'swarm_escalate' && msg.swarm.subagent_id && msg.swarm.status !== 'resolved'"
+                  >
+                    <a-input
+                      v-model:value="swarmNotes[`esc:${msg.swarm.subagent_id}`]"
+                      size="sm"
+                      :placeholder="t('collab.escalateNotePlaceholder')"
+                      class="swarm-note"
+                    />
+                    <GlassButton size="sm" variant="primary" @click="resolveEscalation(msg, 'steer')">
+                      {{ t('collab.escalateSteer') }}
+                    </GlassButton>
+                    <GlassButton size="sm" variant="ghost" @click="resolveEscalation(msg, 'cancel')">
+                      {{ t('collab.escalateCancel') }}
                     </GlassButton>
                   </template>
                 </div>
@@ -171,6 +199,7 @@ import {
   getRoom, getRoomMessages, postRoomMessage, applyRoomEvent,
   computeMentionQuery, applyMention, filterMembers,
   decideRoomApproval, roomCandidateAction, startRoomCollaboration,
+  getRoomSwarmPending, resolveRoomEscalation,
   type RoomInfo, type RoomMessage, type RoomEvent, type MentionContext, type RoomMember,
 } from '@/api/modules/collaborationRoom'
 
@@ -216,6 +245,10 @@ function isSwarmActionable(msg: RoomMessage): boolean {
   if (msg.kind === 'swarm_candidate') {
     return sw.status === 'submitted'
   }
+  if (msg.kind === 'swarm_escalate') {
+    // M13：升级卡可处置（steer/cancel 提交口）；已处置（resolved）只读
+    return sw.status !== 'resolved'
+  }
   return false
 }
 
@@ -230,7 +263,13 @@ async function decideApproval(msg: RoomMessage, decision: 'approve' | 'reject') 
   const rid = msg.swarm?.request_id
   if (!rid) return
   try {
-    await decideRoomApproval(roomId, rid, decision)
+    await decideRoomApproval(roomId, rid, decision, swarmNotes[rid] ?? '')
+    // M13：本地即改卡状态（不空等 WS 回声）；待裁决角标同步刷新
+    messages.value = messages.value.map((m) =>
+      m.swarm?.request_id === rid
+        ? { ...m, swarm: { ...m.swarm, status: decision === 'approve' ? 'approved' : 'rejected' } }
+        : m)
+    refreshSwarmPending()
     antMessage.success(t('collab.swarmActionDone'))
   } catch {
     antMessage.error(t('collab.swarmActionFailed'))
@@ -242,6 +281,49 @@ async function actCandidate(msg: RoomMessage, action: 'intercept' | 'merge') {
   if (!cid) return
   try {
     await roomCandidateAction(roomId, cid, action)
+    // M13：本地即改卡状态（intercept→rejected / merge→merged）
+    messages.value = messages.value.map((m) =>
+      m.swarm?.candidate_id === cid
+        ? { ...m, swarm: { ...m.swarm, status: action === 'merge' ? 'merged' : 'rejected' } }
+        : m)
+    refreshSwarmPending()
+    antMessage.success(t('collab.swarmActionDone'))
+  } catch {
+    antMessage.error(t('collab.swarmActionFailed'))
+  }
+}
+
+// ── M13：待裁决角标 + 升级卡处置（steer/cancel）+ 处置备注 ──────────────
+const pendingApprovals = ref<string[]>([])
+const pendingCandidates = ref<string[]>([])
+const swarmNotes = reactive<Record<string, string>>({})
+
+async function refreshSwarmPending() {
+  try {
+    const pending = await getRoomSwarmPending(roomId)
+    pendingApprovals.value = pending.approvals
+    pendingCandidates.value = pending.candidates
+  } catch {
+    // 读面失败不阻断房间使用（角标维持上次读数）
+  }
+}
+
+async function resolveEscalation(msg: RoomMessage, action: 'steer' | 'cancel') {
+  const sid = msg.swarm?.subagent_id
+  if (!sid) return
+  const note = (swarmNotes[`esc:${sid}`] ?? '').trim()
+  if (action === 'steer' && !note) {
+    antMessage.warning(t('collab.escalateNoteRequired'))
+    return
+  }
+  try {
+    await resolveRoomEscalation(roomId, sid, action, note)
+    // 本地即改卡状态（resolved），待裁决读数刷新
+    messages.value = messages.value.map((m) =>
+      m.swarm?.subagent_id === sid && m.kind === 'swarm_escalate'
+        ? { ...m, swarm: { ...m.swarm, status: 'resolved' } }
+        : m)
+    refreshSwarmPending()
     antMessage.success(t('collab.swarmActionDone'))
   } catch {
     antMessage.error(t('collab.swarmActionFailed'))
@@ -259,6 +341,8 @@ function onEvent(event: RoomEvent) {
     return
   }
   messages.value = applyRoomEvent(messages.value, event)
+  // M13：系统卡（审批/升级/候选）上墙即刷新待裁决角标
+  if (event.event_type === 'agent_reply') refreshSwarmPending()
   scrollToBottom()
 }
 
@@ -404,6 +488,8 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  // M13：待裁决角标（审批/候选卡上墙后可见，裁决后刷新）
+  refreshSwarmPending()
 })
 </script>
 

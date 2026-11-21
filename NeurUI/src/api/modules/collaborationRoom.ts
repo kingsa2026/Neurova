@@ -228,6 +228,19 @@ export async function getRoomSwarmPending(roomId: string): Promise<RoomSwarmPend
   return { approvals: data?.approvals ?? [], candidates: data?.candidates ?? [] }
 }
 
+/** M13：房间升级卡处置——steer（注入指示继续）/ cancel（叫停）。 */
+export async function resolveRoomEscalation(
+  roomId: string,
+  subagentId: string,
+  action: 'steer' | 'cancel',
+  note = '',
+): Promise<void> {
+  await api.post(
+    `${BASE}/rooms/${encodeURIComponent(roomId)}/escalations/${encodeURIComponent(subagentId)}/resolve`,
+    { action, note },
+  )
+}
+
 // ── S11 入口二：房间"发起协作"动作（用户直发多 agent 协作）──────────────
 
 export interface StartCollaborationPayload {
@@ -257,9 +270,18 @@ export function applyRoomEvent(messages: RoomMessage[], event: RoomEvent): RoomM
 
   if (type === 'user_message') {
     const content = String(p.content ?? '')
-    const dup = messages.some(
-      (m) => m.sender_type === 'user' && m.sender_id === senderId && m.content === content,
-    )
+    // M13：去重键以 event_id 为准（sync_resume 重放同一事件只算一条）；
+    // 乐观回显（本地占位 id=local*）与 WS 确认同文 → 仍视为同一条；
+    // 用户连续发送两条同文消息（不同 event_id、非本地占位）不再被误吞。
+    const dup = messages.some((m) => {
+      if (event.event_id && m.id === event.event_id) return true
+      return (
+        String(m.id || '').startsWith('local') &&
+        m.sender_type === 'user' &&
+        m.sender_id === senderId &&
+        m.content === content
+      )
+    })
     if (dup) return messages
     return [...messages, { id: event.event_id, sender_type: 'user', sender_id: senderId, content }]
   }
