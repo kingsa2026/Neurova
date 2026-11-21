@@ -1185,9 +1185,18 @@ class MultiModelLLMClient:
         switched_models: set = set()
         # R2：attempt 生命周期账本（每逻辑请求一份，轨迹经 _lastAttemptLedger 可查）
         from neurova.llm.routing.attempt import AttemptLedger, AttemptOutcome
+        # R4：流分片载荷归一（dict/对象双形态单源）
+        from neurova.llm.routing.stream_events import (
+            StreamEventKind,
+            chunkField,
+            chunkPayloadKinds,
+        )
 
         ledger = AttemptLedger()
         self._lastAttemptLedger = ledger
+        self._lastUsageDiagnostics = None
+        # R6：usage 缺失诊断计数（请求级累计，跨切换不重置）
+        usage_diag = {"chunks_seen": 0, "usage_chunks_seen": 0}
 
         while True:
             model_key = client.model or "unknown"
@@ -1288,6 +1297,7 @@ class MultiModelLLMClient:
                             break
                         _pending = None
                         _stream_state["last_chunk_at"] = time.time()
+                        usage_diag["chunks_seen"] += 1
                         _stream_state["warned_at"] = 0.0
                         if first_token_ms == 0:
                             # 首个有效 chunk（含 reasoning/content/usage 任一载荷）
@@ -1300,6 +1310,7 @@ class MultiModelLLMClient:
                         # 取最后一次非空值，逐 chunk 累加会把 token 双计。
                         _u = getattr(chunk, "usage", None)
                         if _u:
+                            usage_diag["usage_chunks_seen"] += 1
                             stream_usage = {
                                 "prompt_tokens": getattr(_u, "prompt_tokens", None) if not isinstance(_u, dict) else _u.get("prompt_tokens"),
                                 "completion_tokens": getattr(_u, "completion_tokens", None) if not isinstance(_u, dict) else _u.get("completion_tokens"),
@@ -1313,22 +1324,14 @@ class MultiModelLLMClient:
                             reply_text += getattr(chunk, "content", "") or ""
                             reply_text += getattr(chunk, "reasoning_content", "") or ""
                         # 静默遥测计数：判读"思考/正文各吐了多少"的证据
-                        _rc = getattr(chunk, "reasoning_content", None)
-                        if isinstance(chunk, dict) and not _rc:
-                            _rc = chunk.get("reasoning_content")
-                        if _rc:
-                            _stream_state["reasoning_chars"] += len(_rc)
-                        _cc = getattr(chunk, "content", None)
-                        if isinstance(chunk, dict) and not _cc:
-                            _cc = chunk.get("content")
-                        if _cc:
-                            _stream_state["content_chars"] += len(_cc)
-                        _tc = getattr(chunk, "tool_calls", None)
-                        if isinstance(chunk, dict) and not _tc:
-                            _tc = chunk.get("tool_calls")
-                        if _tc:
-                            saw_tool_calls = True
-                        # A1：校准采样累积（仅采样期；含工具调用分片的响应不采样）
+                        # R4：载荷判类/取值走 stream_events 单源（dict/对象双形态）
+                        _kinds = chunkPayloadKinds(chunk)
+                        if StreamEventKind.REASONING in _kinds:
+                            _stream_state["reasoning_chars"] += len(chunkField(chunk, "reasoning_content") or "")
+                        if StreamEventKind.TEXT in _kinds:
+                            _stream_state["content_chars"] += len(chunkField(chunk, "content") or "")
+                        if StreamEventKind.TOOL_CALLS in _kinds:
+                            saw_tool_calls = True                        # A1：校准采样累积（仅采样期；含工具调用分片的响应不采样）
                         if _calib_collect:
                             _calib_text += (getattr(chunk, "content", "") or "") + (
                                 getattr(chunk, "reasoning_content", "") or ""
@@ -1409,6 +1412,8 @@ class MultiModelLLMClient:
                     _prompt = stream_usage.get("prompt_tokens")
                     _completion = stream_usage.get("completion_tokens")
                     _estimated = False
+                    # R6：缺失判定要在估值兜底改写之前取（无法估值的形态也算缺失）
+                    usage_missing = _prompt is None or _completion is None
                     if _prompt is None or _completion is None:
                         _est_client = getattr(client.client, "count_tokens", None)
                         if _est_client:
@@ -1421,6 +1426,17 @@ class MultiModelLLMClient:
                         else:
                             _prompt = _prompt or 0
                             _completion = _completion or 0
+                    # R6：usage 缺失诊断（prompt/completion 任一缺失即视作
+                    # usage 缺失——含无法估值形态；留缺失原因与分片计数，
+                    # 随请求归档 + _lastUsageDiagnostics 可查；真值回传时为 None）
+                    if usage_missing:
+                        self._lastUsageDiagnostics = {
+                            "reason": "stream_usage_missing",
+                            "chunks_seen": usage_diag["chunks_seen"],
+                            "usage_chunks_seen": usage_diag["usage_chunks_seen"],
+                        }
+                    else:
+                        self._lastUsageDiagnostics = None
                     # P2-6：任务级回填（同 chat 路径）
                     from neurova.core.usage_accounting import set_task_last_call
 
@@ -1472,6 +1488,7 @@ class MultiModelLLMClient:
                         "estimated": bool(_estimated),
                         "cacheReadTokens": _cache_read,
                         "cacheWriteTokens": _cache_write,
+                        "usageDiagnostics": self._lastUsageDiagnostics,
                     },
                     durationMs=int(duration * 1000),
                     success=True,
