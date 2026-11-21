@@ -70,6 +70,10 @@ export interface ApprovalTrajectoryItem {
   status: string
   decision?: string | null
   decided_by?: string | null
+  /** D1 记忆式放行来源标记（后端投影带上时为 "memory_grant"；现行审计面可能缺席） */
+  decision_source?: string | null
+  /** D1 命中的授权单编号（同上，缺席时由 decided_by 的 memory_grant: 前缀提取） */
+  grant_id?: string | null
   requested_at?: string | null
   decided_at?: string | null
   latency_ms?: number | null

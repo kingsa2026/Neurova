@@ -3133,6 +3133,9 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
     approvalAuditRequestEvent: 'Evento de solicitud',
     approvalAuditDecisionEvent: 'Evento de decisión',
     approvalAuditNoRequestEvent: 'Sin evento de solicitud (antes de la reconstrucción tras reinicio solo se registró la decisión)',
+    // D1 insignia de permiso por memoria (trayectoria de aprobaciones/dossier)
+    memoryGrantBadge: 'Permiso por memoria',
+    memoryGrantTitle: 'Permiso por memoria · autorización {id}',
     resource: 'Recurso',
     details: 'Detalles',
   },
@@ -3169,6 +3172,9 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
     colSteps: 'Pasos',
     colToolCalls: 'Llamadas de herramienta',
     colTrajectory: 'Trayectoria (herramientas)',
+    // D-H nota de coste (solo registros con cost_note)
+    costNote: 'Nota de coste',
+    costNoteEst: 'est. ~{tokens} tokens',
     suites: {
       "reasoning-v1": { name: "Razonamiento lógico", description: "Prueba la deducción lógica y la resolución de problemas" },
       "coding-v1": { name: "Generación de código", description: "Prueba la generación y depuración de código" },
@@ -3784,6 +3790,10 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
     subagentEvUpdate: 'Requisito actualizado',
     subagentEvCancelled: 'Detenido',
     subagentEvTerminal: 'Finalizado',
+    // A1 insignia de calidad terminal (panel de subagente)
+    subagentQualityStrong: 'Fiable',
+    subagentQualityWeak: 'Pendiente de revisión',
+    subagentQualityNone: 'Sin evidencia',
     execFailed: 'Error de ejecución',
     thinking: 'Pensando…',
     selectCanvasWorkflow: 'Seleccionar flujo de trabajo del lienzo',

@@ -83,6 +83,8 @@ function handleSubAgentSyncEvent(event: { event_type: string; payload: Record<st
       win.report = String(p.report || '')
       win.error = p.error || null
       win.stallNotice = undefined
+      // A1：终态质量分级随事件携带时直接带上（当前广播暂无此键 → 面板自取事件账本）
+      win.terminalQuality = String((event.payload as Record<string, unknown>)?.['terminal_quality'] ?? '') || undefined
       // completed/failed 窗口超时自动回收（重新 started 会清掉定时器）
       clearRecycleTimer(sid)
       recycleTimers.set(
@@ -165,6 +167,8 @@ export async function restoreSubAgentWindows(
       status,
       report: '',
       error: row?.error_type || null,
+      // A1：台账行带终态分级时直接带上（当前投影暂无此键 → 面板自取事件账本）
+      terminalQuality: String(row?.terminal_quality ?? '') || undefined,
     }
     if (status !== 'running') {
       recycleTimers.set(

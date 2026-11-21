@@ -3133,6 +3133,9 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     approvalAuditRequestEvent: 'अनुरोध घटना',
     approvalAuditDecisionEvent: 'निर्णय घटना',
     approvalAuditNoRequestEvent: 'कोई अनुरोध घटना नहीं (पुनरारंभ पुनर्निर्माण से पहले केवल निर्णय दर्ज था)',
+    // D1 मेमोरी अनुमति बैज (अनुमोदन ट्रैजेक्टरी/सहयोग डॉसियर)
+    memoryGrantBadge: 'मेमोरी अनुमति',
+    memoryGrantTitle: 'मेमोरी अनुमति · अधिकार {id}',
     resource: 'संसाधन',
     details: 'विवरण',
   },
@@ -3169,6 +3172,9 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     colSteps: 'चरण',
     colToolCalls: 'टूल कॉल',
     colTrajectory: 'प्रक्षेप पथ (टूल)',
+    // D-H लागत टिप्पणी (केवल cost_note वाले रिकॉर्ड पर दिखे)
+    costNote: 'लागत टिप्पणी',
+    costNoteEst: 'अनुमानित ~{tokens} टोकन',
     suites: {
       "reasoning-v1": { name: "तार्किक तर्क", description: "तार्किक निगमन और समस्या समाधान का परीक्षण" },
       "coding-v1": { name: "कोड जनरेशन", description: "कोड जनरेशन और डिबगिंग का परीक्षण" },
@@ -3784,6 +3790,10 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     subagentEvUpdate: 'आवश्यकता अपडेट',
     subagentEvCancelled: 'रोका गया',
     subagentEvTerminal: 'समाप्त',
+    // A1 टर्मिनल गुणवत्ता बैज (सब-एजेंट स्थिति क्षेत्र)
+    subagentQualityStrong: 'विश्वसनीय',
+    subagentQualityWeak: 'समीक्षा आवश्यक',
+    subagentQualityNone: 'कोई प्रमाण नहीं',
     execFailed: 'निष्पादन विफल',
     thinking: 'सोच रहा है…',
     selectCanvasWorkflow: 'कैनवास वर्कफ़्लो चुनें',

@@ -3133,6 +3133,9 @@ conflictTimeReadout: 'Lettura temporale: {basis} (vecchia {old} → nuova {new})
     approvalAuditRequestEvent: 'Evento di richiesta',
     approvalAuditDecisionEvent: 'Evento di decisione',
     approvalAuditNoRequestEvent: 'Nessun evento di richiesta (prima della ricostruzione al riavvio veniva registrata solo la decisione)',
+    // D1 badge di permesso da memoria (traiettoria approvazioni/dossier)
+    memoryGrantBadge: 'Permesso da memoria',
+    memoryGrantTitle: 'Permesso da memoria · autorizzazione {id}',
     resource: 'Risorsa',
     details: 'Dettagli',
   },
@@ -3169,6 +3172,9 @@ conflictTimeReadout: 'Lettura temporale: {basis} (vecchia {old} → nuova {new})
     colSteps: 'Passi',
     colToolCalls: 'Chiamate strumenti',
     colTrajectory: 'Traiettoria (strumenti)',
+    // D-H nota di costo (solo record con cost_note)
+    costNote: 'Nota di costo',
+    costNoteEst: 'stima ~{tokens} token',
     suites: {
       "reasoning-v1": { name: "Ragionamento logico", description: "Testa la deduzione logica e la risoluzione di problemi" },
       "coding-v1": { name: "Generazione di codice", description: "Testa la generazione e il debug di codice" },
@@ -3784,6 +3790,10 @@ conflictTimeReadout: 'Lettura temporale: {basis} (vecchia {old} → nuova {new})
     subagentEvUpdate: 'Requisito aggiornato',
     subagentEvCancelled: 'Interrotto',
     subagentEvTerminal: 'Concluso',
+    // A1 badge di qualità terminale (pannello sotto-agente)
+    subagentQualityStrong: 'Affidabile',
+    subagentQualityWeak: 'Da verificare',
+    subagentQualityNone: 'Senza prove',
     execFailed: 'Esecuzione fallita',
     thinking: 'Sto pensando…',
     selectCanvasWorkflow: 'Seleziona flusso di lavoro canvas',

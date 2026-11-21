@@ -10,6 +10,52 @@ export interface BenchmarkRunPayload {
   agent_id: string
 }
 
+/**
+ * 运行记录成本标注（D-H 口径：评测手动跑 + 成本标注）。
+ * 后端 suite_eval.runSuite 的 costNote 原样透传进运行记录 `cost_note`，
+ * 已知键 model/est_tokens，其余键不参与展示（自由结构）。
+ */
+export interface BenchmarkCostNote {
+  model?: string
+  est_tokens?: number
+  [key: string]: unknown
+}
+
+/** 运行记录行（GET /benchmark/runs、/benchmark/results 的 data.items 行）。 */
+export interface BenchmarkRunRecord {
+  run_id: string
+  suite_id?: string
+  suite_name?: string
+  agent_id?: string
+  user_id?: string
+  status?: string
+  simulated?: boolean
+  score?: number | null
+  tasks_total?: number | null
+  tasks_correct?: number | null
+  avg_latency_ms?: number | null
+  tags?: string[]
+  started_at?: string | null
+  completed_at?: string | null
+  /** 成本标注：记录带才显示，缺省不渲染（向后兼容） */
+  cost_note?: BenchmarkCostNote | null
+}
+
+/**
+ * 成本标注的展示归一：取模型名与预估 tokens。
+ * 记录不带 cost_note、形态非法或双缺时返回 null（调用面显示占位符，不编造数字）。
+ */
+export function costNoteParts(note: unknown): { model: string; estTokens: number | null } | null {
+  if (!note || typeof note !== 'object' || Array.isArray(note)) return null
+  const rec = note as Record<string, unknown>
+  const model = String(rec.model ?? '').trim()
+  const raw = rec.est_tokens
+  const num = typeof raw === 'number' ? raw : Number(raw)
+  const estTokens = raw != null && raw !== '' && Number.isFinite(num) && num > 0 ? Math.round(num) : null
+  if (!model && estTokens == null) return null
+  return { model, estTokens }
+}
+
 // ---------------------------------------------------------------------------
 // API（P2-21：自 BenchmarkPage 裸写 URL 收编；路径/参数逐字对齐原调用）
 // ---------------------------------------------------------------------------

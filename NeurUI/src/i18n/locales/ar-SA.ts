@@ -3133,6 +3133,9 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     approvalAuditRequestEvent: 'حدث الطلب',
     approvalAuditDecisionEvent: 'حدث القرار',
     approvalAuditNoRequestEvent: 'لا يوجد حدث طلب (قبل إعادة البناء بعد إعادة التشغيل سُجل القرار فقط)',
+    // D1 شارة الإذن المحفوظ (مسار الموافقات/سجل التعاون)
+    memoryGrantBadge: 'إذن محفوظ',
+    memoryGrantTitle: 'إذن محفوظ · رقم التفويض {id}',
     resource: 'المورد',
     details: 'التفاصيل',
   },
@@ -3169,6 +3172,9 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     colSteps: 'الخطوات',
     colToolCalls: 'استدعاءات الأدوات',
     colTrajectory: 'المسار (الأدوات)',
+    // D-H ملاحظة التكلفة (تظهر فقط للسجلات التي تحمل cost_note)
+    costNote: 'ملاحظة التكلفة',
+    costNoteEst: 'تقدير ~{tokens} رمز',
     suites: {
       "reasoning-v1": { name: "الاستدلال المنطقي", description: "يختبر الاستنباط المنطقي وحل المشكلات" },
       "coding-v1": { name: "توليد الأكواد", description: "يختبر توليد الأكواد وتصحيحها" },
@@ -3784,6 +3790,10 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     subagentEvUpdate: 'تم تحديث المتطلبات',
     subagentEvCancelled: 'أُوقف',
     subagentEvTerminal: 'انتهى',
+    // A1 شارة جودة الحالة النهائية (لوحة الوكيل الفرعي)
+    subagentQualityStrong: 'موثوق',
+    subagentQualityWeak: 'بحاجة لمراجعة',
+    subagentQualityNone: 'بدون دليل',
     execFailed: 'فشل التنفيذ',
     thinking: 'يفكر…',
     selectCanvasWorkflow: 'اختر سير عمل اللوحة',

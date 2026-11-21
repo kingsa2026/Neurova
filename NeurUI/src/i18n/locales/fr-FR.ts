@@ -3133,6 +3133,9 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
     approvalAuditRequestEvent: 'Événement de demande',
     approvalAuditDecisionEvent: 'Événement de décision',
     approvalAuditNoRequestEvent: 'Aucun événement de demande (avant la reconstruction au redémarrage, seule la décision était enregistrée)',
+    // D1 badge d’autorisation mémoire (trajectoire d’approbations/dossier)
+    memoryGrantBadge: 'Autorisation mémoire',
+    memoryGrantTitle: 'Autorisation mémoire · ticket {id}',
     resource: 'Ressource',
     details: 'Détails',
   },
@@ -3169,6 +3172,9 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
     colSteps: 'Étapes',
     colToolCalls: 'Appels d’outils',
     colTrajectory: 'Trajectoire (outils)',
+    // D-H note de coût (uniquement les enregistrements avec cost_note)
+    costNote: 'Note de coût',
+    costNoteEst: 'est. ~{tokens} tokens',
     suites: {
       "reasoning-v1": { name: "Raisonnement logique", description: "Teste la déduction logique et la résolution de problèmes" },
       "coding-v1": { name: "Génération de code", description: "Teste la génération et le débogage de code" },
@@ -3784,6 +3790,10 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
     subagentEvUpdate: 'Besoin mis à jour',
     subagentEvCancelled: 'Arrêté',
     subagentEvTerminal: 'Terminé',
+    // A1 badge de qualité terminale (panneau de sous-agent)
+    subagentQualityStrong: 'Fiable',
+    subagentQualityWeak: 'À vérifier',
+    subagentQualityNone: 'Sans preuve',
     execFailed: 'Échec de l\'exécution',
     thinking: 'Réflexion…',
     selectCanvasWorkflow: 'Sélectionner un flux de travail de canvas',

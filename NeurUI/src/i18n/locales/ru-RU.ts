@@ -3133,6 +3133,9 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
     approvalAuditRequestEvent: 'Событие запроса',
     approvalAuditDecisionEvent: 'Событие решения',
     approvalAuditNoRequestEvent: 'Нет события запроса (до восстановления после перезапуска было записано только решение)',
+    // D1 знак выдачи по памяти (траектория согласований/досье)
+    memoryGrantBadge: 'Выдача по памяти',
+    memoryGrantTitle: 'Выдача по памяти · грант {id}',
     resource: 'Ресурс',
     details: 'Детали',
   },
@@ -3169,6 +3172,9 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
     colSteps: 'Шаги',
     colToolCalls: 'Вызовы инструментов',
     colTrajectory: 'Траектория (инструменты)',
+    // D-H заметка о затратах (только записи с cost_note)
+    costNote: 'Заметка о затратах',
+    costNoteEst: 'оценка ~{tokens} токенов',
     suites: {
       "reasoning-v1": { name: "Логическое рассуждение", description: "Проверяет логическую дедукцию и решение задач" },
       "coding-v1": { name: "Генерация кода", description: "Проверяет генерацию и отладку кода" },
@@ -3784,6 +3790,10 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
     subagentEvUpdate: 'Требование обновлено',
     subagentEvCancelled: 'Остановлено',
     subagentEvTerminal: 'Завершено',
+    // A1 знак качества терминального состояния (панель субагента)
+    subagentQualityStrong: 'Достоверно',
+    subagentQualityWeak: 'Требует проверки',
+    subagentQualityNone: 'Без оснований',
     execFailed: 'Ошибка выполнения',
     thinking: 'Думает…',
     selectCanvasWorkflow: 'Выберите рабочий процесс холста',

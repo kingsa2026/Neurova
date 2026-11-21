@@ -35,6 +35,7 @@ const i18n = createI18n({
     subagentTimeline: '事件时间线', subagentTimelineEmpty: '暂无事件',
     subagentEvSpawned: '派生', subagentEvTerminal: '终态',
     subagentLineage: '谱系（派生链）',
+    subagentQualityStrong: '可信', subagentQualityWeak: '待复核', subagentQualityNone: '无据',
   }, common: { close: '关闭' } } },
 })
 
@@ -154,5 +155,71 @@ describe('SubAgentPanel — F5 谱系徽标', () => {
     expect(w1.find('.lineage-chip').exists()).toBe(false)
     const w2 = mountPanel({})
     expect(w2.find('.lineage-chip').exists()).toBe(false)
+  })
+})
+
+/**
+ * A1 终态质量徽标（批三配套展示层）：run 已终态且 terminal_quality 非空时，
+ * 状态区显示分级徽标（strong=可信 / weak=待复核 / none=无据）。
+ * 数据源是子任务事件账本（GET /console/chat/subagents/{id}/events）的
+ * terminal 事件 payload.terminal_quality——面板终态时自取，旧数据（无该
+ * payload 键）不渲染徽标。
+ */
+describe('SubAgentPanel — A1 终态质量徽标', () => {
+  const eventsWithQuality = (quality: string) => [
+    { event_id: 'e1', type: 'spawned', subagent_id: 'a1', causation_id: '',
+      payload: { task: '找资料' }, occurred_at: '2026-11-17T01:00:00+00:00' },
+    { event_id: 'e2', type: 'terminal', subagent_id: 'a1', causation_id: 'e1',
+      payload: { status: 'completed', terminal_quality: quality }, occurred_at: '2026-11-17T01:00:05+00:00' },
+  ]
+
+  it.each([
+    ['strong', 'quality-strong', '可信'],
+    ['weak', 'quality-weak', '待复核'],
+    ['none', 'quality-none', '无据'],
+  ])('终态 terminal_quality=%s 渲染对应分级徽标（事件账本取数）', async (quality, cls, label) => {
+    getConsoleSubagentEventsMock.mockResolvedValue({
+      data: { subagent_id: 'a1', count: 2, events: eventsWithQuality(quality) },
+    })
+    const w = mountPanel({ status: 'completed' })
+    await flushPromises()
+    const badge = w.find('.quality-chip')
+    expect(badge.exists()).toBe(true)
+    expect(badge.classes()).toContain(cls)
+    expect(w.text()).toContain(label)
+  })
+
+  it('终态但事件账本无 terminal_quality（旧数据）不渲染徽标', async () => {
+    getConsoleSubagentEventsMock.mockResolvedValue({
+      data: { subagent_id: 'a1', count: 2, events: eventsWithQuality('') },
+    })
+    const w = mountPanel({ status: 'failed' })
+    await flushPromises()
+    expect(w.find('.quality-chip').exists()).toBe(false)
+  })
+
+  it('非终态（running/in_review）不渲染质量徽标', () => {
+    getConsoleSubagentEventsMock.mockResolvedValue({
+      data: { subagent_id: 'a1', count: 2, events: eventsWithQuality('strong') },
+    })
+    const w1 = mountPanel({ status: 'running' })
+    expect(w1.find('.quality-chip').exists()).toBe(false)
+    const w2 = mountPanel({ status: 'in_review' })
+    expect(w2.find('.quality-chip').exists()).toBe(false)
+  })
+
+  it('状态入参显式带 terminalQuality 时不再重复拉事件', async () => {
+    getConsoleSubagentEventsMock.mockClear()
+    const w = mountPanel({ status: 'completed', terminalQuality: 'weak' })
+    await flushPromises()
+    expect(w.find('.quality-chip').classes()).toContain('quality-weak')
+    expect(getConsoleSubagentEventsMock).not.toHaveBeenCalled()
+  })
+
+  it('事件账本读面故障时不渲染徽标（不假装有分级）', async () => {
+    getConsoleSubagentEventsMock.mockRejectedValue(new Error('503'))
+    const w = mountPanel({ status: 'completed' })
+    await flushPromises()
+    expect(w.find('.quality-chip').exists()).toBe(false)
   })
 })

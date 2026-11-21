@@ -3133,6 +3133,9 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     approvalAuditRequestEvent: '要求イベント',
     approvalAuditDecisionEvent: '決定イベント',
     approvalAuditNoRequestEvent: '要求イベントなし（再起動補完前に決定のみ記録）',
+    // D1 メモリ許可バッジ（承認トラジェクトリ/協作档案の決定記録）
+    memoryGrantBadge: 'メモリ許可',
+    memoryGrantTitle: 'メモリ許可 · 許可ID {id}',
     resource: 'リソース',
     details: '詳細',
   },
@@ -3169,6 +3172,9 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     colSteps: 'ステップ数',
     colToolCalls: 'ツール呼び出し',
     colTrajectory: '軌跡（ツール）',
+    // D-H コスト注記（cost_note がある記録のみ表示）
+    costNote: 'コスト注記',
+    costNoteEst: '推定 ~{tokens} tokens',
     suites: {
       "reasoning-v1": { name: "論理推論", description: "論理的推論と問題解決をテスト" },
       "coding-v1": { name: "コード生成", description: "コード生成とデバッグをテスト" },
@@ -3784,6 +3790,10 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     subagentEvUpdate: '要件変更',
     subagentEvCancelled: '停止済み',
     subagentEvTerminal: '終了',
+    // A1 終端品質バッジ（サブエージェント状態域）
+    subagentQualityStrong: '信頼',
+    subagentQualityWeak: '要確認',
+    subagentQualityNone: '根拠なし',
     execFailed: '実行失敗',
     thinking: '考え中…',
     selectCanvasWorkflow: 'キャンバスワークフローを選択',

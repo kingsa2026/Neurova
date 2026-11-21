@@ -68,6 +68,11 @@
           <template v-if="column.key === 'status'">
             <a-tag :color="record.simulated ? 'orange' : record.status === 'completed' ? 'green' : 'blue'">{{ record.simulated ? 'simulated' : record.status === 'completed' ? t('benchmark.pass') : (record.status || '-') }}</a-tag>
           </template>
+          <!-- D-H 成本标注：模型名 + 预估 tokens（记录带 cost_note 才显示，没有则占位符） -->
+          <template v-if="column.key === 'cost_note'">
+            <span v-if="costNoteText(record)" class="mono">{{ costNoteText(record) }}</span>
+            <span v-else class="mono">—</span>
+          </template>
         </template>
       </a-table>
     </GlassCard>
@@ -181,8 +186,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listBenchmarkSuites, listBenchmarkResults, runBenchmarkSuite, getBenchmarkRun, getBaselineReports, getBaselineReport } from '@/api/modules/benchmark'
-import type { BaselineReportListItem, BaselineReportDetail } from '@/api/modules/benchmark'
+import { listBenchmarkSuites, listBenchmarkResults, runBenchmarkSuite, getBenchmarkRun, getBaselineReports, getBaselineReport, costNoteParts } from '@/api/modules/benchmark'
+import type { BaselineReportListItem, BaselineReportDetail, BenchmarkRunRecord } from '@/api/modules/benchmark'
 import { useAgentStore } from '@/stores/agents'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -208,7 +213,7 @@ const loading = ref(false)
 const loadingResults = ref(false)
 const running = ref(false)
 const suites = ref<any[]>([])
-const results = ref<any[]>([])
+const results = ref<BenchmarkRunRecord[]>([])
 const selectedSuite = ref<any>(null)
 const selectedAgentId = ref<string | null>(null)
 
@@ -233,7 +238,19 @@ const resultColumns = computed(() => [
   { title: t('benchmark.score'), key: 'score', width: 180 },
   { title: t('benchmark.duration'), dataIndex: 'avg_latency_ms', key: 'duration' },
   { title: t('common.status'), key: 'status', width: 80 },
+  // D-H 成本标注：记录带 cost_note 才有内容，缺省显示占位符
+  { title: t('benchmark.costNote'), key: 'cost_note', width: 170 },
 ])
+
+/** 成本标注单元格文本：模型名 · 预估 ~N tokens；记录不带 cost_note 时为空串 */
+const costNoteText = (record: BenchmarkRunRecord): string => {
+  const parts = costNoteParts(record?.cost_note)
+  if (!parts) return ''
+  const bits: string[] = []
+  if (parts.model) bits.push(parts.model)
+  if (parts.estTokens != null) bits.push(t('benchmark.costNoteEst', { tokens: parts.estTokens }))
+  return bits.join(' · ')
+}
 
 const agentResultColumns = computed(() => [
   { title: t('benchmark.agent'), dataIndex: 'agent_name', key: 'agent_name' },

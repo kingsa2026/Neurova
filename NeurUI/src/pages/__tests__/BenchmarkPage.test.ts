@@ -61,7 +61,7 @@ const i18n = createI18n({
       common: { error: '错误', success: '成功', status: '状态', noData: '暂无数据', open: '打开' },
       system: { benchmark: '基准测试' },
       workflow: { execute: '执行' },
-      benchmark: { execute: '执行', idle: '空闲', open: '打开', resultsComparison: '结果对比', perAgentResults: '按智能体结果', agent: '智能体', test: '测试', score: '分数', duration: '耗时', testsRun: '测试次数', passed: '通过', failed: '失败', avgScore: '平均分', pass: '通过', fail: '失败', lastRun: '上次: ', tests: '测试',
+      benchmark: { execute: '执行', idle: '空闲', open: '打开', resultsComparison: '结果对比', perAgentResults: '按智能体结果', agent: '智能体', test: '测试', score: '分数', duration: '耗时', testsRun: '测试次数', passed: '通过', failed: '失败', avgScore: '平均分', pass: '通过', fail: '失败', lastRun: '上次: ', tests: '测试', costNote: '成本标注', costNoteEst: '预估 ~{tokens} tokens',
         suites: {
           'reasoning-v1': { name: '逻辑推理', description: '测试逻辑推演与问题求解' },
           'coding-v1': { name: '代码生成', description: '测试代码生成与调试' },
@@ -223,4 +223,66 @@ describe('BenchmarkPage Agent 层契约', () => {
     expect(agentRows).toContain('Nova')
     expect(agentRows).toContain('Atlas')
   })
+})
+
+// ── D-H 成本标注（批三配套展示层）：记录带 cost_note 时显示模型名+预估 tokens ──
+import { costNoteParts } from '@/api/modules/benchmark'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+const benchmarkPageSource = readFileSync(resolve(process.cwd(), 'src/pages/BenchmarkPage.vue'), 'utf-8')
+const benchmarkApiSource = readFileSync(resolve(process.cwd(), 'src/api/modules/benchmark.ts'), 'utf-8')
+
+describe('costNoteParts — 运行记录成本标注归一', () => {
+  it('{model, est_tokens} 归一为模型名+预估 tokens', () => {
+    expect(costNoteParts({ model: 'nova-4', est_tokens: 1234.6 })).toEqual({
+      model: 'nova-4',
+      estTokens: 1235,
+    })
+  })
+
+  it('缺 model 只留 tokens；缺 tokens 只留模型名', () => {
+    expect(costNoteParts({ est_tokens: 42 })).toEqual({ model: '', estTokens: 42 })
+    expect(costNoteParts({ model: 'nova-4' })).toEqual({ model: 'nova-4', estTokens: null })
+  })
+
+  it('无 cost_note / 非法形态 / 双缺返回 null（记录不带就不显示）', () => {
+    expect(costNoteParts(undefined)).toBeNull()
+    expect(costNoteParts(null)).toBeNull()
+    expect(costNoteParts('note')).toBeNull()
+    expect(costNoteParts({})).toBeNull()
+    expect(costNoteParts({ model: '', est_tokens: -1 })).toBeNull()
+  })
+
+  it('自由结构宽容：model/est_tokens 之外的键不参与展示', () => {
+    expect(costNoteParts({ model: 'm', est_tokens: 3, run_by: 'manual' })).toEqual({
+      model: 'm',
+      estTokens: 3,
+    })
+  })
+})
+
+describe('BenchmarkPage 成本标注列', () => {
+  it('结果表挂 cost_note 列并经 costNoteParts 渲染（无标注显示占位符）', () => {
+    expect(benchmarkPageSource).toContain("key: 'cost_note'")
+    expect(benchmarkPageSource).toContain('costNoteParts')
+    expect(benchmarkPageSource).toContain('benchmark.costNote')
+    expect(benchmarkPageSource).toContain('benchmark.costNoteEst')
+  })
+
+  it('类型与格式化器收口在 benchmark api 模块（页面不另造形状）', () => {
+    expect(benchmarkApiSource).toContain('export interface BenchmarkCostNote')
+    expect(benchmarkApiSource).toContain('export function costNoteParts')
+  })
+
+  it.each(['zh-CN', 'en-US', 'ja-JP', 'ko-KR', 'de-DE', 'es-ES', 'fr-FR', 'it-IT', 'ru-RU', 'ar-SA', 'hi-IN'])(
+    '%s 有 benchmark.costNote 与 costNoteEst 文案',
+    (locale) => {
+      const file = readFileSync(resolve(process.cwd(), `src/i18n/locales/${locale}.ts`), 'utf-8')
+      for (const key of ['costNote', 'costNoteEst']) {
+        const line = file.split('\n').find((ln) => ln.includes(`${key}:`)) ?? ''
+        expect(line, `${locale} 缺 benchmark.${key}`).not.toBe('')
+      }
+    },
+  )
 })

@@ -17,6 +17,7 @@ import { resolve } from 'node:path'
 
 const source = readFileSync(resolve(process.cwd(), 'src/pages/AuditPage.vue'), 'utf-8')
 const auditApi = readFileSync(resolve(process.cwd(), 'src/api/modules/audit.ts'), 'utf-8')
+const approvalGrantUtil = readFileSync(resolve(process.cwd(), 'src/utils/approvalGrant.ts'), 'utf-8')
 
 const LOCALES = [
   'zh-CN', 'en-US', 'ja-JP', 'ko-KR', 'de-DE', 'es-ES',
@@ -49,6 +50,34 @@ describe('S8 文案面', () => {
   it.each(LOCALES)('%s 有 audit.approvalTrajectoryTitle 与成对展示键', (locale) => {
     const file = readFileSync(resolve(process.cwd(), `src/i18n/locales/${locale}.ts`), 'utf-8')
     for (const key of ['approvalTrajectoryTitle', 'approvalRunIdRequired', 'approvalAuditEmpty', 'approvalAuditLevel', 'approvalAuditStatus', 'approvalAuditDecided', 'approvalAuditPending', 'approvalAuditRequested', 'approvalAuditDecidedAt', 'approvalAuditDecision', 'approvalAuditDecidedBy', 'approvalAuditLatency', 'approvalAuditRequestEvent', 'approvalAuditDecisionEvent']) {
+      const line = file.split('\n').find((ln) => ln.includes(`${key}:`)) ?? ''
+      expect(line, `${locale} 缺 audit.${key}`).not.toBe('')
+    }
+  })
+})
+
+/**
+ * D1 记忆式放行徽标（批三配套展示层）：裁决记录里 decision_source="memory_grant"
+ * 或裁决人标记 "memory_grant:<grant_id>" 命中时，决策人列显示「记忆放行」小徽标，
+ * title 带授权单编号；普通链路裁决不渲染（向后兼容）。
+ */
+describe('S8 审批轨迹记忆放行徽标', () => {
+  it('决策人列按 memoryGrantOf 识别记忆放行并渲染徽标', () => {
+    expect(source).toContain('memoryGrantOf')
+    // title 文案收口在共享 util（t 注入），页面只负责接线
+    expect(source).toContain('memoryGrantTitleOf')
+    expect(source).toContain('memory-grant-chip')
+    expect(source).toContain('audit.memoryGrantBadge')
+    expect(approvalGrantUtil).toContain('audit.memoryGrantTitle')
+  })
+
+  it('识别器收口在共享 util（AuditPage 与协作档案同源，不各写各的）', () => {
+    expect(source).toContain("from '@/utils/approvalGrant'")
+  })
+
+  it.each(LOCALES)('%s 有 audit.memoryGrantBadge 与 memoryGrantTitle 文案', (locale) => {
+    const file = readFileSync(resolve(process.cwd(), `src/i18n/locales/${locale}.ts`), 'utf-8')
+    for (const key of ['memoryGrantBadge', 'memoryGrantTitle']) {
       const line = file.split('\n').find((ln) => ln.includes(`${key}:`)) ?? ''
       expect(line, `${locale} 缺 audit.${key}`).not.toBe('')
     }

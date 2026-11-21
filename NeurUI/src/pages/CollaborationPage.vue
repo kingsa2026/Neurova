@@ -159,6 +159,10 @@
               <a-tag :color="a.status === 'decided' ? 'green' : 'orange'">
                 {{ a.status === 'decided' ? `${a.decision ?? ''}` : t('collab.dossierStatusPending') }}
               </a-tag>
+              <!-- D1 记忆式放行徽标：与审批审计轨迹同一识别器，命中才渲染 -->
+              <a-tooltip v-if="memoryGrantOf(a)" :title="memoryGrantTitleOf(a, t)">
+                <a-tag class="memory-grant-chip" data-testid="dossier-memory-grant">{{ t('audit.memoryGrantBadge') }}</a-tag>
+              </a-tooltip>
               <span class="dossier-mono">{{ a.operation || a.request_id }}</span>
               <span class="dossier-dim"> · {{ a.run_id }}<template v-if="a.decided_by"> · {{ a.decided_by }}</template></span>
             </div>
@@ -297,6 +301,7 @@ import { getRoom, updateRoom } from '@/api/modules/collaborationRoom'
 import { getProjectCollaboration, type ProjectCollaboration } from '@/api/modules/collaboration'
 import { listProjects } from '@/api/modules/projects'
 import type { CollabSession, CollabTemplate } from '@/api/modules/collaboration'
+import { memoryGrantOf, memoryGrantTitleOf } from '@/utils/approvalGrant'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -544,4 +549,13 @@ async function loadDossier() {
 .dossier-timeline { margin-top: 8px; }
 .dossier-list { display: flex; flex-direction: column; gap: 6px; }
 .dossier-item { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* D1 记忆式放行徽标：与 AuditPage 同一形态，颜色走既有令牌 */
+.memory-grant-chip {
+  margin: 0;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--nr-primary-light, #818cf8);
+  background: var(--nr-primary-soft, rgba(99, 102, 241, 0.12));
+  border-color: var(--nr-primary-soft-border, rgba(99, 102, 241, 0.2));
+}
 </style>

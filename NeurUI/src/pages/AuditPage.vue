@@ -124,6 +124,15 @@
           <template v-if="column.key === 'latency_ms'">
             <span class="mono">{{ record.latency_ms == null ? '—' : `${record.latency_ms} ms` }}</span>
           </template>
+          <!-- D1 记忆式放行徽标：decision_source/decided_by 标记命中时提示该决定来自授权单 -->
+          <template v-if="column.key === 'decided_by'">
+            <span class="acc-decider">
+              <a-tooltip v-if="memoryGrantOf(record)" :title="memoryGrantTitleOf(record, t)">
+                <a-tag class="memory-grant-chip" data-testid="approval-memory-grant">{{ t('audit.memoryGrantBadge') }}</a-tag>
+              </a-tooltip>
+              <span>{{ record.decided_by || '—' }}</span>
+            </span>
+          </template>
         </template>
         <template #expandedRowRender="{ record }">
           <div class="approval-expand" data-testid="approval-audit-expand">
@@ -217,6 +226,7 @@ import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
 import { formatTimestampText } from '@/utils/displayText'
+import { memoryGrantOf, memoryGrantTitleOf } from '@/utils/approvalGrant'
 
 const { t } = useI18n()
 
@@ -516,6 +526,16 @@ onMounted(() => {
 .approval-expand { font-size: 12px; }
 .approval-reason { color: var(--nr-warning); margin: 4px 0; }
 .approval-no-action { color: var(--nr-text-tertiary); margin: 4px 0; }
+/* D1 记忆式放行徽标：主色软底小签，颜色全部走既有令牌 */
+.acc-decider { display: inline-flex; align-items: center; gap: 4px; }
+.memory-grant-chip {
+  margin: 0;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--nr-primary-light, #818cf8);
+  background: var(--nr-primary-soft, rgba(99, 102, 241, 0.12));
+  border-color: var(--nr-primary-soft-border, rgba(99, 102, 241, 0.2));
+}
 .panel-head { display: flex; justify-content: space-between; align-items: center; }
 .panel-title { font-weight: 600; font-size: 13px; color: var(--nr-text-primary); }
 </style>

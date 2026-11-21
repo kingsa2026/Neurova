@@ -31,6 +31,8 @@ export interface SubAgentWindowState {
   agentPath?: string[]
   /** P2（蜂群对照）：卡死渐进提醒——后端看门狗判 member 连续无产出后携带 */
   stallNotice?: { stalledSeconds: number; reminderCount: number }
+  /** A1：终态质量分级（strong/weak/none；空/缺省=未终态或事件账本未带，面板自取） */
+  terminalQuality?: string
 }
 
 const props = defineProps<{ state: SubAgentWindowState }>()
@@ -100,17 +102,47 @@ const timeline = ref<SubagentEvent[]>([])
 const timelineLoading = ref(false)
 let timelineTimer: ReturnType<typeof setInterval> | null = null
 
+// ── A1 终态质量分级：事件账本 terminal 事件 payload.terminal_quality 是它
+// 目前的前端可达投影（WS completed 广播与台账读面暂不带该键）——终态时从
+// 同一份账本提取，旧数据无此键则不渲染徽标。
+const terminalQuality = ref('')
+
+function applyRunEvents(events: SubagentEvent[]): void {
+  timeline.value = events
+  if (terminalQuality.value) return
+  for (const ev of events) {
+    if (ev.type !== 'terminal') continue
+    const q = String((ev.payload || {})['terminal_quality'] ?? '')
+    if (q) terminalQuality.value = q
+    break
+  }
+}
+
 async function fetchTimeline(): Promise<void> {
   timelineLoading.value = true
   try {
     const res = await getConsoleSubagentEvents(props.state.subagentId)
-    timeline.value = res.data?.events ?? []
+    applyRunEvents(res?.data?.events ?? [])
   } catch {
     timeline.value = []
   } finally {
     timelineLoading.value = false
   }
 }
+
+/** 终态质量徽标读数：仅终态且分级非空时给出（词值到 UI 态的翻译只此一处） */
+const qualityBadge = computed(() => {
+  if (props.state.status !== 'completed' && props.state.status !== 'failed') return null
+  const q = terminalQuality.value
+  if (!q) return null
+  const labels: Record<string, string> = {
+    strong: t('ui.subagentQualityStrong'),
+    weak: t('ui.subagentQualityWeak'),
+    none: t('ui.subagentQualityNone'),
+  }
+  if (!(q in labels)) return null
+  return { cls: `quality-${q}`, label: labels[q] }
+})
 
 function stopTimelinePolling(): void {
   if (timelineTimer !== null) {
@@ -129,12 +161,18 @@ function toggleTimeline(): void {
   }
 }
 
+// 终态到达：时间线开着就补拉最终版并停轮询（既有行为）；时间线关着但分级
+// 未知时也拉一次事件账本提取 terminal_quality（A1 徽标读数），已知则不重复拉。
 watch(() => props.state.status, (status) => {
-  if (showTimeline.value && status !== 'running' && status !== 'in_review') {
+  if (status !== 'completed' && status !== 'failed') return
+  terminalQuality.value = props.state.terminalQuality || ''
+  if (showTimeline.value) {
     stopTimelinePolling()
     void fetchTimeline()
+  } else if (!terminalQuality.value) {
+    void fetchTimeline()
   }
-})
+}, { immediate: true })
 
 onUnmounted(stopTimelinePolling)
 
@@ -191,6 +229,13 @@ function shortTime(iso: string): string {
         class="panel-type-chip lineage-chip"
         :title="`${t('ui.subagentLineage')}: ${(state.agentPath || []).join(' › ')}`"
       >⛓ {{ lineageBadge }}</span>
+      <!-- A1：终态质量分级徽标（仅终态且事件账本/入参带分级时渲染，旧数据不显示） -->
+      <span
+        v-if="qualityBadge"
+        class="panel-type-chip quality-chip"
+        :class="qualityBadge.cls"
+        :title="qualityBadge.label"
+      >{{ qualityBadge.label }}</span>
       <button class="panel-btn" :title="t('ui.subagentTimeline')" @click.stop="toggleTimeline">≡</button>
       <button class="panel-btn" :title="minimized ? t('ui.expand') : t('ui.minimize')" @click.stop="toggleMinimize">
         {{ minimized ? '▢' : '—' }}
@@ -276,6 +321,23 @@ function shortTime(iso: string): string {
 }
 .panel-type-chip.team-chip { color: var(--nr-primary-light, #818cf8); text-transform: none; }
 .panel-type-chip.lineage-chip { color: var(--nr-text-secondary, #94a3b8); text-transform: none; }
+/* A1 终态质量分级：绿=可信 / 橙=待复核 / 灰=无据（颜色全部走既有令牌） */
+.panel-type-chip.quality-chip { text-transform: none; letter-spacing: 0; }
+.panel-type-chip.quality-chip.quality-strong {
+  color: var(--nr-success, #10b981);
+  border-color: var(--nr-success-soft-border, rgba(16, 185, 129, 0.35));
+  background: var(--nr-success-soft-bg, rgba(16, 185, 129, 0.12));
+}
+.panel-type-chip.quality-chip.quality-weak {
+  color: var(--nr-warning, #f59e0b);
+  border-color: var(--nr-warning-soft-border, rgba(245, 158, 11, 0.35));
+  background: var(--nr-warning-soft-bg, rgba(245, 158, 11, 0.12));
+}
+.panel-type-chip.quality-chip.quality-none {
+  color: var(--nr-text-tertiary, rgba(255, 255, 255, 0.45));
+  border-color: var(--nr-border, rgba(255, 255, 255, 0.08));
+  background: transparent;
+}
 .panel-btn {
   border: none;
   background: transparent;
