@@ -694,6 +694,8 @@ class ToolExecutor:
         "continue_subagent": "_execute_continue_subagent",
         # H 批补差：父侧叫停运行中的子代理
         "cancel_subagent": "_execute_cancel_subagent",
+        # C2 接线（G3 收敛面）：把子代理 member 会话回滚到最近检查点
+        "rollback_subagent": "_execute_rollback_subagent",
         # P3-1（评测报告 G-11）：跨 agent 审批链——子代理请求 / 父代理裁决
         "request_approval": "_execute_request_approval",
         "decide_subagent_approval": "_execute_decide_approval",
@@ -3623,12 +3625,13 @@ class ToolExecutor:
         }
 
     async def _execute_continue_subagent(self, params: Dict) -> Dict:
-        """P2（工具清单 3.1-3 续）+ H 批补差：续跑/改需求。
+        """P2（工具清单 3.1-3 续）+ H 批补差 + C2 接线：续跑/改需求/fork。
 
         终态子代理 → 既有复活链（member 会话历史保留、上一段产出衔接、
         治理闸与全新派生同路、权限档只收窄不升级）。
         运行中子代理 → mode=steer 把新指令注入成员会话插话队列（下一工具轮
         生效，尽力而为）；mode=restart 先叫停再按续跑链重派（溯源保留）。
+        mode=fork → 经 G3 收敛面派生新分支 run（新会话、原 run 不动）。
         """
         from neurova.agent.swarm import get_swarm_manager
         from neurova.security.permission_mode import (
@@ -3642,9 +3645,11 @@ class ToolExecutor:
             return {"error": "缺少 subagent_id 参数"}
         if not message:
             return {"error": "缺少 message 参数（续跑指令）"}
+        # C2 接线：mode 字典扩容——steer/restart（运行中改需求，既有）+
+        # resume（终态续跑，缺省行为）/ fork（派生新分支 run，经 G3 收敛面）。
         mode = str(params.get("mode") or "steer").strip().lower()
-        if mode not in ("steer", "restart"):
-            return {"error": "mode 仅支持 steer/restart"}
+        if mode not in ("steer", "restart", "resume", "fork"):
+            return {"error": "mode 仅支持 steer/restart/resume/fork"}
 
         swarm = get_swarm_manager()
         session_id = getattr(self._agent, "current_session_id", None)
@@ -3674,6 +3679,23 @@ class ToolExecutor:
         return get_swarm_manager().cancelRun(
             subagentId,
             reason=str(params.get("reason") or ""),
+            command_id=str(params.get("command_id") or "").strip() or None,
+        )
+
+    async def _execute_rollback_subagent(self, params: Dict) -> Dict:
+        """C2 接线（G3 收敛面）：把子代理 member 会话回滚到最近检查点。
+
+        机制在 SwarmManager.rollbackSubagent → NeuacpMemberSurface.rollback
+        （CheckpointService 事务化恢复：恢复前留 pre-restore 快照、失败自动
+        回滚；无检查点/能力未声明诚实失败）。仅主代理可用（成员工具面已剔除）。
+        """
+        from neurova.agent.swarm import get_swarm_manager
+
+        subagentId = str(params.get("subagent_id") or "").strip()
+        if not subagentId:
+            return {"success": False, "error": "rollback_subagent 需要 subagent_id"}
+        return get_swarm_manager().rollbackSubagent(
+            subagentId,
             command_id=str(params.get("command_id") or "").strip() or None,
         )
 

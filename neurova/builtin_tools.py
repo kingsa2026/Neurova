@@ -1566,16 +1566,16 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "continue_subagent": {
-        # 并行能力声明：续跑/改需求走 spawn 同一条治理闸与执行路径（子代理可能跑任意工具），非只读。
+        # 并行能力声明：续跑/改需求/fork 走 spawn 同一条治理闸与执行路径（子代理可能跑任意工具），非只读。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
-        "description": "【续跑/改需求子代理】对子代理下达追加指令。已结束（completed/failed）的子代理被复活：member 会话历史保留（不是从零重派），上一段产出自动附带衔接。运行中（running/in_review）的子代理也可改需求：mode=steer 把新指令注入其会话（下一工具轮生效，尽力而为——若成员已不再调用工具则不会送达）；mode=restart 先叫停再按新指令重派（保留溯源）。适用：失败续跑、追加分析、修正方向。仅主代理可用（子代理不得续跑兄弟——与递归派生同禁）。",
+        "description": "【续跑/改需求子代理】对子代理下达追加指令。已结束（completed/failed）的子代理被复活：member 会话历史保留（不是从零重派），上一段产出自动附带衔接。运行中的子代理也可改需求：mode=steer 把新指令注入其会话（下一工具轮生效，尽力而为）；mode=restart 先叫停再按新指令重派（保留溯源）；mode=fork 从该子代理派生一个新分支 run（新会话起步、原 run 不叫停不改动）。适用：失败续跑、追加分析、修正方向。仅主代理可用（子代理不得续跑兄弟——与递归派生同禁）。",
         "parameters": {
             "type": "object",
             "properties": {
                 "subagent_id": {"type": "string", "description": "要续跑/改需求的子代理 ID（spawn_subagent/subagent_status 返回的 subagent_id）"},
                 "message": {"type": "string", "description": "续跑/修正指令：接着做什么/修正什么/补充什么约束"},
                 "background": {"type": "boolean", "description": "是否后台执行（默认 false，前台等结果；仅终态续跑时有效）"},
-                "mode": {"type": "string", "enum": ["steer", "restart"], "description": "运行中子代理的改需求方式：steer 注入会话（下一工具轮生效，尽力而为，默认）/ restart 先叫停再按新指令重派（保留溯源）。已终态的子代理忽略本参数，直接走续跑链"},
+                "mode": {"type": "string", "enum": ["steer", "restart", "resume", "fork"], "description": "改需求/派生方式：steer 注入运行中会话（下一工具轮生效，尽力而为，默认）/ restart 先叫停再按新指令重派（保留溯源）/ resume 续跑已终态子代理（缺省行为，member 会话复用）/ fork 从该子代理派生新分支 run（新会话起步、原 run 不受影响，返回新 subagent_id）。已终态子代理的 steer/restart 视同 resume"},
                 "command_id": {"type": "string", "description": "幂等命令 ID（可选）：重试时传同一 ID 防重复注入/重派；不传则不做幂等去重"},
             },
             "required": ["subagent_id", "message"],
@@ -1590,6 +1590,20 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "properties": {
                 "subagent_id": {"type": "string", "description": "要叫停的子代理 ID（spawn_subagent/subagent_status 返回的 subagent_id）"},
                 "reason": {"type": "string", "description": "叫停原因（留痕进事件账本与失败交接文案）"},
+                "command_id": {"type": "string", "description": "幂等命令 ID（可选）：重试时传同一 ID 防重复执行；不传则不做幂等去重"},
+            },
+            "required": ["subagent_id"],
+        },
+    },
+    "rollback_subagent": {
+        # 并行能力声明：回滚会重写 member 会话存储（删后重建），非只读、不可重放
+        # （重放会再生成一份 pre-restore 快照并再次改写会话）。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【回滚子代理会话】把子代理的成员会话恢复到最近一次检查点（事务化：恢复前自动留档 pre-restore 快照，恢复失败自动回滚）。适用于成员跑偏后回到最近已知良好状态再续派。无检查点、恢复失败或成员未声明会话回滚能力时，诚实返回失败原因。仅主代理可用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "subagent_id": {"type": "string", "description": "要回滚成员会话的子代理 ID（spawn_subagent/subagent_status 返回的 subagent_id）"},
                 "command_id": {"type": "string", "description": "幂等命令 ID（可选）：重试时传同一 ID 防重复执行；不传则不做幂等去重"},
             },
             "required": ["subagent_id"],
@@ -2511,6 +2525,8 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "request_approval", "decide_subagent_approval",
     # 叫停（H 批补差）：改共享运行状态并终止成员任务，重放制造第二次取消
     "cancel_subagent",
+    # 会话回滚（C2 接线）：重放会再生成一份 pre-restore 快照并再次改写 member 会话
+    "rollback_subagent",
     # 多步编排：内层步进可能含任意写操作，重放制造新变更
     "orchestrate_tools",
 })
@@ -2522,12 +2538,14 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
 # - 递归派生/续跑：子代理不得再拉起执行链（孙代理/兄弟续跑）；
 # - 审批裁决（P3-1）：子代理不得裁决自己发起的审批单（自己批自己=审批链失效）；
 # - 叫停（H 批补差）：子代理不得叫停自己/兄弟的运行；
+# - 会话回滚（C2 接线）：子代理不得回滚自己/兄弟的 member 会话；
 # - 团队编排三工具（S10）：成员自行派团/立队等于绕过发起者的治理面；
 # - 项目/群聊四工具（S13）：成员建项目/房间发言须过主 agent 的治理面。
 MAIN_AGENT_ONLY_TOOLS = frozenset({
     "spawn_subagent", "continue_subagent", "decide_subagent_approval",
-    "cancel_subagent", "list_teams", "dispatch_team", "propose_team",
-    "project_create", "project_list", "project_detail", "room_post",
+    "cancel_subagent", "rollback_subagent", "list_teams", "dispatch_team",
+    "propose_team", "project_create", "project_list", "project_detail",
+    "room_post",
 })
 
 

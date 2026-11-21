@@ -1214,6 +1214,24 @@ class SwarmManager:
         events = readRunEvents(sid) if sid else []
         return {"subagent_id": sid, "count": len(events), "events": events}
 
+    def memberSurface(self, subagentId: str):
+        """C2 接线（G3 收敛面）：按 subagent_id 解析成员操作面（读面共用单点）。
+
+        run 在内存台账 → ``NeuacpMemberSurface.forRun``（能力档来自名册现值/
+        spawn 快照）；已逐出的存量 run → 以最小标识 run 补位（事件账本读数
+        不依赖名册档，读数行为与逐出前一致）。未知 id 也返回面——账本读侧对
+        未知 run 返回空列表（与 runEvents 同口径），写操作由各面按缺标识诚实
+        失败（如 rollback 缺 agent_id/member_session_id）。
+        """
+        from neurova.agent.neuacp.adapter_surface import NeuacpMemberSurface
+
+        sid = str(subagentId or "").strip()
+        with self._lock:
+            run = self._runs.get(sid)
+        if run is None:
+            run = SubAgentRun(subagent_id=sid)
+        return NeuacpMemberSurface.forRun(run)
+
     def settleIdleRuns(self, *, now_ts: Optional[float] = None) -> Dict[str, Any]:
         """A5：闲置终态 run 自动收敛（定时入口=TaskScheduler 每小时；可手动触发）。
 
@@ -1937,6 +1955,63 @@ class SwarmManager:
         except Exception as e:  # noqa: BLE001 - 传导失败不阻断取消主流程
             logger.debug("Swarm: 外部成员叫停传导失败 (subagent_id=%s): %s", sid, e)
 
+    def rollbackSubagent(self, subagent_id: str,
+                         command_id: Optional[str] = None) -> Dict[str, Any]:
+        """C2 接线（G3 收敛面）：把子代理 member 会话回滚到最近检查点。
+
+        机制全在 ``NeuacpMemberSurface.rollback``（CheckpointService 事务化
+        恢复：恢复前自动留 pre-restore 快照、apply 失败自动回滚；能力闸
+        conversation_rollback 在面内 fail-closed）。本方法只做 run 解析、
+        能力未声明的转译（CapabilityNotDeclared → 结构化拒绝）与事件留痕。
+        ``command_id`` 非空时走命令回执（同 ID 重试重放结果，不重复执行）。
+        """
+        cid = str(command_id or "").strip()
+        if not cid:
+            return self._rollbackSubagentInner(subagent_id)
+        from neurova.core.command_receipt import executeWithReceipt
+
+        try:
+            result, replayed = executeWithReceipt(
+                _receiptConnection(),
+                command_id=cid,
+                command_type="rollback_subagent",
+                thread_id=str(subagent_id or ""),
+                fn=lambda: self._rollbackSubagentInner(subagent_id),
+            )
+        except Exception as exc:  # noqa: BLE001 - 回执三态错误如实转拒绝结构
+            return _receiptRejection(exc)
+        if replayed:
+            result = dict(result or {})
+            result["replayed"] = True
+        return result
+
+    def _rollbackSubagentInner(self, subagent_id: str) -> Dict[str, Any]:
+        """rollbackSubagent 的无回执内层（同一命令的组成部分，不单独进回执）。"""
+        sid = str(subagent_id or "").strip()
+        if not sid:
+            return {"success": False, "error": "subagent_id 不能为空"}
+        with self._lock:
+            run = self._runs.get(sid)
+        if run is None:
+            return {"success": False, "error": f"未找到子 Agent 运行记录: {sid}"}
+        from neurova.agent.neuacp.adapter_surface import (
+            CapabilityNotDeclared,
+            NeuacpMemberSurface,
+        )
+
+        try:
+            result = NeuacpMemberSurface.forRun(run).rollback()
+        except CapabilityNotDeclared as exc:
+            self._logRunEvent(run, "rollback_rejected", {
+                "reason": str(exc)[:EVENT_ERROR_SUMMARY_CHARS]})
+            return {"success": False, "error": str(exc)}
+        self._logRunEvent(run, "rollback", {
+            "success": bool((result or {}).get("success")),
+            "restored_ref": str((result or {}).get("restored_ref") or ""),
+            "pre_restore_ref": str((result or {}).get("pre_restore_ref") or ""),
+        })
+        return result
+
     async def updateSubagent(
         self,
         subagentId: str,
@@ -1999,6 +2074,9 @@ class SwarmManager:
           mode=steer（默认，尽力而为）→ 新指令注入成员会话插话队列，成员下一
             工具轮可见；若成员已不再调用工具则不会送达（如实提示，可改 restart）；
           mode=restart → 先叫停再按终态续跑链重派（resumed_from 溯源保留）。
+        - C2 接线（G3 收敛面）：mode=fork → 经 NeuacpMemberSurface.fork 派生
+            新分支 run（新 member 会话、resumed_from 溯源），原 run 不叫停不改动；
+          mode=resume → 显式点名续跑（只针对终态 run，语义同缺省续跑链）。
         """
         sid = str(subagentId or "").strip()
         text = str(message or "").strip()
@@ -2010,6 +2088,41 @@ class SwarmManager:
             run = self._runs.get(sid)
         if run is None:
             return {"success": False, "error": f"未找到子 Agent 运行记录: {sid}"}
+        # C2 接线：mode 字典扩容（steer/restart 既有 + resume/fork 新增）。
+        # 未知 mode 结构化拒绝（不静默当 steer——那会把语义错误的调用悄悄放行）。
+        if mode not in ("steer", "restart", "resume", "fork"):
+            return {"success": False,
+                    "error": f"mode 仅支持 steer/restart/resume/fork（收到: {mode}）"}
+        if mode == "fork":
+            # fork：经收敛面派生新分支 run（原 run 不叫停不改动，进行中任务
+            # 不受影响）。能力闸在面内：外部成员未声明 fork →
+            # CapabilityNotDeclared（诚实拒绝）；内部 agent（caps None）放行。
+            from neurova.agent.neuacp.adapter_surface import (
+                CapabilityNotDeclared,
+                NeuacpMemberSurface,
+            )
+
+            try:
+                forkResult = await NeuacpMemberSurface.forRun(run).fork(
+                    text, background=background)
+            except CapabilityNotDeclared as exc:
+                self._logRunEvent(run, "fork_rejected", {
+                    "reason": str(exc)[:EVENT_ERROR_SUMMARY_CHARS]})
+                return {"success": False, "error": str(exc)}
+            self._logRunEvent(run, "forked", {
+                "branch_subagent_id": str((forkResult or {}).get("subagent_id") or ""),
+                "message": text[:EVENT_TASK_SUMMARY_CHARS],
+            })
+            if (isinstance(forkResult, dict) and not forkResult.get("error")
+                    and not forkResult.get("rejected")):
+                forkResult = dict(forkResult)
+                forkResult["forked_from"] = run.subagent_id
+            return forkResult
+        if mode == "resume" and run.status in SUBAGENT_ACTIVE_STATUSES:
+            return {"success": False,
+                    "error": f"子代理 {sid} 仍在运行（status={run.status}）——"
+                             "mode=resume 只针对已终态的运行；运行中改需求请用 "
+                             "mode=steer（注入会话）或 mode=restart（先叫停再重派）"}
         if run.status in SUBAGENT_ACTIVE_STATUSES:
             if mode == "restart":
                 cancelResult = self._cancelRunInner(sid, reason="改需求重派（先叫停再重派）")
@@ -2126,6 +2239,9 @@ class SwarmManager:
         sameExecutor, modelChanged, targetInstalled = True, False, True
         currentTool, currentModel = "", ""
         decision = None
+        # C2 接线（G3 收敛面）：会话内换模型分支经 surface.switchModel 判定，
+        # 面内拒绝（能力未声明/决策 reject）时携带的诚实原因。
+        switchError = ""
         if isinstance(snapshotCaps, dict) and snapshotCaps:
             current = self._resumeTargetProfile(old)
             if current is None:
@@ -2139,13 +2255,33 @@ class SwarmManager:
             sameExecutor = currentTool == str(getattr(old, "executor_tool", "") or "")
             modelChanged = currentModel != str(getattr(old, "executor_model", "") or "")
             targetInstalled = bool(current.get("installed"))
-            from neurova.agent.neuacp.catalog import decideProviderTransition
+            if sameExecutor and modelChanged:
+                # C2 接线：切换分支改经 surface.switchModel 做能力闸 + 五结果
+                # 决策（编排层禁止绕过面自判；外部成员未声明
+                # model_switch_in_session → 面内 CapabilityNotDeclared，转既有
+                # 结构化拒绝；决策语义与 decideProviderTransition 同一口径）。
+                from neurova.agent.neuacp.adapter_surface import (
+                    CapabilityNotDeclared,
+                    NeuacpMemberSurface,
+                )
 
-            decision = decideProviderTransition(
-                snapshotCaps, current.get("caps") or {},
-                same_executor=sameExecutor, target_installed=targetInstalled,
-                model_changed=modelChanged,
-            )
+                try:
+                    switchVerdict = NeuacpMemberSurface.forRun(old).switchModel(
+                        currentModel)
+                except CapabilityNotDeclared as exc:
+                    decision, switchError = "reject", str(exc)
+                else:
+                    decision = switchVerdict.get("decision") or "reject"
+                    if not switchVerdict.get("success"):
+                        switchError = str(switchVerdict.get("error") or "")
+            else:
+                from neurova.agent.neuacp.catalog import decideProviderTransition
+
+                decision = decideProviderTransition(
+                    snapshotCaps, current.get("caps") or {},
+                    same_executor=sameExecutor, target_installed=targetInstalled,
+                    model_changed=modelChanged,
+                )
         else:
             memberCaps = self._memberExecutorCaps(old)
             if memberCaps is not None:
@@ -2163,6 +2299,10 @@ class SwarmManager:
             "model_changed": modelChanged,
             "tenant_checked": True,
         })
+        if switchError:
+            # C2：面内拒绝（能力未声明/请求模型不一致/目标不可用）——诚实原因
+            # 已由收敛面给出，这里原样透出（不另造第二份拒绝文案）。
+            return {"success": False, "error": switchError}
         if decision == "reject":
             return {
                 "success": False,

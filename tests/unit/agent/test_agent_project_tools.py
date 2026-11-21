@@ -380,6 +380,8 @@ class TestMemberExclusionSingleSource:
             # 递归派生/续跑/裁决/叫停（P3-1 与 H 批先例）
             "spawn_subagent", "continue_subagent", "decide_subagent_approval",
             "cancel_subagent",
+            # 会话回滚（C2 接线）：子代理不得回滚自己/兄弟的 member 会话
+            "rollback_subagent",
             # 团队编排三工具（S10）
             "list_teams", "dispatch_team", "propose_team",
             # 项目/群聊四工具（S13）

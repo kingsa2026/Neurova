@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": "neurova.builtin_tools._BUILTIN_SCHEMAS",
-  "tool_count": 138,
+  "tool_count": 139,
   "tools": [
     {
       "agent_scope": "all",
@@ -1108,6 +1108,10 @@
       "agent_scope": "main_only",
       "args_schema": {
         "properties": {
+          "command_id": {
+            "description": "幂等命令 ID（可选）：重试时传同一 ID 防重复执行；不传则不做幂等去重",
+            "type": "string"
+          },
           "reason": {
             "description": "叫停原因（留痕进事件账本与失败交接文案）",
             "type": "string"
@@ -1980,15 +1984,21 @@
             "description": "是否后台执行（默认 false，前台等结果；仅终态续跑时有效）",
             "type": "boolean"
           },
+          "command_id": {
+            "description": "幂等命令 ID（可选）：重试时传同一 ID 防重复注入/重派；不传则不做幂等去重",
+            "type": "string"
+          },
           "message": {
             "description": "续跑/修正指令：接着做什么/修正什么/补充什么约束",
             "type": "string"
           },
           "mode": {
-            "description": "运行中子代理的改需求方式：steer 注入会话（下一工具轮生效，尽力而为，默认）/ restart 先叫停再按新指令重派（保留溯源）。已终态的子代理忽略本参数，直接走续跑链",
+            "description": "改需求/派生方式：steer 注入运行中会话（下一工具轮生效，尽力而为，默认）/ restart 先叫停再按新指令重派（保留溯源）/ resume 续跑已终态子代理（缺省行为，member 会话复用）/ fork 从该子代理派生新分支 run（新会话起步、原 run 不受影响，返回新 subagent_id）。已终态子代理的 steer/restart 视同 resume",
             "enum": [
               "steer",
-              "restart"
+              "restart",
+              "resume",
+              "fork"
             ],
             "type": "string"
           },
@@ -2003,7 +2013,7 @@
         ],
         "type": "object"
       },
-      "description": "【续跑/改需求子代理】对子代理下达追加指令。已结束（completed/failed）的子代理被复活：member 会话历史保留（不是从零重派），上一段产出自动附带衔接。运行中（running/in_review）的子代理也可改需求：mode=steer 把新指令注入其会话（下一工具轮生效，尽力而为——若成员已不再调用工具则不会送达）；mode=restart 先叫停再按新指令重派（保留溯源）。适用：失败续跑、追加分析、修正方向。仅主代理可用（子代理不得续跑兄弟——与递归派生同禁）。",
+      "description": "【续跑/改需求子代理】对子代理下达追加指令。已结束（completed/failed）的子代理被复活：member 会话历史保留（不是从零重派），上一段产出自动附带衔接。运行中的子代理也可改需求：mode=steer 把新指令注入其会话（下一工具轮生效，尽力而为）；mode=restart 先叫停再按新指令重派（保留溯源）；mode=fork 从该子代理派生一个新分支 run（新会话起步、原 run 不叫停不改动）。适用：失败续跑、追加分析、修正方向。仅主代理可用（子代理不得续跑兄弟——与递归派生同禁）。",
       "external_write": true,
       "min_role": null,
       "name": "continue_subagent",
@@ -2238,6 +2248,10 @@
           "background": {
             "description": "是否后台执行（默认 true=立即返回各成员 subagent_id；false=等待全部完成）",
             "type": "boolean"
+          },
+          "command_id": {
+            "description": "幂等命令 ID（可选）：网络重试/断线重发时传同一 ID，只有第一次会真正派活，后续重试返回上次结果（replayed=true）；不传则不做幂等去重",
+            "type": "string"
           },
           "task": {
             "description": "交给团队的完整、自包含任务描述（每个成员都会收到，成员职责段按名册自动注入）",
@@ -3297,6 +3311,30 @@
       "external_write": true,
       "min_role": null,
       "name": "request_approval",
+      "read_only": false
+    },
+    {
+      "agent_scope": "main_only",
+      "args_schema": {
+        "properties": {
+          "command_id": {
+            "description": "幂等命令 ID（可选）：重试时传同一 ID 防重复执行；不传则不做幂等去重",
+            "type": "string"
+          },
+          "subagent_id": {
+            "description": "要回滚成员会话的子代理 ID（spawn_subagent/subagent_status 返回的 subagent_id）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subagent_id"
+        ],
+        "type": "object"
+      },
+      "description": "【回滚子代理会话】把子代理的成员会话恢复到最近一次检查点（事务化：恢复前自动留档 pre-restore 快照，恢复失败自动回滚）。适用于成员跑偏后回到最近已知良好状态再续派。无检查点、恢复失败或成员未声明会话回滚能力时，诚实返回失败原因。仅主代理可用。",
+      "external_write": true,
+      "min_role": null,
+      "name": "rollback_subagent",
       "read_only": false
     },
     {

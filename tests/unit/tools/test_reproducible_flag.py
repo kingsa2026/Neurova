@@ -68,6 +68,8 @@ EXPECTED_NON_REPRODUCIBLE = {
     "request_approval", "decide_subagent_approval",
     # 叫停（H 批补差）：改共享运行状态并终止成员任务，重放制造第二次取消
     "cancel_subagent",
+    # 会话回滚（C2 接线）：重放会再生成一份 pre-restore 快照并再次改写 member 会话
+    "rollback_subagent",
     # 桌面写动作（AD 批）：拖拽/按键/粘贴重放制造新桌面副作用，同 computer_type
     "computer_drag", "computer_key", "computer_paste",
 }

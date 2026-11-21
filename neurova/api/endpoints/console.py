@@ -1621,8 +1621,9 @@ async def get_console_subagent_events(
     账本（JSONL 归档）独立于台账与内存逐出——run 被逐出后仍可查。归属判定
     与 runs 读面同一谓词（`_check_session_ownership`，教义第 6 条）：台账行在
     → 按行内 user_id 判；台账无行（gate off/早期运行）→ 非管理员 fail-closed。
+    C2 接线：事件读数经 G3 收敛面（NeuacpMemberSurface.snapshot）取数——
+    同一账本单源，读面换道、响应形状不变。
     """
-    from neurova.agent.swarm_event_log import readRunEvents
     from neurova.core import agent_run_store as _ars
 
     user_id = _get_user_id(request, current_user)
@@ -1632,7 +1633,15 @@ async def get_console_subagent_events(
         if row is None:
             raise HTTPException(status_code=403, detail="Forbidden")
         _check_session_ownership({"user_id": row.get("user_id") or ""}, user_id)
-    events = await asyncio.to_thread(readRunEvents, subagent_id)
+
+    # C2 接线（G3 收敛面）：读数换道经 memberSurface().snapshot()——run 在册
+    # 走面，已逐出的存量 run 由面内以最小标识补位（账本读数不设能力维度）。
+    from neurova.agent.swarm import get_swarm_manager
+
+    def _readEventsViaSurface():
+        return get_swarm_manager().memberSurface(subagent_id).snapshot()
+
+    events = await asyncio.to_thread(_readEventsViaSurface)
     return {
         "code": 0,
         "message": "success",
