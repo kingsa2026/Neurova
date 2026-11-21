@@ -101,6 +101,17 @@
   心跳/重放窗口单源取值、范围变更即生效。
 - **量级** S-M；**依赖** 无。
 
+**三端客户端契约（connection_runtime v1，D-5 对齐依据，2026-11-21 补）**：
+服务端在移动 WS 的每个 pong 帧携带 `connection_runtime` 字段
+（`describeForClients()` 现算：`version`、`heartbeat.interval_s`、
+`reconnect.backoff_base_s/backoff_cap_s/backoff_jitter`、`replay.window_s`、
+`subscription.scopes`）。三端取值规则：心跳周期 = 契约 `heartbeat.interval_s`
+（毫秒化后钳位 [100ms, 300s]）；重连退避 = 契约 `reconnect.backoff_base_s /
+backoff_cap_s`（公式 min(base·2^n, cap)，鸿蒙另有 ±jitter；安卓暂不实现抖动，
+保持确定性）；契约未到达前沿用既有缺省（安卓 30s 心跳 / 1s·16s 退避、
+鸿蒙 30s / 0.5s·30s），旧后端 pong 无该字段时行为零变化。scope 按需订阅的
+客户端消费（看一个线程不付全部线程的账）另行排产，不在本节。
+
 ### G5 · 权限两小项（P2）
 
 - **现状**：外部成员的路径校验依赖命令 allowlist/危险命令检测，无 symlink 感知的逐级 realpath

@@ -86,6 +86,18 @@ class MobileWsChannel(
     private var refreshAlreadyTried = false
     private var manualClosed = false
 
+    /**
+     * D-5 三端契约对齐：连接契约（服务端 pong 帧 `connection_runtime` 字段，
+     * G4 describeForClients 单源）到达后覆盖以下取值；未到达前保持构造缺省
+     * （与既有行为一致）。@Volatile：OkHttp 读线程写、心跳/重连协程读。
+     */
+    @Volatile
+    private var activeHeartbeatMs: Long = heartbeatIntervalMs
+    @Volatile
+    private var activeBackoffBaseMs: Long = DEFAULT_BACKOFF_BASE_MS
+    @Volatile
+    private var activeBackoffCapMs: Long = DEFAULT_BACKOFF_CAP_MS
+
     fun connect() {
         // 手动关闭是终态（MobileWsClosePolicy：manual 恒终态）——挂起的重连协程
         // 不得借 connect() 复活已关闭的通道
@@ -129,12 +141,18 @@ class MobileWsChannel(
         heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
             while (true) {
-                delay(heartbeatIntervalMs)
+                delay(activeHeartbeatMs)
                 awaitingPong.set(true)
                 // 心跳是 JSON 帧 {"type":"ping"}：后端消息循环 json.loads 只吃 JSON，
                 // 裸文本 "ping" 会炸掉连接（鸿蒙 WebSocketAdapter 同契约，勿回潮）
                 if (!sendFrame(buildJsonObject("type" to "ping"))) break
-                delay(pongTimeoutMs)
+                // 等 pong：到达即进入下一周期（不把 pongTimeout 硬拼进周期——
+                // 否则契约 15s 会被拉长成 interval+10s）；超时仍未到视为断流。
+                var waited = 0L
+                while (awaitingPong.get() && waited < pongTimeoutMs) {
+                    delay(50)
+                    waited += 50
+                }
                 if (awaitingPong.get()) {
                     // 超时未收到 pong：视为断流，主动拆线走传输层重连档。关闭码用线上
                     // 合法的 1000——1006 是 RFC 保留码，OkHttp 发送侧直接抛
@@ -185,7 +203,30 @@ class MobileWsChannel(
         }
     }
 
-    private fun backoffMs(count: Int): Long = (1000L shl count.coerceAtMost(4)).coerceAtMost(16000)
+    private fun backoffMs(count: Int): Long =
+        backoffDelayMs(count, activeBackoffBaseMs, activeBackoffCapMs)
+
+    /**
+     * D-5 三端契约对齐：应用服务端下发的连接契约（connection_runtime）——
+     * 心跳周期与重连退避 base/cap 从单源契约取值；字段缺失/非法时保持现值
+     * （旧后端 pong 无该字段 = 行为零变化）。
+     */
+    private fun applyConnectionRuntime(contract: JsonObject) {
+        val intervalS = (contract["heartbeat"] as? JsonObject)
+            ?.get("interval_s")?.toString()?.trim('"')?.toDoubleOrNull()
+        if (intervalS != null && intervalS > 0) {
+            activeHeartbeatMs = (intervalS * 1000).toLong().coerceIn(100L, 300_000L)
+        }
+        val reconnect = contract["reconnect"] as? JsonObject
+        val baseS = reconnect?.get("backoff_base_s")?.toString()?.trim('"')?.toDoubleOrNull()
+        val capS = reconnect?.get("backoff_cap_s")?.toString()?.trim('"')?.toDoubleOrNull()
+        if (baseS != null && baseS > 0) {
+            activeBackoffBaseMs = (baseS * 1000).toLong().coerceIn(100L, 60_000L)
+        }
+        if (capS != null && capS > 0) {
+            activeBackoffCapMs = (capS * 1000).toLong().coerceAtLeast(activeBackoffBaseMs)
+        }
+    }
 
     private inner class Listener : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -199,8 +240,13 @@ class MobileWsChannel(
             val frame = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return
             when (frame["type"]?.toString()?.trim('"')) {
                 // 后端 pong 是 JSON 帧 {"type":"pong",...}（mobile_pairing.py 消息循环），
-                // 裸文本 "pong" 不在契约内；收到即清除等待标记，心跳循环据此判活
-                "pong" -> awaitingPong.set(false)
+                // 裸文本 "pong" 不在契约内；收到即清除等待标记，心跳循环据此判活。
+                // D-5：pong 携带 connection_runtime 契约（G4 单源），到达即覆盖
+                // 心跳/退避取值；无该字段的 pong（旧后端）保持现行为。
+                "pong" -> {
+                    awaitingPong.set(false)
+                    (frame["connection_runtime"] as? JsonObject)?.let { applyConnectionRuntime(it) }
+                }
                 "chat:chunk" -> eventsFlow.tryEmit(
                     Event.Chunk(
                         content = frame["content"]?.toString()?.trim('"').orEmpty(),
@@ -272,5 +318,15 @@ class MobileWsChannel(
 
         private const val HEARTBEAT_MS = 30_000L
         private const val PONG_TIMEOUT_MS = 10_000L
+        private const val DEFAULT_BACKOFF_BASE_MS = 1_000L
+        private const val DEFAULT_BACKOFF_CAP_MS = 16_000L
+
+        /**
+         * 重连退避（可测纯函数）：min(base * 2^count, cap)，与服务端
+         * connection_runtime.reconnect 契约同式；位移上限放宽到 6（64 倍），
+         * 既有缺省（1s/16s）行为不变（count≥4 时 cap 先生效）。
+         */
+        internal fun backoffDelayMs(count: Int, baseMs: Long, capMs: Long): Long =
+            (baseMs shl count.coerceAtMost(6)).coerceAtMost(capMs)
     }
 }

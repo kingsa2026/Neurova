@@ -33,7 +33,7 @@ import { EventBus } from '../bus/EventBus';
 import { AuthStore } from '../state/stores/AuthStore';
 import { ApiFacade } from '../api/ApiFacade';
 import { ErrorManager, ErrorCategory } from '../error/ErrorManager';
-import { WSMessage } from '../types';
+import { WSMessage, WsConnectionRuntimeContract } from '../types';
 
 /** 日志标签 */
 const TAG = 'WebSocketAdapter';
@@ -117,6 +117,13 @@ export class WebSocketAdapter {
   private reconnectCount: number = 0;
   /** 最大重连次数 */
   private maxReconnect: number = MAX_RECONNECT;
+  /**
+   * D-5 三端契约对齐：连接契约（服务端 pong 帧 connection_runtime，G4 单源）
+   * 到达后覆盖以下取值；未到达前保持既有缺省（行为零变化）。
+   */
+  private heartbeatIntervalMs: number = HEARTBEAT_INTERVAL;
+  private reconnectBaseMs: number = RECONNECT_BASE_MS;
+  private reconnectCapMs: number = RECONNECT_CAP_MS;
   /** 最近一次连接的 URL（用于重连） */
   private lastUrl: string = '';
   /** 最近一次连接的 token（用于重连） */
@@ -391,6 +398,11 @@ export class WebSocketAdapter {
       this.handleSnapshotRequired(raw);
       return;
     }
+    // D-5 三端契约对齐：pong 携带 connection_runtime 契约（G4 单源），到达即
+    // 覆盖心跳/退避取值；无该字段的 pong（旧后端）保持现行为。
+    if (type === 'pong' && parsed.connection_runtime !== undefined) {
+      this.applyConnectionRuntime(parsed.connection_runtime);
+    }
     // 服务端帧带单调 seq（先落账再发送）：推进游标（重放帧按原 seq 计，幂等）
     if (parsed.seq !== undefined && parsed.seq > this.lastServerSeq) {
       this.lastServerSeq = parsed.seq;
@@ -520,7 +532,7 @@ export class WebSocketAdapter {
   // 心跳保活
   // ===========================================================================
 
-  /** 启动心跳：使用 setTimeout 递归实现，每 30s 发送一次 ping */
+  /** 启动心跳：使用 setTimeout 递归实现，周期取连接契约（缺省 30s，契约到达后跟随服务端） */
   private startHeartbeat(): void {
     this.stopHeartbeat();
     const beat = (): void => {
@@ -528,10 +540,10 @@ export class WebSocketAdapter {
         this.logger.warn(TAG, '心跳发送失败', e);
       });
       // 递归调度下一次心跳
-      this.heartbeatTimerId = setTimeout(beat, HEARTBEAT_INTERVAL);
+      this.heartbeatTimerId = setTimeout(beat, this.heartbeatIntervalMs);
     };
     // 首次延迟一个间隔后发送
-    this.heartbeatTimerId = setTimeout(beat, HEARTBEAT_INTERVAL);
+    this.heartbeatTimerId = setTimeout(beat, this.heartbeatIntervalMs);
   }
 
   /** 停止心跳定时器 */
@@ -581,15 +593,35 @@ export class WebSocketAdapter {
 
   /**
    * 下次重连退避时延（毫秒）：min(base * 2^n, cap) 后乘 ±20% 抖动。
-   * 语义对齐服务端下发的续传/重连说明（同仓单源）：base 0.5s、指数 2^n、
-   * cap 30s、±20% 抖动、封顶在抖动之前生效（结果至多 cap * 1.2）。
+   * base/cap 取连接契约（D-5：服务端 connection_runtime.reconnect 单源下发，
+   * 到达后覆盖）；缺省 0.5s/30s 与服务端常量同值。
    * n 从 0 计：首次重连 0.5s 起步（reconnectCount 已先行自增，故取 n = 次数 - 1）。
    */
   private nextReconnectDelayMs(): number {
     const attempt: number = Math.max(0, this.reconnectCount - 1);
-    const cappedMs: number = Math.min(RECONNECT_BASE_MS * Math.pow(2, attempt), RECONNECT_CAP_MS);
+    const cappedMs: number = Math.min(this.reconnectBaseMs * Math.pow(2, attempt), this.reconnectCapMs);
     const jitter: number = 0.8 + Math.random() * 0.4;
     return cappedMs * jitter;
+  }
+
+  /**
+   * D-5 三端契约对齐：应用服务端 pong 帧携带的 connection_runtime 契约——
+   * 心跳周期与重连退避 base/cap 从单源契约取值；字段缺失/非法时保持现值
+   * （旧后端 pong 无该字段 = 行为零变化）。
+   */
+  private applyConnectionRuntime(contract: WsConnectionRuntimeContract): void {
+    const intervalS: number | undefined = contract.heartbeat?.interval_s;
+    if (intervalS !== undefined && intervalS > 0) {
+      this.heartbeatIntervalMs = Math.min(Math.max(intervalS * 1000, 100), 300000);
+    }
+    const baseS: number | undefined = contract.reconnect?.backoff_base_s;
+    if (baseS !== undefined && baseS > 0) {
+      this.reconnectBaseMs = Math.min(Math.max(baseS * 1000, 100), 60000);
+    }
+    const capS: number | undefined = contract.reconnect?.backoff_cap_s;
+    if (capS !== undefined && capS > 0) {
+      this.reconnectCapMs = Math.max(capS * 1000, this.reconnectBaseMs);
+    }
   }
 
   /** 用长期设备身份换新 ticket 再连；无设备身份（未配对）时按旧 token 直连 */

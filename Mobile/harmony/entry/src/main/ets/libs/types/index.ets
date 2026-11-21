@@ -243,6 +243,38 @@ export interface WSMessage {
   seq?: number;      // 服务端账本单调序号（先落账再发送，断线重连按游标补拉）
   epoch?: number;    // 连接代际（每次重连递增，客户端据此识别新连接）
   replay?: boolean;  // sync_resume 重放标记（true=补发的历史帧，非新执行）
+  connection_runtime?: WsConnectionRuntimeContract;  // D-5：pong 携带的三端连接契约（G4 单源）
+}
+
+/** 连接运行时契约——心跳段（服务端 connection_runtime.heartbeat） */
+export interface WsHeartbeatContract {
+  interval_s?: number;  // 心跳/探活周期（秒）
+}
+
+/** 连接运行时契约——重连退避段（服务端 connection_runtime.reconnect） */
+export interface WsReconnectContract {
+  backoff_base_s?: number;   // 退避基数（秒）：min(base*2^n, cap)
+  backoff_cap_s?: number;    // 退避封顶（秒），封顶在抖动前生效
+  backoff_jitter?: number;   // 抖动比例（0.2 = ±20%）
+}
+
+/** 连接运行时契约——重放窗口段（服务端 connection_runtime.replay） */
+export interface WsReplayContract {
+  window_s?: number;  // 断线重放窗口（秒），游标出窗诚实降级快照
+}
+
+/** 连接运行时契约——按需订阅段（服务端 connection_runtime.subscription） */
+export interface WsSubscriptionContract {
+  scopes?: string[];  // 支持的订阅范围：session / thread / global
+}
+
+/** 连接运行时契约整体（服务端 describeForClients 单源下发，D-5 三端对齐依据） */
+export interface WsConnectionRuntimeContract {
+  version?: number;
+  heartbeat?: WsHeartbeatContract;
+  reconnect?: WsReconnectContract;
+  replay?: WsReplayContract;
+  subscription?: WsSubscriptionContract;
 }
 
 /** chat:send 消息 */

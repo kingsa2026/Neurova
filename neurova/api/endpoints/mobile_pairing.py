@@ -1916,7 +1916,15 @@ async def mobile_websocket(websocket: WebSocket):
 
             # 处理心跳
             if message.get("type") == "ping":
-                await ledgerWs.send_json({"type": "pong", "timestamp": time.time()})
+                # D-5 服务端先行：连接契约随心跳 pong 下发（G4 describeForClients
+                # 的消费接线——此前零调用点，三端只能手抄数值）。客户端首次
+                # ping/pong 即取到心跳/退避/重放窗口取值，不再各自硬编码。
+                from neurova.api.connection_runtime import describeForClients
+
+                await ledgerWs.send_json({
+                    "type": "pong", "timestamp": time.time(),
+                    "connection_runtime": describeForClients(),
+                })
                 continue
 
             # 远程驾驶（项 1）：断线重连后按游标补发缺失帧（带 replay 标记）。
