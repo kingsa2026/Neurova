@@ -182,6 +182,19 @@ class TestRunQueueWiring:
         order = [e["subagent_id"] for e in swarm.runQueueSnapshot()]
         assert order == ["q-c", "q-a", "q-b"]
 
+    def test_status_projection_carries_queue_position(self, swarm):
+        run = _run(swarm, "q-pos-1")
+        swarm._registerRunQueue(run)
+        assert swarm.status("q-pos-1")["queue_position"] == 1
+        swarm.setRunQueuePriority("q-pos-1", "high")
+        assert swarm.status("q-pos-1")["queue_position"] == 1
+        swarm.cancelQueuedRun("q-pos-1")
+        assert swarm.status("q-pos-1")["queue_position"] == 0, "离队后位次归 0"
+
+    def test_status_projection_queue_position_absent_for_unqueued(self, swarm):
+        _run(swarm, "q-pos-2", status=SUBAGENT_RUNNING)
+        assert swarm.status("q-pos-2")["queue_position"] == 0
+
 
 class TestTerminalQualityWiring:
     def test_completed_run_is_strong_and_flows_to_envelope(self, swarm):

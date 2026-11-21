@@ -268,6 +268,8 @@ ENDPOINT_MODULES = [
     ("neurova.api.endpoints.tool_layers", "/v1/tool-layers", "Tool Layers API"),
     # B4：外部编码代理管理面（catalog / test / status，admin 门；设计文档 §4.7）
     ("neurova.api.endpoints.external_agents_api", "/v1/external-agents", "External Agents API"),
+    # B4：排队 run 管理面（队列位次/优先级/取消/任务书修订，admin 门）
+    ("neurova.api.endpoints.swarm_queue_api", "/v1/swarm-queue", "Swarm Queue API"),
     ("neurova.api.endpoints.skill_pool_api", "/v1/skill-pool", "Skill Pool API"),
     ("neurova.api.endpoints.skill_version_api", "/v1/skill-versions", "Skill Version API"),
     ("neurova.api.endpoints.text_evolution_api", "/v1/evolution", "Text Evolution API"),

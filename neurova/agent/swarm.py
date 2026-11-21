@@ -61,6 +61,7 @@ from neurova.agent.swarm_support import (
     buildRunLineage,
     reconcileSwarmRunsAtStartup,
     replayRunTailStatus,
+    requiresReviewConfirmation,
     transitionRun,
 )
 
@@ -699,19 +700,22 @@ class SwarmManager:
                         "external_adapter": externalAdapter,
                         "deps": list(deps), "status": "blocked", "created_at": time.time(),
                     }
-            return {
-                "subagent_id": blockedId, "agent_id": resolved_id,
-                "status": "blocked", "background": True,
-                "dependencies": list(deps), "unsatisfied": unsatisfied,
-                "data_fence": dataFence,
-                "room_id": str(room_id or "").strip(),
-                "project_id": effectiveProjectId,
-                "team_id": str(team_id or "").strip() if teamMember else "",
-                "team_role": teamRoleLabel,
-                "selected_member": teamMember,
-                "hint": "依赖未就绪，已登记等待；依赖验收通过后自动启动（subagent_status 查询）",
-                **self._quota_snapshot(),
-            }
+                # 依赖门 return 必须在 if unsatisfied: 之内——全部依赖已满足时
+                # blockedId 未定义，落到这里就是 UnboundLocalError（根修：只有
+                # 真有未满足依赖才走 blocked 登记，否则落到下方正常派生）。
+                return {
+                    "subagent_id": blockedId, "agent_id": resolved_id,
+                    "status": "blocked", "background": True,
+                    "dependencies": list(deps), "unsatisfied": unsatisfied,
+                    "data_fence": dataFence,
+                    "room_id": str(room_id or "").strip(),
+                    "project_id": effectiveProjectId,
+                    "team_id": str(team_id or "").strip() if teamMember else "",
+                    "team_role": teamRoleLabel,
+                    "selected_member": teamMember,
+                    "hint": "依赖未就绪，已登记等待；依赖验收通过后自动启动（subagent_status 查询）",
+                    **self._quota_snapshot(),
+                }
 
         run = SubAgentRun(
             depth=child_depth,
@@ -1095,7 +1099,10 @@ class SwarmManager:
             return {"error": f"未找到子 Agent 运行记录: {subagent_id}"}
         if run is None:
             return dict(blocked)
-        return run.to_dict()
+        result = run.to_dict()
+        # B4 管理面：排队中的 run 随状态投影透出队列位次（0=不在队列）。
+        result["queue_position"] = _runQueue().position(subagent_id)
+        return result
 
     def list_active(self) -> List[Dict[str, Any]]:
         """列出未结束的子 Agent 运行"""
@@ -1593,12 +1600,17 @@ class SwarmManager:
     # ── P1-4（评测报告 G-4）：依赖门控 ──────────────────────────
 
     def _depSatisfied(self, run: SubAgentRun) -> bool:
-        """依赖放行判据（η 门）：终态 completed 且验收门未判不达标。
+        """依赖放行判据（η 门）：终态 completed 且验收门未判不达标，且终态可信。
 
+        A1 终态质量分级消费点：weak/none 终态（超时/取消兜底、来路不明）的
+        completion 不算合格输入——上层不得把弱终态当强终态消费，须先复核；
+        历史空值（直接构造、未经 transitionRun 收口）维持原放行行为（向后兼容）。
         验收灰度关闭时 acceptance 为 None → 退化为"completed 即放行"（判据弱化但门仍在）；
         验收 failed/skipped-judge 的产出不是合格输入（skipped 是诚实降级，仍放行）。
         """
         if run.status != SUBAGENT_COMPLETED:
+            return False
+        if requiresReviewConfirmation(run):
             return False
         acceptance = run.acceptance or {}
         return acceptance.get("achieved") is not False
