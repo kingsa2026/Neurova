@@ -62,6 +62,16 @@ import { SettingGroup, SettingItem } from '../libs/types';
 /** 日志标签 */
 const TAG = 'SettingPage';
 
+/** 通道取值的展示名（auto/device/backend；未知值回落自动） */
+function asrChannelLabel(value: string): string {
+  const labels = new Map<string, string>();
+  labels.set('auto', '自动（端侧优先）');
+  labels.set('device', '仅设备端');
+  labels.set('backend', '仅后端');
+  const label = labels.get(value);
+  return label === undefined ? '自动（端侧优先）' : label;
+}
+
 /**
  * SettingViewHelper - 应用设置页视图模型纯函数集合
  *
@@ -289,6 +299,8 @@ export struct SettingPage {
   // F10 入口行徽标数据（真实计数，fail-soft）
   @State private serverCount: number = 0;
   @State private unreadCount: number = 0;
+  // 语音识别通道当前值（asr_channel: auto|device|backend）
+  @State private asrChannelLabel: string = '自动（端侧优先）';
   // 单组模式：经导航菜单 push 进入时携带 groupKey，只渲染该分组（空 = 我的根页菜单模式）
   @State private singleGroupKey: string = '';
 
@@ -299,6 +311,7 @@ export struct SettingPage {
     }
     this.loadSettings();
     this.loadEntryCounts();
+    this.asrChannelLabel = asrChannelLabel(this.cm.get<string>('asr_channel', 'auto'));
   }
 
   /** F10 分组一徽标：终端档案数 + 未读通知数（真端点，失败置 0 不阻塞页面） */
@@ -742,7 +755,7 @@ export struct SettingPage {
   // ===========================================================================
 
   @Builder
-  entryRow(icon: string, title: string, badge: string, value: string, route: string) {
+  entryRow(icon: string, title: string, badge: string, value: string, route: string, onTap?: () => void) {
     Row() {
       Column() {
         AppIcon({ name: icon, iconSize: 18, color: this.sm.getColor('primary') })
@@ -782,10 +795,56 @@ export struct SettingPage {
     .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
+      if (onTap !== undefined) {
+        onTap();
+        return;
+      }
+      if (route !== '') {
         this.router.push(route);
+      }
     })
   }
 
+  /** 语音识别通道三选一（auto/device/backend，AlertDialog buttons 数组） */
+  private showAsrChannelDialog(): void {
+    AlertDialog.show({
+      title: '语音识别通道',
+      message: '选择语音输入用哪个识别通道。自动=设备端引擎优先，失败回落后端；仅后端走 PC 终端的流式识别。',
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      buttons: [
+        {
+          value: '自动（端侧优先）',
+          action: () => {
+            this.applyAsrChannel('auto');
+          }
+        },
+        {
+          value: '仅设备端',
+          action: () => {
+            this.applyAsrChannel('device');
+          }
+        },
+        {
+          value: '仅后端',
+          fontColor: this.sm.getColor('primary'),
+          action: () => {
+            this.applyAsrChannel('backend');
+          }
+        }
+      ]
+    });
+  }
+
+  /** 落库所选通道并刷新行值（配置随 saveToPreferences 持久化） */
+  private applyAsrChannel(value: string): void {
+    this.cm.set<string>('asr_channel', value);
+    this.cm.saveToPreferences();
+    this.asrChannelLabel = asrChannelLabel(value);
+    this.msg.success('语音识别通道：' + this.asrChannelLabel);
+  }
+
+  // ===========================================================================
   // 菜单模式内容（个人卡 + 功能入口 + 管理员分组）
   // ===========================================================================
 
@@ -839,6 +898,9 @@ export struct SettingPage {
     Column() {
       this.entryRow('server', 'PC 终端与配对', this.serverCount > 0 ? this.serverCount.toString() + ' 台档案' : '', '', RouteNames.CONNECTION)
       this.entryRow('model', '模型管理', '', '', RouteNames.MODEL)
+      this.entryRow('mic', '语音识别通道', '', this.asrChannelLabel, '', () => {
+        this.showAsrChannelDialog();
+      })
       this.entryRow('bell', '通知中心', this.unreadCount > 0 ? this.unreadCount.toString() : '', '', RouteNames.NOTIFICATION)
       this.entryRow('task', '任务看板', '', '', RouteNames.TASK)
       this.entryRow('folder', '文件', '', '', RouteNames.FILE)
