@@ -98,6 +98,35 @@ class MobileWsChannel(
     @Volatile
     private var activeBackoffCapMs: Long = DEFAULT_BACKOFF_CAP_MS
 
+    /**
+     * D3 出站帧游标：服务端账本单调 seq（先落账再发送）。重连成功且游标 > 0
+     * 时发 sync_resume 补拉 (cursor, head] 的帧；收到 sync_snapshot_required
+     * 归零（弃游标按首连语义走快照/历史恢复）。内存态：进程重启走会话历史
+     * 恢复，不重放旧帧。@Volatile：OkHttp 读线程写、重连协程读。
+     */
+    @Volatile
+    private var lastServerSeq: Long = 0L
+    /** D-5 按需订阅范围（缺省 global 全收；session/thread 须带 scopeKey） */
+    @Volatile
+    private var subscriptionScope: String = "global"
+    @Volatile
+    private var subscriptionScopeKey: String = ""
+
+    /**
+     * D-5 按需订阅：设置订阅范围（看一个线程不付全部线程的账）。
+     * scope ∈ session/thread/global；session/thread 须带非空 scopeKey
+     * （与服务端 parseSubscriptionScope 同规，非法输入保持原范围不变）。
+     * 断线重连的 sync_resume 会自动携带该范围。
+     */
+    fun setSubscriptionScope(scope: String, scopeKey: String) {
+        val normalized = scope.trim().lowercase()
+        if (normalized != "session" && normalized != "thread" && normalized != "global") return
+        val key = scopeKey.trim()
+        if (normalized != "global" && key.isEmpty()) return
+        subscriptionScope = normalized
+        subscriptionScopeKey = if (normalized == "global") "" else key
+    }
+
     fun connect() {
         // 手动关闭是终态（MobileWsClosePolicy：manual 恒终态）——挂起的重连协程
         // 不得借 connect() 复活已关闭的通道
@@ -132,6 +161,24 @@ class MobileWsChannel(
     }
 
     private fun sendFrame(frame: JsonObject): Boolean = socket?.send(json.encodeToString(JsonObject.serializer(), frame)) ?: false
+
+    /**
+     * D3 断线补拉：重连成功且游标 > 0 时请求服务端补发 (cursor, head] 的帧。
+     * D-5 按需订阅：非 global 范围随补拉请求下发（服务端只推范围内帧并做
+     * 越权防线校验）；缺省 global 不带参数=全量。
+     */
+    private fun resumeMissedFrames() {
+        if (lastServerSeq <= 0) return
+        val map = linkedMapOf<String, kotlinx.serialization.json.JsonElement>(
+            "type" to JsonPrimitive("sync_resume"),
+            "last_seq" to JsonPrimitive(lastServerSeq),
+        )
+        if (subscriptionScope != "global" && subscriptionScopeKey.isNotEmpty()) {
+            map["scope"] = JsonPrimitive(subscriptionScope)
+            map["scope_key"] = JsonPrimitive(subscriptionScopeKey)
+        }
+        sendFrame(JsonObject(map))
+    }
 
     private fun buildJsonObject(vararg pairs: Pair<String, String?>): JsonObject = JsonObject(
         pairs.mapNotNull { (key, value) -> value?.let { key to JsonPrimitive(it) } }.toMap(),
@@ -234,11 +281,26 @@ class MobileWsChannel(
             refreshAlreadyTried = false
             stateFlow.value = State.AUTHED
             startHeartbeat()
+            // D3 断线补拉：游标 > 0（断线前收过账本帧）时发 sync_resume，
+            // 服务端补发 (cursor, head] 的帧（带 replay 标记）；首连游标 0 不发
+            resumeMissedFrames()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
             val frame = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return
+            // D3 游标推进：服务端出站帧带单调 seq（先落账再发送），幂等取大
+            frame["seq"]?.toString()?.trim('"')?.toLongOrNull()?.let { seq ->
+                if (seq > lastServerSeq) lastServerSeq = seq
+            }
             when (frame["type"]?.toString()?.trim('"')) {
+                // D3 快照降级：游标过旧/非法/重放预算耗尽——服务端拒绝部分重放。
+                // 弃游标并主动拆线走重连档：重连后游标为 0，按首连语义由既有
+                // 历史加载链路恢复，不携旧游标补拉（避免漏帧的部分重放）。
+                "sync_snapshot_required" -> {
+                    lastServerSeq = 0
+                    socket?.close(1000, "snapshot-resync")
+                    socket = null
+                }
                 // 后端 pong 是 JSON 帧 {"type":"pong",...}（mobile_pairing.py 消息循环），
                 // 裸文本 "pong" 不在契约内；收到即清除等待标记，心跳循环据此判活。
                 // D-5：pong 携带 connection_runtime 契约（G4 单源），到达即覆盖
@@ -288,6 +350,12 @@ class MobileWsChannel(
                     ),
                 )
             }
+        }
+
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            // 服务端先发 close（如快照降级链路）：必须应答完成关闭握手，
+            // onClosed → 重连链路才得以继续（OkHttp 不会代答 close 帧）
+            webSocket.close(code, reason)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
