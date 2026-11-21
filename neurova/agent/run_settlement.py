@@ -25,6 +25,13 @@ SETTLE_IDLE_DAYS_DEFAULT = 3.0
 SETTLE_ENV_ENABLED = "NEUROVA_SWARM_AUTO_SETTLE"  # 默认 off（D-C 拍板）
 SETTLE_ENV_IDLE_DAYS = "NEUROVA_SWARM_SETTLE_IDLE_DAYS"  # 默认 3.0
 
+# A5 终态助推：run 落终态后把下次扫掠提前的短延时（秒）。TaskScheduler 的
+# addSystemJob 只支持固定周期 job（IntervalTrigger），无一次性 job——故用
+# 「到期时间戳」模式：终态事件更新 _next_sweep_due，轻量周期 job 到点查
+# due 即跑。助推延时与轻量 job 周期同源本常量（单一事实源）。
+SETTLE_BOOST_DELAY_SECONDS = 60.0
+SETTLE_BOOST_JOB_ID = "swarm_run_settlement_boost"
+
 # 护栏键（guards dict 的键；True=命中=挡结算）
 G_ACTIVE_RUN = "active_run"
 G_PENDING_APPROVAL = "pending_approval"

@@ -80,3 +80,14 @@ async def editTask(subagent_id: str, body: TaskBody,
         return manager.editRunTask(subagent_id, body.task)
     except ValueError as e:  # noqa: PERF203 - 空任务书等入参错误 → 400
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/settle")
+async def settleIdleRunsExplicit(
+        _admin: Dict[str, Any] = Depends(requireAdmin)) -> Dict[str, Any]:
+    """A5 显式驱动：admin 显式触发一次闲置 run 结算（POST /v1/swarm-queue/settle）。
+
+    不受 NEUROVA_SWARM_AUTO_SETTLE 默认关限制——admin 显式调用即执行；
+    九重护栏与闲置阈值照常生效。返回结算结果三桶（settled/skipped/failed）。
+    """
+    return _manager().settleIdleRunsNow()

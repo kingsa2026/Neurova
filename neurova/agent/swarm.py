@@ -439,6 +439,10 @@ class SwarmManager:
         # P1 移交清偿：run 终态后释放外部适配器的后台任务强引用集（防 GC 吞任务）。
         self._adapterCloseTasks: set = set()
         self._lock = threading.RLock()
+        # A5 终态助推账本：_nextSweepDue=下次助推扫掠到期时刻（epoch 秒，0=无待跑）；
+        # _settleBoostJobRegistered 防重复注册 60s 轻量 job（开关开才注册）。
+        self._nextSweepDue = 0.0
+        self._settleBoostJobRegistered = False
         # A5：自动结算开启时才挂定时 sweep（默认关——不拉起调度器，测试零污染）。
         # 每小时一轮；管理面也可直接调 settleIdleRuns() 手动触发。
         try:
@@ -1185,6 +1189,10 @@ class SwarmManager:
         A2：同事件镜像进全局事件库（全局单调 seq，重放/快照协议用）——
         JSONL 账本仍是一手事实源，镜像 fail-open 不阻断主流程。
         """
+        # A5 终态助推：terminal 事件是全部终态迁移的统一收口（成败/超时/取消/
+        # 队列取消都从这里落）——在此把下次结算扫掠提前（开关开才调度，fail-open）。
+        if eventType == "terminal":
+            self._scheduleSettleBoost()
         try:
             from neurova.agent.swarm_event_log import appendRunEvent
 
@@ -1232,14 +1240,20 @@ class SwarmManager:
             run = SubAgentRun(subagent_id=sid)
         return NeuacpMemberSurface.forRun(run)
 
-    def settleIdleRuns(self, *, now_ts: Optional[float] = None) -> Dict[str, Any]:
-        """A5：闲置终态 run 自动收敛（定时入口=TaskScheduler 每小时；可手动触发）。
+    def settleIdleRuns(self, *, now_ts: Optional[float] = None,
+                       force: bool = False) -> Dict[str, Any]:
+        """A5：闲置终态 run 自动收敛。三个驱动入口：
+
+        - 时钟驱动：TaskScheduler 每小时 job（开关开才挂，默认关）；
+        - 显式驱动：``settleIdleRunsNow()``（admin 端点 POST /v1/swarm-queue/settle），
+          ``force=True`` 不受开关限制；
+        - 终态助推：run 落终态时把下次扫掠提前（``_settleBoostTick`` 到期即跑）。
 
         结算语义按本仓状态机裁剪：completed/failed 已是终态且无出边，**不新增
         "settled" 状态词**——结算动作 = 把闲置超阈值的终态 run 从内存台账逐出
         （事件/帧/归档账本在磁盘，逐出后仍可查）并留痕 `auto_settled` 事件。
-        护栏与阈值判定单源在 run_settlement.evaluateSettlement；开关
-        NEUROVA_SWARM_AUTO_SETTLE 默认关（D-C 拍板），阈值
+        护栏与阈值判定单源在 run_settlement.evaluateSettlement（任何驱动都不豁免）；
+        开关 NEUROVA_SWARM_AUTO_SETTLE 默认关（D-C 拍板），阈值
         NEUROVA_SWARM_SETTLE_IDLE_DAYS 默认 3 天。
         """
         from neurova.agent.run_settlement import (
@@ -1249,7 +1263,7 @@ class SwarmManager:
         )
 
         enabled, idleDays = readSettleSettings()
-        if not enabled:
+        if not enabled and not force:
             return {"enabled": False, "settled": [], "skipped": [], "failed": []}
         now = float(now_ts) if now_ts is not None else time.time()
         candidates: List[Any] = []
@@ -1289,6 +1303,61 @@ class SwarmManager:
                 })
 
         return sweep(candidates, now_ts=now, idle_days=idleDays, settle_fn=_settle)
+
+    def settleIdleRunsNow(self, *, now_ts: Optional[float] = None) -> Dict[str, Any]:
+        """A5 显式驱动：管理面（POST /v1/swarm-queue/settle）显式触发一次结算。
+
+        不受 NEUROVA_SWARM_AUTO_SETTLE 默认关限制——admin 显式调用即执行；
+        九重护栏与闲置阈值照常生效（force 只越过开关，不豁免护栏）。
+        返回结算结果三桶（settled/skipped/failed）。
+        """
+        return self.settleIdleRuns(now_ts=now_ts, force=True)
+
+    def _scheduleSettleBoost(self) -> None:
+        """A5 终态助推：run 落终态且开关开时，把下次扫掠提前 60s。
+
+        TaskScheduler 只支持固定周期 job（addSystemJob=IntervalTrigger，无一次性
+        job），故用「到期时间戳」模式：这里只更新 _nextSweepDue（多次终态取最早
+        到期）并确保 60s 轻量 job 在册；到点扫掠由 _settleBoostTick 执行。全程
+        fail-open：助推注册失败不阻断终态事件归档。
+        """
+        try:
+            from neurova.agent.run_settlement import (
+                SETTLE_BOOST_DELAY_SECONDS,
+                SETTLE_BOOST_JOB_ID,
+                readSettleSettings,
+            )
+
+            if not readSettleSettings()[0]:
+                return
+            now = time.time()
+            with self._lock:
+                due = now + SETTLE_BOOST_DELAY_SECONDS
+                if self._nextSweepDue <= 0 or due < self._nextSweepDue:
+                    self._nextSweepDue = due
+                alreadyRegistered = self._settleBoostJobRegistered
+                self._settleBoostJobRegistered = True
+            if not alreadyRegistered:
+                from neurova.agent.scheduler import get_scheduler
+
+                get_scheduler().addSystemJob(
+                    self._settleBoostTick, SETTLE_BOOST_JOB_ID,
+                    int(SETTLE_BOOST_DELAY_SECONDS))
+        except Exception as boostError:  # noqa: BLE001 - 助推失败不阻断终态落账
+            logger.debug("Swarm: 终态助推调度失败: %s", boostError)
+
+    def _settleBoostTick(self) -> None:
+        """A5 终态助推的 60s 轻量 job：到点查 _nextSweepDue，到期即跑一轮结算。"""
+        now = time.time()
+        with self._lock:
+            due = self._nextSweepDue
+            if due <= 0 or now < due:
+                return
+            self._nextSweepDue = 0.0  # 到期消费，跑完不重复助推
+        try:
+            self.settleIdleRuns()
+        except Exception as tickError:  # noqa: BLE001 - 助推扫掠失败不炸调度线程
+            logger.debug("Swarm: 终态助推扫掠失败: %s", tickError)
 
     def runFrames(self, subagent_id: str, afterSeq: int = 0,
                   limit: int = 1000) -> Dict[str, Any]:
