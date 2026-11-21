@@ -40,12 +40,19 @@ def defaultSshKeyResolver(key_ref: str) -> Optional[str]:
     return value or None
 
 
-def resolveRemoteCommand(command, remote, key_resolver: Optional[KeyResolver] = None) -> List[str]:
+def resolveRemoteCommand(command, remote, key_resolver: Optional[KeyResolver] = None,
+                         remote_env: Optional[dict] = None) -> List[str]:
     """把原命令包装成 ssh 前缀命令（fail-closed：缺 host/user/key 即抛错）。
 
     产出形态（顺序固定）：``["ssh", "-o", "BatchMode=yes", "-p", <port>,
-    "-i", <key>, "<user>@<host>", "--", *原命令]``；port/key_ref 缺省时
-    对应项省略。
+    "-i", <key>, "<user>@<host>", "--", *env 前缀, *原命令]``；port/key_ref
+    缺省时对应项省略。
+
+    ``remote_env``（D2/D3 远程身份路由）：需要随命令**路由到远端成员进程**的
+    环境变量（如 C4 的 ``NEUROVA_RUN_CREDENTIAL``）。OpenSSH 不转发任意本地
+    环境变量，凭据必须显式走远端命令面（``KEY=VALUE cmd...``）才能到达远程
+    成员；键按字典序排列保证命令形态确定，值经 shlex.quote 防远端重新切分。
+    缺省/空 dict 不产生任何前缀（命令形态与既往逐字节一致）。
     """
     parts = [str(part) for part in (command or [])]
     if not parts:
@@ -87,6 +94,13 @@ def resolveRemoteCommand(command, remote, key_resolver: Optional[KeyResolver] = 
 
     prefix.append(f"{user}@{host}")
     prefix.append("--")
+    # 远端 env 前缀（KEY=VALUE 作为一个 argv 元素交给远端 shell 解析）：
+    # shlex.quote 保证含空格/特殊字符的键值不被远端重新切分。
+    for env_key in sorted(remote_env or {}):
+        env_value = remote_env[env_key]
+        if env_value is None:
+            continue
+        prefix.append(shlex.quote(f"{env_key}={env_value}"))
     # OpenSSH 把参数原样用空格拼接交给远端 shell：带空格/特殊字符的参数
     # 必须 quote，否则远端重新切分（插件形态 --prompt 任务文本首当其冲）。
     prefix.extend(shlex.quote(part) for part in parts)
@@ -98,17 +112,19 @@ wrapRemoteCommand = resolveRemoteCommand
 
 
 def resolveSpawnCommand(command, transport: str = "stdio", remote=None,
-                        key_resolver: Optional[KeyResolver] = None) -> List[str]:
+                        key_resolver: Optional[KeyResolver] = None,
+                        remote_env: Optional[dict] = None) -> List[str]:
     """spawn 期统一漏斗：按 transport 产出实际拉起命令。
 
-    stdio 原样返回（既有行为零变化）；ssh 走 resolveRemoteCommand 包装；
-    其余 transport fail-closed（本卡只落地 stdio/ssh）。
+    stdio 原样返回（既有行为零变化）；ssh 走 resolveRemoteCommand 包装
+    （``remote_env`` 为需要路由到远端成员进程的环境变量）；其余 transport
+    fail-closed（本卡只落地 stdio/ssh）。
     """
     transport_value = str(transport or "stdio")
     if transport_value == "stdio":
         return [str(part) for part in (command or [])]
     if transport_value == "ssh":
-        return resolveRemoteCommand(command, remote, key_resolver)
+        return resolveRemoteCommand(command, remote, key_resolver, remote_env)
     raise NeuacpError(
         f"不支持的 transport: {transport_value!r}（当前支持 stdio/ssh，fail-closed）")
 

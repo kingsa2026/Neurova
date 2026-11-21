@@ -402,3 +402,166 @@ def test_applyRemoteTransportRejectsUnsupportedTransport():
     executor = NeuacpStdioExecutor(["opencode", "acp"])
     with pytest.raises(NeuacpError):
         applyRemoteTransport(executor, "http", {"host": "h", "user": "u"})
+
+
+# ── 7. D2/D3 远程身份凭据路由（run 凭据经 ssh 命令面到达远端成员进程） ──────
+
+CRED_ENV = "NEUROVA_RUN_CREDENTIAL"
+
+
+def _issueRunToken():
+    from neurova.security.run_identity import issueRunCredential
+
+    return issueRunCredential("run-route-1", "tenant-route-1", ttl_s=600)
+
+
+def test_remoteEnvPrefixRoutedAfterDashDash():
+    token = _issueRunToken()
+    command = resolveRemoteCommand(
+        ["python3", "/tmp/probe.py"],
+        {"host": "h", "user": "u"},
+        key_resolver=lambda ref: KEY_PATH,
+        remote_env={CRED_ENV: token},
+    )
+    rest = command[command.index("--") + 1:]
+    assert rest[0] == shlex.quote(f"{CRED_ENV}={token}")
+    assert rest[1:] == ["python3", "/tmp/probe.py"]
+
+
+def test_remoteEnvNoneKeepsCommandUnchanged():
+    command = resolveRemoteCommand(
+        ["opencode", "acp"],
+        {"host": "h", "user": "u"},
+        key_resolver=lambda ref: KEY_PATH,
+    )
+    assert command == ["ssh", "-o", "BatchMode=yes", "u@h", "--", "opencode", "acp"]
+
+
+def test_remoteEnvEmptyDictKeepsCommandUnchanged():
+    command = resolveRemoteCommand(
+        ["opencode", "acp"],
+        {"host": "h", "user": "u"},
+        key_resolver=lambda ref: KEY_PATH,
+        remote_env={},
+    )
+    assert command == ["ssh", "-o", "BatchMode=yes", "u@h", "--", "opencode", "acp"]
+
+
+def test_remoteEnvValueWithSpacesQuoted():
+    command = resolveRemoteCommand(
+        ["opencode"],
+        {"host": "h", "user": "u"},
+        key_resolver=lambda ref: KEY_PATH,
+        remote_env={"NEUROVA_TASK_TEXT": "fix the bug"},
+    )
+    rest = command[command.index("--") + 1:]
+    assert rest[0] == shlex.quote("NEUROVA_TASK_TEXT=fix the bug")
+
+
+def test_remoteEnvKeysSortedForDeterminism():
+    token = _issueRunToken()
+    command = resolveRemoteCommand(
+        ["opencode"],
+        {"host": "h", "user": "u"},
+        key_resolver=lambda ref: KEY_PATH,
+        remote_env={"ZZZ_A": "1", CRED_ENV: token, "AAA_C": "3"},
+    )
+    rest = command[command.index("--") + 1:]
+    assert rest[0] == "AAA_C=3"
+    assert rest[1] == shlex.quote(f"{CRED_ENV}={token}")
+    assert rest[2] == "ZZZ_A=1"
+    assert rest[3:] == ["opencode"]
+
+
+def test_clientSshSpawnRoutesRunCredentialToRemoteCommand(monkeypatch):
+    import neurova.agent.neuacp.acp_client as acp_client_module
+
+    captured = {}
+
+    def fakePopen(command, **kwargs):
+        captured["command"] = [str(part) for part in command]
+        return _FakeProcess()
+
+    monkeypatch.setattr(acp_client_module.subprocess, "Popen", fakePopen)
+    monkeypatch.setattr(
+        NeuacpClient, "request",
+        lambda self, method, params=None, timeout=None: {"protocolVersion": "1"},
+    )
+    monkeypatch.setenv(KEY_ENV, KEY_PATH)
+    client = NeuacpClient(
+        ["python3", "/tmp/probe.py"],
+        transport="ssh",
+        remote={"host": "203.0.113.10", "user": "deploy", "key_ref": KEY_ENV},
+        run_credential_context={"run_id": "run-route-1", "tenant_id": "tenant-route-1"},
+    )
+    try:
+        client.start()
+    finally:
+        client.terminate()
+    command = captured["command"]
+    assert "--" in command
+    rest = command[command.index("--") + 1:]
+    assert rest[0].startswith(f"{CRED_ENV}=")
+    payload_b64 = rest[0].split("=", 1)[1].split(".", 1)[0]
+    import base64
+
+    payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=="))
+    assert payload["run_id"] == "run-route-1"
+    assert payload["tenant_id"] == "tenant-route-1"
+    assert rest[1:] == ["python3", "/tmp/probe.py"]
+
+
+def test_clientStdioSpawnKeepsCredentialOutOfCommand(monkeypatch):
+    """stdio 路径回归护栏：凭据只进子进程 env，命令面不带前缀。"""
+    import neurova.agent.neuacp.acp_client as acp_client_module
+
+    captured = {}
+
+    def fakePopen(command, **kwargs):
+        captured["command"] = [str(part) for part in command]
+        captured["env"] = kwargs.get("env") or {}
+        return _FakeProcess()
+
+    monkeypatch.setattr(acp_client_module.subprocess, "Popen", fakePopen)
+    monkeypatch.setattr(
+        NeuacpClient, "request",
+        lambda self, method, params=None, timeout=None: {"protocolVersion": "1"},
+    )
+    client = NeuacpClient(
+        ["opencode", "acp"],
+        run_credential_context={"run_id": "run-route-1", "tenant_id": "tenant-route-1"},
+    )
+    try:
+        client.start()
+    finally:
+        client.terminate()
+    assert "--" not in captured["command"]
+    assert CRED_ENV in captured["env"]
+
+
+def test_pluginSshSpawnRoutesRunCredentialToRemoteCommand(monkeypatch):
+    import neurova.agent.neuacp.plugin_executor as plugin_module
+
+    captured = {}
+
+    def fakePopen(command, **kwargs):
+        captured["command"] = [str(part) for part in command]
+        return _FakeProcess(stdout_lines=b'{"type":"result","result":"ok"}\n')
+
+    monkeypatch.setattr(plugin_module.subprocess, "Popen", fakePopen)
+    monkeypatch.setenv(KEY_ENV, KEY_PATH)
+    executor = NeuacpPluginExecutor(
+        ["zcode"],
+        transport="ssh",
+        remote={"host": "198.51.100.7", "user": "ci", "key_ref": KEY_ENV},
+        run_tenant_id="tenant-route-1",
+    )
+    ctx = NeuacpSessionContext(member_session_id="m-1", task_text="任务", cwd="",
+                               metadata={"subagent_id": "run-route-1"})
+    asyncio.run(executor.start(ctx))
+    asyncio.run(executor.prompt("任务", lambda kind, text: None, None))
+    command = captured["command"]
+    assert "--" in command
+    rest = command[command.index("--") + 1:]
+    assert rest[0].startswith(f"{CRED_ENV}=")
+    assert rest[1] == "zcode"

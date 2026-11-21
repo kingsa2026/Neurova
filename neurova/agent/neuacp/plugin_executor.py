@@ -70,13 +70,22 @@ class NeuacpPluginExecutor:
 
     async def prompt(self, task_text: str, emitter: Callable[[str, Any], None], on_permission: Callable[[str, str, str], dict]) -> NeuacpExecResult:
         command = self._command + [self._prompt_arg, task_text]
+        child_env = buildChildEnvironment(
+            self._env_extra, run_credential_context=self._run_credential_context)
         # Windows：PATH 里的 CLI 可能是 .cmd/.bat，Popen 不做 PATHEXT 解析。
         # transport=ssh：先包装成 ssh 前缀命令（§4.8，缺 remote/凭据 fail-closed），
         # ssh.exe 本身在 PATH，同样走 which 解析。
         if self._transport != "stdio":
             from neurova.agent.neuacp.ssh_transport import resolveSpawnCommand
 
-            command = resolveSpawnCommand(command, self._transport, self._remote)
+            # D2/D3 远程身份路由：OpenSSH 不转发任意本地 env，C4 的 run 凭据
+            # 必须显式走远端命令面才能到达远程成员进程（缺省无凭据零前缀）。
+            remote_env = {}
+            run_credential = child_env.get("NEUROVA_RUN_CREDENTIAL")
+            if run_credential:
+                remote_env["NEUROVA_RUN_CREDENTIAL"] = run_credential
+            command = resolveSpawnCommand(command, self._transport, self._remote,
+                                          remote_env=remote_env)
         resolved_head = shutil.which(command[0]) if command else None
         if resolved_head:
             command[0] = resolved_head
@@ -86,8 +95,7 @@ class NeuacpPluginExecutor:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                env=buildChildEnvironment(
-                    self._env_extra, run_credential_context=self._run_credential_context),
+                env=child_env,
                 cwd=self._cwd or None,
             )
         except OSError as exc:

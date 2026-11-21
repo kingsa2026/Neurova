@@ -174,7 +174,14 @@ class NeuacpClient:
         if self._transport != "stdio":
             from neurova.agent.neuacp.ssh_transport import resolveSpawnCommand
 
-            command = resolveSpawnCommand(command, self._transport, self._remote)
+            # D2/D3 远程身份路由：OpenSSH 不转发任意本地 env，C4 的 run 凭据
+            # 必须显式走远端命令面才能到达远程成员进程（缺省无凭据零前缀）。
+            remote_env = {}
+            run_credential = env.get("NEUROVA_RUN_CREDENTIAL")
+            if run_credential:
+                remote_env["NEUROVA_RUN_CREDENTIAL"] = run_credential
+            command = resolveSpawnCommand(command, self._transport, self._remote,
+                                          remote_env=remote_env)
         resolved_head = shutil.which(command[0]) if command else None
         if resolved_head:
             command[0] = resolved_head
