@@ -29,6 +29,7 @@ class ContextSource(Enum):
     MULTIMODAL = "multimodal"  # 多模态内容
     USER_INPUT = "user_input"  # 用户输入
     SUMMARY = "summary"  # 溢出折叠摘要（P1-1③：压缩视图而非丢内容）
+    GENERATION = "generation"  # 生成物（M9：AIGC 生成产物——图/视频/音乐回执入池）
 
 
 #: 上下文来源 → 优先级阶梯（**唯一事实源**）。
@@ -52,6 +53,8 @@ SOURCE_PRIORITY = {
     ContextSource.CONVERSATION: 60,
     ContextSource.TOOL_CALL: 60,
     ContextSource.REFLECTION: 60,
+    # 生成物与工具结果同档：模型可消费的过程产物（M9）
+    ContextSource.GENERATION: 60,
     ContextSource.EMOTION: 50,
 }
 

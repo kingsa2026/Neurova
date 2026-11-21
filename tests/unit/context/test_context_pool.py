@@ -41,8 +41,10 @@ class TestContextSource:
     def test_source_members(self):
         """测试 ContextSource 枚举成员数量"""
         # P1-1③：+SUMMARY（溢出折叠摘要源）
-        assert len(ContextSource) == 11
+        # M9（多模态追平批一）：+GENERATION（AIGC 生成产物源）
+        assert len(ContextSource) == 12
         assert ContextSource.SUMMARY.value == "summary"
+        assert ContextSource.GENERATION.value == "generation"
 
 
 class TestContextInput:

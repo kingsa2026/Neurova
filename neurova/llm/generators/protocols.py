@@ -72,6 +72,18 @@ class VideoProtocol(str, Enum):
     SORA = "sora"
 
 
+class MusicProtocol(str, Enum):
+    """音乐生成协议（M1 多模态追平批一）。
+
+    FAL：fal.ai Queue API——提交 POST {base}/{model_id}，轮询
+    GET {base}/{owner}/{app}/requests/{id}/status，取回
+    GET {base}/{owner}/{app}/requests/{id}。当前唯一实测协议族，
+    缺省即 fal（不虚构第二家）。
+    """
+
+    FAL = "fal"
+
+
 # ── 协议解析：显式标签 → 后端映射（含中文标签）→ model/base_url 兜底探测 ──
 
 _PROTOCOL_LABELS = {
@@ -126,6 +138,18 @@ def resolve_video_protocol(
     if "sora" in text:
         return VideoProtocol.SORA
     return VideoProtocol.WAN
+
+
+def resolve_music_protocol(
+    protocol_label: str = "", model_name: str = "", base_url: str = "",
+) -> MusicProtocol:
+    """音乐协议解析：当前唯一实测协议族是 fal Queue API，一律归 FAL。
+
+    签名与 resolve_image_protocol / resolve_video_protocol 对齐（标签/模型名/
+    base_url 三参探测位保留）；在拿到第二家实测契约前不虚构协议
+    （修复教义：禁止虚构端点），缺省与未知标签都归 fal。
+    """
+    return MusicProtocol.FAL
 
 
 # ── URL 拼接纯函数（实测矩阵的单源实现） ──
@@ -649,6 +673,7 @@ async def submit_video(
     audio: Optional[bool] = None,
     timeout: float = 60.0,
     last_frame: Optional[str] = None,
+    video_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """提交视频生成任务，返回 {task_id, poll_url?, raw, ignored_params?}。
 
@@ -656,6 +681,11 @@ async def submit_video(
     first_frame/last_frame 角色（先画后动插值）；VEO instances 支持
     lastFrame（Google 公开 API 字段）；WAN 无尾帧通道 → 尾帧进
     ignored_params 显式标注（首帧照常提交，不静默丢弃不假生效）。
+
+    M2 视频生视频（video_url=源视频）：wan/seedance2/veo 三家落地；
+    请求体字段按各家既有异步任务形态设计（WAN input.video_url、
+    Seedance content type=video_url、VEO instance.video base64）——
+    契约按桩锁定，官方文档待核。
     """
     protocol = (
         VideoProtocol(creds.protocol)
@@ -689,6 +719,16 @@ async def submit_video(
             body["input"]["media"] = resolved_refs
             if any(str(r).startswith("oss://") for r in resolved_refs):
                 headers["X-DashScope-OssResourceResolve"] = "enable"
+        if video_url:
+            # M2：源视频。本地文件与参考媒体同走百炼临时上传；http(s)/oss 直传。
+            if video_url.startswith(("http://", "https://", "oss://")):
+                body["input"]["video_url"] = video_url
+            else:
+                body["input"]["video_url"] = await dashscope_upload_file(
+                    creds.api_key, creds.model or "wan2.7-videoedit",
+                    video_url, creds.base_url)
+            if str(body["input"]["video_url"]).startswith("oss://"):
+                headers["X-DashScope-OssResourceResolve"] = "enable"
         status, data = await _post_json(wan_submit_url(creds.base_url), headers, body, timeout)
         if status >= 400:
             raise RuntimeError(f"WAN 提交失败 HTTP {status}: {str(data)[:300]}")
@@ -702,6 +742,10 @@ async def submit_video(
     if protocol == VideoProtocol.SEEDANCE2:
         headers = {"Authorization": f"Bearer {creds.api_key}"}
         content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+        if video_url:
+            # M2：源视频 role=reference_video（契约按桩锁定，官方文档待核）
+            content.append({"type": "video_url", "role": "reference_video",
+                            "video_url": {"url": media_to_data_url(video_url)}})
         for i, ref in enumerate(refs):
             role = "first_frame" if i == 0 else "reference_image"
             content.append({"type": "image_url", "role": role, "image_url": {"url": media_to_data_url(ref)}})
@@ -780,6 +824,23 @@ async def submit_video(
     # VEO
     headers = {"x-goog-api-key": creds.api_key}
     instance: Dict[str, Any] = {"prompt": prompt}
+    if video_url:
+        # M2：源视频 → instance.video base64 字节（契约按桩锁定，官方文档待核）。
+        # http(s) 引用服务端取字节；本地文件经 media_to_data_url 转 data URL。
+        src = media_to_data_url(video_url)
+        if src.startswith("http"):
+            blob = await _get_binary(src)
+            instance["video"] = {
+                "bytesBase64Encoded": base64.b64encode(blob).decode(),
+                "mimeType": mimetypes.guess_type(video_url)[0] or "video/mp4",
+            }
+        else:
+            header, _, payload = src.partition(",")
+            instance["video"] = {
+                "bytesBase64Encoded": payload,
+                "mimeType": (header[5:].split(";")[0]
+                             if header.startswith("data:") else "video/mp4"),
+            }
     for ref in refs:
         instance["image"] = {"bytesBase64Encoded": media_to_data_url(ref).split(",", 1)[-1],
                              "mimeType": "image/png"}
@@ -907,10 +968,11 @@ async def generate_video_wait(
     poll_interval: float = 10.0,
     max_wait: float = 900.0,
     last_frame: Optional[str] = None,
+    video_url: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """submit + 轮询直到完成（阻塞式封装，供同步调用方使用；透传尾帧）。"""
+    """submit + 轮询直到完成（阻塞式封装，供同步调用方使用；透传尾帧/源视频）。"""
     submitted = await submit_video(creds, prompt, duration, resolution, ref_images,
-                                   audio, last_frame=last_frame)
+                                   audio, last_frame=last_frame, video_url=video_url)
     task_id = submitted.get("task_id")
     if not task_id:
         raise RuntimeError(f"视频任务提交未返回 task_id: {str(submitted.get('raw'))[:300]}")
@@ -922,6 +984,141 @@ async def generate_video_wait(
         if result["status"] != "running":
             return result
     raise TimeoutError("视频生成轮询超时")
+
+
+# ── 音乐协议（M1 多模态追平批一）：fal Queue API ────────────────────────────
+# 契约事实源：fal.ai 官方文档 docs.fal.ai/model-endpoints/queue（2026-11-22 实核）：
+# 提交 POST {base}/{model_id}（头 Authorization: Key <FAL_KEY>）→
+# {request_id, status_url, response_url, queue_position}；
+# 轮询 GET {base}/{owner}/{app}/requests/{id}/status，status ∈
+# IN_QUEUE / IN_PROGRESS / COMPLETED（失败在 COMPLETED 内带 error/error_type）；
+# 取回 GET {base}/{owner}/{app}/requests/{id} → 模型输出（音频型 audio.url/audio_url）。
+# 状态/取回 URL 只含 owner/app 两段（官方明示：带 endpoint 子路径返回 405）。
+
+DEFAULT_FAL_QUEUE_BASE = "https://queue.fal.run"
+DEFAULT_FAL_MUSIC_MODEL = "fal-ai/musicgen"  # 请求体契约按桩锁定，官方文档待核
+
+
+def _fal_owner_app(model_id: str) -> str:
+    """完整模型 ID → owner/app 两段（轮询/取回 URL 不含更多子路径，405 规避）。"""
+    parts = [p for p in str(model_id or "").split("/") if p]
+    if len(parts) >= 2:
+        return f"{parts[0]}/{parts[1]}"
+    return "/".join(parts)
+
+
+def fal_submit_url(model_id: str, base_url: str = "") -> str:
+    base = (base_url or DEFAULT_FAL_QUEUE_BASE).rstrip("/")
+    return f"{base}/{str(model_id or '').strip('/')}"
+
+
+def fal_status_url(model_id: str, request_id: str, base_url: str = "") -> str:
+    base = (base_url or DEFAULT_FAL_QUEUE_BASE).rstrip("/")
+    return f"{base}/{_fal_owner_app(model_id)}/requests/{request_id}/status"
+
+
+def fal_result_url(model_id: str, request_id: str, base_url: str = "") -> str:
+    base = (base_url or DEFAULT_FAL_QUEUE_BASE).rstrip("/")
+    return f"{base}/{_fal_owner_app(model_id)}/requests/{request_id}"
+
+
+def _fal_headers(api_key: str) -> Dict[str, str]:
+    # 官方鉴权头是 Key 前缀（非 Bearer）：Authorization: Key $FAL_KEY
+    return {"Authorization": f"Key {api_key}"}
+
+
+def _fal_audio_url(data: Dict[str, Any]) -> str:
+    """音频产物 URL 候选字段宽松解析（audio.url / audio_url / url / output 递归）。"""
+    if not isinstance(data, dict):
+        return ""
+    audio = data.get("audio")
+    if isinstance(audio, dict) and audio.get("url"):
+        return str(audio["url"])
+    for key in ("audio_url", "url"):
+        if data.get(key):
+            return str(data[key])
+    output = data.get("output")
+    if isinstance(output, dict):
+        return _fal_audio_url(output)
+    return ""
+
+
+async def submit_music(
+    creds: ProtocolCredentials,
+    prompt: str,
+    duration: int = 30,
+    timeout: float = 60.0,
+) -> Dict[str, Any]:
+    """提交 fal 音乐生成任务（M1）。
+
+    请求体字段按既有协议族形态设计：prompt 必带，duration 秒数透传——
+    具体音频模型的入参字段名以其官方模型卡为准
+    （契约按桩锁定，官方文档待核）。
+    """
+    protocol = resolve_music_protocol(creds.protocol, creds.model, creds.base_url)
+    if protocol is not MusicProtocol.FAL:
+        raise ValueError(f"不支持的音乐生成协议: {protocol.value}")
+    model_id = creds.model or DEFAULT_FAL_MUSIC_MODEL
+    body: Dict[str, Any] = {"prompt": prompt}
+    if duration:
+        body["duration"] = int(duration)
+    status, data = await _post_json(
+        fal_submit_url(model_id, creds.base_url), _fal_headers(creds.api_key),
+        body, timeout)
+    if status >= 400:
+        raise RuntimeError(f"fal 音乐提交失败 HTTP {status}: {str(data)[:300]}")
+    request_id = str(data.get("request_id") or "")
+    if not request_id:
+        raise RuntimeError(f"fal 音乐提交未返回 request_id: {str(data)[:300]}")
+    return {
+        "task_id": request_id,
+        "poll_url": str(data.get("status_url") or "")
+        or fal_status_url(model_id, request_id, creds.base_url),
+        "result_url": str(data.get("response_url") or "")
+        or fal_result_url(model_id, request_id, creds.base_url),
+        "raw": data,
+    }
+
+
+async def poll_music(
+    creds: ProtocolCredentials, task_id: str, poll_url: str = "",
+    result_url: str = "", timeout: float = 30.0,
+) -> Dict[str, Any]:
+    """轮询 fal 音乐任务一次：{status: running|succeeded|failed, audio_url?, error?, raw}。
+
+    四态映射：IN_QUEUE/IN_PROGRESS → running；COMPLETED+error → failed（诚实原文）；
+    COMPLETED 无错 → 取回端点拿音频 URL → succeeded；HTTP 错误 → failed。
+    """
+    protocol = resolve_music_protocol(creds.protocol, creds.model, creds.base_url)
+    if protocol is not MusicProtocol.FAL:
+        raise ValueError(f"不支持的音乐生成协议: {protocol.value}")
+    url = poll_url or fal_status_url(creds.model, task_id, creds.base_url)
+    status, data = await _get_json(url, _fal_headers(creds.api_key), timeout)
+    if status >= 400:
+        return {"status": "failed", "error": f"HTTP {status}", "raw": data}
+    st = str(data.get("status") or "").upper()
+    if st == "COMPLETED":
+        err = data.get("error") or data.get("error_type")
+        if err:
+            return {"status": "failed", "error": str(err)[:300], "raw": data}
+        r_url = result_url or (
+            poll_url[:-len("/status")] if poll_url.endswith("/status") else ""
+        ) or fal_result_url(creds.model, task_id, creds.base_url)
+        r_status, r_data = await _get_json(r_url, _fal_headers(creds.api_key), timeout)
+        if r_status >= 400:
+            return {"status": "failed", "error": f"产物取回失败 HTTP {r_status}",
+                    "raw": r_data}
+        audio_url = _fal_audio_url(r_data)
+        if not audio_url:
+            return {"status": "failed",
+                    "error": f"任务完成但未返回音频 URL: {str(r_data)[:200]}",
+                    "raw": r_data}
+        return {"status": "succeeded", "audio_url": audio_url, "raw": r_data}
+    if st in ("FAILED", "ERROR"):
+        return {"status": "failed", "error": str(data.get("error") or data)[:300],
+                "raw": data}
+    # IN_QUEUE / IN_PROGRESS / 未知中间态
+    return {"status": "running", "raw": data}
 
 
 # ── B2-d（#7167 对齐）：脚本对白带入生成提示词 + 逐字校验守卫 ────────────────

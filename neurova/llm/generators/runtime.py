@@ -13,8 +13,8 @@
 - ``ProtocolGenerator``：按 GeneratorType 分发到 protocols 实测矩阵，产物即刻
   本地化，返回渠道 mixin 读取的 ``GenerationResult.success/urls/error_message``
   契约（urls=服务端本地路径，渠道 ``_download_url`` 带本地分支）；
-- keyframe_to_video / video_to_video 无实测协议：**诚实报错**（缓后台账登记），
-  不假成功。
+- keyframe_to_video / video_to_video：M2 起走 wan/seedance2/veo 实测协议
+  （源视频 video_url + 首尾帧 imageUrl/endImageUrl，契约按桩锁定官方待核）。
 
 旧 ``LegacyBytesAdapter``（wechat_ai/feishu_ai 旧工厂契约 ``generate(**kwargs)->bytes``）
 已随那两个死码文件于 2026-11-14 退役。
@@ -43,12 +43,11 @@ DEFAULT_OPENAI_BASE = "https://api.openai.com/v1"
 DEFAULT_WAN_BASE = "https://dashscope.aliyuncs.com/api/v1"
 
 # L5：keyframe_to_video 转真实通道（Seedance first_frame+last_frame 先画后动）；
-# video_to_video 仍无实测协议（台账 A4 blocked）：候选=DashScope wan2.7-videoedit
-# （by-capability 数据面已见该模型 ID），但端点/请求体未实测——批次0 虚构端点
-# （4000 行假协议）教训禁止盲写，需有效 DashScope key 实测后再接
-_VIDEO_TYPES = ("text_to_video", "image_to_video", "keyframe_to_video")
+# M2：video_to_video 落地 wan/seedance2/veo 三家（源视频 + 首尾帧 imageUrl/
+# endImageUrl，契约按桩锁定官方待核）——facade 按用户传入模型/协议分派，
+# 未指定默认 dashscope-wan 先验证。
+_VIDEO_TYPES = ("text_to_video", "image_to_video", "keyframe_to_video", "video_to_video")
 _IMAGE_TYPES = ("text_to_image", "image_to_image")
-_UNSUPPORTED_TYPES = ("video_to_video",)
 
 
 class GenerationCredsError(ValueError):
@@ -160,7 +159,8 @@ def derive_generation_protocol(
     3. 其余走 resolve_*_protocol 的 模型名+base 兜底探测 → 默认支。
     """
     fn = (protocols.resolve_image_protocol if kind == "image"
-          else protocols.resolve_video_protocol)
+          else protocols.resolve_video_protocol if kind == "video"
+          else protocols.resolve_music_protocol)
     pid = str(provider_id or "")
     base = str(base_url or "")
     if not base and not protocol_label:
@@ -231,7 +231,8 @@ async def persist_media(
     safe_name = safe_task_name(task_id)
     if url_or_data.startswith("data:"):
         header, _, payload = url_or_data.partition(",")
-        ext = "png" if "image" in header else ("mp4" if "video" in header else "bin")
+        ext = "png" if "image" in header else (
+            "mp4" if "video" in header else ("mp3" if "audio" in header else "bin"))
         path = out_dir_path / f"{safe_name}_{index}.{ext}"
         content = _b64.b64decode(payload)
     else:
@@ -246,7 +247,10 @@ async def persist_media(
                     raise RuntimeError(f"产物下载失败 HTTP {resp.status}")
                 content_type = resp.headers.get("content-type", "")
                 ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
-                       "video/mp4": "mp4"}.get(content_type.split(";")[0], "bin")
+                       "video/mp4": "mp4", "audio/mpeg": "mp3", "audio/mp3": "mp3",
+                       "audio/wav": "wav", "audio/x-wav": "wav", "audio/mp4": "m4a",
+                       "audio/ogg": "ogg", "audio/flac": "flac"}.get(
+                    content_type.split(";")[0], "bin")
                 path = out_dir_path / f"{safe_name}_{index}.{ext}"
                 content = await resp.read()
     if not content:
@@ -344,13 +348,24 @@ class ProtocolGenerator:
         model = (config.model or config.model_id or "").strip()
         refs: List[str] = []
         last_frame = ""
+        video_url = ""
         if t == "image_to_video" and config.image_url:
             refs = [config.image_url]
         elif t == "keyframe_to_video":
             if config.start_image_url:
                 refs = [config.start_image_url]
             last_frame = config.end_image_url or ""
-        provider_id, protocol = derive_generation_protocol("video", model)
+        elif t == "video_to_video":
+            # M2：源视频 + 首尾帧（imageUrl/endImageUrl 语义位，见 GenerationConfig）
+            video_url = config.video_url or ""
+            if config.image_url:
+                refs = [config.image_url]
+            last_frame = config.end_image_url or ""
+        # M2 用户可选分派：显式协议标签（extra_params.protocol）最优先，
+        # 其次模型名探测；两者皆缺省落 dashscope-wan（resolve_video_protocol 默认支）
+        protocol_label = str((config.extra_params or {}).get("protocol") or "")
+        provider_id, protocol = derive_generation_protocol(
+            "video", model, protocol_label=protocol_label)
         try:
             creds = resolve_generation_creds(
                 protocol, model, provider_id or None, None, None, DEFAULT_WAN_BASE)
@@ -363,7 +378,9 @@ class ProtocolGenerator:
             result = await protocols.generate_video_wait(
                 creds, config.prompt, duration=duration, resolution=resolution,
                 ref_images=refs, max_wait=max_wait,
-                last_frame=last_frame or None)
+                last_frame=last_frame or None,
+                # 仅 v2v 携带源视频通道（非 v2v 不改既有调用形态）
+                **({"video_url": video_url} if video_url else {}))
         except Exception as e:  # noqa: BLE001 — 诚实回传
             logger.warning("facade 视频生成失败: %s", e)
             return GenerationResult(success=False, error=f"视频生成失败: {str(e)[:300]}")

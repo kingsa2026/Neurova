@@ -119,11 +119,11 @@ def _derive_selection(kind: str, model: str, provider_id: Optional[str],
     模型反查启用服务商）再推导；显式协议标签仍最优先，旧请求行为不变。
     """
     from neurova.llm.generators import runtime as gen_runtime
-    from neurova.llm.generators.protocols import ImageProtocol, VideoProtocol
+    from neurova.llm.generators.protocols import ImageProtocol, MusicProtocol, VideoProtocol
 
     pid, value = gen_runtime.derive_generation_protocol(
         kind, model or "", provider_id, protocol_label or "", base_url or "")
-    cls = ImageProtocol if kind == "image" else VideoProtocol
+    cls = {"image": ImageProtocol, "video": VideoProtocol, "music": MusicProtocol}[kind]
     return (pid or None), cls(value)
 
 
@@ -155,6 +155,10 @@ class ImageGenerationRequest(BaseModel):
     # R2 能力自适应路由：按协议支持面透传，不支持的参数进账本 ignored_params
     seed: Optional[int] = Field(default=None, description="随机种子（ARK/DASHSCOPE 支持）")
     strength: Optional[float] = Field(default=None, description="图生图变化强度（暂无实测通道，会被显式忽略并标注）")
+    # M9：生成物入活水池的会话归属（缺省不写池）
+    session_id: Optional[str] = Field(default=None, description="会话ID（生成物入上下文池）")
+    agent_id: Optional[str] = Field(default=None, description="AgentID（池隔离键）")
+    turn: Optional[int] = Field(default=None, description="轮次（入池元数据）")
 
 
 class AudioGenerationRequest(BaseModel):
@@ -181,6 +185,28 @@ class VideoGenerationRequest(BaseModel):
     audio: Optional[bool] = Field(default=None, description="是否生成音频（wan3）")
     # L5 尾帧通道：Seedance first+last 插值；WAN 无通道 → ignored_params 标注
     last_frame: Optional[str] = Field(default=None, description="尾帧（URL 或本地路径，Seedance i2v 支持）")
+    # M2：视频生视频源视频（wan/seedance2/veo，URL 或本地路径）
+    video_url: Optional[str] = Field(default=None, description="视频生视频的源视频（URL 或本地路径）")
+    # M9：生成物入活水池的会话归属（缺省不写池）
+    session_id: Optional[str] = Field(default=None, description="会话ID（生成物入上下文池）")
+    agent_id: Optional[str] = Field(default=None, description="AgentID（池隔离键）")
+    turn: Optional[int] = Field(default=None, description="轮次（入池元数据）")
+
+
+class MusicGenerationRequest(BaseModel):
+    """音乐生成请求（M1：fal Queue API 异步任务，两段式与 /video 同范式）"""
+
+    prompt: str = Field(..., description="生成提示")
+    model: Optional[str] = Field(default=None, description="fal 模型 ID（如 fal-ai/musicgen）")
+    duration: int = Field(default=30, description="时长(秒)")
+    protocol: Optional[str] = Field(default=None, description="协议标签 fal")
+    provider_id: Optional[str] = Field(default=None, description="使用已配置服务商的凭据")
+    api_key: Optional[str] = Field(default=None, description="显式凭据（优先于服务商配置）")
+    base_url: Optional[str] = Field(default=None, description="显式端点")
+    # M9：生成物入活水池的会话归属（缺省不写池）
+    session_id: Optional[str] = Field(default=None, description="会话ID（生成物入上下文池）")
+    agent_id: Optional[str] = Field(default=None, description="AgentID（池隔离键）")
+    turn: Optional[int] = Field(default=None, description="轮次（入池元数据）")
 
 
 def _get_request_id(request: Request) -> str:
@@ -385,6 +411,15 @@ async def generate_image(
         raise HTTPException(status_code=502, detail="图像生成未返回产物")
     _ledger_add(TASK_SUCCEEDED, local_path=str(images[0].get("path") or ""),
                 ignored=ignored_csv)
+    # M9：生成物入活水池（会话归属显式携带；无归属/无池诚实跳过不阻断）
+    from neurova.llm.generators.pool_ingest import archiveGenerationToPool
+
+    await archiveGenerationToPool(
+        kind="image", prompt=body.prompt,
+        urls=[img["url"] for img in images if img.get("url")],
+        task_id=task_id, protocol=protocol.value, model=creds.model or "",
+        user_id=uid, agent_id=str(body.agent_id or ""),
+        session_id=str(body.session_id or ""), turn=int(body.turn or 0))
     data: Dict[str, Any] = {"images": images, "task_id": task_id}
     if ignored_csv:
         data["ignored_params"] = ignored_csv
@@ -574,7 +609,9 @@ async def generate_video(
 
     provider_id, protocol = _derive_selection("video", effective_model, provider_id,
                                               body.protocol, body.base_url)
-    _validate_ref_images(body.ref_images)
+    # M2：源视频与参考图同一白名单纪律（http(s)/data 直传，本地路径限允许目录）
+    _validate_ref_images(
+        list(body.ref_images or []) + ([body.video_url] if body.video_url else []))
     creds = _resolve_generation_creds(
         protocol.value, effective_model or None, provider_id, body.api_key, body.base_url,
         default_base="https://dashscope.aliyuncs.com/api/v1",
@@ -583,7 +620,7 @@ async def generate_video(
         submitted = await submit_video(
             creds, body.prompt, duration=body.duration, resolution=body.resolution,
             ref_images=list(body.ref_images or []), audio=body.audio,
-            last_frame=body.last_frame or None,
+            last_frame=body.last_frame or None, video_url=body.video_url or None,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -611,6 +648,9 @@ async def generate_video(
         prompt=body.prompt[:500],
         owner_user_id=str(current_user.get("user_id") or ""),
         ignored_params=ignored_csv,
+        # M9：收口成功时产物凭此归属入活水池
+        session_id=str(body.session_id or ""), agent_id=str(body.agent_id or ""),
+        turn=int(body.turn or 0),
     ))
     return {
         "code": 0,
@@ -618,6 +658,61 @@ async def generate_video(
         "data": {"task_id": record.task_id, "status": record.status,
                  "protocol": protocol.value,
                  **({"ignored_params": ignored_csv} if ignored_csv else {})},
+    }
+
+
+@router.post("/music")
+async def generate_music(
+    request: Request,
+    body: MusicGenerationRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """音乐生成（M1：fal Queue API 提交 + 持久任务账本，两段式与 /video 同范式）"""
+    _ = request
+
+    from neurova.llm.generators.protocols import submit_music
+    from neurova.llm.generators.task_ledger import (
+        TASK_SUBMITTED, TaskRecord, get_generation_task_ledger,
+    )
+
+    effective_model = (body.model or "").strip()
+    provider_id, protocol = _derive_selection(
+        "music", effective_model, body.provider_id, body.protocol, body.base_url)
+    creds = _resolve_generation_creds(
+        protocol.value, effective_model or None, provider_id, body.api_key, body.base_url,
+        default_base="https://queue.fal.run",
+    )
+    try:
+        submitted = await submit_music(creds, body.prompt, duration=body.duration)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001 — 诚实 5xx，不伪造成功
+        logger.warning("音乐任务提交失败: %s", e)
+        raise HTTPException(status_code=502, detail=f"音乐任务提交失败: {str(e)[:300]}")
+
+    remote_task_id = str(submitted.get("task_id") or "")
+    if not remote_task_id:
+        raise HTTPException(status_code=502, detail="提交未返回 task_id（协议响应异常）")
+    record = get_generation_task_ledger().add(TaskRecord(
+        kind="music",
+        provider_id=str(provider_id or ""),
+        protocol=protocol.value,
+        model=creds.model,
+        base_url=creds.base_url,
+        status=TASK_SUBMITTED,
+        remote_task_id=remote_task_id,
+        poll_url=str(submitted.get("poll_url") or ""),
+        prompt=body.prompt[:500],
+        owner_user_id=str(current_user.get("user_id") or ""),
+        # M9：收口成功时产物凭此归属入活水池
+        session_id=str(body.session_id or ""), agent_id=str(body.agent_id or ""),
+        turn=int(body.turn or 0),
+    ))
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"task_id": record.task_id, "status": record.status,
+                 "protocol": protocol.value},
     }
 
 
@@ -646,6 +741,26 @@ async def resolve_generation_protocol_for_model(
 # ── B2-c：任务轮询 / 任务列表 / 产物静态文件 ────────────────────────────────
 
 
+def _get_owned_task_record(task_id: str, current_user: Dict[str, Any]):
+    """任务归属校验单源（P1-9）：/video/status 与 /music/status 共用。
+
+    新任务落账本时带 owner_user_id；历史无主记录（升级前存量）仅管理员可见，
+    其余一律 403。
+    """
+    from neurova.llm.generators.task_ledger import get_generation_task_ledger
+
+    record = get_generation_task_ledger().get(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
+    owner = str(getattr(record, "owner_user_id", "") or "")
+    uid = str(current_user.get("user_id") or "")
+    if owner and owner != uid:
+        raise HTTPException(status_code=403, detail="无权访问该任务")
+    if not owner and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="无权访问该任务")
+    return record
+
+
 @router.get("/video/status/{task_id}")
 async def get_generation_video_status(
     request: Request,
@@ -660,18 +775,7 @@ async def get_generation_video_status(
         TASK_TERMINAL_STATUSES, get_generation_task_ledger,
     )
 
-    ledger = get_generation_task_ledger()
-    record = ledger.get(task_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
-    # P1-9：任务归属校验——新任务落账本时带 owner_user_id；历史无主记录
-    # （升级前存量）仅管理员可见，其余一律 403。
-    owner = str(getattr(record, "owner_user_id", "") or "")
-    uid = str(current_user.get("user_id") or "")
-    if owner and owner != uid:
-        raise HTTPException(status_code=403, detail="无权访问该任务")
-    if not owner and current_user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="无权访问该任务")
+    record = _get_owned_task_record(task_id, current_user)
     if record.status in TASK_TERMINAL_STATUSES:
         return {
             "code": 0,
@@ -681,7 +785,38 @@ async def get_generation_video_status(
                      "error": record.error},
         }
 
-    result = await settle_video_record(record, ledger=ledger)
+    result = await settle_video_record(record, ledger=get_generation_task_ledger())
+    data: Dict[str, Any] = {"task_id": task_id, "status": result["status"]}
+    for key in ("url", "error", "warning"):
+        if result.get(key):
+            data[key] = result[key]
+    return {"code": 0, "message": "success", "data": data}
+
+
+@router.get("/music/status/{task_id}")
+async def get_generation_music_status(
+    request: Request,
+    task_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """轮询音乐任务（M1：收口委托 recovery.settle_music_record，与 /video/status 同口径）。"""
+    _ = request
+    from neurova.llm.generators.recovery import settle_music_record
+    from neurova.llm.generators.task_ledger import (
+        TASK_TERMINAL_STATUSES, get_generation_task_ledger,
+    )
+
+    record = _get_owned_task_record(task_id, current_user)
+    if record.status in TASK_TERMINAL_STATUSES:
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {"task_id": task_id, "status": record.status,
+                     "url": _local_url(record.local_path) if record.local_path else record.result_url,
+                     "error": record.error},
+        }
+
+    result = await settle_music_record(record, ledger=get_generation_task_ledger())
     data: Dict[str, Any] = {"task_id": task_id, "status": result["status"]}
     for key in ("url", "error", "warning"):
         if result.get(key):

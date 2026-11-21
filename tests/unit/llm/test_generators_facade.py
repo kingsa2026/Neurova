@@ -285,19 +285,33 @@ def test_facade_video_success_and_failure_honest(runtime_patched):
     assert "审核" in result2.error
 
 
-def test_facade_v2v_unsupported_not_fake(runtime_patched):
+def test_facade_v2v_unsupported_not_fake(runtime_patched, monkeypatch):
     """L5+：keyframe_to_video 已转真实通道（Seedance 首尾帧，见
-    test_generation_lastframe.py::TestFacadeKeyframe）；v2v 仍诚实报错。"""
+    test_generation_lastframe.py::TestFacadeKeyframe）。
+    M2（多模态追平批一）：v2v 亦转真实通道（wan/seedance2/veo，源视频
+    video_url + 首尾帧）——「不假成功」的纪律不变：协议失败仍诚实回 error
+    （失败分支由 test_generation_video_to_video.py 的诚实报错用例钉住）。
+    """
     runtime, calls = runtime_patched
     from neurova.llm.generators import GenerationConfig, GeneratorType
+    from neurova.llm.generators import protocols as proto_mod
 
+    captured = {}
+
+    async def fake_wait(creds, prompt, **kw):
+        captured["video_url"] = kw.get("video_url")
+        captured["protocol"] = creds.protocol
+        return {"status": "succeeded", "video_url": "http://cdn/out.mp4", "raw": {}}
+
+    monkeypatch.setattr(proto_mod, "generate_video_wait", fake_wait)
     gen = runtime.ProtocolGenerator(GeneratorType.VIDEO_TO_VIDEO)
     result = _run(gen.generate(GenerationConfig(
         type=GeneratorType.VIDEO_TO_VIDEO,
         video_url="v.mp4", prompt="p",
     )))
-    assert not result.success
-    assert "协议" in result.error  # 诚实说明原因，而非假成功或空 error
+    assert result.success
+    assert captured["video_url"] == "v.mp4"
+    assert result.urls  # 产物本地化契约不回退
 
 
 # ── 6. 端点侧搬移后兼容（安全测试 patch 面不变）────────────────────────────

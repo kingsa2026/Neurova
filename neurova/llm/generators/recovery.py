@@ -45,6 +45,34 @@ logger = get_logger(__name__)
 
 async def settle_video_record(record: TaskRecord, ledger: Optional[GenerationTaskLedger] = None) -> Dict[str, Any]:
     """轮询一条视频任务一次并写账本。返回 {status, url?, error?}。"""
+    return await _settle_media_record(
+        record, ledger,
+        poll=lambda creds: protocols.poll_video(creds, record.remote_task_id, record.poll_url),
+        url_key="video_url", media_kind="video", default_base=DEFAULT_WAN_BASE)
+
+
+async def settle_music_record(record: TaskRecord, ledger: Optional[GenerationTaskLedger] = None) -> Dict[str, Any]:
+    """轮询一条音乐任务一次并写账本（M1；与视频收口同一实现口径）。"""
+    return await _settle_media_record(
+        record, ledger,
+        poll=lambda creds: protocols.poll_music(creds, record.remote_task_id, record.poll_url),
+        url_key="audio_url", media_kind="audio",
+        default_base=protocols.DEFAULT_FAL_QUEUE_BASE)
+
+
+async def _settle_media_record(
+    record: TaskRecord,
+    ledger: Optional[GenerationTaskLedger],
+    poll,
+    url_key: str,
+    media_kind: str,
+    default_base: str,
+) -> Dict[str, Any]:
+    """异步生成任务（视频/音乐）单次轮询收口的共用实现。
+
+    差异只在三处：轮询函数、产物 URL 字段名、缺省 base——收口语义
+    （凭据重取 / 落盘本地化 / 账本终态 / 用量入账）只有一份。
+    """
     ledger = ledger or get_generation_task_ledger()
     creds = ProtocolCredentials(api_key="", base_url=record.base_url,
                                 model=record.model, protocol=record.protocol)
@@ -53,55 +81,71 @@ async def settle_video_record(record: TaskRecord, ledger: Optional[GenerationTas
         try:
             creds = resolve_generation_creds(
                 record.protocol, record.model, record.provider_id, None, None,
-                default_base=record.base_url or DEFAULT_WAN_BASE,
+                default_base=record.base_url or default_base,
             )
         except GenerationCredsError:
             pass
     try:
-        result = await protocols.poll_video(creds, record.remote_task_id, record.poll_url)
+        result = await poll(creds)
     except Exception as e:  # noqa: BLE001
         result = {"status": TASK_FAILED, "error": str(e)[:300]}
 
     status = str(result.get("status") or TASK_RUNNING)
     if status == TASK_SUCCEEDED:
-        video_url = result.get("video_url") or ""
-        if video_url.startswith("http"):
+        media_url = result.get(url_key) or ""
+        if media_url.startswith(("http", "data:")):
             try:
-                path = await persist_media(video_url, "video", record.task_id, 0)
-                ledger.update(record.task_id, status=TASK_SUCCEEDED, result_url=video_url,
+                path = await persist_media(media_url, media_kind, record.task_id, 0)
+                ledger.update(record.task_id, status=TASK_SUCCEEDED, result_url=media_url,
                               local_path=path)
-                _record_video_usage(record, "success")
-                return {"status": TASK_SUCCEEDED, "url": local_url_for(path)}
+                _record_generation_usage(record, "success")
+                delivered = local_url_for(path)
+                await _archiveSettledToPool(record, delivered)
+                return {"status": TASK_SUCCEEDED, "url": delivered}
             except Exception as e:  # noqa: BLE001 — 下载失败仍回成功+远端 URL（可能已过期）
-                ledger.update(record.task_id, status=TASK_SUCCEEDED, result_url=video_url)
-                _record_video_usage(record, "success")
-                return {"status": TASK_SUCCEEDED, "url": video_url,
+                ledger.update(record.task_id, status=TASK_SUCCEEDED, result_url=media_url)
+                _record_generation_usage(record, "success")
+                await _archiveSettledToPool(record, media_url)
+                return {"status": TASK_SUCCEEDED, "url": media_url,
                         "warning": f"本地化失败: {str(e)[:200]}"}
-        ledger.update(record.task_id, status=TASK_SUCCEEDED, result_url=video_url)
-        _record_video_usage(record, "success")
-        return {"status": TASK_SUCCEEDED, "url": video_url}
+        ledger.update(record.task_id, status=TASK_SUCCEEDED, result_url=media_url)
+        _record_generation_usage(record, "success")
+        await _archiveSettledToPool(record, media_url)
+        return {"status": TASK_SUCCEEDED, "url": media_url}
     if status == TASK_FAILED:
         err = str(result.get("error") or "")[:300]
         ledger.update(record.task_id, status=TASK_FAILED, error=err)
-        _record_video_usage(record, "failed")
+        _record_generation_usage(record, "failed")
         return {"status": TASK_FAILED, "error": err}
     ledger.update(record.task_id, status=TASK_RUNNING)
     return {"status": TASK_RUNNING}
 
 
-def _record_video_usage(record: TaskRecord, status: str) -> None:
-    """L4：视频终态入账 AIGC 用量（时长=提交至终态耗时；写失败静默）。"""
+def _record_generation_usage(record: TaskRecord, status: str) -> None:
+    """L4：生成任务终态入账 AIGC 用量（kind 取账本行；写失败静默）。"""
     try:
         from neurova.core.aigc_usage import get_aigc_usage
 
         duration_ms = max(0.0, (time.time() - (record.submitted_at or time.time())) * 1000)
         get_aigc_usage().record(
-            kind="video", user_id=record.owner_user_id or "",
+            kind=record.kind or "video", user_id=record.owner_user_id or "",
             provider=record.provider_id, model=record.model,
             protocol=record.protocol, status=status,
             items=1 if status == "success" else 0, duration_ms=duration_ms)
     except Exception:  # noqa: BLE001 — 统计永不影响收口
         pass
+
+
+async def _archiveSettledToPool(record: TaskRecord, url: str) -> None:
+    """M9：收口成功的产物入活水池（会话归属随账本行携带；失败不阻断收口）。"""
+    from neurova.llm.generators.pool_ingest import archiveGenerationToPool
+
+    await archiveGenerationToPool(
+        kind=record.kind or "video", prompt=record.prompt,
+        urls=[url] if url else [],
+        task_id=record.task_id, protocol=record.protocol, model=record.model,
+        user_id=record.owner_user_id, agent_id=record.agent_id,
+        session_id=record.session_id, turn=record.turn)
 
 
 def _recovery_interval() -> float:
@@ -117,7 +161,10 @@ async def recovery_tick(ledger: Optional[GenerationTaskLedger] = None) -> int:
     processed = 0
     for rec in ledger.unfinished():
         try:
-            await settle_video_record(rec, ledger=ledger)
+            if rec.kind == "music":
+                await settle_music_record(rec, ledger=ledger)
+            else:
+                await settle_video_record(rec, ledger=ledger)
             processed += 1
         except Exception as e:  # noqa: BLE001
             logger.warning("生成任务恢复收口失败(%s): %s", rec.task_id, e)

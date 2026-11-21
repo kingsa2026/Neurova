@@ -68,6 +68,10 @@ class TaskRecord:
     # R3（Studio 批量）：批次关联（episode/batch id）与项目关联，供进度聚合与追溯
     batch_key: str = ""
     project_id: str = ""
+    # M9：生成物入活水池的会话归属（收口成功时经 pool_ingest 写池）
+    session_id: str = ""
+    agent_id: str = ""
+    turn: int = 0
     submitted_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
