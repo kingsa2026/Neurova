@@ -36,6 +36,7 @@ class NeuacpStdioExecutor:
         request_timeout: float = 30.0,
         prompt_timeout: Optional[float] = None,
         on_tool_call: Optional[Callable[[dict], None]] = None,
+        protocol_version: str = "1",
     ) -> None:
         self._cwd = cwd or ""
         self._command = [str(part) for part in command]
@@ -43,6 +44,9 @@ class NeuacpStdioExecutor:
         self._request_timeout = request_timeout
         self._prompt_timeout = prompt_timeout
         self._on_tool_call = on_tool_call
+        # G1：目录条目声明的 ACP 协议版本（缺省 "1" 行为不变）；create client
+        # 时传入 start 按声明版本协商（registry 声明 v2 的 agent 走 v2 握手）。
+        self._protocol_version = str(protocol_version or "1")
         self._emitter: Optional[Callable[[str, Any], None]] = None
         self._permission_asker: Optional[Callable[[str, str, str], dict]] = None
         self._session_id: Optional[str] = None
@@ -177,7 +181,8 @@ class NeuacpStdioExecutor:
     def _newStartedClient(self) -> NeuacpClient:
         """构造并拉起一个 ACP 客户端（池 factory 与直启路径共用）。"""
         client = self._newClient()
-        client.start()
+        # G1：initialize 按条目声明版本协商（缺省 "1" 与既有 v1 全量一致）。
+        client.start(protocol_version=self._protocol_version)
         return client
 
     def _bindClientCallbacks(self, client: NeuacpClient) -> None:

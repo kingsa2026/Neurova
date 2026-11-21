@@ -9,6 +9,12 @@
   合法 JSON 行即视为可达。超时 30s，进程必须清理。
   返回 ``{ok, protocolVersion?, serverCapabilities?, error?}``。
 - GET  /v1/external-agents/status   进程池状态（B3 落地前为占位，落地后如实读）。
+- POST /v1/external-agents/registry/refresh
+                                      ACP registry 手动刷新（G1，admin 门）：
+                                      拉取官方 registry 并换入目录合并快照；
+                                      默认关、无定时任务，网络失败 stale 降级
+                                      诚实回填。返回 {entries, fetched_at,
+                                      stale, error?, entry_count, source_url}。
 - GET  /v1/external-agents/runs/{subagent_id}/frames
                                       帧账本读面（F2，设计文档 §3.2，拍板 D-C）：
                                       按 seq 游标回放一次 run 的原生帧（脱敏后
@@ -26,6 +32,7 @@
 取到 initialize 结果/首个合法 JSON 行即收，不派任务、不留进程。
 """
 import asyncio
+import functools
 import json
 import shutil
 import subprocess
@@ -36,7 +43,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from neurova.agent.neuacp.acp_client import NeuacpClient
-from neurova.agent.neuacp.catalog import EXECUTOR_KINDS, listCatalog
+from neurova.agent.neuacp.catalog import (
+    EXECUTOR_KINDS,
+    listCatalog,
+    protocolVersionFor,
+)
 from neurova.agent.neuacp.child_env import buildChildEnvironment
 from neurova.agent.neuacp.process_governance import TIMEOUT_MATRIX
 from neurova.api.auth import get_current_user
@@ -107,7 +118,10 @@ async def testExternalAgent(
     try:
         if kind == "plugin":
             return await _probePlugin(command, body.cwd, TEST_TIMEOUT_S)
-        return await _probeAcp(command, body.cwd, TEST_TIMEOUT_S)
+        # G1：按条目声明版本协商（registry 声明 v2 的 agent 用 v2 握手；
+        # 预设/未知工具缺省 "1"，行为不变）
+        return await _probeAcp(command, body.cwd, TEST_TIMEOUT_S,
+                               protocol_version=protocolVersionFor(body.tool))
     except Exception as exc:  # noqa: BLE001 - 连通失败是结果不是 HTTP 错误，错误原文回填
         logger.warning("外部代理连通测试失败 kind=%s command=%s: %s", kind, command[0], exc)
         return {"ok": False, "error": str(exc)}
@@ -124,6 +138,26 @@ async def externalAgentsStatus(current_user: Dict[str, Any] = Depends(requireAdm
     if callable(snapshot):
         return snapshot()
     return {"processes": [], "note": "process pool lands with B3"}
+
+
+# ---------- G1：ACP registry 手动刷新（默认关，无定时任务） ----------
+
+
+@router.post("/registry/refresh")
+async def refreshExternalAgentRegistry(current_user: Dict[str, Any] = Depends(requireAdmin)):
+    """手动刷新 ACP registry 快照（G1，仅 admin）。
+
+    - 拉取（有界超时/体积）→ 解析归一 → 换入目录合并快照；网络失败 stale
+      降级：保留上次快照、标注 stale、error 诚实回填，不以空表顶替。
+    - 返回 ``{entries, fetched_at, stale, entry_count, source_url, error?}``。
+    - 刷新成功后 registry 独有条目经 GET /catalog 可见（source="registry"）。
+    """
+    from neurova.agent.neuacp.registry import getAcpRegistry
+
+    registry = getAcpRegistry()
+    # 网络 IO 放线程池：不阻塞事件循环（拉取自带 15s 超时与 5MiB 上限）
+    status = await asyncio.to_thread(registry.refresh)
+    return {**status, "entries": registry.entries()}
 
 
 # ---------- F2：帧账本读面（设计文档 §3.2，拍板 D-C） ----------
@@ -225,16 +259,20 @@ async def getSubagentRunFrames(
 # ---------- 握手级探测（按 kind 分派） ----------
 
 
-async def _probeAcp(command: List[str], cwd: str, timeout_s: float) -> Dict[str, Any]:
-    """ACP 握手：initialize 往返 + v1 版本协商（不兼容 fail-closed）。
+async def _probeAcp(command: List[str], cwd: str, timeout_s: float,
+                    protocol_version: str = "1") -> Dict[str, Any]:
+    """ACP 握手：initialize 往返 + 版本协商（不兼容 fail-closed）。
 
     复用 ``NeuacpClient``（``NeuacpStdioExecutor`` 的握手层），拿到
     protocolVersion / serverCapabilities 即收；terminate 幂等，异常路径
     （含 start 内部自清理）后再兜一道，保证进程必被清理。
+    ``protocol_version`` 按目录条目声明传入（G1：registry 声明 v2 的 agent
+    按 v2 协商；缺省 "1" 行为不变）。
     """
     client = NeuacpClient(command, cwd=cwd or None, request_timeout=timeout_s)
     try:
-        result = await asyncio.to_thread(client.start)
+        result = await asyncio.to_thread(
+            functools.partial(client.start, protocol_version=protocol_version))
     finally:
         await asyncio.to_thread(client.terminate)
     result = result or {}

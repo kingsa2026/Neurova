@@ -2701,7 +2701,7 @@ class SwarmManager:
         # F1 第二闸（拍板 D-D，设计文档 §3.1）：租户闸之后、提取 kind/构造执行体
         # 之前——名册经旧数据/旁路写入的不支持组合在这里 fail-closed，
         # 「refused before anything opens」，绝不为其开进程。
-        from neurova.agent.neuacp.catalog import refuseExecutorSpec
+        from neurova.agent.neuacp.catalog import protocolVersionFor, refuseExecutorSpec
 
         capabilityReasons = refuseExecutorSpec(spec)
         if capabilityReasons:
@@ -2725,7 +2725,13 @@ class SwarmManager:
                 from neurova.agent.neuacp import NeuacpMemberAdapter, NeuacpStdioExecutor
                 from neurova.agent.neuacp.ssh_transport import applyRemoteTransport
 
-                executor = NeuacpStdioExecutor(command, cwd=cwd)
+                # G1：按目录条目声明的 ACP 协议版本创建执行体（registry 声明
+                # v2 的 agent 经 client.start(protocol_version=...) 协商；
+                # 预设/未声明缺省 "1"，行为不变）。
+                executor = NeuacpStdioExecutor(
+                    command, cwd=cwd,
+                    protocol_version=protocolVersionFor(str(spec.get("tool") or "")),
+                )
                 applyRemoteTransport(executor, transport, remote)
                 # P1 移交清偿：spawn 装配接入进程池（键含租户段，§6.4）；
                 # 池故障 fail-open——acquire 失败在 executor.start 内退回直启。

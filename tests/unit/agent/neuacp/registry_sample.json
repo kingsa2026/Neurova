@@ -1,0 +1,104 @@
+{
+  "version": "1.0.0",
+  "agents": [
+    {
+      "id": "cline",
+      "name": "Cline",
+      "version": "3.0.74",
+      "description": "Autonomous coding agent CLI - capable of creating/editing files, running commands, using the browser, and more",
+      "repository": "https://github.com/cline/cline",
+      "website": "https://cline.bot/cli",
+      "authors": [
+        "Cline Bot Inc."
+      ],
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/cline/cline/blob/main/LICENSE",
+      "distribution": {
+        "npx": {
+          "package": "cline@3.0.74",
+          "args": [
+            "--acp"
+          ]
+        }
+      },
+      "icon": "https://cdn.agentclientprotocol.com/registry/v1/latest/cline.svg"
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "version": "2.3.2",
+      "description": "The open source coding agent",
+      "repository": "https://github.com/anomalyco/opencode",
+      "website": "https://opencode.ai",
+      "authors": [
+        "Anomaly"
+      ],
+      "license": "MIT",
+      "license_url": "https://github.com/anomalyco/opencode/blob/dev/LICENSE",
+      "distribution": {
+        "binary": {
+          "windows-x86_64": {
+            "archive": "https://github.com/anomalyco/opencode/releases/download/v2.3.2/opencode-windows-x64.zip",
+            "cmd": "./opencode.exe",
+            "args": [
+              "acp"
+            ]
+          },
+          "linux-x86_64": {
+            "archive": "https://github.com/anomalyco/opencode/releases/download/v2.3.2/opencode-linux-x64.tar.gz",
+            "cmd": "./opencode",
+            "args": [
+              "acp"
+            ]
+          }
+        }
+      },
+      "icon": "https://cdn.agentclientprotocol.com/registry/v1/latest/opencode.svg"
+    },
+    {
+      "id": "fast-agent",
+      "name": "fast-agent",
+      "version": "0.10.63",
+      "description": "Code and build agents with comprehensive multi-provider support",
+      "repository": "https://github.com/evalstate/fast-agent",
+      "website": "https://fast-agent.ai",
+      "authors": [
+        "enquiries@fast-agent.ai"
+      ],
+      "license": "Apache 2.0",
+      "license_url": "https://github.com/evalstate/fast-agent/blob/main/LICENSE",
+      "distribution": {
+        "uvx": {
+          "package": "fast-agent-acp==0.10.63",
+          "args": [
+            "-x"
+          ]
+        }
+      },
+      "icon": "https://cdn.agentclientprotocol.com/registry/v1/latest/fast-agent.svg"
+    },
+    {
+      "id": "sample-v2-agent",
+      "name": "Sample V2 Agent",
+      "version": "0.2.0",
+      "description": "Synthetic trimmed entry declaring ACP protocolVersion 2 (forward-compat path).",
+      "repository": "https://example.com/sample-v2-agent",
+      "authors": [
+        "Neurova Sample"
+      ],
+      "license": "MIT",
+      "license_url": "https://example.com/sample-v2-agent/LICENSE",
+      "distribution": {
+        "npx": {
+          "package": "@sample/v2-agent@0.2.0",
+          "args": [
+            "--acp"
+          ]
+        }
+      },
+      "icon": "https://example.com/sample-v2-agent.svg",
+      "protocolVersion": 2
+    }
+  ],
+  "extensions": []
+}

@@ -17,6 +17,10 @@
 - C4 探测分级：``probeTool`` / ``listCatalog``（目录与状态轮询路径）恒为
   ``shutil.which`` 级浅探测，零子进程；``probeToolHealth`` 默认浅探测，
   仅显式 ``deep=True``（管理面 /test 握手专用）才运行 ``--version`` 深探测。
+- G1 registry 合并：``mergedCatalog()`` 提供合并视图（预设 > registry，
+  同名预设胜出，``source``/``protocol_version`` 留痕）；registry 快照默认
+  空（拉取默认关，admin 显式刷新），各读取口（defaultCommand/capabilitiesFor/
+  refuseExecutorSpec/probeTool/listCatalog/probeToolHealth）一律走合并视图。
 """
 import shutil
 import subprocess
@@ -86,6 +90,14 @@ _KIND_PROFILES = {
     "acp": _ACP_CAPABILITIES,
     "plugin": _PLUGIN_CAPABILITIES,
 }
+
+
+def conservativeCapabilities() -> Dict[str, Any]:
+    """保守能力档的公开读取口（registry 归一化共用这一份，教义第 6 条）。
+
+    返回深拷贝：registry 条目各自持有独立副本，改写互不影响。
+    """
+    return deepcopy(_CONSERVATIVE_CAPABILITIES)
 
 #: P1 三家预设（gemini-cli / claude-code / codex）能力档：家档基础上补 C2
 #: 新维度的诚实取值。ACP v1 通用方法面只有 session/new + session/prompt，
@@ -180,9 +192,50 @@ CATALOG: Dict[str, Dict[str, Any]] = {
 }
 
 
+def mergedCatalog() -> Dict[str, Dict[str, Any]]:
+    """合并目录视图（G1）：预设（CATALOG）> registry 快照，同名预设胜出。
+
+    - 合并顺序即优先级：registry 快照只补位预设未收录的工具名，同名冲突
+      以预设为准（本仓验证过的启动命令/能力声明优先于 registry 声明）。
+      各条目带 ``source``（"preset" | "registry"）与 ``protocol_version``
+      新键（向后兼容新增），即「谁胜出」的留痕。
+    - 本地直配层（名册 ``executor.command``，运行时事实源）位于目录之上，
+      不在本合并面内——目录只提供默认值与能力声明。
+    - registry 快照默认空（拉取默认关）：未执行 admin 刷新时本函数等价于
+      纯预设目录，零网络请求。
+    """
+    merged: Dict[str, Dict[str, Any]] = {}
+    for tool, entry in CATALOG.items():
+        presetEntry = dict(entry)
+        presetEntry.setdefault("source", "preset")
+        presetEntry.setdefault("protocol_version", "1")
+        merged[tool] = presetEntry
+    # 惰性导入：registry 归一化依赖本模块的保守能力档（避免 import 环）。
+    from neurova.agent.neuacp.registry import getAcpRegistry
+
+    for entry in getAcpRegistry().entries():
+        tool = str(entry.get("tool") or "").strip()
+        if tool and tool not in merged:
+            merged[tool] = entry
+    return merged
+
+
+def protocolVersionFor(tool: str) -> str:
+    """工具条目声明的 ACP 协议版本（缺省 "1"，行为与既有全量 v1 一致）。
+
+    registry 条目声明 v2 时透出 "2"，供执行体 client.start 按声明版本协商
+    （v2 仅做版本协商兼容路径，语义面待 spec 正式另评）。未知/禁用工具
+    保守返回 "1"。
+    """
+    entry = mergedCatalog().get(str(tool or "").strip())
+    if entry is None or entry.get("disabled"):
+        return "1"
+    return str(entry.get("protocol_version") or "1")
+
+
 def defaultCommand(tool: str) -> Optional[List[str]]:
-    """目录默认启动命令；未知工具/禁用工具返回 None。"""
-    entry = CATALOG.get(str(tool or "").strip())
+    """目录默认启动命令（合并视图）；未知工具/禁用工具返回 None。"""
+    entry = mergedCatalog().get(str(tool or "").strip())
     if entry is None or entry.get("disabled"):
         return None
     return list(entry.get("command") or [])
@@ -210,12 +263,12 @@ def _capabilitiesExport(caps: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def capabilitiesFor(tool: str) -> Dict[str, Any]:
-    """工具能力声明（F1）：已知且未禁用的工具返回其声明拷贝；
+    """工具能力声明（F1，合并视图）：已知且未禁用的工具返回其声明拷贝；
     未知/禁用工具返回保守档（只放行 stdio + chain）。
 
     序量字段出口为 list（JSON 可序列化）；返回值为独立拷贝，改写不影响目录。
     """
-    entry = CATALOG.get(str(tool or "").strip())
+    entry = mergedCatalog().get(str(tool or "").strip())
     caps = _CONSERVATIVE_CAPABILITIES
     if entry is not None and not entry.get("disabled"):
         caps = entry.get("capabilities") or _CONSERVATIVE_CAPABILITIES
@@ -249,7 +302,8 @@ def refuseExecutorSpec(spec: Dict[str, Any]) -> List[str]:
         return reasons
 
     if tool:
-        entry = CATALOG.get(tool)
+        # 合并视图（预设 > registry）：registry 条目同样接受打开前校验
+        entry = mergedCatalog().get(tool)
         if entry is None:
             reasons.append(f"未知工具: {tool}（目录未收录）")
         elif entry.get("disabled"):
@@ -280,8 +334,12 @@ def refuseExecutorSpec(spec: Dict[str, Any]) -> List[str]:
 
 
 def probeTool(tool: str) -> Dict[str, Any]:
-    """单工具本机探测：CLI 安装检查在用户启用连接时实时执行。"""
-    entry = CATALOG.get(str(tool or "").strip())
+    """单工具本机探测（合并视图）：CLI 安装检查在用户启用连接时实时执行。"""
+    return _probeEntry(tool, mergedCatalog().get(str(tool or "").strip()))
+
+
+def _probeEntry(tool: str, entry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """探测核心：对给定目录条目做 which 级浅探测 + 能力声明导出。"""
     if entry is None:
         return {"tool": tool, "known": False, "installed": False}
     head = (entry.get("command") or [""])[0]
@@ -299,14 +357,22 @@ def probeTool(tool: str) -> Dict[str, Any]:
         "disabled": bool(entry.get("disabled")),
         "installed": installed,
         "install_hint": entry.get("install_hint"),
+        # G1：来源与声明协议版本随探测出口透出（向后兼容新增键）
+        "source": entry.get("source") or "preset",
+        "protocol_version": str(entry.get("protocol_version") or "1"),
         # F1：能力声明随探测出口透出（前端下拉可据此预判，测试连接前即可提示）
         "capabilities": _capabilitiesExport(entry.get("capabilities")),
     }
 
 
 def listCatalog() -> List[Dict[str, Any]]:
-    """全量目录（每项附本机探测结果与能力声明），供管理面/前端下拉。"""
-    return [probeTool(tool) for tool in CATALOG]
+    """全量目录（合并视图，每项附本机探测结果与能力声明），供管理面/前端下拉。
+
+    registry 快照默认空（拉取默认关）；admin 刷新后 registry 独有条目追加
+    在预设之后，同名条目只暴露胜出的预设一份。
+    """
+    merged = mergedCatalog()
+    return [_probeEntry(tool, entry) for tool, entry in merged.items()]
 
 
 # ── C5：provider 切换五结果决策（纯函数，能力数据驱动，无 IO） ─────────────
@@ -418,7 +484,7 @@ def probeToolHealth(tool: str, *, timeout_s: float = PROBE_TIMEOUT_S,
       失败仍是 installed=True）。
     """
     tool = str(tool or "").strip()
-    entry = CATALOG.get(tool)
+    entry = mergedCatalog().get(tool)
     if entry is None:
         return {"tool": tool, "installed": False, "install_hint": "",
                 "version": None, "error": "unknown_tool"}
