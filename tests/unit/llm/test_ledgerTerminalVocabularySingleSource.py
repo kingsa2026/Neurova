@@ -202,7 +202,7 @@ class TestWriteReadClosedLoop:
         monkeypatch.setattr(rec_mod, "persist_media", fakePersist)
         monkeypatch.setattr(rec_mod, "resolve_generation_creds",
                             lambda *a, **k: object())
-        monkeypatch.setattr(rec_mod, "_record_video_usage", lambda *a, **k: None)
+        monkeypatch.setattr(rec_mod, "_record_generation_usage", lambda *a, **k: None)
 
         out = asyncio.run(rec_mod.settle_video_record(rec, ledger=led))
         assert out["status"] == "succeeded", out
@@ -243,7 +243,7 @@ class TestWriteReadClosedLoop:
         monkeypatch.setattr(rec_mod.protocols, "poll_video", fakePoll)
         monkeypatch.setattr(rec_mod, "persist_media", boomPersist)
         monkeypatch.setattr(rec_mod, "resolve_generation_creds", lambda *a, **k: object())
-        monkeypatch.setattr(rec_mod, "_record_video_usage", lambda *a, **k: None)
+        monkeypatch.setattr(rec_mod, "_record_generation_usage", lambda *a, **k: None)
 
         asyncio.run(rec_mod.settle_video_record(rec, ledger=led))
         written = led.get(rec.task_id)
@@ -276,7 +276,7 @@ class TestWriteReadClosedLoop:
         monkeypatch.setattr(rec_mod.protocols, "poll_video", fakePoll)
         monkeypatch.setattr(rec_mod, "persist_media", fakePersist)
         monkeypatch.setattr(rec_mod, "resolve_generation_creds", lambda *a, **k: object())
-        monkeypatch.setattr(rec_mod, "_record_video_usage", lambda *a, **k: None)
+        monkeypatch.setattr(rec_mod, "_record_generation_usage", lambda *a, **k: None)
 
         asyncio.run(rec_mod.settle_video_record(rec, ledger=led))
         written = led.get(rec.task_id)
