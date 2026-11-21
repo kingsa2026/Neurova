@@ -5,7 +5,7 @@ RSI 风险较高，必须采用渐进式部署，从被动观察到完全自动�
 """
 
 from neurova.core.logger import get_logger
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .automation_prerequisites import automationPrerequisiteVerdict
 from .gate_verdict import GateVerdict
@@ -180,7 +180,8 @@ class RSIDeploymentController:
           即硬否决并点名是哪一条——它问的是"有没有实装"，不是"本轮有没有读数"；
 
         - **硬否决**（有读数且结论为否）：发散、度量失明、不可晋升的收敛读数、
-          负 ROI、无回滚天数未达标、经验采纳后成功率低于门槛
+          负 ROI、无回滚天数未达标、经验采纳后成功率低于门槛、
+          实做次数不足（R6：晋升 2→3 需该相位 ≥3 次真实应用、3→4 需 ≥10 次）
           —— 只要读数存在就生效，不因"此阶段不要求"而豁免；
         - **必需性**（该阶段必须有读数）：缺席才判 `unevidenced`。
 
@@ -246,6 +247,10 @@ class RSIDeploymentController:
                     days,
                 )
 
+        applied_verdict = self._phaseAppliedGate(metrics, unevidenced)
+        if applied_verdict is not None:
+            return applied_verdict
+
         quality_verdict = self._experience_quality_guard(
             metrics, "experience_quality" in required, unevidenced
         )
@@ -261,6 +266,49 @@ class RSIDeploymentController:
 
     def _required_days_without_rollback(self) -> int:
         return self._REQUIRED_DAYS_WITHOUT_ROLLBACK.get(self._current_phase, 0)
+
+    def _phaseAppliedGate(
+        self, metrics: Dict[str, Any], unevidenced: List[str]
+    ) -> Optional[GateVerdict]:
+        """实做次数门槛（R6，拍板 2026-11-21）：晋升前先问"这个相位真的做过几次"。
+
+        2→3 需当前相位累计 ≥3 次真实应用、3→4 需 ≥10 次（applied_count>0 的
+        迭代计数）；1→2 无此要求——手动档还没自动执行过，卡次数会把晋升链
+        锁成循环依赖。堵的是"空转也能升顶"：rsi_phase=4 顶格与 1018 轮 0 应用
+        的证据脱节，正是本门槛要消灭的形态。
+
+        读数由编排器按当前相位累计后经 `metrics["phase_applied_count"]` 供值：
+        - 有读数且不足 ⇒ `failed`，reason 点名相位/累计数/要求值（可对账）；
+        - 读数缺席 ⇒ 无法计数，落 `unevidenced`，**不得当 0 糊弄**；
+        - 门槛表单源 `governance_settings.rsi_phase_min_applied`，决策时刻读取
+          （活旋钮，与经验质量阈值同一纪律：两处各配一份迟早漂移）。
+        """
+        from neurova.security.governance_settings import resolveRsiPhaseMinApplied
+
+        required = resolveRsiPhaseMinApplied().get(self._current_phase)
+        if required is None:
+            return None  # 该相位无实做次数要求（0→1、1→2）
+
+        reading = metrics.get("phase_applied_count")
+        if isinstance(reading, bool) or not isinstance(reading, (int, float)):
+            unevidenced.append(
+                f"phase_applied_count 缺失：当前相位 {self._current_phase} 的"
+                f"真实应用次数无法计数（晋升要求 ≥{required}）"
+            )
+            return None
+
+        applied = int(reading)
+        if applied < required:
+            logger.info(
+                "Not enough real applications at phase %s: %s < %s",
+                self._current_phase, applied, required,
+            )
+            return GateVerdict.failed(
+                f"实做次数不足：当前相位 {self._current_phase} 累计 "
+                f"applied={applied}，晋升要求 ≥{required}",
+                applied,
+            )
+        return None
 
     def advance_phase(self) -> int:
         """

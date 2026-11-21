@@ -182,16 +182,17 @@ def test_phase_three_to_four_requires_roi_evidence():
     入参必须带上第四份读数，roi 才是唯一变量。**断言集一条未减也未放宽**
     （`without_roi` 仍须因 roi 缺项落 unevidenced，`with_roi` 仍须为真）。
     第四份读数经 016 的唯一供值口造，不在测试里手写它的形态。
+    R6 再涨到五份：`phase_applied_count` 须达 3→4 的门槛 10，roi 才是唯一变量。
     """
     controller = RSIDeploymentController(initial_phase=3)
     quality = _good_experience_quality()
 
     without_roi = controller.evaluate_phase_transition(
         {"days_without_rollback": 40, "convergence_status": "converging",
-         "experience_quality": quality})
+         "experience_quality": quality, "phase_applied_count": 10})
     with_roi = controller.evaluate_phase_transition(
         {"days_without_rollback": 40, "convergence_status": "converging", "roi": 0.2,
-         "experience_quality": quality})
+         "experience_quality": quality, "phase_applied_count": 10})
 
     assert without_roi.state == "unevidenced" and "roi" in without_roi.reason
     assert bool(with_roi) is True

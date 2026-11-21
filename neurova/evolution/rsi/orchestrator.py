@@ -386,6 +386,9 @@ class RSIOrchestrator:
         self._last_recovery: Optional[Dict[str, Any]] = None
         self._attempts_total = 0
         self._applied_total = 0
+        # R6 实做次数门槛的供值账：按"当前 deployment_phase"分桶累计真实应用
+        # （applied_count>0 的迭代记 1 次）。晋升判据据此问"这个相位真的做过几次"。
+        self._phase_applied_counts: Dict[int, int] = {}
         # F1 外部对照：逐轮成对采集（代理分, e2e 参考分）——setpoint 贴近度
         # 代理的滚动相关性呈报（观测档：参考=e2e 对齐；golden 臂评分属升判据档）
         # F3 实验档：NEUROVA_RSI_F3_ARM=no_new_feedback 时切断外部参考采集
@@ -1020,6 +1023,13 @@ class RSIOrchestrator:
             assertRsiRoundIdentity(optimizations, applied_results)
             applied_count = sum(1 for r in applied_results if r.get("applied"))
             self._applied_total += applied_count
+            if applied_count:
+                # R6：真实应用按"当前相位"记一笔（回滚后 applied_count 归 0 不追溯——
+                # 应用确实发生过，晋升门槛统计的是"做过"，不是"做成了还留着"）。
+                _applied_phase = self.deployment_controller.get_current_phase()
+                self._phase_applied_counts[_applied_phase] = (
+                    self._phase_applied_counts.get(_applied_phase, 0) + 1
+                )
 
             if applied_count:
                 perf_after = self._measure_performance()
@@ -1225,6 +1235,11 @@ class RSIOrchestrator:
             # 与上面两条不同，这里不摘键——空库与"有库但没人采纳过"要能被区分出来，
             # 读数的 None 字段本身就是证据（第 6 步 `_refresh_experience_metrics()` 已写入）。
             phase_metrics["experience_quality"] = self.metrics.experience_quality_readout()
+            # 实做次数读数（R6）：当前相位下真实应用的累计迭代数。0 也如实喂——
+            # "没做过"是可计数的事实；缺席（摘键）才表示无法计数，判据落 unevidenced。
+            phase_metrics["phase_applied_count"] = self._phase_applied_counts.get(
+                self.deployment_controller.get_current_phase(), 0
+            )
 
             verdict = self.deployment_controller.evaluate_phase_transition(phase_metrics)
             if not isinstance(verdict, GateVerdict):

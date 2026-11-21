@@ -89,6 +89,11 @@ DEFAULTS: Dict[str, Any] = {
     # 有覆写条目的 agent 自动晋升写回覆写条目，不污染全局。解析/写回唯一出处
     # 在本模块（resolveRsiPhaseFor / persistRsiPhaseFor），编排器只搬运不重算。
     "rsi_phase_overrides": {},
+    # R6（拍板 2026-11-21，详案 §6-R6 / §8-10）：晋升实做次数门槛——键是**当前
+    # 相位**（评估 2→3 晋升时看 "2"），值是该相位下真实应用（applied_count>0 的
+    # 迭代）的最少累计次数。phase 1→2 无此要求（手动档还没自动执行过，卡次数
+    # 会把晋升链锁成循环依赖）。堵"空转也能升顶"的结构性漏洞。
+    "rsi_phase_min_applied": {"2": 3, "3": 10},
 }
 
 #: `approval_wait_seconds` 的合法域。夹紧而非报错：配置写歪不该让整轮失败。
@@ -167,6 +172,29 @@ def resolveRsiPhaseFor(agent_id: str, settings: Optional[Dict[str, Any]] = None)
             return override
     phase = _coercePhase(data.get("rsi_phase"))
     return 0 if phase is None else phase
+
+
+def resolveRsiPhaseMinApplied(settings: Optional[Dict[str, Any]] = None) -> Dict[int, int]:
+    """晋升实做次数门槛的唯一读法（R6）：{当前相位: 最少真实应用次数}。
+
+    决策时刻调用（活旋钮）：治理设置改了门槛，判据当场跟着翻。
+    文件缺键回落 DEFAULTS；条目键/值非法（非整数、相位越界、负数）一律
+    丢弃——读不出合法门槛的相位不设门槛，但绝不把垃圾值折算成 0/1 放行。
+    """
+    data = settings if settings is not None else load_governance_settings()
+    raw = data.get("rsi_phase_min_applied")
+    if not isinstance(raw, dict):
+        raw = DEFAULTS["rsi_phase_min_applied"]
+    thresholds: Dict[int, int] = {}
+    for key, value in raw.items():
+        try:
+            phase = int(key)
+            threshold = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= phase <= 4 and threshold >= 0:
+            thresholds[phase] = threshold
+    return thresholds
 
 
 def rsiPhaseSourceFor(agent_id: str, settings: Optional[Dict[str, Any]] = None) -> str:

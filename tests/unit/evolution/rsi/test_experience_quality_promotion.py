@@ -58,11 +58,16 @@ def _readout(rows: int, decisions: int, rate) -> dict:
 
 
 def _promotion_metrics(quality) -> dict:
-    """phase 2/3 的其余必证读数全部给定且全部满足，只让经验质量一个变量说话。"""
+    """phase 2/3 的其余必证读数全部给定且全部满足，只让经验质量一个变量说话。
+
+    R6 起晋升还要求实做次数：这里给 10，两档门槛（2→3 需 ≥3、3→4 需 ≥10）
+    都已满足，经验质量才仍是唯一变量。
+    """
     metrics = {
         "convergence_status": "converging",
         "roi": 0.2,
         "days_without_rollback": 40,
+        "phase_applied_count": 10,
     }
     if quality is not None:
         metrics["experience_quality"] = quality
@@ -358,8 +363,9 @@ class TestProductionWiring:
         """真 EKB（conftest 已指向临时库）为空 ⇒ 判据无据，阶段既不推进也不否决。"""
         probe = rsi_probe_factory(rsi_phase=2)
         _age_the_install(probe)
-
-        result = probe.orchestrator.run_iteration()
+        # R6：先攒满 3 次真实应用让实做次数门放行，空库的"无据"才轮得到出场
+        probe.run(3)
+        result = probe.results[-1]
 
         assert probe.phase == 2, "无经验质量读数却推进了"
         verdict = result["phase_verdict"]
@@ -407,8 +413,10 @@ class TestObservationSurface:
         probe = rsi_probe_factory(rsi_phase=2)
         # 天数不足是硬否决，会先于"经验质量无据"返回；把装配时刻推旧才测得到本单那条边
         _age_the_install(probe)
+        # R6：先攒满 3 次真实应用让实做次数门放行，经验质量的"无据"才轮得到出场
+        probe.run(3)
 
-        summary = summarize_rsi_result(probe.orchestrator.run_iteration())
+        summary = summarize_rsi_result(probe.results[-1])
 
         assert "phase_verdict" in RSI_SUMMARY_FIELDS, "新字段未进摘要契约"
         assert summary["phase_verdict"]["state"] == "unevidenced", summary
@@ -422,7 +430,8 @@ class TestObservationSurface:
         """
         probe = rsi_probe_factory(rsi_phase=2)
         _age_the_install(probe)
-        probe.orchestrator.run_iteration()
+        # R6：先攒满 3 次真实应用让实做次数门放行，被卡原因才轮得到经验质量
+        probe.run(3)
 
         verdict = probe.orchestrator.get_status()["phase_verdict"]
 
