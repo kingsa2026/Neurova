@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
@@ -45,6 +46,65 @@ def visionImagePart(data: bytes, mimeType: str) -> Dict[str, Any]:
     normalized, mime = normalize_image_for_llm(data, mimeType)
     encoded = base64.b64encode(normalized).decode("ascii")
     return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}}
+
+
+#: 服务商视觉通道普遍接受的位图 MIME（OpenAI / Anthropic / Gemini 同此集合）。
+#: 集合外的图要么转码进来，要么诚实拒发——不发必被服务商拒收的原件。
+LLM_SUPPORTED_IMAGE_MIMES = frozenset(
+    {"image/jpeg", "image/png", "image/gif", "image/webp"}
+)
+
+
+def _reencodeToSupportedImage(data: bytes) -> Optional[Tuple[bytes, str]]:
+    """把视觉通道不收的位图（AVIF/HEIC/BMP/TIFF…）转码成 PNG/JPEG。
+
+    成功返回 (bytes, mime)；字节解不开（含 SVG 这类非位图矢量格式）返回 None
+    ——拒发的决定与文案由调用方落地，这里不静默吞。
+    """
+    try:
+        import io
+
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        hasAlpha = img.mode in ("RGBA", "LA", "PA") or (
+            img.mode == "P" and "transparency" in img.info
+        )
+        out = io.BytesIO()
+        if hasAlpha:
+            img.save(out, "PNG")
+            return out.getvalue(), "image/png"
+        img.convert("RGB").save(out, "JPEG", quality=90)
+        return out.getvalue(), "image/jpeg"
+    except Exception:  # noqa: BLE001 - 解不开就如实上报，不猜格式
+        return None
+
+
+def imagePartForLlm(data: bytes, mime: str, filename: str = "") -> Tuple[Optional[Dict], Optional[str]]:
+    """图片附件 → 视觉切片的一道闸：支持格式直装，其余转码兜底或诚实拒发。
+
+    - 支持集合内：走 `visionImagePart`（归一化→base64→data URL 单源）；
+    - 集合外但 PIL 可解码（AVIF 等）：先转码成 PNG/JPEG 再装——模型真看得到画面，
+      而不是发一张必被服务商拒收的原件（对齐"媒体引用兜底"语义）；
+    - SVG（按 mime 或扩展名识别）与解不开的字节：不装切片，返回诚实原因
+      （拒发留痕，不静默丢图）。
+
+    返回 `(切片, 拒发原因)`：切片为 None 时原因必非空，二者不会同时为空。
+    """
+    mime = (mime or "").lower()
+    if mime in LLM_SUPPORTED_IMAGE_MIMES:
+        return visionImagePart(data, mime), None
+
+    converted = _reencodeToSupportedImage(data)
+    if converted is None:
+        ext = os.path.splitext(filename or "")[1].lower()
+        if mime == "image/svg+xml" or ext == ".svg":
+            return None, "SVG 矢量图不在视觉通道支持集内，且无法转码成位图"
+        return None, (
+            f"图片格式 {mime or '未知'} 不在视觉通道支持集内，且字节无法解码转码"
+        )
+    return visionImagePart(converted[0], converted[1]), None
 
 
 def extractAttachmentFrames(pipeline: Any, attachment: Dict) -> Tuple[List[bytes], str]:
@@ -215,14 +275,29 @@ def injectAttachmentsIntoInput(
         except Exception:
             data = None
 
-        if file_type == "image" and data:
-            # 大图归一化：超闸门图片降采样重编码，防 413 request_too_large
-            vision_parts.append(visionImagePart(data, mime))
-            # 持久化通道只留中性标记：指令不能进历史（2026-09-09 串台事故——
-            # 图片 base64 只挂当轮请求，历史里的"请结合图片回答"对后续文本轮
-            # 是一条无图可依、无法履行的指令，弱模型被带偏去文件系统找图）；
-            # 当轮指令由 _apply_vision_attachments 挂到请求级 text part。
-            parts.append(f"[用户上传了图片: {filename}（图片已随本轮请求附上）]")
+        if (file_type == "image" or mime.lower().startswith("image/")) and data:
+            # 图片格式闸：支持格式直装；AVIF 等非常规位图转码兜底；SVG/解不开的
+            # 拒发留痕——不把必被服务商拒收的原件发出去，也不静默丢图。
+            part, refusalReason = imagePartForLlm(data, mime, filename)
+            if part is not None:
+                # 超闸门大图在 visionImagePart 内降采样重编码，防 413 request_too_large
+                vision_parts.append(part)
+                # 持久化通道只留中性标记：指令不能进历史（2026-09-09 串台事故——
+                # 图片 base64 只挂当轮请求，历史里的"请结合图片回答"对后续文本轮
+                # 是一条无图可依、无法履行的指令，弱模型被带偏去文件系统找图）；
+                # 当轮指令由 _apply_vision_attachments 挂到请求级 text part。
+                parts.append(f"[用户上传了图片: {filename}（图片已随本轮请求附上）]")
+            else:
+                logger.warning(
+                    "[附件注入] 图片 %s（%s）拒发: %s（file_id=%s）",
+                    filename,
+                    mime,
+                    refusalReason,
+                    file_id or "缺失",
+                )
+                parts.append(
+                    f"[用户上传了图片: {filename}（本轮未能看到画面） 原因: {refusalReason}]"
+                )
             continue
 
         text, status = extract_attachment_text(data, filename, file_type)
