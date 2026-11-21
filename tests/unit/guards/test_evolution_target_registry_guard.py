@@ -61,12 +61,11 @@ def test_everyForbiddenTargetIsLockedAndSurvivalCritical():
 
 
 def test_kernelLocatorPathsExistOnDisk():
-    """禁改 locator 指向真实路径（survival_probe.py 由 P0-2 落地，单独豁免）。"""
+    """禁改 locator 指向真实路径（survival_probe.py 已随 P0-2 落地，正式校验）。"""
     repo = REPO_ROOT
     missing = [
         target.locator
         for target in get_target_registry().forbiddenTargets()
-        if target.locator != "neurova/evolution/rsi/survival_probe.py"
-        and not (repo / target.locator).exists()
+        if not (repo / target.locator).exists()
     ]
     assert missing == [], f"禁改清单指向不存在的路径: {missing}"
