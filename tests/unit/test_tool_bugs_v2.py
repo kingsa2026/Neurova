@@ -198,7 +198,7 @@ class TestN5DuplicateToolResultOnException:
 
 
 # ═══════════════════════════════════════════════════════════════
-# N-2 + N-3: NLToolSynthesizer 类名冲突 + evolution_facade 三重断裂
+# N-2: NLToolSynthesizer 类名冲突（N-3 的 synthesize_tools 已随 P3-4 退役）
 # ═══════════════════════════════════════════════════════════════
 
 class TestN2N3ClassNameConflictAndFacadeBreakage:
@@ -206,11 +206,8 @@ class TestN2N3ClassNameConflictAndFacadeBreakage:
     与 nl_synthesizer.py:129 的 502 行真实类同名。EvolutionOrchestrator
     (closed_loop.py:215) 持有 stub 实例，而非真实 NL 合成器。
 
-    Bug N-3: evolution_facade.py:279-283 synthesize_tools 三重断裂：
-    1. 属性名错: 访问 nl_synthesizer，实际是 tool_synthesizer
-    2. 方法名错: 调用 synthesize()，stub 只有 synthesize_from_patterns()
-    3. 签名错: 传 top_n=，真实类签名是 synthesize(description, context)
-    三重错误导致 synthesize_tools 永远返回空列表。
+    Bug N-3 的回归面（facade.synthesize_tools 三重断裂）已随 P3-4 闲置件
+    处置退役：该方法零生产消费方，连同 PatternBasedToolSynthesizer 链一并删除。
     """
 
     def test_closed_loop_no_stub_class_named_NLToolSynthesizer(self):
@@ -223,41 +220,6 @@ class TestN2N3ClassNameConflictAndFacadeBreakage:
             assert cl_synth is RealSynth, (
                 f"closed_loop.NLToolSynthesizer 应是真实类，实际是独立 stub: {cl_synth}"
             )
-
-    def test_synthesize_tools_calls_correct_attribute_and_method(self):
-        """synthesize_tools 应调用 tool_synthesizer.synthesize_from_patterns。"""
-        from neurova.evolution.evolution_facade import EvolutionFacade
-
-        facade = EvolutionFacade()
-        mock_orch = MagicMock()
-        mock_synth = MagicMock()
-        mock_synth.synthesize_from_patterns.return_value = [{"tool": "test"}]
-        mock_orch.tool_synthesizer = mock_synth
-        facade._orchestrator = mock_orch
-
-        result = facade.synthesize_tools(top_n=3)
-
-        assert result == [{"tool": "test"}], f"应返回合成结果，实际 {result}"
-        mock_synth.synthesize_from_patterns.assert_called_once_with(top_n=3)
-
-    def test_synthesize_tools_does_not_access_nl_synthesizer_attr(self):
-        """synthesize_tools 不应访问 orchestrator.nl_synthesizer（属性不存在）。"""
-        from neurova.evolution.evolution_facade import EvolutionFacade
-
-        facade = EvolutionFacade()
-        mock_orch = MagicMock()
-        mock_synth = MagicMock()
-        mock_synth.synthesize_from_patterns.return_value = []
-        mock_orch.tool_synthesizer = mock_synth
-        # nl_synthesizer 属性不应被访问（不存在）
-        facade._orchestrator = mock_orch
-
-        facade.synthesize_tools(top_n=5)
-
-        # nl_synthesizer 不应被访问
-        _ = mock_orch.nl_synthesizer  # MagicMock 会创建属性，所以用 mock_synth 验证
-        mock_synth.synthesize_from_patterns.assert_called_once()
-
 
 # ═══════════════════════════════════════════════════════════════
 # N-6: 流式事件 str() 化污染回复 (chat_pipeline.py:779-788)

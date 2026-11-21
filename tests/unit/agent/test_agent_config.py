@@ -1,7 +1,8 @@
 """
 neurova/agent_config.py 测试
 
-覆盖: AgentConfigManager 的 CRUD、soul.md 管理、模型列表、单例工厂
+覆盖: AgentConfigManager 的 CRUD、模型列表、单例工厂
+（soul.json 结构化读写已随 P3-4 闲置件处置退役——soul 单源在 soul.md）
 """
 import json
 import os
@@ -70,19 +71,6 @@ class TestCreateAgent:
         agents = manager.list_agents()
         assert len(agents) == 1
         assert agents[0]["id"] == "test_agent"
-
-    def test_creates_soul_file(self, manager, tmp_path, monkeypatch):
-        """实现契约：魂显式落 agent 根目录 soul.json（工作区单源，已无 souls/<id> 目录）"""
-        monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path))
-        manager.create_agent("a1", "Agent1")
-        agent = manager.get_agent("a1")
-        assert agent is not None
-        payload = {"name": "Agent1", "personality": "沉稳"}
-        assert manager.save_agent_soul("a1", payload) is True
-        from neurova.core.agent_workspaces import get_agent_soul_path
-
-        assert get_agent_soul_path("a1").exists()
-        assert manager.get_agent_soul("a1")["personality"] == "沉稳"
 
     def test_duplicate_id_returns_false(self, manager):
         """实现契约：重复 id 返回 False（不抛）"""
@@ -171,15 +159,6 @@ class TestUpdateAgent:
         m2 = AgentConfigManager(config_dir=Path(manager._config_dir))
         assert m2.get_agent("a1")["name"] == "Persisted"
 
-    def test_save_agent_soul(self, manager):
-        """实现契约：save_agent_soul 持久化灵魂配置"""
-        manager.create_agent("a1", "OldName")
-        ok = manager.save_agent_soul("a1", {"persona": "新名称"})
-        assert ok is True
-        soul = manager.get_agent_soul("a1")
-        assert soul is not None
-
-
 class TestDeleteAgent:
     def test_delete_existing(self, manager):
         manager.create_agent("a1", "")
@@ -199,44 +178,6 @@ class TestDeleteAgent:
         m2 = AgentConfigManager(config_dir=Path(manager._config_dir))
         assert len(m2.list_agents()) == 1
 
-
-# ================================================================
-# Soul 管理
-# ================================================================
-
-class TestSoul:
-    def test_get_soul_roundtrip(self, manager):
-        """创建后 soul.json 未生成 → None；save 后可读回"""
-        manager.create_agent("a1", "TestAgent")
-        assert manager.get_agent_soul("a1") is None
-        ok = manager.save_agent_soul("a1", {"persona": "TestAgent"})
-        assert ok is True
-        soul = manager.get_agent_soul("a1")
-        assert soul == {"persona": "TestAgent"}
-
-    def test_get_soul_nonexistent_returns_none(self, manager):
-        """实现契约：soul 不存在返回 None（不抛）"""
-        assert manager.get_agent_soul("nobody") is None
-
-    def test_save_soul(self, manager):
-        manager.create_agent("a1", "")
-        ok = manager.save_agent_soul("a1", "# New Title\n\nNew content")
-        assert ok is True
-        soul = manager.get_agent_soul("a1")
-        assert soul == "# New Title\n\nNew content"
-
-    def test_save_soul_creates_dir_on_demand(self, manager):
-        """实现契约：save_agent_soul 不校验 agent 存在性（目录按需创建）"""
-        ok = manager.save_agent_soul("nobody", {"content": "c"})
-        assert ok is True
-
-    def test_save_soul_updates_updated_at(self, manager):
-        """实现 agent dict 用 last_active（无 updated_at 键），save 前后不变即锁定"""
-        manager.create_agent("a1", "")
-        before = manager.get_agent("a1")["last_active"]
-        manager.save_agent_soul("a1", {"content": "# Updated"})
-        after = manager.get_agent("a1")["last_active"]
-        assert after >= before
 
 # ================================================================
 # 模型列表

@@ -54,7 +54,7 @@ def test_four_primary_faces_under_agent_root(unified):
 
 def test_remaining_agent_faces_under_agent_root(unified):
     root = unified / "data" / "kai"
-    assert aw.get_agent_soul_path("kai") == root / "soul.json"
+    # soul.json 已退役结构化读写（P3-4）：仅作为 agent 根目录的 legacy 标记文件存在
     assert aw.get_agent_personality_path("kai") == root / "personality.json"
     assert aw.get_agent_sleep_settings_path("kai") == root / "sleep_settings.json"
     assert aw.get_agent_media_config_path("kai") == root / "media_config.json"

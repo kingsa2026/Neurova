@@ -368,26 +368,6 @@ from neurova.evolution.pattern_miner import PatternMiner
 from neurova.core.data_root import get_data_root
 
 
-class PatternBasedToolSynthesizer:
-    """基于频繁模式的工具合成器 — 从 PatternMiner 的频繁模式生成工具模板。
-
-    Bug N-2 修复: 原类名 NLToolSynthesizer 与 nl_synthesizer.py 的真实
-    NLToolSynthesizer（502 行完整实现）同名冲突，导致 EvolutionOrchestrator
-    持有 stub 实例而非真实 NL 合成器。重命名为 PatternBasedToolSynthesizer
-    以消除歧义——此类只做基于模式的合成，不做 NL 描述合成。
-    """
-
-    def __init__(self, pattern_miner: Optional[PatternMiner] = None):
-        self.pattern_miner = pattern_miner
-        logger.info("PatternBasedToolSynthesizer initialized")
-
-    def synthesize_from_patterns(self, top_n: int = 5) -> List[Dict[str, Any]]:
-        """从频繁模式合成工具模板列表。"""
-        if not self.pattern_miner:
-            return []
-        return self.pattern_miner.to_skill_template_list(top_n=top_n)
-
-
 class EvolutionOrchestrator:
     """进化编排器 — 协调工具进化、权重更新和经验反哺"""
 
@@ -401,7 +381,6 @@ class EvolutionOrchestrator:
         self.tool_lifecycle = tool_lifecycle or ToolLifecycleManager()
         self.pattern_miner = PatternMiner()
         self.genetic_engine = ToolGeneticEngine()
-        self.tool_synthesizer = PatternBasedToolSynthesizer(self.pattern_miner)
         self.experience_feedback = ExperienceFeedback()
         # pattern_min_support 桥（RSI 活表）：属性 setter 同步到模式挖掘器
         self.experience_feedback.attach_pattern_miner(self.pattern_miner)
@@ -814,13 +793,21 @@ def default_evolution_improvements_path() -> Path:
     return get_data_root() / "evolution" / "skill_improvements.json"
 
 
+def default_evolution_genetic_population_path() -> Path:
+    """默认遗传种群持久化路径（环境变量可覆盖，测试隔离用）。"""
+    env_path = os.environ.get("NEUROVA_EVOLUTION_GENETIC_POPULATION")
+    if env_path:
+        return Path(env_path)
+    return get_data_root() / "evolution" / "genetic_population.json"
+
+
 def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
     """显式挂载进化状态持久化并恢复（幂等；启动时调用一次）。
 
     与 get_evolution_orchestrator 分离：单例保持零 IO 副作用，
     测试/嵌入场景不会污染 data/；生产由 start_server 显式装配。
-    装配六件：工具权重 + 模式序列 + 工具生命周期 + 经验成败计数 + 技能经验库
-    + 技能改进史（工单 016 补最后一件；此前纯内存的组件重启即归零）。
+    装配七件：工具权重 + 模式序列 + 工具生命周期 + 经验成败计数 + 技能经验库
+    + 技能改进史 + 遗传种群（P3-4；此前种群纯内存，重启归零靠重播种）。
     返回是否从既有文件恢复了权重（其余件恢复结果只记日志，失败不阻断启动）。
     """
     orchestrator = get_evolution_orchestrator()
@@ -834,6 +821,7 @@ def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
         ("pattern_miner", default_evolution_patterns_path()),
         ("tool_lifecycle", default_evolution_lifecycle_path()),
         ("experience_feedback", default_evolution_experience_path()),
+        ("genetic_engine", default_evolution_genetic_population_path()),
     ):
         component = getattr(orchestrator, attr, None)
         if component is None or not hasattr(component, "attach_persistence"):
@@ -895,7 +883,7 @@ def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
 
 
 def flush_evolution_persistence() -> Dict[str, bool]:
-    """关停时强制落盘六件进化状态（绕过节流）。
+    """关停时强制落盘七件进化状态（绕过节流）。
 
     节流落盘（默认 10s）意味着关停前最后窗口期内的变更只在内存——
     优雅关停必须 flush 一次，否则每次短会话重启都会丢尾部变更。
@@ -903,7 +891,7 @@ def flush_evolution_persistence() -> Dict[str, bool]:
     """
     orchestrator = get_evolution_orchestrator()
     result: Dict[str, bool] = {}
-    for attr in ("tool_weights", "pattern_miner", "tool_lifecycle", "experience_feedback"):
+    for attr in ("tool_weights", "pattern_miner", "tool_lifecycle", "experience_feedback", "genetic_engine"):
         component = getattr(orchestrator, attr, None)
         if component is None or not hasattr(component, "save"):
             continue

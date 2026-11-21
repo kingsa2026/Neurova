@@ -251,14 +251,6 @@ class TestCallSitesFeedTheLedger:
 
         assert orchestrator.pattern_miner._outcomes == [None]
 
-    def test_facade_add_tool_sequence_forwards_the_ticket(self):
-        orchestrator = EvolutionOrchestrator()
-        facade = EvolutionFacade(orchestrator)
-
-        facade.add_tool_sequence(list(ALPHA_BETA), context=TASK, success=False)
-
-        assert orchestrator.pattern_miner._outcomes == [False]
-
 
 def _agent_stub(records: List[Dict[str, Any]]) -> SimpleNamespace:
     """只带生产装配点要读的字段的 agent 替身（不冒充 Agent 类）。"""

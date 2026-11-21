@@ -171,10 +171,6 @@ def get_agent_config_path(agent_id: str = "") -> Path:
     return get_agent_root_dir(agent_id) / "agent_config.json"
 
 
-def get_agent_soul_path(agent_id: str = "") -> Path:
-    return get_agent_root_dir(agent_id) / "soul.json"
-
-
 def get_agent_personality_path(agent_id: str = "") -> Path:
     return get_agent_root_dir(agent_id) / "personality.json"
 

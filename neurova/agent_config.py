@@ -310,60 +310,6 @@ class AgentConfigManager:
             logger.info("删除 Agent: %s", agent_id)
             return True
 
-    def get_agent_soul(self, agent_id: str) -> Optional[Dict[str, Any]]:
-        """
-        获取 Agent 灵魂配置
-
-        Args:
-            agent_id: Agent ID
-
-        Returns:
-            灵魂配置，不存在返回 None
-        """
-        with self._lock:
-            from neurova.core.agent_workspaces import get_agent_soul_path
-
-            soul_file = get_agent_soul_path(agent_id)
-
-            if not soul_file.exists():
-                return None
-
-            try:
-                with open(soul_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.error("加载 Agent 灵魂配置失败: %s", e)
-                return None
-
-    def save_agent_soul(self, agent_id: str, soul: Dict[str, Any]) -> bool:
-        """
-        保存 Agent 灵魂配置
-
-        Args:
-            agent_id: Agent ID
-            soul: 灵魂配置
-
-        Returns:
-            是否保存成功
-        """
-        with self._lock:
-            from neurova.core.agent_workspaces import get_agent_soul_path
-
-            soul_file = get_agent_soul_path(agent_id)
-
-            try:
-                # 确保目录存在
-                soul_file.parent.mkdir(parents=True, exist_ok=True)
-
-                with open(soul_file, "w", encoding="utf-8") as f:
-                    json.dump(soul, f, ensure_ascii=False, indent=2)
-
-                logger.info("保存 Agent 灵魂配置: %s", agent_id)
-                return True
-            except Exception as e:
-                logger.error("保存 Agent 灵魂配置失败: %s", e)
-                return False
-
     def list_models(self) -> List[Dict[str, Any]]:
         """
         列出所有模型

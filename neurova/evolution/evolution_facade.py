@@ -5,32 +5,14 @@
 - AdaptiveToolWeights (工具权重)
 - ToolLifecycleManager (工具生命周期)
 - PatternMiner (模式挖掘)
-- NLToolSynthesizer (工具合成)
 
 设计模式: Facade
 """
 
 from neurova.core.logger import get_logger
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class EvolutionResult:
-    """进化操作结果"""
-    success: bool
-    data: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
-        return {
-            "success": self.success,
-            "data": self.data,
-            "metadata": self.metadata,
-        }
 
 
 class EvolutionFacade:
@@ -154,38 +136,6 @@ class EvolutionFacade:
         except Exception as e:
             logger.warning("更新工具生命周期失败: %s", e)
     
-    # ============ 工具选择 ============
-    
-    def select_tools(
-        self, 
-        available_tools: List[str], 
-        context: str = "",
-    ) -> Dict[str, Any]:
-        """
-        选择工具（基于权重和上下文）
-        
-        Args:
-            available_tools: 可用工具列表
-            context: 上下文描述
-            
-        Returns:
-            Dict: 工具选择结果
-        """
-        if not available_tools:
-            return {"selected": [], "reason": "no_tools_available"}
-        
-        # 按权重排序
-        ranked = self.rank_tools(available_tools)
-        
-        # 选择前3个
-        selected = ranked[:3]
-        
-        return {
-            "selected": selected,
-            "weights": {tool: self.get_tool_weight(tool) for tool in selected},
-            "context": context,
-        }
-    
     # ============ 经验处理 ============
     
     def record_experience(
@@ -248,31 +198,7 @@ class EvolutionFacade:
             return {"success": False, "error": str(e)}
 
     # ============ 模式挖掘 ============
-    
-    def add_tool_sequence(
-        self, 
-        tools: List[str], 
-        context: str = "",
-        success: Optional[bool] = None,
-    ):
-        """
-        添加工具序列（用于模式挖掘）
-        
-        Args:
-            tools: 工具名称列表
-            context: 上下文描述
-            success: 本条序列的客观结果位（工单 013，取 010 的 `TicketEvidence.ticket`）；
-                None = 无票据，遗传臂与技能模板据此不投票
-        """
-        if not self._orchestrator or not hasattr(self._orchestrator, 'pattern_miner'):
-            return
-        
-        try:
-            self._orchestrator.pattern_miner.add_sequence(
-                tools, context=context, success=success)
-        except Exception as e:
-            logger.warning("添加工具序列失败: %s", e)
-    
+
     def get_frequent_patterns(self, top_n: int = 10) -> List[Dict[str, Any]]:
         """
         获取频繁模式
@@ -305,32 +231,6 @@ class EvolutionFacade:
             ]
         except Exception as e:
             logger.warning("获取频繁模式失败: %s", e)
-            return []
-    
-    # ============ 工具合成 ============
-    
-    def synthesize_tools(self, top_n: int = 5) -> List[Dict[str, Any]]:
-        """
-        合成工具（基于频繁模式）
-
-        Args:
-            top_n: 合成前N个工具
-
-        Returns:
-            List[Dict]: 合成的工具列表
-        """
-        # Bug N-3 修复: 三重断裂
-        # 1. 属性名: nl_synthesizer → tool_synthesizer（匹配 closed_loop.py:221）
-        # 2. 方法名: synthesize → synthesize_from_patterns（匹配 PatternBasedToolSynthesizer）
-        # 3. 签名: top_n= 已正确（synthesize_from_patterns 接受 top_n）
-        if not self._orchestrator or not hasattr(self._orchestrator, 'tool_synthesizer'):
-            return []
-
-        try:
-            tools = self._orchestrator.tool_synthesizer.synthesize_from_patterns(top_n=top_n)
-            return tools if isinstance(tools, list) else []
-        except Exception as e:
-            logger.warning("合成工具失败: %s", e)
             return []
     
     # ============ 统计 ============
@@ -392,31 +292,3 @@ class EvolutionFacade:
             Dict: 经验记录结果
         """
         return self.record_experience(text, task, tools, success)
-
-
-# 全局单例
-_facade_instance: Optional[EvolutionFacade] = None
-
-
-def get_evolution_facade(
-    evolution_orchestrator=None,
-) -> EvolutionFacade:
-    """
-    获取进化门面单例
-    
-    Args:
-        evolution_orchestrator: EvolutionOrchestrator实例
-        
-    Returns:
-        EvolutionFacade: 门面实例
-    """
-    global _facade_instance
-    if _facade_instance is None and evolution_orchestrator is not None:
-        _facade_instance = EvolutionFacade(evolution_orchestrator)
-    return _facade_instance
-
-
-def reset_evolution_facade():
-    """重置门面单例（用于测试）"""
-    global _facade_instance
-    _facade_instance = None

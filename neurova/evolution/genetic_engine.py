@@ -17,6 +17,8 @@ import random
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from neurova.evolution.persistence import PersistedStateMixin
+
 logger = get_logger(__name__)
 
 
@@ -81,21 +83,13 @@ class ToolGenotype:
         }
 
 
-@dataclass
-class GeneticConfig:
-    """遗传算法配置。"""
-
-    population_size: int = 10
-    elite_ratio: float = 0.2
-    mutation_rate: float = 0.3
-    crossover_rate: float = 0.7
-    validation_threshold: float = 0.8
-    max_generations: int = 100
-
-
-class ToolGeneticEngine:
+class ToolGeneticEngine(PersistedStateMixin):
     """
     工具基因编程引擎：使用进化算法自动发现和优化工具组合。
+
+    P3-4：种群经 PersistedStateMixin 持久化（attach_persistence + 节流落盘 +
+    原子写 + 损坏回退空态），落 `<数据根>/evolution/genetic_population.json`
+    ——此前纯内存，重启归零只能靠 pattern_mining 重播种（演化史清零）。
     """
 
     def __init__(
@@ -117,6 +111,9 @@ class ToolGeneticEngine:
             elite_ratio: 精英比例
             seed: 随机种子（None=系统熵；注入固定值可复现进化过程）
         """
+        # 持久化底座（未挂载时零 IO 副作用，纯内存/测试语义零变化）
+        self._init_state_persistence()
+
         self._population_size = population_size
         self._validation_threshold = validation_threshold
         self._mutation_rate = mutation_rate
@@ -158,6 +155,43 @@ class ToolGeneticEngine:
         """获取已验证工具数量。"""
         return self._validated_count
 
+    # ---- PersistedStateMixin 钩子（P3-4 种群持久化）----
+
+    def _snapshot_payload(self) -> Dict[str, Any]:
+        """种群逐基因型导出（fitness 为派生值不落盘，恢复时重算）。"""
+        return {
+            "version": 1,
+            "validated_count": self._validated_count,
+            "population": [genotype.to_dict() for genotype in self._population],
+        }
+
+    def _restore_payload(self, data: Dict[str, Any]) -> None:
+        """覆盖语义恢复；坏行跳过、按当前容量截断（容量是配置，不随文件漂移）。"""
+        population: List[ToolGenotype] = []
+        for item in data.get("population", []):
+            if not isinstance(item, dict):
+                continue
+            tools = item.get("tools") or item.get("tool_sequence") or []
+            if not isinstance(tools, list) or not tools:
+                continue
+            try:
+                population.append(
+                    ToolGenotype(
+                        tool_sequence=[str(tool) for tool in tools],
+                        success_rate=float(item.get("success_rate", 0.5)),
+                        execution_time_ms=float(item.get("execution_time_ms", 0.0)),
+                        reuse_count=max(0, int(item.get("reuse_count", 0))),
+                        generation=max(1, int(item.get("generation", 1))),
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+        self._population = population[: self._population_size]
+        try:
+            self._validated_count = max(0, int(data.get("validated_count", 0)))
+        except (TypeError, ValueError):
+            self._validated_count = 0
+
     def add_to_population(self, genotype: ToolGenotype) -> None:
         """添加个体到种群。
 
@@ -171,6 +205,7 @@ class ToolGeneticEngine:
             self._population = self._population[: self._population_size - 1]
 
         self._population.append(genotype)
+        self._maybe_persist()
         logger.debug("Added genotype to population: %s", genotype.tools)
 
     def record_reuse(self, tool_sequence: List[str]) -> bool:
@@ -184,6 +219,7 @@ class ToolGeneticEngine:
         for genotype in self._population:
             if list(genotype.tool_sequence) == normalized:
                 genotype.reuse_count += 1
+                self._maybe_persist()
                 return True
         return False
 
@@ -264,6 +300,7 @@ class ToolGeneticEngine:
             # 更新种群
             self._population = new_population[: self._population_size]
 
+        self._maybe_persist()
         return self._population.copy()
 
     def crossover(self, parent_a: ToolGenotype, parent_b: ToolGenotype) -> Optional[ToolGenotype]:
