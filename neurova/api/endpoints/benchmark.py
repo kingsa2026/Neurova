@@ -37,6 +37,9 @@ class BenchmarkRunRequest(BaseModel):
     agent_id: str
     config: typing.Optional[dict] = None
     tags: typing.List[str] = Field(default_factory=list)
+    #: E1/D-H：手动跑评测的成本标注（{"model": str, "est_tokens": int} 或等价结构）；
+    # 缺省不落键。随记录存储并透传执行器进事实报告。
+    cost_note: typing.Optional[dict] = None
 
 
 # ── In-memory stores ───────────────────────────────────
@@ -112,12 +115,13 @@ async def list_suites():
     return {"code": 0, "message": "success", "data": {"suites": suites, "total": len(suites)}}
 
 
-def _executeBenchmarkRun(runId: str, suiteId: str, answerFn, limit: typing.Optional[int]) -> None:
+def _executeBenchmarkRun(runId: str, suiteId: str, answerFn, limit: typing.Optional[int],
+                         cost_note: typing.Optional[dict] = None) -> None:
     """后台执行真评测并把终态写回运行台账（POST 即返 running，本函数只在线程里跑）。"""
     from neurova.benchmark.suite_eval import getSuiteTasks, runSuite
 
     try:
-        report = runSuite(getSuiteTasks(suiteId), answerFn, limit=limit)
+        report = runSuite(getSuiteTasks(suiteId), answerFn, limit=limit, costNote=cost_note)
         updates = {
             "status": report["status"],
             "score": report["score"],
@@ -127,6 +131,8 @@ def _executeBenchmarkRun(runId: str, suiteId: str, answerFn, limit: typing.Optio
             "per_task": report["per_task"],
             "executed_at": report["executed_at"],
         }
+        if report.get("cost_note") is not None:
+            updates["cost_note"] = report["cost_note"]
     except Exception as exc:  # noqa: BLE001 - 执行器意外故障如实落账，不静默
         logger.error("Benchmark run %s executor failed: %s", runId, exc)
         updates = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
@@ -189,6 +195,7 @@ async def run_benchmark(body: BenchmarkRunRequest, request: Request):
             "config": config,
             "started_at": now,
             "completed_at": now,
+            **( {"cost_note": body.cost_note} if body.cost_note else {} ),
         }
         with _RUNS_LOCK:
             _RUNS_STORE[run_id] = run_data
@@ -220,6 +227,7 @@ async def run_benchmark(body: BenchmarkRunRequest, request: Request):
         "config": config,
         "started_at": now,
         "completed_at": None,
+        **( {"cost_note": body.cost_note} if body.cost_note else {} ),
     }
     with _RUNS_LOCK:
         _RUNS_STORE[run_id] = run_data
@@ -227,7 +235,7 @@ async def run_benchmark(body: BenchmarkRunRequest, request: Request):
 
     worker = threading.Thread(
         target=_executeBenchmarkRun,
-        args=(run_id, body.suite_id, answerFn, limit),
+        args=(run_id, body.suite_id, answerFn, limit, body.cost_note),
         name=f"benchmark-run-{run_id[:8]}",
         daemon=True,
     )
