@@ -142,3 +142,18 @@
 - R2 的 CANCELLED 结局枚举已备但消费方中断路径未单独标定（GeneratorExit 经 finally 收尾，记录保持 started 态）。
 - 批一验证期间发现并行会话已提交批次新增了 4 处身份读方未同步 `test_turnIdentitySingleSource` 台账（asr/minutes、cognitive_layers/dreaming、computer_use/lane_mutex、core/tool_call_journal），致 tests/unit/agent 存量 1 红——非本批引入（git log 归属已核：a16ff1c91/ead7506bf/bae2b703c），移交台账处置。
 - 待拍板 D-R1…D-R5 仍开放；批二/批三未启动。
+
+### 批二（2026-11-22，四卡全部完成，本地未推）
+
+| 卡 | 提交 | 内容 | 验证 |
+|----|------|------|------|
+| R4 | 5fee4fc47 | 流分片载荷归一（routing/stream_events.py：StreamEventKind 最小词表 + chunkField 双形态取值 + chunkPayloadKinds 判类）；chat_stream 计数/空响应判定改读单源 | 12 单测；全量 llm 965 passed 零回归 |
+| R5 | d6c020070 | 定价 tiers 阶梯（按 prompt_tokens 取档、超出取最高档）+ 聚合商上报成本透传（llm_client 四处 usage 构造点经 _providerReportedCost 提取 → provider_reported_cost_usd，记账优先采信、上报 0 亦尊重） | 6 单测；全量 llm 965 passed 零回归 |
+| R6 | 702e11788（链重写后随 5fee4fc47 定稿） | usage 缺失诊断（reason=stream_usage_missing + chunks_seen/usage_chunks_seen，随请求归档 + _lastUsageDiagnostics 可查；真值回传时为 None） | 2 单测 |
+| R7 | dd4904e75 | 端点/路由能力位同源锁约测试（三组能力位实证已同源，契约锁，无生产代码改动） | 2 单测 |
+
+执行记录注记：
+- R4 与 R6 因同文件（multi_model_client.py）交叠合并为一笔提交（原 702e11788）。
+- 702e11788 首版提交信息净 LOC 声明笔误（写成 +77/−24，实为 +84/−16）——趁未推送经链重写修正（702e11788..HEAD 共 6 笔原样重建，树/作者/信息不变，CAS 落 ref）；期间并行会话在本工作区遗留的陈旧合并冲突（两份 docs）按 HEAD 侧收口（取最新已提交内容，无工作丢失）。
+- tests/unit/agent 存量 1 红（身份读方台账未同步）维持移交。
+- 批三（R8-R11）与 D-R1..D-R5 待拍板仍开放。
