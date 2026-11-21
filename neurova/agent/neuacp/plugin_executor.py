@@ -39,6 +39,7 @@ class NeuacpPluginExecutor:
         frame_limit: int = _DEFAULT_FRAME_LIMIT,
         transport: str = "stdio",
         remote: Optional[dict] = None,
+        run_tenant_id: str = "",
     ) -> None:
         self._command = [str(part) for part in command]
         self._cwd = cwd or ""
@@ -48,6 +49,10 @@ class NeuacpPluginExecutor:
         # 传输形态（§4.8）：stdio 本机直拉；ssh 经 SSH 隧道在远端拉起同一命令。
         self._transport = str(transport or "stdio")
         self._remote = remote if isinstance(remote, dict) else None
+        # C4：run 级凭据的租户段（swarm 装配期传入；run id 在 start(ctx) 时从
+        # metadata 取）——每次 prompt 一进程，凭据随进程环境逐 run 注入。
+        self._run_tenant_id = str(run_tenant_id or "")
+        self._run_credential_context: Optional[dict] = None
         self._process: Optional[subprocess.Popen] = None
         self._lock = threading.RLock()
         # F2 帧留痕键（§3.2）：start(ctx) 时从 metadata["subagent_id"] 取；
@@ -58,6 +63,10 @@ class NeuacpPluginExecutor:
         if ctx.cwd:
             self._cwd = ctx.cwd
         self._frame_key = str((ctx.metadata or {}).get("subagent_id") or "").strip() or None
+        subagent_id = self._frame_key
+        self._run_credential_context = (
+            {"run_id": subagent_id, "tenant_id": self._run_tenant_id}
+            if subagent_id and self._run_tenant_id else None)
 
     async def prompt(self, task_text: str, emitter: Callable[[str, Any], None], on_permission: Callable[[str, str, str], dict]) -> NeuacpExecResult:
         command = self._command + [self._prompt_arg, task_text]
@@ -77,7 +86,8 @@ class NeuacpPluginExecutor:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                env=buildChildEnvironment(self._env_extra),
+                env=buildChildEnvironment(
+                    self._env_extra, run_credential_context=self._run_credential_context),
                 cwd=self._cwd or None,
             )
         except OSError as exc:

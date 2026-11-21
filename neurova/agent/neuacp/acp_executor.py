@@ -45,6 +45,7 @@ class NeuacpStdioExecutor:
         prompt_timeout: Optional[float] = None,
         on_tool_call: Optional[Callable[[dict], None]] = None,
         protocol_version: str = "1",
+        run_tenant_id: str = "",
     ) -> None:
         self._cwd = cwd or ""
         self._command = [str(part) for part in command]
@@ -55,6 +56,9 @@ class NeuacpStdioExecutor:
         # G1：目录条目声明的 ACP 协议版本（缺省 "1" 行为不变）；create client
         # 时传入 start 按声明版本协商（registry 声明 v2 的 agent 走 v2 握手）。
         self._protocol_version = str(protocol_version or "1")
+        # C4：run 级凭据的租户段（swarm 装配期传入；run id 在 start(ctx) 时从
+        # metadata 取）——两者合成 run 级身份凭据注入子进程环境。
+        self._run_tenant_id = str(run_tenant_id or "")
         self._emitter: Optional[Callable[[str, Any], None]] = None
         self._permission_asker: Optional[Callable[[str, str, str], dict]] = None
         self._session_id: Optional[str] = None
@@ -94,6 +98,24 @@ class NeuacpStdioExecutor:
         await asyncio.to_thread(self._ensureClient)
         # 池复用件每次 start 重设帧留痕键（随取用方切换；无主=空键不留痕）。
         self._applyFrameKey()
+        # C4：凭据上下文须在 _ensureClient 之后绑——ensure 可能新建 client 实例。
+        self._applyRunCredentialContext()
+
+    def _applyRunCredentialContext(self) -> None:
+        """C4：把 run 级身份凭据上下文绑到生效中的客户端（fail-open）。
+
+        凭据=HMAC(run_id+tenant_id) 的作用域令牌，子进程经环境变量拿到可证明
+        自身归属的凭据。池复用件的进程环境在首启定格——run 级 env 凭据对
+        复用进程的后续 run 不再生效（HTTP 消费面卡需按池化语义另行裁定）。
+        """
+        subagent_id = self._frame_key
+        if not subagent_id or not self._run_tenant_id:
+            return
+        try:
+            self._client.setRunCredentialContext(
+                {"run_id": subagent_id, "tenant_id": self._run_tenant_id})
+        except Exception as exc:  # noqa: BLE001 - 凭据注入失败不阻断启动
+            logger.debug("run 凭据上下文注入失败（忽略）: %s", exc)
 
     def _applyFrameKey(self) -> None:
         """把本执行体的帧留痕键绑到生效中的 ACP 客户端（fail-open）。"""

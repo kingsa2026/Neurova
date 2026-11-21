@@ -59,6 +59,7 @@ class NeuacpClient:
         *,
         cwd: Optional[str] = None,
         env_extra: Optional[Dict[str, str]] = None,
+        run_credential_context: Optional[dict] = None,
         on_event: Optional[Callable[[str, dict], None]] = None,
         on_crash: Optional[Callable[[str], None]] = None,
         request_timeout: float = _DEFAULT_REQUEST_TIMEOUT,
@@ -69,8 +70,13 @@ class NeuacpClient:
         retry_total_budget_s: Optional[float] = None,
     ) -> None:
         self._command = [str(part) for part in command]
-        self._cwd = cwd
+        # 空 cwd 归一为 None（继承父进程目录）——空字符串会让 Popen 在
+        # Windows 上报 WinError 123（文件名语法不正确）。
+        self._cwd = cwd or None
         self._env_extra = dict(env_extra or {})
+        # C4：run 级身份凭据上下文（{"run_id","tenant_id"}）——_childEnvironment
+        # 据此签发 NEUROVA_RUN_CREDENTIAL 注入子进程环境（None 不注入，行为不变）。
+        self._run_credential_context = run_credential_context
         self._on_event = on_event
         self._on_crash = on_crash
         self._request_timeout = request_timeout
@@ -530,4 +536,9 @@ class NeuacpClient:
         self._recordFrame("observed", payload)
 
     def _childEnvironment(self) -> dict:
-        return buildChildEnvironment(self._env_extra)
+        return buildChildEnvironment(
+            self._env_extra, run_credential_context=self._run_credential_context)
+
+    def setRunCredentialContext(self, ctx: Optional[dict]) -> None:
+        """C4：更新 run 级凭据上下文（池复用件每次 start 随取用方重设）。"""
+        self._run_credential_context = ctx

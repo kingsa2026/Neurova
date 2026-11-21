@@ -3000,6 +3000,7 @@ class SwarmManager:
                 executor = NeuacpStdioExecutor(
                     command, cwd=cwd,
                     protocol_version=protocolVersionFor(str(spec.get("tool") or "")),
+                    run_tenant_id=team_tenant,
                 )
                 applyRemoteTransport(executor, transport, remote)
                 # P1 移交清偿：spawn 装配接入进程池（键含租户段，§6.4）；
@@ -3008,7 +3009,8 @@ class SwarmManager:
             elif kind == "plugin":
                 from neurova.agent.neuacp import NeuacpMemberAdapter, NeuacpPluginExecutor
 
-                executor = NeuacpPluginExecutor(command, cwd=cwd, transport=transport, remote=remote)
+                executor = NeuacpPluginExecutor(command, cwd=cwd, transport=transport, remote=remote,
+                                                 run_tenant_id=team_tenant)
             else:
                 return None, f"外部成员 {agent_id} 的执行体类型未知：{kind!r}"
         except ImportError:
