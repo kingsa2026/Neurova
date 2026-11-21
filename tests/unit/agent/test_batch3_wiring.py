@@ -202,3 +202,60 @@ class TestTerminalQualityWiring:
         run = _run(swarm, "tq-3", status=SUBAGENT_RUNNING)
         transitionRun(run, SUBAGENT_FAILED, cause="subagent_timeout")
         assert swarm.status("tq-3")["terminal_quality"] == "weak"
+
+
+class TestRealPathWiring:
+    """真 spawn→终态链路的接线覆盖（变异检验暴露的路径盲区补强）：
+
+    - spawn 与 spawned 事件同点同步入队；
+    - _run_member 开跑（member_started）即出队；
+    - _execute finally 终态出队 + 名下子结果投递单补扫。
+    """
+
+    @staticmethod
+    def _mock_agent():
+        from unittest.mock import MagicMock
+
+        agent = MagicMock()
+        agent.config.name = "子Agent"
+        return agent
+
+    @pytest.mark.asyncio
+    async def test_full_lifecycle_queue_and_catchup(self, swarm):
+        import asyncio as aio
+        from unittest.mock import patch
+
+        from neurova.agent.delegated_delivery import getDeliveryLedger
+        from neurova.agent.mailbox import get_agent_mailbox
+
+        started = aio.Event()
+        release = aio.Event()
+
+        agent = self._mock_agent()
+
+        async def _chat(*_args, **_kwargs):
+            started.set()
+            await release.wait()
+            return {"text": "任务完成报告"}
+
+        agent.chat = _chat
+        with patch("neurova.api.endpoints.get_agent_instance", return_value=agent):
+            result = await swarm.spawn(task="全链路任务", agent_id="researcher",
+                                       background=True, session_id="sess-full")
+        sid = result["subagent_id"]
+        assert any(e["subagent_id"] == sid for e in swarm.runQueueSnapshot()), \
+            "spawn 与 spawned 事件同点同步入队"
+        # 子结果投递单先落账（目标父 run = 本 run），父终态收口时应被补扫
+        ticket = getDeliveryLedger().record(
+            "child-full", sid, "子Agent终态", {"report": "子结果"}, "mid-full")
+        await aio.wait_for(started.wait(), timeout=5)
+        assert swarm.status(sid)["status"] == "running"
+        assert all(e["subagent_id"] != sid for e in swarm.runQueueSnapshot()), \
+            "member_started 开跑即出队"
+        release.set()
+        await swarm._tasks[sid]
+        assert all(e["subagent_id"] != sid for e in swarm.runQueueSnapshot()), \
+            "终态出队（_execute finally）"
+        assert getDeliveryLedger().get(ticket["ticket_id"])["redelivered"] is True, \
+            "终态补扫应补投名下子结果投递单"
+        assert get_agent_mailbox().pending("sess-full") >= 1, "补投件真入箱"
