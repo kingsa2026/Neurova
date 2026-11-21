@@ -75,7 +75,7 @@ def test_installedVersionParsedAndProbeIsReadOnly(tmp_path):
         seen["timeout"] = timeout_s
         return (0, "fake-version-1.2.3\nbuild 42\n", "")
 
-    result = probeToolHealth(_TOOL, which_fn=which_fn, run_fn=run_fn)
+    result = probeToolHealth(_TOOL, which_fn=which_fn, run_fn=run_fn, deep=True)
     assert result["installed"] is True
     assert result["version"] == "fake-version-1.2.3"
     assert result["error"] is None
@@ -94,6 +94,7 @@ def test_versionTruncatedTo200Chars(tmp_path):
         _TOOL,
         which_fn=lambda name: exe,
         run_fn=lambda cmd, t: (0, long_line + "\nsecond\n", ""),
+        deep=True,
     )
     assert result["installed"] is True
     assert result["version"] == long_line[:200]
@@ -106,6 +107,7 @@ def test_runFailureNonZeroKeepsInstalledWithError(tmp_path):
         _TOOL,
         which_fn=lambda name: exe,
         run_fn=lambda cmd, t: (3, "", "boom"),
+        deep=True,
     )
     # installed 与 version 独立：装了但 version 探测失败仍是 installed=True
     assert result["installed"] is True
@@ -120,7 +122,7 @@ def test_runTimeoutKeepsInstalledWithError(tmp_path):
     def run_fn(cmd, timeout_s):
         raise subprocess.TimeoutExpired(cmd, timeout_s)
 
-    result = probeToolHealth(_TOOL, which_fn=lambda name: exe, run_fn=run_fn)
+    result = probeToolHealth(_TOOL, which_fn=lambda name: exe, run_fn=run_fn, deep=True)
     assert result["installed"] is True
     assert result["version"] is None
     assert result["error"]
@@ -136,6 +138,7 @@ def test_everyActiveCatalogToolProbesInstalled(tmp_path, tool):
         tool,
         which_fn=lambda name: exe,
         run_fn=lambda cmd, t: (0, "stub-1.0\n", ""),
+        deep=True,
     )
     assert result["installed"] is True
     assert result["version"] == "stub-1.0"

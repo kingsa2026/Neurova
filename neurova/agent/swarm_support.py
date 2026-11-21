@@ -46,6 +46,12 @@ SUBAGENT_ACTIVE_STATUSES = frozenset({SUBAGENT_PENDING, SUBAGENT_RUNNING, SUBAGE
 #: 已收尾的状态——既释放槽位，也进 _evict_finished_runs 的逐出面
 SUBAGENT_FINISHED_STATUSES = frozenset({SUBAGENT_COMPLETED, SUBAGENT_FAILED})
 
+# ── A1：终态质量分级词值（本模块唯一出处）──────────────────────────
+#: classifyTerminalQuality 的三档输出——验收门/评审门据此决定是否需要复核。
+TERMINAL_QUALITY_STRONG = "strong"
+TERMINAL_QUALITY_WEAK = "weak"
+TERMINAL_QUALITY_NONE = "none"
+
 # ── S3：run 生命周期迁移表（唯一收口 transitionRun）────────────────────
 # 迁移合法性从各赋值点收拢到这一张表：键=现役状态，值=允许去的下一态集合。
 # 终态（completed/failed）无出边；pending 只能启动或直接判失败（依赖门拦下/
@@ -107,6 +113,47 @@ def buildRunLineage(run: "SubAgentRun", runsMap: Optional[Dict[str, "SubAgentRun
     }
 
 
+#: 视作「provider 明确完成」的正常完成成因（A1）：空（无成因直完）与
+#: candidate_merged（S4 候选合入——swarm 主链路唯一的 completed 迁移仪式）。
+#: 其余完成成因（超时/取消兜底、可疑成因）一律按 weak 处理。
+STRONG_COMPLETION_CAUSES = frozenset({"", "candidate_merged"})
+
+
+def classifyTerminalQuality(status: str, cause: str) -> str:
+    """终态可信度分级（A1）：验收门/评审门据此决定是否需要复核确认。
+
+    映射表（cause 词值见 ``agent_run_ledger.SUBAGENT_CAUSE_*``）：
+    - completed + 正常完成成因（"" 或 candidate_merged，见 STRONG_COMPLETION_CAUSES）→ strong
+    - completed + subagent_timeout / subagent_cancelled（兜底推断）           → weak
+    - completed + 其他非空成因（完成得可疑）                                  → weak
+    - failed    + 任意非空成因（timeout/cancelled/failed/crash）             → weak
+    - failed    + ""（无成因，来路不明）                                      → none
+    - 非终态（pending/running/in_review/未知）+ 任意                          → none
+    """
+    target = str(status or "").strip()
+    if target not in SUBAGENT_FINISHED_STATUSES:
+        return TERMINAL_QUALITY_NONE
+    causeText = str(cause or "").strip()
+    if target == SUBAGENT_COMPLETED:
+        if causeText in STRONG_COMPLETION_CAUSES:
+            return TERMINAL_QUALITY_STRONG
+        return TERMINAL_QUALITY_WEAK  # 超时/取消兜底或可疑成因：完成不可信，按弱可信处理
+    # failed：有成因可追 → weak；无成因 → none（来路不明，必须复核）
+    if causeText:
+        return TERMINAL_QUALITY_WEAK
+    return TERMINAL_QUALITY_NONE
+
+
+def requiresReviewConfirmation(run: "SubAgentRun") -> bool:
+    """该 run 的终态是否需要复核确认（A1）：weak/none → True，strong → False。
+
+    供验收门/评审门决定是否加一道复核；空串（尚未到终态）返回 False——
+    复核针对的是已有终态结果的可信度，非终态本就无结果可确认。
+    """
+    quality = str(getattr(run, "terminal_quality", "") or "")
+    return quality in (TERMINAL_QUALITY_WEAK, TERMINAL_QUALITY_NONE)
+
+
 def transitionRun(run: "SubAgentRun", newStatus: str, cause: str = "") -> str:
     """run 状态迁移唯一收口（S3）：迁移表强校验 + status_changed 事件归档。
 
@@ -131,6 +178,9 @@ def transitionRun(run: "SubAgentRun", newStatus: str, cause: str = "") -> str:
             f"（subagent={run.subagent_id} cause={cause or 'n/a'}；"
             f"合法去向 {sorted(RUN_STATUS_TRANSITIONS.get(current, frozenset()))}）")
     run.status = target
+    # A1：终态迁移同步写质量分级；同态重申（上方提前返回）与非终态迁移不动该字段。
+    if target in SUBAGENT_FINISHED_STATUSES:
+        run.terminal_quality = classifyTerminalQuality(target, cause)
     try:
         from neurova.agent.swarm_event_log import appendRunEvent
 
@@ -285,7 +335,10 @@ class SubAgentRun:
     submitted_result: Optional[Dict[str, Any]] = None
     # 收尾成因（见 `agent_run_ledger.SUBAGENT_CAUSE_*`）：台账的 error_type 由它翻出来，
     # 不靠嗅探 error 文本——那正是「同一件事两份口径」的下一种形态。
-    cause: str = "" 
+    cause: str = ""
+    # A1：终态质量分级（strong/weak/none，见 classifyTerminalQuality）——
+    # 终态迁移时由 transitionRun 写入；非终态/同态重申保持不变。空串 = 未到终态。
+    terminal_quality: str = ""
     report: str = ""
     error: Optional[str] = None
     started_at: float = field(default_factory=time.time)
@@ -347,6 +400,7 @@ class SubAgentRun:
             "submitted_result": self.submitted_result,
             "tool_allowlist_size": len(self.tool_allowlist) if self.tool_allowlist else None,
             "status": self.status,
+            "terminal_quality": self.terminal_quality,
             "report": self.report,
             "error": self.error,
             "started_at": self.started_at,

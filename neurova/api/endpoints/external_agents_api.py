@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field
 from neurova.agent.neuacp.acp_client import NeuacpClient
 from neurova.agent.neuacp.catalog import EXECUTOR_KINDS, listCatalog
 from neurova.agent.neuacp.child_env import buildChildEnvironment
+from neurova.agent.neuacp.process_governance import TIMEOUT_MATRIX
 from neurova.api.auth import get_current_user
 from neurova.core.logger import get_logger
 
@@ -48,7 +49,6 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 
 #: 连通测试超时（设计文档 §4.7：30s）
 TEST_TIMEOUT_S = 30.0
-_PLUGIN_TERMINATE_WAIT_S = 5.0
 
 #: 执行体类型分派：kind 取值收口到 catalog.EXECUTOR_KINDS 单源
 #: （与名册 NeuacpExecutorSpec、能力校验 refuseExecutorSpec 同一口径，教义第 6 条）
@@ -316,7 +316,7 @@ def _terminateProcess(proc: subprocess.Popen) -> None:
         if proc.poll() is None:
             proc.terminate()
             try:
-                proc.wait(timeout=_PLUGIN_TERMINATE_WAIT_S)
+                proc.wait(timeout=TIMEOUT_MATRIX["terminate_grace"])
             except subprocess.TimeoutExpired:
                 proc.kill()
                 try:

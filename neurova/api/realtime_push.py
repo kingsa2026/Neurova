@@ -17,13 +17,20 @@
 对外帧格式由端点经 `renderFrame` 保持（既有出口为数据帧 `data: {json}\n\n`、
 心跳 `: keep-alive\n\n` 注释行），模板不改动帧格式。console.py / chat.py 的
 chat 回合流不在本模板范围（回合流非通知流）。
+
+字节治理（单事件上限 + 重放字节预算，可选项）见 `ssePushStream` 的
+`event_cap` / `byte_budget` 参数说明；协商与预算原语在
+`neurova/api/ws_stream_budget.py`，续传决策在 `neurova/api/subscription_resume.py`。
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import time
-from typing import Any, AsyncIterator, Callable, List, Optional
+from typing import Any, AsyncIterator, Callable, List, Optional, Tuple
+
+from neurova.api.ws_stream_budget import ReplayByteBudget, enforceEventCap
 
 #: 增量源永久关闭的哨兵（区别于"本轮心跳超时"的 None）
 FEED_EXHAUSTED = object()
@@ -97,19 +104,78 @@ async def ssePushStream(
     authorize: Optional[Callable[[], bool]] = None,
     heartbeatInterval: float = 15.0,
     maxFrames: Optional[int] = None,
+    byte_budget: Optional[ReplayByteBudget] = None,
+    event_cap: Optional[int] = None,
 ) -> AsyncIterator[str]:
     """统一 SSE 生成器。
 
     时序：feed 建立（订阅）先于 snapshot()（读首屏）——这是"订阅先于读首屏"的
     落点；快照尾游标交给 nextFrame 做增量，衔接处不漏不重。maxFrames 为测试钩子
     （发满即收尾；生产不传 = 无限流）。
+
+    字节治理（E3，可选；**不传这两个参数时行为与既有出口逐字一致**）：
+
+    - ``event_cap``：单帧字节上限（建议用 ``ws_stream_budget.MAX_EVENT_BYTES``）。
+      每帧渲染后按 UTF-8 编码字节数判定，超限帧**整体替换**为诚实占位帧
+      ``data: {"event_truncated": true, "reason": "event_bytes_exceed_cap",
+      "original_bytes": N, "cap_bytes": C}\\n\\n``（绝不产出半截 JSON），占位帧
+      字节同样计入预算账面。
+    - ``byte_budget``：:class:`~neurova.api.ws_stream_budget.ReplayByteBudget`，
+      对本流外发的每个数据帧（首屏快照 + 增量 + 占位帧）按编码字节数记账。
+      某帧记账后突破预算 → 该帧**扣下不发**，改发一帧降级通告后本流收尾：
+
+      ``event: snapshot_downgrade\\ndata: {"reason": "replay_byte_budget_exhausted",
+      "last_seq": <已外发最大游标>, "fed_bytes": N, "budget_bytes": M,
+      "resume": "snapshot"}\\n\\n``
+
+      客户端语义：收到 ``snapshot_downgrade`` 即丢弃本地增量游标，按
+      ``subscription_resume.reconnectBackoff`` 的退避语义重连，以首屏快照恢复
+      （与全局事件库 ``replayThrough`` 的 degraded → 快照降级协议同构）。
+      心跳注释帧（``: keep-alive``）不记账。
     """
     sent = 0
     lastKey: Optional[Any] = None
+
+    def _prepare(frame: Any) -> Tuple[Optional[str], bool]:
+        """渲染 + 单事件上限 + 字节记账。返回 (外发帧, 是否触发降级)。
+
+        外发帧为 None 表示该帧被预算扣下（未外发，客户端转快照恢复）。
+        两个治理参数都未传时走原路径：渲染结果原样返回，零额外行为。
+        """
+        rendered = renderFrame(frame)
+        if event_cap is None and byte_budget is None:
+            return rendered, False
+        encoded = rendered.encode("utf-8")
+        if event_cap is not None:
+            ok, honest = enforceEventCap(encoded, max_bytes=event_cap)
+            if not ok:
+                rendered = honest.decode("utf-8")
+                encoded = honest
+        if byte_budget is not None and not byte_budget.feed(len(encoded)):
+            return None, True
+        return rendered, False
+
+    def _downgradeNotice(cursor: Optional[Any]) -> str:
+        payload = json.dumps(
+            {
+                "reason": "replay_byte_budget_exhausted",
+                "last_seq": cursor,
+                "fed_bytes": byte_budget.fedBytes,
+                "budget_bytes": byte_budget.maxBytes,
+                "resume": "snapshot",
+            },
+            ensure_ascii=False,
+        )
+        return f"event: snapshot_downgrade\ndata: {payload}\n\n"
+
     for frame in feed.snapshot():                       # ② 首屏快照（① 订阅已先建立）
+        rendered, downgrade = _prepare(frame)
+        if downgrade:
+            yield _downgradeNotice(lastKey)  # lastKey = 已外发的最大游标（被扣下的帧不计入）
+            return
         lastKey = feed.frameKey(frame)
         sent += 1
-        yield renderFrame(frame)
+        yield rendered
         if feed.isTerminal(frame):
             return
         if maxFrames is not None and sent >= maxFrames:
@@ -123,8 +189,12 @@ async def ssePushStream(
                 return
             yield ": keep-alive\n\n"
             continue
+        rendered, downgrade = _prepare(frame)
+        if downgrade:
+            yield _downgradeNotice(lastKey)  # lastKey = 已外发的最大游标（被扣下的帧不计入）
+            return
         lastKey = feed.frameKey(frame)
         sent += 1
-        yield renderFrame(frame)
+        yield rendered
         if feed.isTerminal(frame):
             return

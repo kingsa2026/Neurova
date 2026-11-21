@@ -23,6 +23,13 @@
 
 LLM 通道由调用方注入（端点侧复用 `_rag_llm_fn` 单一事实源），本模块不关心
 provider 细节；无通道时由端点如实 503，不在本模块伪造回答。
+
+「先 case 后修」纪律（E1，模型可见文本改动的前置门）：
+工具描述/任务书/验收 rubric/prompt 模板等模型可见文本改动，必须先提交对该文本
+会失败、对改后文本通过的 eval case（`EvalCase` + `assertCaseRedGreen` 红绿自检），
+case 须标注来源（Issue/事故/评审）与成本口径；覆盖检查单源是
+`validateCaseFirst`。D-H 口径：**评测手动跑 + 成本标注**（cost_hint/cost_note
+落事实记录），CI 只跑判据单测，不接付费模型跑。
 """
 from __future__ import annotations
 
@@ -118,6 +125,139 @@ def clearSuiteBanks() -> None:
         _SUITE_BANKS.clear()
 
 
+# ── eval case 注册表（「先 case 后修」纪律的机制面） ────────────────
+
+#: source.kind 的合法取值：case 从哪来（Issue/事故/评审），必填。
+CASE_SOURCE_KINDS = ("issue", "incident", "review")
+
+_CASE_LOCK = threading.RLock()
+_EVAL_CASES: Dict[str, "EvalCase"] = {}
+
+
+@dataclass
+class EvalCase:
+    """一条模型可见文本的评测 case——「先 case 后修」纪律的载体。
+
+    - `subject_id`：被守卫的模型可见文本唯一标识（工具描述/任务书模板/
+      验收 rubric），`validateCaseFirst` 按它对改动面做覆盖检查；
+    - `source`：必填，`{"kind": "issue"|"incident"|"review", "ref": str}`，
+      case 的出处（没有来源的 case 不许注册）；
+    - `cost_hint`：选填，`{"model": str, "est_tokens": int}`，手动跑评测的
+      成本口径标注（D-H：评测手动跑 + 成本标注，CI 只跑判据单测）。
+    """
+
+    case_id: str
+    suite_id: str
+    prompt: str
+    check: CheckFn
+    subject_id: str
+    source: dict
+    cost_hint: Optional[dict] = None
+
+
+def _validateCaseSource(source: dict) -> None:
+    if not isinstance(source, dict):
+        raise ValueError(
+            f"eval case source 必须是 {{'kind': ..., 'ref': ...}} 字典，得到 {type(source).__name__}"
+        )
+    kind = source.get("kind")
+    ref = source.get("ref")
+    if kind not in CASE_SOURCE_KINDS:
+        raise ValueError(
+            f"eval case source.kind 必填且须为 {CASE_SOURCE_KINDS} 之一，得到 {kind!r}"
+        )
+    if not isinstance(ref, str) or not ref.strip():
+        raise ValueError(
+            "eval case source.ref 必填（Issue 号/事故编号/评审记录标识），得到空值"
+        )
+
+
+def registerEvalCase(case: EvalCase) -> None:
+    """注册一条 eval case；同 case_id 重复注册与缺 source 均拒绝。
+
+    source 必填（kind ∈ issue/incident/review，ref 非空）——「先 case 后修」
+    要求每条 case 能追溯到它的提出场景，匿名 case 不入库。
+    """
+    if not isinstance(case, EvalCase):
+        raise ValueError(f"registerEvalCase 只收 EvalCase 实例，得到 {type(case).__name__}")
+    if not str(case.case_id or "").strip():
+        raise ValueError("eval case case_id 必填")
+    if not str(case.subject_id or "").strip():
+        raise ValueError("eval case subject_id 必填（被守卫的模型可见文本唯一标识）")
+    _validateCaseSource(case.source)
+    with _CASE_LOCK:
+        if case.case_id in _EVAL_CASES:
+            raise ValueError(f"eval case 重复注册: {case.case_id}")
+        _EVAL_CASES[case.case_id] = case
+
+
+def listEvalCases(suiteId: str = "") -> List[EvalCase]:
+    """列出已注册 eval case；给 suiteId 时只列该 suite 的。"""
+    with _CASE_LOCK:
+        cases = list(_EVAL_CASES.values())
+    if suiteId:
+        cases = [case for case in cases if case.suite_id == suiteId]
+    return cases
+
+
+def clearEvalCases() -> None:
+    with _CASE_LOCK:
+        _EVAL_CASES.clear()
+
+
+def validateCaseFirst(
+    changedSubjectIds: Sequence[str],
+    suiteIds: Optional[Sequence[str]] = None,
+) -> dict:
+    """纪律检查单源：改动面里每个模型可见文本 subject_id 必须有已注册 case 覆盖。
+
+    - `changedSubjectIds`：本次改动涉及的模型可见文本标识集合；
+    - `suiteIds`：只在这些 suite 里找覆盖 case；None＝跨全部 suite 汇总；
+    - 返回 `{"covered": [...], "missing": [...]}`，均按 subject_id 排序去重；
+      missing 非空＝有改动没先立 case，按纪律应先补 case 再动手。
+    """
+    cases = listEvalCases()
+    if suiteIds is not None:
+        allowed = set(suiteIds)
+        cases = [case for case in cases if case.suite_id in allowed]
+    coveredSubjects = {case.subject_id for case in cases}
+    changed = sorted(set(changedSubjectIds))
+    return {
+        "covered": [sid for sid in changed if sid in coveredSubjects],
+        "missing": [sid for sid in changed if sid not in coveredSubjects],
+    }
+
+
+def assertCaseRedGreen(
+    case: EvalCase,
+    oldAnswerFn: Callable[[str], str],
+    newAnswerFn: Callable[[str], str],
+) -> None:
+    """「先 case 后修」红绿自检器：旧文本下判据必须 FAIL（红），新文本下必须 PASS（绿）。
+
+    - `oldAnswerFn(prompt)`：按**改动前**的模型可见文本生成回答；
+    - `newAnswerFn(prompt)`：按**改后**的模型可见文本生成回答。
+    任一态不满足即 AssertionError，并指名是哪一态、哪个 case、哪份文本——
+    旧文本就已通过＝case 没咬住缺陷（不算先红）；改后仍未通过＝修复没生效（不算转绿）。
+    """
+    oldAnswer = str(oldAnswerFn(case.prompt) or "")
+    newAnswer = str(newAnswerFn(case.prompt) or "")
+    oldPassed = bool(case.check(oldAnswer)[0])
+    newPassed = bool(case.check(newAnswer)[0])
+    if oldPassed:
+        raise AssertionError(
+            f"eval case {case.case_id} 未先红：旧文本（{case.subject_id}）下判据已通过"
+            f"（旧回答 {oldAnswer[:_ANSWER_SNIPPET_LEN]!r}）——"
+            "「先 case 后修」要求 case 对改动前的文本必须 FAIL"
+        )
+    if not newPassed:
+        raise AssertionError(
+            f"eval case {case.case_id} 未转绿：新文本（{case.subject_id}）下判据仍未通过"
+            f"（新回答 {newAnswer[:_ANSWER_SNIPPET_LEN]!r}）——"
+            "「先 case 后修」要求 case 对改后的文本必须 PASS"
+        )
+
+
 # ── 执行器 ─────────────────────────────────────────────────────────
 
 def runSuite(
@@ -125,13 +265,18 @@ def runSuite(
     answerFn: Callable[[str], str],
     clockFn: Callable[[], float] = time.perf_counter,
     limit: Optional[int] = None,
+    costNote: Optional[dict] = None,
 ) -> dict:
     """逐任务执行：answerFn(prompt)→回答→判据给分，产出真实聚合指标。
 
     - 单任务异常（LLM 或判据）＝该任务失败事实，计 0 分、记 error、计入
       tasks_total，不中断 run（与 multi_agent.BenchRunner 同款故障隔离）；
     - 时延只计取答段（clockFn 注入，测试可断言）；
-    - 空任务库如实返回 score=None，不编造 0 分或 1 分。
+    - 空任务库如实返回 score=None，不编造 0 分或 1 分；
+    - `costNote`：选填，手动跑评测的成本标注（如
+      `{"model": ..., "est_tokens": ..., "run_by": "manual"}`），原样透传进
+      运行记录 `cost_note` 字段落事实（D-H 口径：评测手动跑 + 成本标注，
+      CI 只跑判据单测）；不传时记录不含该字段，既有字段不受影响。
     """
     if answerFn is None:
         raise ValueError("answer_fn 未提供——无 LLM 通道不得伪造回答")
@@ -174,7 +319,7 @@ def runSuite(
     tasksTotal = len(perTask)
     scores = [row["score"] for row in perTask]
     latencies = [row["latency_ms"] for row in perTask]
-    return {
+    report = {
         "status": "completed",
         "tasks_total": tasksTotal,
         "tasks_correct": sum(1 for row in perTask if row["passed"]),
@@ -183,6 +328,9 @@ def runSuite(
         "per_task": perTask,
         "executed_at": datetime.now(timezone.utc).isoformat(),
     }
+    if costNote is not None:
+        report["cost_note"] = dict(costNote)
+    return report
 
 
 # ── 种子任务库（现役四 suite；multimodal-v1 有意不接，见模块 docstring）──

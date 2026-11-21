@@ -15,6 +15,14 @@ S9 房间桥接：run 带协作房间（``run.room_id``）时，L1/L2 审批卡�
 审批链单源，房间只做"呈现 + 应答回灌"。决策权限复用房间群主制度：仅群主
 （project.owner_id）或平台 admin 可判定，普通成员回复只记议见。
 
+D1 记忆式批准（审批 grant）：同会话/同团队对同类动作"免再批"。两档授权——
+:func:`acceptForSession`（会话档，随锚定 run 生命周期存进程内）与
+:func:`acceptAlways`（团队档，持久化到数据根 ``team_approval_grants.json``，
+可撤销）。决策集成在 :func:`requestRunApproval`：定级后、弹批前查
+:func:`matchGrant`，命中走自动放行通路并留痕（decision 记录带 grant_id 与
+``memory_grant`` 来源标记）。红线：**L2 永不记忆式放行**——grant 只覆盖
+L0/L1，且"只降不升"（L1 grant 覆盖同动作 L0 请求，L0 grant 只覆盖 L0）。
+
 单源纪律（教义第 6 条）：审批单只落在既有 ``ApprovalManager``（SQLite 状态机 +
 governance API + 站内通知镜像），本模块只做蜂群侧的分级、投递与等待唤醒，
 **不建第二套审批存储**。等待/唤醒复用 ``approval_relay``——与工具 ASK 同一条通路；
@@ -23,11 +31,13 @@ governance API + 站内通知镜像），本模块只做蜂群侧的分级、投
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import threading
 import time
-from typing import Any, Dict, Optional
+import uuid
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +181,7 @@ def _emitApprovalAudit(
     mode: str = "",
     note: str = "",
     decidedByChannel: str = "",
+    grantId: str = "",
 ) -> bool:
     """一次审批请求/决定落审计单源；fail-open——写失败不阻断审批主流程。
 
@@ -179,6 +190,7 @@ def _emitApprovalAudit(
     member_session_id/parent_session_id）、决策人（decided_by/user_id）、
     决策（decision）、时延（latency_ms）。S9 房间回灌时 ``decided_by`` 记决策人的
     房间身份（用户 id），``decided_by_channel`` 标记裁决通道（room/parent_agent）。
+    D1 记忆式放行时 ``grant_id`` 记命中的授权单（审计可查）。
     写失败（异常或返回 False）记 ``auditWriteFailures`` 计数 + error 日志，不静默吞。
     """
     from neurova.security.audit_logger import (
@@ -215,6 +227,7 @@ def _emitApprovalAudit(
         "decision": str(decision or ""),
         "decided_by": str(actor or "") if phase == "decide" else "",
         "decided_by_channel": str(decidedByChannel or "") if phase == "decide" else "",
+        "grant_id": str(grantId or ""),
         "note": str(note or "")[:200],
         "path_values": [
             ["run_id", runId],
@@ -262,6 +275,376 @@ def _pendingShape(
         payload["approval_timeout"] = True
         payload["waited_seconds"] = waited
     return payload
+
+
+# ── D1 记忆式批准（审批 grant）：同会话/同团队免再批 + 投影化读面 ─────────
+#
+# 红线：L2 永不记忆式放行——grant 只允许 L0/L1 档（创建入口拒绝 L2，匹配面对
+# L2 请求一律不命中），level_covered 语义"只降不升"：grant 记录其覆盖档，
+# L1 grant 覆盖同动作的 L0/L1 请求，L0 grant 只覆盖 L0，任何 grant 不覆盖 L2。
+# 动作匹配：精确串相等，或 "前缀:*" 通配（见 :func:`actionMatchesPattern`）。
+# 单源纪律：审批单本体仍只落 ApprovalManager；grant 是"免再批"的授权记录，
+# 团队档持久化到数据根 team_approval_grants.json（读一次+写穿，threading.RLock，
+# 不建 SQLite 第二套），会话档随锚定 run 的生命周期存进程内。
+
+GRANT_KIND_SESSION = "session"
+GRANT_KIND_TEAM = "team"
+#: 决策留痕的来源标记（run.approvals 条目 decision_source 字段取值）
+GRANT_SOURCE_MARKER = "memory_grant"
+GRANT_STORE_FILENAME = "team_approval_grants.json"
+GRANT_STORE_FORMAT_VERSION = 1
+#: session grant 的兜底会话域前缀（run 无 member 会话键时按 run 自身收口）
+GRANT_RUN_SCOPE_PREFIX = "run:"
+
+_grantLock = threading.RLock()
+#: 进程内 grant 台账（session+team 同册）；team 档与数据根 JSON 写穿同步。
+#: None = 未加载；路径变化（数据根注入切换）时重读。
+_grantCache: Optional[List[Dict[str, Any]]] = None
+_grantCachePath: str = ""
+
+
+def _memberSessionKey(run: Any) -> str:
+    """member run 的会话域键：优先 member_session_id，缺省按 run 自身收口。"""
+    sessionKey = str(getattr(run, "member_session_id", "") or "").strip()
+    if sessionKey:
+        return sessionKey
+    return GRANT_RUN_SCOPE_PREFIX + str(getattr(run, "subagent_id", "") or "")
+
+
+def actionMatchesPattern(pattern: str, action: str) -> bool:
+    """动作匹配：精确串相等，或 "前缀:*" 通配（冒号边界，非子串匹配）。
+
+    - 精确：``"Bash:run_x"`` 只命中 ``"Bash:run_x"``；
+    - 通配：``"Bash:*"`` 命中一切以 ``"Bash:"`` 开头的动作（含 ``"Bash:run_x"``），
+      不命中 ``"Bashxx:run"``（缺冒号边界）、不命中裸 ``"Bash"``；
+    - 大小写敏感；任一侧为空不命中。
+    """
+    pat = str(pattern or "").strip()
+    act = str(action or "").strip()
+    if not pat or not act:
+        return False
+    if pat.endswith(":*"):
+        return act.startswith(pat[:-1])  # 保留 "前缀:" 边界，防 "Bashxx" 误吞
+    return pat == act
+
+
+def grantCoversLevel(grantLevel: str, requestLevel: str) -> bool:
+    """level_covered 只降不升：L1 grant 覆盖 L0/L1 请求；L0 grant 只覆盖 L0。
+
+    任何 grant 都不覆盖 L2（红线，见本节头注）；非法档一律不覆盖。
+    """
+    grantLv = str(grantLevel or "").strip().upper()
+    requestLv = str(requestLevel or "").strip().upper()
+    if requestLv not in (LEVEL_L0, LEVEL_L1):
+        return False
+    if grantLv == LEVEL_L1:
+        return requestLv in (LEVEL_L0, LEVEL_L1)
+    if grantLv == LEVEL_L0:
+        return requestLv == LEVEL_L0
+    return False
+
+
+def _nextGrantId() -> str:
+    return f"grant_{uuid.uuid4().hex[:12]}"
+
+
+def _grantStorePath() -> str:
+    """团队 grant 的持久化落点（数据根下，调用时解析——注入才对测试生效）。"""
+    from neurova.core.data_root import dataPath
+
+    return dataPath(GRANT_STORE_FILENAME)
+
+
+def _loadGrantsLocked() -> List[Dict[str, Any]]:
+    """读一次：数据根 JSON → 进程内台账（路径变化时重读，测试注入友好）。
+
+    文件缺失按空档处理；损坏/不可读时点名 error 并按空档处理（fail-closed：
+    没有 grant 就没有记忆式放行，宁可退回人工弹批，不装没看见）。
+    """
+    global _grantCache, _grantCachePath
+    path = _grantStorePath()
+    if _grantCache is not None and _grantCachePath == path:
+        return _grantCache
+    grants: List[Dict[str, Any]] = []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        rows = payload.get("grants") if isinstance(payload, dict) else None
+        if isinstance(rows, list):
+            grants = [
+                g for g in rows
+                if isinstance(g, dict) and g.get("kind") == GRANT_KIND_TEAM
+            ]
+    except FileNotFoundError:
+        grants = []
+    except (OSError, ValueError) as e:
+        logger.error("团队审批 grant 文件不可读（%s），按空档处理（不记忆式放行）：%s", path, e)
+        grants = []
+    _grantCache = grants
+    _grantCachePath = path
+    return _grantCache
+
+
+def _writeGrantsLocked() -> None:
+    """写穿：team 档原子落盘（session 档不持久化——随 run 生命周期）。"""
+    path = _grantStorePath()
+    payload = {
+        "version": GRANT_STORE_FORMAT_VERSION,
+        "updated_at": time.time(),
+        "grants": [g for g in _loadGrantsLocked() if g.get("kind") == GRANT_KIND_TEAM],
+    }
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmpPath = path + ".tmp"
+    with open(tmpPath, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+    os.replace(tmpPath, path)
+
+
+def _grantNotAllowedLevel(level: str) -> Optional[str]:
+    """grant 档位校验：非法档报错，L2 拒绝（红线）。合法返回 None。"""
+    grantLevel = normalizeLevel(level)
+    if grantLevel == LEVEL_L2:
+        raise ValueError("L2 永不记忆式放行——不可逆操作的裁决权不能被预授权")
+    return None
+
+
+def acceptForSession(run: Any, action: str, *, level: str, granted_by: str) -> Dict[str, Any]:
+    """记忆式批准·会话档：本 run/会话域内同类动作免再批（run 结束即失效）。
+
+    - scope 绑定该 member run 的会话域（member_session_id；缺省按 run 自身收口），
+      并锚定发起 run——run 终态（或被逐出 runsMap）即失效（见 :func:`_grantRunAlive`）；
+    - level 只收 L0/L1：L2 拒绝建单（ValueError）。
+
+    Returns:
+        grant 字典（副本）：grant_id/kind/action/level/session_key/run_id/
+        team_id/granted_by/granted_at/revoked/revoked_at/revoked_by。
+    """
+    act = str(action or "").strip()
+    if not act:
+        raise ValueError("action 不能为空（要放行哪类操作必须写明）")
+    _grantNotAllowedLevel(level)
+    grantLevel = normalizeLevel(level)
+    grant = {
+        "grant_id": _nextGrantId(),
+        "kind": GRANT_KIND_SESSION,
+        "action": act,
+        "level": grantLevel,
+        "session_key": _memberSessionKey(run),
+        "run_id": str(getattr(run, "subagent_id", "") or ""),
+        "team_id": str(getattr(run, "team_id", "") or ""),
+        "granted_by": str(granted_by or "").strip(),
+        "granted_at": time.time(),
+        "revoked": False,
+        "revoked_at": 0.0,
+        "revoked_by": "",
+    }
+    with _grantLock:
+        _loadGrantsLocked().append(grant)
+    return dict(grant)
+
+
+def acceptAlways(team_id: str, action: str, *, level: str, granted_by: str) -> Dict[str, Any]:
+    """记忆式批准·团队档：本团队内同类动作配置化放行，可撤销，持久化到数据根。
+
+    跨 run 生效（按 team_id 匹配，双方都非空才认）；level 只收 L0/L1。
+    Returns:
+        grant 字典（副本），字段同 :func:`acceptForSession`（session_key/run_id 为空）。
+    """
+    tid = str(team_id or "").strip()
+    if not tid:
+        raise ValueError("team_id 不能为空（团队档 grant 必须归属团队）")
+    act = str(action or "").strip()
+    if not act:
+        raise ValueError("action 不能为空（要放行哪类操作必须写明）")
+    _grantNotAllowedLevel(level)
+    grantLevel = normalizeLevel(level)
+    grant = {
+        "grant_id": _nextGrantId(),
+        "kind": GRANT_KIND_TEAM,
+        "action": act,
+        "level": grantLevel,
+        "session_key": "",
+        "run_id": "",
+        "team_id": tid,
+        "granted_by": str(granted_by or "").strip(),
+        "granted_at": time.time(),
+        "revoked": False,
+        "revoked_at": 0.0,
+        "revoked_by": "",
+    }
+    with _grantLock:
+        _loadGrantsLocked().append(grant)
+        _writeGrantsLocked()
+    return dict(grant)
+
+
+def revokeGrant(grant_id: str, revoked_by: str) -> bool:
+    """撤销 grant（session/team 通用）：撤销即失效。
+
+    不存在或已撤销返回 False（裁决幂等，不重复生效）。
+    """
+    gid = str(grant_id or "").strip()
+    if not gid:
+        return False
+    with _grantLock:
+        for grant in _loadGrantsLocked():
+            if grant.get("grant_id") != gid:
+                continue
+            if grant.get("revoked"):
+                return False
+            grant["revoked"] = True
+            grant["revoked_at"] = time.time()
+            grant["revoked_by"] = str(revoked_by or "").strip()
+            if grant.get("kind") == GRANT_KIND_TEAM:
+                _writeGrantsLocked()
+            return True
+    return False
+
+
+def listGrants(team_id: str = "", session_key: str = "") -> List[Dict[str, Any]]:
+    """grant 读面（副本列表）；team_id/session_key 传空 = 不过滤该维度。"""
+    tid = str(team_id or "").strip()
+    skey = str(session_key or "").strip()
+    with _grantLock:
+        rows = list(_loadGrantsLocked())
+    picked: List[Dict[str, Any]] = []
+    for grant in rows:
+        if tid and grant.get("team_id") != tid:
+            continue
+        if skey and grant.get("session_key") != skey:
+            continue
+        picked.append(dict(grant))
+    return picked
+
+
+def getGrant(grant_id: str) -> Optional[Dict[str, Any]]:
+    """按 id 查单张 grant（副本）；不存在返回 None。"""
+    gid = str(grant_id or "").strip()
+    with _grantLock:
+        for grant in _loadGrantsLocked():
+            if grant.get("grant_id") == gid:
+                return dict(grant)
+    return None
+
+
+def _grantRunAlive(grant: Dict[str, Any], requestingRun: Any = None) -> bool:
+    """session grant 的活性闸门：锚 run 仍处活跃态才有效（run 结束即失效）。
+
+    锚 run 状态取自 runsMap（``SwarmManager.status``，跨 run/续跑场景的权威
+    口径，查不到＝已终态/被逐出 → 失效）；请求方对象与锚是同一 run 时直接读
+    对象上的实时 status（同一实例，免查册）。
+    """
+    from neurova.agent.swarm_support import SUBAGENT_ACTIVE_STATUSES
+
+    anchorId = str(grant.get("run_id") or "")
+    if not anchorId:
+        return False
+    if (requestingRun is not None
+            and str(getattr(requestingRun, "subagent_id", "") or "") == anchorId):
+        return str(getattr(requestingRun, "status", "") or "") in SUBAGENT_ACTIVE_STATUSES
+    try:
+        from neurova.agent.swarm import get_swarm_manager
+
+        info = get_swarm_manager().status(anchorId)
+    except Exception as e:  # noqa: BLE001 - 锚状态不可查按失效处理（宁可再批一次）
+        logger.debug("session grant 锚 run 状态不可查 (%s)：%s", anchorId, e)
+        return False
+    return isinstance(info, dict) and info.get("status") in SUBAGENT_ACTIVE_STATUSES
+
+
+def matchGrant(run: Any, action: str, level: str) -> Optional[Dict[str, Any]]:
+    """按 会话档 → 团队档 顺序找第一张能覆盖本次请求的有效 grant。
+
+    红线：level 为 L2 时一律返回 None（永不记忆式放行）；已撤销/动作不匹配/
+    档位不覆盖/会话档锚 run 已终态的都不命中。
+
+    Returns:
+        命中的 grant 副本（含 grant_id/level/granted_by），未命中返回 None。
+    """
+    requestLevel = normalizeLevel(level)
+    if requestLevel == LEVEL_L2:
+        return None
+    act = str(action or "").strip()
+    if not act or run is None:
+        return None
+    skey = _memberSessionKey(run)
+    tid = str(getattr(run, "team_id", "") or "").strip()
+    with _grantLock:
+        rows = list(_loadGrantsLocked())
+    for grant in rows:  # 会话档优先（更贴身的作用域）
+        if grant.get("kind") != GRANT_KIND_SESSION or grant.get("revoked"):
+            continue
+        if grant.get("session_key") != skey:
+            continue
+        if not _grantRunAlive(grant, run):
+            continue
+        if (actionMatchesPattern(grant.get("action", ""), act)
+                and grantCoversLevel(grant.get("level", ""), requestLevel)):
+            return dict(grant)
+    for grant in rows:  # 团队档跨 run 生效（双方 team_id 都非空才认）
+        if grant.get("kind") != GRANT_KIND_TEAM or grant.get("revoked"):
+            continue
+        if not tid or grant.get("team_id") != tid:
+            continue
+        if (actionMatchesPattern(grant.get("action", ""), act)
+                and grantCoversLevel(grant.get("level", ""), requestLevel)):
+            return dict(grant)
+    return None
+
+
+def projectRunApprovals(run: Any) -> List[Dict[str, Any]]:
+    """run 审批记录的投影化读面（纯函数，供前端/房间/管理面复用）。
+
+    每条含：request_id/action/reason/等级（level 声明档 + effective_level 实际档）/
+    status 状态/decided_by 裁决人/requested_at 时间/grant 关联
+    （grant_id + decision_source：``memory_grant`` 记忆式放行，``chain`` 既有链路）。
+    不改 run 状态，缺字段按空值补齐。
+    """
+    rows = getattr(run, "approvals", None) or []
+    projection: List[Dict[str, Any]] = []
+    for entry in rows:
+        if not isinstance(entry, dict):
+            continue
+        projection.append({
+            "request_id": str(entry.get("request_id", "") or ""),
+            "action": str(entry.get("action", "") or ""),
+            "reason": str(entry.get("reason", "") or ""),
+            "level": str(entry.get("level", "") or ""),
+            "effective_level": str(entry.get("effective_level", "") or ""),
+            "status": str(entry.get("status", "") or ""),
+            "decided_by": str(entry.get("decided_by", "") or ""),
+            "requested_at": float(entry.get("at", 0.0) or 0.0),
+            "decision_source": str(entry.get("decision_source", "") or "chain"),
+            "grant_id": str(entry.get("grant_id", "") or ""),
+        })
+    return projection
+
+
+def projectTeamGrants(team_id: str) -> List[Dict[str, Any]]:
+    """团队 grant 列表投影（含可撤销标记 ``revocable``）：管理面撤销入口的读面。
+
+    只收团队档——session 档随 run 生命周期，不入团队授权管理面。
+    """
+    tid = str(team_id or "").strip()
+    projection: List[Dict[str, Any]] = []
+    for grant in listGrants(team_id=tid):
+        if grant.get("kind") != GRANT_KIND_TEAM:
+            continue
+        revoked = bool(grant.get("revoked"))
+        projection.append({
+            "grant_id": grant.get("grant_id", ""),
+            "kind": grant.get("kind", ""),
+            "action": grant.get("action", ""),
+            "level": grant.get("level", ""),
+            "team_id": grant.get("team_id", ""),
+            "granted_by": grant.get("granted_by", ""),
+            "granted_at": grant.get("granted_at", 0.0),
+            "revoked": revoked,
+            "revoked_by": grant.get("revoked_by", ""),
+            "revoked_at": grant.get("revoked_at", 0.0),
+            "revocable": not revoked,
+        })
+    return projection
 
 
 async def requestRunApproval(
@@ -330,6 +713,7 @@ async def requestRunApproval(
             note="低危自动放行" if effective == LEVEL_L0 else "auto_approve 模式放行",
         )
         entry["status"] = "approved"
+        entry["decided_by"] = f"auto_rule:{effective}"
         _emitApprovalAudit(
             "decide", act, request,
             actor=f"auto_rule:{effective}", decision="approve",
@@ -342,6 +726,39 @@ async def requestRunApproval(
             "request_id": request.request_id, "level": effective,
             "status": "approved", "decided_by": f"auto_rule:{effective}",
         }
+
+    # ── 记忆式批准（D1）：弹批前查 grant——命中走自动放行通路并留痕 ──
+    # L2 在 matchGrant 内一律不命中（红线）；未命中落回既有弹批流程（行为不变）。
+    grant = matchGrant(run, act, effective)
+    if grant is not None:
+        decidedBy = f"{GRANT_SOURCE_MARKER}:{grant['grant_id']}"
+        approvedByGrant = manager.approve_request(
+            request.request_id,
+            approved_by=decidedBy,
+            note=(f"记忆式放行（{grant['kind']} grant，覆盖档 {grant['level']}，"
+                  f"预授权人 {grant['granted_by'] or 'unknown'}）"),
+        )
+        if approvedByGrant:
+            entry["status"] = "approved"
+            entry["decided_by"] = decidedBy
+            entry["decision_source"] = GRANT_SOURCE_MARKER
+            entry["grant_id"] = grant["grant_id"]
+            _emitApprovalAudit(
+                "decide", act, request,
+                actor=decidedBy, decision="approve",
+                latencyMs=(time.time() - started) * 1000,
+                runId=run.subagent_id, agentName=run.agent_name, task=run.task,
+                level=declared, effective=effective, mode=mode,
+                grantId=grant["grant_id"],
+            )
+            return {
+                "approved": True, "auto_approved": True, "pending": False,
+                "request_id": request.request_id, "level": effective,
+                "status": "approved", "decided_by": decidedBy,
+                "decision_source": GRANT_SOURCE_MARKER,
+                "grant_id": grant["grant_id"],
+            }
+        # 批准未生效（极端竞态/单刚过期）：不假装放行，落回人工弹批流程
 
     # ── 需人裁支路：L1(interactive) 代理给父；L2 强制人工 ──
     _notifyParent(run, _parentEnvelope(run, request, declared, effective, mode))
@@ -374,6 +791,7 @@ async def requestRunApproval(
     decided = manager.get_request(request.request_id)
     approved = status == "approved"
     entry["status"] = status
+    entry["decided_by"] = (decided.approved_by if decided else "") or ""
     payload: Dict[str, Any] = {
         "approved": approved, "auto_approved": False, "pending": False,
         "request_id": request.request_id, "level": effective, "status": status,

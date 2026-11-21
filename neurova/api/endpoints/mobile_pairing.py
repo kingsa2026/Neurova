@@ -1904,12 +1904,24 @@ async def mobile_websocket(websocket: WebSocket):
                 await ledgerWs.send_json({"type": "pong", "timestamp": time.time()})
                 continue
 
-            # 远程驾驶（项 1）：断线重连后按游标补发缺失帧（带 replay 标记）
+            # 远程驾驶（项 1）：断线重连后按游标补发缺失帧（带 replay 标记）。
+            # D3：续传模式经 subscription_resume 单源决策——游标过旧（区间内帧
+            # 已被老化）或非法/预算耗尽时，诚实下发 sync_snapshot_required 要求
+            # 全量重同步，不做会漏帧的部分重放（与全局事件库降级语义同构）。
             if message.get("type") == "sync_resume":
                 try:
                     resumeCursor = int(message.get("last_seq") or 0)
                 except (TypeError, ValueError):
                     resumeCursor = 0
+                resumeDecision = wsLedger.resolveResume(pairing_id, resumeCursor)
+                if resumeDecision.mode != "replay":
+                    await ledgerWs.send_json({
+                        "type": "sync_snapshot_required",
+                        "reason": resumeDecision.reason,
+                        "note": resumeDecision.note,
+                        "head_seq": wsLedger.lastSeq(pairing_id),
+                    })
+                    continue
                 for row in wsLedger.replaySince(pairing_id, resumeCursor):
                     replayFrame = dict(row["frame"])
                     replayFrame["seq"] = row["seq"]

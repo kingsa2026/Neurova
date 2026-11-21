@@ -10,6 +10,13 @@
   permission_modes / streaming / resume / session_reuse），并提供
   ``capabilitiesFor`` / ``refuseExecutorSpec`` 供「打开前拒绝」双闸共用
   （配置期 422 + 派活期拒绝）；声明是本仓已验证支持面的单一事实源。
+- C2 维度扩展：新增 model_switch_in_session / conversation_rollback / steer /
+  fork 四个布尔维度（连同 C5 的 handoff_inject 收口进
+  ``BOOLEAN_CAPABILITY_DIMS`` 单源清单）。缺省/缺失一律按不支持处理
+  （fail-closed）；预设只写诚实值，未在对应执行链上验证的能力不声明为真。
+- C4 探测分级：``probeTool`` / ``listCatalog``（目录与状态轮询路径）恒为
+  ``shutil.which`` 级浅探测，零子进程；``probeToolHealth`` 默认浅探测，
+  仅显式 ``deep=True``（管理面 /test 握手专用）才运行 ``--version`` 深探测。
 """
 import shutil
 import subprocess
@@ -19,10 +26,26 @@ from typing import Any, Dict, List, Optional
 #: 执行体类型取值唯一事实源（名册/管理面/派活同口径，教义第 6 条）。
 EXECUTOR_KINDS = ("acp", "plugin")
 
-#: ACP 原生/适配器家能力档（七家同口径）。ssh 是通用命令包装
+#: 布尔型能力维度单源清单（教义第 6 条）：refuseExecutorSpec 逐维校验、
+#: decideProviderTransition 消费、_capabilitiesExport 透出共用这一份；
+#: 新增布尔维度必须在此登记。序量维度（transports / permission_modes）
+#: 不在此列，仍按各自清单校验。
+BOOLEAN_CAPABILITY_DIMS = (
+    "streaming",
+    "resume",
+    "session_reuse",
+    "handoff_inject",
+    "model_switch_in_session",
+    "conversation_rollback",
+    "steer",
+    "fork",
+)
+
+#: ACP 原生/适配器家能力档（基础五维；gemini-cli/claude-code/codex 三家在
+#: 此之上叠 _P1_ACP_CAPABILITIES 的新维度声明）。ssh 是通用命令包装
 #: （ssh_transport.resolveSpawnCommand），机制上两家 transport 都支持；
 #: 审批链 chain/auto 均可；ACP update 流为流式；无官方续跑口径；
-#: 会话内可复用进程/会话。
+#: 会话内可复用进程/会话。C2 新维度不入家档（缺失=按 False 保守）。
 _ACP_CAPABILITIES = {
     "transports": ("stdio", "ssh"),
     "permission_modes": ("chain", "auto"),
@@ -41,14 +64,20 @@ _PLUGIN_CAPABILITIES = {
     "session_reuse": False,
 }
 
-#: 保守能力档：未知/禁用工具只放行最朴素组合（stdio + chain，
-#: 无流式/续跑/会话复用）——fail-closed 的缺省声明。
+#: 保守能力档：未知/禁用工具只放行最朴素组合（stdio + chain），
+#: 全部布尔扩展维度（流式/续跑/会话复用/交接/会话内换模型/回滚/插话/fork）
+#: 一律 False——fail-closed 的缺省声明（缺失与 False 同义=不支持）。
 _CONSERVATIVE_CAPABILITIES = {
     "transports": ("stdio",),
     "permission_modes": ("chain",),
     "streaming": False,
     "resume": False,
     "session_reuse": False,
+    "handoff_inject": False,
+    "model_switch_in_session": False,
+    "conversation_rollback": False,
+    "steer": False,
+    "fork": False,
 }
 
 #: kind 级能力档（executor.tool 留空时的判定口径）：acp 取目录 acp 档、
@@ -56,6 +85,19 @@ _CONSERVATIVE_CAPABILITIES = {
 _KIND_PROFILES = {
     "acp": _ACP_CAPABILITIES,
     "plugin": _PLUGIN_CAPABILITIES,
+}
+
+#: P1 三家预设（gemini-cli / claude-code / codex）能力档：家档基础上补 C2
+#: 新维度的诚实取值。ACP v1 通用方法面只有 session/new + session/prompt，
+#: 会话内换模型 / 会话回滚 / 运行中插话（steer）/ 会话 fork 均无确证口径
+#: （协议能力位未见、本仓未实测），一律保守声明 False——取得验证证据前
+#: 不得改真。三家当前同源同值；将来某家取得独立证据再按家拆分。
+_P1_ACP_CAPABILITIES = {
+    **_ACP_CAPABILITIES,
+    "model_switch_in_session": False,
+    "conversation_rollback": False,
+    "steer": False,
+    "fork": False,
 }
 
 #: 内置预设（默认 command 为官方口径，允许名册覆盖）。
@@ -104,7 +146,7 @@ CATALOG: Dict[str, Dict[str, Any]] = {
         "transport": "stdio",
         "command": ["gemini", "--acp"],
         "origin": "native",
-        "capabilities": dict(_ACP_CAPABILITIES),
+        "capabilities": dict(_P1_ACP_CAPABILITIES),
         "install_hint": "https://github.com/google-gemini/gemini-cli",
     },
     "claude-code": {
@@ -113,7 +155,7 @@ CATALOG: Dict[str, Dict[str, Any]] = {
         "command": ["npx", "@agentclientprotocol/claude-agent-acp"],
         "origin": "adapter",
         "requires_node": True,
-        "capabilities": dict(_ACP_CAPABILITIES),
+        "capabilities": dict(_P1_ACP_CAPABILITIES),
         "install_hint": "npm i -g @agentclientprotocol/claude-agent-acp",
     },
     "codex": {
@@ -122,7 +164,7 @@ CATALOG: Dict[str, Dict[str, Any]] = {
         "command": ["npx", "@agentclientprotocol/codex-acp"],
         "origin": "adapter",
         "requires_node": True,
-        "capabilities": dict(_ACP_CAPABILITIES),
+        "capabilities": dict(_P1_ACP_CAPABILITIES),
         "install_hint": "npm i -g @agentclientprotocol/codex-acp",
     },
     # 已裁定暂不接入（2026-11-19）：结论留档，不进生效预设；能力照常声明留档。
@@ -150,15 +192,21 @@ def _capabilitiesExport(caps: Dict[str, Any]) -> Dict[str, Any]:
     """能力档出口形态：元组转 list（JSON 可序列化），并拷贝防外部改写目录。
 
     管理面/前端直接消费本形态；目录内声明保持元组（不可变、单源）。
+    基础五键恒透出（既有契约）；C2 起的布尔扩展维度仅在声明为真时透出
+    （False/缺失不透出，二者同义=不支持），保守出口形态保持不变。
     """
     source = caps or _CONSERVATIVE_CAPABILITIES
-    return {
+    exported: Dict[str, Any] = {
         "transports": list(source.get("transports") or ()),
         "permission_modes": list(source.get("permission_modes") or ()),
         "streaming": bool(source.get("streaming")),
         "resume": bool(source.get("resume")),
         "session_reuse": bool(source.get("session_reuse")),
     }
+    for dim in BOOLEAN_CAPABILITY_DIMS:
+        if dim not in exported and bool(source.get(dim)):
+            exported[dim] = True
+    return exported
 
 
 def capabilitiesFor(tool: str) -> Dict[str, Any]:
@@ -182,6 +230,8 @@ def refuseExecutorSpec(spec: Dict[str, Any]) -> List[str]:
     - tool 非空时必须已知、未禁用、且目录 kind 与 spec["kind"] 一致；
     - transport ∈ 该能力档 transports；permission_mode ∈ 该能力档 permission_modes；
     - remote 仅当 transport == "ssh"；
+    - C2：spec 显式索取（键存在且为真）的布尔能力维度（BOOLEAN_CAPABILITY_DIMS
+      单源）必须被该能力档声明，未声明按不支持拒绝（fail-closed）；
     - tool 为空时按 kind 取能力档（acp→acp 档、plugin→zcode 档）判定。
 
     多项违规全部并列返回（不短路），供配置期 422 与派活期拒绝共用。
@@ -221,6 +271,11 @@ def refuseExecutorSpec(spec: Dict[str, Any]) -> List[str]:
         reasons.append(f"permission_mode 非法: {permission_mode}（支持 {' | '.join(modes)}）")
     if remote is not None and transport != "ssh":
         reasons.append("remote 仅在 transport=ssh 时允许")
+    # C2：布尔能力维度逐维校验（单源 BOOLEAN_CAPABILITY_DIMS）——只校验
+    # 显式索取为真的键；未索取/索取 False 不加约束（与既有行为一致）。
+    for dim in BOOLEAN_CAPABILITY_DIMS:
+        if bool(spec.get(dim)) and not bool(caps.get(dim)):
+            reasons.append(f"{dim} 不被支持: 目标能力档未声明 {dim}=true")
     return reasons
 
 
@@ -265,6 +320,11 @@ def _handoffCapable(caps: Dict[str, Any]) -> bool:
     return bool((caps or {}).get("handoff_inject", False))
 
 
+def _modelSwitchInSessionCapable(caps: Dict[str, Any]) -> bool:
+    """会话内换模型能力（C2 新增维度）：键缺失按 False 保守处理（fail-closed）。"""
+    return bool((caps or {}).get("model_switch_in_session", False))
+
+
 def decideProviderTransition(current_caps: Dict[str, Any], target_caps: Dict[str, Any], *,
                              same_executor: bool, target_installed: bool = True,
                              model_changed: bool = False) -> str:
@@ -275,12 +335,16 @@ def decideProviderTransition(current_caps: Dict[str, Any], target_caps: Dict[str
     2. not same_executor → 跨 executor：双方 capabilities 的 handoff 能力均可用
        （_handoffCapable：capabilities.get("handoff_inject", False) 为真——保守缺省 False）
        → "create_with_handoff"，否则 "reject"
-    3. model_changed and session_reuse(target) → "switch_model_in_session"
+    3. model_changed and session_reuse(target) → 须目标显式声明
+       model_switch_in_session（_modelSwitchInSessionCapable，缺省 False）才
+       → "switch_model_in_session"；未声明按保守 → "reject"（不静默复用
+       旧模型会话）
     4. session_reuse(target) → "reuse"
     5. resume(target) → "restart_and_resume"
     6. 兜底 → "reject"（同 executor 但既不能复用也不能续跑，且无 handoff 能力）
 
-    capabilities dict 键缺失按保守值处理（session_reuse/resume/handoff_inject 缺省 False）。
+    capabilities dict 键缺失按保守值处理（session_reuse/resume/handoff_inject/
+    model_switch_in_session 缺省 False）。
     返回值必须属于 TRANSITION_RESULTS。
     """
     if not target_installed:
@@ -292,7 +356,9 @@ def decideProviderTransition(current_caps: Dict[str, Any], target_caps: Dict[str
     target = target_caps or {}
     session_reuse = bool(target.get("session_reuse", False))
     if model_changed and session_reuse:
-        return "switch_model_in_session"
+        if _modelSwitchInSessionCapable(target):
+            return "switch_model_in_session"
+        return "reject"
     if session_reuse:
         return "reuse"
     if bool(target.get("resume", False)):
@@ -302,7 +368,8 @@ def decideProviderTransition(current_caps: Dict[str, Any], target_caps: Dict[str
 
 # ── C1：provider 目录健康探测与握手档案 ─────────────────────────────────────
 
-#: 健康探测子进程超时（秒）：只读 ``--version`` 探测，超时即杀，不拖住调用方。
+#: 深探测子进程超时（秒）：只读 ``--version`` 探测，超时即杀，不拖住调用方。
+#: 仅 deep=True（管理面 /test 握手专用）路径使用；浅探测不产生子进程。
 PROBE_TIMEOUT_S = 10.0
 
 
@@ -331,18 +398,21 @@ def _defaultProbeRun(cmd_list: List[str], timeout_s: float) -> tuple:
 
 
 def probeToolHealth(tool: str, *, timeout_s: float = PROBE_TIMEOUT_S,
-                    which_fn=None, run_fn=None) -> Dict[str, Any]:
-    """目录工具健康探测（C1）：installed + version，无副作用。
+                    which_fn=None, run_fn=None, deep: bool = False) -> Dict[str, Any]:
+    """目录工具健康探测（C1，C4 分级）：installed (+ version)，无副作用。
 
+    - **浅探测（默认 ``deep=False``）**：只做 ``shutil.which`` 级存在性检查，
+      绝不运行子进程——状态轮询 / 目录列表等高频路径零副作用；返回
+      ``installed`` 与 ``version=None``（版本未知，非错误）。
+    - **深探测（``deep=True``，管理面 /test 握手专用）**：which 命中后再运行
+      ``command[0] + ["--version"]`` 解析版本。探测只读目录既有 command 声明，
+      绝不发送目录 command 的完整参数（不触发登录/会话/MCP 启动）。
     - which_fn/run_fn 供测试注入（缺省 ``shutil.which`` / ``_defaultProbeRun``）；
       run_fn 约定：``run_fn(cmd_list, timeout_s) -> (returncode, stdout, stderr)``。
-    - 探测只读目录既有 command 声明：which 命中 ``command[0]``，再运行
-      ``command[0] + ["--version"]``；绝不发送目录 command 的完整参数
-      （不触发登录/会话/MCP 启动）。
     - 未知/禁用工具 → ``{"tool", "installed": False, "install_hint",
       "version": None, "error": "unknown_tool"|"disabled"}``；
     - 已知但未安装 → 同形态且 ``error=None``（install_hint 取目录声明）；
-    - 已安装 → ``{"installed": True, "version": stdout 首行截 200 字符,
+    - 已安装（深探测）→ ``{"installed": True, "version": stdout 首行截 200 字符,
       "error": None}``；运行失败/超时 → ``{"installed": True, "version": None,
       "error": "<原因>"}``（installed 与 version 独立：装了但 version 探测
       失败仍是 installed=True）。
@@ -357,13 +427,17 @@ def probeToolHealth(tool: str, *, timeout_s: float = PROBE_TIMEOUT_S,
                 "install_hint": str(entry.get("install_hint") or ""),
                 "version": None, "error": "disabled"}
     which_fn = which_fn or shutil.which
-    run_fn = run_fn or _defaultProbeRun
     command = list(entry.get("command") or [])
     head = command[0] if command else ""
     install_hint = str(entry.get("install_hint") or "")
     if not head or not which_fn(head):
         return {"tool": tool, "installed": False, "install_hint": install_hint,
                 "version": None, "error": None}
+    if not deep:
+        # 浅探测（默认）：which 命中即 installed，不运行任何子进程。
+        return {"tool": tool, "installed": True, "install_hint": install_hint,
+                "version": None, "error": None}
+    run_fn = run_fn or _defaultProbeRun
     try:
         returncode, stdout, stderr = run_fn([head, "--version"], timeout_s)
     except subprocess.TimeoutExpired:

@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from neurova.api.subscription_resume import ResumeDecision
+from neurova.api.subscription_resume import resolveResume as _resolveResumeDecision
 from neurova.core.db_migration import migrate as applyMigrations, register_migration
 from neurova.core.logger import get_logger
 
@@ -213,6 +215,38 @@ class MobileWsLedger:
                 (pairing_id,),
             ).fetchone()
         return int(row["max_seq"] or 0) if row is not None else 0
+
+    def oldestSeq(self, pairing_id: str) -> int:
+        """该设备仍留存的最早 seq（保留窗口下界；空账本 0）。
+
+        保留窗口老化按设备删前缀：窗口内更早的帧已不可回放。续传决策据此判
+        "游标过旧"。注意全局 seq 跨设备交错，本下界是**设备级**的。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT MIN(seq) AS min_seq FROM mobile_ws_events WHERE pairing_id = ?",
+                (pairing_id,),
+            ).fetchone()
+        minSeq = row["min_seq"] if row is not None else None
+        return int(minSeq) if minSeq is not None else 0
+
+    def resolveResume(
+        self, pairing_id: str, last_seq: Optional[int], *, budget=None
+    ) -> ResumeDecision:
+        """断线重连续传决策（D3 单源语义在本账本的落点，见
+        ``neurova/api/subscription_resume.py``）。
+
+        ``min_available_seq`` 取本设备留存窗口下界 ``oldestSeq()``：游标早于
+        "下界-1" 即 ``(cursor, head]`` 区间内已有帧被老化删除，增量必不完整 →
+        snapshot（与全局事件库 ``replayThrough`` 的 pruned_through 降级语义同构）。
+        ``budget`` 为可选的 ``ReplayByteBudget``（预算耗尽 → snapshot）。
+        """
+        return _resolveResumeDecision(
+            last_seq,
+            self.lastSeq(pairing_id),
+            min_available_seq=self.oldestSeq(pairing_id),
+            budget=budget,
+        )
 
     def replaySince(self, pairing_id: str, last_seq: int, limit: int = _REPLAY_LIMIT) -> List[Dict[str, Any]]:
         """按游标补发：返回该设备 ``seq > last_seq`` 的账本帧（升序，带 seq）。"""

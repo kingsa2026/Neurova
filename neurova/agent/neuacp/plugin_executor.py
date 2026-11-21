@@ -17,13 +17,13 @@ from typing import Any, Callable, List, Optional
 from neurova.agent.neuacp.child_env import buildChildEnvironment
 from neurova.agent.neuacp.acp_client import NeuacpError
 from neurova.agent.neuacp.executor import NeuacpExecResult, NeuacpSessionContext
+from neurova.agent.neuacp.process_governance import TIMEOUT_MATRIX
 from neurova.agent.neuacp.redaction import redactFrame
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
 _DEFAULT_FRAME_LIMIT = 1_000_000
-_TERMINATE_WAIT_S = 5.0
 
 
 class NeuacpPluginExecutor:
@@ -190,7 +190,7 @@ class NeuacpPluginExecutor:
             if proc.poll() is None:
                 proc.terminate()
                 try:
-                    proc.wait(timeout=_TERMINATE_WAIT_S)
+                    proc.wait(timeout=TIMEOUT_MATRIX["terminate_grace"])
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     try:

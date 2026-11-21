@@ -77,6 +77,10 @@ python start.py --check
 - 前端实跑门两道：`npm run test`（vitest）与 `npx vue-tsc --noEmit`（CI 同款检查）。
   `npm run lint` **目前跑不了**（仓内无 eslint 配置、eslint 不在依赖清单），故不列为验收项；
   恢复这道门属另批（补 flat config + 依赖并接入 CI），详见 `AGENTS.md` §4 与台账 §6-112。
+- **模型可见文本先 case 后修**：模型可见文本（工具描述/任务书/验收 rubric/prompt 模板）
+  改动必须先 case 后修：先提交对该文本会失败、对改后文本通过的 eval case（红→绿自检），
+  case 标注来源（Issue/事故/评审）与成本口径；评测默认手动跑并标注成本，
+  CI 只跑判据单测，不接付费模型跑（机制见 `neurova/benchmark/suite_eval.py`）。
 
 ## 代码规约
 

@@ -186,6 +186,11 @@ Issue #68 明确要求写进"项目配置"的通用准则。与修复教义同�
   `lint` 脚本指向 eslint，而仓内既无 `eslint.config.*`/`.eslintrc*`、eslint 也不在依赖清单
   ⇒ **这道门今天跑不起来**，故不作为验收项；要恢复它须另批补 flat config + 依赖并接入 CI
   （台账 §6-112 形态三）。规则以"实际存在的命令"为准，不以"规则里写着"当作已存在。
+- **模型可见文本先 case 后修**：模型可见文本（工具描述/任务书/验收 rubric/prompt 模板）
+  改动必须先 case 后修：先提交对该文本会失败、对改后文本通过的 eval case（红→绿自检，
+  机制见 `neurova/benchmark/suite_eval.py` 的 `EvalCase`/`validateCaseFirst`/`assertCaseRedGreen`），
+  case 标注来源（Issue/事故/评审）与成本口径；评测默认手动跑并标注成本，
+  CI 只跑判据单测，不接付费模型跑。
 
 ## 5. 提交纪律
 

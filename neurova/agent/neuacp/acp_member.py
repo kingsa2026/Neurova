@@ -20,6 +20,7 @@ import logging
 from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
+from neurova.agent.neuacp.credential_gate import assertNoRotation
 from neurova.agent.neuacp.executor import NeuacpSessionContext
 from neurova.agent.neuacp.redaction import redactFrame
 
@@ -283,7 +284,23 @@ class NeuacpMemberAdapter:
 
     # ── swarm 成员鸭子面 ─────────────────────────────────────────────────
 
+    def _gateAgentId(self) -> str:
+        """凭据闸门键：优先 run.agent_id（名册对位键），未绑定 run 退回 config.name。
+
+        凭据轮换按 agent 记账（credential_gate 单源），此处键必须与轮换发起方
+        使用同一 agent 标识。cancel/close 不设闸——释放资源不属新会话启动。
+        """
+        runAgentId = str(getattr(self._run, "agent_id", "") or "").strip()
+        if runAgentId:
+            return runAgentId
+        return str(getattr(self.config, "name", "") or "").strip()
+
     async def chat(self, user_input: str, *, stream: bool = True, session_id: Optional[str] = None, metadata: Optional[dict] = None, **_ignored) -> dict:
+        # C4 凭据闸门：新会话启动前检查该 agent 是否在凭据轮换中。轮换期间
+        # 诚实拒绝（CredentialRotationInProgress 原样上抛，由派活链按成员失败
+        # 收口，异常自带「稍后重试」指引）；放在 executor.start 之前——轮换中
+        # 连外部进程/会话都不再拉起，杜绝以旧凭据建半生命周期会话。
+        assertNoRotation(self._gateAgentId())
         # swarm._run_member 的签名约束（swarm.py:2256-2259）：不接受 temperature/max_tokens。
         emitter = (metadata or {}).get("event_emitter")
         if session_id:

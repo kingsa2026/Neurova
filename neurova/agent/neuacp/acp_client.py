@@ -11,17 +11,25 @@ import queue
 import shutil
 import subprocess
 import threading
+import time
 from collections import deque
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.agent.neuacp.child_env import buildChildEnvironment
+from neurova.agent.neuacp.process_governance import (
+    TIMEOUT_MATRIX,
+    RetryBudget,
+    classifyFailure,
+    terminateProcessGroup,
+)
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
 _DEFAULT_FRAME_LIMIT = 1_000_000
-_DEFAULT_REQUEST_TIMEOUT = 30.0
-_TERMINATE_WAIT_S = 5.0
+# 超时单源（C3）：握手/请求/取消/退出宽限统一取自 TIMEOUT_MATRIX，行为不变
+_DEFAULT_REQUEST_TIMEOUT = TIMEOUT_MATRIX["request"]
+_TERMINATE_WAIT_S = TIMEOUT_MATRIX["terminate_grace"]
 
 
 class NeuacpError(Exception):
@@ -56,6 +64,8 @@ class NeuacpClient:
         frame_limit: int = _DEFAULT_FRAME_LIMIT,
         transport: str = "stdio",
         remote: Optional[dict] = None,
+        retry_max_attempts: int = 1,
+        retry_total_budget_s: Optional[float] = None,
     ) -> None:
         self._command = [str(part) for part in command]
         self._cwd = cwd
@@ -64,6 +74,12 @@ class NeuacpClient:
         self._on_crash = on_crash
         self._request_timeout = request_timeout
         self._frame_limit = frame_limit
+        # C3 重试总预算：默认 max_attempts=1（首败即终，行为与无重试一致）；
+        # 总预算默认取超时矩阵 request 值——单次超时即耗尽预算，不会盲目重试
+        self._retry_max_attempts = max(1, int(retry_max_attempts))
+        self._retry_total_budget_s = (
+            TIMEOUT_MATRIX["request"] if retry_total_budget_s is None else float(retry_total_budget_s)
+        )
         # 传输形态（§4.8）：stdio 本机直拉；ssh 经 SSH 隧道在远端拉起同一命令。
         self._transport = str(transport or "stdio")
         self._remote = remote if isinstance(remote, dict) else None
@@ -144,6 +160,10 @@ class NeuacpClient:
                 stderr=subprocess.PIPE,
                 env=env,
                 cwd=self._cwd,
+                # C3 进程组治理前置：子进程自立进程组/会话（Windows 侧为
+                # CREATE_NEW_PROCESS_GROUP），POSIX killpg 才不会误伤本进程组；
+                # Windows taskkill /T 按父子树杀，不受此标志影响
+                start_new_session=True,
             )
         except OSError as exc:
             self._process = None
@@ -183,15 +203,9 @@ class NeuacpClient:
                 except Exception:
                     pass
             if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=wait_s)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    try:
-                        proc.wait(timeout=2.0)
-                    except subprocess.TimeoutExpired:
-                        pass
+                # C3：进程组/树级回收（先宽限后强杀，孙进程一并回收；
+                # 任何路径失败兜底 proc.kill()，进程必须死）
+                terminateProcessGroup(proc, wait_s)
         finally:
             self._failWaiters(NeuacpError("neuacp client terminated"))
         # 退出观测点（§3.2）：EOF/terminate/失败收口都经这里，落 observed/exited。
@@ -210,6 +224,25 @@ class NeuacpClient:
     # ---------- 请求/通知 ----------
 
     def request(self, method: str, params: Optional[dict] = None, timeout: Optional[float] = None) -> dict:
+        """发送请求并等待应答；超时重试经 RetryBudget 总预算封顶。
+
+        默认 max_attempts=1：首败即终（行为与无重试一致）；开启重试后
+        次数与总耗时任一耗尽即 fail，不只数次数（C3）。
+        """
+        budget = RetryBudget(self._retry_max_attempts, self._retry_total_budget_s)
+        while True:
+            if not budget.canAttempt():
+                raise NeuacpTimeoutError(
+                    f"ACP request timeout: {method}（{budget.exhaustedReason()}）"
+                )
+            started = time.monotonic()
+            try:
+                return self._requestOnce(method, params, timeout)
+            except NeuacpTimeoutError:
+                # 仅超时重试；失败记账（成功不记账），预算/次数任一耗尽即终
+                budget.recordFailure(time.monotonic() - started)
+
+    def _requestOnce(self, method: str, params: Optional[dict], timeout: Optional[float]) -> dict:
         proc = self._process
         if proc is None or proc.poll() is not None:
             raise NeuacpError("neuacp client not running")
@@ -368,13 +401,26 @@ class NeuacpClient:
             if self._crash_reported or self._closed:
                 return
             self._crash_reported = True
-        self._failWaiters(NeuacpProtocolError(f"external agent fail-closed: {reason}"))
+        # C3 失败落账诚实改写：结合 stderr 尾识别 OOM 等根因并如实标注
+        honest_reason = self._honestFailureReason(reason)
+        self._failWaiters(NeuacpProtocolError(f"external agent fail-closed: {honest_reason}"))
         if self._on_crash is not None:
             try:
-                self._on_crash(reason)
+                self._on_crash(honest_reason)
             except Exception:
                 pass
         self.terminate()
+
+    def _honestFailureReason(self, reason: str) -> str:
+        """失败落账前的诚实改写：结合 stderr 尾分类根因（不掩盖原始证据）。
+
+        OOM 类改写为「内存资源耗尽」明确标注；unknown 类保持原文不动。
+        """
+        stderr_text = "\n".join(self._stderr_tail)
+        verdict = classifyFailure(f"{reason}\n{stderr_text}")
+        if verdict["kind"] == "unknown":
+            return reason
+        return verdict["honest_reason"]
 
     def _failWaiters(self, error: Exception) -> None:
         with self._lock:

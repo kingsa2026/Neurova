@@ -4,7 +4,9 @@
 五结果词表：reuse | switch_model_in_session | restart_and_resume | create_with_handoff | reject。
 判定输入只来自 catalog 能力声明（_ACP_CAPABILITIES / _PLUGIN_CAPABILITIES /
 _CONSERVATIVE_CAPABILITIES 同口径字段；handoff_inject 为 C5 新增维度，缺省 False 保守，
-本卡不给任何 preset 加 handoff_inject=True）。fail-closed：能力缺失/未知一律保守分支。
+本卡不给任何 preset 加 handoff_inject=True；model_switch_in_session 为 C2 新增维度，
+switch_model_in_session 结果须目标显式声明，缺省 False 保守 reject）。fail-closed：
+能力缺失/未知一律保守分支。
 """
 import pytest
 
@@ -17,6 +19,9 @@ from neurova.agent.neuacp.catalog import (
     capabilitiesFor,
     decideProviderTransition,
 )
+
+#: C2：显式声明会话内换模型能力的 acp 档（用于验证 switch 分支本身）。
+_ACP_WITH_MODEL_SWITCH = dict(_ACP_CAPABILITIES, model_switch_in_session=True)
 
 
 # ── 词表 ──────────────────────────────────────────────────────────────────
@@ -81,8 +86,31 @@ def test_crossExecutorOneSidedHandoffRejects():
 
 
 def test_sameExecutorModelChangedSwitchesModelInSession():
+    # C2：目标显式声明 model_switch_in_session 才允许会话内换模型
     assert (
-        decideProviderTransition(_ACP_CAPABILITIES, _ACP_CAPABILITIES, same_executor=True, model_changed=True)
+        decideProviderTransition(_ACP_WITH_MODEL_SWITCH, _ACP_WITH_MODEL_SWITCH,
+                                 same_executor=True, model_changed=True)
+        == "switch_model_in_session"
+    )
+
+
+def test_modelSwitchWithoutDeclarationConservativelyRejects():
+    # C2：session_reuse=True 但未声明 model_switch_in_session（键缺失按 False
+    # 保守）→ 换模型诉求 reject，不静默复用旧模型会话
+    reuseOnly = {"session_reuse": True}
+    assert (
+        decideProviderTransition(reuseOnly, reuseOnly, same_executor=True, model_changed=True)
+        == "reject"
+    )
+    assert (
+        decideProviderTransition(_ACP_CAPABILITIES, _ACP_CAPABILITIES,
+                                 same_executor=True, model_changed=True)
+        == "reject"
+    )
+    # 声明在目标侧即可（同 executor 决策只读 target 能力）
+    assert (
+        decideProviderTransition(None, dict(reuseOnly, model_switch_in_session=True),
+                                 same_executor=True, model_changed=True)
         == "switch_model_in_session"
     )
 
@@ -152,7 +180,7 @@ def test_resultAlwaysInTransitionResults():
 @pytest.mark.parametrize(
     "caps,expectedSame,expectedModelChanged",
     [
-        (_ACP_CAPABILITIES, "reuse", "switch_model_in_session"),
+        (_ACP_WITH_MODEL_SWITCH, "reuse", "switch_model_in_session"),
         (_PLUGIN_CAPABILITIES, "restart_and_resume", "restart_and_resume"),
         (_CONSERVATIVE_CAPABILITIES, "reject", "reject"),
     ],

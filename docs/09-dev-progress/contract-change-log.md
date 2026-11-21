@@ -17,8 +17,14 @@
 | 2026-11-21 | 事件账本 record | 新增事件类型 `auto_settled` / `context_transfer_failed` / `resume_decision`（批二 A5/B3/C5 留痕；`context_transfer` 见上行） | 向后兼容（新增枚举值） | 消费方对未知 type 保持跳过语义 |
 | 2026-11-21 | 权限模式 | 新增组织天花板环境变量 `NEUROVA_PERMISSION_CEILING`（值=PermissionMode value；未设不封顶） | 向后兼容（未设时行为不变；设置后只收紧不放宽） | 部署方按需注入；AUTO 值按既定语义落 BUILD |
 | 2026-11-21 | swarm 内部 | `.gitignore` 临时脚本规则锚定仓库根（`run_*.py`→`/run_*.py` 等 8 条） | 仓库行为修正（原规则会误吞子目录正式模块） | 无消费方影响 |
+| 2026-11-21 | run 投影/事件 | `SubAgentRun.to_dict()`、terminal 事件 payload、`_uplinkEnvelope` 信封新增 `terminal_quality`（strong/weak/none；A1 终态质量分级） | 向后兼容（新增可选键） | 消费方按需读取；验收/评审门据 `requiresReviewConfirmation` 决定复核 |
+| 2026-11-21 | 审批审计 | 命中记忆式批准的裁决记录新增 `decision_source="memory_grant"` 与 `grant_id`（D1）；审计 details 落 `grant_id` | 向后兼容（新增可选键；未命中 grant 行为不变） | 消费方按需读取；团队档 grant 持久化数据根 `team_approval_grants.json`（进程内状态，非跨进程 wire） |
+| 2026-11-21 | SSE 推送 | `ssePushStream` 新增可选 `byte_budget`/`event_cap`：超单事件上限发诚实占位帧；累计超预算发 `event: snapshot_downgrade` 通告（含已外发最大游标）后转快照（E3） | 向后兼容（默认不传参数行为逐字不变） | 客户端收到 snapshot_downgrade 应丢弃游标、按退避重连取首屏快照 |
+| 2026-11-21 | 移动 WS sync_resume | 快照必要（cursor 过旧/非法/预算尽）时下发 `sync_snapshot_required {reason, note, head_seq}`（D3，决策单源 `subscription_resume.resolveResumeMode`；三端重连退避按 `reconnectBackoff` 语义实现） | 行为澄清：此前游标过旧无明确语义 | 客户端收到后丢弃游标、退避重连、以首屏快照恢复；绝不部分重放 |
+| 2026-11-21 | 评测运行记录 | suite_eval `/run` 记录新增可选 `cost_note`（E1，手动跑成本标注；不传不含该键） | 向后兼容（新增可选键） | 消费方按需读取 |
+| 2026-11-21 | neuacp 失败文案 | 外部代理失败原因经 classifyFailure 诚实改写：OOM 类标注「内存资源耗尽」并保留原始证据（C3） | 文案变化（结构不变，error 仍为字符串） | 消费方如按旧文案匹配需改为含「资源耗尽」关键词判定 |
 
 ## 待登记（ upcoming）
 
-- A2 事件库（swarm_event_store）接入订阅面后的 cursor/replay/snapshot 协议字段。
-- D2 组织权限天花板（`NEUROVA_PERMISSION_CEILING`）接入派活链后的 mode 收窄语义。
+- C2 能力维度扩展（model_switch_in_session/conversation_rollback/steer/fork）在能力出口真值透出后的消费面（决策矩阵已按保守缺省工作）。
+- B4 队列管理面（runQueueSnapshot/setRunQueuePriority/cancelQueuedRun/editRunTask）接入工具/API 面时的 schema 增量。

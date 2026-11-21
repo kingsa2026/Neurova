@@ -353,6 +353,41 @@ def _eventStore():
     return _EVENT_STORE
 
 
+_DELIVERY_LEDGER = None
+_DELIVERY_LEDGER_LOCK = threading.RLock()
+
+
+def _deliveryLedger():
+    """子代理完成投递账本（B1，惰性单例）：投递单 pending→claimed→
+    acknowledged|disposed 的状态机与父闲补投，接在 pushParentMail 唯一写点。"""
+    global _DELIVERY_LEDGER
+    if _DELIVERY_LEDGER is not None:
+        return _DELIVERY_LEDGER
+    with _DELIVERY_LEDGER_LOCK:
+        if _DELIVERY_LEDGER is None:
+            from neurova.agent.delegated_delivery import DeliveryLedger
+
+            _DELIVERY_LEDGER = DeliveryLedger()
+    return _DELIVERY_LEDGER
+
+
+_RUN_QUEUE = None
+_RUN_QUEUE_LOCK = threading.RLock()
+
+
+def _runQueue():
+    """排队 run 管理面（B4，惰性单例）：队列位次/优先级/取消/任务书修订。"""
+    global _RUN_QUEUE
+    if _RUN_QUEUE is not None:
+        return _RUN_QUEUE
+    with _RUN_QUEUE_LOCK:
+        if _RUN_QUEUE is None:
+            from neurova.agent.run_queue import RunQueue
+
+            _RUN_QUEUE = RunQueue()
+    return _RUN_QUEUE
+
+
 class SwarmManager:
     """蜂群管理器：派生、执行、事件广播、结果回流
 
@@ -747,6 +782,8 @@ class SwarmManager:
             "subagent_type": run.subagent_type, "model": run.model,
             "parent_trace_id": run.parent_trace_id,
         })
+        # B4：与 spawned 事件同点入排队管理面（位次/优先级/修订/取消的读改单源）
+        self._registerRunQueue(run)
 
         if fallback:
             logger.info("Swarm: 请求的 agent_id=%s 不存在，回退到 %s", agent_id, resolved_id)
@@ -1652,6 +1689,8 @@ class SwarmManager:
             "subagent_type": run.subagent_type, "model": run.model,
             "parent_trace_id": run.parent_trace_id,
         })
+        # B4：blocked 放行的 run 与主 spawn 同点入排队管理面
+        self._registerRunQueue(run)
         execTask = asyncio.create_task(
             self._execute(run, agent, info["initiator_agent"], info["stream"])
         )
@@ -2698,6 +2737,8 @@ class SwarmManager:
     ) -> None:
         """执行子 Agent 任务：广播 STARTED → chat（可流式）→ 广播 COMPLETED → 池归档"""
         transitionRun(run, SUBAGENT_RUNNING, cause="member_started")
+        # B4：开跑即出队（队列只持排队中的 run；软出队，不在队不抛）
+        _runQueue().dequeue(run.subagent_id)
         # P3-2（评测报告 G-12）：member 轨迹 trace——spawn→member→回流共一条可查询
         # 的 span 树；fail-open（轨迹故障/开关关闭不阻断子任务，与台账同口径）。
         userId = self._subagentAccountingUserId(initiator_agent)
@@ -2940,9 +2981,18 @@ class SwarmManager:
             # error 摘要随行（cause 为空时它是唯一起因线索；截断防正文进账本）
             self._logRunEvent(run, "terminal", {
                 "status": run.status, "cause": run.cause,
+                "terminal_quality": getattr(run, "terminal_quality", ""),
                 "error": (run.error or "")[:EVENT_ERROR_SUMMARY_CHARS],
                 "duration_ms": round(run.duration * 1000, 3),
             })
+            # B1：本 run 作为父 run 终结时，对其名下未销账的子结果投递单补投一次
+            #（子结果到时父已收工的静默丢失口子在此收口）。
+            try:
+                self._deliveryCatchUp(run.subagent_id)
+            except Exception as e:  # noqa: BLE001 - 补投失败不阻断终态收尾
+                logger.debug("Swarm: 投递补扫失败 (%s): %s", run.subagent_id, e)
+            # B4：终态即出队（队列只持排队中的 run；软出队，不在队不抛）。
+            _runQueue().dequeue(run.subagent_id)
             self._endMemberTrace(recorder, memberSpanId, run)
             reset_subagent_depth(depth_token)
             resetCurrentSubagentId(subagentIdToken)
@@ -3123,6 +3173,8 @@ class SwarmManager:
             "depth": run.depth,
             "status": run.status,
             "cause": run.cause,
+            # A1：终态可信度分级随信封上行——父侧/验收门据此决定是否需要复核
+            "terminal_quality": getattr(run, "terminal_quality", ""),
             "error": run.error,
             "duration": run.duration,
             "model": run.model,
@@ -3167,6 +3219,61 @@ class SwarmManager:
                 return run
         return None
 
+    def _registerRunQueue(self, run: SubAgentRun) -> None:
+        """B4：run 入排队管理面（与 spawned 事件同点登记；fail-open 不阻断派生）。"""
+        try:
+            _runQueue().enqueue(run.subagent_id, run.task)
+        except Exception as e:  # noqa: BLE001 - 队列登记失败不阻断派生主流程
+            logger.debug("Swarm: 队列登记失败 (%s): %s", run.subagent_id, e)
+
+    def runQueueSnapshot(self) -> List[Dict[str, Any]]:
+        """排队 run 有序快照（B4 管理面读数：优先级降序+同级先来先服务，位次从 1 起）。"""
+        return _runQueue().snapshot()
+
+    def setRunQueuePriority(self, subagent_id: str, priority: str) -> int:
+        """调整排队 run 的优先级（B4），返回调整后的新位次；不在队显式 KeyError。"""
+        return _runQueue().setPriority(subagent_id, priority)
+
+    def cancelQueuedRun(self, subagent_id: str) -> Dict[str, Any]:
+        """取消排队 run（B4）：出队留痕 + run 判 failed（cause=subagent_cancelled）。
+
+        仅对仍在队列中的 run 生效（不在队 KeyError）；已开跑/终态的 run 不在
+        队列，走既有 cancelRun 通道。取消是诚实终态：落 status_changed/terminal
+        事件与台账口径一致。
+        """
+        entry = _runQueue().cancelQueued(subagent_id)
+        with self._lock:
+            run = self._runs.get(subagent_id)
+        if run is not None and run.status == SUBAGENT_PENDING:
+            run.cancel_note = "队列管理面取消"
+            transitionRun(run, SUBAGENT_FAILED, cause=SUBAGENT_CAUSE_CANCELLED)
+            run.cause = SUBAGENT_CAUSE_CANCELLED
+            run.error = "subagent_cancelled（队列管理面取消；任务未执行，可直接重派）"
+            run.finished_at = time.time()
+            self._logRunEvent(run, "terminal", {
+                "status": run.status, "cause": run.cause,
+                "terminal_quality": getattr(run, "terminal_quality", ""),
+                "error": run.error, "duration_ms": round(run.duration * 1000, 3),
+            })
+        return entry
+
+    def editRunTask(self, subagent_id: str, new_task: str) -> Dict[str, Any]:
+        """任务书修订（B4）：排队中改写任务书（requeued）；在跑经 steer 队列注入
+        （steered）；两者都不可能时诚实拒绝（rejected，带原因）。"""
+        from neurova.core.steer_queue import get_steer_queue
+
+        with self._lock:
+            run = self._runs.get(subagent_id)
+        memberSession = str(getattr(run, "member_session_id", "") or "") if run is not None else ""
+
+        def _steer(sid: str, text: str) -> bool:
+            return bool(memberSession) and get_steer_queue().push(memberSession, text)
+
+        result = _runQueue().editTask(subagent_id, new_task, steer_fn=_steer)
+        if result.get("mode") == "requeued" and run is not None:
+            run.task = new_task  # 排队任务书改写同步回 run（状态投影一致）
+        return result
+
     def pushParentMail(self, run: SubAgentRun, tag: str, envelope: Dict[str, Any], priority: str = "normal") -> bool:
         """父会话邮箱投递的**唯一写点**（邮箱写点单源钉子：生产面只许 swarm.py 一处写）。
 
@@ -3175,21 +3282,82 @@ class SwarmManager:
         room_collab 的报告经候选板/房间通道，房间会话无 loop 排空邮箱）；
         失败不影响调用方主流程（诚实 debug，不吞成无声）。
         `priority` 透传邮箱优先级队列（S2）：审批/升级类投递默认 high。
+
+        B1 投递账本：嵌套派生（有父 run）的结果投递同步落投递单——入箱即
+        claimed、入箱失败即 dispose 留痕；父 run 已终态时立即触发一次补投
+        （catch-up），防"子结果到时父已收工"的静默丢失。
         """
         if run.origin not in ("chat", "team_dispatch") or not run.session_id:
             return False
+        messageId = f"dlv_{uuid.uuid4().hex[:16]}"
+        ticket = None
+        parentRunId = str(getattr(run, "parent_subagent_id", "") or "")
+        if parentRunId:
+            try:
+                ticket = _deliveryLedger().record(
+                    run.subagent_id, parentRunId, tag, envelope, messageId,
+                    generation=int(run.depth or 0),
+                )
+            except Exception as e:  # noqa: BLE001 - 投递单落账失败不阻断投递主流程
+                logger.debug("Swarm: 投递单落账失败 (%s): %s", run.subagent_id, e)
         try:
             from neurova.agent.mailbox import get_agent_mailbox
 
-            get_agent_mailbox().push(
+            delivered = get_agent_mailbox().push(
                 run.session_id,
                 f"[{tag}] " + json.dumps(envelope, ensure_ascii=False),
                 priority=priority,
+                message_id=messageId,
             )
-            return True
         except Exception as e:  # noqa: BLE001 - 投递失败不影响主流程
             logger.debug("Swarm: 父会话邮箱投递失败 (%s): %s", run.subagent_id, e)
-            return False
+            delivered = False
+        if ticket is not None:
+            if delivered:
+                _deliveryLedger().claim(ticket["ticket_id"])
+            else:
+                try:
+                    _deliveryLedger().dispose(ticket["ticket_id"], "mailbox_push_failed")
+                except Exception as e:  # noqa: BLE001 - 处置留痕失败仅记调试
+                    logger.debug("Swarm: 投递单处置失败 (%s): %s", ticket["ticket_id"], e)
+        if delivered and parentRunId:
+            with self._lock:
+                parentRun = self._runs.get(parentRunId)
+            if parentRun is not None and parentRun.status in SUBAGENT_FINISHED_STATUSES:
+                self._deliveryCatchUp(parentRunId)
+        return delivered
+
+    def _deliveryCatchUp(self, parent_run_id: str) -> List[Dict[str, Any]]:
+        """父 run 终结时对其名下未销账投递单补投一次（B1）。
+
+        补投走同一会话邮箱（高优先级、独立 messageId 防邮箱幂等去重吞件），
+        信封带 ``delivery_catchup`` 标记供消费方识别；无投递通道（父 run 无
+        会话）则显式 dispose 留痕，不静默悬挂。
+        """
+        with self._lock:
+            parentRun = self._runs.get(str(parent_run_id or ""))
+        if parentRun is None or not parentRun.session_id:
+            for stale in _deliveryLedger().pendingForParent(parent_run_id):
+                try:
+                    _deliveryLedger().dispose(stale["ticket_id"], "parent_run_finished_no_channel")
+                except Exception as e:  # noqa: BLE001 - 处置留痕失败仅记调试
+                    logger.debug("Swarm: 补投前处置失败 (%s): %s", stale["ticket_id"], e)
+            return []
+
+        def _deliver(ticket: Dict[str, Any]) -> bool:
+            from neurova.agent.mailbox import get_agent_mailbox
+
+            catchupEnvelope = dict(ticket.get("envelope") or {})
+            catchupEnvelope["delivery_catchup"] = True
+            return get_agent_mailbox().push(
+                parentRun.session_id,
+                f"[{ticket.get('tag') or '子Agent结果'}·补投] "
+                + json.dumps(catchupEnvelope, ensure_ascii=False),
+                priority="high",
+                message_id=f"{ticket.get('message_id')}-cu",
+            )
+
+        return _deliveryLedger().catchUp(parent_run_id, _deliver)
 
     def recordEscalation(
         self, run: SubAgentRun, reason: str, question: str = "", severity: str = "normal",
