@@ -287,6 +287,38 @@ _FIRST_BATCH_TARGETS = (
     ),
 )
 
+# ---------------------------------------------------------------------------
+# 内置登记：首批 L2 代码白名单（计划书 §6 P2-3，2026-11-21 拍板：prompt 编译器
+# + 技能卡目录——两者都有现成测试面且不在启动链路上）。
+# 与 L1 文本对象的分工：L1 登记"改文案"（promptTemplate，走文本进化管线），
+# 这里登记"改代码"（module，走 PrPatchChannel 生效通道）。白名单外 patch 一律
+# 拒（PrPatchChannel.plan 经 assertMutable fail-closed）；扩面 = 改规则，
+# 只走人工 PR + 守卫测试（tests/unit/guards/test_l2WhitelistGuard.py）红绿。
+# ---------------------------------------------------------------------------
+
+_L2_FIRST_BATCH_TARGETS = (
+    EvolutionTarget(
+        targetId="l2.promptCompiler",
+        layer="L2",
+        kind="module",
+        locator="neurova/context/rules_sections.py",
+        scope="global",
+        gateLevel="approval",
+        survivalCritical=False,
+        verdictSuite="suite_eval.chat",
+    ),
+    EvolutionTarget(
+        targetId="l2.skillCardCatalog",
+        layer="L2",
+        kind="module",
+        locator="neurova/skills/skill_service.py",
+        scope="global",
+        gateLevel="approval",
+        survivalCritical=False,
+        verdictSuite="suite_eval.chat",
+    ),
+)
+
 
 class EvolutionTargetRegistry:
     """演化对象注册表：register / get / listByLayer / listByGateLevel /
@@ -302,6 +334,8 @@ class EvolutionTargetRegistry:
         for target in _FORBIDDEN_KERNEL_TARGETS:
             self.register(target)
         for target in _FIRST_BATCH_TARGETS:
+            self.register(target)
+        for target in _L2_FIRST_BATCH_TARGETS:
             self.register(target)
 
     def register(self, target: EvolutionTarget) -> None:
