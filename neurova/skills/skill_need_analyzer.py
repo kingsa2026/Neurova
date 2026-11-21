@@ -252,7 +252,13 @@ class SkillNeedAnalyzer:
         自我模型历史 + promptSection 最近自评行。provider 惰性解引用
         （Agent 装配顺序：memory_manager 可能晚于 skill_manager 就绪）；
         自评失败不阻断技能获取主流程（fail-soft）。
+
+        噪音门控：required_skills 为空的轮次（纯聊天/无需能力的任务）**不评估**
+        ——空 requirements 会产出 coverage=1.0/confidence=0.5 的空自评，把
+        上一次有意义的自评从"最近一条"位置顶掉（promptSection 只显示最近一条）。
         """
+        if not required_skills:
+            return
         try:
             assess = self._self_model_provider() if self._self_model_provider else None
             if assess is None:

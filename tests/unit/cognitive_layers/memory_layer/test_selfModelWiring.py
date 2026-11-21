@@ -163,6 +163,17 @@ class TestTaskAssessmentWiring:
             (req, cap, conf) for req, cap, conf in assessment["capability_matches"]
         ]
 
+    def test_analyzeAndAcquire_noSkillNeed_skipsAssessment(self, tmp_path):
+        """无技能需求的轮次（纯聊天/无需能力的任务）不得产生任务自评——防噪音。
+
+        空required_skills若也评估，会以 coverage=1.0/confidence=0.5 的空自评
+        落历史并顶掉上一次有意义自评（promptSection 只显示最近一条）。
+        """
+        analyzer, _manager, module = self._analyzer(tmp_path, [], lambda: _manager.assessTaskCapabilities)
+        result = analyzer.analyze_and_acquire("你好")
+        assert result["required_skills"] == []
+        assert module.get_stats()["assessments_count"] == 0
+
     def test_analyzeAndAcquire_withoutProvider_skipsAssessment(self, tmp_path):
         analyzer, _manager, module = self._analyzer(tmp_path, ["搜索"], None)
         result = analyzer.analyze_and_acquire("帮我搜索文件")
