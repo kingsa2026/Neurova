@@ -32,6 +32,7 @@
 | 2026-11-21 | 工具目录/管理面 | ACP registry 零代码接入（G1）：catalog 合并暴露「预设+registry」两源（合并顺序 本地直配>预设>registry），条目新增 `source`/`protocol_version` 键；新增 admin 端点 `POST /v1/external-agents/registry/refresh`（默认关，无定时任务；网络失败 stale 降级） | 向后兼容（新增可选键与新增端点；live 实测 catalog 8→52 条） | 消费方按需读取 source/protocol_version |
 | 2026-11-21 | /test 握手 | 能力字段按 ACP 规范名 `agentCapabilities` 透传（真机 CLIs 实测回包即此；旧键 `serverCapabilities` 兼容回退）（G2 陷阱清单第 2 条代码侧清偿） | 真机上从此非空（此前静默拿空）；响应键名不变 | 消费方无感（键名不变、值从空变实） |
 | 2026-11-21 | ACP 协议 | 客户端支持 ACP v2（G6）：握手协商整数版本选 codec（v1 逐字节保持；v2 走 codec_v2——initialize 增 info、prompt 内容块数组、cancel 按 requestId、update 流 24 分支映射到既有内部事件、未知分支跳过）；成员执行体按目录条目声明版本协商 | 向后兼容（v1 线上字节不变；v2 仅对声明 v2 的 agent 启用） | 对 v1 agent 无感；对 v2 agent 从「不可用」变「可用」 |
+| 2026-11-21 | 工具 schema | `continue_subagent` 增可选 `mode`（steer/restart/resume/fork；缺省 resume 行为不变）；新增工具 `rollback_subagent`（subagent_id → member 会话恢复到最近检查点，事务化+pre-restore 留档；无检查点/失败诚实 success=false）（C2 接线：G3 收敛面四方法全部获得编排调用方） | 向后兼容（可选参数与新增工具） | fork=派生新 run（原 run 不动）；rollback=会话级恢复，不改变 run 状态机 |
 
 ## 待登记（ upcoming）
 
