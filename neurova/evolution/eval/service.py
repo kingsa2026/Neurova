@@ -27,6 +27,8 @@ from typing import Any, Dict, NamedTuple, Optional
 
 from neurova.core.data_root import get_data_root
 from neurova.core.logger import get_logger
+from neurova.benchmark.evolution_cases import subjectForProposal
+from neurova.benchmark.suite_eval import validateCaseFirst
 from neurova.evolution.eval.config import EvolutionConfig, text_evolution_enabled
 from neurova.evolution.eval.cost_ledger import costSoftGateVerdict, deploymentCostDelta
 from neurova.evolution.eval.surfaces import surfaceReadout
@@ -1550,6 +1552,25 @@ class SkillEvolutionService:
         return current != baseline
 
     def _apply_to_skill(self, proposal: dict, registry: Any) -> bool:
+        # R2「先 case 后修」门（AGENTS.md §4 的机制化）：改动面涉及的模型
+        # 可见文本 subject 必须已有 EvalCase 覆盖，未覆盖即拒绝应用
+        # （fail-closed），missing 逐个如实点名。subject 概念对齐：提案侧是
+        # skill_id，EvalCase 侧是 subject_id——最小映射单源在
+        # evolution_cases.subjectForProposal（skill_id 命中四类守卫文本
+        # soul/constitution/behavior_rules/rules_sections 才产生 subject；
+        # 普通技能正文不在首批覆盖面，仍由本管线留出集/bench 门把守）。
+        # 本 choke point 同时覆盖 decide 批准与 adoptVariant 变体采纳两条
+        # 文本写路径。判据（CheckFn）全部确定性、无 LLM 依赖。
+        subjectId = subjectForProposal(proposal)
+        if subjectId:
+            missing = validateCaseFirst([subjectId]).get("missing") or []
+            if missing:
+                logger.warning(
+                    "case-first 拦截：提案 %s 改动模型可见文本 subject=%r "
+                    "无已注册 EvalCase 覆盖（missing=%s），拒绝应用",
+                    proposal.get("proposal_id"), subjectId, missing,
+                )
+                return False
         try:
             svc = agentLibrary(self.agent_id)
             info = svc.get_skill_info(proposal["skill_id"])
