@@ -87,6 +87,8 @@ interface WsMessagePayload {
 interface SyncResumeRequest {
   type: string;
   last_seq: number;
+  scope?: string;      // D-5 按需订阅范围：session / thread（global 缺省不带）
+  scope_key?: string;  // 范围归属键：session/thread 时必填（服务端越权防线校验）
 }
 
 /** sync_snapshot_required 通告（服务端判定游标不可续传，要求弃游标按快照重同步） */
@@ -124,6 +126,9 @@ export class WebSocketAdapter {
   private heartbeatIntervalMs: number = HEARTBEAT_INTERVAL;
   private reconnectBaseMs: number = RECONNECT_BASE_MS;
   private reconnectCapMs: number = RECONNECT_CAP_MS;
+  /** D-5 按需订阅范围（页面经 setSubscriptionScope 设置；缺省 global 全收） */
+  private subscriptionScope: string = 'global';
+  private subscriptionScopeKey: string = '';
   /** 最近一次连接的 URL（用于重连） */
   private lastUrl: string = '';
   /** 最近一次连接的 token（用于重连） */
@@ -483,9 +488,35 @@ export class WebSocketAdapter {
       return;
     }
     const req: SyncResumeRequest = { type: 'sync_resume', last_seq: this.lastServerSeq };
+    // D-5 按需订阅：非 global 范围随补拉请求下发（服务端只推范围内帧；
+    // 范围由页面经 setSubscriptionScope 设置，缺省 global 不带参数=全量）
+    if (this.subscriptionScope !== 'global' && this.subscriptionScopeKey !== '') {
+      req.scope = this.subscriptionScope;
+      req.scope_key = this.subscriptionScopeKey;
+    }
     this.send(JSON.stringify(req)).catch((e: Error) => {
       this.logger.warn(TAG, 'sync_resume 补拉发送失败（连接可能再次断开）', e);
     });
+  }
+
+  /**
+   * D-5 按需订阅：设置订阅范围（看一个线程不付全部线程的账）。
+   * scope ∈ session/thread/global；session/thread 须带非空 scopeKey
+   * （与服务端 parseSubscriptionScope 同规，非法输入保持原范围不变）。
+   * 断线重连的 sync_resume 会自动携带该范围。
+   */
+  setSubscriptionScope(scope: string, scopeKey: string): void {
+    const normalized: string = scope.trim().toLowerCase();
+    if (normalized !== 'session' && normalized !== 'thread' && normalized !== 'global') {
+      this.logger.warn(TAG, `非法订阅范围: ${scope}，保持 ${this.subscriptionScope}`);
+      return;
+    }
+    if (normalized !== 'global' && scopeKey.trim() === '') {
+      this.logger.warn(TAG, `${normalized} 范围缺少 scope_key，保持 ${this.subscriptionScope}`);
+      return;
+    }
+    this.subscriptionScope = normalized;
+    this.subscriptionScopeKey = normalized === 'global' ? '' : scopeKey.trim();
   }
 
   /**

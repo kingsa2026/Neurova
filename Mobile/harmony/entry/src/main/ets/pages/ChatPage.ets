@@ -251,6 +251,11 @@ export struct ChatPage {
     // 清键：下次直接进对话页回到新会话
     state.set('chat:active_session_id', '');
     state.set('chat:active_session_title', '');
+    // D-5 按需订阅：已落库会话进页即订阅本会话（服务端只推本会话帧）；
+    // 新会话（本地临时 id）保持 global——落库后由 adoptServerSession 收窄
+    if (this.fromList && this.sessionId.length > 0) {
+      this.ws.setSubscriptionScope('session', this.sessionId);
+    }
     // 4. 建立 WS 连接
     this.connectWs();
     // 4. 订阅聊天事件
@@ -278,6 +283,8 @@ export struct ChatPage {
     this.bus.off('ws:connected', this.connectedHandler);
     // 语音资源收尾（识别引擎/采集器可能仍在运行）
     this.stopVoice();
+    // D-5 按需订阅：离页恢复 global 全收（下次进页按目标会话重新收窄）
+    this.ws.setSubscriptionScope('global', '');
     // 断开 WS（adapter 内部会清理心跳与重连定时器）
     this.ws.disconnect();
     // M5.2.1 清理 chunk 缓冲，避免下次进入页面残留旧数据
@@ -1351,6 +1358,8 @@ export struct ChatPage {
       // 服务端已为该会话铸真记录：视为已落库（可置顶/归档；重连快照重同步也以此为准）
       this.fromList = true;
       StateManager.getInstance().set('chat:active_session_id', id);
+      // D-5 按需订阅：会话落库后把订阅范围收窄到本会话（重连补拉随之带 scope）
+      this.ws.setSubscriptionScope('session', id);
     }
   }
 
