@@ -63,6 +63,13 @@ class EvolutionSettings:
     rsi_backoff_every_turns: int = 20
     # 递归棘轮每轮候选数(粗筛→中筛→细筛,轮数=len)
     rsi_ratchet_candidates: List[int] = field(default_factory=lambda: [50, 10, 3])
+    # R5(拍板 2026-11-21,详案 §6-R5):回滚历史与装配时刻是否落盘。
+    # 默认**开**——晋升判据"距上次回滚天数"的唯一数据源不应默认缺席
+    # (详案 §1.4 实测:持久化默认关 ⇒ rsi_rollback.json history 恒 0 条)。
+    # 落盘路径由 rsi/rollback_manager.resolve_rollback_state_path 三级解析:
+    # env NEUROVA_EVOLUTION_ROLLBACK 显式路径 > 本键开 → data_root 派生默认 >
+    # 本键关 → None(零 IO)。测试隔离由 conftest 统一注入 env,不靠默认值兜底。
+    rsi_rollback_persistence_enabled: bool = True
     # ── 真臂预算（P1-C 线：进化主路径可切真 agent 轨迹）──
     # 一次真臂运行要花多少个**完整 agent 回合**的上限。默认 40 是裁定本身，不是实现细节：
     # 按默认配置（iterations=10、20 条用例、锚定地板开）一次整轮进化要 231 个回合，
@@ -202,7 +209,8 @@ def update_settings(**patch: Any) -> EvolutionSettings:
                 data[k] = v
         # 类型收敛:布尔字段拒绝字符串误传,数值字段坏值回默认
         defaults = _defaults()
-        for k in ("text_evolution", "auto_apply_skill_evolution", "lifecycle_sweep"):
+        for k in ("text_evolution", "auto_apply_skill_evolution", "lifecycle_sweep",
+                  "rsi_rollback_persistence_enabled"):
             data[k] = bool(data[k])
         try:
             data["lifecycle_interval_hours"] = max(1, int(data["lifecycle_interval_hours"]))

@@ -214,15 +214,14 @@ def test_orchestrator_self_attaches_rollback_persistence(rsi_probe_factory, tmp_
     挂载点在 rsi 包内（`RSIOrchestrator.__init__`），不放 `agent_core`：
     后者受尺寸棘轮锁死；也不放 `bootstrap_evolution_persistence`：
     bootstrap 早于 per-agent 构造，覆盖不到注入进来的那个实例。
-    路径仅在 `NEUROVA_EVOLUTION_ROLLBACK` 显式设置时启用 ——
-    与 `NEUROVA_RSI_RECEIPTS` 同款的"未设即零 IO"约定，
-    避免几十个单测各自往仓库 `data/` 里写。
+    R5 起解析走三级："env 显式路径 > 设置键开 → 派生路径 > 关 → None"。
+    本档考 env 那一级（显式注入即按注入路径挂载，既有部署零漂移）；
+    "默认开 → 派生路径"与"显式关 → None"两级由
+    test_rollbackPersistenceSettings.py 钉。
     """
     from neurova.evolution.rsi.rollback_manager import resolve_rollback_state_path
 
     rollback_path = tmp_path / "rsi_rollback.json"
-
-    assert resolve_rollback_state_path() is None, "未设 env 时不得隐式落盘"
 
     monkeypatch.setenv("NEUROVA_EVOLUTION_ROLLBACK", str(rollback_path))
     assert resolve_rollback_state_path() == rollback_path
@@ -308,9 +307,18 @@ def test_days_zero_still_blocks_promotion_from_phase_one():
     assert verdict.state == "failed"
 
 
-def test_two_orchestrators_do_not_share_one_rollback_timeline(rsi_probe_factory, monkeypatch):
+def test_two_orchestrators_do_not_share_one_rollback_timeline(
+    rsi_probe_factory, tmp_path, monkeypatch
+):
     """回滚时间线属于各自的编排器实例，不得被并发写混成一锅。"""
     monkeypatch.delenv("NEUROVA_EVOLUTION_ROLLBACK", raising=False)
+    # R5 默认翻转后"未设 env"不再等于零 IO——本档考的是"纯内存实例不共享"，
+    # 故显式关闭开关回到该形态（开态的挂载与派生路径归
+    # test_rollbackPersistenceSettings.py 钉）。
+    settings_path = tmp_path / "evolution_settings.json"
+    settings_path.write_text(
+        json.dumps({"rsi_rollback_persistence_enabled": False}), encoding="utf-8")
+    monkeypatch.setenv("NEUROVA_EVOLUTION_SETTINGS", str(settings_path))
     first = rsi_probe_factory(rsi_phase=2).orchestrator
     second = rsi_probe_factory(rsi_phase=2).orchestrator
 

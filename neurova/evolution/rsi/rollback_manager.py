@@ -21,16 +21,42 @@ logger = get_logger(__name__)
 
 _PAYLOAD_VERSION = 2
 
-# 回滚时间线落盘路径开关。未显式设置时**不做任何 IO** ——
-# 与 `NEUROVA_RSI_RECEIPTS` 同款约定：几十个单测各自构造 RSIOrchestrator，
-# 隐式写仓库 data/ 会把测试变成状态污染源。生产由 start_server/部署环境设定。
+# 回滚时间线落盘路径开关。解析走 `resolve_rollback_state_path` 的三级口径：
+# env 显式路径（兼容既有部署） > 设置键 `rsi_rollback_persistence_enabled`
+# 开 → data_root 派生默认路径 > 关 → None（零 IO）。
+# 测试对"未设 env"的旧约定（零 IO）升级为"显式关闭开关"或"conftest 注入
+# 临时 env 路径"——仓库根污染判据不变，隔离方式随默认翻转一起升级（R5）。
 ROLLBACK_STATE_ENV = "NEUROVA_EVOLUTION_ROLLBACK"
+
+#: 设置键关闭时返回 None；开启时落到数据根下这份默认文件（与 start_server
+#: 的 env 注入值同形，env 缺席的部署由此获得同一落点）。
+_DEFAULT_ROLLBACK_LANDING = ("evolution", "rsi_rollback.json")
 
 
 def resolve_rollback_state_path() -> Optional[Path]:
-    """回滚历史与装配时刻的落盘路径；未配置环境变量时返回 None。"""
+    """回滚历史与装配时刻的落盘路径（三级解析，决策时刻读设置）。
+
+    1. env `NEUROVA_EVOLUTION_ROLLBACK` 显式路径——既有部署零漂移；
+    2. 设置键 `rsi_rollback_persistence_enabled` 开（默认）→ data_root 派生
+       默认路径（测试环境随 NEUROVA_DATA_DIR 注入自动隔离，不写仓库根）；
+    3. 设置键关 → None：调用方不挂载持久化，create_snapshot/execute_rollback
+       纯内存零 IO。
+
+    设置在**调用时**读而非 import 时冻结——治理面改开关，下一轮装配即生效；
+    这与 governance_settings.resolve_flag 的"活旋钮"口径同一条。
+    """
     env_path = os.environ.get(ROLLBACK_STATE_ENV)
-    return Path(env_path) if env_path else None
+    if env_path:
+        return Path(env_path)
+    # 惰性 import：evolution_settings 属进化包 __init__ 的装载面，模块级引用
+    # 会在包初始化期成环；本函数只在编排器装配/测试断言时被调用。
+    from neurova.evolution.evolution_settings import load_settings
+
+    if not load_settings().rsi_rollback_persistence_enabled:
+        return None
+    from neurova.core.data_root import dataLanding
+
+    return dataLanding(*_DEFAULT_ROLLBACK_LANDING, legacy=())
 
 
 def _aware(value: datetime) -> datetime:

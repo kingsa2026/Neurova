@@ -55,6 +55,8 @@ class SettingsPatch(BaseModel):
     rsi_event_throttle_seconds: Optional[float] = None
     rsi_backoff_every_turns: Optional[int] = None
     rsi_ratchet_candidates: Optional[List[int]] = None
+    # R5：回滚持久化开关（晋升判据"距上次回滚天数"的数据源开关，默认开）。
+    rsi_rollback_persistence_enabled: Optional[bool] = None
     # 真臂预算：一次真臂运行可花的完整 agent 回合上限（闸见 service.checkRealArmBudget）
     real_arm_max_agent_turns: Optional[int] = Field(default=None, ge=1, le=2000)
 

@@ -823,6 +823,11 @@ def _isolate_evolution_state_paths(tmp_path, monkeypatch):
     —— 实测 `test_evolution_state_persistence.py` 单跑一次即改写该生产文件。
     工单 016 给 `AutoSkillImprover` 挂持久化，泄漏面会再多一处，故先在根 conftest
     收口（默认值也注入，测试自己不再需要逐个补 env）。
+
+    R5（2026-11-21）补 `NEUROVA_EVOLUTION_ROLLBACK`：回滚持久化默认翻转
+    为开后，凡构造 RSIOrchestrator 的用例都会挂载落盘。env 优先级最高，
+    在这里逐用例注入 tmp 路径即把"默认开"的写面整体隔离——个别考"无 env
+    时解析为何"的用例自行 `monkeypatch.delenv` 露出设置键那一层。
     """
     state_dir = tmp_path / "evolution"
     for key, name in (
@@ -831,6 +836,7 @@ def _isolate_evolution_state_paths(tmp_path, monkeypatch):
         ("NEUROVA_EVOLUTION_LIFECYCLE", "tool_lifecycle.json"),
         ("NEUROVA_EVOLUTION_EXPERIENCE", "experience_feedback.json"),
         ("NEUROVA_EVOLUTION_SKILL_EXPERIENCE", "skill_experiences.json"),
+        ("NEUROVA_EVOLUTION_ROLLBACK", "rsi_rollback.json"),
     ):
         monkeypatch.setenv(key, str(state_dir / name))
 
