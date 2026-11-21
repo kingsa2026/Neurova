@@ -376,3 +376,35 @@ class TestAppWiring:
             assert r.headers["location"].endswith("/v1/mcp/agent-tools/")
             r2 = await http.post("/v1/mcp/agent-tools/", json=body)
             assert r2.status_code == 401
+
+
+class TestIdentityFailClosed:
+    """修复计划 M2：MCP 工具上下文身份读取缺失时必须 fail-closed，
+    不得回落 admin/service 视角（缺省即 admin 是权限面 fail-open）。"""
+
+    def _ctx(self, withUser=None):
+        state = SimpleNamespace(**({"neurova_user": withUser} if withUser is not None else {}))
+        request = SimpleNamespace(state=state)
+        return SimpleNamespace(request_context=SimpleNamespace(request=request))
+
+    def test_missing_identity_raises(self):
+        from neurova.mcp_ontology_server import _currentUserFromContext
+
+        with pytest.raises(Exception) as ei:
+            _currentUserFromContext(self._ctx())
+        assert "identity" in str(ei.value).lower() or "身份" in str(ei.value)
+
+    def test_broken_context_raises_not_admin(self):
+        from neurova.mcp_ontology_server import _currentUserFromContext
+
+        class _Boom:
+            request_context = property(lambda self: (_ for _ in ()).throw(RuntimeError("broken")))
+
+        with pytest.raises(Exception):
+            _currentUserFromContext(_Boom())
+
+    def test_present_identity_returned_unchanged(self):
+        from neurova.mcp_ontology_server import _currentUserFromContext
+
+        user = {"user_id": "u1", "role": "user", "tenant_id": "t1"}
+        assert _currentUserFromContext(self._ctx(withUser=user)) is user

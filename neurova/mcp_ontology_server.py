@@ -107,17 +107,31 @@ async def _resolveIdentity(scope: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
+class McpIdentityMissingError(RuntimeError):
+    """MCP 工具上下文缺少已解析身份（未走 asgi_entry 鉴权注入即被调用）。
+
+    M2（修复计划 2026-11-21）：缺失必须 fail-closed 拒绝，绝不回落 admin/service
+    视角——那等于身份通道断裂时以最高权限执行工具。
+    """
+
+
 def _currentUserFromContext(ctx: Any) -> Dict[str, Any]:
-    """从 MCP 请求上下文取中间件解析出的身份（缺省 service 视角，防御态）。"""
+    """从 MCP 请求上下文取中间件解析出的身份；读不到即抛 :class:`McpIdentityMissingError`。
+
+    正常链路：asgi_entry 已把 ``_resolveIdentity`` 的结果写进
+    ``request.state.neurova_user``（解析不出在入口就 401）——工具被调用时身份必然在。
+    读不到说明绕过了鉴权入口（或调用方装配不完整），按无身份 fail-closed 处理。
+    """
     try:
         request = getattr(getattr(ctx, "request_context", None), "request", None)
         user = getattr(getattr(request, "state", None), "neurova_user", None)
-        if isinstance(user, dict):
+        if isinstance(user, dict) and user:
             return user
-    except Exception:  # noqa: BLE001 - 身份读取失败按无身份处理
+    except Exception:  # noqa: BLE001 - 读取失败与缺失同罪：fail-closed
         pass
-    return {"user_id": "system", "username": "service", "role": "admin",
-            "tenant_id": "default"}
+    raise McpIdentityMissingError(
+        "MCP 工具缺少已解析身份（neurova_user 未注入）——请求必须经鉴权入口（fail-closed）"
+    )
 
 
 def _tenantOf(user: Dict[str, Any]) -> str:
