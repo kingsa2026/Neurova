@@ -105,11 +105,22 @@ export const useChatStore = defineStore('chat', () => {
     archivedSessions.value = archivedSessions.value.filter((s) => s.id !== sessionId)
   }
 
-  /** 拖拽重排（补课 A5）：source 的 updatedAt 置于 target 之后（本地视觉排序）。 */
+  /**
+   * 拖拽重排（补课 A5 + E3 收口）：把 source 真实移到 target 之后。
+   *
+   * 旧实现只 bump updatedAt——数组序不动，重排全靠落库后的 applySessionOrder
+   * 二次排序，拖拽当下没有真实位移。现改为在 sessions 数组内直接位移，
+   * 使「顺序真变化才提交」的守卫（useSessionOps.onSessionDrop）能读到
+   * 前后差异；updatedAt 顺位语义保留（today/week/earlier 分组桶的依据）。
+   */
   function moveSessionAfter(sourceId: string, targetId: string): void {
-    const src = sessions.value.find((s) => s.id === sourceId)
+    if (!sourceId || sourceId === targetId) return
+    const fromIdx = sessions.value.findIndex((s) => s.id === sourceId)
     const tgt = sessions.value.find((s) => s.id === targetId)
-    if (!src || !tgt) return
+    if (fromIdx < 0 || !tgt) return
+    const [src] = sessions.value.splice(fromIdx, 1)
+    const toIdx = sessions.value.findIndex((s) => s.id === targetId)
+    sessions.value.splice(toIdx + 1, 0, src)
     const tgtTs = tgt.updatedAt ? Date.parse(tgt.updatedAt) : Date.now()
     src.updatedAt = new Date(tgtTs + 1).toISOString()
   }

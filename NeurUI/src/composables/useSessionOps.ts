@@ -77,13 +77,21 @@ export function useSessionOps() {
     e.dataTransfer?.setData('text/plain', sessionId)
   }
 
-  /** 拖拽放下 = 把拖拽会话的 updatedAt 移到目标之后。 */
+  /**
+   * 拖拽放下 = 把拖拽会话移到目标之后；顺序真变化才落库（E3 勘察收口：
+   * 原实现无条件全量提交 reorder，放到自身/原位也白打一发请求）。
+   */
   function onSessionDrop(targetId: string): void {
     const sourceId = draggingSessionId.value
     draggingSessionId.value = null
     dragOverSessionId.value = null
     if (!sourceId || sourceId === targetId) return
+    const before = filteredSessions.value.map((s) => s.id)
     chatStore.moveSessionAfter(sourceId, targetId)
+    const after = filteredSessions.value.map((s) => s.id)
+    // 顺序未变（放到原位）不发起重排请求。reorder 契约收全量 ordered_ids
+    //（后端 set_sessions_sort_order 按全序写 sort_order），故真变化时仍提交全量列表。
+    if (before.length === after.length && before.every((id, i) => id === after[i])) return
     // 拖拽排序落库：本地视觉排序立即生效，
     // 同时异步持久化 sort_order（失败静默——本地排序仍可用，刷新后回退服务端顺序）。
     void persistSessionOrder()

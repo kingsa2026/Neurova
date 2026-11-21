@@ -70,7 +70,7 @@ describe('useChat', () => {
       const { loadSessions, store } = useChat()
       await loadSessions('agent-1')
 
-      expect(api.get).toHaveBeenCalledWith('/console/chat/sessions', { params: { agent_id: 'agent-1' } })
+      expect(api.get).toHaveBeenCalledWith('/console/chat/sessions', { params: { agent_id: 'agent-1', limit: 100 } })
       expect(store.sessions).toHaveLength(2)
       expect(store.sessions[0]).toEqual({
         id: 's1',
@@ -129,7 +129,7 @@ describe('useChat', () => {
       vi.mocked(api.get).mockResolvedValueOnce({ data: { sessions: [] } } as any)
       const { loadSessions } = useChat()
       await loadSessions('')
-      expect(api.get).toHaveBeenCalledWith('/console/chat/sessions', { params: undefined })
+      expect(api.get).toHaveBeenCalledWith('/console/chat/sessions', { params: { limit: 100 } })
     })
 
     // ── chat.loadHistoryFailed 修复契约 (遗留边界情况) ──────────────

@@ -17,7 +17,7 @@
     </div>
 
     <div class="nr-session-list">
-      <template v-for="group in groupedSessions" :key="group.key">
+      <template v-for="group in visibleGroups" :key="group.key">
         <div v-if="group.label" class="nr-session-group-label">{{ group.label }}</div>
         <div
           v-for="session in group.sessions"
@@ -52,6 +52,15 @@
           </a-dropdown>
         </div>
       </template>
+      <!-- E3 勘察：会话列表渲染封顶——窗口外的会话折叠为「加载更多」入口，按批放量 -->
+      <button
+        v-if="sessionHiddenCount > 0"
+        class="nr-session-load-more"
+        type="button"
+        @click="loadMoreSessions"
+      >
+        {{ t('chat.loadMoreSessions', { count: sessionHiddenCount }) }}
+      </button>
       <div v-if="filteredSessions.length === 0" class="nr-session-empty">
         {{ t('chat.noSessions') }}
       </div>
@@ -73,7 +82,8 @@ import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
-import { useSessionOps } from '@/composables/useSessionOps'
+import { useSessionOps, type SessionGroup } from '@/composables/useSessionOps'
+import { useRenderWindow, LIST_RENDER_BATCH } from '@/composables/useRenderWindow'
 import UiIcon from '@/components/UiIcon.vue'
 import { overlayContainerToBody } from '@/utils/overlay'
 
@@ -99,6 +109,34 @@ const {
   togglePin,
   archiveSession,
 } = useSessionOps()
+
+// ── E3 勘察：会话列表无界渲染收口 ──────────────────────────────────
+// 渲染窗口：首屏 LIST_RENDER_BATCH 条，「加载更多」按批放量；会话列表
+// 整表重载（切 Agent / 存档恢复等 setSessions 换表）时窗口归位。
+// 搜索过滤（filteredSessions 重算）不重置窗口，命中子集照常显示。
+const {
+  visibleCount: sessionVisibleCount,
+  hiddenCount: sessionHiddenCount,
+  loadMore: loadMoreSessions,
+} = useRenderWindow(filteredSessions, {
+  batch: LIST_RENDER_BATCH,
+  resetKey: () => chatStore.sessions,
+})
+
+/** 按窗口预算切分组：组内保持原序，跨组累计不超过窗口条数。 */
+const visibleGroups = computed<SessionGroup[]>(() => {
+  const budget = sessionVisibleCount.value
+  if (budget >= filteredSessions.value.length) return groupedSessions.value
+  let remaining = budget
+  const out: SessionGroup[] = []
+  for (const group of groupedSessions.value) {
+    if (remaining <= 0) break
+    const slice = group.sessions.slice(0, remaining)
+    remaining -= slice.length
+    out.push({ key: group.key, label: group.label, sessions: slice })
+  }
+  return out
+})
 </script>
 
 <style scoped>
@@ -197,6 +235,23 @@ const {
   color: var(--nr-text-muted);
   padding: 32px 16px;
   font-size: 13px;
+}
+/* E3：加载更多入口（颜色全走既有令牌） */
+.nr-session-load-more {
+  display: block;
+  margin: 8px auto 12px;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.nr-session-load-more:hover {
+  background: var(--nr-glass-bg-hover);
+  color: var(--nr-text-primary);
 }
 .nr-session-group-label {
   font-size: 11px;

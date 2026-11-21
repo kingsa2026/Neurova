@@ -10,6 +10,7 @@ import { useI18n } from 'vue-i18n'
 import UiIcon from '@/components/UiIcon.vue'
 import { isNearBottom } from '@/utils/chatSteps'
 import { getConsoleSubagentEvents, type SubagentEvent } from '@/api/modules/console'
+import { useRenderWindow, LIST_RENDER_BATCH } from '@/composables/useRenderWindow'
 
 export interface SubAgentWindowState {
   subagentId: string
@@ -130,6 +131,20 @@ async function fetchTimeline(): Promise<void> {
   }
 }
 
+// ── E3 勘察：事件时间线无界渲染收口 ────────────────────────────────
+// 账本为追加序（尾部=最新），取尾部窗口：默认只渲染最近 LIST_RENDER_BATCH
+// 条，更早的折叠为「查看更早的 {count} 条」入口，点击按批放量（展开后
+// 仍有界）。切换子代理（面板复用）时窗口归位。
+const {
+  visibleItems: visibleTimeline,
+  hiddenCount: hiddenEarlierCount,
+  loadMore: showEarlierEvents,
+} = useRenderWindow(timeline, {
+  batch: LIST_RENDER_BATCH,
+  mode: 'tail',
+  resetKey: () => props.state.subagentId,
+})
+
 /** 终态质量徽标读数：仅终态且分级非空时给出（词值到 UI 态的翻译只此一处） */
 const qualityBadge = computed(() => {
   if (props.state.status !== 'completed' && props.state.status !== 'failed') return null
@@ -244,17 +259,26 @@ function shortTime(iso: string): string {
     </div>
     <div v-if="!minimized" class="panel-body">
       <div class="panel-task" :title="state.task">{{ state.task }}</div>
-      <!-- H-4 事件时间线：run 事件账本的可视化（发现而不裁决的观测面） -->
+      <!-- H-4 事件时间线：run 事件账本的可视化（发现而不裁决的观测面）；
+           E3 渲染封顶：默认只显示最近一批，更早的经入口按批展开 -->
       <div v-if="showTimeline" class="panel-timeline">
         <div v-if="timelineLoading && !timeline.length" class="tl-empty">{{ t('ui.thinking') }}</div>
         <div v-else-if="!timeline.length" class="tl-empty">{{ t('ui.subagentTimelineEmpty') }}</div>
-        <div v-for="ev in timeline" :key="ev.event_id" class="tl-row">
-          <span class="tl-dot" :class="`tl-${ev.type}`"></span>
-          <div class="tl-body">
-            <div class="tl-head">{{ eventLabel(ev.type) }}<span class="tl-time"> · {{ shortTime(ev.occurred_at) }}</span></div>
-            <div v-if="eventDetail(ev)" class="tl-detail">{{ eventDetail(ev) }}</div>
+        <template v-else>
+          <button
+            v-if="hiddenEarlierCount > 0"
+            class="tl-earlier-btn"
+            type="button"
+            @click="showEarlierEvents"
+          >{{ t('ui.subagentTimelineEarlier', { count: hiddenEarlierCount }) }}</button>
+          <div v-for="ev in visibleTimeline" :key="ev.event_id" class="tl-row">
+            <span class="tl-dot" :class="`tl-${ev.type}`"></span>
+            <div class="tl-body">
+              <div class="tl-head">{{ eventLabel(ev.type) }}<span class="tl-time"> · {{ shortTime(ev.occurred_at) }}</span></div>
+              <div v-if="eventDetail(ev)" class="tl-detail">{{ eventDetail(ev) }}</div>
+            </div>
           </div>
-        </div>
+        </template>
       </div>
       <!-- P2（蜂群对照）：卡死渐进提醒（发现而不裁决：只提示，等/停由用户决定） -->
       <div v-if="isBusy && state.stallNotice" class="panel-stall">
@@ -390,6 +414,17 @@ function shortTime(iso: string): string {
   overflow-y: auto;
 }
 .tl-empty { font-size: 11px; color: var(--nr-text-tertiary, var(--nr-text-tertiary)); }
+/* E3：查看更早事件入口（展开式分批放量，颜色走既有令牌） */
+.tl-earlier-btn {
+  border: none;
+  background: transparent;
+  padding: 2px 0 5px;
+  font-size: 11px;
+  color: var(--nr-primary-light, #818cf8);
+  cursor: pointer;
+  text-align: left;
+}
+.tl-earlier-btn:hover { text-decoration: underline; }
 .tl-row { display: flex; gap: 6px; padding: 3px 0; align-items: flex-start; }
 .tl-row + .tl-row { border-top: 1px dashed rgba(255, 255, 255, 0.06); }
 .tl-dot {

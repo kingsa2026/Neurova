@@ -21,7 +21,7 @@
     </div>
     <div class="nr-dock-history-list">
       <div
-        v-for="session in filteredSessions"
+        v-for="session in visibleSessions"
         :key="session.id"
         class="nr-session-item"
         :class="{ active: session.id === currentSessionId }"
@@ -40,6 +40,15 @@
           </template>
         </a-dropdown>
       </div>
+      <!-- E3 勘察同因同修：dock 历史列表与侧栏同一渲染窗口策略 -->
+      <button
+        v-if="hiddenSessionCount > 0"
+        class="nr-session-load-more"
+        type="button"
+        @click="loadMoreSessions"
+      >
+        {{ t('chat.loadMoreSessions', { count: hiddenSessionCount }) }}
+      </button>
       <div v-if="filteredSessions.length === 0" class="nr-session-empty">{{ t('chat.noSessions') }}</div>
     </div>
   </div>
@@ -58,6 +67,7 @@ import { useRightDockStore } from '@/stores/rightDock'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
 import { useSessionOps } from '@/composables/useSessionOps'
+import { useRenderWindow, LIST_RENDER_BATCH } from '@/composables/useRenderWindow'
 import UiIcon from '@/components/UiIcon.vue'
 import { overlayContainerToBody } from '@/utils/overlay'
 
@@ -71,6 +81,17 @@ const chatStore = useChatStore()
 const rightDock = useRightDockStore()
 const { searchQuery, filteredSessions, currentSessionId } = storeToRefs(chatStore)
 const { createSession, renameSession, togglePin, archiveSession, loadArchivedSessions } = useSessionOps()
+
+// E3 勘察同因同修：与 ChatSessionSidebar 同一渲染窗口策略（首屏 50 条，
+// 加载更多按批放量；整表重载时窗口归位）。
+const {
+  visibleItems: visibleSessions,
+  hiddenCount: hiddenSessionCount,
+  loadMore: loadMoreSessions,
+} = useRenderWindow(filteredSessions, {
+  batch: LIST_RENDER_BATCH,
+  resetKey: () => chatStore.sessions,
+})
 
 /** 打开存档 tab（原页头历史面板「🗂 存档会话」按钮等价行为：打开即加载列表） */
 function onOpenArchive(): void {
@@ -150,5 +171,22 @@ function onOpenArchive(): void {
   text-align: center;
   color: var(--nr-text-secondary, #8b8fa3);
   font-size: 12px;
+}
+/* E3：加载更多入口（与侧栏同款，颜色全走既有令牌） */
+.nr-session-load-more {
+  display: block;
+  margin: 8px auto;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.nr-session-load-more:hover {
+  background: var(--nr-glass-bg-hover);
+  color: var(--nr-text-primary);
 }
 </style>

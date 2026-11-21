@@ -37,6 +37,14 @@ export interface UploadResult {
 
 const BASE = '/console'
 
+/**
+ * 会话列表单次拉取上限（E3 勘察：侧栏渲染窗口 50/批，一次取足 2 批）。
+ * 后端 /console/chat/sessions 当前未实现 limit 过滤（全量返回），此参数
+ * 先与前端声明契约对齐，后端支持后即自动生效；今日实际的有界面是
+ * 侧栏渲染窗口（useRenderWindow）。
+ */
+export const CONSOLE_SESSION_LIST_LIMIT = 100
+
 /** Get console session list. */
 export function getConsoleSessions(params?: { agent_id?: string; limit?: number }) {
   return api.get<ApiResponse<ConsoleSession[]>>(`${BASE}/chat/sessions`, { params })

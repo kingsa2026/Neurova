@@ -14,6 +14,7 @@ import {
   sendConsoleFeedback,
   forkConsoleSession,
   setConsoleCheckpoint,
+  CONSOLE_SESSION_LIST_LIMIT,
 } from '@/api/modules/console'
 import { useChatStore } from '@/stores/chat'
 import type { ChatMessage, Session } from '@/types/chat'
@@ -144,11 +145,16 @@ export function useChat(options: UseChatOptions = {}) {
   /**
    * Load the session list for the given agent. On success, auto-selects the
    * first session if none is currently active.
+   *
+   * E3 勘察：此处原未传 limit（后端全量返回，侧栏无界渲染的源头之一）。
+   * 现按声明契约带上单次拉取上限；后端今日仍全量返回，实际有界面是
+   * 侧栏渲染窗口（ChatSessionSidebar 的 useRenderWindow）。
    */
   async function loadSessions(agentId: string): Promise<void> {
     loadingSessions.value = true
     try {
-      const res: any = await getConsoleSessions(agentId ? { agent_id: agentId } : undefined)
+      const params = { ...(agentId ? { agent_id: agentId } : {}), limit: CONSOLE_SESSION_LIST_LIMIT }
+      const res: any = await getConsoleSessions(params)
       const data = res?.data ?? res
       const sessionList = data?.sessions ?? data ?? []
       const mapped: Session[] = sessionList.map(

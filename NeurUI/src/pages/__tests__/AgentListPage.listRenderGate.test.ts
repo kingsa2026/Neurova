@@ -7,9 +7,11 @@
  *   表格视图 a-table 客户端分页 pageSize=12。
  *   → 用例 1：500 个 Agent 卡片视图只渲染 12 张卡 + 分页控件存在 + 翻到第 2 页换批仍 12 张；
  *   → 用例 2：500 个 Agent 表格视图只渲染 12 行。
- * - 已知无界登记（未在本文件修）：ChatSessionSidebar.vue 会话列表全量渲染
- *   （getConsoleSessions 未传 limit，侧栏 v-for 全量展开）；SubAgentPanel.vue
- *   事件时间线全量渲染（该组件另有会话在途改造，本轮不动）。
+ * - 原登记于本文件的两处无界列表已各自立门（E3 收口）：
+ *   ChatSessionSidebar.vue → chat/__tests__/ChatSessionSidebar.listRenderGate.test.ts
+ *   （渲染窗口 + 加载更多 + 拖拽顺序守卫）；
+ *   SubAgentPanel.vue → components/__tests__/SubAgentPanel.listRenderGate.test.ts
+ *   （时间线尾部窗口 + 查看更早入口）。dock 历史列表（HistoryTab）同因同修。
  *
  * 门径：谁移除 slice 分页、或把表格分页改假（pageSize 覆盖全量），本文件即红。
  */
