@@ -10,6 +10,7 @@ import top.neurova.mobile.core.net.HttpChannel
 import top.neurova.mobile.core.net.MobileWsChannel
 import top.neurova.mobile.core.store.SecureVaultCredentialStore
 import top.neurova.mobile.feature.admin.AdminRepository
+import top.neurova.mobile.feature.admin.EvolutionRepository
 import top.neurova.mobile.feature.agents.AgentsStore
 import top.neurova.mobile.feature.auth.AuthStore
 import top.neurova.mobile.feature.chat.ChatRepository
@@ -51,4 +52,5 @@ class AppRuntime(context: Context) {
     val knowledgeRepo = KnowledgeRepository(http)
     val modelsRepo = ModelsRepository(http)
     val adminRepo = AdminRepository(http)
+    val evolutionRepo = EvolutionRepository(http)
 }

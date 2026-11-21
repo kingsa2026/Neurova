@@ -46,6 +46,7 @@ fun ProfileTabScreen(
     onOpenModels: () -> Unit = {},
     onOpenAdminUsers: () -> Unit = {},
     onOpenAdminGroups: () -> Unit = {},
+    onOpenAdminEvolution: () -> Unit = {},
 ) {
     val runtime = LocalAppRuntime.current
     val palette = LocalNeurovaColors.current
@@ -140,6 +141,8 @@ fun ProfileTabScreen(
             SectionTitle("管理员域")
             InfoRow(title = "用户管理", subtitle = "账号列表 · 停用/删除", onClick = onOpenAdminUsers)
             InfoRow(title = "用户组", subtitle = "分组与成员", onClick = onOpenAdminGroups)
+            // P1-8：演化状态只读入口（当前基线代/最近世代/门禁结果摘要；写面留 PC 治理页）
+            InfoRow(title = "演化状态", subtitle = "当前基线代 · 门禁结果摘要", onClick = onOpenAdminEvolution)
         }
         Spacer(modifier = Modifier.size(24.dp))
     }

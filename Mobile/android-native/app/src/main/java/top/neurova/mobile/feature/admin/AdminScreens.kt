@@ -261,9 +261,9 @@ fun AdminGroupsScreen(onBack: () -> Unit) = AdminGate(title = "用户组", onBac
     }
 }
 
-/** 管理员路由门控：非管理员渲染诚实拦截态（后端同权鉴权兜底） */
+/** 管理员路由门控：非管理员渲染诚实拦截态（后端同权鉴权兜底）；P1-8 演化状态页复用 */
 @Composable
-private fun AdminGate(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
+internal fun AdminGate(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
     val runtime = LocalAppRuntime.current
     val palette = LocalNeurovaColors.current
     Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {

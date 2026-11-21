@@ -40,6 +40,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import top.neurova.mobile.feature.admin.AdminEvolutionScreen
 import top.neurova.mobile.feature.admin.AdminGroupsScreen
 import top.neurova.mobile.feature.admin.AdminUsersScreen
 import top.neurova.mobile.feature.agents.AgentsTabScreen
@@ -196,11 +197,13 @@ private fun NeurovaNavHost(navController: NavHostController) {
                 onOpenModels = { navController.navigate("profile/models") },
                 onOpenAdminUsers = { navController.navigate("admin/users") },
                 onOpenAdminGroups = { navController.navigate("admin/groups") },
+                onOpenAdminEvolution = { navController.navigate("admin/evolution") },
             )
         }
         composable("profile/servers") { ServerManageScreen(onBack = { navController.popBackStack() }) }
         composable("profile/models") { ModelsScreen(onBack = { navController.popBackStack() }) }
         composable("admin/users") { AdminUsersScreen(onBack = { navController.popBackStack() }) }
         composable("admin/groups") { AdminGroupsScreen(onBack = { navController.popBackStack() }) }
+        composable("admin/evolution") { AdminEvolutionScreen(onBack = { navController.popBackStack() }) }
     }
 }
