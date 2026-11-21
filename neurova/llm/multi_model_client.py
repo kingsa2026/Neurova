@@ -806,12 +806,21 @@ class MultiModelLLMClient:
         # 口径是"累计等待"，不含请求自身耗时（那由 read timeout 侧管，见
         # tests/unit/llm/test_llm_read_timeout_split.py），两处各扣一次会把同一笔账算两遍。
         waitedSeconds = 0.0
+        # R2：attempt 生命周期账本（每逻辑请求一份，轨迹经 _lastAttemptLedger 可查）
+        from neurova.llm.routing.attempt import AttemptLedger, AttemptOutcome
+
+        ledger = AttemptLedger()
+        self._lastAttemptLedger = ledger
         for _attempt in range(max_attempts):
             if not client:
                 return last_result
+            attempt = ledger.start(client)
             result = await self._chat_single_attempt(client, messages, **kwargs)
             if result.get("success"):
+                ledger.finish(attempt, AttemptOutcome.COMPLETED)
                 return result
+            ledger.finish(attempt, AttemptOutcome.FAILED,
+                          error_summary=str(result.get("error") or ""))
             last_result = result
             # R1 回退资格单源：语义表在 neurova.llm.routing.error_policy
             # （rate_limited/transient〔含 408/409/423/425 网关态〕/
@@ -1174,11 +1183,17 @@ class MultiModelLLMClient:
         switch_count = 0
         yielded_any = False
         switched_models: set = set()
+        # R2：attempt 生命周期账本（每逻辑请求一份，轨迹经 _lastAttemptLedger 可查）
+        from neurova.llm.routing.attempt import AttemptLedger, AttemptOutcome
+
+        ledger = AttemptLedger()
+        self._lastAttemptLedger = ledger
 
         while True:
             model_key = client.model or "unknown"
             acquired = False
             start_time = time.time()
+            attempt = ledger.start(client)
             try:
                 try:
                     limiter.acquire(model_key, blocking=False)
@@ -1196,6 +1211,9 @@ class MultiModelLLMClient:
                 _cache_read, _cache_write = 0, 0
                 reply_text = ""
                 first_token_ms = 0  # P1-8：首块耗时入账
+                # R2：空响应判定用——首块耗时毫秒数对瞬时桩会截断为 0，不能当
+                # 「有无载荷」信号；以内容/推理/工具调用任一实际到达为准。
+                saw_tool_calls = False
                 _stream_response_id: Optional[str] = None  # P3-12：provider 响应/分片 id（对账用）
                 # A1（对照改进项）：尺子校准采样——样本足够后就地停采（零持续开销）
                 from neurova.core import token_calibration
@@ -1296,11 +1314,20 @@ class MultiModelLLMClient:
                             reply_text += getattr(chunk, "reasoning_content", "") or ""
                         # 静默遥测计数：判读"思考/正文各吐了多少"的证据
                         _rc = getattr(chunk, "reasoning_content", None)
+                        if isinstance(chunk, dict) and not _rc:
+                            _rc = chunk.get("reasoning_content")
                         if _rc:
                             _stream_state["reasoning_chars"] += len(_rc)
                         _cc = getattr(chunk, "content", None)
+                        if isinstance(chunk, dict) and not _cc:
+                            _cc = chunk.get("content")
                         if _cc:
                             _stream_state["content_chars"] += len(_cc)
+                        _tc = getattr(chunk, "tool_calls", None)
+                        if isinstance(chunk, dict) and not _tc:
+                            _tc = chunk.get("tool_calls")
+                        if _tc:
+                            saw_tool_calls = True
                         # A1：校准采样累积（仅采样期；含工具调用分片的响应不采样）
                         if _calib_collect:
                             _calib_text += (getattr(chunk, "content", "") or "") + (
@@ -1333,6 +1360,35 @@ class MultiModelLLMClient:
                         limiter.release(model_key)
                         acquired = False
                 duration = time.time() - start_time  # P2-4 补刀：原为丢弃结果的死语句
+                # R2：空响应（零载荷收流）视作可切换失败——先于成功入账处理；
+                # 无候选可切时如实空收流（旧行为），但台账留 empty 痕。
+                # 判据=内容/推理/工具调用任一实际到达（首块耗时毫秒数会截断为 0，
+                # 不能作「有无载荷」信号）。
+                if not (_stream_state["content_chars"] or _stream_state["reasoning_chars"] or saw_tool_calls):
+                    client.increment_request(success=False)
+                    ledger.finish(attempt, AttemptOutcome.EMPTY,
+                                  duration_ms=int(duration * 1000))
+                    fail_count += 1
+                    nxt = (
+                        self._next_failover_client(client, switched_models)
+                        if fail_count < cfg["max_switches"]
+                        else None
+                    )
+                    if nxt is not None:
+                        switch_count += 1
+                        switched_models.add(f"{client.provider.id}/{client.model}")
+                        yield {"retry_status": dict(
+                            phase="switched", fail_count=fail_count,
+                            max_switches=cfg["max_switches"], switch_count=switch_count,
+                            model=nxt.model, from_model=model_key,
+                            provider=nxt.provider.id, reason="empty_response",
+                        )}
+                        client = nxt
+                        retry_no = 0
+                        continue
+                    return
+                ledger.finish(attempt, AttemptOutcome.COMPLETED,
+                              duration_ms=int(duration * 1000), first_token_ms=first_token_ms)
                 client.increment_request(success=True)
                 limiter.report_success(model_key)
                 try:
@@ -1429,6 +1485,14 @@ class MultiModelLLMClient:
                 # 审计 P0-C2：流内 429 与 chat() 同源——分类后 report_429 暂停该模型
                 # B1-2：分类名对齐 model_error_policy（rate_limited/model_not_found）
                 error_kind = self._classify_error(e)
+                # R2：结局标定——已吐可见内容后死亡=interrupted，首内容前=failed
+                ledger.finish(
+                    attempt,
+                    AttemptOutcome.INTERRUPTED if yielded_any else AttemptOutcome.FAILED,
+                    error_kind=error_kind,
+                    error_summary=str(e),
+                    duration_ms=int((time.time() - start_time) * 1000),
+                )
                 retry_after = None
                 if error_kind == "rate_limited" and not getattr(e, "_acquire_blocked", False):
                     # B1-6（#6617）：服务端 Retry-After 头优先（缺失回落 30s 默认退避）
