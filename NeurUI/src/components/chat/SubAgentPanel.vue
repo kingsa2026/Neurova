@@ -102,6 +102,9 @@ const showTimeline = ref(false)
 const timeline = ref<SubagentEvent[]>([])
 const timelineLoading = ref(false)
 let timelineTimer: ReturnType<typeof setInterval> | null = null
+// M5：全局事件库游标（与 JSONL 的 per-run seq 是两个空间——合并以 event_id
+// 去重，不按 seq 排序；追加序即时间序）。
+let replayCursor = 0
 
 // ── A1 终态质量分级：事件账本 terminal 事件 payload.terminal_quality 是它
 // 目前的前端可达投影（WS completed 广播与台账读面暂不带该键）——终态时从
@@ -119,15 +122,53 @@ function applyRunEvents(events: SubagentEvent[]): void {
   }
 }
 
+/** M5：增量合并——只追加未渲染过的事件（event_id 去重），保持账本追加序。 */
+function mergeRunEvents(events: SubagentEvent[]): void {
+  if (!events.length) return
+  const seen = new Set(timeline.value.map((e) => e.event_id))
+  const fresh = events.filter((e) => !seen.has(e.event_id))
+  if (!fresh.length) return
+  timeline.value = [...timeline.value, ...fresh]
+  if (!terminalQuality.value) {
+    for (const ev of fresh) {
+      if (ev.type !== 'terminal') continue
+      const q = String((ev.payload || {})['terminal_quality'] ?? '')
+      if (q) { terminalQuality.value = q; break }
+    }
+  }
+}
+
 async function fetchTimeline(): Promise<void> {
   timelineLoading.value = true
   try {
     const res = await getConsoleSubagentEvents(props.state.subagentId)
+    replayCursor = 0
     applyRunEvents(res?.data?.events ?? [])
   } catch {
     timeline.value = []
   } finally {
     timelineLoading.value = false
+  }
+}
+
+/** M5：游标增量刷新——只拉新增事件；degraded（游标过旧/超预算）回退全量读法。 */
+async function pollTimelineIncrement(): Promise<void> {
+  try {
+    const res = await getConsoleSubagentEvents(props.state.subagentId, replayCursor)
+    const data = res?.data
+    if (data?.mode !== 'replay') {
+      await fetchTimeline()
+      return
+    }
+    if (data.degraded) {
+      replayCursor = 0
+      await fetchTimeline()
+      return
+    }
+    mergeRunEvents(data.events ?? [])
+    replayCursor = data.high_water ?? replayCursor
+  } catch {
+    // 轮询失败静默——下一轮再取（时间线不因单次网络抖动清空）
   }
 }
 
@@ -171,8 +212,8 @@ function toggleTimeline(): void {
   stopTimelinePolling()
   if (showTimeline.value) {
     void fetchTimeline()
-    // 运行中每 5s 刷新一次账本；终态到达时补拉最终版并停止
-    if (isBusy.value) timelineTimer = setInterval(() => void fetchTimeline(), 5000)
+    // 运行中每 5s 增量刷新一次账本（M5 游标只拉新增）；终态到达时补拉最终版并停止
+    if (isBusy.value) timelineTimer = setInterval(() => void pollTimelineIncrement(), 5000)
   }
 }
 
