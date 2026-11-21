@@ -515,3 +515,103 @@ T3 当期主干与原快照相隔约四小时（e19193db → 6f94a063），20 �
   （结构差距未变），维持原分；D-A 预算 16k→32k 是参数变化非机制变化，B2 不调分；前端
   徽标/cost_note 透传属既有机制消费面补链，D1/E1 不调分；T3 侧漂移为 provider 版本探测
   性能优化单点，20 项维持原分。本轮调分仅 C1/C5/E3 三项各 +0.5。
+
+---
+
+## 复评记录三（2026-11-21，第三轮，T3 主干 2af43518）
+
+> 复评时点：IDE 接入计划六卡实施完毕后——G1 ACP registry 零代码接入（2a12d1fcb）、
+> 握手能力字段 agentCapabilities 规范名扫荡（50b980a5c）、G2 真实 transcript 回放契约
+> （01f8fd72e）、G6 ACP v2 全量适配（e5642a0b3）、G4 多端连接运行时单源（453884bd4）、
+> G5 权限两小项（01c809b49）、G3 适配器方法面收敛（e31417d31，另 1823b8465 cwd 回报
+> 替身入库）。本仓基线为第二轮复评读数（c7ada5e6d，85.25）。
+> T3 浅克隆再 fetch 确认漂移：主干自 `80871270` 前进 25 笔至
+> `2af435185ea82065e2d0ca69a6765e2ba7aad001`（2026-11-20 23:35 -0800，"perf(server):
+> branch PR lookups start 9 git processes instead of 14 (#40153)"），313 files
+> +21309/−2020；构成以 web/mobile/server 缺陷修复为主，另有一笔 projects 多仓特性
+> （60863edc）与两笔 perf——orchestration-v2 / provider-core / provider-acp 仅被修复类
+> 提交触及（provider 运行时退出通知线程、antigravity/claude/opencode 修复、PR watch
+> 诊断文案），无新增能力维度、适配器包或编排原语，20 子项能力面无实质漂移——T3 逐项
+> 维持原分。评分口径沿用原卡（每子项 0-10、五大类同权重）；本仓证据全部按当前树
+> （1823b8465）现场读数。
+
+### 调分项（3 项，原分 → 新分）
+
+| 子项 | Neurova | T3 Code | 关键证据（本次现场读数） | 变化原因 |
+|---|---|---|---|---|
+| C1 协议覆盖 | 8.5 → **9.0** | 9.5 → 9.5 | 本仓 `neurova/agent/neuacp/registry.py:31`（官方 registry CDN 源）/:34（15s 超时）/:37（5MiB 载荷上限）+ `catalog.py:195` mergedCatalog（预设>registry 合并视图，defaultCommand/capabilitiesFor/refuseExecutorSpec/probeTool/listCatalog/probeToolHealth 全读取口改走）/:223 protocolVersionFor、`external_agents_api.py:124/:263-275`（/test 按条目声明版本协商，admin 刷新默认关+非 admin 403）；`codec_v2.py:27/:107/:155/:177/:211`（v2 编解码：initialize 必填 info/prompt 内容块数组/cancel 按 requestId/update 流 24 分支映射）+ `acp_client.py:210-248`（整数版本协商选 codec，v1 字面量逐字保持）；`replay_fixtures/` 10 份真机 transcript + `test_replay_contract.py:145`（30 变异注入全红）；真拉官方 registry 46 agents 归一入册，catalog 8→52 条。T3 `provider-*` 10 包+provider-acp-registry+effect-acp v1/v2 双代协商 | 第二轮点名的两项 T3 C1 优势面本轮补齐：registry 任意 ACP agent 零代码入册（新增规范内 agent 不改代码即被发现/派活）、ACP v1/v2 双代协商（v2 全量编解码+v1 逐字节保持）；剩余差距=T3 十一家**原生专有协议**适配（Cursor/Grok/Antigravity 等非 ACP agent）与 update 流背压队列等工程深度，本方仍以 ACP 单协议栈+registry 覆盖 |
+| D3 多端与远程 | 8.5 → **9.0** | 9.5 → 9.5 | 本仓 `neurova/api/connection_runtime.py:58`（HEARTBEAT_INTERVAL_S=15 单源）/:61（REPLAY_WINDOW_S=86400，与 A2 事件库 1 天保留窗同口径）/:72（SUBSCRIPTION_SCOPES=session·thread·global）/:130 parseSubscriptionScope/:151 inScope（解析失败帧 fail-closed 扣下，宁可少发不越权）/:178 describeForClients 三端契约下发；`realtime_push.py:33/:122-123`（心跳改从单源取，缺省值与改前一致零行为差异）；`mobile_ws_ledger.py:259/:272/:277/:282-303`（订阅登记/查询/注销+replaySince 按 scope 过滤，pairing 归属校验恒在）；32 例新测试。T3 `docs/internals/connection-runtime.md`（shell/thread 订阅分层）+`remote.md`/`t3-connect.md`（三路由+DPoP） | 第二轮点名的「心跳/重放窗口/订阅范围语义分散、无按需订阅」差距消解：三端连接语义收口单源（心跳/重放窗口/退避常量同源可覆盖），按需订阅（"看一个线程不付全部线程的账"）服务端语义在账本层落地（scope 解析+归属判定+按需过滤，只收紧不放宽）；剩余差距=T3 三路由热切换+learned routes+DPoP 云中继的完整远程产品面，另本方 scope 的端点级接线（mobile_pairing sync_resume 传 scope、neurflow_api 心跳显式传参收口）已登记为后续卡 |
+| E2 契约与兼容 | 8.0 → **8.5** | 9.5 → 9.5 | 本仓 `scripts/neuacp_record_fixture.py`（常驻录制：真 CLI 子进程按共享场景脚本驱动，帧经真 frame_log 脱敏落盘）+ `tests/unit/agent/neuacp/replay_harness.py`（真 NeuacpClient 管线回放，ScriptedTransport 以 flush 时点供帧保因果序）+ `replay_fixtures/` 10 份真机 fixture（opencode 4/claude-code 3/codex 3 场景；gemini-cli 未装如实缺失）+ `test_replay_contract.py`（51 用例=10 契约回放+30 变异注入全红防恒真+10 脱敏卫生+1 覆盖登记）+ `replay_fixtures/README.md` 9 条协议陷阱清单。T3 contracts 单源包+回放兼容纪律 | 「真实进程录制 transcript → 经真编排管线回放断言」的回放兼容纪律落地（此前协议细节回归只靠活体抽查）——T3 E2 优势三成分（单源包/wire 双向兼容/回放兼容纪律）中的回放纪律分量补齐，且以变异注入防「回放器恒真」；剩余差距=契约单源包（服务端+三端共同消费、双向兼容纪律成体系）仍未动，本方 API 契约面仍为守卫测试+变更登记 |
+
+### 维持项（17 项，逐项说明）
+
+| 子项 | 维持分（本仓/T3） | 维持原因 |
+|---|---|---|
+| A1 生命周期状态机 | 9.0 / 9.5 | 无新工作；T3 的 attempt 代际+执行图节点状态差距未动 |
+| A2 事件溯源与审计 | 8.5 / 9.5 | 单写路径事件溯源/全量投影重建未动（事件库仍为 JSONL 账本的 fail-open 双写镜像） |
+| A3 幂等与恢复 | 8.5 / 9.5 | effect outbox（租约认领/退避/崩溃对账）仍未立项 |
+| A4 并发治理 | 8.0 / 7.0 | 双方均无新工作；本方 turn 准入治理继续反超 +1.0 |
+| A5 结算与收敛 | 8.0 / 9.0 | 仍仅 idle sweep 且默认关；T3 为 PR merge 事件流等四驱动且常开 |
+| B1 子代理建模 | 9.0 / 9.5 | 无新工作；T3 执行图节点树+确定性派生 id 的建模深度差距未动 |
+| B2 上下文传递 | 8.0 / 9.5 | G3 将 steer 注入与交接工件改经收敛面（`swarm.py:2033`/`:2183`）属**既有接线换道**（steer 队列与 `_buildResumeHandoff` 机制、跨 executor `handoff_inject` 判定口径均未变），非新触发点；预算仍静态 32k（`context_transfer.py:23` DEFAULT_TOKEN_CAP=32000）；fork/provider 切换/spawn/result 多触发点未贯通、预算非活窗口动态 |
+| B3 checkpoint 回滚 | 8.5 / 9.5 | G3 rollback 方法（`adapter_surface.py:184`）闸于 `conversation_rollback` 维度且映射 K1 恢复面（member 会话检查点恢复），非 provider 会话协同回退；预设该维度仍保守 False（`catalog.py` _P1_ACP_CAPABILITIES），协同回退未活 |
+| B4 依赖与队列 | 8.5 / 8.5 | 无新工作，维持拉平（T3 promote-to-steer 细分仍由本方 edit 三态覆盖） |
+| C2 能力声明与降级 | 9.0 / 9.5 | G3 方法级能力面落地（`adapter_surface.py:69` requireCapability 单点——dim 不在 BOOLEAN_CAPABILITY_DIMS 单源即 ValueError 防拼错、caps None 放行/其余 fail-closed；`:107` forRun 名册读不到回落 spawn 快照档，外部成员不被静默放权；`:129` steer 无闸防既有插话路径被保守档闸死）——能力驱动降级机制加强；但 rollback/fork/switchModel/snapshot 四方法尚无编排侧调用方（本卡遗留登记），编排层能力分支未全量收敛，且声明结构仍为扁平布尔维 vs T3 12 维按域嵌套——按「接线广度未达不给下一档」口径维持 9.0 |
+| C3 进程治理 | 9.0 / 9.5 | G5 为路径守卫（文件访问安全域），cgroup lease+POSIX 所有权台账差距未动 |
+| C4 认证与凭据 | 8.5 / 9.0 | G6 对 v2 authMethods 做诚实透传（需要 auth 而未实现→显式 not_supported），属协议面边际补齐；T3 auth 全生命周期控制器+实例间 binding 隔离差距未动 |
+| C5 provider 切换与接续 | 8.5 / 9.5 | 预设 `handoff_inject` 仍保守缺省 False（`catalog.py:80` _CONSERVATIVE_CAPABILITIES、`:386` _handoffCapable）；G3 handoffArtifact 沿用同一判定（跨 executor 双方声明才放行），真跨家活体交割未开；T3 活体交割+活窗口动态预算仍领先 |
+| D1 审批链 | 9.0 / 9.0 | 无新工作，维持拉平 |
+| D2 权限天花板 | 8.5 / 9.5 | G5 的「只暴露原生支持模式」经提交自证系既有 refuseExecutorSpec 矩阵钉子已覆盖（确认性钉子，未新增机制）；path_guard（`neurova/security/path_guard.py` symlink 感知逐级 realpath fail-closed+外部代理 cwd 规约）属文件访问安全强化，非档位天花板；T3 另有的跨环境 `T3-Mode-Limit` 请求头与 MCP 子任务两层收窄未动 |
+| E1 评测体系 | 8.5 / 8.5 | 无新工作，维持拉平 |
+| E3 性能治理 | 8.5 / 9.0 | 无新工作（G4 的心跳/重放窗口属连接语义单源，计入 D3）；前端列表渲染回归门已建，T3 审计面更广（steady shells/内存限额自停） |
+
+### 总分对照
+
+| | Neurova | T3 Code（reference_ac） |
+|---|---|---|
+| A 编排模型 | 42.0 / 50 | 44.5 / 50 |
+| B 执行图与上下文 | 34.0 / 40 | 37.0 / 40 |
+| C 外部 agent 接入 | 43.5 → **44.0** / 50 | 47.0 / 50 |
+| D 协作与人在环 | 26.0 → **26.5** / 30 | 28.0 / 30 |
+| E 工程方法 | 25.0 → **25.5** / 30 | 27.0 / 30 |
+| **合计（百分制）** | **85.25 → 86.0** | **91.8**（当期主干前进 25 笔，能力面无变化，维持） |
+
+### 仍未达标子项（16 项，按差距排序）
+
+| 子项 | 差距 | 剩余差距原因 |
+|---|---|---|
+| B2 上下文传递 | −1.5 | 接线仍以续跑单路径为主；fork/provider 切换/spawn/result 多触发点未贯通，预算静态非活窗口动态 |
+| A2 事件溯源 | −1.0 | 事件库仍为 JSONL 账本 fail-open 双写镜像，非单写路径事件溯源，无全量投影重建 |
+| A3 幂等与恢复 | −1.0 | effect outbox（租约/退避/崩溃对账）未立项 |
+| A5 结算与收敛 | −1.0 | 仅 idle sweep 且默认关；T3 四驱动（含 PR merge 事件流）常开 |
+| B3 checkpoint 回滚 | −1.0 | provider 会话协同回退依赖能力声明（保守缺省 False），未真执行 |
+| C5 切换与接续 | −1.0 | 预设 handoff_inject 保守缺省，真跨家活体交割未开；T3 动态预算+物化交割更深 |
+| D2 权限天花板 | −1.0 | 跨环境请求头与 MCP 子任务两层收窄未覆盖 |
+| E2 契约与兼容 | −1.0 | 回放兼容纪律已补齐；契约单源包（服务端+三端共同消费）仍未建 |
+| A1 状态机 | −0.5 | attempt 代际+执行图节点状态未建 |
+| B1 子代理建模 | −0.5 | 执行图节点树+确定性派生 id 建模未建 |
+| C1 协议覆盖 | −0.5 | registry+v1/v2 双代已补齐；T3 十一家原生专有协议适配（非 ACP agent）的广度仍领先 |
+| C2 能力声明 | −0.5 | 方法面四方法待编排接线；扁平布尔维 vs T3 12 维按域嵌套分组 |
+| C3 进程治理 | −0.5 | cgroup lease+所有权台账未建 |
+| C4 认证与凭据 | −0.5 | auth 生命周期控制器+binding 隔离未建 |
+| D3 多端与远程 | −0.5 | 连接语义单源+按需订阅已落地（scope 端点接线待续）；T3 三路由热切换+DPoP 云中继的完整远程面未覆盖 |
+| E3 性能治理 | −0.5 | 列表渲染回归门已建；T3 审计面更广（steady shells/内存限额自停） |
+
+### 达成判定
+
+- **未全面达标（部分达成，差距继续收窄）**。16 项落后（净尾差 11.5，折百分制 5.8 分）、
+  3 项拉平（B4/D1/E1）、1 项反超保持（A4，+1.0）。
+- 总分：Neurova **85.25 → 86.0**，T3 **91.8**（当期主干 25 笔提交以修复/特性/perf 为主，
+  20 子项能力面无变化），净差由 6.5 收窄至 **5.8**。
+- 本轮实质消解 IDE 接入专项点名的三项差距：C1 的「ACP registry 任意 agent 零代码接入」
+  与「v1/v2 双代协商」、D3 的「心跳/重放窗口/订阅范围单源+按需订阅语义」、E2 的「真实
+  transcript 回放兼容纪律」；G3/G5 落地了适配器方法面与路径安全，但按接线广度口径分别
+  计入 C2/B3 维持与 D2 确认，不调分。
+- 剩余差距仍集中在两类：**接线广度**（B2 多触发点、C5 预设 handoff_inject 保守缺省、
+  C2 四方法编排侧调用方、D3 scope 端点级接线）与**体系深度**（A2 单写事件溯源、
+  A3 effect outbox、E2 契约单源包、C1 原生专有协议适配、C3 cgroup、C4 auth binding、
+  B3 协同回退、A5 多驱动、D2/D3 远程路由面）——均为可继续立项的明确后续，不是机制缺失。
+- 复评纪律说明：本次不为追分放水——C2 方法面四方法尚无编排侧调用方，按「接线广度未达
+  不给下一档」口径维持 9.0；B2 收敛面换道非新触发点不调分；D2 原生模式纪律经提交自证
+  系既有覆盖确认不调分；T3 侧 25 笔漂移逐项核对无能力面变化，各项维持原分。
+  本轮调分仅 C1/D3/E2 三项各 +0.5。
