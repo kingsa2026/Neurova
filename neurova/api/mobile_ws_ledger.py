@@ -26,8 +26,11 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+from neurova.api.connection_runtime import SubscriptionScope
+from neurova.api.connection_runtime import inScope as _frameInScope
+from neurova.api.connection_runtime import parseSubscriptionScope as _parseScope
 from neurova.api.subscription_resume import ResumeDecision
 from neurova.api.subscription_resume import resolveResume as _resolveResumeDecision
 from neurova.core.db_migration import migrate as applyMigrations, register_migration
@@ -160,6 +163,9 @@ class MobileWsLedger:
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        # 订阅范围登记（按需订阅，G4 单源）：pairing_id → SubscriptionScope。
+        # 连接级内存态：断线重连由客户端重新订阅（不落库，不跨进程）。
+        self._subscriptions: Dict[str, SubscriptionScope] = {}
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=5000")
         with self._lock:
@@ -248,8 +254,53 @@ class MobileWsLedger:
             budget=budget,
         )
 
-    def replaySince(self, pairing_id: str, last_seq: int, limit: int = _REPLAY_LIMIT) -> List[Dict[str, Any]]:
-        """按游标补发：返回该设备 ``seq > last_seq`` 的账本帧（升序，带 seq）。"""
+    # ── 订阅范围（按需订阅，G4 单源接线） ────────────────────────────
+
+    def subscribe(self, pairing_id: str, scope: str, scope_key: str = "") -> SubscriptionScope:
+        """登记该设备当前连接的订阅范围（"看一个线程不付全部线程的账"）。
+
+        解析校验走 ``connection_runtime.parseSubscriptionScope`` 单源；非法范围
+        抛 ``ValueError``（fail-closed，不带病登记）。登记后 :meth:`replaySince`
+        只下发落在范围内的帧；未登记时不过滤（与改前行为一致——范围过滤只做
+        加法，``pairing_id`` 归属校验恒在，不放宽）。
+        """
+        parsed = _parseScope(scope, scope_key)
+        with self._lock:
+            self._subscriptions[pairing_id] = parsed
+        return parsed
+
+    def subscriptionOf(self, pairing_id: str) -> Optional[SubscriptionScope]:
+        """读该设备已登记的订阅范围（未登记返回 None）。"""
+        with self._lock:
+            return self._subscriptions.get(pairing_id)
+
+    def unsubscribe(self, pairing_id: str) -> None:
+        """清除订阅登记（连接关闭 / 客户端要求全量重同步时调用）。"""
+        with self._lock:
+            self._subscriptions.pop(pairing_id, None)
+
+    def replaySince(
+        self,
+        pairing_id: str,
+        last_seq: int,
+        limit: int = _REPLAY_LIMIT,
+        scope: Optional[Union[SubscriptionScope, Tuple[str, str]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """按游标补发：返回该设备 ``seq > last_seq`` 的账本帧（升序，带 seq）。
+
+        ``scope``：订阅范围过滤（G4 按需订阅）。可传
+        :class:`~neurova.api.connection_runtime.SubscriptionScope` 或
+        ``(scope, scope_key)`` 元组；缺省回落到 :meth:`subscribe` 登记的该设备
+        订阅，未登记则不过滤（行为与改前一致）。过滤经
+        ``connection_runtime.inScope``：范围外帧与**解析失败（缺/空/错型
+        session_id、thread_id）的帧一律扣下不下发**（fail-closed）。
+        """
+        if scope is None:
+            effectiveScope = self.subscriptionOf(pairing_id)
+        elif isinstance(scope, SubscriptionScope):
+            effectiveScope = scope
+        else:
+            effectiveScope = _parseScope(scope[0], scope[1] if len(scope) > 1 else "")
         with self._lock:
             rows = self._conn.execute(
                 "SELECT seq, frame_json FROM mobile_ws_events"
@@ -261,6 +312,8 @@ class MobileWsLedger:
             try:
                 frame = json.loads(row["frame_json"])
             except Exception:  # noqa: BLE001 - 留档损坏的帧跳过（不阻断后续补发）
+                continue
+            if effectiveScope is not None and not _frameInScope(frame, effectiveScope):
                 continue
             out.append({"seq": int(row["seq"]), "frame": frame})
         return out

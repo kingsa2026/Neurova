@@ -30,6 +30,9 @@ from neurova.api.ws_stream_budget import ReplayByteBudget
 __all__ = [
     "RESUME_MODE_REPLAY",
     "RESUME_MODE_SNAPSHOT",
+    "RECONNECT_BACKOFF_BASE_S",
+    "RECONNECT_BACKOFF_CAP_S",
+    "RECONNECT_BACKOFF_JITTER_FRACTION",
     "ResumeDecision",
     "resolveResume",
     "resolveResumeMode",
@@ -41,6 +44,13 @@ __all__ = [
 RESUME_MODE_REPLAY = "replay"
 #: 降级全量快照（游标过旧 / 非法 / 预算耗尽 / 首连）
 RESUME_MODE_SNAPSHOT = "snapshot"
+
+#: 三端统一重连退避参数（reconnectBackoff 的缺省语义单源；
+#: connection_runtime.describeForClients 下发给三端的就是这三个值，不另抄）
+RECONNECT_BACKOFF_BASE_S = 0.5
+RECONNECT_BACKOFF_CAP_S = 30.0
+#: 缺省抖动幅度：最终时延在封顶后基础值上乘 ``[1-j, 1+j]`` 均匀分布
+RECONNECT_BACKOFF_JITTER_FRACTION = 0.2
 
 
 @dataclass(frozen=True)
@@ -118,8 +128,8 @@ def resolveResumeMode(
 def reconnectBackoff(
     attempt: int,
     *,
-    base_s: float = 0.5,
-    cap_s: float = 30.0,
+    base_s: float = RECONNECT_BACKOFF_BASE_S,
+    cap_s: float = RECONNECT_BACKOFF_CAP_S,
     jitter_fn=None,
 ) -> float:
     """三端统一的重连退避：``min(base_s * 2^attempt, cap_s)``，缺省 ±20% 抖动。
@@ -127,7 +137,7 @@ def reconnectBackoff(
     - ``attempt`` 负数按 0 处理；封顶在抖动**之前**生效（结果至多 ``cap_s * 1.2``）；
     - ``jitter_fn(delay_s) -> float`` 可注入：收到封顶后的基础时延，返回最终时延
       （确定性测试传 ``lambda d: d``；平台可接自己的随机源）；
-    - 缺省抖动 ``random.uniform(0.8, 1.2)``（±20%）。
+    - 缺省抖动 ``±RECONNECT_BACKOFF_JITTER_FRACTION``（±20%）。
 
     本函数是 PC / 鸿蒙 / 安卓三端重连退避的**语义单源**：客户端 SDK 按此处
     公式实现，服务端在下发的续传/重连说明里引用同一语义，不再各自手抄。
@@ -136,7 +146,8 @@ def reconnectBackoff(
     raw = min(float(base_s) * (2 ** n), float(cap_s))
     if jitter_fn is not None:
         return float(jitter_fn(raw))
-    return raw * random.uniform(0.8, 1.2)
+    j = RECONNECT_BACKOFF_JITTER_FRACTION
+    return raw * random.uniform(1 - j, 1 + j)
 
 
 def dedupBySequence(frames: Optional[List[Any]]) -> List[Any]:

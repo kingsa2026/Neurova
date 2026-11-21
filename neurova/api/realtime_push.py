@@ -30,7 +30,12 @@ import json
 import time
 from typing import Any, AsyncIterator, Callable, List, Optional, Tuple
 
+from neurova.api.connection_runtime import HEARTBEAT_INTERVAL_S, heartbeat_interval_s
 from neurova.api.ws_stream_budget import ReplayByteBudget, enforceEventCap
+
+#: 改前签名里硬编码的心跳缺省（15.0）收口到 connection_runtime 后的现值别名，
+#: 供回归钉与外部引用；运行时缺省经 heartbeat_interval_s() 解析（env 可覆盖）。
+DEFAULT_HEARTBEAT_INTERVAL_S = HEARTBEAT_INTERVAL_S
 
 #: 增量源永久关闭的哨兵（区别于"本轮心跳超时"的 None）
 FEED_EXHAUSTED = object()
@@ -102,7 +107,7 @@ async def ssePushStream(
     feed: Any,
     renderFrame: Callable[[Any], str],
     authorize: Optional[Callable[[], bool]] = None,
-    heartbeatInterval: float = 15.0,
+    heartbeatInterval: Optional[float] = None,
     maxFrames: Optional[int] = None,
     byte_budget: Optional[ReplayByteBudget] = None,
     event_cap: Optional[int] = None,
@@ -112,6 +117,11 @@ async def ssePushStream(
     时序：feed 建立（订阅）先于 snapshot()（读首屏）——这是"订阅先于读首屏"的
     落点；快照尾游标交给 nextFrame 做增量，衔接处不漏不重。maxFrames 为测试钩子
     （发满即收尾；生产不传 = 无限流）。
+
+    ``heartbeatInterval`` 缺省从连接运行时单源取
+    （``connection_runtime.heartbeat_interval_s()``，env
+    ``NEUROVA_HEARTBEAT_INTERVAL_S`` 可覆盖；缺省值与改前硬编码的 15.0 一致，
+    显式传参仍优先）。
 
     字节治理（E3，可选；**不传这两个参数时行为与既有出口逐字一致**）：
 
@@ -133,6 +143,10 @@ async def ssePushStream(
       （与全局事件库 ``replayThrough`` 的 degraded → 快照降级协议同构）。
       心跳注释帧（``: keep-alive``）不记账。
     """
+    if heartbeatInterval is None:
+        # G4 单源接线：缺省心跳间隔从 connection_runtime 取（env 可覆盖）。
+        # 现值与改前硬编码 15.0 一致——行为零差异，只是数值不再第二处手抄。
+        heartbeatInterval = heartbeat_interval_s()
     sent = 0
     lastKey: Optional[Any] = None
 
