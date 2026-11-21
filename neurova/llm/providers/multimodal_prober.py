@@ -11,12 +11,18 @@ import json
 from neurova.core.logger import get_logger
 import os
 import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import dataPath
 from neurova.core.time_utils import nowIso as _now_iso
+
+try:
+    import aiohttp
+except ImportError:  # 探测矩阵的 HTTP 层；测试经本模块命名空间打桩
+    aiohttp = None
 
 logger = get_logger(__name__)
 
@@ -373,3 +379,254 @@ def evaluate_image_probe_answer(answer: Any) -> Dict[str, Any]:
     if any(m in text for m in positive_markers):
         return {"supports_vision": True, "confidence": 0.85, "reason": "positive_marker"}
     return {"supports_vision": False, "confidence": 0.2, "reason": "no_marker"}
+
+
+# ---------------------------------------------------------------------------
+# 视觉探测矩阵（M7，2026-11-22）：按 provider 协议族构建真图探测请求。
+#
+# 此前只有 openai 一家发真图（openai_provider._image_probe_request），其余
+# provider 的 probe_model_multimodal 是名称启发式（恒 supported=True）——
+# 声明与实测的一致性无从对齐。矩阵把「红图 + 主色调提问」的请求形态按协议
+# 族收口到本模块一处：openai 兼容族（openrouter/ollama/lm_studio/opencode…）、
+# anthropic 原生 /v1/messages、gemini 原生 generateContent(inline_data)。
+# 红图与提问复用 openai_provider 的既有单源（懒加载取用，不另造第二份）；
+# HTTP 层经本模块命名空间的 aiohttp 打桩即可进 CI，真 Key 手动档走同一入口。
+# ---------------------------------------------------------------------------
+
+#: 纯红答案的判定词（与 openai_provider 的红图口径一致：答出红色系才算真看见）
+_RED_ANSWER_KEYWORDS = ("red", "scarlet", "crimson", "红", "赤")
+
+_GEMINI_PROVIDER_KINDS = frozenset({"gemini", "google", "google-vertex", "google-cn"})
+
+
+@dataclass(frozen=True)
+class ImageProbeRequest:
+    """一个 provider 协议族的图像探测请求（protocol 决定答案提取口径）。"""
+
+    protocol: str
+    url: str
+    headers: Dict[str, str]
+    payload: Dict[str, Any]
+
+
+def _probeAssets() -> "tuple[str, str]":
+    """红图 base64 与提问文案（懒加载复用 openai_provider 的既有单源）。"""
+    from neurova.llm.providers.openai_provider import OpenAIProvider, _redProbeSquareBase64
+
+    return _redProbeSquareBase64(), OpenAIProvider._IMAGE_PROBE_PROMPT
+
+
+def buildImageProbeRequest(
+    providerType: str,
+    modelId: str,
+    baseUrl: str,
+    apiKey: str,
+) -> ImageProbeRequest:
+    """provider 类型 → 该协议族的真图探测请求（纯函数，单一事实源）。
+
+    未显式认识的类型一律按 OpenAI 兼容族处理（openrouter/ollama/lm_studio/
+    opencode/deepseek 等都是 /chat/completions 形态）。
+    """
+    kind = (providerType or "").strip().lower()
+    imageB64, prompt = _probeAssets()
+
+    if kind == "anthropic":
+        from neurova.llm.providers.anthropic_client import anthropic_endpoint_url
+
+        return ImageProbeRequest(
+            protocol="anthropic",
+            url=anthropic_endpoint_url(baseUrl),
+            headers={
+                "x-api-key": apiKey or "",
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            payload={
+                "model": modelId,
+                "max_tokens": 200,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": imageB64,
+                                },
+                            },
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ],
+            },
+        )
+
+    if kind in _GEMINI_PROVIDER_KINDS:
+        from neurova.llm.providers.gemini_client import geminiImagePartFromUrl
+
+        base = (baseUrl or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+        if "/v1beta" not in base:
+            base = f"{base}/v1beta"
+        short = (modelId or "").split("/")[-1]
+        return ImageProbeRequest(
+            protocol="gemini",
+            url=f"{base}/models/{short}:generateContent",
+            headers={"x-goog-api-key": apiKey or "", "Content-Type": "application/json"},
+            payload={
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [
+                            geminiImagePartFromUrl(f"data:image/png;base64,{imageB64}"),
+                            {"text": prompt},
+                        ],
+                    }
+                ],
+                "generationConfig": {"maxOutputTokens": 200},
+            },
+        )
+
+    base = (baseUrl or "https://api.openai.com/v1").rstrip("/")
+    return ImageProbeRequest(
+        protocol="openai",
+        url=f"{base}/chat/completions",
+        headers={
+            "Authorization": f"Bearer {apiKey or ''}",
+            "Content-Type": "application/json",
+        },
+        payload={
+            "model": modelId,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{imageB64}"},
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
+            "max_tokens": 200,
+            "stream": False,
+        },
+    )
+
+
+def extractProbeAnswer(protocol: str, data: Dict[str, Any]) -> str:
+    """按协议族从探测响应里提取模型文本答案。"""
+    if protocol == "anthropic":
+        blocks = data.get("content") or []
+        texts = [
+            str(b.get("text") or "")
+            for b in blocks
+            if isinstance(b, dict) and b.get("type") == "text"
+        ]
+        return "\n".join(t for t in texts if t)
+    if protocol == "gemini":
+        candidates = data.get("candidates") or [{}]
+        parts = ((candidates[0] or {}).get("content") or {}).get("parts") or []
+        return "\n".join(
+            str(p.get("text") or "") for p in parts if isinstance(p, dict) and p.get("text")
+        )
+    choices = data.get("choices") or [{}]
+    message = choices[0].get("message") or {}
+    return str(message.get("content") or message.get("reasoning_content") or "")
+
+
+async def _sendImageProbe(request: ImageProbeRequest, timeoutSeconds: float) -> str:
+    """发探测请求并提取答案；HTTP >= 400 抛异常（由 probeProviderVision 归一）。"""
+    if aiohttp is None:
+        raise RuntimeError("aiohttp 未安装，无法进行图像探测")
+    timeout = aiohttp.ClientTimeout(total=timeoutSeconds) if hasattr(aiohttp, "ClientTimeout") else None
+    async with aiohttp.ClientSession() as session:
+        kwargs: Dict[str, Any] = {"headers": request.headers, "json": request.payload}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        async with session.post(request.url, **kwargs) as response:
+            if response.status >= 400:
+                detail = ""
+                try:
+                    body = await response.json()
+                    detail = str(body.get("error", {}).get("message", body))
+                except Exception:  # noqa: BLE001 — body 解析失败保留状态码信息
+                    detail = await response.text() if hasattr(response, "text") else ""
+                exc = RuntimeError(f"HTTP {response.status}: {detail or 'probe rejected'}")
+                exc.status_code = response.status
+                raise exc
+            data = await response.json()
+            return extractProbeAnswer(request.protocol, data)
+
+
+async def probeProviderVision(
+    providerType: str,
+    modelId: str,
+    baseUrl: str,
+    apiKey: str,
+    timeoutSeconds: float = 20.0,
+):
+    """对任意 provider 协议族发真图探测，返回归一的 ProbeResult。
+
+    - 答出红色系/正向看见 → supported=True + vision；
+    - 请求被媒体关键词拒绝 → supported=False（probe_source=probed）；
+    - 其他错误（限频/网络/网关）→ probe_source=inconclusive，不下结论；
+    - 永不抛异常：探测失败必须归一返回，不炸调用链。
+    """
+    from neurova.llm.providers.openai_provider import OpenAIProvider
+    from neurova.llm.providers.types import ProbeResult
+
+    request = buildImageProbeRequest(providerType, modelId, baseUrl, apiKey)
+    start_time = time.time()
+
+    try:
+        answer = await _sendImageProbe(request, timeoutSeconds)
+    except Exception as e:  # noqa: BLE001 — 探测失败归一返回
+        message = str(e).lower()
+        if OpenAIProvider._is_media_keyword_error(message):
+            return ProbeResult(
+                model_id=modelId,
+                supported=False,
+                capabilities=[],
+                latency_ms=(time.time() - start_time) * 1000,
+                metadata={
+                    "protocol": request.protocol,
+                    "probe_source": "probed",
+                    "probe_detail": "media_rejected",
+                },
+            )
+        return ProbeResult(
+            model_id=modelId,
+            supported=False,
+            capabilities=[],
+            latency_ms=(time.time() - start_time) * 1000,
+            metadata={
+                "protocol": request.protocol,
+                "probe_source": "inconclusive",
+                "probe_detail": str(e)[:300],
+            },
+        )
+
+    evaluation = evaluate_image_probe_answer(answer)
+    answer_text = str(answer or "").strip()
+    saw_red = any(k in answer_text.lower() for k in _RED_ANSWER_KEYWORDS)
+    if evaluation.get("supports_vision") or saw_red:
+        supported, source, capabilities = True, "probed", ["vision"]
+    elif evaluation.get("confidence", 0) >= 0.5:
+        supported, source, capabilities = False, "probed", []
+    else:
+        supported, source, capabilities = False, "inconclusive", []
+
+    return ProbeResult(
+        model_id=modelId,
+        supported=supported,
+        capabilities=capabilities,
+        latency_ms=(time.time() - start_time) * 1000,
+        metadata={
+            "protocol": request.protocol,
+            "probe_source": source,
+            "probe_answer": answer_text[:200],
+        },
+    )
