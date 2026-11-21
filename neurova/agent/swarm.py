@@ -2026,9 +2026,11 @@ class SwarmManager:
                 return await self._updateSubagentInner(
                     sid, message, mode="steer", background=background,
                     session_id=session_id, initiator_agent=initiator_agent)
-            from neurova.core.steer_queue import get_steer_queue
+            # G3 收敛面：steer 经 NeuacpMemberSurface（邮箱机制不依赖 agent 侧
+            # 支持，面内不加能力闸；编排层禁止绕过面直写队列）。
+            from neurova.agent.neuacp.adapter_surface import NeuacpMemberSurface
 
-            delivered = get_steer_queue().push(run.member_session_id, text)
+            delivered = NeuacpMemberSurface.forRun(run).steer(text)
             self._logRunEvent(run, "update_injected", {
                 "mode": "steer", "delivered": bool(delivered), "message": text[:120],
             })
@@ -2173,7 +2175,12 @@ class SwarmManager:
         # B2（参照系 ac 借鉴）：续跑衔接升级为上下文传递工件（登记/预算/省略
         # 可恢复/inline 投递/事件留痕），替代旧的 report[:4000] 裸截断。
         task = message.strip()
-        handoffText, handoffMeta = self._buildResumeHandoff(old)
+        # G3 收敛面：交接工件构建经 NeuacpMemberSurface（跨 executor 时在面内
+        # 按既有五结果判定同口径要求 handoff_inject；工件本体仍复用
+        # _buildResumeHandoff 单一实现，编排层禁止绕过面直建）。
+        from neurova.agent.neuacp.adapter_surface import NeuacpMemberSurface
+
+        handoffText, handoffMeta = NeuacpMemberSurface.forRun(old).handoffArtifact(message)
         if handoffText:
             task = f"{handoffText}\n\n[续跑指令]\n{task}"
         elif handoffMeta.get("failed"):
