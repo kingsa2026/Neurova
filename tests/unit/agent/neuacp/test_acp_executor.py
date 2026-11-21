@@ -101,3 +101,47 @@ def test_closeIsIdempotent():
         await executor.close()
 
     asyncio.run(run())
+
+
+def test_chunkStreamsWhilePermissionPending():
+    """M9：权限等待期间泵线程不被阻塞——裁决前的正文 chunk 应先于裁决到达。
+
+    旧契约下权限处理器在泵线程同步等人审，agent 紧随权限请求之后发出的
+    帧全部滞留；新契约下处理器先返回、裁决走工作线程，chunk 即时派发。
+    注意：事件循环线程上不得用阻塞 Event.wait（会饿死同循环的 prompt 任务），
+    一律 async 轮询。
+    """
+    import threading
+    import time
+
+    async def run():
+        executor, ctx, _ = makeExecutor("acp_permission_then_chunk")
+        askEntered = threading.Event()
+        releaseAsk = threading.Event()
+
+        def slow_asker(action, reason, context):
+            askEntered.set()
+            releaseAsk.wait(10)
+            return {"approved": False}
+
+        await executor.start(ctx)
+        chunks = []
+        promptTask = asyncio.create_task(executor.prompt(
+            "改配置", lambda kind, text: chunks.append((kind, text)), slow_asker))
+        deadline = time.time() + 10
+        while not askEntered.is_set() and time.time() < deadline:
+            await asyncio.sleep(0.05)
+        assert askEntered.is_set(), "权限请求未到达裁决器"
+        while not any("裁决等待期间" in text for _, text in chunks) and time.time() < deadline:
+            await asyncio.sleep(0.05)
+        assert any("裁决等待期间" in text for _, text in chunks), "权限等待期间泵线程必须继续派发帧（chunk 先于裁决到达）"
+        releaseAsk.set()
+        result = await promptTask
+        await executor.close()
+        return chunks, result
+
+    chunks, result = asyncio.run(run())
+    assert ("content", "权限被拒，任务中止") in chunks
+    assert result.stop_reason == "end_of_turn"
+
+

@@ -66,6 +66,21 @@ def main():
             continue
 
         if method == "session/prompt":
+            if mode == "acp_permission_then_chunk":
+                # M9：先发权限请求，**不等裁决**先发一段正文——旧同步处理器下
+                # 这段会被泵线程阻塞到裁决之后才派发；新契约下应即时到达。
+                send(out, {"jsonrpc": "2.0", "id": 9001, "method": "session/request_permission", "params": {"toolCall": {"title": "写入 src/app.py"}, "options": [{"kind": "allow"}]}})
+                send(out, {"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "sess-1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "裁决等待期间的心跳正文"}}}})
+                resp_line = sys.stdin.buffer.readline()
+                try:
+                    resp = json.loads(resp_line.decode("utf-8"))
+                except Exception:
+                    resp = {}
+                choice = ((resp.get("result") or {}).get("outcome") or {}).get("choice")
+                if choice != "allow":
+                    send(out, {"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "sess-1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "权限被拒，任务中止"}}}})
+                send(out, {"jsonrpc": "2.0", "id": msg_id, "result": {"stopReason": "end_of_turn"}})
+                continue
             if mode in ("acp_flow", "acp_permission"):
                 send(out, {"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "sess-1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "你好 Neuacp"}}}})
                 send(out, {"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "sess-1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"text": "思考中"}}}})

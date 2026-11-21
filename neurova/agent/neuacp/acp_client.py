@@ -349,10 +349,14 @@ class NeuacpClient:
     def notify(self, method: str, params: Optional[dict] = None) -> None:
         self._sendFrame({"jsonrpc": "2.0", "method": method, "params": params or {}})
 
-    def setRequestHandler(self, method: str, handler: Callable[[dict], dict]) -> None:
+    def setRequestHandler(self, method: str,
+                          handler: Callable[[dict, "Callable[[dict], None]"], None]) -> None:
         """注册 agent→client 方向的请求处理器（如 session/request_permission）。
 
-        handler 在泵线程内同步调用，返回值作为 JSON-RPC result 回给 agent。
+        M9 契约：处理器在泵线程内被调用为 ``handler(params, respond)``——
+        **不得阻塞泵线程**；需要等待（如人审）的处理器先返回，稍后经
+        ``respond``（线程安全，可任意线程调用）补发 JSON-RPC result 应答帧。
+        处理器抛异常 = 自动回错误帧（code -32000）。
         """
         with self._lock:
             self._request_handlers[method] = handler
@@ -458,15 +462,20 @@ class NeuacpClient:
         with self._lock:
             handler = self._request_handlers.get(method)
         if handler is not None and msg_id is not None:
+            def _respond(payload: dict) -> None:
+                """M9：延迟应答出口（线程安全——_sendFrame 自带写锁与帧账本锁）。"""
+                try:
+                    self._sendFrame({"jsonrpc": "2.0", "id": msg_id, "result": payload})
+                except NeuacpError:
+                    pass
             try:
-                result = handler(message.get("params") or {})
-                response = {"jsonrpc": "2.0", "id": msg_id, "result": result}
+                handler(message.get("params") or {}, _respond)
             except Exception as exc:
-                response = {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32000, "message": str(exc)}}
-            try:
-                self._sendFrame(response)
-            except NeuacpError:
-                pass
+                try:
+                    self._sendFrame({"jsonrpc": "2.0", "id": msg_id,
+                                     "error": {"code": -32000, "message": str(exc)}})
+                except NeuacpError:
+                    pass
             return
         if self._on_event is not None:
             try:

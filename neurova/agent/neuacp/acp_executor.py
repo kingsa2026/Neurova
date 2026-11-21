@@ -410,11 +410,22 @@ class NeuacpStdioExecutor:
             return codec.permissionResponse({"approved": False}, params)
         return {"outcome": {"choice": "deny"}}
 
-    def _handlePermissionRequest(self, params: dict) -> dict:
+    def _handlePermissionRequest(self, params: dict, respond) -> None:
+        """session/request_permission 处理器（M9 契约：泵线程调用，**不阻塞**）。
+
+        裁决挪到独立工作线程——人审等待期间泵线程继续派发流式 chunk/心跳/
+        崩溃通知；裁决完成后经 ``respond`` 补发应答帧（JSON-RPC 按 id 配对，
+        允许晚于其它帧到达）。asker 未注册/异常一律 fail-closed deny。
+        """
         codec = self._client.codec
         asker = self._permission_asker
+
+        def _deny() -> None:
+            respond(self._permissionDenyResponse(params))
+
         if asker is None:
-            return self._permissionDenyResponse(params)
+            _deny()
+            return
         if codec is not None:
             # v2：主体在 subject 面包（tool_call/command），标题提至顶层 title。
             subject = params.get("subject") or {}
@@ -431,11 +442,21 @@ class NeuacpStdioExecutor:
         # 未声明按 other（审批档由适配器按 kind 声明、链内危险正则统一升档）。
         kind = str(tool.get("kind") or "other")
         action = f"acp:{toolName}:{kind}"
-        try:
-            decision = asker(action, reason_text, json.dumps(params, ensure_ascii=False))
-        except Exception:
-            return self._permissionDenyResponse(params)
-        approved = bool((decision or {}).get("approved"))
-        if codec is not None:
-            return codec.permissionResponse(decision, params)
-        return {"outcome": {"choice": "allow" if approved else "deny"}}
+
+        def _askWorker() -> None:
+            try:
+                decision = asker(action, reason_text, json.dumps(params, ensure_ascii=False))
+            except Exception:
+                _deny()
+                return
+            approved = bool((decision or {}).get("approved"))
+            try:
+                if codec is not None:
+                    respond(codec.permissionResponse(decision, params))
+                else:
+                    respond({"outcome": {"choice": "allow" if approved else "deny"}})
+            except Exception:
+                _deny()
+
+        threading.Thread(target=_askWorker, daemon=True,
+                         name=f"neuacp-permission-{toolName}").start()

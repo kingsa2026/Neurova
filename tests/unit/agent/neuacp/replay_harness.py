@@ -157,8 +157,8 @@ def runScenarioSteps(
             elif op == "set_permission_handler":
                 choice = str(step.get("choice", "deny"))
 
-                def _decide(_params, _choice=choice):
-                    return {"outcome": {"choice": _choice}}
+                def _decide(_params, _respond, _choice=choice):
+                    _respond({"outcome": {"choice": _choice}})
 
                 client.setRequestHandler("session/request_permission", _decide)
                 outcome["ok"] = True
