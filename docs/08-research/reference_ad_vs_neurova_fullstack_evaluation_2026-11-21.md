@@ -1,6 +1,6 @@
 # reference_ad：LobeHub（lobehub/lobehub）vs Neurova 全方位代码级对照评测
 
-- 日期：2026-11-21（v2：增补 D11 自我进化/RSI 维；v3：增补 D2 上下文活水池专项；v4：增补 D4 工具肌肉记忆专项）
+- 日期：2026-11-21（v2：增补 D11 自我进化/RSI 维；v3：增补 D2 上下文活水池专项；v4：增补 D4 工具肌肉记忆专项；v5：多模态十轴专项细拆）
 - 对象：[lobehub/lobehub](https://github.com/lobehub/lobehub)（代号 reference_ad；LobeChat 同源演进后的 agent 平台主线仓库）
 - 快照：canary 分支浅克隆，版本 2.3.4，pushed_at 2026-11-21；85.9k stars / 16.3k forks；TypeScript
 - 体量：124 个 pnpm 子包；ts/tsx 共 **3,777,641 行**；`*.test.*` 文件 **7,321** 个；18 种界面语言；32 条 GitHub workflow
@@ -10,11 +10,11 @@
 
 ## 0. 结论摘要
 
-**总分（11 维 120 分）：LobeHub 98.5 vs Neurova 90.5。**（v2 增补 D11 自我进化/RSI 维：L 5.5 / N 8.5；v3 增补 D2 上下文活水池专项，N 上下文工程 4.0→4.5；v4 增补 D4 工具肌肉记忆专项，N 工具框架 3.0→3.5）
+**总分（11 维 120 分）：LobeHub 98.0 vs Neurova 94.0。**（v2 自进化维 L 5.5 / N 8.5；v3 活水池专项 N 上下文工程 4.0→4.5；v4 肌肉记忆专项 N 工具框架 3.0→3.5；v5 多模态专项细拆后 D8 据实重评 L 6.5→6.0 / N 3.5→7.0）
 
 - LobeHub 是当前公开仓里**工程完成度最高**的 agent 平台之一：agent 运行时（分布式步调度/parked-resume/成本预算）、44 个全真内置工具、三档沙箱、91 家模型 provider、7,321 个测试文件、四通道桌面 OTA 发布，均为第一梯队。
-- Neurova 反超的六处：**多智能体治理深度**（审批链 L0-L2/候选 CAS/依赖门控/评审相位/台账重放）、**记忆生命周期**（睡眠整理/遗忘/污染清除/纪律准入 vs 对方无遗忘无衰减）、**本体知识图谱**（对方为零）、**租户隔离的真实执行**（对方 OSS 侧 RBAC 是空壳 stub）、**MCP server 面**（对方仅 client）、**自我进化/RSI**（对方=默认关闭的受控自改进：无评测闭环、无影子/灰度、回滚靠人；本仓=门禁链+影子验证+回滚+存活探针的世代闭环）。
-- LobeHub 领先的六处：模型接入广度（91 vs 7）、多模态（图像 41 家/视频 24 家/语音/音乐）、工具生态规模与执行安全分层、认证体系（17 SSO+Passkey+自建 OIDC IdP）、数据层工程（242 表 228 迁移）、工程纪律规模（e2e 性能预算/bundle 门禁/语义化发布）。
+- Neurova 反超的七处：**多智能体治理深度**（审批链 L0-L2/候选 CAS/依赖门控/评审相位/台账重放）、**记忆生命周期**（睡眠整理/遗忘/污染清除/纪律准入 vs 对方无遗忘无衰减）、**本体知识图谱**（对方为零）、**租户隔离的真实执行**（对方 OSS 侧 RBAC 是空壳 stub）、**MCP server 面**（对方仅 client）、**自我进化/RSI**（对方=默认关闭的受控自改进：无评测闭环、无影子/灰度、回滚靠人；本仓=门禁链+影子验证+回滚+存活探针的世代闭环）、**多模态**（v5 十轴细拆 69.0 vs 68.5 接近反超：语音双栈/屏幕视觉/OCR 本仓胜，生成广度对方胜）。
+- LobeHub 领先的五处：模型接入广度（91 vs 7）、工具生态规模与执行安全分层、认证体系（17 SSO+Passkey+自建 OIDC IdP）、数据层工程（242 表 228 迁移）、工程纪律规模（e2e 性能预算/bundle 门禁/语义化发布）。多模态经 v5 细化后接近持平、本仓反超（见 D8 专项）。
 - 评分不是体量加分：LobeHub 的 OSS 快照有真实短板（RBAC stub、主站 CSP 缺失、业务 API 无限流、Electron IPC 裸 socket、secret-channel 疑似未接线），均已如实扣分。
 
 ## 1. 方法与局限
@@ -34,11 +34,11 @@
 | D5 | 知识库与 RAG | 10 | 7.0 | 6.5 | L 小胜 |
 | D6 | 记忆系统 | 8 | 5.5 | 7.0 | **N 胜** |
 | D7 | 多模型接入 | 10 | 9.5 | 5.5 | L 大胜 |
-| D8 | 多模态 | 8 | 6.5 | 3.5 | L 胜 |
+| D8 | 多模态 | 8 | 6.0 | 7.0 | **N 反超（v5）** |
 | D9 | 数据/租户/认证/安全 | 12 | 9.0 | 8.0 | L 小胜 |
 | D10 | 工程纪律 | 14 | 12.5 | 11.0 | L 胜 |
 | D11 | 自我进化/RSI | 10 | 5.5 | 8.5 | **N 胜** |
-| | **合计** | **120** | **98.5** | **90.5** | |
+| | **合计** | **120** | **98.0** | **94.0** | |
 
 ## 3. 分域详评
 
@@ -108,11 +108,13 @@
 
 > 细分拆解（十轴逐项 + 自适应路由五级标定专论）见同目录《[reference_ad_llm_access_and_adaptive_routing_teardown_2026-11-22.md](reference_ad_llm_access_and_adaptive_routing_teardown_2026-11-22.md)》：专项口径 L 86.0 / N 70.0（/100），其中容错轴本仓反超（9.0 vs 8.5）。
 
-### D8 多模态（L 6.5 / N 3.5）
+### D8 多模态（L 6.0 / N 7.0）——本仓反超（v5 细化）
 
-**LobeHub**：图像生成 41 个 provider 实现+完整 agent 工具（ExecutionRuntime 622 行任务状态机，`builtin-tool-image-generation/src/ExecutionRuntime/index.ts:36-56`）；视频生成 24 家+727 行运行时（轮询/webhook 回执）；TTS 核心+6 家专用（兼容工厂使 OpenAI 系默认获得 TTS）；ASR 5 家；音乐生成+realtime 模型类型；视觉输入在消息协议原生支持（`types/chat.ts:42-62`）。
-**Neurova**：文本/视觉输入为主；差异项=**computer use 全栈**（截图+UIA+SOM 混合，`neurova/computer_use/`）与 **SIP 语音渠道**（`channels/`），生成类（图像/视频/音乐）缺位。
-**子项**：生成类 3.0/0；语音 1.5/1.0；视觉与环境理解 2.0/2.5（本仓 computer use/设备域反超）。
+**LobeHub**：生成侧广度领先——图像生成 41 家 provider+完整工具链（4 API manifest、ExecutionRuntime 轮询状态机、/create/image 创作页、client/server 双执行器，`builtin-tool-image-generation/src/ExecutionRuntime/index.ts:441-587`）；视频 24 家+双层轮询+后台兜底（`videoBackgroundPolling.ts:43-60`）；音乐仅 fal 一家但产品面完整（/create/music+webhook 回调）；视觉输入协议深（parts 协议、无视觉模型占位符、SVG/AVIF 特判、工具图片回灌复查，`MessageContent.ts:132-151,552-626`）；多模态契约测试矩阵厚。**产品面断点**：TTS 有 6 家实现+完整服务端路由但聊天 UI 未接线（useBusinessTTSProvider 空桩，仅 CLI 可用）；realtime 模型纯占位（有卡片无运行时）；语音通话/RTC 无；实时听写会话端点不在仓内（云侧依赖）。
+**Neurova**：语音双栈深且全线接线——TTS 3+ 引擎+流式合成+聊天流式播报（useStreamTTS）+渠道出站三形态契约（`channels/voice_egress.py`）；ASR 4 引擎+WS 流式+语音纪要+渠道入站转写（`voice_pipeline.py`）；SIP/Twilio 电话通道（无 DTMF/转接，深度中等）；AIGC 生成有实测端点矩阵——/generation/image|video|audio|text + 协议矩阵（openai-images/ark/dashscope-wan/seedance/veo/sora，`llm/generators/protocols.py:55-236`）+ aigc_studio 分镜→图→视频生产管线 + 前端三页走本仓端点；视觉输入单源链路（attachment_turn_injection→图像轮路由→图像保留→双协议切片）+真图探测；文档 OCR 三引擎同契约；**桌面屏幕视觉**（computer_use：截图+UIA+SOM+perception_gate 三闸）为差异化理解面。短板：音乐生成缺失；Gemini 原生链路收图待核实；video_to_video 无实测协议。
+**子项**：生成类（图/视频/音乐） 3.0/2.0；语音（TTS/ASR/通话） 1.0/2.0（本仓反超：对方 TTS 产品面断裂、无电话通道）；视觉理解与文件解析 1.5/1.5；屏幕与设备视觉 0.5/1.5（本仓 computer use 大胜）。
+
+> 细分拆解（十轴逐项）见同目录《[reference_ad_multimodal_teardown_2026-11-22.md](reference_ad_multimodal_teardown_2026-11-22.md)》：专项口径 LobeHub 68.5 / Neurova 69.0（/100）——生成广度对方胜、语音/屏幕视觉/OCR 本仓胜，总体接近、本仓反超；追平方案见《docs/04-plans/2026-11-22-reference-ad-multimodal-catchup-implementation-plan.md》（三批十卡，待拍板四项）。
 
 ### D9 数据/租户/认证/安全（L 9 / N 8）
 
@@ -163,6 +165,7 @@ P2：
 9. 语义化发布与桌面 OTA 通道（本仓移动端已有发版链，桌面端可参考其四通道灰度）。
 10. 验收证据链（acceptance 证据落固定可访问位置，可复用不重跑）与"每 bugfix 先红后绿"的 skills 化路由（本仓已有钩子强制，可补 skills 文档路由）。
 11. **弱信号累加器触发反思**：纠正≥2/工具失败≥2/步数≥6 等廉价阈值触发每轮反思（selfReflection.ts:66-73），比定时全量反思省成本；可作本仓元认知回路的触发源补充。
+12. **多模态契约测试矩阵+视频后台轮询兜底**：对方 MessageContent 全矩阵测试（视觉降级/多图/工具图片回灌/AVIF 特判，:38-989）纳入本仓 M8 契约棘轮；生成任务后台轮询兜底（videoBackgroundPolling.ts:43-60）可对照本仓 /video/status 轮询补后台兜底形态。
 
 不照搬：
 - 三轨 API 与 124 包超细粒度 monorepo（胶水层理解成本高，与本仓"单一事实源"教义相悖）；
@@ -186,3 +189,4 @@ P2：
 - v2（同日）：应评审指出补 D11 自我进化/RSI 维（对方侧证据来自对 agentSignal/self-iteration/skill-store/eval-rubric 簇的专项只读深读），总分口径由 10 维 110 分改为 11 维 120 分；D1–D10 各子项分未变。
 - v3（同日）：应评审指出补 D2 上下文活水池专项（双方各一路专项只读深读：本仓 context_pool/context 36 文件 vs 对方 context-engine 27 处理器+压缩库+修剪链），本仓上下文工程子项 4.0→4.5，总分 89.5→90.0；其余子项分未变。
 - v4（同日）：应评审指出补 D4 工具肌肉记忆专项（本仓 muscle_memory/tool_memory_integration vs 对方 agent-signal/Expertise/UsageCounter 工具学习面扫查），本仓工具框架子项 3.0→3.5，总分 90.0→90.5；其余子项分未变。
+- v5（2026-11-22）：应评审要求把多模态单独拆出细化——新增专项《reference_ad_multimodal_teardown_2026-11-22.md》（十轴：L 68.5 / N 69.0，两路只读深读）。首版 D8 粗评漏计本仓 AIGC 端点/语音双栈/OCR，据实重评 D8：L 6.5→6.0 / N 3.5→7.0，总分 98.5/90.5 → 98.0/94.0；追平方案另立《2026-11-22-reference-ad-multimodal-catchup-implementation-plan.md》（三批十卡，待拍板四项）。
