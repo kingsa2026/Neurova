@@ -837,6 +837,9 @@ def _isolate_evolution_state_paths(tmp_path, monkeypatch):
         ("NEUROVA_EVOLUTION_EXPERIENCE", "experience_feedback.json"),
         ("NEUROVA_EVOLUTION_SKILL_EXPERIENCE", "skill_experiences.json"),
         ("NEUROVA_EVOLUTION_ROLLBACK", "rsi_rollback.json"),
+        # P3-4：遗传种群持久化（genetic_population.json）随 bootstrap 挂载，
+        # 同批注入 tmp 隔离，防止单跑测试改写仓库 data/evolution 生产文件。
+        ("NEUROVA_EVOLUTION_GENETIC_POPULATION", "genetic_population.json"),
     ):
         monkeypatch.setenv(key, str(state_dir / name))
 

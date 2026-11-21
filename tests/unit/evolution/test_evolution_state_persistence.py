@@ -240,11 +240,13 @@ class TestBootstrapWiring(_PersistenceTestBase):
         self.patterns_path = Path(self.tmp.name) / "patterns.json"
         self.lifecycle_path = Path(self.tmp.name) / "lifecycle.json"
         self.experience_path = Path(self.tmp.name) / "experience.json"
+        self.genetic_path = Path(self.tmp.name) / "genetic_population.json"
         self.env = {
             "NEUROVA_EVOLUTION_WEIGHTS": str(self.weights_path),
             "NEUROVA_EVOLUTION_PATTERNS": str(self.patterns_path),
             "NEUROVA_EVOLUTION_LIFECYCLE": str(self.lifecycle_path),
             "NEUROVA_EVOLUTION_EXPERIENCE": str(self.experience_path),
+            "NEUROVA_EVOLUTION_GENETIC_POPULATION": str(self.genetic_path),
         }
 
     def _seed_state_files(self):
@@ -343,6 +345,9 @@ class TestBootstrapWiring(_PersistenceTestBase):
                 self.assertEqual(
                     orchestrator.experience_feedback._persist_path, self.experience_path
                 )
+                self.assertEqual(
+                    orchestrator.genetic_engine._persist_path, self.genetic_path
+                )
             finally:
                 closed_loop.reset_evolution_orchestrator()
 
@@ -356,6 +361,7 @@ class TestBootstrapWiring(_PersistenceTestBase):
             self.assertIsNone(orchestrator.pattern_miner._persist_path)
             self.assertIsNone(orchestrator.tool_lifecycle._persist_path)
             self.assertIsNone(orchestrator.experience_feedback._persist_path)
+            self.assertIsNone(orchestrator.genetic_engine._persist_path)
         finally:
             closed_loop.reset_evolution_orchestrator()
 
