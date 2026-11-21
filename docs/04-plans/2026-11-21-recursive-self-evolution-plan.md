@@ -611,3 +611,52 @@ class PrPatchChannel:
 - **隐私红线**：跨租户比对只在**脱敏签名层**进行（失败类别、工具名、判据 ID、digest 计数）；原始会话内容与证据**永不跨租户可见**——聚类分析不得成为数据出境通道。
 - **统一进化的额外验收**：global 修复的 G2 判据集必须包含**每个报告租户**的代表性样本——证明"解决了共性，且不伤任何报告方"。
 - 落点：SignalBus 增加跨租户聚类步骤（§3.8 已同步）；聚类阈值与签名规范待拍板（§8-11）。
+
+---
+
+## 11. 执行记录与偏离说明（2026-11-22 实施完毕）
+
+一期 25 卡 + 1 项待办清偿全部完成，在多会话并发开发环境下实施（期间其他会话并行落了 LLM 路由批、多代理协作修复批、reference_ad 计划等提交）。
+
+### 11.1 实施波次与提交
+
+| 波 | 卡 → commit |
+|---|---|
+| 文档 | 详案+二期设计入库 `621efb95f`；P1-8 卡补充 `ce6da5aa0` |
+| 一 | R6 `a81e7e2bd`（phase 4→1+实做门槛）/ R2 `54b0abd3a` / R3 `bfff86e23` / P0-1 `9b4c7ec17` / P0-3 `7dae832b7` |
+| 二 | R5 `dd3047de1`（回滚持久化默认开）/ R7 `a15f7c914`（RSI 面板参数化+写入口单点）/ P0-2 `e76ff8142`（存活探针六判据） |
+| 三 | **R1 `cf99ec4e5`（第一个被应用且实测的优化）** / P1-0 `1dc0890cf` / P1-1 `60abde70f` / P1-2 `c44cb0d5c` |
+| 四 | P1-3 `2725a3715`（世代编排接线，live-verify 世代 deployed）/ P1-7 `05121035c`（租户段）/ R4（metacog 门全局开，纯配置） |
+| 五 | P1-4 `ce32d6dc1`（金丝雀+自动回滚演练）/ P1-5 `aa77eb3e6`（世代治理读面） |
+| 六 | P1-6 `e3a57aaf4`（**全自动闭环三段演练全过**）/ P1-8 `ddf6b6e9a`+`422a5f2d4`+`dc4e06190`（NeurUI/鸿蒙/安卓） |
+| 七 | P2-1 `08670e114`（PR_PATCH 生效通道）/ P2-3 `7ec463597`（L2 白名单）/ P2-4 `68aadb12d`（提案收口）/ P3-4 `bbab739db`+`cd7f6f30a`（遗传持久化+闲置件处置） |
+| 八 | P2-2 `6bd9ec3d9`（neuacp 桥接层）/ P3-1 `8262d4d4d`（EvolutionPolicy）/ P3-3 `8db54e4d3`（评测棘轮） |
+| 九 | P3-2 `4653fe1d1`（MetaEvaluator+两空转件转正） |
+| 清偿 | swarm.py 接线 `ecac8ea46`（外部成员补丁→演化提案通道，禁碰件解冻后） |
+
+### 11.2 与设计的偏离（均如实说明）
+
+1. **独立 `signal_bus.py` 未建**：信号汇聚由 `generation_orchestrator` 的信号收集承担（功能等价、少一个模块）；跨租户聚类的 `tenantDistribution` 落在 quality/swarm 两库（P1-7）。
+2. **L1.5 文本面登记为 layer=L1**：TargetRegistry 的 layer 枚举不私扩，文本四 subject 以 kind=promptTemplate + verdictSuite=suite_eval 体现分档。
+3. **soul 演化定位修正**：注册表 locator 指向真实载体 soul.md（agent_core.py:1327），非 soul.json（半闲置）；P3-4 顺势退役 soul.json 结构化读写。
+4. **R1 增补人工批准应用端点**：phase 1 手动档语义下"第一个被应用的优化"经 `POST /v1/governance/rsi/optimizations/apply` 人工批准达成（这正是相位设计的本义）；自动应用仍由相位门+世代门禁双闸把守。
+5. **P2-4 两臂落盘格式未迁移**（爆炸面考量）：先收口读（`collectProposals` 聚合）+ RSI 臂原子写+有界归档；格式统一留待后续。
+6. **NLToolSynthesizer"闲置"结论被推翻**：P3-4 核实其已经由 agent_core→chat_pipeline Step 0.5 真实消费，保留未处置。
+
+### 11.3 实施期事故（均已恢复）
+
+- 第七、八波首次派发的后台代理**静默未启动**（派发返回成功但代理目录从未出现）——经用户质疑发现，重派并建立"派发后存在性复核"流程；
+- P1-5 提交时 `--only` 整文件收录卷入 P1-4 在途改动 → `reset --soft`+`update-index` 重建为干净提交；
+- P3-4 首笔提交被并行会话 `commit --amend`+`reset` 孤儿化 → 确认工作树改动俱在后重新落库，内容零丢失。
+
+### 11.4 验收终态
+
+- 终验回归（evolution 全目录+guards+治理/审批/世代端点+evals+benchmark）：**2345 passed / 1 failed**——唯一失败为 `test_wiring_signatures_alive[tool_executor-signatures19]` 预存红（他会在途禁碰件，历次 A/B 均记录），**零新增失败**；
+- 全自动闭环三段演练全过（零人工晋升/自动回滚/失败淘汰）；swarm 外部成员补丁接线清偿（`ecac8ea46`）；
+- 闲置件 8 件处置完毕（退役或接线，零静默遗留）；双文档与 0-index 已入库。
+
+### 11.5 移交二期（Harness^N）与后续
+
+- swarm.py 内 P2-2 接线点已清偿；`nl_synthesizer.get/reset` 单例对零调用（P3-4 登记的相邻观察）可在二期顺手处置；
+- 二期立项前置（一期验收门）已满足：P0–P3 完成 + 全自动闭环演练通过 + 世代机制运转；
+- Harness^N 设计文档（2026-11-21-harness-nth-power-design.md）随本批一并入库，待拍板项见其 §6。
