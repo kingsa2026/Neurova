@@ -477,3 +477,37 @@ class TestRoomAdjudicationOfGovernanceAsk:
         assert res["data"].get("success") is True, res
         project = collab.get_project(created["project_id"])
         assert "2003" not in project.members, "房间驳回后人类成员不得写入"
+
+
+class TestTeamVisibilitySharedList:
+    """M12：治理批准把共享对象写进项目 metadata.teamSharedUserIds（判据可审计）。"""
+
+    @pytest.mark.asyncio
+    async def test_decide_approval_records_shared_list(self, collab, approvals, auditDb, executor):
+        exe, _ = executor
+        result = await exe._execute_project_create({
+            "name": "共享清单项目", "visibility": "team", "memberUserIds": ["user_z"],
+        })
+        assert result.get("success") is True
+        decided = await exe._execute_decide_approval({
+            "request_id": result["request_id"], "decision": "approve",
+        })
+        assert decided.get("success") is True
+        project = collab.get_project(result["project_id"])
+        assert "user_z" in (project.metadata.get("teamSharedUserIds") or []), "批准后共享对象必须入清单"
+
+    @pytest.mark.asyncio
+    async def test_pending_then_room_approval_records_shared_list(
+            self, collab, approvals, auditDb, executor, roomStore, roomBus):
+        exe, _ = executor
+        result = await exe._execute_project_create({
+            "name": "房间裁决共享项目", "visibility": "team", "memberUserIds": ["user_y"],
+        })
+        assert result.get("governance_pending") is True
+        from neurova.tool_executor import applyProjectGovernanceDecision
+
+        applied = applyProjectGovernanceDecision(
+            result["request_id"], decidedBy="owner_u", decidedByChannel="room")
+        assert applied.get("applied") is True
+        project = collab.get_project(result["project_id"])
+        assert "user_y" in (project.metadata.get("teamSharedUserIds") or [])

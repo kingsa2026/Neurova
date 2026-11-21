@@ -1268,10 +1268,12 @@ class CollaborationIsolationManager:
         if project.visibility == ProjectVisibility.PUBLIC:
             return True
 
-        # 团队可见性需要额外检查（这里简化处理）
+        # 团队可见性（M12）：治理批准的共享清单（teamSharedUserIds，由审批
+        # 回灌写入项目 metadata、审计可查）内的用户可查看；清单外非成员一律拒
+        # （fail-closed 不变）。
         if project.visibility == ProjectVisibility.TEAM:
-            # 实际应用中应该检查用户是否在同一团队
-            return False
+            shared = project.metadata.get("teamSharedUserIds") or []
+            return user_id in shared
 
         return False
 

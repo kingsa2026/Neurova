@@ -116,6 +116,10 @@ def applyProjectGovernanceDecision(requestId: str, decidedBy: str = "",
         project.visibility = ProjectVisibility.TEAM
         project.updated_at = time.time()
         visibilityApplied = "team"
+        # M12：批准共享对象入清单（TEAM 可见性判据，审计可查）
+        shared = set(project.metadata.get("teamSharedUserIds") or [])
+        shared.update(str(uid) for uid in (snapshot.get("member_user_ids") or []) if uid)
+        project.metadata["teamSharedUserIds"] = sorted(shared)
     iso._save_project(project)
     _auditProjectAction("project_governance_applied", project.project_id, {
         "request_id": requestId, "added_members": added,
@@ -3420,6 +3424,10 @@ class ToolExecutor:
                         project.add_member(uid, MemberRole.VIEWER, invited_by=agentId or None)
                 if visibilityReq == "team":
                     project.visibility = ProjectVisibility.TEAM
+                    # M12：批准共享对象入清单（TEAM 可见性判据，审计可查）
+                    shared = set(project.metadata.get("teamSharedUserIds") or [])
+                    shared.update(str(uid) for uid in memberUserIds if uid)
+                    project.metadata["teamSharedUserIds"] = sorted(shared)
                 iso._save_project(project)
             else:
                 pending = True

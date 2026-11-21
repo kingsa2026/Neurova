@@ -528,3 +528,29 @@ class TestDeleteProjectAdminChannel:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestTeamVisibilitySharedList:
+    """M12：TEAM 可见性 = 项目成员 ∪ 治理批准共享清单（teamSharedUserIds）。"""
+
+    @pytest.fixture
+    def manager(self, tmp_path):
+        return CollaborationIsolationManager(
+            data_dir=str(tmp_path), admin_checker=lambda uid: uid == "admin"
+        )
+
+    def test_team_visibility_shared_user_can_view(self, manager):
+        project = manager.create_project(
+            name="团队项目", owner_id="owner1",
+            visibility=ProjectVisibility.TEAM)
+        project.metadata["teamSharedUserIds"] = ["user_z"]
+        assert manager._can_view_project(project, "user_z") is True, \
+            "治理批准的共享用户应可查看（原实现恒 False）"
+        assert manager._can_view_project(project, "stranger") is False, \
+            "清单外非成员一律拒（fail-closed 不变）"
+
+    def test_team_visibility_empty_list_rejects_non_member(self, manager):
+        project = manager.create_project(
+            name="无清单团队项目", owner_id="owner1",
+            visibility=ProjectVisibility.TEAM)
+        assert manager._can_view_project(project, "anyone") is False
