@@ -29,6 +29,9 @@
 | 2026-11-21 | 上下文交接 | handoff 默认预算 16k→**32k token**（D-A 拍板；`NEUROVA_CONTEXT_HANDOFF_TOKEN_CAP` 覆盖不变，字节上限 64KiB 不变） | 默认值变化（env 覆盖者无感） | 依赖旧 16k 默认的部署方无需动作；如需回落用 env 覆盖 |
 | 2026-11-21 | run 投影/事件 | `SubAgentRun.to_dict()` 新增 `executor_caps_snapshot`/`executor_tool`/`executor_model`（D-B 派生时执行体档案快照）；续跑结果新增 `provider_transition`（五结果之一或 null）；`resume_decision` 事件 payload 增 `same_executor`/`model_changed`/`tenant_checked`；新事件类型 `resume_cross_tenant_admin`（admin 跨租户豁免审计） | 向后兼容（新增可选键/枚举值，未知类型跳过语义不变） | 消费方按需读取 |
 | 2026-11-21 | 续跑行为 | resumeFinishedRun 重写（D-B）：租户闸先于终态判定（跨租户非 admin 返回与「未找到」逐字同形，不泄露存在性）；五结果决策按「spawn 快照 vs 名册现值」判定，切换路径（switch_model_in_session/create_with_handoff/restart_and_resume）首次可达 | 行为增强（此前切换路径不可达；跨租户续跑不设防） | 跨租户续跑/切换从前「可用」变为「拒绝」——这是红线修复，非回归 |
+| 2026-11-21 | 工具目录/管理面 | ACP registry 零代码接入（G1）：catalog 合并暴露「预设+registry」两源（合并顺序 本地直配>预设>registry），条目新增 `source`/`protocol_version` 键；新增 admin 端点 `POST /v1/external-agents/registry/refresh`（默认关，无定时任务；网络失败 stale 降级） | 向后兼容（新增可选键与新增端点；live 实测 catalog 8→52 条） | 消费方按需读取 source/protocol_version |
+| 2026-11-21 | /test 握手 | 能力字段按 ACP 规范名 `agentCapabilities` 透传（真机 CLIs 实测回包即此；旧键 `serverCapabilities` 兼容回退）（G2 陷阱清单第 2 条代码侧清偿） | 真机上从此非空（此前静默拿空）；响应键名不变 | 消费方无感（键名不变、值从空变实） |
+| 2026-11-21 | ACP 协议 | 客户端支持 ACP v2（G6）：握手协商整数版本选 codec（v1 逐字节保持；v2 走 codec_v2——initialize 增 info、prompt 内容块数组、cancel 按 requestId、update 流 24 分支映射到既有内部事件、未知分支跳过）；成员执行体按目录条目声明版本协商 | 向后兼容（v1 线上字节不变；v2 仅对声明 v2 的 agent 启用） | 对 v1 agent 无感；对 v2 agent 从「不可用」变「可用」 |
 
 ## 待登记（ upcoming）
 

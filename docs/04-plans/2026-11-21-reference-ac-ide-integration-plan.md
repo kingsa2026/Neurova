@@ -14,6 +14,7 @@
 | 二 | G3 | 适配器方法面收敛 | M | G2（回放网先在，重构才敢动） | 是（D-4） |
 | 二 | G4 | 多端连接运行时单源 | S-M | 无 | 是（D-5） |
 | 三 | G5 | 权限两小项 | S | 无 | 否 |
+| 二 | G6 | ACP v2 全量适配（用户拍板升级：T3 已用 v2 证明可行） | L | G1 | 否 |
 
 并行建议：批一两卡文件域互斥（G1 动 catalog/管理面，G2 动 tests 工具与回放管线）可并行；
 批二两卡亦可并行；批三收尾。预计里程碑：批一消除 G1/G2 两大差距；批二收敛抽象与多端；批三补尾。
@@ -112,6 +113,38 @@
   + catalog 侧「未声明模式拒绝」用例。
 - **量级** S；**依赖** 无。
 
+### G6 · ACP v2 全量适配（P1，用户拍板升级）
+
+- **背景**：用户拍板「T3 已用 v2 证明可行，升级到 v2 适配」（覆盖此前「v2 仅协商备选」的口径）。
+  官方 schema 实测（npx 缓存内 v1.21.0 vs v2.0.0-alpha.3）：225→218 定义、39 增/45 删/约 140 变——
+  是完整重定形，不是小改。
+- **我们方法子集的 v2 关键变化**（schema 实证）：
+  - initialize：增必填 `info`(Implementation{name,version})；响应带 `authMethods`（v1 的独立
+    authenticate 方法在 v2 移除，登录/登出改 LoginAuth/LogoutAuth）；
+  - session/new→NewSession：必填 `cwd`(AbsolutePath)；响应 sessionId+configOptions+availableCommands；
+  - session/load→ResumeSession：必填 sessionId+cwd，新增 `replayFrom`（协议级重放语义），响应无 sessionId（复用）；
+  - session/prompt→Prompt：`prompt` 从字符串变**内容块数组**（ContentBlock：text/image/audio/resource…），
+    响应从 stopReason 改为 `messageId`；
+  - cancel：CancelNotification→CancelRequestNotification，按 `requestId` 取消（不再按 sessionId）；
+  - request_permission：增 sessionId/title/options/subject（Command/ToolCall/Request 权限主体拆分）；
+  - update 流：SessionUpdate 联合 24 分支（用户/agent/思考的 chunk 与消息、工具调用、终端、计划、
+    可用命令、配置、成本与上下文窗口、压缩、unstable 扩展、other）。
+- **方案**：新建 `neurova/agent/neuacp/codec_v2.py`（v2 编解码层）：
+  1. **版本策略**：握手协商出整数版本后选 codec——v1 走既有代码路径（线上字节不变），v2 走
+     codec_v2；codec 接口=（构造 initialize/new/resume/prompt/cancel/permission 应答的 params，
+     解析响应与 update 流为内部事件模型）；
+  2. **内部事件模型不变**：v2 的 24 分支 update 映射到本仓既有消费面（chunk→流式、工具调用→
+     tool_call 镜像、计划→plan_update、消息→message、成本→usage、压缩→压缩事件；终端/unstable
+     分支按「未知类型跳过」纪律先如实归档不消费）；
+  3. **auth 变化**：v2 下 authMethods 随 initialize 下发，LoginAuth/LogoutAuth 按需实现（本仓外部
+     成员现状多数免登，先做诚实透传：需要 auth 而未实现→显式 not_supported 错误）；
+  4. v1 行为**逐字节保持**（既有测试与 G2 回放 fixture 全部继续通过）。
+- **红绿判据**：`tests/unit/agent/neuacp/test_v2_codec.py` + `v2_strict_agent.py`（按 v2 schema 严格
+  校验形状的假 agent）——v2 握手/新会话/续跑/prompt（内容块数组）/cancel(requestId)/权限请求/
+  update 流映射逐项先红后绿；v1 回归（既有全部 neuacp 测试+G2 回放 fixture）零失败。
+- **量级** L；**依赖** G1（版本协商已落地）。
+
+
 ---
 
 ## 2. 待拍板项汇总（已全部拍板：2026-11-21 用户确认「按建议来」）
@@ -127,6 +160,8 @@
 **拍板结果**：D-1～D-5 全部按建议值执行。另用户追加确认：**ACP v2 以「版本协商兼容」最小形式
 纳入 G1**（registry 条目声明版本→按声明版本握手；v2 alpha 阶段不全量实现其能力面，正式版另评）；
 registry 本身即 G1 卡本体，纳入升级。
+**拍板更新（同日二次确认）**：用户拍板「T3 已用 v2 证明可行，升级到 v2 适配」——**升级为全量
+适配，新增 G6 卡**（v2 编解码层+版本策略+update 流 24 分支映射，v1 逐字节保持），见 G6 节。
 
 ## 3. 明确不做 / 防扩 scope
 
@@ -141,3 +176,15 @@ registry 本身即 G1 卡本体，纳入升级。
   G2 真录制、G3–G5 真链路）。
 - 全部完成后按评测报告 20 子项评分卡做**第三轮复评**（重点 C1 接入广度/C2 能力声明/E3 性能门），
   结果追加「复评记录三」。
+
+---
+
+## 执行记录（按卡补记）
+
+| 卡 | 状态 | commit | 备注 |
+|---|---|---|---|
+| G1 | **已实施+live-verify** | 本笔提交 | registry.py（fetch 15s/5MiB 上限+UA 自报根修 CDN 403/解析归一/同 id 首个胜出/DCL 单例+stale 降级）+ catalog 合并视图（本地直配>预设>registry，defaultCommand/capabilitiesFor/refuseExecutorSpec/probeTool/listCatalog/probeToolHealth 全命中点改走）+ admin 刷新端点（默认关无定时）+ 条目版本透传握手；真拉官方 registry 46 agents 归一（23 npx/21 binary/2 uvx），真 create_app 刷新后 catalog 8→52 条、非 admin 403；18 例新测试，neuacp 全套 166 绿；顺带吸收 auth-surface 生成物预存漂移（swarm-queue 4 路由） |
+| G2 | **已实施+live-verify** | 本笔提交 | scripts/neuacp_record_fixture.py 常驻录制（dogfood 真 NeuacpClient+真 frame_log 脱敏）+ replay_harness.py（ScriptedTransport flush 时点供帧保因果序——实测踩到 write 即可见的假序并修复）+ 10 份真机 fixture（opencode 全 4 场景/claude-code 2/codex 2/gemini-cli 未装如实缺失）+ test_replay_contract 51 用例（含 30 变异注入全红防恒真）+ README 9 条协议陷阱（protocolVersion 整数/真机字段 agentCapabilities/end_turn 词值/鉴权墙两形态等）；neuacp 全套 217 绿 |
+| G6 | **已实施** | 本笔提交 | codec_v2.py（出站 6 类 params 构造+入站 24 分支 update 归一，缺关键字段 V2ProtocolError fail-closed）+ acp_client 版本策略（协商整数选 codec，v1 字面量原样）+ acp_executor 按 codec 分发（v1 分支逐字未动；_promptV2 以 state_update(idle) 为收口真源）+ v2_strict_agent 严格校验替身 + test_v2_codec 39 例；**中间红抓出真缺陷：_promptV2 事件循环内阻塞等 idle 卡死 cancel——根修 to_thread**；v1 回归 205 绿 |
+| agentCapabilities 扫荡 | **已实施** | 本笔提交 | G2 录制实证真机握手能力字段=agentCapabilities（假 agent 误用 serverCapabilities）→ /test 唯一消费点改规范名优先+旧名兼容，两个测试桩与断言同步；强化断言暂存还原法实证红 |
+| 回归 | **已验证** | 本笔提交 | 合并回归 neuacp 全套+external_agents+wire 契约：**293 passed, 2 skipped**（skip=既有未装 CLI 诚实跳过），零新增失败 |
