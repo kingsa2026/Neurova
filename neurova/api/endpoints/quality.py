@@ -55,6 +55,8 @@ async def record_quality_event(
                 current_user.get("username") or current_user.get("user_id") or ""
             ),
             reasonCode=body.reason_code, occurredAt=body.occurred_at,
+            # 租户段（P1-7）：随调用者 JWT 的租户归属落库；服务身份无租户时如实空串
+            tenantId=str(current_user.get("tenant_id") or ""),
             metadata=body.metadata,
         )
     except ValueError as exc:
@@ -75,7 +77,11 @@ async def record_turn_outcome(
             body.turn_id, body.session_id,
             agentId=body.agent_id, channel=body.channel,
             outcome=body.outcome, source="explicit_api",
-            occurredAt=body.occurred_at, metadata=body.metadata,
+            occurredAt=body.occurred_at,
+            # 租户段（P1-7）：取本入口可得的租户信息＝调用者 JWT 的租户归属；
+            # 服务身份无租户时如实空串。改判不改动既有行的租户归属。
+            tenantId=str(current_user.get("tenant_id") or ""),
+            metadata=body.metadata,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -100,12 +106,16 @@ async def get_session_takeover_state(
 @router.get("/metrics")
 async def get_quality_metrics(
     window_seconds: int = Query(default=7 * 86400, ge=60, le=90 * 86400),
+    tenant_id: Optional[str] = Query(default=None),
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """会话质量 + token 归因读数；没有分母的率返回 None，不伪造 0。"""
+    """会话质量 + token 归因读数；没有分母的率返回 None，不伪造 0。
+
+    tenant_id 三态：不传＝全部租户；传租户串＝只算该租户；传空串＝只算
+    无租户段行（历史/未接线入口）。"""
     if str(current_user.get("role") or "") != "admin":
         raise HTTPException(status_code=403, detail="质量指标仅限管理员")
-    data = get_quality_store().metrics(window_seconds)
+    data = get_quality_store().metrics(window_seconds, tenantId=tenant_id)
     data["token_usage"] = None
     try:
         from neurova.knowledge.foundation import get_knowledge_fact_store

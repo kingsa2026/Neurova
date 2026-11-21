@@ -36,8 +36,9 @@ DEFAULT_KEEP_WINDOW_S = 24 * 3600.0        # D-E 拍板：保留 1 天
 DEFAULT_REPLAY_MAX_EVENTS = 5000
 DEFAULT_REPLAY_MAX_BYTES = 4 * 1024 * 1024
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
+# v1 基线表结构（补租户段之前的形态；v2 负责补 tenant_id 列）
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS swarm_events (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,19 +61,31 @@ CREATE TABLE IF NOT EXISTS store_meta (
 );
 """
 
+
+def _addTenantIdColumn(conn: sqlite3.Connection) -> None:
+    """v2（P1-7）：补 tenant_id 租户段列。旧库无列时 ALTER TABLE 幂等补齐，
+    历史行按 NOT NULL DEFAULT '' 落空串——无段信号如实可辨，不臆造归属。"""
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(swarm_events)").fetchall()
+    }
+    if "tenant_id" not in columns:
+        conn.execute("ALTER TABLE swarm_events ADD COLUMN tenant_id TEXT NOT NULL DEFAULT ''")
+
+
 # 模块级登记（与 api/auth.py 的 auth_blacklist、core/command_receipt.py 同范式）：
 # import 即入登记表可审计；register_migration 对同版本重复注册幂等忽略，
 # SwarmEventStore.ensureSchema 内再注册一次亦安全。
-register_migration(_SCHEMA_VERSION, _SCHEMA, domain=EVENT_STORE_DB_DOMAIN)
+register_migration(1, _SCHEMA, domain=EVENT_STORE_DB_DOMAIN)
+register_migration(_SCHEMA_VERSION, _addTenantIdColumn, domain=EVENT_STORE_DB_DOMAIN)
 
 _EVENT_COLUMNS = (
-    "seq, stream_id, event_id, type, payload_json, command_id, occurred_at"
+    "seq, stream_id, event_id, type, payload_json, command_id, occurred_at, tenant_id"
 )
 
 _INSERT_SQL = (
     "INSERT INTO swarm_events "
-    "(stream_id, event_id, type, payload_json, command_id, occurred_at, occurred_ts) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?)"
+    "(stream_id, event_id, type, payload_json, command_id, occurred_at, occurred_ts, tenant_id) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 _META_PRUNED_THROUGH = "pruned_through"
@@ -102,7 +115,7 @@ def _occurredTs(occurredAt: str) -> float:
 
 def _rowToEvent(row: Tuple) -> Dict[str, Any]:
     """行 → 契约事件形态：{seq, stream_id, event_id, type, payload,
-    command_id, occurred_at}。列序与 _EVENT_COLUMNS 一致。"""
+    command_id, occurred_at, tenant_id}。列序与 _EVENT_COLUMNS 一致。"""
     try:
         payload = json.loads(row[4]) if row[4] else {}
     except (TypeError, ValueError):
@@ -115,6 +128,7 @@ def _rowToEvent(row: Tuple) -> Dict[str, Any]:
         "payload": payload,
         "command_id": row[5],
         "occurred_at": row[6],
+        "tenant_id": row[7] or "",
     }
 
 
@@ -131,7 +145,8 @@ class SwarmEventStore:
 
     def ensureSchema(self) -> None:
         """注册并应用本域迁移（幂等；防降级遵循 db_migration 语义）。"""
-        register_migration(_SCHEMA_VERSION, _SCHEMA, domain=EVENT_STORE_DB_DOMAIN)
+        register_migration(1, _SCHEMA, domain=EVENT_STORE_DB_DOMAIN)
+        register_migration(_SCHEMA_VERSION, _addTenantIdColumn, domain=EVENT_STORE_DB_DOMAIN)
         _applyDomainMigrations(self._conn, domain=EVENT_STORE_DB_DOMAIN)
 
     def close(self) -> None:
@@ -140,9 +155,13 @@ class SwarmEventStore:
             self._conn.close()
 
     def append(self, stream_id: str, event_type: str, payload: dict, *,
-               event_id: str = "", command_id: str = "", occurred_at: str = "") -> int:
+               event_id: str = "", command_id: str = "", occurred_at: str = "",
+               tenant_id: str = "") -> int:
         """追加一条事件，返回全局单调 seq。event_id 非空时唯一（重复 event_id
-        幂等忽略并返回其既有 seq——镜像双写不重放副作用）。"""
+        幂等忽略并返回其既有 seq——镜像双写不重放副作用）。
+
+        tenant_id（P1-7）：租户段，随产生事件的 run/session 上下文由调用方
+        传入；拿不到时留空串（无段信号如实可辨），库层不臆造归属。"""
         stream = str(stream_id or "")
         if not stream:
             raise SwarmEventStoreError("stream_id 不能为空：事件必须归属一条流")
@@ -158,6 +177,7 @@ class SwarmEventStore:
                         str(command_id or ""),
                         str(occurred_at or ""),
                         _occurredTs(occurred_at),
+                        str(tenant_id or ""),
                     ),
                 )
                 self._conn.commit()
@@ -250,6 +270,47 @@ class SwarmEventStore:
             "events": [_rowToEvent(row) for row in rows],
         }
 
+    def tenantDistribution(self, eventType: str = "", *,
+                           windowSeconds: float = 7 * 86400.0,
+                           now_ts: Optional[float] = None) -> Dict[str, Any]:
+        """按租户段对事件做跨租户计数（SignalBus 全局代信号分布校验的最小
+        读数，详案 §3.8/§10.6）。
+
+        eventType 为空串统计全部类型；只采信带租户段（tenant_id 非空）的
+        行进 distribution——跨租户计数只认带段信号；无段行（历史数据/未接线
+        入口）如实计入 unsegmented，不冒充任何租户。窗口按 occurred_ts 数值
+        比较（与 pruneCovered 同口径）；只有计数出街，事件内容不跨租户。
+        """
+        now = float(now_ts) if now_ts is not None else time.time()
+        startTs = now - float(windowSeconds)
+        wanted = str(eventType or "")
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT type, tenant_id FROM swarm_events WHERE occurred_ts >= ?",
+                (startTs,),
+            ).fetchall()
+        counts: Dict[str, int] = {}
+        total = 0
+        unsegmented = 0
+        for row in rows:
+            if wanted and str(row[0] or "") != wanted:
+                continue
+            total += 1
+            tenant = str(row[1] or "")
+            if tenant:
+                counts[tenant] = counts.get(tenant, 0) + 1
+            else:
+                unsegmented += 1
+        return {
+            "event_type": wanted,
+            "window_seconds": int(windowSeconds),
+            "total": total,
+            "segmented": total - unsegmented,
+            "unsegmented": unsegmented,
+            "distinct_tenants": len(counts),
+            "distribution": counts,
+        }
+
     def markPrunedThrough(self, seq: int) -> None:
         """记录已安全修剪边界（store_meta 表 key=pruned_through）。单调推进不回退。"""
         with self._lock:
@@ -306,12 +367,16 @@ class SwarmEventStore:
             return len(deleteSeqs)
 
 
-def mirrorFromLedger(store: SwarmEventStore, events: List[dict]) -> int:
+def mirrorFromLedger(store: SwarmEventStore, events: List[dict],
+                     *, tenant_id: str = "") -> int:
     """把 H-4 JSONL 账本事件（swarm_event_log.readRunEvents 的输出形态：
     {event_id, type, subagent_id, payload, occurred_at, seq, ...}）镜像写入
     store（stream_id=subagent_id）。按 event_id 幂等；返回新写入条数。
     缺失 event_id 的行跳过不计，由调用方决定是否补发；缺 subagent_id 的行
     同样跳过不计（事件必须归属一条流）。
+
+    tenant_id（P1-7）：租户段透传——记录自带 ``tenant_id`` 字段时优先，
+    否则用调用方传入的 ``tenant_id``（随 run 上下文），都没有落空串。
 
     计数口径：新写入行恰使全局 highWater 各 +1（幂等重写不产生新行），
     故以前后 highWater 差计新写入条数（单线程镜像路径下精确）。
@@ -330,5 +395,6 @@ def mirrorFromLedger(store: SwarmEventStore, events: List[dict]) -> int:
             record.get("payload") or {},
             event_id=eventId,
             occurred_at=str(record.get("occurred_at") or ""),
+            tenant_id=str(record.get("tenant_id") or tenant_id or ""),
         )
     return store.highWater() - before

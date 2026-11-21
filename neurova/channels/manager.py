@@ -505,6 +505,8 @@ class ChannelManager:
 
                 session_id = self.resolve_session_scope_id(message)
                 occurred = getattr(message, "timestamp", None)
+                # 租户段（P1-7）：适配器按属主部门根把 tenant_id 写进 message.metadata
+                # （见本文件 ingest 处的同源注入）；没带上的渠道如实落空串。
                 get_quality_store().recordEvent(
                     event_type.value, session_id,
                     agentId=str(message.metadata.get("agent_id") or ""),
@@ -516,6 +518,7 @@ class ChannelManager:
                     actorId=str(message.sender_id or ""),
                     reasonCode=str(message.metadata.get("takeover_reason") or ""),
                     occurredAt=occurred.isoformat() if hasattr(occurred, "isoformat") else None,
+                    tenantId=str(message.metadata.get("tenant_id") or ""),
                     metadata={"chat_id": message.chat_id},
                 )
             except Exception as exc:  # noqa: BLE001 - 质量账失败不影响渠道主链

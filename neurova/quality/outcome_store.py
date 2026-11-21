@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.data_root import dataPath
+from neurova.core.db_migration import migrate as _applyDomainMigrations
+from neurova.core.db_migration import register_migration
 from neurova.core.logger import get_logger
 from neurova.knowledge.foundation.storage_fence import assertNotUnderProductionMemory
 from neurova.core.time_utils import nowIso as _now
@@ -25,6 +27,10 @@ EVENT_TYPES = ("human_takeover_started", "human_takeover_ended", "turn_outcome")
 TAKEOVER_SOURCES = ("channel_event", "console_mark", "api")
 TURN_OUTCOMES = ("answered", "safety_refusal", "insufficient_evidence", "tool_failure", "handoff", "unknown")
 
+#: 质量库的 schema 版本域（PRAGMA user_version 按 domain 隔离，见 db_migration）
+QUALITY_DB_DOMAIN = "conversation_quality"
+
+# v1 基线表结构（补租户段之前的形态；v2 负责补 tenant_id 列）
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversation_quality_events (
     event_id TEXT PRIMARY KEY,
@@ -50,6 +56,26 @@ CREATE INDEX IF NOT EXISTS idx_quality_type_time
 """
 
 
+def _addTenantIdColumn(conn: sqlite3.Connection) -> None:
+    """v2（P1-7）：补 tenant_id 租户段列。旧库无列时 ALTER TABLE 幂等补齐，
+    历史行按 NOT NULL DEFAULT '' 落空串——无段信号如实可辨，不臆造归属。"""
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(conversation_quality_events)").fetchall()
+    }
+    if "tenant_id" not in columns:
+        conn.execute(
+            "ALTER TABLE conversation_quality_events"
+            " ADD COLUMN tenant_id TEXT NOT NULL DEFAULT ''"
+        )
+
+
+# 模块级登记（与 agent/swarm_event_store.py 同范式）：import 即入登记表可审计；
+# register_migration 对同版本重复注册幂等忽略，__init__ 内再注册一次亦安全。
+register_migration(1, _SCHEMA, domain=QUALITY_DB_DOMAIN)
+register_migration(2, _addTenantIdColumn, domain=QUALITY_DB_DOMAIN)
+
+
 def _windowStart(seconds: int) -> str:
     moment = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
         seconds=max(1, int(seconds))
@@ -66,7 +92,11 @@ class ConversationQualityStore:
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         with self._lock, self._conn:
-            self._conn.executescript(_SCHEMA)
+            # 版本化迁移（AGENTS.md §3：schema 变更走 db_migration 注册表，
+            # 不只写 IF NOT EXISTS）——旧库无 tenant_id 列时由 v2 自动补齐
+            register_migration(1, _SCHEMA, domain=QUALITY_DB_DOMAIN)
+            register_migration(2, _addTenantIdColumn, domain=QUALITY_DB_DOMAIN)
+            _applyDomainMigrations(self._conn, domain=QUALITY_DB_DOMAIN)
 
     def close(self) -> None:
         with self._lock:
@@ -85,6 +115,7 @@ class ConversationQualityStore:
         reasonCode: str = "",
         occurredAt: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        tenantId: str = "",
     ) -> Dict[str, Any]:
         if eventType not in EVENT_TYPES:
             raise ValueError("未知 event_type: %r" % eventType)
@@ -107,10 +138,11 @@ class ConversationQualityStore:
                 "INSERT INTO conversation_quality_events"
                 " (event_id, event_type, session_id, agent_id, channel, source,"
                 " source_event_id, actor_id, reason_code, occurred_at, recorded_at,"
-                " metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " metadata_json, tenant_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (event_id, eventType, str(sessionId), str(agentId), str(channel),
                  str(source), str(sourceEventId), str(actorId), str(reasonCode),
-                 stamp, _now(), json.dumps(metadata or {}, ensure_ascii=False)),
+                 stamp, _now(), json.dumps(metadata or {}, ensure_ascii=False),
+                 str(tenantId or "")),
             )
             row = self._conn.execute(
                 "SELECT * FROM conversation_quality_events WHERE event_id = ?",
@@ -129,6 +161,7 @@ class ConversationQualityStore:
         source: str = "chat_pipeline",
         occurredAt: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        tenantId: str = "",
     ) -> Dict[str, Any]:
         if outcome not in TURN_OUTCOMES:
             outcome = "unknown"
@@ -139,6 +172,8 @@ class ConversationQualityStore:
         sourceName = str(source or "chat_pipeline")
         # 显式裁定允许改判：同一 turn 的 explicit_api 行原地更新，
         # 自动分类行仍走 append-only 幂等（重复回放不新增事实）。
+        # 改判不改租户归属：tenant_id 记录的是回合发生在哪个租户，
+        # 不随改判人（explicit_api 调用方）变化；原行无段时保持空串如实。
         if sourceName == "explicit_api" and turnKey:
             with self._lock, self._conn:
                 existing = self._conn.execute(
@@ -165,7 +200,7 @@ class ConversationQualityStore:
             "turn_outcome", sessionId,
             agentId=agentId, channel=channel, source=sourceName,
             sourceEventId=turnKey, reasonCode=outcome,
-            occurredAt=occurredAt, metadata=payload,
+            occurredAt=occurredAt, metadata=payload, tenantId=tenantId,
         )
 
     def takeoverState(self, sessionId: str) -> Dict[str, Any]:
@@ -194,15 +229,25 @@ class ConversationQualityStore:
             "last_event": last,
         }
 
-    def metrics(self, windowSeconds: int = 7 * 86400) -> Dict[str, Any]:
+    def metrics(self, windowSeconds: int = 7 * 86400,
+                tenantId: Optional[str] = None) -> Dict[str, Any]:
+        """窗口内质量指标聚合。
+
+        tenantId 三态：None（缺省）＝全部租户（既有行为不变）；
+        指定租户串＝只算该租户；空串＝只算无租户段行（历史/未接线入口，
+        如实单列，不冒充任何租户）。"""
         start = _windowStart(windowSeconds)
+        sql = (
+            "SELECT event_id, event_type, session_id, channel, source,"
+            " reason_code, source_event_id, recorded_at, metadata_json"
+            " FROM conversation_quality_events WHERE occurred_at >= ?"
+        )
+        params: list = [start]
+        if tenantId is not None:
+            sql += " AND tenant_id = ?"
+            params.append(str(tenantId))
         with self._lock:
-            rows = [dict(r) for r in self._conn.execute(
-                "SELECT event_id, event_type, session_id, channel, source,"
-                " reason_code, source_event_id, recorded_at, metadata_json"
-                " FROM conversation_quality_events WHERE occurred_at >= ?",
-                (start,),
-            ).fetchall()]
+            rows = [dict(r) for r in self._conn.execute(sql, params).fetchall()]
         raw_turns = [r for r in rows if r["event_type"] == "turn_outcome"]
         # 同一轮可能先有管线自动分类、后被显式 outcome 覆盖；事件都保留，
         # 指标按轮去重且显式来源优先——否则两条各算一次，率会翻倍。
@@ -268,6 +313,44 @@ class ConversationQualityStore:
         if counts.get("tool_failure", 0) == 0:
             result.setdefault("uninstrumented", {})["tool_failure"] = "管线尚未产出该硬信号"
         return result
+
+    def tenantDistribution(self, eventType: str,
+                           windowSeconds: int = 7 * 86400) -> Dict[str, Any]:
+        """按租户段对某类事件做跨租户计数（SignalBus 全局代信号分布校验的
+        最小读数，详案 §3.8/§10.6）。
+
+        只采信带租户段（tenant_id 非空）的行进 distribution——跨租户计数
+        只认带段信号；无段行（历史数据/未接线入口）如实计入 unsegmented，
+        不冒充任何租户。签名粒度＝事件类型，供「≥N 租户同模式升格 global
+        世代」判定使用；只有计数出街，原始事件内容不跨租户。
+        """
+        if eventType not in EVENT_TYPES:
+            raise ValueError("未知 event_type: %r" % eventType)
+        start = _windowStart(windowSeconds)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT tenant_id FROM conversation_quality_events"
+                " WHERE event_type = ? AND occurred_at >= ?",
+                (eventType, start),
+            ).fetchall()
+        counts: Counter = Counter()
+        unsegmented = 0
+        for row in rows:
+            tenant = str(row["tenant_id"] or "")
+            if tenant:
+                counts[tenant] += 1
+            else:
+                unsegmented += 1
+        total = len(rows)
+        return {
+            "event_type": eventType,
+            "window_seconds": int(windowSeconds),
+            "total": total,
+            "segmented": total - unsegmented,
+            "unsegmented": unsegmented,
+            "distinct_tenants": len(counts),
+            "distribution": dict(counts),
+        }
 
 
 _store: Optional[ConversationQualityStore] = None

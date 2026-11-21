@@ -1267,11 +1267,14 @@ class PostChatPipeline:
         try:
             from neurova.quality import get_quality_store
 
+            # 租户段（P1-7）：HTTP 端点已在请求边界把 tenant_id 注入 metadata；
+            # 其它入口拿不到就落空串（质量账按无段信号如实记录，不臆造归属）。
             get_quality_store().recordTurnOutcome(
                 turn_id, session_id,
                 agentId=agent_id,
                 channel=str((metadata or {}).get("channel") or ""),
                 outcome=outcome,
+                tenantId=str((metadata or {}).get("tenant_id") or ""),
                 metadata={
                     "finish_reason": (metadata or {}).get("finish_reason", ""),
                     "retrieval_hits": (metadata or {}).get("retrieval_hits"),

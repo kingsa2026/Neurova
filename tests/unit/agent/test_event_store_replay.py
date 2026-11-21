@@ -160,9 +160,10 @@ class TestReadStream:
             occurred_at="2026-01-01T00:00:00+00:00",
         )
         event = store.readStream("s1")[0]
+        # P1-7 起契约事件带 tenant_id 租户段（缺省空串）
         assert set(event.keys()) == {
             "seq", "stream_id", "event_id", "type", "payload",
-            "command_id", "occurred_at",
+            "command_id", "occurred_at", "tenant_id",
         }
         assert event["stream_id"] == "s1"
         assert event["event_id"] == "evt-shape-1"
@@ -170,6 +171,7 @@ class TestReadStream:
         assert event["payload"] == {"tool": "search"}
         assert event["command_id"] == "cmd-9"
         assert event["occurred_at"] == "2026-01-01T00:00:00+00:00"
+        assert event["tenant_id"] == ""
 
     def test_readStreamFiltersByStream(self, store):
         store.append("s1", "spawned", {})
@@ -438,7 +440,8 @@ class TestSchemaRegistration:
     def test_schemaRegisteredUnderDedicatedDomain(self, store):
         assert EVENT_STORE_DB_DOMAIN == "swarm_event_store"
         assert EVENT_STORE_DB_DOMAIN in registered_domains()
-        assert latest_version(EVENT_STORE_DB_DOMAIN) == 1
+        # P1-7 起迁移链含租户段迁移（v2），断言取下限不写死具体版本号
+        assert latest_version(EVENT_STORE_DB_DOMAIN) >= 2
 
     def test_reopenSameDbIsIdempotentAndKeepsData(self, tmp_path):
         dbPath = str(tmp_path / "reopen.db")
@@ -452,7 +455,8 @@ class TestSchemaRegistration:
             assert store2.readStream("s1")[0]["payload"] == {"n": 1}
             conn = sqlite3.connect(dbPath)
             try:
-                assert schema_version(conn) == 1
+                # user_version 跟随登记表最新版（P1-7 起为含租户段的 v2+）
+                assert schema_version(conn) == latest_version(EVENT_STORE_DB_DOMAIN)
             finally:
                 conn.close()
         finally:
