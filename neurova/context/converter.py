@@ -33,11 +33,21 @@ class ContextConverter:
 
         return {"role": role, "content": [{"type": "text", "text": context.content}]}
 
+    def to_gemini_format(self, context: ContextInput) -> Dict[str, Any]:
+        """Gemini 原生形态：`contents[].parts[]`（text / inline_data / file_data）。"""
+        role = self._get_role_for_source(context.source)
+
+        if context.source == ContextSource.MULTIMODAL and context.metadata.get("media_type"):
+            return self._convert_multimodal_to_gemini(context, role)
+
+        return {"role": role, "parts": [{"text": context.content}]}
+
     def convert_for_model(self, context: ContextInput, model_name: str) -> Dict[str, Any]:
         if self._is_anthropic_model(model_name):
             return self.to_anthropic_format(context)
-        else:
-            return self.to_openai_format(context)
+        if self._is_gemini_model(model_name):
+            return self.to_gemini_format(context)
+        return self.to_openai_format(context)
 
     def _get_role_for_source(self, source: ContextSource) -> str:
         role_mapping = {
@@ -56,6 +66,9 @@ class ContextConverter:
 
     def _is_anthropic_model(self, model_name: str) -> bool:
         return "claude" in model_name.lower() or "anthropic" in model_name.lower()
+
+    def _is_gemini_model(self, model_name: str) -> bool:
+        return "gemini" in model_name.lower()
 
     def _convert_multimodal_to_openai(self, context: ContextInput, role: str) -> Dict[str, Any]:
         content = []
@@ -92,3 +105,27 @@ class ContextConverter:
             content.append({"type": "text", "text": f"[视频文件: {context.metadata.get('filename', 'unknown')}]"})
 
         return {"role": role, "content": content}
+
+    def _convert_multimodal_to_gemini(self, context: ContextInput, role: str) -> Dict[str, Any]:
+        parts = []
+
+        if context.content:
+            parts.append({"text": context.content})
+
+        media_type = context.metadata.get("media_type")
+        media_url = context.metadata.get("media_url")
+
+        if media_type == "image" and media_url:
+            # data URL → inline_data 的拆解只有一处定义（gemini_client 单源），
+            # 这里只做形态组装，不另立第二份拆包口径
+            from neurova.llm.providers.gemini_client import geminiImagePartFromUrl
+
+            image_part = geminiImagePartFromUrl(media_url)
+            if image_part is not None:
+                parts.append(image_part)
+        elif media_type == "audio" and media_url:
+            parts.append({"text": f"[音频文件: {context.metadata.get('filename', 'unknown')}]"})
+        elif media_type == "video" and media_url:
+            parts.append({"text": f"[视频文件: {context.metadata.get('filename', 'unknown')}]"})
+
+        return {"role": role, "parts": parts}

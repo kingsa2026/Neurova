@@ -21,7 +21,13 @@ from neurova.llm.providers.tool_transport import toGeminiToolChoice, toGeminiToo
 
 logger = get_logger(__name__)
 
-__all__ = ["build_gemini_body", "GeminiNativeClient", "gemini_endpoint_urls"]
+__all__ = [
+    "build_gemini_body",
+    "GeminiNativeClient",
+    "gemini_endpoint_urls",
+    "geminiImagePartFromUrl",
+    "geminiPartsFromContent",
+]
 
 _THINKING_BUDGET_BY_EFFORT = {"standard": 2048, "deep": 8192}
 
@@ -46,6 +52,58 @@ def gemini_endpoint_urls(base_url: str, model: str) -> typing.Tuple[str, str]:
     )
 
 
+def geminiImagePartFromUrl(url: str) -> typing.Optional[dict]:
+    """OpenAI `image_url.url` → Gemini 原生图片 part（单源转换位）。
+
+    `data:<mime>;base64,<payload>` 拆成 `inline_data` 二元组；其余形态走
+    `file_data.file_uri` 引用（不支持的 URI 由 Gemini API 诚实报错，不在
+    这里静默丢图）。无法解析的空 URL 返回 None。
+    """
+    if not url:
+        return None
+    if url.startswith("data:"):
+        header, sep, payload = url.partition(",")
+        if not sep or not payload:
+            return None
+        mime_type = header[5:].split(";")[0].strip() or "image/png"
+        return {"inline_data": {"mime_type": mime_type, "data": payload}}
+    return {"file_data": {"file_uri": url}}
+
+
+def geminiPartsFromContent(content: typing.Any) -> list:
+    """一条消息的 content → Gemini `parts`。
+
+    与 `anthropic_client._contentBlocks` 同一收口位：纯文本、OpenAI 多模态
+    数组（`text` / `image_url`）两种进料都认。这里**不许**用 `str(content)`
+    收口——拍平后模型收到的是 Python repr 字面量，图片与结构全部变成噪声。
+    """
+    if content is None:
+        return []
+    if isinstance(content, str):
+        return [{"text": content}] if content.strip() else []
+    if not isinstance(content, list):
+        text = str(content)
+        return [{"text": text}] if text.strip() else []
+
+    parts: list = []
+    for piece in content:
+        if not isinstance(piece, dict):
+            text = str(piece)
+            if text.strip():
+                parts.append({"text": text})
+            continue
+        kind = piece.get("type")
+        if kind == "text":
+            text = str(piece.get("text") or "")
+            if text.strip():
+                parts.append({"text": text})
+        elif kind == "image_url":
+            part = geminiImagePartFromUrl(str((piece.get("image_url") or {}).get("url") or ""))
+            if part is not None:
+                parts.append(part)
+    return parts
+
+
 def build_gemini_body(
     messages: typing.List[dict],
     max_tokens: typing.Optional[int] = None,
@@ -57,6 +115,8 @@ def build_gemini_body(
     """OpenAI 风格 messages → Gemini generateContent 请求体（纯函数）。
 
     - system 消息 → systemInstruction；其余仅保留 user/assistant 轮
+    - 多模态 content 列表 → Gemini 原生 parts（`inline_data`/`file_data`，
+      见 `geminiPartsFromContent`）
     - thinking_effort（standard/deep）→ thinkingConfig.thinkingBudget；
       light/None 不传（保持模型默认）
     - tools/tool_choice → `tools[].functionDeclarations[]` 与 `toolConfig`
@@ -76,7 +136,9 @@ def build_gemini_body(
             continue
         if role in ("user", "assistant"):
             gemini_role = "model" if role == "assistant" else "user"
-            contents.append({"role": gemini_role, "parts": [{"text": str(text)}]})
+            parts = geminiPartsFromContent(text)
+            if parts:
+                contents.append({"role": gemini_role, "parts": parts})
 
     body: dict = {
         "contents": contents or [{"role": "user", "parts": [{"text": "hello"}]}],
