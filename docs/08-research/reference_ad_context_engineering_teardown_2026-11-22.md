@@ -7,7 +7,7 @@
 
 ## 0. 结论摘要
 
-**专项总分：LobeHub 79.0/100 vs Neurova 75.5/100**——十轴等权下对方胜 3.5 分，画像互补。
+**专项总分：LobeHub 79.0/100 vs Neurova 83.5/100**（v12 三卡实施后据实复评——本仓净反超 4.5 分，里程碑一 ≥79.5 达成、收官 84.0 差 0.5）。
 
 - LobeHub 最强：**缓存经济学修剪**（按 provider 缓存 TTL/价格做盈亏平衡+字节稳定保前缀缓存，本仓无对应物）、**组装管线广度**（27 处理器+约 30 个注入 provider 的阶段化管线）、**token 漂移系数计量**（分桶估算×1.25 补偿）、**附件句柄化卸载**（预览+按 fileId 翻页，按剩余预算动态决策）、**Topic Doctor 消息树体检**（四类结构病+可回退修补）。
 - Neurova 最强：**召回自动回灌**（被动 pool.draw 双通道向量注入+主动 recall_history/pool_search/recall_context_span/context_status 四工具+防自污染——对方被压内容对模型不可自动召回）、**按 token 预算的折叠七步判据**（对方 HistoryTruncate 按条数截断）、**工具结果 microcompact 句柄化**（>8000 token 换占位指针凭 recall_history 直取）、**压缩纪律守卫**（严格变小+失败冷却 5/15/30+CompressionEvent 时间线+溢出兜底重试）。
@@ -20,16 +20,16 @@
 | # | 轴 | 满分 | LobeHub | Neurova | 判定 |
 |---|----|-----:|--------:|--------:|------|
 | 1 | 组装管线与注入架构 | 10 | 9.0 | 7.0 | L 胜 |
-| 2 | Token 计量与预算治理 | 10 | 9.0 | 7.5 | L 胜 |
+| 2 | Token 计量与预算治理 | 10 | 9.0 | 8.5 | L 险胜 |
 | 3 | 截断策略 | 10 | 6.5 | **8.0** | **N 胜** |
-| 4 | 压缩机制与摘要治理 | 10 | 9.0 | 8.5 | L 胜 |
+| 4 | 压缩机制与摘要治理 | 10 | 9.0 | 9.0 | 平（v12 迟滞落地） |
 | 5 | 无损性与可回滚 | 10 | 9.0 | 9.0 | 平 |
 | 6 | 召回与自动回灌 | 10 | 4.0 | **9.5** | **N 大胜** |
 | 7 | 大结果卸载与句柄化 | 10 | 6.5 | **8.0** | **N 胜** |
-| 8 | 缓存经济学 | 10 | **9.5** | 3.0 | **L 大胜** |
-| 9 | 结构完整性与修复 | 10 | 8.5 | 6.5 | L 胜 |
+| 8 | 缓存经济学 | 10 | **9.5** | 8.0 | L 险胜（v12 追平实施） |
+| 9 | 结构完整性与修复 | 10 | 8.5 | 8.0 | L 险胜 |
 | 10 | 测试与纪律守卫 | 10 | 8.0 | **8.5** | **N 小胜** |
-| | **合计** | **100** | **79.0** | **75.5** | |
+| | **合计** | **100** | **79.0** | **83.5** | |
 
 ## 2. 逐轴详拆
 
@@ -117,17 +117,26 @@
 | 轴4 压缩治理 | 8.5 | ≥9.0 | P1-6 迟滞双阈值（0.5→0.65） |
 | 轴3/6/7/10 领先轴 | 8.0/9.5/8.0/8.5 | 保持 | 不回退 |
 
-落地顺序建议：P0-1（单轴 +5，落地即净反超 80.5）→ P0-2 → P0-3 → P1-4；每项走红绿+live-verify 后据实回写本表。
+落地顺序建议：P0-1（单轴 +5，落地即净反超 80.5）→ P0-2 → P0-3 → P1-4；每项走红绿+live-verify 后据实回写本表。——已按此序**并行实施**：P0-1/P0-2/P0-3（含同文件域的 P1-6）三卡落地，P1-4/P1-5 待后续。
+
+### 实施记录（2026-11-22，三卡并行落地，提交 42c0916a6/20649f46e/fafd74af8）
+
+- **P0-1 缓存经济学**=20649f46e：`compression_economics.evaluateCacheBreakEven`（收益=剩余步数×节省×读价，代价=失效区间×(写价−读价)×1.5 安全系数，封闭判因集 no_pricing/warm_within_ttl_deferred/break_even_failed/proceed）+ `CachePricing` 内置 anthropic/openai 兼容两族计价（env `NEUROVA_CACHE_PRICING_JSON` 覆盖、坏 JSON 回退内置）+ orchestrator 仅对增长门主动折叠接闸（预算击穿/固定间隔不受管辖），defer 经 `suppressProactiveFold` 诚实改判 `cache_deferred` 进读数面（fold_suppression.cache_hits）。
+- **P0-2 计量分桶**=42c0916a6：`estimate_window_tokens(..., model_id)`/`WindowTokenMeter(model_id)` 透传溢出保证金（`getModelSafetyMargin` 单源；载荷段放大、协议开销常数 PER_MSG_OVERHEAD 不放大，测试钉死 ceil(载荷×1.25)+4 口径）+ `messagePayloadBreakdown` 消息级分桶（content/tool_calls/reasoning/other，合计与总量同口径）+ budget_report `payload_buckets` 读出经 `/v1/context/budget` 暴露。
+- **P0-3 结构 Doctor**=fafd74af8：`structure_doctor.py` 五类结构病纯判据（concurrent_fork 同槽位互异内容/orphan_turn 工具结果无声明或池引用解析不到/stale_index covers·covered·cutoff 指纹失效/segment_split 轮次断档倒序/lost_content 应有内容为空）+ `diagnoseSession` 真实存储三路适配（SessionManager/池注册表/时间线，查无此会话诚实 session_found=0 不造病）+ `GET /v1/context/diagnose/structure` 只读端点（JWT 鉴权）。
+- **P1-6 迟滞双阈值**随 P0-1 同文件域落地。
+- **红绿与回归**：三卡新增测试 16+13+42 用例均先红后绿；tests/unit/context 全目录 **1344 passed** 零回归（含 fold_trigger_b5/compression_economics/stuck_suppression_sc2/context_status_fold_timing/token_estimator_calibration 等既有守卫）；chat_pipeline 侧压缩消费方 39 passed。
+- **live-verify 6/6**（真管线+真后端）：缓存闸 defer 改判（cache_deferred/warm_within_ttl_deferred/cache_hits=1）、迟滞有摘要 0.65 不折 vs 无摘要同占用照常折叠、真实 build_context 链 payload_buckets={'content': 500,...} 非零、Doctor 真实存储健康会话零误报+池孤儿引用浮出（orphan_turn）、真后端 9791 实测诊断端点鉴权可达且查无会话诚实 404。
 
 P0（直接压成本/补范式缺口）：
-1. **缓存经济学修剪判据**：fold_trigger/裁剪决策加入"缓存盈亏平衡"——按 provider 缓存 TTL 与读写价差，满足「预估剩余步数×token 节省×readPrice > 重写成本×安全系数」才新增折叠；折叠决策做到字节稳定（同输入同输出）保前缀缓存命中。影响面：`neurova/context/fold_trigger.py`、`context_pool.py` 折叠执行、llm 层需暴露 provider 缓存元数据（TTL/价格表）。收益：长会话推理成本直接下降（对方实测把修剪做成省钱决策而非保守保留）。目标：轴8 3.0→≥8.0——单轴落地即净反超（专项 75.5→80.5）。
-2. **token 计量漂移系数+分桶**：估算值×1.25 漂移补偿，按 正文/附件/工具调用/推理/工具定义 分桶计量，预算判定一律用 adjustedTotal。影响面：`context_pool.py` 预算计算、`gates.py` TokenBudgetGate、swarm 软目标。收益：0.85 水位触发更准，减少溢出兜底次数与"假未超真超限"。目标：轴2 7.5→≥8.5。
-3. **结构完整性 Doctor**：对会话消息树/时间线做五类体检（并发分叉/孤儿回合/陈旧分支索引/段裂/内容丢失），修补操作留底可回退。影响面：`neurova/context/`、会话时间线重建（S15 遗产）、swarm 房间消息树。收益：把"重启重建兜底"升级为"主动诊断+定点修复"。目标：轴9 6.5→≥8.0。
+1. 【已实施=20649f46e】**缓存经济学修剪判据**：fold_trigger/裁剪决策加入"缓存盈亏平衡"——按 provider 缓存 TTL 与读写价差，满足「预估剩余步数×token 节省×readPrice > 重写成本×安全系数」才新增折叠；折叠决策做到字节稳定（同输入同输出）保前缀缓存命中。影响面：`neurova/context/fold_trigger.py`、`context_pool.py` 折叠执行、llm 层需暴露 provider 缓存元数据（TTL/价格表）。收益：长会话推理成本直接下降（对方实测把修剪做成省钱决策而非保守保留）。目标：轴8 3.0→≥8.0——单轴落地即净反超（专项 75.5→80.5）。
+2. 【已实施=42c0916a6】**token 计量漂移系数+分桶**：估算值×1.25 漂移补偿，按 正文/附件/工具调用/推理/工具定义 分桶计量，预算判定一律用 adjustedTotal。影响面：`context_pool.py` 预算计算、`gates.py` TokenBudgetGate、swarm 软目标。收益：0.85 水位触发更准，减少溢出兜底次数与"假未超真超限"。目标：轴2 7.5→≥8.5。
+3. 【已实施=fafd74af8】**结构完整性 Doctor**：对会话消息树/时间线做五类体检（并发分叉/孤儿回合/陈旧分支索引/段裂/内容丢失），修补操作留底可回退。影响面：`neurova/context/`、会话时间线重建（S15 遗产）、swarm 房间消息树。收益：把"重启重建兜底"升级为"主动诊断+定点修复"。目标：轴9 6.5→≥8.0。
 
 P1：
-4. **处理器管线插件化**：把 build_context 的注入/改写步骤抽成带阶段号的可注册处理器序列，新来源（新渠道/新记忆类/新工具结果形态）接入不改主干。影响面：`neurova/context/orchestrator.py`（注意尺寸棘轮——新装配落独立模块）。目标：轴1 7.0→≥8.5。
-5. **附件预算单源**：附件只允许占"阈值下剩余空间"，超限自动转预览+句柄翻页，且附件永不触发压缩。影响面：context 抽屉与附件注入路径。
-6. **压缩迟滞双阈值**：已有摘要后触发阈值自动上调（对方 0.5→0.65），与本仓失败冷却（5/15/30）叠加成"时间+次数"双维防抖。
+4. 【待实施】**处理器管线插件化**：把 build_context 的注入/改写步骤抽成带阶段号的可注册处理器序列，新来源（新渠道/新记忆类/新工具结果形态）接入不改主干。影响面：`neurova/context/orchestrator.py`（注意尺寸棘轮——新装配落独立模块）。目标：轴1 7.0→≥8.5。
+5. 【待实施】**附件预算单源**：附件只允许占"阈值下剩余空间"，超限自动转预览+句柄翻页，且附件永不触发压缩。影响面：context 抽屉与附件注入路径。
+6. 【已实施=20649f46e】**压缩迟滞双阈值**：已有摘要后触发阈值自动上调（对方 0.5→0.65），与本仓失败冷却（5/15/30）叠加成"时间+次数"双维防抖。
 
 P2：
 7. **同组单元聚合截断**：截断按"前端同组展示单元"聚合，不把一组配对消息拆到边界两侧。
