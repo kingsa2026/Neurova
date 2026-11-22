@@ -130,3 +130,17 @@
 - **批三**：M10 realtime 评估结论=不立项（D-M2 已拍板），SIP/Twilio 深化路线覆盖。
 - **遗留移交**：chat_pipeline.py:1814 `_IMAGE_RETENTION_KEEP_LAST` 字面量收口（值与单源一致，行为无漂移）；fal duration/产物字段官方模型卡待核；v2v 三家请求体待真 key 实测；音乐前端页未接（后端+端点已通）；Twilio Digits 接入下批；ASRManager 装配缺口的同族排查（TTSManager 是否同病）下批核对。
 - **复评（同口径十轴）**：69.0→**74.5**（轴 7 音乐 0→3.5 后端闭环、轴 1 视觉 8→8.5 Gemini 补齐、轴 3 视频 7→7.5 v2v、轴 6 实时语音 5→6.5 DTMF+转写、轴 10 契约 8→8.5）；总报告 D8 维 7.0→7.5，总分 94.0→95.0。未达 75.0 目标的缺口=音乐前端页未接与 v2v 真 key 实测未做（见遗留移交）。
+
+## 9. 遗留清偿记录（2026-11-22 第二轮，五项清偿完毕）
+
+| 遗留项 | 处置 | 提交 |
+|--------|------|------|
+| 音乐生成前端页未接 | **已接**：MusicGenPage.vue（提交→3s 轮询四态→audio 播放/下载，与 VideoGenPage 同范式）+generation.ts submitMusic/musicStatus+路由 /aigc/music+导航/权限目录+i18n×11；后端无音乐模型卡时诚实显示仅 auto | 858be6f87 |
+| keep_last 字面量收口（chat_pipeline.py:1814 同根因第 4 处） | **已收口**：消费点改读 model_limits.MULTIMODAL_IMAGE_RETAIN_PER_TURN（调用时读取），行为测试 monkeypatch 单源验证 | c2cf8cd3c |
+| 探测矩阵四家接线（anthropic/openrouter/ollama/lm_studio 仍名称启发式） | **已接线**：四家 probe_model_multimodal 委托 M7 矩阵，全仓 name_heuristic 零残留、七处 probe 全诚实 | 79aa28333 |
+| TTSManager 装配核对（ASR 同族排查） | **核对通过零码改**：常驻模式 :1214 先初始化、lazy 模式 _ensure_ready 咽喉自愈、VoiceEngine[TTS] 无门控——设计态以 5 测试钉住 | 50a7a1d54 |
+| Twilio Digits 接入 | **已接**：handle_webhook 识别 Gather Digits→voice_context 单源（DTMF_DIGITS_KEY）进回合；同根因扫荡修正事件映射「mid-call 用户输入全映射 BOT_ERROR」缺陷 | 700e9d9b2 |
+| v2v 三家请求体真 key 实测 | **待凭据**（providers.json 仅元数据、凭据在 keyring；真实生成产生费用，需用户提供/批准可用 key 后执行） | — |
+
+- 遗留清偿后复评：轴 7 音乐 3.5→**4.5**（前端页接通，与对方同为单 provider+完整产品面），专项总分 74.5→**75.5**，达成 75.0 目标；其余轴不变。
+- 线B 连带发现（已登记待裁，非本批引入）：handle_webhook 全仓零生产调用者（webhook 分派缺 voice 支，test_channelVoiceFactorySeamCloses.py 因分派链无验签刻意不接）——HTTP 路由接线仍按该登记待安全批处理。
