@@ -108,6 +108,13 @@ READERS: Dict[str, Set[str]] = {
         # 五结果决策见 tests/unit/agent/test_provider_switch_tenant.py。
         "neurova/agent/swarm.py::SwarmManager.resumeFinishedRun",
         "neurova/agent/swarm.py::SwarmManager._initiatorIsPlatformAdmin",
+        # 2026-11-22 补登（a16ff1c91/ead7506bf/bae2b703c 批次新增的合法读方，
+        # 台账漏同步致本测试存量红）：ASR 纪要归因、梦境规则审计、
+        # computer_use 并发 lane 作用域、工具调用日志 scope。
+        "neurova/asr/minutes.py::_recordInputGap",
+        "neurova/cognitive_layers/dreaming.py::DreamRuleStore._auditHeldRule",
+        "neurova/computer_use/lane_mutex.py::currentLaneScope",
+        "neurova/core/tool_call_journal.py::_journalScope",
     },
 }
 
