@@ -157,3 +157,20 @@
 - 702e11788 首版提交信息净 LOC 声明笔误（写成 +77/−24，实为 +84/−16）——趁未推送经链重写修正（702e11788..HEAD 共 6 笔原样重建，树/作者/信息不变，CAS 落 ref）；期间并行会话在本工作区遗留的陈旧合并冲突（两份 docs）按 HEAD 侧收口（取最新已提交内容，无工作丢失）。
 - tests/unit/agent 存量 1 红（身份读方台账未同步）维持移交。
 - 批三（R8-R11）与 D-R1..D-R5 待拍板仍开放。
+
+### 批三（2026-11-22，R8/R10 完成 + D-R1..D-R5 拍板落定；R9/R11 缓办，本地未推）
+
+| 卡 | 提交 | 内容 | 验证 |
+|----|------|------|------|
+| R8 | 3b8fbb5d9 | LLM 出站域名策略（routing/egress_policy.py）：NEUROVA_LLM_EGRESS_ALLOWLIST（host/`*.domain` 通配）设置后客户端装配点 fail-closed；默认不设置=行为不变 | 7 单测；全量 llm 1050 passed 零回归；live-verify PASS（名单内放行 / 名单外诚实失败且零出网） |
+| R10 | 8e58ce862（评估结论随本记录落档，无生产改动） | 双抽象归一评估结论：**保留分工**——管理面 BaseProvider 管目录/发现/探测，运行面 LLMAbstractProvider/ProviderRegistry 管调用（现仅注册 OpenAIAdapter，消费方=triage 分诊门）；合并需重写全部 provider 适配而收益仅概念统一，不做 | 评估结论经执行记录落档 |
+| D-R4 | （模板数据） | config/llm_provider_templates.json 追加 5 家：deepseek/moonshot/zhipu/siliconflow/dashscope-compatible（均 OpenAI 兼容零代码，原 11 家顺序不变，revision 1→2） | 生产装载链路实测 5 家全部接入；契约测试改约（11→16 家）通过 |
+
+拍板结果（2026-11-22 用户交互拍板）：
+- **D-R1**：核验判定**渠道配置能力本仓已齐备**——前端 ModelPage（顶栏「模型与工具」）多服务商行增删改（每行独立 base_url/api_key/models+连接测试+模型发现）、后端 provider.py 完整 CRUD+scope 隔离、路由层每行即独立回退候选（R1/R3 live-verify 实证跨服务商同名模型回退可用）。无需新建配置面。
+- **D-R2**：加权分流**先观测**（用户要求核验多渠道现状后再定；现状=多服务商行+优先级/健康度排序已可用）。
+- **D-R3**：embedding API 通道（R11）**暂缓**（本地 bge-small-zh 已满足现用场景）。
+- **D-R4**：**补国产主流+聚合商**（已实施，见上表 D-R4 行）。
+- **D-R5**：协议自动选择规则链**暂缓**（随 D-R4 铺量后再评估）。
+- **R9**（ollama 运行面原生分支）：**缓办**——兼容端点路径已经三轮 live-verify 实证可用，原生分支收益仅剩管理面已有的拉取能力，避免双轨漂移。
+- tests/unit/agent 存量 1 红（身份读方台账未同步，a16ff1c91/ead7506bf/bae2b703c 引入）维持移交。
