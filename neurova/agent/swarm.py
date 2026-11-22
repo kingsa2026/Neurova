@@ -866,6 +866,15 @@ class SwarmManager:
                 self._externalAdapters[run.subagent_id] = (
                     externalAdapter, asyncio.get_running_loop())
             self._evict_finished_runs()
+            # 资源治理 P2-4：租约开启（NEUROVA_RUN_LEASE_TTL_S>0）时，
+            # 先回收僵死槽记账，再为本 run 挂租约；TTL=0 时两者均 no-op。
+            self._reapStaleRunSlots()
+            from neurova.core.run_lease import leaseTtlSeconds
+
+            if self._runLeaseBoard().acquire(
+                run.subagent_id, owner=run.subagent_id, ttl=leaseTtlSeconds()
+            ):
+                run.slot_lease = True
 
         # H-4：派生事实入 run 事件账本（正文不进账本，task 只留摘要）
         self._logRunEvent(run, "spawned", {
@@ -2957,6 +2966,41 @@ class SwarmManager:
             else:
                 self._model_active[model] = cur - 1
         run.slot_model = None
+        # 资源治理 P2-4：属主校验释放租约（错主释放被拒；TTL=0 时板空 no-op）
+        self._runLeaseBoard().release(run.subagent_id, owner=run.subagent_id)
+
+    def _runLeaseBoard(self):
+        """P2-4：run 槽租约板（进程内懒建；TTL=0 时 acquire/release 均 no-op）。"""
+        board = getattr(self, "_runLeaseBoardCache", None)
+        if board is None:
+            from neurova.core.run_lease import LeaseBoard
+
+            board = LeaseBoard()
+            self._runLeaseBoardCache = board
+        return board
+
+    def _reapStaleRunSlots(self) -> int:
+        """P2-4：回收「租约过期且任务已终态」的 run 槽记账（只修记账，不杀任务）。
+
+        运行中任务的生命周期由 runtimeBudgetSec 兜底；本回收只处理
+        「任务已 done 但槽未释放」的记账泄漏。TTL=0（缺省）恒 0。
+        调用方须已持有 _lock（RLock 可重入，本方法内再取不致死锁）。
+        """
+        from neurova.core.run_lease import leaseTtlSeconds
+
+        if leaseTtlSeconds() <= 0:
+            return 0
+        reclaimed = 0
+        for key, owner in self._runLeaseBoard().reclaimExpired():
+            run = self._runs.get(key)
+            task = self._tasks.get(key)
+            if run is None or task is None or not task.done():
+                continue
+            self._release_slot(run)
+            self._runs.pop(key, None)
+            reclaimed += 1
+            logger.warning("run 槽租约过期回收（记账修复）：subagent_id=%s owner=%s", key, owner)
+        return reclaimed
 
     def _forget_task(self, subagent_id: str) -> None:
         """移除已完成后台任务的引用（done 回调）"""
