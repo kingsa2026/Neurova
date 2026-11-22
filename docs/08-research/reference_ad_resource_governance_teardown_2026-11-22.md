@@ -70,3 +70,12 @@ P2：
 - 静态只读、canary 单日快照、104 次工具调用抽样走读；关键结论均带 file:line。
 - 两处待核实：OpenAI 兼容 LLM 调用是否依赖 SDK 默认超时；后台任务是否强制 mini 模型绑定。
 - 本仓侧为锚点级复核（container_sandbox/model_rate_limiter/connection_pool/TokenBudgetGate），未做对等全量盘点；对照判定中"待核"项已标注。
+
+## §7 实施记录（2026-11-22，P1×3+P2×2 全部落地）
+
+- **P1-1 工具超时三层同源 clamp**=dce23f1b2：新增 core/timeout_policy.py 单源（[1,800]s，缺省 60s，非法/NaN/bool 回落缺省）；解析层 get_tool_timeout 表值/缺省过闸（单点收口，保留打桩接缝）；执行层 _execute_run_code 用户参 timeout 过闸（封堵 10**9 直通运行时的旁路）。红=ModuleNotFoundError+二段 4 failed（表值/用户参直通实证）；绿=46 passed 含既有 wiring/table-honesty 零回归。live：真后端 /v1/tool-layers/tools/execute run_code timeout=10**9 正常执行（60ms）。
+- **P1-2 后台任务每日原子配额**=c29bd50da：新增 core/background_quota.py（BEGIN IMMEDIATE 原子领取、(name, UTC 日) 计数、fail-closed、DDL 走 db_migration domain=background_quota）；接线 RSI run_iteration 与 Sleep run_sleep_cycle（拒绝返回 quota_denied 信封，消费方零改动）。上限 NEUROVA_RSI_DAILY_QUOTA=500 / NEUROVA_SLEEP_CYCLE_DAILY_QUOTA=200。红=ModuleNotFoundError×3；绿=44 passed（20 线程抢 5 恰放行 5/fail-closed 双形态/跨日跨名隔离）。live：真数据根 first=True/second=False。
+- **P1-3 文件解析四维预算**=55df7e5e4：新增 knowledge/parse_budget.py（输入体积 64MB/页数 2000/表格行数 10 万/单元格面积 500 万，env 注入）；parse_document 三处接线（入口体积闸含旧管线、pdf 页数闸、xls 表格闸），预算异常保形穿透（不被宽 except 重包成 parse_failed）。红=ModuleNotFoundError×3；绿=44 passed。live：真解析函数超限 fast-fail input_too_large。
+- **P2-4 run 槽租约**=8f35c6780：新增 core/run_lease.py 租约板（acquire/renew/release 属主校验、过期回收、单调钟注入）；swarm 三处接线（spawn 锁内回收僵死槽+挂租约、_release_slot 属主释放、_reapStaleRunSlots 只修记账不杀任务）。NEUROVA_RUN_LEASE_TTL_S 缺省 0=关闭逐位一致。红=2 collection error；绿=31 passed。多实例启用位。
+- **P2-5 存储自治理**=407beeab2：新增 core/db_maintenance.py（wal_checkpoint(TRUNCATE)+optimize，gauge neurova_db_maintenance_last_run_unixtime），app 启动注册每日系统 job（jobId=db_maintenance，同 prune 范式 fail-soft）。红=2 collection error；绿=31 passed。live：对运行中后端数据根真 checkpoint。
+- **坑（复用教训）**：①数据根注入变量名是 **NEUROVA_DATA_DIR**（不是 NEUROVA_DATA_ROOT——后者被忽略静默回退仓库 data/，首轮回退污染真实库，已清 live_probe 行）；②共享索引里他会话已 add 的件会被普通 commit 扫走（c29bd50da 卷入 test_phase_suppression_sc1.py）——提交前必须核对 `git diff --cached --numstat` 只含本笔文件；③净 LOC 必须按 add 后实测 numstat 写（本批三笔写错：P1-1/P1-3 当场 amend 修正；P1-2/P2-4 两笔因并行会话高速推进放弃改写、留待推送窗口守卫兜底——c29bd50da 声明 +122 实际 +161、8f35c6780 声明 +121/−2 实际 +143/−0）。
