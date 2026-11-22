@@ -53,6 +53,17 @@ def _loadScript():
     return module
 
 
+def _loadCalibrateModule():
+    """按路径加载标定脚本模块（供各测试类共用）。"""
+    path = (Path(__file__).resolve().parents[3] / "scripts" / "training"
+            / "calibrate_neu_judge.py")
+    spec = importlib.util.spec_from_file_location("calibrate_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.fixture(scope="module")
 def script():
     try:
@@ -363,19 +374,8 @@ class TestDistillImprovements:
 class TestCalibrateScript:
     """标定脚本：真实评估集上反推零误拦的最大 skip_p，可写回产物。"""
 
-    def _loadCalibrate(self):
-        import importlib.util
-
-        path = (Path(__file__).resolve().parents[3] / "scripts" / "training"
-                / "calibrate_neu_judge.py")
-        spec = importlib.util.spec_from_file_location("calibrate_under_test", path)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-        return module
-
     def testRecommendPrefersZeroFalseAlarm(self, script):
-        cal = self._loadCalibrate()
+        cal = _loadCalibrateModule()
         rows = [
             {"features": {k: 1.0 for k in FEATURE_KEYS}, "label": 1.0},
             {"features": {k: 0.0 for k in FEATURE_KEYS}, "label": 0.0},
@@ -421,7 +421,7 @@ class TestCalibrateScript:
                             "--out", str(trainedOut), "--min-messages", "6",
                             "--max-windows", "50"]) == 0
 
-        cal = self._loadCalibrate()
+        cal = _loadCalibrateModule()
         assert cal.main(["--data-root", str(dataRoot), "--artifact", str(trainedOut),
                          "--max-allow", "40", "--apply"]) == 0
         calibrated = json.loads(trainedOut.read_text(encoding="utf-8"))
@@ -569,3 +569,40 @@ class TestExcludeAgents:
                             "--max-windows", "50"]) == 0
         metrics2 = json.loads(out2.read_text(encoding="utf-8"))["eval_metrics"]
         assert metrics2["trainWindows"] + metrics2["frozenWindows"] == 15
+
+
+class TestRecommendObjectives:
+    """标定推荐目标可配：零误拦（保守）/最大 F1（正确拦截率与覆盖并重）/代价加权。
+
+    误杀与漏拦的代价不对称是业务假设而非定理：enforce 下误杀=静默终止
+    一个需要人看的工作回合；漏拦=多花一轮 LLM 调用、agent 多说一轮。
+    两种口径都要能一键出推荐，工作点由业务拍板。
+    """
+
+    def _rows(self):
+        return [
+            {"skip_p": 0.25, "skipped": 15, "tp": 15, "falseAlarms": 0, "missed": 6,
+             "skipPrecision": 1.0, "skipRecall": 0.7143},
+            {"skip_p": 0.45, "skipped": 21, "tp": 18, "falseAlarms": 3, "missed": 3,
+             "skipPrecision": 0.8571, "skipRecall": 0.8571},
+        ]
+
+    def testZeroFpObjectiveKeepsConservativePick(self, script):
+        cal = _loadCalibrateModule()
+        chosen = cal.recommend(self._rows(), objective="zero-fp")
+        assert chosen["skip_p"] == 0.25
+
+    def testMaxF1ObjectiveBalancesPrecisionAndRecall(self, script):
+        cal = _loadCalibrateModule()
+        chosen = cal.recommend(self._rows(), objective="max-f1")
+        # F1：0.25→0.833，0.45→0.857 → 取 0.45（多拦 3 个真 skip，代价 3 误拦）
+        assert chosen["skip_p"] == 0.45
+
+    def testCostObjectiveFollowsCostRatio(self, script):
+        cal = _loadCalibrateModule()
+        # 误拦:漏拦 = 10:1 → 零误拦行胜出
+        assert cal.recommend(self._rows(), objective="cost",
+                             fpCost=10.0, fnCost=1.0)["skip_p"] == 0.25
+        # 误拦:漏拦 = 1:10 → 高召回行胜出
+        assert cal.recommend(self._rows(), objective="cost",
+                             fpCost=1.0, fnCost=10.0)["skip_p"] == 0.45
