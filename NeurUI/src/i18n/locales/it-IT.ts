@@ -2653,6 +2653,10 @@ conflictTimeReadout: 'Lettura temporale: {basis} (vecchia {old} → nuova {new})
     musicFailed: 'Generazione musicale non riuscita',
     musicModelEmptyHint: 'Nessun modello musicale predefinito: l\'invio viene instradato automaticamente per capacità (modello fal predefinito)',
     newShotPlaceholder: '(Nuova scena — descrivi l\'inquadratura)',
+    music: 'Generazione musica',
+    refVideoUrl: 'URL del video di riferimento (opzionale)',
+    firstFrameUrl: 'URL dell’immagine del primo fotogramma (opzionale)',
+    lastFrameUrl: 'URL dell’immagine dell’ultimo fotogramma (opzionale)',
   },
   validation: {
     required: 'Questo campo è obbligatorio',

@@ -87,6 +87,42 @@ describe('AigcHistoryList', () => {
     expect(listTasksMock).toHaveBeenLastCalledWith({ kind: 'image' })
   })
 
+  it('music kind：过滤联动 + ♪ 图标 + 音频播放器（带凭证）', async () => {
+    listTasksMock.mockResolvedValue({
+      code: 0,
+      data: { tasks: [{
+        task_id: 'm1', kind: 'music', protocol: 'fal', model: 'fal-ai/musicgen',
+        status: 'succeeded', prompt: '轻快钢琴曲', submitted_at: 1757700300, updated_at: 1757700301,
+        local_path: '/data/generations/m1.mp3', url: '/api/v1/generation/files/m1.mp3',
+        source: 'rest', error: '',
+      }] },
+    })
+    const wrapper = mountList('music')
+    await flushPromises()
+    expect(listTasksMock).toHaveBeenLastCalledWith({ kind: 'music' })
+    expect(wrapper.text()).toContain('音乐生成') // kind 单选联动文案
+    expect(wrapper.text()).toContain('轻快钢琴曲')
+    const audio = wrapper.find('audio.aigc-history-audio')
+    expect(audio.exists()).toBe(true) // 产物渲染按 music 适配：音频播放器形态
+    expect(audio.attributes('src')).toContain('access_token=tok') // 与图像同源凭证
+    expect(wrapper.html()).toContain('♪') // 缩略位图标形态
+  })
+
+  it('music kind 无产物 url 时不渲染播放器，回退 kind 徽标', async () => {
+    listTasksMock.mockResolvedValue({
+      code: 0,
+      data: { tasks: [{
+        task_id: 'm2', kind: 'music', protocol: 'fal', model: '',
+        status: 'failed', prompt: '爵士鼓点', submitted_at: 1757700400, updated_at: 1757700401,
+        local_path: '', url: '', source: 'workflow', error: '音乐引擎未就绪',
+      }] },
+    })
+    const wrapper = mountList('music')
+    await flushPromises()
+    expect(wrapper.find('audio.aigc-history-audio').exists()).toBe(false)
+    expect(wrapper.html()).toContain('♪') // 无产物仍以音符图标占位（不渲染播放器）
+  })
+
   it('未决任务自动刷新，全部终态自停', async () => {
     vi.useFakeTimers()
     try {

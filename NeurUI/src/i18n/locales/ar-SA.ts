@@ -2653,6 +2653,10 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     musicFailed: 'فشل توليد الموسيقى',
     musicModelEmptyHint: 'لا توجد نماذج موسيقى مُعدّة مسبقًا: يتم توجيه الطلب تلقائيًا حسب القدرة (نموذج fal الافتراضي)',
     newShotPlaceholder: '(لقطة جديدة — اصف المشهد)',
+    music: 'توليد الموسيقى',
+    refVideoUrl: 'رابط الفيديو المرجعي (اختياري)',
+    firstFrameUrl: 'رابط صورة الإطار الأول (اختياري)',
+    lastFrameUrl: 'رابط صورة الإطار الأخير (اختياري)',
   },
   validation: {
     required: 'هذا الحقل مطلوب',

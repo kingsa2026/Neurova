@@ -15,7 +15,7 @@ import GlassPanel from '@/components/GlassPanel.vue'
 
 const props = defineProps<{
   /** 默认过滤的产物类型（当前页 kind）；空 = 初始展示全部 */
-  kind?: '' | 'image' | 'video' | 'audio'
+  kind?: '' | 'image' | 'video' | 'audio' | 'music'
 }>()
 
 const { t } = useI18n()
@@ -87,6 +87,7 @@ defineExpose({ load, tasks, kindFilter, setKind })
         <a-radio-button value="image">{{ t('aigc.image') }}</a-radio-button>
         <a-radio-button value="video">{{ t('aigc.video') }}</a-radio-button>
         <a-radio-button value="audio">{{ t('aigc.audio') }}</a-radio-button>
+        <a-radio-button value="music">{{ t('aigc.music') }}</a-radio-button>
       </a-radio-group>
       <GlassButton size="sm" @click="load">{{ t('common.refresh') }}</GlassButton>
     </div>
@@ -94,10 +95,13 @@ defineExpose({ load, tasks, kindFilter, setKind })
       <div v-for="task in tasks" :key="task.task_id" class="aigc-history-item">
         <div class="aigc-history-thumb">
           <img v-if="task.kind === 'image' && task.url" :src="withFileToken(task.url)" :alt="task.prompt" />
+          <!-- music 产物无缩略图：以音符图标占位，播放器在信息区渲染 -->
+          <span v-else-if="task.kind === 'music'" class="aigc-history-kind aigc-history-kind-music" :title="task.kind">♪</span>
           <span v-else class="aigc-history-kind">{{ task.kind }}</span>
         </div>
         <div class="aigc-history-info">
           <div class="aigc-history-prompt">{{ task.prompt || '—' }}</div>
+          <audio v-if="task.kind === 'music' && task.url" controls :src="withFileToken(task.url)" class="aigc-history-audio" />
           <div class="aigc-history-meta">
             <a-tag :color="statusColor(task.status)">{{ statusText(task.status) }}</a-tag>
             <!-- C3：产物已被保留清理删除（账本行保留），诚实标注过期 -->
@@ -174,6 +178,20 @@ defineExpose({ load, tasks, kindFilter, setKind })
   text-transform: uppercase;
   color: var(--nr-text-secondary);
   background: rgba(125, 125, 125, 0.15);
+}
+
+.aigc-history-kind-music {
+  font-size: 22px;
+  line-height: 1;
+  padding: 10px 12px;
+  color: var(--nr-accent, #4096ff);
+}
+
+.aigc-history-audio {
+  width: 100%;
+  max-width: 420px;
+  height: 32px;
+  margin-top: 4px;
 }
 
 .aigc-history-prompt {

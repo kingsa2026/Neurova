@@ -2653,6 +2653,10 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     musicFailed: 'संगीत जनरेशन विफल रहा',
     musicModelEmptyHint: 'कोई पूर्व-निर्धारित संगीत मॉडल नहीं: सबमिशन क्षमता के अनुसार स्वतः रूट होता है (fal डिफ़ॉल्ट मॉडल)',
     newShotPlaceholder: '(नया शॉट — फ़्रेम प्रॉम्प्ट भरें)',
+    music: 'संगीत जनरेशन',
+    refVideoUrl: 'संदर्भ वीडियो URL (वैकल्पिक)',
+    firstFrameUrl: 'पहले फ़्रेम की छवि URL (वैकल्पिक)',
+    lastFrameUrl: 'अंतिम फ़्रेम की छवि URL (वैकल्पिक)',
   },
   validation: {
     required: 'यह फ़ील्ड आवश्यक है',

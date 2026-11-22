@@ -41,6 +41,10 @@ watch(model, async (m) => {
 })
 const resolution = ref('1080p')
 const refImages = ref<string[]>([])
+// M2 多模态追平：v2v 源视频 + 首尾帧可选参数（后端 /generation/video 已支持，空值不传）
+const refVideoUrl = ref('')
+const firstFrameUrl = ref('')
+const lastFrameUrl = ref('')
 const withAudio = ref<boolean | null>(null)
 // R2 两段式：先出静帧，静帧作首帧再生成视频
 const staticFirst = ref(true)
@@ -74,15 +78,21 @@ async function generate() {
       resolution: resolution.value,
     }
     const refs = [...refImages.value]
-    // R2 两段式：无参考图时先生成一张静帧，
-    // 以服务端本地产物路径作首帧 → i2v（protocols 本地路径转 data URL 已实测）
-    if (staticFirst.value && !refs.length) {
+    // M2：可选首帧 URL 进 ref_images 首位（协议语义 ref_images[0]=first_frame 角色）
+    if (firstFrameUrl.value.trim()) refs.unshift(firstFrameUrl.value.trim())
+    // R2 两段式：无参考图/首帧且无 v2v 源视频时先生成一张静帧，
+    // 以服务端本地产物路径作首帧 → i2v（protocols 本地路径转 data URL 已实测）；
+    // 已给源视频（v2v）时不再生成静帧——源视频即参考，静帧首帧反而冲突
+    if (staticFirst.value && !refs.length && !refVideoUrl.value.trim()) {
       status.value = { status: 'static-frame', progress: 5 }
       const frameRes: any = await generateImage({ prompt: prompt.value.trim(), width: 1024, height: 1024 })
       const frame = (frameRes?.data?.images ?? [])[0]
       if (frame?.path) refs.push(frame.path)
     }
     if (refs.length) payload.ref_images = refs
+    // M2/L5 可选参数透传：空值不传（后端按缺省处理）
+    if (refVideoUrl.value.trim()) payload.video_url = refVideoUrl.value.trim()
+    if (lastFrameUrl.value.trim()) payload.last_frame = lastFrameUrl.value.trim()
     // 协议不随请求下发：服务端 derive_generation_protocol 按 模型→服务商 base_url 自适应推导
     const effProvider = providerOf(model.value)
     if (effProvider) payload.provider_id = effProvider
@@ -169,6 +179,15 @@ onUnmounted(() => {
                 {{ basenameOf(p) }}<button class="aigc-ref-chip-x" type="button" @click="refImages.splice(i, 1)">✕</button>
               </span>
             </div>
+          </a-form-item>
+          <a-form-item :label="t('aigc.refVideoUrl')">
+            <a-input v-model:value="refVideoUrl" :placeholder="t('aigc.refImageHint')" allow-clear />
+          </a-form-item>
+          <a-form-item :label="t('aigc.firstFrameUrl')">
+            <a-input v-model:value="firstFrameUrl" :placeholder="t('aigc.refImageHint')" allow-clear />
+          </a-form-item>
+          <a-form-item :label="t('aigc.lastFrameUrl')">
+            <a-input v-model:value="lastFrameUrl" :placeholder="t('aigc.refImageHint')" allow-clear />
           </a-form-item>
           <a-form-item :label="t('aigc.audio')">
             <a-select v-model:value="withAudio" allow-clear :placeholder="t('aigc.protocolAuto')">

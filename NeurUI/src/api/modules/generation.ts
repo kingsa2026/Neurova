@@ -80,8 +80,13 @@ export interface VideoGenerationPayload {
   provider_id?: string
   api_key?: string
   base_url?: string
+  /** 参考图/首帧（URL 或本地产物路径）；协议语义 ref_images[0]=first_frame 角色 */
   ref_images?: string[]
   audio?: boolean
+  /** M2 v2v：视频生视频的源视频（URL 或本地路径） */
+  video_url?: string
+  /** L5 尾帧（URL 或本地路径；WAN 无通道时服务端 ignored_params 显式标注） */
+  last_frame?: string
 }
 
 export interface MusicGenerationPayload {

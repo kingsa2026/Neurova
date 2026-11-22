@@ -2653,6 +2653,10 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
     musicFailed: 'Error en la generación de música',
     musicModelEmptyHint: 'No hay modelos de música predefinidos: el envío se enruta automáticamente por capacidad (modelo fal predeterminado)',
     newShotPlaceholder: '(Plano nuevo: describe la imagen)',
+    music: 'Generación de música',
+    refVideoUrl: 'URL de vídeo de referencia (opcional)',
+    firstFrameUrl: 'URL de la imagen del primer fotograma (opcional)',
+    lastFrameUrl: 'URL de la imagen del último fotograma (opcional)',
   },
   validation: {
     required: 'Este campo es obligatorio',

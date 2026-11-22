@@ -121,6 +121,50 @@ describe('VideoGenPage', () => {
     wrapper.unmount()
   })
 
+  // ── M2 多模态追平：v2v 源视频 + 首尾帧可选参数 ────────────────────────
+  it('v2v：参考视频 URL 随 payload 透传 video_url，且不先生成静帧', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.prompt = '把白天改成夜景'
+    vm.staticFirst = true
+    vm.refVideoUrl = 'https://x/source.mp4'
+    await vm.generate()
+    // 有源视频时 v2v 语义：不再先生成静帧（源视频即参考，静帧首帧会冲突）
+    expect(generateImageMock).not.toHaveBeenCalled()
+    const payload = submitVideoMock.mock.calls[0][0]
+    expect(payload.video_url).toBe('https://x/source.mp4')
+    wrapper.unmount()
+  })
+
+  it('首尾帧：首帧 URL 进 ref_images 首位（协议 ref_images[0]=first_frame），尾帧 URL 透传 last_frame', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.prompt = 'p'
+    vm.staticFirst = false
+    vm.firstFrameUrl = 'https://x/first.png'
+    vm.lastFrameUrl = 'https://x/end.png'
+    await vm.generate()
+    const payload = submitVideoMock.mock.calls[0][0]
+    expect(payload.ref_images).toEqual(['https://x/first.png'])
+    expect(payload.last_frame).toBe('https://x/end.png')
+    wrapper.unmount()
+  })
+
+  it('可选参数空值不传：payload 不含 video_url/last_frame 键', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.prompt = 'p'
+    vm.staticFirst = false
+    await vm.generate()
+    const payload = submitVideoMock.mock.calls[0][0]
+    expect('video_url' in payload).toBe(false)
+    expect('last_frame' in payload).toBe(false)
+    wrapper.unmount()
+  })
+
   // ── 2026-09-15 模型自适应（协议/服务商不再手填）───────────────────────
   it('无手填「生成协议/服务商 ID」输入（改自适应推导）', async () => {
     const wrapper = mountPage()

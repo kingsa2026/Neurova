@@ -2653,6 +2653,10 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
     musicFailed: 'Échec de la génération musicale',
     musicModelEmptyHint: 'Aucun modèle musical prédéfini : la soumission est routée automatiquement selon les capacités (modèle fal par défaut)',
     newShotPlaceholder: '(Nouveau plan — décrivez l\'image)',
+    music: 'Génération de musique',
+    refVideoUrl: 'URL de vidéo de référence (optionnel)',
+    firstFrameUrl: 'URL de la première image (optionnel)',
+    lastFrameUrl: 'URL de la dernière image (optionnel)',
   },
   validation: {
     required: 'Ce champ est obligatoire',

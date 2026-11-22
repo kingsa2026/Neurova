@@ -2653,6 +2653,10 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     musicFailed: '音楽の生成に失敗しました',
     musicModelEmptyHint: 'プリセット音楽モデルなし：送信後は能力に応じて自動ルーティング（fal 既定モデル）',
     newShotPlaceholder: '（新しいショット — 画面のプロンプトを入力）',
+    music: '音楽生成',
+    refVideoUrl: '参照動画 URL（任意）',
+    firstFrameUrl: '先頭フレーム画像 URL（任意）',
+    lastFrameUrl: '末尾フレーム画像 URL（任意）',
   },
   validation: {
     required: 'この項目は必須です',
