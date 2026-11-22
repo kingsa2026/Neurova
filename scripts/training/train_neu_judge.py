@@ -63,6 +63,13 @@ from neurova.collaboration.neu_judge import (
 )
 from neurova.collaboration.triage_rules import evaluateTriage, extractTriageFeatures
 
+# 可选依赖：10 万条级训练的 numpy 向量化路径；缺失时退回纯 Python 全批量
+# 梯度下降（小样本两者逐位接近，见 TestMixAndScale）。
+try:
+    import numpy as _numpy
+except ImportError:  # pragma: no cover - 无 numpy 的环境走纯 Python 路径
+    _numpy = None
+
 # --- 产物与训练常量 ---
 
 MODEL_VERSION_TRAINED = "0.2.0-trained"
@@ -275,6 +282,67 @@ def _standardize(
     return mean, sigma, frozenset(constantKeys)
 
 
+def _mixWindows(windows: List[Dict], seed: int, maxWindows: int) -> List[Dict]:
+    """数据源目录按路径有序，直接按上限截断会偏斜来源配比；先全局洗牌
+    （固定种子，可复现）再截断——把全部来源揉在一起均匀采样。"""
+    mixed = list(windows)
+    random.Random(seed).shuffle(mixed)
+    return mixed[:maxWindows]
+
+
+def _trainLogisticNumpy(
+    trainSamples: List[Dict],
+    mean: Dict[str, float],
+    sigma: Dict[str, float],
+    rng: random.Random,
+) -> Tuple[Dict[str, float], float, int, float]:
+    """_trainLogisticRegression 的 numpy 向量化版（十万条级样本可行）。
+
+    数学与纯 Python 路径一致：标准化空间全批量梯度下降 + 类平衡权重 +
+    软标签目标；固定种子初始化，确定性收敛。
+    """
+    keys = list(FEATURE_KEYS)
+    matrix = _numpy.array(
+        [[(sample["features"][key] - mean[key]) / sigma[key] for key in keys]
+         for sample in trainSamples],
+        dtype=float,
+    )
+    targets = _numpy.array(
+        [float(sample.get("softLabel", sample["label"])) for sample in trainSamples],
+        dtype=float,
+    )
+    hardLabels = [float(sample["label"]) for sample in trainSamples]
+    count = len(hardLabels)
+    labelCounts: Dict[float, int] = {}
+    for label in hardLabels:
+        labelCounts[label] = labelCounts.get(label, 0) + 1
+    sampleWeights = _numpy.array(
+        [count / (2.0 * labelCounts[label]) for label in hardLabels], dtype=float)
+    sampleWeights /= sampleWeights.sum()
+    weights = _numpy.array([rng.uniform(-0.01, 0.01) for _ in keys], dtype=float)
+    bias = 0.0
+    previousLoss: float | None = None
+    finalLoss = 0.0
+    iteration = 0
+    for iteration in range(1, MAX_ITERATIONS + 1):
+        z = matrix @ weights + bias
+        probabilities = 1.0 / (1.0 + _numpy.exp(-z))
+        errors = probabilities - targets
+        weightedErrors = sampleWeights * errors
+        gradWeights = matrix.T @ weightedErrors
+        gradBias = weightedErrors.sum()
+        loss = -(sampleWeights * (
+            targets * _numpy.log(probabilities + 1e-15)
+            + (1.0 - targets) * _numpy.log(1.0 - probabilities + 1e-15))).sum()
+        bias -= LEARNING_RATE * gradBias
+        weights -= LEARNING_RATE * gradWeights
+        finalLoss = float(loss)
+        if previousLoss is not None and abs(previousLoss - finalLoss) < CONVERGENCE_TOL:
+            break
+        previousLoss = finalLoss
+    return dict(zip(keys, weights.tolist())), float(bias), iteration, finalLoss
+
+
 def _trainLogisticRegression(
     trainSamples: List[Dict],
     mean: Dict[str, float],
@@ -283,8 +351,11 @@ def _trainLogisticRegression(
 ) -> Tuple[Dict[str, float], float, int, float]:
     """标准化空间全批量梯度下降（凸损失，固定种子初始化，确定性收敛）。
 
-    返回 (标准化权重, 标准化偏置, 迭代数, 末轮损失)。
+    返回 (标准化权重, 标准化偏置, 迭代数, 末轮损失)。样本量大时走 numpy
+    向量化路径（数学等价）。
     """
+    if _numpy is not None:
+        return _trainLogisticNumpy(trainSamples, mean, sigma, rng)
     weights = {key: rng.uniform(-0.01, 0.01) for key in FEATURE_KEYS}
     bias = 0.0
     stdVectors = [
@@ -627,7 +698,9 @@ def trainNeuJudgeFromRealData(
         realGateTriageFn,
     )
 
-    windows = harvestSessionWindows(dataRoot, maxWindows=maxWindows, minMessages=minMessages)
+    windows = _mixWindows(
+        harvestSessionWindows(dataRoot, maxWindows=1_000_000, minMessages=minMessages),
+        seed, maxWindows)
     windows = filterExcludedAgents(windows, excludeAgents)
     if not windows:
         raise RuntimeError(
@@ -689,6 +762,7 @@ def trainNeuJudgeFromOutcomeSweep(
         dataRoot, realGateTriageFn, distillLimit=distill,
         windowMinutes=windowMinutes, maxWindows=maxWindows,
         minMessages=minMessages, excludeAgents=excludeAgents,
+        mixSeed=seed,
     )
     labelled = []
     for row in result["labeled"]:

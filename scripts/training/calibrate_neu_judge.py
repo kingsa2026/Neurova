@@ -53,6 +53,14 @@ CATALOGUE_PATH = (
 )
 
 
+#: 评估集排除的大体积外部源：训练可把它们揉合进来，评估尺保持真实房间域，
+#: 不随外部数据规模漂移
+EVAL_EXCLUDE_PREFIXES = (
+    "glaive", "taubench", "tooltalk", "agentcompany", "agentinstruct",
+    "synth-gray", "whowhen",
+)
+
+
 def buildEvalSet(dataRoot: str, maxAllow: int = 60) -> List[Dict]:
     """真实评估集：结果标注的 would-skip + 规则高置信放行（均无教师参与）。"""
     rows: List[Dict] = []
@@ -60,6 +68,9 @@ def buildEvalSet(dataRoot: str, maxAllow: int = 60) -> List[Dict]:
         rows.append({"features": row["features"], "label": row["label"],
                      "src": f"outcome/{row['outcome']}"})
     windows = harvestSessionWindows(dataRoot, maxWindows=1200, minMessages=6)
+    windows = [w for w in windows
+               if not any(w["conversationId"].split("/", 1)[0].startswith(prefix)
+                          for prefix in EVAL_EXCLUDE_PREFIXES)]
     ruled = labelWindows(windows, distillLimit=0)
     allowCount = 0
     for row in ruled["labeled"]:

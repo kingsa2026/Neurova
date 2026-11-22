@@ -283,6 +283,7 @@ def buildOutcomeSweepDataset(
     minMessages: int = 6,
     maxSweepVectors: int = DEFAULT_MAX_SWEEP_VECTORS,
     excludeAgents: Optional[Tuple[str, ...]] = None,
+    mixSeed: Optional[int] = None,
 ) -> Dict[str, Any]:
     """完整管线：收割 → 规则直标 → 结果采矿 → 教师质量门 →
     边界扫描 → 教师标注（配额内，特征向量去重，已知标签免费继承）。
@@ -297,7 +298,18 @@ def buildOutcomeSweepDataset(
     )
 
     labeled: List[Dict[str, Any]] = []
-    windows = harvestSessionWindows(dataRoot, maxWindows=maxWindows, minMessages=minMessages)
+    windows = harvestSessionWindows(
+        dataRoot,
+        maxWindows=(1_000_000 if mixSeed is not None else maxWindows),
+        minMessages=minMessages,
+    )
+    if mixSeed is not None:
+        # 数据源目录按路径有序：先全局洗牌（固定种子，可复现）再截断，
+        # 让全部来源均匀入样（10 万条级训练的数据揉合）。
+        import random
+
+        random.Random(mixSeed).shuffle(windows)
+        windows = windows[:maxWindows]
     windows = filterExcludedAgents(windows, excludeAgents)
     ruled = labelWindows(windows, distillLimit=0)
     for row in ruled["labeled"]:

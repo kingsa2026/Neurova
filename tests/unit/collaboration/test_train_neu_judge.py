@@ -606,3 +606,71 @@ class TestRecommendObjectives:
         # 误拦:漏拦 = 1:10 → 高召回行胜出
         assert cal.recommend(self._rows(), objective="cost",
                              fpCost=1.0, fnCost=10.0)["skip_p"] == 0.45
+
+
+class TestMixAndScale:
+    """10 万条级训练：数据揉合（固定种子洗牌再截断）+ numpy 向量化训练。"""
+
+    def testMixWindowsDeterministicAndFair(self, script):
+        windows = ([{"conversationId": f"a{i}/s"} for i in range(30)] +
+                   [{"conversationId": f"z{i}/s"} for i in range(30)])
+        mixed = script._mixWindows(windows, seed=42, maxWindows=30)
+        assert len(mixed) == 30
+        prefixes = {w["conversationId"][0] for w in mixed}
+        assert prefixes == {"a", "z"}  # 揉合采样而非按路径截断
+        again = script._mixWindows(windows, seed=42, maxWindows=30)
+        assert [w["conversationId"] for w in mixed] == [w["conversationId"] for w in again]
+        other = script._mixWindows(windows, seed=7, maxWindows=30)
+        assert [w["conversationId"] for w in mixed] != [w["conversationId"] for w in other]
+
+    def testNumpyTrainerAgreesWithPurePython(self, script):
+        base = datetime(2026, 11, 22, 9, 0, 0)
+        rows = []
+        for i in range(40):
+            events = [{"role": "user" if j % 2 == 0 else "assistant",
+                       "content": f"问题{i}_{j}，各不相同？",
+                       "timestamp": (base + timedelta(seconds=j)).isoformat()}
+                      for j in range(8)]
+            rows.append({"label": 1.0, "softLabel": 1.0,
+                         "features": script._prepareFeatureVector(extractTriageFeatures(events, ""))})
+        for i in range(40):
+            events = [{"role": "assistant", "content": f"独走{i}号第{j}句，完全一样的句式。",
+                       "timestamp": (base + timedelta(seconds=j)).isoformat()}
+                      for j in range(25)]
+            rows.append({"label": 0.0, "softLabel": 0.0,
+                         "features": script._prepareFeatureVector(extractTriageFeatures(events, ""))})
+        mean, sigma, _ = script._standardize([row["features"] for row in rows])
+        saved = script._numpy
+        try:
+            script._numpy = None
+            w1, b1, it1, _ = script._trainLogisticRegression(rows, mean, sigma, __import__("random").Random(42))
+            script._numpy = __import__("numpy")
+            w2, b2, it2, _ = script._trainLogisticRegression(rows, mean, sigma, __import__("random").Random(42))
+        finally:
+            script._numpy = saved
+        for key in FEATURE_KEYS:
+            assert abs(w1[key] - w2[key]) < 0.05, f"{key} 两路径权重差异过大"
+        assert abs(b1 - b2) < 0.05
+
+    def testBuildEvalSetExcludesBulkExternalSources(self, script, tmp_path):
+        cal = _loadCalibrateModule()
+        dataRoot = tmp_path / "data"
+        def writeSession(agentDir, sessionId):
+            sd = dataRoot / agentDir / "sessions"
+            sd.mkdir(parents=True, exist_ok=True)
+            base = datetime(2026, 11, 22, 9, 0, 0)
+            payload = {"agent_id": agentDir, "session_id": sessionId,
+                       "messages": [{"role": "user" if j % 2 == 0 else "assistant",
+                                     "content": f"问题{sessionId}_{j}，各不相同？",
+                                     "timestamp": (base + timedelta(seconds=j * 5)).isoformat()}
+                                    for j in range(8)]}
+            (sd / f"session_{sessionId}.json").write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        for i in range(6):
+            writeSession(f"agentH{i}", f"human{i}")
+        for i in range(6):
+            writeSession(f"glaive-x{i}", f"g{i}")
+        rows = cal.buildEvalSet(str(dataRoot), maxAllow=60)
+        allowRows = [r for r in rows if r["label"] == 1.0]
+        # 大体积外部源不进评估集：放行侧只来自真实房间会话（6 行）
+        assert len(allowRows) == 6
