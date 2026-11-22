@@ -586,6 +586,53 @@ def trainNeuJudgeFromRealData(
     return payload
 
 
+def trainAxionFromRealData(
+    dataRoot: str,
+    seed: int = DEFAULT_SEED,
+    distill: int = 60,
+    minMessages: int = 6,
+    maxWindows: int = 400,
+    windowMinutes: float = 5.0,
+) -> Dict:
+    """Axion 1.0 方学金：答案先行结果采矿 + 教师质量门 + 边界扫描蒸馏。"""
+    from neurova.collaboration.triage_axion import buildAxionDataset
+    from neurova.collaboration.triage_dataset import realGateTriageFn
+
+    result = buildAxionDataset(
+        dataRoot, realGateTriageFn, distillLimit=distill,
+        windowMinutes=windowMinutes, maxWindows=maxWindows,
+        minMessages=minMessages,
+    )
+    labelled = []
+    for row in result["labeled"]:
+        sessionId = row.get("sessionId") or row.get("conversationId") or ""
+        labelled.append({
+            "sessionId": sessionId,
+            "category": row.get("category") or row.get("labeler") or "rules",
+            "features": _prepareFeatureVector(row["features"]),
+            "label": float(row["label"]),
+        })
+    if len(labelled) < 8:
+        raise RuntimeError(
+            f"Axion 管线可训练样本不足（{len(labelled)} < 8）——需要更多会话流量"
+        )
+    payload = _trainAndEvaluate(
+        labelled, result["grayUnlabeled"], len(labelled), seed,
+        modelVersion="0.4.0-axion",
+    )
+    agreementValue = result["teacherAgreement"].get("agreement")
+    payload["eval_metrics"].update({
+        "outcomeSamples": float(result["outcomeSamples"]),
+        "teacherChecked": float(result["teacherAgreement"].get("checked") or 0),
+        "teacherAgreement": (float(agreementValue) if agreementValue is not None else -1.0),
+        "sweepVectors": float(result["sweepVectors"]),
+        "distillUsed": float(result["distillUsed"]),
+        "distillErrors": float(result["distillErrors"]),
+        "aborted": 1.0 if result["aborted"] else 0.0,
+    })
+    return payload
+
+
 def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="SB-3 离线训练 NeuJudge：合成窗口规则弱标注自举（计划 §5.3/§8-SB-3）；"
@@ -594,8 +641,9 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument("--windows", type=int, default=DEFAULT_WINDOWS, help="合成窗口数量（默认 400）")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="固定随机种子（默认 42）")
     parser.add_argument(
-        "--source", choices=("synthetic", "real"), default="synthetic",
-        help="训练数据源：synthetic=规则自举合成窗口（默认）；real=从数据根收割真实会话窗口",
+        "--source", choices=("synthetic", "real", "axion"), default="synthetic",
+        help="训练数据源：synthetic=规则自举合成窗口（默认）；real=从数据根收割真实"
+        "会话窗口；axion=Axion 方学（答案先行结果采矿+教师质量门+边界扫描蒸馏）",
     )
     parser.add_argument(
         "--data-root", type=str, default="",
@@ -627,7 +675,16 @@ def main(argv: List[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if args.source == "real":
+    if args.source == "axion":
+        dataRoot = args.data_root or str(Path(__file__).resolve().parents[2] / "data")
+        payload = trainAxionFromRealData(
+            dataRoot,
+            seed=args.seed,
+            distill=args.distill,
+            minMessages=args.min_messages,
+            maxWindows=args.max_windows,
+        )
+    elif args.source == "real":
         dataRoot = args.data_root or str(Path(__file__).resolve().parents[2] / "data")
         payload = trainNeuJudgeFromRealData(
             dataRoot,
