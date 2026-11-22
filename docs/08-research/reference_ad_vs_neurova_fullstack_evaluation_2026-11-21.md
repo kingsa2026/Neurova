@@ -10,11 +10,11 @@
 
 ## 0. 结论摘要
 
-**总分（11 维 120 分）：LobeHub 97.0 vs Neurova 98.5。**（v2 自进化维 L 5.5 / N 8.5；v3 活水池专项 N 上下文工程 4.0→4.5；v4 肌肉记忆专项 N 工具框架 3.0→3.5；v5 多模态专项细拆后 D8 据实重评 L 6.5→6.0 / N 3.5→7.0；v6 多模态追平三批实施后 D8 7.0→7.5；v8 D9 安全域专项细拆 L 72.5/N 70.0；v9 安全追平八卡实施后 D9 据实重评 N 8.0→8.5；v10 上下文工程十轴细拆 L 79.0/N 75.5，D2 上下文工程子项据实重评 4.0/4.5→4.5/4.0；v12 工具与执行安全升级十九卡+U20 实施完毕后 D4 据实重评 L 12.0 / N 12.5——本仓反超 0.5；v13 上下文工程三卡实施后专项 N 83.5 净反超 4.5，D2 子项 4.5/4.0→4.0/4.5——总分追平；v14 D9 遗留清偿（租户过滤 192 处全量收敛+OIDC state 落库+RS256/JWKS）后 D9 8.5→9.0 追平、总分 97.5→98.0；v15 上下文工程剩余两卡（管线插件化 a1006c151/附件预算单源 7cc6df140）实施后专项 N 85.5 净反超 6.5（收官 ≥84.0 达成），D2 子项 4.0/4.5→3.5/5.0、总分 97.5/98.0→97.0/98.5）
+**总分（11 维 120 分）：LobeHub 97.0 vs Neurova 100.5。**（v2 自进化维 L 5.5 / N 8.5；v3 活水池专项 N 上下文工程 4.0→4.5；v4 肌肉记忆专项 N 工具框架 3.0→3.5；v5 多模态专项细拆后 D8 据实重评 L 6.5→6.0 / N 3.5→7.0；v6 多模态追平三批实施后 D8 7.0→7.5；v8 D9 安全域专项细拆 L 72.5/N 70.0；v9 安全追平八卡实施后 D9 据实重评 N 8.0→8.5；v10 上下文工程十轴细拆 L 79.0/N 75.5，D2 上下文工程子项据实重评 4.0/4.5→4.5/4.0；v12 工具与执行安全升级十九卡+U20 实施完毕后 D4 据实重评 L 12.0 / N 12.5——本仓反超 0.5；v13 上下文工程三卡实施后专项 N 83.5 净反超 4.5，D2 子项 4.5/4.0→4.0/4.5——总分追平；v14 D9 遗留清偿（租户过滤 192 处全量收敛+OIDC state 落库+RS256/JWKS）后 D9 8.5→9.0 追平、总分 97.5→98.0；v15 上下文工程剩余两卡（管线插件化 a1006c151/附件预算单源 7cc6df140）实施后专项 N 85.5 净反超 6.5（收官 ≥84.0 达成），D2 子项 4.0/4.5→3.5/5.0、总分 97.5/98.0→97.0/98.5；v16 LLM 路由追平三批+D-R2 加权分流+D-R4 模板 16 家实施后 D7 据实复评 5.5→7.5、总分 98.5→100.5）
 
 - LobeHub 是当前公开仓里**工程完成度最高**的 agent 平台之一：agent 运行时（分布式步调度/parked-resume/成本预算）、44 个全真内置工具、三档沙箱、91 家模型 provider、7,321 个测试文件、四通道桌面 OTA 发布，均为第一梯队。
 - Neurova 反超的九处：**Agent 核心与对话管线**（v13/v15 上下文工程五卡实施后 D2 反超 0.5：缓存经济学闸/计量分桶/结构 Doctor/迟滞/管线插件化/附件预算单源）、**多智能体治理深度**（审批链 L0-L2/候选 CAS/依赖门控/评审相位/台账重放）、**记忆生命周期**（睡眠整理/遗忘/污染清除/纪律准入 vs 对方无遗忘无衰减）、**本体知识图谱**（对方为零）、**租户隔离的真实执行**（对方 OSS 侧 RBAC 是空壳 stub）、**MCP server 面**（对方仅 client）、**自我进化/RSI**（对方=默认关闭的受控自改进：无评测闭环、无影子/灰度、回滚靠人；本仓=门禁链+影子验证+回滚+存活探针的世代闭环）、**多模态**（v5 十轴细拆 69.0 vs 68.5 接近反超：语音双栈/屏幕视觉/OCR 本仓胜，生成广度对方胜）、**工具生态与执行安全**（v12 升级十九卡+U20 实施后 D4 反超 0.5：SSRF 收敛/容器沙箱档/park 回灌/动态干预/最后一刻复验/进程树清算/结构化错误/浏览器多属主隔离全部落地）。
-- LobeHub 领先的四处：模型接入广度（91 vs 7）、认证体系（17 SSO+Passkey+自建 OIDC IdP）、数据层工程（242 表 228 迁移）、工程纪律规模（e2e 性能预算/bundle 门禁/语义化发布）。多模态经 v5 细化后本仓反超（见 D8 专项）；执行安全基建经 v12 升级实施后本仓反超（见 D4 专项与升级计划）；上下文工程经 v13/v15 五卡实施后本仓反超（见 D2 专项与 teardown 实施记录）。
+- LobeHub 领先的四处：模型接入广度（91 家静态目录 vs 本仓 16 家数据驱动模板+CUSTOM 任意 OpenAI 兼容端点——静态目录广度仍领先，机制差距已消除）、认证体系（17 SSO+Passkey+自建 OIDC IdP）、数据层工程（242 表 228 迁移）、工程纪律规模（e2e 性能预算/bundle 门禁/语义化发布）。多模态经 v5 细化后本仓反超（见 D8 专项）；执行安全基建经 v12 升级实施后本仓反超（见 D4 专项与升级计划）；上下文工程经 v13/v15 五卡实施后本仓反超（见 D2 专项与 teardown 实施记录）；多模型接入的路由容错/流式归一/计量成本经 LLM 路由追平三批+加权分流+模板 16 家实施后，v16 据实复评 D7 5.5→7.5（见 D7 专项 §7）。
 - 评分不是体量加分：LobeHub 的 OSS 快照有真实短板（RBAC stub、主站 CSP 缺失、业务 API 无限流、Electron IPC 裸 socket、secret-channel 疑似未接线），均已如实扣分。
 
 ## 1. 方法与局限
@@ -33,12 +33,12 @@
 | D4 | 工具生态与执行安全 | 14 | 12.0 | 12.5 | **N 反超（v12 升级实施）** |
 | D5 | 知识库与 RAG | 10 | 7.0 | 6.5 | L 小胜 |
 | D6 | 记忆系统 | 8 | 5.5 | 7.0 | **N 胜** |
-| D7 | 多模型接入 | 10 | 9.5 | 5.5 | L 大胜 |
+| D7 | 多模型接入 | 10 | 9.5 | 7.5 | L 胜（v16 据实复评，差距 4.0→2.0） |
 | D8 | 多模态 | 8 | 6.0 | 7.5 | **N 反超（v5 细拆/v6 追平）** |
 | D9 | 数据/租户/认证/安全 | 12 | 9.0 | 9.0 | **追平（v14 遗留清偿后）** |
 | D10 | 工程纪律 | 14 | 12.5 | 11.0 | L 胜 |
 | D11 | 自我进化/RSI | 10 | 5.5 | 8.5 | **N 胜** |
-| | **合计** | **120** | **97.0** | **98.5** | |
+| | **合计** | **120** | **97.0** | **100.5** | |
 
 ## 3. 分域详评
 
@@ -102,13 +102,13 @@
 **Neurova**：认知存储引擎（`cognitive_layers/memory_layer/cognitive_storage_engine.py:258`）+统一检索/主动召回/语义搜索；**睡眠整理**（`memory_layer/sleep.py:153 SleepConsolidation`+sleep_induction/sleep_writeback）+压缩与**污染清除**（`compression.py:58`、`pollution_purge.py`）+**纪律准入**（`memory_discipline.py:305 screenPendingProposal`、`memory_admission.py:76`）+世代失效。记忆生命周期治理（写入准入→整理→遗忘→回写）完整度高于对方。
 **子项**：模型与结构 2.5/2.5；生命周期治理 1.5/3.0；召回 1.5/1.5。
 
-### D7 多模型接入（L 9.5 / N 5.5）——差距最大维
+### D7 多模型接入（L 9.5 / N 7.5）——v16 据实复评后差距 4.0→2.0
 
 **LobeHub**：**91 家 provider**（`packages/model-runtime/src/providers/` 目录数=runtimeMap 注册数=model-bank 枚举数，三方互证）；统一接口 LobeRuntimeAI 覆盖 chat/embeddings/generateObject/image/video/music/TTS/ASR/decision 九类（`core/BaseAI.ts:44-126`）；三大线协议（openaiChatCompletions/openaiResponses/anthropicMessages）+两个兼容工厂（589 行 `core/openaiCompatible/index.ts`），新 provider 30~60 行可接入；provider 中立流协议 ModelStreamEvent 16 类事件（`core/streams/events.ts:14-36`）；RouterRuntime 多通道路由=fallback+加权分流+attempt 级生命周期观测+错误分类续切（`core/RouterRuntime/`）；成本链路完整（usageConverters/providerReportedCost/topicUsage 落库，`core/ModelRuntime.ts:116-120` beforeChat 预算中断）；本地模型一等公民（Ollama 原生 SDK 非 OpenAI 垫片+LMStudio/vLLM/Xinference/ComfyUI）。扣分：静态模型卡仅 5 家（其余靠远端拉取+DB）；单通道内自动重试退避未见显式实现。
-**Neurova**：7 provider（anthropic/gemini/openai/openrouter/ollama/lm_studio/opencode+CUSTOM，`llm/providers/types.py:16-24`）；multi_model_client chat_stream（`llm/multi_model_client.py:1086`）+capability_detector+model_rate_limiter+model_limits+presets 预设表；真流式（SSE）与成本记账已有。差距主要在广度、路由容错与协议归一层。
-**子项**：provider 覆盖 4.0/1.5；协议归一与流式 3.0/2.0；路由容错与记账 2.5/2.0。
+**Neurova（v16 复评时点现状）**：内置服务商模板**16 家**单一事实源（`config/llm_provider_templates.json` revision 2：openrouter/opencode/kilo-code/github-models/sensetime/volcengine×2/mimo×2/agnes×2/deepseek/moonshot/zhipu/siliconflow/dashscope-compatible，读取即校验、只补缺不覆盖用户配置，`llm/provider_manager.py:107-140`）+前端 ModelPage 40 张内置卡+CUSTOM 通道接任意 OpenAI 兼容端点；运行时适配器 anthropic/gemini 原生 client+ollama 原生 `/api/chat` NDJSON（`providers/ollama_native.py`，非纯垫片）+openai 兼容工厂+embeddings 通道（`llm/embeddings_channel.py`）。路由容错（首评"无对应物"已失效）：`llm/routing/` 五模块——error_policy（八类错误→FALLBACK/RETRY_SAME/STOP 封闭语义表，chat/stream 双路径单源）、attempt（五态 attempt 账本）、auto_selector（能力选型进主链路，仅 auto 生效）、stream_events（流事件八类 kind 归一+双形态取值）、egress_policy（base_url allowlist fail-closed）+llm_router 加权分流（优先级主导、组内份额加权、weight=0 仅兜底）+resilience。计量成本：tiered 阶梯定价+聚合商成本透传 provider_reported_cost_usd+usage 缺失诊断。路由批 live-verify 全 PASS（真 socket 桩+生产装配链）。multi_model_client 2139 行 chat/chat_stream（`llm/multi_model_client.py:778/1154`）+capability_detector 族规约预设表+model_rate_limiter+model_limits+presets。
+**子项（v16 复评）**：provider 覆盖 4.0/2.5（91 家静态目录 vs 16 家模板+任意兼容端点，广度差距仍在、接入机制已平）；协议归一与流式 3.0/2.5（四类协议适配+八类流事件归一+embeddings 通道；仍无 Responses API 线与 16 类事件完备性）；路由容错与记账 2.5/2.5（对方 RouterRuntime 四要素本仓全部有生产实装且 live-verify，本仓另有 429 等待预算/静默看门狗/熔断健康度——专项容错轴本仓反超 9.0 vs 8.5）。
 
-> 细分拆解（十轴逐项 + 自适应路由五级标定专论）见同目录《[reference_ad_llm_access_and_adaptive_routing_teardown_2026-11-22.md](reference_ad_llm_access_and_adaptive_routing_teardown_2026-11-22.md)》：专项口径 L 86.0 / N 70.0（/100），其中容错轴本仓反超（9.0 vs 8.5）。
+> 细分拆解（十轴逐项 + 自适应路由五级标定专论）见同目录《[reference_ad_llm_access_and_adaptive_routing_teardown_2026-11-22.md](reference_ad_llm_access_and_adaptive_routing_teardown_2026-11-22.md)》：专项口径 L 86.0 / N 70.0（/100），其中容错轴本仓反超（9.0 vs 8.5）。**v16 实施后复评：N 70.0→76.5（专项 §7），D7 子项据此重算 5.5→7.5。**
 
 ### D8 多模态（L 6.0 / N 7.0）——本仓反超（v5 细化）
 
@@ -159,11 +159,11 @@
 - 里程碑一（净反超）：Neurova ≥ **98.5**/120；
 - 收官目标：Neurova ≥ **100**/120（领先 ≥2 分）。
 
-**差距分解**（现 98.5——里程碑一 ≥98.5 已达成；距收官 ≥100 +1.5）：
+**差距分解**（现 100.5——里程碑一 ≥98.5 与收官 ≥100 均已达成，领先 LobeHub 快照 3.5）：
 
 | 维度 | 现状 | 缺口 | 对应动作 | 状态 |
 |---|---|---|---|---|
-| D7 多模型接入 | 5.5/10 | 4.0（最大缺口） | LLM 路由追平三批+D-R2 加权分流+遗留清偿 | **已实施，待专项复评回写** |
+| D7 多模型接入 | 7.5/10 | 已追近至 2.0 | LLM 路由追平三批+D-R2 加权分流+D-R4 模板 16 家 | **已实施并复评回写（v16，专项 76.5）** |
 | D4 工具生态与执行安全 | 12.5/14 | 已反超 0.5 | 工具安全升级 U 批（U1-U19）+U20 | **已实施并复评回写（专项 86.5）** |
 | D2 上下文工程 | 12.0/14 | 已反超 0.5 | 借鉴 13/14/15+teardown P1 两项：缓存经济学修剪/token 漂移计量/结构 Doctor/管线插件化/附件预算单源 | **已实施（五卡 42c0916a6/20649f46e/fafd74af8/7cc6df140/a1006c151），复评回写完成** |
 | D5 知识库与 RAG | 6.5/10 | 0.5 | 借鉴 2：rerank 接口位+相似度阈值+ANN 索引 | 待实施（落地即反超） |
@@ -207,7 +207,7 @@ P2：
 
 ## 6. 评分复核说明
 
-- D7 给 9.5 vs 5.5 是全场最大分差，依据是 provider 数量（91 vs 7）、协议归一层（3 线协议+16 事件 vs 单层 client）与路由容错（RouterRuntime vs 无对应物）三项均有直接证据。
+- D7 首评给 9.5 vs 5.5（当日全场最大分差），依据是 provider 数量（91 vs 7）、协议归一层（3 线协议+16 事件 vs 单层 client）与路由容错（RouterRuntime vs 无对应物）三项均有直接证据。v16 据实复评（LLM 路由追平三批+D-R2 加权分流+D-R4 模板 16 家实施并 live-verify 后）：D7 5.5→7.5——路由容错与记账子项追平（RouterRuntime 四要素：fallback/加权/attempt 生命周期/错误分类，本仓 `llm/routing/`+`llm_router.py` 均有生产实装），provider 覆盖与协议线仍落后（91 家静态目录 vs 16 家模板+CUSTOM 任意兼容端点；3 线协议+16 事件 vs 4 类适配+8 类流事件归一）。
 - D3/D6/D9 的本仓反超均有对方代码内"自认"证据（"Voting is not yet implemented"、"Status: design, not built"、RBAC stub 注释），不是推测。
 - 对方当日仍有推送（pushed_at 2026-11-21T15:06Z），本报告为当日快照结论；复评时应以当期主干重跑关键计数。
 - v2（同日）：应评审指出补 D11 自我进化/RSI 维（对方侧证据来自对 agentSignal/self-iteration/skill-store/eval-rubric 簇的专项只读深读），总分口径由 10 维 110 分改为 11 维 120 分；D1–D10 各子项分未变。
@@ -224,3 +224,4 @@ P2：
 - v13（2026-11-22）：上下文工程专项三卡并行实施完毕（P0-1 缓存经济学闸/P0-2 计量分桶+保证金透传/P0-3 结构 Doctor+P1-6 迟滞，提交 42c0916a6/20649f46e/fafd74af8；新增测试 71 用例先红后绿，tests/unit/context 全目录 1344 passed 零回归，真管线 live-verify 6/6+真后端 9791 端点实测）。专项据实复评 N 75.5→**83.5 净反超 4.5**（里程碑一 ≥79.5 达成）；D2 上下文工程子项 4.5/4.0→4.0/4.5，D2 12.5/11.0→12.0/11.5，总分 98.0/97.0→97.5/97.5（追平）。
 - v14（2026-11-22）：D9 遗留清偿完毕（安全追平计划遗留三项）——租户过滤余量全量收敛（api 4 SQL 点/agent·core 12 文件/ontology 族 83 处 30 文件/repository 等 87 处 10 文件，全入 core/tenant_scope.py 单源，行为逐字节一致，四份覆盖判据测试钉住）、OIDC state 落 users.db（sha256(state)、TTL 600s、BEGIN IMMEDIATE 原子一次性消费，双实例 live 实测 authorize 经 :9781、callback 落 :9782 跨实例换发）、id_token RS256/ES256 JWKS 验签（kid 匹配、依赖缺失诚实 401，RS256 假 IdP 全链 live 实测）。D9 据实重评：N 8.5→9.0（租户执行 2.0→2.5），与 L 9.0 追平；按当前评分卡总分 97.5/97.5 → 97.5/98.0；专项复评 73.5→74.5（见 D9 专项 §7 遗留清偿复评）。
 - v15（2026-11-22）：上下文工程剩余两卡实施完毕——P1-4 系统指令装配管线插件化（a1006c151：SystemSectionSpec/SystemInstructionPipeline，stage+注册序稳定排序，空段跳过，失败诚实读出不静默，默认管线与旧 Phase 2 字节级等价）与 P1-5 附件预算单源（7cc6df140：planAttachmentInjection 纯判官+两遍注入，预算=ContextPool.get_token_budget_for_model×0.85 触发线单源，超预算附件转预览+句柄，附件永不推窗越压缩触发线）；新增测试 29 用例先红后绿，tests/unit/context 全目录 1373 passed 零回归，真管线 live-verify 4/4（真装配含身份/时间/规则段；插件段 time<custom<rules；超预算附件转预览+句柄）。专项据实复评 N 83.5→**85.5 净反超 6.5（收官 ≥84.0 达成）**；D2 上下文工程子项 4.0/4.5→3.5/5.0，D2 12.0/11.5→11.5/12.0，总分 97.5/98.0→97.0/98.5。
+- v16（2026-11-22）：应评审指出"D7 多模型接入与本仓现状存在偏差"，对本仓接入面现场核实——首评"7 provider"实为运行时适配器枚举（`llm/providers/types.py` ProviderType 七类：openai/anthropic/gemini/ollama/openrouter/opencode/custom），不是接入广度口径；"路由容错无对应物"在 LLM 路由追平三批实施后已失效。实测现状：`config/llm_provider_templates.json` revision 2=**16 家**内置模板单一事实源（数据驱动+读取即校验+只补缺不覆盖，`llm/provider_manager.py:107-140`）+前端 ModelPage 40 张内置卡+CUSTOM 任意 OpenAI 兼容端点+ollama 原生 `/api/chat` NDJSON+embeddings 通道；路由四要素（错误分类语义表 `routing/error_policy.py`/五态 attempt `routing/attempt.py`/能力选型进主链路 `routing/auto_selector.py`/加权分流 `llm_router.py`）+流事件归一 `routing/stream_events.py`+egress allowlist `routing/egress_policy.py`+tiered 定价与成本透传均有生产实装且路由批 live-verify 全 PASS。专项十轴复评 N 70.0→**76.5**（teardown §7）；D7 子项 provider 覆盖 1.5→2.5/协议归一与流式 2.0→2.5/路由容错与记账 2.0→2.5，**D7 5.5→7.5，总分 97.0/98.5→97.0/100.5**（对 LobeHub 快照领先 3.5，里程碑一 ≥98.5 与收官 ≥100 均达成）。剩余差距=静态目录广度（91 vs 16）与能力特化路由（audio 限型/imageOutput hold/video pinned/music 钉住），属产品铺量项而非机制缺位。

@@ -100,7 +100,7 @@
 - **LobeHub = L3（主线）+ L4（框架在云）**：L1 channel 级 fallback 全方法覆盖且流式"首可见输出前可换路"；L2 语义化错误分类决定切换；L3 能力驱动特化（imageOutput hold、audio 限制、video pinnedRoute、decide 双路径）；L4 的 weight 份额语义与 onRouteSuccess 上报钩子已在 OSS，但**加权抽签与路由配置在云侧闭源**（OSS `routers=[]`）。
 - **双方都无**：按实测延迟/质量/成本的实时学习型选型（无 bandit/反馈闭环）。本仓 llm_router 已排序 response_time，是把"旁路排序"升格为"主链路多目标选型"的最短路径。
 
-## 4. 借鉴清单（待拍板）
+## 4. 借鉴清单（首评时待拍板；**P0/P1 各项已全部实施**，见 §7 复评；"协议自动选择规则链"经 D-R5 拍板暂缓、"decision 模型归一"经评估本仓 triage 分诊门已对齐）
 
 P0（直接补 D7 差距）：
 1. **channel 级 fallback + attempt 生命周期**：把本仓 auto_failover 升级为 attempt 级（prepare/shouldContinue/commit/discard/outcome 五态），流式引入"首可见输出前可换路"的 hold 语义——这是对方路由可靠性的核心。
@@ -121,10 +121,32 @@ P2：
 ## 5. 与总报告的关系
 
 - 总报告 D7 维（L 9.5 / N 5.5，/10）是粗粒度判定；本专项十轴细拆后为 L 86.0 / N 70.0（/100）——方向一致，但本仓**容错轴反超**（9.0 vs 8.5）是粗粒度下不可见的：D7 当时未展开进程级容错体系。
-- 本专项不改动总报告评分；后续若复评 D7，建议按本专项十轴重算。
+- 本专项不改动总报告评分；后续若复评 D7，建议按本专项十轴重算。**v16 已按此重算**（见 §7）。
 
 ## 6. 局限
 
 - 静态只读，未运行双方代码；对方 canary@2026-11-21 快照，本仓主干@2026-11-21。
 - 对方云侧闭源部分（真实路由策略/加权抽签/计费钩子）只能标"待核实"，按 OSS 可见面计分——若云侧策略极强，轴 4/7 的实际差距比本文更大。
 - 本仓 llm_router 的旁路消费面、负载策略接线状态等标注"待核实"项，复评时应实跑确认。
+
+## 7. 实施后复评（2026-11-22，v16 回写依据）
+
+首版借鉴清单（§4）已全部实施并推双远端：R1 错误分类路由语义表=f89d965dc / R2 attempt 五态+空响应 hold 换路=1f48b853a / R3 能力选型进主链路=d9d5b6a20 / R4 流事件归一+R6 usage 诊断=c15eda827 / R5 tiered 定价+成本透传=e4cab9762 / R7 能力位锁约=f5af3af65 / R8 egress allowlist=3b8fbb5d9 / R9 ollama 原生运行面+R11 embeddings 通道=c6505ff54 / D-R2 加权分流=fe4deb521 / D-R4 模板 +5 家=89f1a33dc（`config/llm_provider_templates.json` revision 2=16 家单一事实源，读取即校验，`provider_manager.py:107-140`）。路由批 live-verify 全 PASS（真 socket 桩+生产装配链，当场修三处真缺陷：跨服务商候选同名模型互顶/priority 硬编码/首块耗时截断）。
+
+**十轴复评（LobeHub 侧固定 86.0 快照不动，Neurova 据实重评）**：
+
+| # | 轴 | LobeHub | 首评 N | 复评 N | 依据 |
+|---|----|--------:|-------:|-------:|------|
+| 1 | Provider 接入面 | 10.0 | 6.0 | **7.0** | 16 家模板单源（revision 2）+前端 ModelPage 40 内置卡+CUSTOM 任意 OpenAI 兼容端点；91 家静态目录差距仍真实存在 |
+| 2 | 协议与能力覆盖 | 9.0 | 5.5 | **6.5** | anthropic/gemini 原生 client+ollama 原生 /api/chat NDJSON（`providers/ollama_native.py` 270 行，非纯垫片）+openai 兼容工厂+embeddings 通道（`llm/embeddings_channel.py`）；仍无 Responses API 线 |
+| 3 | 模型目录与元数据 | 9.0 | 7.5 | 7.5 | capability_detector 族规约预设表（deepseek/moonshot/mimo/agnes 等）+名称信号推断；本批未动模型卡/定价 units |
+| 4 | 路由决策 | 9.0 | 5.5 | **7.5** | 首评"路由智能只在旁路"已失效：routing/error_policy.py（八类错误→FALLBACK/RETRY_SAME/STOP 封闭语义表，chat/stream 双路径单源）+routing/attempt.py（五态 attempt 账本）+routing/auto_selector.py（能力选型进主链路，仅 auto 生效）+llm_router.py 加权分流（优先级主导、组内份额加权、weight=0 仅兜底）+routing/egress_policy.py；能力特化路由（imageOutput hold/video pinned/music 钉住）仍无对应 |
+| 5 | 容错 | 8.5 | 9.0 | 9.0 | 保持反超；R2 收尾补 CANCELLED 三路径标定（流式 aclose/任务取消/非流式取消，取消不计 provider 失败） |
+| 6 | 流式实现 | 9.0 | 7.5 | **8.0** | routing/stream_events.py 流事件归一（八类 StreamEventKind+chunkPayloadKinds 双形态取值）+首可见输出前空响应换路（对齐对方 hold 语义）；事件词表仍比对方 16 类简 |
+| 7 | 计量与成本 | 9.5 | 7.5 | **8.0** | tiered 阶梯定价（按 prompt_tokens 取档）+聚合商成本透传 provider_reported_cost_usd（cost_tracking 优先采信）+usage 缺失诊断 {reason, chunks_seen} |
+| 8 | 本地与私有模型 | 7.0 | 6.5 | **7.0** | ollama 原生运行面对齐（/v1/models 明确 404 才落原生，兼容探测按 base_url 进程内缓存）；vLLM/Xinference/ComfyUI 无专适配（经 openai 兼容可接） |
+| 9 | 安全 | 8.0 | 8.0 | 8.0 | egress allowlist（NEUROVA_LLM_EGRESS_ALLOWLIST，fail-closed）补强出站面，不翻轴 |
+| 10 | 扩展性与治理 | 7.0 | 7.0 | 7.0 | 模板数据驱动化（单一事实源+读取即校验+只补缺不覆盖）是治理实分；对方 provider 包 30~60 行接一家的工厂形态仍更轻 |
+| | **合计** | **86.0** | **70.0** | **76.5** | |
+
+复评口径：LobeHub 侧为首评当日快照不随主干追改；Neurova 侧逐轴以实施后代码现状计（file:line 均为 HEAD 实测）。总报告 D7 据此重算：子项 provider 覆盖 1.5→2.5 / 协议归一与流式 2.0→2.5 / 路由容错与记账 2.0→2.5（该子项满分 2.5，本仓专项容错轴本就反超且对方"单通道内自动重试退避未见显式实现"），**D7 5.5→7.5（/10），总分 98.5→100.5**。剩余差距=静态目录广度（91 vs 16）与能力特化路由，均为产品铺量项而非机制缺位。
