@@ -201,3 +201,7 @@
   - 已清偿=**/tools/execute 失败面结构化错误信封透传**=45a8c452c（失败响应 data.result 携带原始结构化载荷、顶层 error 串保留兼容；红 4F→绿 19P；live-verify 真后端 9575 两案：缺参 param_errors 透传+未登记主机首见 U6 L1 审批信封 approval_id/governance/pending_approval 完整透传，启动 [ERROR]=0）。
   - 已立卡=**W3 结构化错误信封全端点扫荡**（console/governance/skill/computer 同根因压扁点，见 §4）+**W4 neuacp 池键属主段补全**（见 §4）。
   - 登记不立卡=**mcp 单例属主 default**（per-user MCP 配置场景不存在，出现消费场景再立卡）。
+- **2026-11-22 W3+W4 实施完毕（用户指令「两卡开工」；两卡改动经并行会话统一收口提交=ea414149f，主控复验测试全绿）**：
+  - W3=skill.py `SkillExecuteResponse` 增可选 `error_detail` 字段（失败原始载荷原样透传）+computer.py 五处 502 改 `JSONResponse`（detail 串保留+result 结构化透传）+复扫新增命中点 provider.py（端点字段同步更新）；**排除登记**=console.py:950（聊天错误事件构造，非工具执行响应面）/governance.py:245,365（审批协调器与续跑内部记账）——现场复核与「响应面压扁」不同根因，不硬改。test_structured_error_sweep 7 例+三回归件 18 例全绿；live-verify 三探针全过（启动 [ERROR]=0）。
+  - W4=池键追加属主尾段（六元组→七元组；`_normalizeKey` 双形态兼容、`poolKey(ownerId="")` 缺省回旧六元组），attachProcessPool 装配期传成员 id（**偏离申报**：成员 id 只在 swarm 装配期可得，对 swarm.py 最小穿参——不改则属主只能装 run id、杀死同成员跨 run 进程复用，不可取）；登记行 ownerId=成员 id；test_neuacp_pool_key_owner 20 例（旧键兼容/租户段不变/属主段真实参与池键防串池/stats 透出 owner）；live-verify 真进程池+真桩 CLI 三查（登记属主/复用幂等不增行/旧键兼容）全过。合并回归零新增失败。
+  - 遗留：升级前遗留的 ownerId="" 旧登记行未清理（历史行，如需收口另立小卡）；全量套件验证在独立 worktree 后台运行（结果另行通知回填）。
