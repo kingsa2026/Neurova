@@ -81,11 +81,17 @@ class TestOopsStructuralSubset:
 
 class TestOquareStyleMetrics:
     def test_consistencyMetric(self, tmp_path):
-        store, registry = _seedStore(tmp_path)
+        """U6 语义变更：consistency 由 violation 级 findings 计数按术语数比例折减，
+        不再是静态 1.0。种子库自带结构债（枚举术语 label=id 等），故断言改为
+        与公式逐字咬合，而非钉死满分。"""
         from neurova.knowledge.ontology.quality import ontologyQualityReport
 
+        store, registry = _seedStore(tmp_path)
         report = ontologyQualityReport(store, tenantId="default")
-        assert report["metrics"]["consistency"] == 1.0, "零 violation ⇒ 一致性满分"
+        violations = [f for f in report["findings"] if f["severity"] != "info"]
+        expected = round(max(0.0, 1.0 - len(violations) / max(report["term_count"], 1)), 4)
+        assert report["metrics"]["consistency"] == expected
+        assert 0.0 <= report["metrics"]["consistency"] <= 1.0
 
     def test_concisenessMetric(self, tmp_path):
         store, registry = _seedStore(tmp_path)

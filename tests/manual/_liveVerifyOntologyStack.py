@@ -202,7 +202,8 @@ quality = (r.json() or {}).get("data") or {}
 step("B13 质量报告 REST 200", r.status_code == 200 and quality.get("term_count", 0) > 0,
      "%s terms=%s findings=%s" % (r.status_code, quality.get("term_count"),
                                   len(quality.get("findings") or [])))
-step("B13 质量报告指标闭集", set(quality.get("metrics") or {}) == {"consistency", "conciseness"},
+step("B13 质量报告指标必含（U6 后 metrics 只增不改）",
+     {"consistency", "conciseness"} <= set(quality.get("metrics") or {}),
      str(sorted((quality.get("metrics") or {}).keys())))
 step("B13 质量报告两次读数逐字一致",
      json.dumps(quality, sort_keys=True) == json.dumps(

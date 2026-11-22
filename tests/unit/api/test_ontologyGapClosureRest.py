@@ -68,7 +68,8 @@ class TestQualityRest:
         assert ("missingLabel", "bare_term") in kinds
         assert ("orphanClass", "bare_term") in kinds
         assert data["term_count"] == len(registry.terms(tenantId="default"))
-        assert set(data["metrics"]) == {"consistency", "conciseness"}
+        # U6 阈值化后 metrics 只增不改：既有两键必须在，新增指标键不设闭集断言。
+        assert {"consistency", "conciseness"} <= set(data["metrics"])
 
     def testReportIsByteStable(self, client, store):
         _seedPredicate(store)
