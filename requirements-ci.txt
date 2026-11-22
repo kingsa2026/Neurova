@@ -92,7 +92,7 @@ mcp>=2.0.0
 #          tests/unit/evolution/rsi/test_parameter_source_of_truth.py
 # 回归守卫见 tests/unit/test_pytest_runner_guards.py 与
 # tests/unit/test_dev_path_and_runtime_dep_guards.py 的 TestCiTestRunnerAndFixtureDepsAreReal。
-pytest>=9.0.3
+pytest>=9.2.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.1.0
 pytest-timeout>=2.3
