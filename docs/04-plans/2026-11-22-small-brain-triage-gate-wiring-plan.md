@@ -1,6 +1,6 @@
 # 小脑分诊门接线与自研微型判定模型实施方案
 
-> 日期：2026-11-22 · 状态：**已实施并开机（2026-11-22，九笔提交，本地未推）：SB-1..SB-5 + 收官修复 + SB-6/SB-7；分诊门已切 shadow 档收误杀率数据；D-SB4 已裁决实施（SmallBrainRouter 退役）；D-SB1/D-SB3 待拍板遗留**
+> 日期：2026-11-22 · 状态：**已实施并开机（2026-11-22，十一笔提交，本地已推双远端）：SB-1..SB-5 + 收官修复 + SB-6/SB-7 + D-SB1/D-SB3；分诊门已切 shadow 档收误杀率数据；D-SB1/D-SB3/D-SB4 全部裁决实施**
 > 来源：[多 Agent 协作实现路径分析报告](../05-reports/2026-11-21-multi-agent-collaboration-implementation-analysis.md) §8/§11 + 2026-11-21/22「双心智通路」专项剖析（会话内完成，证据链见 §1）
 > 关联计划：[2026-11-21-multi-agent-collaboration-repair-plan.md](2026-11-21-multi-agent-collaboration-repair-plan.md)（M1–M14 协作域断点修复，与本计划**文件域无交集**，可并行）
 > 纪律：每卡先红后绿（红灯实证缺陷）→ 最小实现转绿 → A/B 零新增失败 → live-verify 真链路 → `--only` 逐文件提交；净新增 LOC 尽量为负或逐条列明去向（测试不计）。
@@ -106,7 +106,7 @@
 
 1. **规则强标签自举（主力，零人工零 LLM）**：规则在无歧义区即完美标注器——人类在场窗口→正样本；≥20 独走/复读环窗口→负样本。
 2. **人工标注回流**：enforce 期每次 skip 落特征快照，admin 经管理端点复核改标，进入下一轮训练集（SB-5）。
-3. **离线 LLM 蒸馏（可选，明确不在运行路径）**：用现有 `SmallBrainTriageGate` 离线跑抽样窗口生成弱标签，成本封顶、人工触发——**待拍板 D-SB1，不进 v1**。
+3. **离线 LLM 蒸馏（可选，明确不在运行路径）**：用现有 `SmallBrainTriageGate` 离线跑抽样窗口生成弱标签，成本封顶、人工触发——**已实施（D-SB1，`70d844735`：训练脚本 `--distill N` 配额制，默认 0 不启用；经 realGateTriageFn 复用同一份运行时分诊门）**。
 
 数据源现成：会话 JSON、房间转录（RoomStore→SessionRepository）、请求归档 JSONL。训练/验证按**会话切分**（防同会话泄漏）；固定种子；产物带 `model_version/feature_version/data_fingerprint/eval_metrics`。
 
@@ -178,9 +178,9 @@ SB-1（规则，同时是模型训练数据来源，先落地当地基）→ SB-
 
 | 编号 | 问题 | 选项与推荐 |
 |---|---|---|
-| D-SB1 | 离线 LLM 蒸馏是否立项为可选项 | 立项但默认不启用（推荐）/ 不立项 |
+| D-SB1 | 离线 LLM 蒸馏是否立项为可选项 | **已裁决并实施（2026-11-22 用户拍板，`70d844735`）**：立项为可选项、默认不启用——训练脚本 `--distill N` 配额制离线蒸馏，复用同一份运行时分诊门，失败诚实弃权 |
 | D-SB2 | 模型弃权带初始宽度 | 0.25–0.75（推荐）/ 更窄 |
-| D-SB3 | 默认模型是否随 v1 发布 | 发布"仅结构特征"小模型（推荐，等价规则平滑版）/ 暂不发模型只上规则 |
+| D-SB3 | 默认模型是否随 v1 发布 | **已裁决并实施（2026-11-22 用户拍板）**：种子模型随仓发布（`neu_judge_default.json`，仅结构特征）；D-SB3 真实数据源同批落地——训练脚本 `--source real` 从数据根会话文件收割窗口（本仓实测 100 窗口训练通过） |
 | D-SB4 | SmallBrainRouter（选模型半边）处置 | **已裁决并实施（2026-11-22 用户拍板）：先比后合退役（`365cb3916`）**——`neurova/llm/llm_router.py` 为选模型单源（能力驱动、已进主聊天链路），SmallBrainRouter 为关键词规则弱重复且零生产消费方（仅 phase3_api 三端点自展，前端零引用），整体退役并修正两处失实注释 |
 | D-SB5 | shadow 晋升判据 | ≥500 次判定且误救率<1%（推荐）/ 固定 7 天 |
 
@@ -214,9 +214,10 @@ SB-1（规则，同时是模型训练数据来源，先落地当地基）→ SB-
 | 收官修复 | `9ae2f9b05` | /triage/stats 双源合并（live-verify 实测发现 Layer 6 计数器无端点透出的可观测性断点） |
 | SB-6/D-SB4 | `365cb3916` | SmallBrainRouter 先比后合退役（净 −634 行）：选模型单源归 `llm/llm_router.py`，phase3_api 三端点/失实注释/集成测试用例同批清偿，13 例绿 |
 | SB-7 | `ea81fd0ac` | 误杀率统计 `falseRescueStats`（skip 后 5 分钟人类救援窗口）接入 /triage/stats 第三源；开关切 shadow，33 例绿 |
+| D-SB1/D-SB3 | `70d844735` | `triage_dataset.py`（真实会话窗口收割 + 规则/离线蒸馏弱标注）+ 训练脚本 `--source real/--distill` + 旧门异常契约修正；真实数据冒烟 100 窗口训练通过，17 例绿 |
 
 - **A/B 回归**：受影响域全量串行（collaboration/evals/channels/benchmark + 五入口套件）**1762 passed / 3 failed**——失败均为预存 `test_swarm_room_integration.py::TestEscalationResolve` 顺序性失败，逐卡前后失败集合逐行一致，净增失败 0。
 - **live-verify（9777 真后端，13/13 PASS）**：off 档真实回合计数冻结（零副作用）→ 运行时 PUT 切 enforce → 真实回合 `triage_checks` 0→1（**闸在自动路径真跑**）→ 人类在场回合零拦截 → `/triage/skip-samples` admin 端点在线。skip 拦截路径由 26 例接线测试以真实 SessionSyncManager 事件覆盖（人类触发型入口无法经 HTTP 构造纯 agent 环，如实登记）。
 - **开关已开（shadow，2026-11-22）**：`data/app_settings.json` 的 `triage_gate_enabled=shadow`（运行时配置不入库），复启后端活体确认三链：`GET /settings` 回读 shadow、真实回合 `triage_checks` 0→1（闸在 shadow 档真跑）、`false_rescue` 读数与 `/triage/skip-samples` 端点在线——误杀率数据自此随流量积累，达标（≥500 次判定且误救率<1%）后可切 enforce。
 - **偏离与修正**：① SB-2 任务书契约矛盾（权重方向 vs decide 映射）按计划 §3 裁决 p=「值得响应」概率；② SB-3 修正 model_version 精确比对缺陷（重训产物永不可加载）+ 合成数据零方差特征根因修复（亚型多样化+零方差权重置 0+指标透出）；③ SB-4 增 `triage_gate_errors` 计数器、`settleResult` skipped 守卫（防完成回调竞速洗掉 skip 终态）、SSE `skipped` 具名事件；④ live-verify 发现并修复 /triage/stats 双源未合流断点（`9ae2f9b05`）。
-- **待拍板遗留**：D-SB1（离线蒸馏）/D-SB3（正式训练数据源）仍开放；D-SB4 已裁决实施（SmallBrainRouter 退役，`365cb3916`）。当前开关=shadow、种子模型仅结构特征、弃权带 0.25–0.75，均按计划推荐值先行，正式拍板后如需调整另起小卡。
+- **待拍板遗留**：D-SB1/D-SB3/D-SB4 已全部裁决实施（`70d844735`/`365cb3916`）。当前开关=shadow、种子模型仅结构特征、弃权带 0.25–0.75，按计划推荐值先行；D-SB1 蒸馏默认配额 0（人工触发才消费 LLM），真实数据 skip 类正样本待渠道流量积累。
