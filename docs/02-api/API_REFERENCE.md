@@ -457,7 +457,7 @@
 > 守卫 `tests/unit/api/test_authSurfaceFreshness.py` 逐字比对，漂移即红。
 > 口径：只认**路由依赖图**里的身份/角色门；在 handler 体内自验 token 的那一类**未覆盖**，要确认它只能真打请求。404/405 不算门。
 
-**汇总**：路由 1041 条（含方法展开）——需认证 **1021**、公开 **20**。
+**汇总**：路由 1061 条（含方法展开）——需认证 **1037**、公开 **24**。
 
 | 模块前缀 | 路由 | 需认证 | 公开 |
 |----------|------|--------|------|
@@ -468,10 +468,10 @@
 | `api` | 37 | 37 | 0 |
 | `artifacts` | 2 | 2 | 0 |
 | `audio` | 9 | 9 | 0 |
-| `audit` | 5 | 5 | 0 |
-| `auth` | 10 | 0 | 10 |
+| `audit` | 6 | 6 | 0 |
+| `auth` | 17 | 3 | 14 |
 | `backups` | 3 | 3 | 0 |
-| `benchmark` | 16 | 16 | 0 |
+| `benchmark` | 18 | 18 | 0 |
 | `budgets` | 7 | 7 | 0 |
 | `build` | 6 | 6 | 0 |
 | `builder` | 5 | 5 | 0 |
@@ -479,10 +479,10 @@
 | `channel-configs` | 16 | 16 | 0 |
 | `channel-sharing` | 7 | 7 | 0 |
 | `chat` | 6 | 6 | 0 |
-| `collaboration` | 27 | 27 | 0 |
+| `collaboration` | 28 | 28 | 0 |
 | `computer` | 25 | 25 | 0 |
 | `computers` | 11 | 10 | 1 |
-| `console` | 30 | 30 | 0 |
+| `console` | 31 | 31 | 0 |
 | `context` | 10 | 10 | 0 |
 | `cost-rollup` | 8 | 8 | 0 |
 | `diagnostics` | 1 | 1 | 0 |
@@ -493,8 +493,8 @@
 | `external-agents` | 5 | 5 | 0 |
 | `files` | 12 | 12 | 0 |
 | `firewall` | 6 | 6 | 0 |
-| `generation` | 10 | 10 | 0 |
-| `governance` | 38 | 38 | 0 |
+| `generation` | 12 | 12 | 0 |
+| `governance` | 43 | 43 | 0 |
 | `groups` | 8 | 8 | 0 |
 | `growth` | 13 | 13 | 0 |
 | `health` | 6 | 1 | 5 |
@@ -540,7 +540,7 @@
 | `sleep` | 15 | 15 | 0 |
 | `stats` | 9 | 9 | 0 |
 | `studio` | 21 | 21 | 0 |
-| `swarm-queue` | 4 | 4 | 0 |
+| `swarm-queue` | 5 | 5 | 0 |
 | `sync` | 8 | 8 | 0 |
 | `synonyms` | 12 | 12 | 0 |
 | `tasks` | 8 | 8 | 0 |
@@ -553,9 +553,13 @@
 
 **依赖图里未见身份门的路由（候选集，不等于「无凭证可打」）**：
 
+- `POST /api/v1/auth/2fa/verify`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
+- `GET /api/v1/auth/oidc/authorize`
+- `GET /api/v1/auth/oidc/callback`
+- `GET /api/v1/auth/oidc/status`
 - `POST /api/v1/auth/recover-password`
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/register`
