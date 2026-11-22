@@ -2,7 +2,7 @@
 
 - 日期：2026-11-22
 - 来源：总报告《reference_ad_vs_neurova_fullstack_evaluation_2026-11-21.md》D4 维两份专项拆解的可借鉴点全量收口（21 项，见《reference_ad_remote_execution_teardown_2026-11-22.md》§4）
-- 性质：**实施计划（六项拍板已落定 2026-11-22，可开工）**——按卡实施、每卡先红后绿+live-verify；竞品/外部对标，研究参考，不作产品事实源
+- 性质：**实施计划（已实施完毕 2026-11-22：三批十九卡+U20 全部落地，D4 专项复评 86.5/100）**——按卡实施、每卡先红后绿+live-verify；竞品/外部对标，研究参考，不作产品事实源
 - 目标：D4 专项十轴复评 82.0→90.0+（轴1 8.5→9.0/轴3 6.5→8.0/轴6 7.0→8.5/轴7 7.0→9.0/轴9 8.5→9.0/轴10 8.5→9.0）；总报告 D4 11.5→13.0+、总分 96.0→98.0+
 - 范围红线：只吸收借鉴点，不动既有已验收行为；净新增 LOC 逐卡申报；不引第三方重依赖（paramiko/pyotp 级别以下优先标准库）
 
@@ -139,3 +139,9 @@
 
 - **2026-11-22 评估卡回填（U13/U14/U15/U18）**：U13 HPKE=**暂缓**（本仓凭据不穿不可信中转：一次性配对码+connect ticket+TLS+SSH 信道+本地注入四条链路均已闭环；引入 HPKE=第二套并行凭据面，违教义第 6 条）；U14 MCP Apps UI=**暂缓不立项**（本仓 MCP 消费方全为无头 agent，无 UI 宿主，做了即"注册无消费者模块"）；U15 云沙箱双 provider=**暂缓**（单机部署形态零云沙箱消费方，先落 U5 容器档，未来上云时 provider seam 长在 code_sandbox 既有后端选择处）；U18 核对=截图链已规范（核销），但发现两个真实隔离缺口→**新增 U20 卡**入批二（浏览器 context 跨用户共享；浏览器产物共享目录无属主登记可被任意登录用户跨读）。
 - **2026-11-22 U19 试点回填（shell 分段判据）**：`scripts/check_shell_segments.py`（AST 判定四类 shell 执行点 × 拼接/格式化，豁免 tests//scripts//ALLOW 登记/治理 import 邻近使用）+ `tests/unit/security/test_shell_segments_scan.py` 先红后绿 32 例全绿；全仓实跑 1273 文件、shell 执行点 5 处（hooks_engine:118、shell_sessions:96、computer.py:461、ssh_runner:273、remote_deploy:113）、调用点拼接 0 处 → 违规 0，warning 档退出 0；误报率 0/0 按 0.0 记（5 处命令串均变量透传，逐条人工复核无拼接面）；已知盲区=跨函数先拼接再透传（remote_deploy.writeText f-string → self.run → exec_command），待后续卡接过程间分析或按教义改 argv 传递；误报清零前维持 warning 不升 error（D-T5）。
+- **2026-11-22 全部卡实施完毕（三批十九卡+U20）**：
+  - 波次一：U2 SSRF 收敛=91969ed0a（safe_fetch 使能层委托 url_guard 单源+全量迁移+静态扫描严格零违规）；U1+U3 SSH host key known_hosts+首接确认卡+失败相位追踪=10b9cf7b2（真 socket 四段 live-verify）。
+  - 波次二：治理簇五卡（U4 最后一刻复验/U6 动态干预注册表/U7 运行元数据/U11 失败分级重试/U12 结构化 UNSUPPORTED）=df23d131c；通道认证三件套+多型令牌（U9/U16）=79a15e220；U10 进程树清算+killpg 单源收敛=45c54da78；U5 容器沙箱档=b1f3feb6c；U19 shell 分段 lint=ead9c31e5。
+  - 波次三：tool_executor 收尾簇（U8 park+迟交回灌/U17 不可信会话凭据隔离/U5 isolation 分派接线/U10 exec 清算接线/write_pdf 属主登记）=6fd2f600e；U20 浏览器 context 按属主池化+产物属主登记+车道属主段+端能力声明路由=372e12c95；收口补遗（auth_oidc 出站登记/动态干预测试入档）=b92e69ece；schema 补声明撤豁免=bf5bd9368。
+  - 合并回归：tools+security+computer_use **3803 passed 零失败**（含 U1-U3、U20 真 chromium 13/13、U8 真 SSH 服务端、U10 真实三层进程树、U17 真实用户库 live-verify）。
+  - **D4 专项复评：82.0→86.5**（总目标 90.0 未达，差距=对方分布式执行面/云沙箱档/lint 强制成熟度，诚实记档不入水分）；总报告 D4 12.0/11.5→**12.0/12.5 本仓反超 0.5**，总分 98.0/96.0→**98.0/97.0**。

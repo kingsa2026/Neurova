@@ -1,6 +1,6 @@
 # reference_ad：LobeHub（lobehub/lobehub）vs Neurova 全方位代码级对照评测
 
-- 日期：2026-11-21（v2：增补 D11 自我进化/RSI 维；v3：增补 D2 上下文活水池专项；v4：增补 D4 工具肌肉记忆专项；v5：多模态十轴专项细拆；v7：D4 工具与执行安全十轴专项细拆；v8：D9 数据/租户/认证/安全专项细拆；v10：上下文工程十轴专项细拆；v11：借鉴清单升格为最终实施目标）
+- 日期：2026-11-21（v2：增补 D11 自我进化/RSI 维；v3：增补 D2 上下文活水池专项；v4：增补 D4 工具肌肉记忆专项；v5：多模态十轴专项细拆；v7：D4 工具与执行安全十轴专项细拆；v8：D9 数据/租户/认证/安全专项细拆；v10：上下文工程十轴专项细拆；v11：借鉴清单升格为最终实施目标；v12：D4 升级计划实施完毕后 D4 据实重评）
 - 对象：[lobehub/lobehub](https://github.com/lobehub/lobehub)（代号 reference_ad；LobeChat 同源演进后的 agent 平台主线仓库）
 - 快照：canary 分支浅克隆，版本 2.3.4，pushed_at 2026-11-21；85.9k stars / 16.3k forks；TypeScript
 - 体量：124 个 pnpm 子包；ts/tsx 共 **3,777,641 行**；`*.test.*` 文件 **7,321** 个；18 种界面语言；32 条 GitHub workflow
@@ -10,11 +10,11 @@
 
 ## 0. 结论摘要
 
-**总分（11 维 120 分）：LobeHub 98.0 vs Neurova 96.0。**（v2 自进化维 L 5.5 / N 8.5；v3 活水池专项 N 上下文工程 4.0→4.5；v4 肌肉记忆专项 N 工具框架 3.0→3.5；v5 多模态专项细拆后 D8 据实重评 L 6.5→6.0 / N 3.5→7.0；v6 多模态追平三批实施后 D8 7.0→7.5；v8 D9 安全域专项细拆 L 72.5/N 70.0；v9 安全追平八卡实施后 D9 据实重评 N 8.0→8.5；v10 上下文工程十轴细拆 L 79.0/N 75.5，D2 上下文工程子项据实重评 4.0/4.5→4.5/4.0）
+**总分（11 维 120 分）：LobeHub 98.0 vs Neurova 97.0。**（v2 自进化维 L 5.5 / N 8.5；v3 活水池专项 N 上下文工程 4.0→4.5；v4 肌肉记忆专项 N 工具框架 3.0→3.5；v5 多模态专项细拆后 D8 据实重评 L 6.5→6.0 / N 3.5→7.0；v6 多模态追平三批实施后 D8 7.0→7.5；v8 D9 安全域专项细拆 L 72.5/N 70.0；v9 安全追平八卡实施后 D9 据实重评 N 8.0→8.5；v10 上下文工程十轴细拆 L 79.0/N 75.5，D2 上下文工程子项据实重评 4.0/4.5→4.5/4.0；v12 工具与执行安全升级十九卡+U20 实施完毕后 D4 据实重评 L 12.0 / N 12.5——本仓反超 0.5）
 
 - LobeHub 是当前公开仓里**工程完成度最高**的 agent 平台之一：agent 运行时（分布式步调度/parked-resume/成本预算）、44 个全真内置工具、三档沙箱、91 家模型 provider、7,321 个测试文件、四通道桌面 OTA 发布，均为第一梯队。
-- Neurova 反超的七处：**多智能体治理深度**（审批链 L0-L2/候选 CAS/依赖门控/评审相位/台账重放）、**记忆生命周期**（睡眠整理/遗忘/污染清除/纪律准入 vs 对方无遗忘无衰减）、**本体知识图谱**（对方为零）、**租户隔离的真实执行**（对方 OSS 侧 RBAC 是空壳 stub）、**MCP server 面**（对方仅 client）、**自我进化/RSI**（对方=默认关闭的受控自改进：无评测闭环、无影子/灰度、回滚靠人；本仓=门禁链+影子验证+回滚+存活探针的世代闭环）、**多模态**（v5 十轴细拆 69.0 vs 68.5 接近反超：语音双栈/屏幕视觉/OCR 本仓胜，生成广度对方胜）。
-- LobeHub 领先的六处：模型接入广度（91 vs 7）、执行安全基建（沙箱三档/SSRF 专用包/凭据脱敏——D4 经 v7 细拆后仅余 0.5 分差，工具智能面被本仓肌肉记忆追平）、认证体系（17 SSO+Passkey+自建 OIDC IdP）、数据层工程（242 表 228 迁移）、工程纪律规模（e2e 性能预算/bundle 门禁/语义化发布）、上下文工程（v10 十轴 79.0 vs 75.5：缓存经济学修剪/组装管线广度/token 计量/结构 Doctor）。多模态经 v5 细化后本仓反超（见 D8 专项）。
+- Neurova 反超的八处：**多智能体治理深度**（审批链 L0-L2/候选 CAS/依赖门控/评审相位/台账重放）、**记忆生命周期**（睡眠整理/遗忘/污染清除/纪律准入 vs 对方无遗忘无衰减）、**本体知识图谱**（对方为零）、**租户隔离的真实执行**（对方 OSS 侧 RBAC 是空壳 stub）、**MCP server 面**（对方仅 client）、**自我进化/RSI**（对方=默认关闭的受控自改进：无评测闭环、无影子/灰度、回滚靠人；本仓=门禁链+影子验证+回滚+存活探针的世代闭环）、**多模态**（v5 十轴细拆 69.0 vs 68.5 接近反超：语音双栈/屏幕视觉/OCR 本仓胜，生成广度对方胜）、**工具生态与执行安全**（v12 升级十九卡+U20 实施后 D4 反超 0.5：SSRF 收敛/容器沙箱档/park 回灌/动态干预/最后一刻复验/进程树清算/结构化错误/浏览器多属主隔离全部落地）。
+- LobeHub 领先的五处：模型接入广度（91 vs 7）、认证体系（17 SSO+Passkey+自建 OIDC IdP）、数据层工程（242 表 228 迁移）、工程纪律规模（e2e 性能预算/bundle 门禁/语义化发布）、上下文工程（v10 十轴 79.0 vs 75.5：缓存经济学修剪/组装管线广度/token 计量/结构 Doctor）。多模态经 v5 细化后本仓反超（见 D8 专项）；执行安全基建经 v12 升级实施后本仓反超（见 D4 专项与升级计划）。
 - 评分不是体量加分：LobeHub 的 OSS 快照有真实短板（RBAC stub、主站 CSP 缺失、业务 API 无限流、Electron IPC 裸 socket、secret-channel 疑似未接线），均已如实扣分。
 
 ## 1. 方法与局限
@@ -30,7 +30,7 @@
 | D1 | 架构与模块化 | 12 | 10.0 | 8.0 | L 胜 |
 | D2 | Agent 核心与对话管线 | 14 | 12.5 | 11.0 | L 小胜（v10 细拆） |
 | D3 | 多智能体编排 | 12 | 8.5 | 10.5 | **N 胜** |
-| D4 | 工具生态与执行安全 | 14 | 12.0 | 11.5 | L 险胜（v7 细拆） |
+| D4 | 工具生态与执行安全 | 14 | 12.0 | 12.5 | **N 反超（v12 升级实施）** |
 | D5 | 知识库与 RAG | 10 | 7.0 | 6.5 | L 小胜 |
 | D6 | 记忆系统 | 8 | 5.5 | 7.0 | **N 胜** |
 | D7 | 多模型接入 | 10 | 9.5 | 5.5 | L 大胜 |
@@ -38,7 +38,7 @@
 | D9 | 数据/租户/认证/安全 | 12 | 9.0 | 8.5 | L 小胜（安全追平八卡实施后差距 0.5） |
 | D10 | 工程纪律 | 14 | 12.5 | 11.0 | L 胜 |
 | D11 | 自我进化/RSI | 10 | 5.5 | 8.5 | **N 胜** |
-| | **合计** | **120** | **98.0** | **96.0** | |
+| | **合计** | **120** | **98.0** | **97.0** | |
 
 ## 3. 分域详评
 
@@ -74,11 +74,11 @@
 **Neurova**：SwarmManager（`neurova/agent/swarm.py:446`）spawn/cancelRun/cancelQueuedRun/resumeFinishedRun/steer 全链；TaskUnit（`agent/task_unit.py:22`）+审批链 L0-L2（`agent/approval_chain.py`）+依赖门控（swarm.py:1931 上游未验收→dependency_failed）+评审相位（`agent/review_gate.py`）+候选制 CAS 合并与冲突升级+H-4 事件账本与重放收敛（reconcileRunFromEvents）；房间/项目双入口；neuacp 外部代理（OpenCode/Qoder/CodeBuddy/ZCode+SSH 远程+按租户隔离的进程池）。
 **判定**：对方胜在 supervisor 编排形态与外部 agent 适配广度；本仓胜在治理闭环（审批分级/候选合并/依赖门/评审/台账）与外部代理的租户隔离红线。**子项**：编排形态 3.0/3.5；治理与审批 2.5/4.0；异构外部 agent 3.0/3.0。
 
-### D4 工具生态与执行安全（L 12.0 / N 11.5）
+### D4 工具生态与执行安全（L 12.0 / N 12.5）
 
 **LobeHub**：44 个 builtin-tool 全部真实现（每包 manifest+执行体，无空壳；`packages/builtin-tools/src/index.ts` 汇总），manifest 带 Zod 校验+humanIntervention+超时 clamp（`packages/types/src/tool/builtin.ts:211-289`）；双执行面（client 经 device-gateway WS+Redis 等结果，server 侧 serverRuntimes 73 文件）；MCP 仅 client（stdio+StreamableHTTP，`packages/device-mcp`，支持 MCP Apps SEP-1865 UI），**无 MCP server 面**；沙箱三档=云沙箱（market/onlyboxes）+SRT 本地沙箱（文件读写白名单+网络域名白名单+禁 PTY，`packages/device-sandbox/src/policy.ts`）+Pyodide WASM Worker；ssrf-safe-fetch 逐跳重定向过滤+体积上限（`packages/ssrf-safe-fetch/index.ts:182-213`）；凭据脱敏到 `******` 且不进模型上下文（`builtin-tool-creds/src/injectResult.ts:34-58`）；审批三层=声明式 humanIntervention+动态审计（pathScopeAudit/deleteFilesAudit 等，`builtin-tools/src/dynamicInterventionAudits.ts:13-20`）+安全黑名单 auto-run 亦不可绕过（`agent-runtime/src/core/InterventionChecker.ts:60-77`）。扣分：local-system runCommand 在用户主进程直接执行无进程级隔离（靠审批+黑名单+超时）；secret-channel HPKE 实现精良但主链路未见消费方（待核实）。
 **Neurova**：ToolExecutor 单管道零旁路+curated 名册；沙箱族 `neurova/sandbox/`（code_sandbox/exec_sandbox/restricted_token/appcontainer）；凭据 keyring（`security/secret_store.py`）；webhook 验签 8 处（dingtalk/feishu/wechat_kf_crypto/telegram/qq/qclaw/xiaoyi 等）。**MCP client+server 双端**（`tool_layers/mcp_client.py`+`mcp_agent_tools_server.py`/`mcp_ontology_server.py`+`security/mcp_grants.py`）——对方没有的一半。扣分：内置工具数量与执行面规模小于对方；无云沙箱档。
-**子项**：工具框架与生态规模 4.5/4.0；沙箱与隔离 3.5/2.5；MCP 2.0/3.0；凭据与审批 2.0/1.5。十轴细拆见《reference_ad_tool_security_teardown_2026-11-22.md》（等权 N 82.0 / L 78.0；D4 按"执行安全"权重计 L 险胜 0.5）。
+**子项**：工具框架与生态规模 4.5/4.5；沙箱与隔离 3.5/3.0；MCP 2.0/3.0；凭据与审批 2.0/2.0。十轴细拆见《reference_ad_tool_security_teardown_2026-11-22.md》（等权实施前 N 82.0 / L 78.0；v12 升级实施后复评 N 86.5 / L 78.0——SSRF 收敛/容器沙箱档/park 回灌/动态干预/最后一刻复验/进程树清算/结构化错误/浏览器多属主隔离落地；D4 按"执行安全"权重计 N 12.5 / L 12.0 反超 0.5）。
 
 #### D4 专项：工具肌肉记忆 vs 对方工具学习面（v4 增补）
 
@@ -88,7 +88,7 @@
 
 **LobeHub（无程序性工具记忆）**：最接近的三个对应物都在"文档/观测层"——① Agent Signal 弱信号回路（同工具连续失败≥2/用户纠正≥2 → self-reflection → create/refine_skill 提案，`accumulators/selfReflection.ts:11-21`）：沉淀物是 SKILL.md 说明书，激活后整篇进 system prompt（`SkillContextProvider.ts:47-76`），靠模型"读了照做"，不改工具清单、不生成参数模板；② Expertise(SCLPT) 教训库：成熟教训单向编译为 verify_criteria（`expertise.ts:411`）——是**交付物验收判定器**，不进工具选择/参数链；③ `UsageCounter.accumulateTool` 按 byTool 记 {calls, errors, totalTimeMs}（`UsageCounter.ts:204-234`）——纯计量，无读取方反哺工具发现/排序（toolDiscovery 无 rank/score 逻辑）；agent-tracing 轨迹重放仅评测用。全仓无 tool usage/stats 表、无参数模板、无"成功调用序列固化重放"机制。
 
-**判定**：方向上有形似者（失败信号→反思→沉淀），但对方沉淀物是"说明书"而非可执行调用模式；本仓肌肉记忆是"调用结果→结构化统计→相似任务自动取回→改变工具选择与参数→成败回流迭代"的完整程序性闭环，且自动执行不绕治理/审批。此能力对方为零。**子项影响**：工具框架与生态规模 3.0→3.5（对方仍以 44 工具规模与执行安全分层领先该子项）。D4 合计 L 12.5 / N 10.5。
+**判定**：方向上有形似者（失败信号→反思→沉淀），但对方沉淀物是"说明书"而非可执行调用模式；本仓肌肉记忆是"调用结果→结构化统计→相似任务自动取回→改变工具选择与参数→成败回流迭代"的完整程序性闭环，且自动执行不绕治理/审批。此能力对方为零。**子项影响**：工具框架与生态规模 3.0→3.5（对方仍以 44 工具规模与执行安全分层领先该子项）。D4 合计 L 12.5 / N 10.5（v4 时点数；v12 升级实施后 D4 = L 12.0 / N 12.5 本仓反超——见评分卡与工具安全拆解复评节）。
 
 ### D5 知识库与 RAG（L 7 / N 6.5）
 
