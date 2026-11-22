@@ -269,7 +269,7 @@ def buildOutcomeSweepDataset(
     """完整管线：收割 → 规则直标 → 结果采矿 → 教师质量门 →
     边界扫描 → 教师标注（配额内，特征向量去重，已知标签免费继承）。
 
-    返回 {"labeled": [...], "outcomeSamples", "teacherAgreement",
+    返回 {"labeled": [...], "windows": [...], "outcomeSamples", "teacherAgreement",
           "sweepVectors", "distillUsed", "distillErrors", "aborted"}。
     """
     from neurova.collaboration.triage_dataset import (
@@ -357,6 +357,7 @@ def buildOutcomeSweepDataset(
             })
     return {
         "labeled": labeled,
+        "windows": windows,
         "grayUnlabeled": ruled["grayUnlabeled"],
         "outcomeSamples": len(outcomeRows),
         "teacherAgreement": agreement,

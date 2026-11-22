@@ -543,6 +543,65 @@ def _ingestSkipFeedback(dataRoot: str) -> List[Dict]:
     return rows
 
 
+def _ingestExternalLabels(dataRoot: str) -> Dict[str, Tuple[float, float]]:
+    """external_labels.jsonl → {sessionId: (label, softLabel)}。
+
+    外部数据集与合成数据的结果/教师标签都走这份文件（答案先行：标签来自
+    可观测结果或教师裁决，同会话的规则标签会被其覆盖；灰区弃权窗若有外部
+    标签也会补入训练）。
+    """
+    path = Path(dataRoot) / "external_labels.jsonl"
+    if not path.exists():
+        return {}
+    out: Dict[str, Tuple[float, float]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            record = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        sessionId = str(record.get("sessionId") or "")
+        if not sessionId or "label" not in record:
+            continue
+        label = float(record["label"])
+        soft = float(record.get("softLabel", label))
+        out[sessionId] = (label, soft)
+    return out
+
+
+def _applyExternalOverrides(
+    labelled: List[Dict],
+    windows: List[Dict],
+    overrides: Dict[str, Tuple[float, float]],
+) -> int:
+    """外部/合成标签落地：覆盖同会话已标注行的标签，并为灰区弃权窗补入
+    带外部标签的训练行（合成灰区数据由此进入训练集）。返回应用条数。"""
+    applied = 0
+    seen = {row["sessionId"] for row in labelled}
+    for row in labelled:
+        if row["sessionId"] in overrides:
+            row["label"], row["softLabel"] = overrides[row["sessionId"]]
+            applied += 1
+    for window in windows:
+        convId = window["conversationId"]
+        if convId in overrides and convId not in seen:
+            labelled.append({
+                "sessionId": convId,
+                "category": "external",
+                "features": _prepareFeatureVector(
+                    extractTriageFeatures(window["events"], "")),
+                "label": overrides[convId][0],
+                "softLabel": overrides[convId][1],
+            })
+            seen.add(convId)
+            applied += 1
+    return applied
+
+
 def trainNeuJudgeFromRealData(
     dataRoot: str,
     seed: int = DEFAULT_SEED,
@@ -589,6 +648,8 @@ def trainNeuJudgeFromRealData(
     ]
     feedbackRows = _ingestSkipFeedback(dataRoot)
     labelled.extend(feedbackRows)
+    overrides = _ingestExternalLabels(dataRoot)
+    appliedExternal = _applyExternalOverrides(labelled, windows, overrides)
     if len(labelled) < 8:
         raise RuntimeError(
             f"可训练样本不足（{len(labelled)} < 8）——需要更多会话流量、"
@@ -601,6 +662,8 @@ def trainNeuJudgeFromRealData(
     payload["eval_metrics"]["distillUsed"] = float(labelledRaw["distillUsed"])
     payload["eval_metrics"]["distillErrors"] = float(labelledRaw["distillErrors"])
     payload["eval_metrics"]["skipFeedbackSamples"] = float(len(feedbackRows))
+    payload["eval_metrics"]["externalLabels"] = float(len(overrides))
+    payload["eval_metrics"]["externalApplied"] = float(appliedExternal)
     payload["eval_metrics"]["distillScope"] = 1.0 if distillScope == "audit" else 0.0
     return payload
 
@@ -633,6 +696,9 @@ def trainNeuJudgeFromOutcomeSweep(
             "label": float(row["label"]),
             "softLabel": float(row.get("softLabel", row["label"])),
         })
+    overrides = _ingestExternalLabels(dataRoot)
+    appliedExternal = _applyExternalOverrides(
+        labelled, result.get("windows") or [], overrides)
     if len(labelled) < 8:
         raise RuntimeError(
             f"边界扫描管线可训练样本不足（{len(labelled)} < 8）——需要更多会话流量"
@@ -650,6 +716,8 @@ def trainNeuJudgeFromOutcomeSweep(
         "distillUsed": float(result["distillUsed"]),
         "distillErrors": float(result["distillErrors"]),
         "aborted": 1.0 if result["aborted"] else 0.0,
+        "externalLabels": float(len(overrides)),
+        "externalApplied": float(appliedExternal),
     })
     return payload
 

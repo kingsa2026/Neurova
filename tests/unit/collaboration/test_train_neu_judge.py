@@ -428,3 +428,99 @@ class TestCalibrateScript:
         assert "thresholds" in calibrated
         assert calibrated["thresholds"]["skip_p"] <= calibrated["thresholds"]["allow_p"]
         assert NeuJudge.loadFrom(trainedOut) is not None
+
+
+class TestExternalLabelIngestion:
+    """外部数据集/合成灰区标签注入：external_labels.jsonl → 训练行。
+
+    答案先行：标签来自可观测结果或教师裁决（合成灰区由真分诊门打标），
+    同会话规则/蒸馏标签被外部标签覆盖；灰区弃权窗带外部标签时补入训练
+    （category="external"），评估指标透出 externalLabels/externalApplied。
+    """
+
+    def testIngestExternalLabelsParsesAndSkipsBadLines(self, script, tmp_path):
+        labels = tmp_path / "external_labels.jsonl"
+        lines = [
+            json.dumps({"sessionId": "a/x", "label": 1, "softLabel": 0.9}),
+            json.dumps({"sessionId": "b/y", "label": 0}),
+            "not-json-line",
+            json.dumps({"sessionId": "", "label": 1}),
+            json.dumps({"sessionId": "c/z"}),
+        ]
+        labels.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        out = script._ingestExternalLabels(str(tmp_path))
+        assert out == {"a/x": (1.0, 0.9), "b/y": (0.0, 0.0)}
+        # 文件缺失 → 空映射（不报错，离线训练不因无外部数据中断）
+        assert script._ingestExternalLabels(str(tmp_path / "missing")) == {}
+
+    def testApplyExternalOverridesOverridesAndAppends(self, script):
+        base = datetime(2026, 11, 22, 9, 0, 0)
+
+        def events(tag: str) -> list:
+            return [{"role": "assistant", "content": f"{tag}第{j}句，各不相同。",
+                     "timestamp": (base + timedelta(seconds=j * 5)).isoformat()}
+                    for j in range(5)]
+
+        windows = [
+            {"conversationId": "a/x", "events": events("甲")},
+            {"conversationId": "c/z", "events": events("丙")},
+        ]
+        labelled = [{
+            "sessionId": "a/x", "category": "llm_distill",
+            "features": script._prepareFeatureVector(
+                extractTriageFeatures(windows[0]["events"], "")),
+            "label": 0.0, "softLabel": 0.3,
+        }]
+        applied = script._applyExternalOverrides(
+            labelled, windows, {"a/x": (1.0, 0.9), "c/z": (0.0, 0.8)})
+        assert applied == 2
+        byId = {row["sessionId"]: row for row in labelled}
+        # 同会话：外部标签覆盖旧标签与软标签
+        assert byId["a/x"]["label"] == 1.0
+        assert byId["a/x"]["softLabel"] == 0.9
+        # 灰区弃权窗：带外部标签补入，category=external
+        assert byId["c/z"]["category"] == "external"
+        assert byId["c/z"]["label"] == 0.0
+        assert byId["c/z"]["softLabel"] == 0.8
+
+    def testSweepTrainingAbsorbsExternalLabels(self, script, tmp_path):
+        dataRoot = tmp_path / "data"
+
+        def writeSession(agentDir: str, sessionId: str, messages: list) -> None:
+            sessionsDir = dataRoot / agentDir / "sessions"
+            sessionsDir.mkdir(parents=True, exist_ok=True)
+            base = datetime(2026, 11, 22, 9, 0, 0)
+            payload = {"agent_id": agentDir, "session_id": sessionId,
+                       "messages": [{"role": m["role"], "content": m["content"],
+                                     "timestamp": (base + timedelta(seconds=i * 5)).isoformat()}
+                                    for i, m in enumerate(messages)]}
+            (sessionsDir / f"session_{sessionId}_2026-11-22.json").write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        for i in range(6):
+            writeSession(f"agentH{i}", f"human{i}",
+                         [{"role": "user" if j % 2 == 0 else "assistant",
+                           "content": f"问题{i}_{j}，各不相同？"} for j in range(8)])
+        for i in range(6):
+            writeSession(f"agentL{i}", f"loop{i}",
+                         [{"role": "assistant", "content": f"独走{i}号第{j}句。"}
+                          for j in range(25)])
+        # 灰区窗（短独走、非逐字、规则弃权）+ 教师外部标签 → 应补入训练
+        writeSession("synthGray", "synth",
+                     [{"role": "assistant", "content": f"灰区独走第{j}句，进展与待确认并存。"}
+                      for j in range(8)])
+        (dataRoot / "external_labels.jsonl").write_text(
+            json.dumps({"sessionId": "synthGray/synth", "label": 1,
+                        "softLabel": 0.85, "source": "synth-gray"}) + "\n",
+            encoding="utf-8")
+
+        out = tmp_path / "artifact.json"
+        assert script.main(["--source", "sweep", "--data-root", str(dataRoot),
+                            "--out", str(out), "--distill", "0",
+                            "--min-messages", "6", "--max-windows", "50"]) == 0
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        metrics = payload["eval_metrics"]
+        assert metrics["externalLabels"] == 1.0
+        assert metrics["externalApplied"] == 1.0
+        assert payload["model_version"] == "0.4.0-neurova"
+        assert NeuJudge.loadFrom(out) is not None
