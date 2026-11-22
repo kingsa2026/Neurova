@@ -29,9 +29,19 @@ _lock = threading.RLock()
 
 
 def buildAlwaysOnBudgetReport(
-    segments: Mapping[str, str], *, system_cap: int = DEFAULT_ALWAYS_ON_CAP
+    segments: Mapping[str, str],
+    *,
+    system_cap: int = DEFAULT_ALWAYS_ON_CAP,
+    messages: Optional[Iterable[Any]] = None,
+    model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """按段统计常驻文本；超总预算或超分段预算都显式列出。"""
+    """按段统计常驻文本；超总预算或超分段预算都显式列出。
+
+    `messages` 提供时增量带出窗口载荷分桶读数 `payload_buckets`
+    （content/tool_calls/reasoning/other，经 window_compactor 单源拆分）；
+    `model_id` 透传该模型溢出保证金（只放大载荷桶）。缺省不传 messages 时
+    分桶为全零形状——既有键与既有调用面零变化。
+    """
     items = []
     for name, text in (segments or {}).items():
         chars = len(text or "")
@@ -53,7 +63,22 @@ def buildAlwaysOnBudgetReport(
         "over_budget": total > int(system_cap),
         "over_segment_caps": [item["segment"] for item in items if item["over_cap"]],
         "segments": items,
+        "payload_buckets": windowPayloadBucketReadout(messages, model_id=model_id),
     }
+
+
+def windowPayloadBucketReadout(
+    messages: Optional[Iterable[Any]], *, model_id: Optional[str] = None
+) -> Dict[str, int]:
+    """窗口消息载荷分桶读数（展示侧只读，拆分单源在 window_compactor）。
+
+    判据与展示共用 `WindowTokenMeter.breakdown` 的同一份分桶，面板读数即
+    判据读数；`model_id` 提供时载荷按该模型溢出保证金放大。空序列返回
+    全零桶 `{"content": 0, "tool_calls": 0, "reasoning": 0, "other": 0}`。
+    """
+    from neurova.context.window_compactor import WindowTokenMeter
+
+    return WindowTokenMeter(model_id=model_id).breakdown(list(messages or []))
 
 
 def recordContextBudget(
@@ -61,9 +86,17 @@ def recordContextBudget(
     segments: Mapping[str, str],
     *,
     system_cap: int = DEFAULT_ALWAYS_ON_CAP,
+    messages: Optional[Iterable[Any]] = None,
+    model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """记录最近一次系统提示的常驻分段；同 agent 后写覆盖先写。"""
-    report = buildAlwaysOnBudgetReport(segments, system_cap=system_cap)
+    """记录最近一次系统提示的常驻分段；同 agent 后写覆盖先写。
+
+    `messages`/`model_id` 透传 `buildAlwaysOnBudgetReport`（增量分桶读数，
+    见其 docstring）；不传时报告仍带全零 `payload_buckets`，既有消费方零感知。
+    """
+    report = buildAlwaysOnBudgetReport(
+        segments, system_cap=system_cap, messages=messages, model_id=model_id
+    )
     report["agent_id"] = str(agent_id or "default")
     if report["over_budget"]:
         logger.warning(

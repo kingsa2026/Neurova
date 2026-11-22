@@ -97,11 +97,15 @@ class CompressionEvent:
         }
 
 
-def estimateContextTokens(messages: Iterable) -> int:
-    """消息序列的 token 估算（窗口计量单源 window_compactor 的无状态入口）。"""
+def estimateContextTokens(messages: Iterable, model_id: Optional[str] = None) -> int:
+    """消息序列的 token 估算（窗口计量单源 window_compactor 的无状态入口）。
+
+    `model_id` 透传单源：提供时对该模型溢出保证金生效（只放大载荷，协议开销
+    常数不参与）；缺省行为与既有调用逐字节一致。
+    """
     from neurova.context.window_compactor import estimate_window_tokens
 
-    return int(estimate_window_tokens(messages or []))
+    return int(estimate_window_tokens(messages or [], model_id=model_id))
 
 
 def contextFingerprint(message: Any) -> str:

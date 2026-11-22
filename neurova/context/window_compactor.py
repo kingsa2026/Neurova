@@ -40,26 +40,82 @@ def messagePayloadTokens(
     这条判据在它最该起作用的形状上恒真（实测低估 270×，台账 §21.3）。
 
     载荷 = 文本内容｜多模态分段（文本段按文本、图像段按 `IMAGE_PART_TOKENS`）
-    + `tool_calls` 协议原文串。`content` 为分段 list 时不得抛异常 ——
-    判据面缺多模态口径，等于多模态轮不受预算管辖。
+    + `tool_calls` 协议原文串 + `reasoning`/`thinking` 字段原文（若存在——
+    thinking 模式下部分 provider 要求 assistant 消息回带它，见
+    `model_capability_cache.CAP_NEEDS_REASONING_CONTENT`，是真载荷）。
+    `content` 为分段 list 时不得抛异常 —— 判据面缺多模态口径，等于多模态轮
+    不受预算管辖。分桶细目见 `messagePayloadBreakdown`（与总量共用同一拆分）。
     """
-    segments, fixed = _payloadSegments(message)
+    bucketed, fixed = _payloadParts(message)
     if estimator is None:
         from neurova.context.token_estimator import estimate_tokens
 
         estimator = estimate_tokens
-    return sum(estimator(text) for text in segments) + fixed
+    return sum(estimator(text) for texts in bucketed.values() for text in texts) + fixed
 
 
-def _payloadSegments(message: typing.Any) -> typing.Tuple[typing.List[str], int]:
-    """载荷拆成（待计量的文本段, 固定计价部分）。
+def messagePayloadBreakdown(
+    message: typing.Any, estimator: typing.Optional[typing.Callable[[str], int]] = None
+) -> typing.Dict[str, int]:
+    """一条消息载荷的**分桶计量**（与 `messagePayloadTokens` 同一拆分的细目）。
 
-    非 dict 的条目按改前 `str(message)` 语义处理（兼容裸字符串序列）。
+    返回 `{"content": int, "tool_calls": int, "reasoning": int, "other": int}`：
+
+    - `content`：正文（字符串 content 或多模态分段的 text 段）；
+    - `tool_calls`：`tool_calls` 协议序列化原文串（`arguments` 本体）；
+    - `reasoning`：`reasoning_content`/`reasoning`/`thinking` 字段原文（若存在）；
+    - `other`：固定计价部分（图像段按 `IMAGE_PART_TOKENS`）等其余载荷。
+
+    桶间不重复计数，**合计 == `messagePayloadTokens(message, estimator)`**
+    （同一 `_payloadParts` 拆分，只是按桶归集）。
+    """
+    bucketed, fixed = _payloadParts(message)
+    if estimator is None:
+        from neurova.context.token_estimator import estimate_tokens
+
+        estimator = estimate_tokens
+    buckets: typing.Dict[str, int] = {
+        "content": 0,
+        "tool_calls": 0,
+        "reasoning": 0,
+        "other": 0,
+    }
+    for name, texts in bucketed.items():
+        buckets[name] += sum(estimator(text) for text in texts)
+    buckets["other"] += fixed
+    return buckets
+
+
+def _reasoningText(message: typing.Optional[dict]) -> str:
+    """消息上的 reasoning/thinking 原文（若存在且非空串）。
+
+    多个别名键取第一个非空串；只认字符串形态（非字符串字段不进载荷口径，
+    与 `messagePayloadTokens` 保持同一拆分）。
+    """
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        value = (message or {}).get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _payloadParts(
+    message: typing.Any,
+) -> typing.Tuple[typing.Dict[str, typing.List[str]], int]:
+    """载荷拆成（桶名 → 该桶待计量文本段列表, 固定计价部分）。
+
+    总量（`messagePayloadTokens`）与分桶（`messagePayloadBreakdown`）共用
+    **这一份拆分**——桶间不重复计数，合计恒等于总量口径。非 dict 的条目按
+    改前 `str(message)` 语义处理（兼容裸字符串序列），归 content 桶。
     """
     if not isinstance(message, dict):
-        return ([str(message)] if message else []), 0
+        return ({"content": [str(message)]} if message else {"content": []}), 0
 
-    segments: typing.List[str] = []
+    bucketed: typing.Dict[str, typing.List[str]] = {
+        "content": [],
+        "tool_calls": [],
+        "reasoning": [],
+    }
     fixed = 0
     content = message.get("content", "")
     if isinstance(content, list):
@@ -68,17 +124,21 @@ def _payloadSegments(message: typing.Any) -> typing.Tuple[typing.List[str], int]
                 continue
             kind = part.get("type")
             if kind == "text":
-                segments.append(str(part.get("text", "")))
+                bucketed["content"].append(str(part.get("text", "")))
             elif kind == "image_url":
                 fixed += IMAGE_PART_TOKENS
     elif content:
-        segments.append(str(content))
+        bucketed["content"].append(str(content))
 
     tool_calls = message.get("tool_calls")
     if tool_calls:
         # 协议原文形态（`arguments` 是 JSON 串）——与 provider 收到的字节对齐计价
-        segments.append(json.dumps(tool_calls, ensure_ascii=False))
-    return segments, fixed
+        bucketed["tool_calls"].append(json.dumps(tool_calls, ensure_ascii=False))
+
+    reasoning = _reasoningText(message)
+    if reasoning:
+        bucketed["reasoning"].append(reasoning)
+    return bucketed, fixed
 
 # 摘要失败收敛：摘要请求失败时从折叠区丢最旧一条
 # 重试（输入变小更易成功），最多重试 _SUMMARY_MAX_RETRIES 次；仍失败则回落
@@ -106,12 +166,26 @@ class WindowTokenMeter:
     缺省为 None，每次调用自建。
     """
 
-    def __init__(self, estimator: typing.Optional[typing.Callable[[str], int]] = None):
-        if estimator is None:
+    def __init__(
+        self,
+        estimator: typing.Optional[typing.Callable[[str], int]] = None,
+        model_id: typing.Optional[str] = None,
+    ):
+        if model_id:
+            # 溢出保证金只走 `estimate_tokens(model_id=...)` 单源（步进/封顶/
+            # 向上取整都在那一处），不得在计量侧出现第二份保证金算法。与自定义
+            # estimator 同时给出时以 model_id 为准。`PER_MSG_OVERHEAD` 在 `one()`
+            # 里按常数另加、不经估算器，天然不参与保证金放大。
+            def estimator(text: str, _model_id: str = model_id) -> int:  # noqa: E731
+                from neurova.context.token_estimator import estimate_tokens
+
+                return estimate_tokens(text, model_id=_model_id)
+        elif estimator is None:
             from neurova.context.token_estimator import estimate_tokens
 
             estimator = estimate_tokens
         self._estimator = estimator
+        self._model_id = model_id
         # 键是 id(obj)，但**同时持有强引用**——只存 id 会被 CPython 的 id 复用
         # 击中（对象被回收后新对象拿到同一 id → 计量结果串号）。meter 生命周期
         # 只有一次折叠调用，持有引用的代价可忽略。
@@ -143,14 +217,39 @@ class WindowTokenMeter:
         self._totals[key] = (seq, value)
         return value
 
+    def breakdown(self, msgs: typing.Iterable) -> typing.Dict[str, int]:
+        """窗口载荷的**逐桶累计**（判据与展示共用的分桶读数）。
 
-def estimate_window_tokens(msgs: typing.Iterable) -> int:
+        与 `one`/`total` 同一拆分（`messagePayloadBreakdown`）：桶间不重复
+        计数，桶合计 == Σ`messagePayloadTokens`；协议开销 `PER_MSG_OVERHEAD`
+        是窗口级常数，不属于任何载荷桶，不计入本读数。
+        """
+        seq = msgs if isinstance(msgs, (list, tuple)) else list(msgs or [])
+        totals: typing.Dict[str, int] = {
+            "content": 0,
+            "tool_calls": 0,
+            "reasoning": 0,
+            "other": 0,
+        }
+        for m in seq:
+            for name, value in messagePayloadBreakdown(m, self._estimator).items():
+                totals[name] += value
+        return totals
+
+
+def estimate_window_tokens(
+    msgs: typing.Iterable, model_id: typing.Optional[str] = None
+) -> int:
     """估算窗口消息序列的 token 总量（统一估算器 EXACT/BALANCED 策略）。
+
+    `model_id` 提供时对该模型溢出保证金生效（只放大载荷，经
+    `estimate_tokens(model_id=...)` 单源；`PER_MSG_OVERHEAD` 是协议开销常数，
+    不参与放大）。缺省行为与既有调用逐字节一致。
 
     无状态入口：等价于一次性 `WindowTokenMeter`。需要在一段逻辑内多次求值时，
     请显式持有 meter，避免重复计量。
     """
-    return WindowTokenMeter().total(msgs)
+    return WindowTokenMeter(model_id=model_id).total(msgs)
 
 
 #: 视图归一化保留的字段（协议契约字段 + 工具寻址字段）。
