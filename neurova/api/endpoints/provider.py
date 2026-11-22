@@ -51,6 +51,20 @@ class ProviderInfo(BaseModel):
     embedding_model: Optional[str] = None
 
 
+def _providerWeight(value: Any) -> float:
+    """weight 读数防御：非数值（测试桩自动属性/异常配置）回退 1.0，负值钳 0。"""
+    try:
+        w = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    return max(0.0, w)
+
+
+def _providerEmbeddingModel(value: Any) -> Optional[str]:
+    """embedding_model 读数防御：仅收非空字符串，其余（桩/空串）归一 None。"""
+    return value if isinstance(value, str) and value else None
+
+
 class CreateProviderRequest(BaseModel):
     """创建服务商请求"""
 
@@ -231,8 +245,8 @@ async def list_providers(request: Request, current_user: Dict[str, Any] = Depend
                             status=getattr(provider, "health_status", "unknown"),
                             models_count=len(getattr(provider, "models", [])),
                             api_key_configured=bool(getattr(provider, "api_key", None)),
-                            weight=float(getattr(provider, "weight", 1.0) or 1.0),
-                            embedding_model=getattr(provider, "embedding_model", None),
+                            weight=_providerWeight(getattr(provider, "weight", 1.0)),
+                            embedding_model=_providerEmbeddingModel(getattr(provider, "embedding_model", None)),
                         )
                     )
         except Exception as e:
@@ -318,8 +332,8 @@ async def get_provider(
                     status=getattr(provider, "health_status", "unknown"),
                     models_count=len(getattr(provider, "models", [])),
                     api_key_configured=bool(getattr(provider, "api_key", None)),
-                    weight=float(getattr(provider, "weight", 1.0) or 1.0),
-                    embedding_model=getattr(provider, "embedding_model", None),
+                    weight=_providerWeight(getattr(provider, "weight", 1.0)),
+                    embedding_model=_providerEmbeddingModel(getattr(provider, "embedding_model", None)),
                 )
     except Exception as e:
         logger.warning("Get provider error: %s", e)
@@ -361,8 +375,8 @@ async def create_provider(
                 is_active=getattr(provider, "enabled", True),
                 status="created",
                 api_key_configured=bool(getattr(provider, "api_key", None)),
-                weight=float(getattr(provider, "weight", 1.0) or 1.0),
-                embedding_model=getattr(provider, "embedding_model", None),
+                weight=_providerWeight(getattr(provider, "weight", 1.0)),
+                embedding_model=_providerEmbeddingModel(getattr(provider, "embedding_model", None)),
             )
         else:
             logger.error("Provider manager does not have add_provider method")
@@ -453,8 +467,8 @@ async def update_provider(
                         is_active=getattr(provider, "enabled", False),
                         status="updated",
                         api_key_configured=bool(getattr(provider, "api_key", None)),
-                        weight=float(getattr(provider, "weight", 1.0) or 1.0),
-                        embedding_model=getattr(provider, "embedding_model", None),
+                        weight=_providerWeight(getattr(provider, "weight", 1.0)),
+                        embedding_model=_providerEmbeddingModel(getattr(provider, "embedding_model", None)),
                     )
                 return ProviderInfo(
                     provider_id=provider_id,
