@@ -82,6 +82,11 @@ ADVANCED_DEFAULTS: Dict[str, Any] = {
     # 本开关单独生效）。设置面板「高级」卡可视开关；env
     # NEUROVA_SWARM_ACCEPTANCE 显式 on/off 最优先（运维逃生门）。
     "swarm_acceptance_enabled": False,
+    # SB-4：小脑分诊门三档开关（off/shadow/enforce）。off=与旧行为一致（默认，
+    # 零行为漂移）；shadow=恒放行仅计数（triage_shadow_would_skip）；enforce=
+    # 真拦截（仅规则命中或模型 p<低阈值）。env NEUROVA_TRIAGE_GATE_MODE
+    # 显式值最优先（运维逃生门，非法值按 off）。
+    "triage_gate_enabled": "off",
 }
 
 # LLM 路由设置分区（actionability 门控等路由期决策）——默认全关，零行为漂移。

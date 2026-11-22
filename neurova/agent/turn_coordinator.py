@@ -49,11 +49,19 @@ NON_RETRYABLE_YIELD_REASONS: FrozenSet[str] = frozenset(
     {YieldReason.MODEL_PIN_VIOLATION.value}
 )
 
+# 这些原因是"跳过本轮"而不是"挂起等自愈"：会话空转不随等待消失，等待只是白烧
+# 预算（SB-4 计划 §6：被分诊门拦截的回合 skip，不 park）。判到即立即返回，
+# 由台账把本轮收成终态，不进 park 队列。
+SKIP_YIELD_REASONS: FrozenSet[str] = frozenset({YieldReason.TRIAGE_GATE.value})
+SKIP_PARK_REASON = "triage_gate_skip"
+
 __all__ = [
     "YieldWaitPolicy",
     "yieldWaitPolicy",
     "turnOperationIdentity",
     "YieldGateOutcome",
+    "SKIP_YIELD_REASONS",
+    "SKIP_PARK_REASON",
     "requestYieldGate",
     "reportTurnOutcome",
 ]
@@ -186,6 +194,7 @@ async def requestYieldGate(
             proposed_operations=[operation],
             conversation_id=sessionId or None,
             adoptModelSwitch=adoptModelSwitch,
+            userInput=userInput,
         )
 
         if not decision.should_yield:
@@ -201,6 +210,26 @@ async def requestYieldGate(
             )
 
         reason = str(decision.reason.value) if decision.reason else "unspecified"
+
+        if reason in SKIP_YIELD_REASONS:
+            # skip 语义（SB-4 计划 §6）：本轮不执行、不等待、不 park——
+            # 空转不随等待自愈，白等 200s 只是把成本加倍。台账侧据此把
+            # 已建的 running 行收成终态（见 agent_run_ledger.skipTurn）。
+            logger.info(
+                "让位闸跳过本轮（会话空转，不等待）：agent=%s 会话=%s 原因=%s",
+                agentId, sessionId, reason,
+            )
+            return YieldGateOutcome(
+                proceeded=False,
+                attempts=attempts,
+                waitedSeconds=waited,
+                operation=operation,
+                parkReason=SKIP_PARK_REASON,
+                agentId=agentId,
+                sessionId=sessionId,
+                modelName=modelName,
+                details=dict(decision.details or {}),
+            )
 
         if reason in NON_RETRYABLE_YIELD_REASONS:
             logger.warning(

@@ -5,6 +5,7 @@ Neurova GLANCE_YIELD_RULES - Multi-Agent Coordination Protocol
 """
 
 import asyncio
+import os
 from enum import Enum
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
@@ -12,8 +13,42 @@ from datetime import datetime
 import time
 
 from neurova.core.logger import get_logger
+from neurova.core.app_settings import get_advanced_settings
+from neurova.collaboration.triage_rules import evaluateTriage
+from neurova.collaboration.neu_judge import NeuJudge
 
 logger = get_logger(__name__)
+
+# ── Layer 6 分诊门三档开关（计划 §7 治理开关）────────────────────────────
+# env 显式值最优先（off/shadow/enforce，非法值警告后按 off），
+# 其次设置面板键 advanced.triage_gate_enabled（字符串，默认 off）。
+TRIAGE_GATE_ENV = "NEUROVA_TRIAGE_GATE_MODE"
+TRIAGE_GATE_SETTING_KEY = "triage_gate_enabled"
+TRIAGE_GATE_MODES = ("off", "shadow", "enforce")
+
+
+def triageGateMode() -> str:
+    """解析分诊门当前档位：env > 设置键 > 兜底 off（沿 acceptance_gate 的回落惯例）。"""
+    raw = (os.environ.get(TRIAGE_GATE_ENV) or "").strip().lower()
+    if raw:
+        if raw in TRIAGE_GATE_MODES:
+            return raw
+        logger.warning(
+            "%s=%r 非法（合法值 %s），按 off 处理", TRIAGE_GATE_ENV, raw, "/".join(TRIAGE_GATE_MODES)
+        )
+        return "off"
+    try:
+        value = get_advanced_settings().get(TRIAGE_GATE_SETTING_KEY, "off")
+    except Exception:  # noqa: BLE001 - 设置不可读回落默认关（不因设置故障改变闸行为）
+        return "off"
+    mode = str(value or "off").strip().lower()
+    if mode not in TRIAGE_GATE_MODES:
+        logger.warning(
+            "设置 %s=%r 非法（合法值 %s），按 off 处理",
+            TRIAGE_GATE_SETTING_KEY, value, "/".join(TRIAGE_GATE_MODES),
+        )
+        return "off"
+    return mode
 
 class YieldReason(str, Enum):
     """Yield decision reasons"""
@@ -106,14 +141,24 @@ class GlanceYieldChecker:
         # Layer 5: Seen cursors (integrated with SeenBoundary)
         self._seen_sequences: Dict[str, int] = {}  # (agent, convo) -> seq
 
-        # Layer 6: Triage cache
-        self._triage_cache: Dict[str, bool] = {}  # conversation_hash -> actionable
+        # Layer 6: 分诊门（规则 R0-R4 + 灰区 NeuJudge 级联，窗口每轮现算，
+        # 无跨轮缓存——旧的 triage 结果缓存字典随 SB-4 退役）。
+        self._triage_model: Optional[NeuJudge] = None
+        self._triage_model_failed = False
 
         # Statistics
         self._stats = {
             'total_checks': 0,
             'yields': 0,
             'proceeds': 0,
+            # Layer 6 分诊门计数（get_stats 透出）
+            'triage_checks': 0,
+            'triage_rule_skips': 0,
+            'triage_model_skips': 0,
+            'triage_shadow_would_skip': 0,
+            'triage_model_unavailable': 0,
+            'triage_events_unavailable': 0,
+            'triage_gate_errors': 0,
         }
 
         logger.info("GlanceYieldChecker initialized")
@@ -176,6 +221,7 @@ class GlanceYieldChecker:
         proposed_operations: List[str],
         conversation_id: Optional[str] = None,
         adoptModelSwitch: bool = False,
+        userInput: str = "",
     ) -> YieldDecision:
         """
         Main entry point: Check all yield rules
@@ -221,7 +267,7 @@ class GlanceYieldChecker:
 
         # Layer 6: Triage gate
         if conversation_id:
-            decision = self._check_triage_gate(conversation_id)
+            decision = self._check_triage_gate(conversation_id, userInput)
             if decision.should_yield:
                 return decision
 
@@ -412,26 +458,107 @@ class GlanceYieldChecker:
 
         return YieldDecision(should_yield=False)
 
-    def _check_triage_gate(self, conversation_id: str) -> YieldDecision:
-        """Layer 6: Small-brain triage gate"""
-        # Check if conversation is actionable
-        # Uses cheap model to filter noise
+    def _check_triage_gate(self, conversation_id: str, user_input: str = "") -> YieldDecision:
+        """Layer 6: Small-brain triage gate（SB-4 接线：规则守高置信区 + 模型守灰区）。
 
-        cache_key = f"triage:{conversation_id}"
-        if cache_key in self._triage_cache:
-            is_actionable = self._triage_cache[cache_key]
+        计划出处：docs/04-plans/2026-11-22-small-brain-triage-gate-wiring-plan.md §3/§6/§7。
+        - off：恒放行（与旧缓存空壳行为一致，零副作用）；
+        - shadow：恒放行，仅计 `triage_shadow_would_skip`；
+        - enforce：规则命中（R2/R3）或模型 p<SKIP_P 才拦截，其余保守放行。
 
-            if not is_actionable:
-                logger.debug(f"Triage gate blocked: conversation={conversation_id}")
+        整条链保持同步；事件源/规则/模型的意外异常一律按「调用方降级」契约
+        转放行 + 计数 + warning 留痕（不静默）。
+        """
+        mode = triageGateMode()
+        if mode == "off":
+            return YieldDecision(should_yield=False)
 
-                return YieldDecision(
-                    should_yield=True,
-                    reason=YieldReason.TRIAGE_GATE,
-                    details={"conversation_id": conversation_id},
-                )
+        self._stats['triage_checks'] += 1
+        try:
+            return self._triageGateDecision(conversation_id, user_input, mode)
+        except Exception:  # noqa: BLE001 - 闸不吞异常≠不降级：计数与日志即留痕
+            self._stats['triage_gate_errors'] += 1
+            logger.warning(
+                "分诊门判定意外失败，按放行降级：conversation=%s", conversation_id, exc_info=True
+            )
+            return YieldDecision(should_yield=False)
 
-        # Default: allow (conservative)
+    def _triageGateDecision(
+        self, conversation_id: str, user_input: str, mode: str
+    ) -> YieldDecision:
+        """分诊门判定本体（mode 必为 shadow/enforce）。"""
+        # 进料口：会话事件单一事实源（SessionSyncManager），同步内存快照
+        try:
+            from neurova.sync.session_sync_manager import get_session_sync_manager
+
+            manager = get_session_sync_manager()
+            if manager.get_session(conversation_id) is None:
+                self._stats['triage_events_unavailable'] += 1
+                logger.debug("分诊门无会话窗口，放行：conversation=%s", conversation_id)
+                return YieldDecision(should_yield=False)
+            events = manager.get_messages(conversation_id, 50)
+        except Exception:  # noqa: BLE001 - 取不到窗口按放行 + 计数（不吞成拦截）
+            self._stats['triage_events_unavailable'] += 1
+            logger.warning("分诊门取会话窗口失败，按放行降级：conversation=%s", conversation_id, exc_info=True)
+            return YieldDecision(should_yield=False)
+
+        verdict = evaluateTriage(events or [], user_input)
+        features = dict(verdict.features)
+
+        if verdict.action == "skip":
+            if mode == "shadow":
+                self._stats['triage_shadow_would_skip'] += 1
+                return YieldDecision(should_yield=False)
+            self._stats['triage_rule_skips'] += 1
+            logger.info(
+                "分诊门规则拦截：conversation=%s rule=%s", conversation_id, verdict.reason
+            )
+            return YieldDecision(
+                should_yield=True,
+                reason=YieldReason.TRIAGE_GATE,
+                details={"source": "rules", "rule": verdict.reason, "features": features},
+            )
+
+        # 规则高置信放行（R0/R1）直接过；灰色区（default_allow）问 NeuJudge
+        if verdict.reason != "default_allow":
+            return YieldDecision(should_yield=False)
+
+        model = self._triageModel()
+        if model is None:
+            # 模型产物不可用：诚实降级为仅规则（规则层本身仍是闸）
+            return YieldDecision(should_yield=False)
+
+        p = model.score(features)
+        decision = model.decide(p)
+        if decision == "skip":
+            if mode == "shadow":
+                self._stats['triage_shadow_would_skip'] += 1
+                return YieldDecision(should_yield=False)
+            self._stats['triage_model_skips'] += 1
+            logger.info(
+                "分诊门模型拦截：conversation=%s p=%.4f", conversation_id, p
+            )
+            return YieldDecision(
+                should_yield=True,
+                reason=YieldReason.TRIAGE_GATE,
+                details={"source": "model", "p": p, "features": features},
+            )
+        # allow / abstain → 保守放行（弃权带与原门"拿不准→响应"同构）
         return YieldDecision(should_yield=False)
+
+    def _triageModel(self) -> Optional[NeuJudge]:
+        """懒加载 NeuJudge 默认产物并缓存在 checker 上；失败置标记只警告一次。"""
+        if self._triage_model_failed:
+            return None
+        if self._triage_model is None:
+            try:
+                self._triage_model = NeuJudge.loadDefault()
+            except Exception:  # noqa: BLE001 - 产物缺失/损坏：点名降级，不 fail-open 到无闸
+                self._triage_model_failed = True
+                self._stats['triage_model_unavailable'] += 1
+                logger.warning("NeuJudge 默认产物不可用，分诊门降级为仅规则模式", exc_info=True)
+                return None
+        return self._triage_model
 
     def record_operation_start(self, agent_id: str, operation_hash: str) -> None:
         """开工：记间距时间戳，并占一个并发槽（同一 agent 幂等——只占一格）。"""
@@ -502,13 +629,6 @@ class GlanceYieldChecker:
 
         logger.warning(f"Rate limit triggered for agent: {agent_id}")
 
-    def cache_triage_result(self, conversation_id: str, actionable: bool) -> None:
-        """Cache triage gate result"""
-        cache_key = f"triage:{conversation_id}"
-        self._triage_cache[cache_key] = actionable
-
-        logger.debug(f"Cached triage result: {cache_key}={actionable}")
-
     def get_stats(self) -> Dict[str, Any]:
         """Get checker statistics"""
         self._reapExpiredOps()
@@ -516,7 +636,6 @@ class GlanceYieldChecker:
             "registered_agents": len(self._agent_pins),
             "active_per_model": {m: len(s) for m, s in self._activeOps.items()},
             "pacing_stats": dict(self._pacing_stats),
-            "triage_cache_size": len(self._triage_cache),
             **self._stats,
         }
 

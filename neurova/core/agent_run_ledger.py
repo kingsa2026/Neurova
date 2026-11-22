@@ -63,6 +63,9 @@ class TurnAdmission:
 
     `allowed=True` 时 `parkReason` 恒空；`allowed=False` 且 `ledgerFailed=True`
     意味着"判了挂起却没落库"，调用方必须走诚实失败，不能发 parked 事件糊弄过去。
+    `skipped=True`（SB-4 skip 语义）表示本轮被分诊门跳过：不是 park、不是失败，
+    run 行已由 `AgentRunLedger.skipTurn` 收成终态，调用方按各自的响应包络回
+    "本轮已跳过"即可。
     """
 
     allowed: bool
@@ -71,11 +74,12 @@ class TurnAdmission:
     attempts: int = 0
     waitedSeconds: float = 0.0
     ledgerFailed: bool = False
+    skipped: bool = False
     outcome: Optional[YieldGateOutcome] = None
 
     @property
     def parked(self) -> bool:
-        return not self.allowed and not self.ledgerFailed
+        return not self.allowed and not self.ledgerFailed and not self.skipped
 
 
 class AgentRunLedger:
@@ -188,6 +192,23 @@ class AgentRunLedger:
             logger.warning("AgentRun 台账挂起写入失败", exc_info=True)
             return False
 
+    def skipTurn(self, reason: str) -> bool:
+        """分诊门 skip（SB-4 计划 §6）：把本轮 running 行收成**终态**，不留幽灵。
+
+        run 行在进闸前已由 `acquire()` 建成 running；被跳过的回合没有执行体，
+        若不收尾就会留一条 running 幽灵占着同会话单活槽。终态词表只有
+        completed/failed/cancelled（`agent_run_store.TERMINAL_STATUSES`）——
+        "被分诊门跳过"既不是成功也不是用户取消，`failed` + 专属 `error_type`
+        是当前词表下最诚实的落法（不新增第四个终态词，不改 agent_run_store）。
+        走既有 `_finishAs`（owner 栅栏 + 独立线程），后续 `settleResult` 对
+        已终态行是 no-op。
+        """
+        if self.run_id is None:
+            return False
+        logger.info("分诊门跳过回合，run 行收终态：run=%s reason=%s", self.run_id, reason)
+        self._finishAs("failed", reason)
+        return True
+
     def attach(self, task: "asyncio.Task") -> None:
         if self.run_id is not None:
             task.add_done_callback(self.settle)
@@ -212,6 +233,11 @@ class AgentRunLedger:
         if result.get("parked"):
             # 行已由 parkTurn 转成 parked（非终态，等人续跑）；这里再写终态
             # 就等于把"等人"抹成"已结束"
+            return
+        if result.get("skipped"):
+            # 行已由 skipTurn 收成终态（failed/triage_gate_skip）；这里再落
+            # completed 会与它竞速（finish 只认 running 行，先到先得），
+            # 会把"被跳过"洗成"成功完成"
             return
         if result.get("stopped"):
             self._finishAs("cancelled", "user_stopped")
@@ -266,6 +292,20 @@ async def requestTurnAdmission(
     if outcome.proceeded:
         return TurnAdmission(
             allowed=True,
+            runId=ledger.run_id or "",
+            attempts=outcome.attempts,
+            waitedSeconds=outcome.waitedSeconds,
+            outcome=outcome,
+        )
+
+    if outcome.parkReason == "triage_gate_skip":
+        # SB-4 skip 语义：本轮不执行也不挂起——把进闸前已建的 running 行
+        # 收成终态（failed/triage_gate_skip），不调 parkTurn、不进 park 队列。
+        ledger.skipTurn(outcome.parkReason)
+        return TurnAdmission(
+            allowed=False,
+            skipped=True,
+            parkReason=outcome.parkReason,
             runId=ledger.run_id or "",
             attempts=outcome.attempts,
             waitedSeconds=outcome.waitedSeconds,

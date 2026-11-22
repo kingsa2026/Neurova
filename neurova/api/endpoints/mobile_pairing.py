@@ -962,6 +962,15 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
             logger.exception("mobile 让位闸 fail-open，本轮直接执行 agent=%s session=%s", agent_id, session_id)
             admission = None
         if admission is not None and not admission.allowed:
+            if admission.skipped:
+                # SB-4 分诊门 skip：不发 queued 卡，仅照常发 chat:done 收尾。
+                # 人类自身消息恒 R0 放行，此分支正常不会触发，但语义必须对。
+                logger.debug(
+                    "分诊门跳过本轮（移动端）：agent_id=%s session_id=%s reason=%s run_id=%s",
+                    agent_id, session_id, admission.parkReason, admission.runId,
+                )
+                await ws.send_json({"type": "chat:done", "session_id": session_id})
+                return
             # 挂起（Agent 忙/闸判）：如实给排队卡收尾，不假装本轮已回答
             await ws.send_json({"type": "chat:queued", "session_id": session_id,
                                 "parked": True, "reason": admission.parkReason,

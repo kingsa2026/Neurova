@@ -368,6 +368,13 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
                 },
             )
             if not admission.allowed:
+                if admission.skipped:
+                    # SB-4 分诊门 skip：渠道不回复（上层对空列表即不发送）
+                    logger.debug(
+                        "分诊门跳过本轮（渠道不回复）：agent_id=%s session_id=%s reason=%s run_id=%s",
+                        agent_id, session_id, admission.parkReason, admission.runId,
+                    )
+                    return []
                 if admission.ledgerFailed:
                     # 没落库的"挂起"没人能续——按假状态处理比按成功处理更安全，但必须点名
                     return [

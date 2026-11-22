@@ -1115,6 +1115,19 @@ async def post_console_chat(
                     onWait=_gateWaitNotice,
                 )
                 if not admission.allowed:
+                    if admission.skipped:
+                        # SB-4 分诊门 skip：本轮不执行也不挂起，按本面回包形态回空回复
+                        logger.debug(
+                            "分诊门跳过本轮：agent_id=%s session_id=%s reason=%s run_id=%s",
+                            agent_id, session_id, admission.parkReason, admission.runId,
+                        )
+                        return {
+                            "text": "",
+                            "reasoning": None,
+                            "tool_messages": [],
+                            "triage_skipped": True,
+                            "skip_reason": admission.parkReason,
+                        }
                     if admission.ledgerFailed:
                         # 没落库的"挂起"没人能续，那就是假状态——如实报错
                         return {

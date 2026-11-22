@@ -415,6 +415,25 @@ async def chat(
             payload=turnPayloadForV1(body, entry=ENTRY_V1CHAT, sessionId=sessionId),
         )
         if not admission.allowed:
+            if admission.skipped:
+                # SB-4 分诊门 skip：本轮不执行也不挂起，按本端点包络回空回复
+                logger.debug(
+                    "分诊门跳过本轮：agent_id=%s session_id=%s reason=%s run_id=%s",
+                    body.agent_id, sessionId, admission.parkReason, admission.runId,
+                )
+                return {
+                    "code": 0,
+                    "message": "skipped",
+                    "data": {
+                        "text": "",
+                        "triage_skipped": True,
+                        "skip_reason": admission.parkReason,
+                        "run_id": admission.runId,
+                        "agent_id": body.agent_id,
+                        "session_id": body.session_id or "default",
+                    },
+                    "request_id": request_id,
+                }
             if admission.parked:
                 return _parkedResponse(
                     admission.runId, admission.parkReason,
@@ -635,6 +654,17 @@ async def chat_stream(
                     onWait=_gateWaitNotice,
                 )
                 if not admission.allowed:
+                    if admission.skipped:
+                        # SB-4 分诊门 skip：本轮不执行也不挂起（不进 park 队列）
+                        logger.debug(
+                            "分诊门跳过本轮（流式）：agent_id=%s session_id=%s reason=%s run_id=%s",
+                            body.agent_id, sessionId, admission.parkReason, admission.runId,
+                        )
+                        return {
+                            "skipped": True,
+                            "skip_reason": admission.parkReason,
+                            "run_id": admission.runId,
+                        }
                     if admission.parked:
                         return {
                             "parked": True,
@@ -728,6 +758,23 @@ async def chat_stream(
             # 整轮结束后取 chat() 返回值：TTS audio 产物 + 兜底文本
             response = await task
             reply_text = ""
+            if isinstance(response, dict) and response.get("skipped"):
+                # SB-4 分诊门 skip：以 skipped+done 收尾，不产生任何模型内容
+                yield (
+                    "event: skipped\ndata: "
+                    + json.dumps(
+                        {
+                            "type": "skipped",
+                            "skip_reason": response.get("skip_reason", ""),
+                            "run_id": response.get("run_id", ""),
+                            "request_id": request_id,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                )
+                yield f"event: done\ndata: {json.dumps({'type': 'done', 'request_id': request_id})}\n\n"
+                return
             if isinstance(response, dict) and response.get("parked"):
                 # P2-8：闸判挂起且已落库——这一轮没跑，流以 parked+done 收尾
                 parkedPayload = {k: v for k, v in response.items() if k != "parked"}
