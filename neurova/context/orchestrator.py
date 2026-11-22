@@ -1436,85 +1436,22 @@ class ContextOrchestrator:
         # 构建工具描述
         tools_desc = await self.get_tools_description()
 
-        # Phase 2: 构建系统提示
-        # P2-11：优先消费会话身份快照
-        # （ChatPipeline 每轮经 session_snapshot 冻结，同会话内身份写入
-        # 不改变当前 prompt，下次会话生效）；未装配快照时活值兜底（零行为
-        # 变化）。
-        frozen = getattr(self._agent, "_frozen_identity_snapshot", None)
-        if isinstance(frozen, dict) and frozen.get("soul"):
-            soul_text = frozen["soul"]
-            personality_text = frozen.get("personality") or ""
-            constitution_text = frozen.get("constitution") or ""
-            # E2/E4：宪法规则段与人格特质段随身份三件套同点冻结（快照时点
-            # 生效，会话内写入不漂移当前 prompt，下次会话生效）。
-            constitution_rules_text = str(frozen.get("constitution_rules") or "")
-            personality_traits_text = str(frozen.get("personality_traits") or "")
-        else:
-            soul_text = self.soul or ""
-            personality_text = self.personality or ""
-            constitution_text = self.config.constitution or ""
-            # 无快照（无状态调用）：现取活值，与冻结路径同一编译单源（诚实降级）。
-            constitution_rules_text = self._liveConstitutionRulesText()
-            personality_traits_text = self._livePersonalityTraitsText()
-        system_instructions = [soul_text]
-        if personality_text:
-            system_instructions.append(personality_text)
-        if personality_traits_text:
-            # E4：人格特质编译段——与 personality.md 文本轨同一组装点合流
-            # （紧随其后，不另起第二入口）。
-            system_instructions.append(personality_traits_text)
-        if constitution_text:
-            system_instructions.append(constitution_text)
-        if constitution_rules_text:
-            # E2：enabled 宪法规则编译段——与 config.constitution 字符串轨
-            # 同一组装点合流（紧随其后，不另起第二注入点）。
-            system_instructions.append(constitution_rules_text)
+        # Phase 2: 构建系统提示——P1-4 处理器管线化（十轴专项·轴1）
+        # 段序/跳过条件/文本与原手工 append 序列字节一致（默认注册表见
+        # processor_pipeline.defaultSystemPipeline：identity→time→rules→
+        # workspace_docs→skill_catalog→self_model；identity 冻结快照优先、
+        # 无快照活值兜底）。插件经 pipeline.register(SystemSectionSpec(...))
+        # 注入新段，不再改本方法。
+        # P0-1/P0-3 防漂移钉：主链经默认处理器的 workspace_docs/skill_catalog
+        # 段仍接 _workspace_docs_section() 与 _skill_catalog_section() 单源
+        # helper（与 build_system_prompt 同源），双路径各自拼装的漂移不得重演。
+        from neurova.context.processor_pipeline import defaultSystemPipeline
 
-        # Bug T-1 修复:注入当前时间上下文(避免 LLM 误用训练截止日期回答时间问题)
-        # build_context 是 chat_pipeline 实际调用的路径(build_system_prompt 只是工具方法,未被调用),
-        # 所以必须在此处注入时间,否则 LLM 看不到真实当前时间。
-        time_section = self._build_current_time_section()
-        system_instructions.append(time_section)
-
-        # 批次 C：恒定规则段（工具使用方法论/环境块/记忆写入规则）——除日期
-        # 外全部恒定，system 会话内字节稳定；动态内容走 envelope（injector）
-        from neurova.context.rules_sections import build_all_sections
-
-        rules_section = build_all_sections(
-            workspace_path=str(getattr(self.config, "workspace_path", "") or "")
-        )
-        system_instructions.append(rules_section)
-
-        # P0-1：工作区 AGENTS.md 文档树——与 build_system_prompt
-        # 共用单源 helper（本方法是 chat_pipeline 实际调用路径，注入必须在此）
-        workspace_section = self._workspace_docs_section()
-        if workspace_section:
-            system_instructions.append(workspace_section)
-
-        # P0-3：可用技能目录段——同单源纪律，默认关=零注入
-        catalog_section = self._skill_catalog_section()
-        if catalog_section:
-            system_instructions.append(catalog_section)
-
-        # 自我模型读取面：实测能力画像（tool_memory 逐次记录派生）+ 声明能力
-        # + 知识领域 + 最近任务自评。原始账单源在 tool_memory，此处只透传
-        # usage_history 快照；无数据返回空串=零注入零成本。运行期动态段，
-        # 不随身份快照冻结（与技能目录段同性质）。判据收严：只接受**非空
-        # 字符串**返回值——测试桩/异常实现可能返回 MagicMock 等真值对象。
-        _self_model_section = ""
-        try:
-            _mm = getattr(self._agent, "memory_manager", None)
-            if _mm is not None and hasattr(_mm, "selfModelPromptSection"):
-                _tm = getattr(self._agent, "tool_memory", None)
-                _usage = getattr(_tm, "usage_history", None) if _tm is not None else None
-                _section = _mm.selfModelPromptSection(usage_records=_usage)
-                if isinstance(_section, str):
-                    _self_model_section = _section.strip()
-        except Exception:  # noqa: BLE001 - 摘要缺席不阻断上下文装配
-            _self_model_section = ""
-        if _self_model_section:
-            system_instructions.append(_self_model_section)
+        _system_assembly = defaultSystemPipeline().assemble(self)
+        system_instructions = _system_assembly.instructions
+        for _failure in _system_assembly.failures:
+            # 失败隔离留痕：单处理器失败不阻断装配，但必须诚实暴露。
+            logger.warning("系统段处理器失败(不阻断装配): %s", _failure)
 
         # 使用配置的行为规则
         behavior_rules = list(self.config.behavior_rules or [])
@@ -1735,15 +1672,10 @@ class ContextOrchestrator:
                 recordContextBudget(
                     str(agent_id or "default"),
                     {
-                        "soul": soul_text,
-                        "personality": personality_text,
-                        "personality_traits": personality_traits_text,
-                        "constitution": constitution_text,
-                        "constitution_rules": constitution_rules_text,
-                        "time": time_section,
-                        "rules": rules_section,
-                        "workspace_docs": workspace_section or "",
-                        "skill_catalog": catalog_section or "",
+                        # P1-4：命名段单源取自管线装配台账（含空段原值，与旧
+                        # `xxx or ""` 口径一致）；behavior_rules/tools 两键
+                        # 不在管线范围，维持原样。
+                        **_system_assembly.sections,
                         "behavior_rules": "\n".join(str(x) for x in behavior_rules),
                         "tools": tools_desc or "",
                     },
