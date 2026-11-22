@@ -206,6 +206,22 @@
 执行注记：
 - 红灯形态：模块缺失类红测先收集期 ImportError、再以「有模块无接线」的行为红补证（临时 worktree@HEAD 实测 4 failed）——两段式红据多模态批先例成立。
 - 真 LLMClient.chat 为同步 httpx 经 asyncio.to_thread 装配：消费方取消在 to_thread 挂起点立即生效，attempt 标 CANCELLED；被弃 worker 线程照跑至读超时（live-verify 桩需配短 timeout 让进程干净退出）。
-- live-verify 观察到 httpx2 流式 asyncgen 收尾期 `aclose(): already running` 噪声（LLMClient 既有收尾竞态，非本批引入；行为与台账正确），登记待观测。
+- live-verify 观察到 httpx2 流式 asyncgen 收尾期 `aclose(): already running` 噪声（LLMClient 既有收尾竞态，非本批引入；行为与台账正确）→ **已清偿**：chat_stream_async finally 显式关流（见遗留清偿批 832748b0d）。
 - 提交由并行会话统合落库（c6505ff54，含三卡全部生产码与测试）；本仓 D-R2 前两笔（fe4deb521/44396334f）仍在主线历史。
-- 遗留移交：ollama 无 api_key 仍被运行面 key 门拦截（既有行为，未在本批放宽）；R11 每服务商 embedding_model 配置面未建（env 双键先行）；前端 weight/embedding 配置位后置。
+- 遗留移交：ollama 无 api_key 仍被运行面 key 门拦截（既有行为，未在本批放宽）；R11 每服务商 embedding_model 配置面未建（env 双键先行）；前端 weight/embedding 配置位后置。→ **均已于遗留清偿批清偿，见下节。**
+
+### 遗留清偿批（2026-11-22，五项遗留当日清偿，本地未推）
+
+用户指令「处理一下遗留问题」→ 收尾批登记的遗留与观察项逐项落地：
+
+| 项 | 提交 | 内容 | 验证 |
+|----|------|------|------|
+| 身份台账存量红 | 4029a4291 | tests/unit/agent 存量 1 红清偿：按「台账即登记表」契约补登 a16ff1c91/ead7506bf/bae2b703c 批次新增的 4 处合法读方（asr/minutes 纪要归因、cognitive_layers/dreaming 规则审计、computer_use/lane_mutex 并发作用域、core/tool_call_journal 日志 scope） | 修复前 1F/10P 实测 → 11 passed 全绿 |
+| ollama 免 key | 61ac1ca7c | 运行面 key 门三处同根因命中点（init 默认服务商门/_create_model_client 门/_resolve_available_fallback 懒建候选过滤）收敛到唯一判据 _providerRequiresKey：ollama 豁免（本地部署免鉴权），其余服务商维持「无 key 不建客户端」 | 红灯实测（No client available）→ 11 passed；全量 llm 1082 passed 零回归 |
+| embedding_model 声明面 | f9fe2fe78 | R11 配置面补齐：ProviderConfig.embedding_model 字段（落盘持久化）+ manager 存取（空串=清除）+ CRUD API 逐键透传 + 通道目标解析单源化：env 双键（全局覆盖）> 服务商声明（list_providers 序首个）> 本地 | worktree@HEAD 红灯 4 failed 实证 → 绿；全量 llm 1088 passed 零回归 |
+| 流式显式关流 | 832748b0d | chat_stream_async 增 stream 哨兵 + finally：正常/异常/消费方中断全退出路径显式 close 上游流——**清除此前「登记待观测」的 httpx2 asyncgen 竞态噪声根因**（GC 最终化与在途迭代竞态） | 间谍流 2 用例先红（不调 close）后绿；流式回归 39 passed |
+| 前端配置位 | 7ed9022e2 | ModelPage 配置弹窗高级区暴露 分流权重（D-R2）与 嵌入模型（R11）输入，openConfigure 回填/saveConfiguration 显式下发（weight 空框不下发防误清、embedding_model 空串=清除）；i18n 五键 × 11 语言 | vue-tsc 0 错；vitest 2855 passed（存量 4 failed 经 stash A/B 实证系并行会话在途工作，非本批引入） |
+
+执行注记：
+- 磁盘满事故：C 盘 100% 阻塞 worktree 操作——清理陈旧 worktree（head-ab2，455M）与 pip/uv 缓存（~810M）后恢复；研究用参考克隆（lobehub-src 等）系有意保留未动。
+- vitest 存量 4 failed 的 A/B 自证：stash 本笔前端改动后复跑同样失败——归属并行会话在途批（AIGC 子菜单重构 + 同名函数盘点台账未再生），不随本批清偿。
