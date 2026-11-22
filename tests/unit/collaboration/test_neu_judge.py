@@ -110,10 +110,10 @@ class TestDefaultWeightsArtifact:
         # 契约是 feature_version 精确匹配 + model_version 非空可溯源。
         assert isinstance(model.modelVersion, str) and model.modelVersion.strip()
         assert model.featureVersion == FEATURE_VERSION
-        assert model.featureVersion == "triage-features-v1"
+        assert model.featureVersion == "triage-features-v2"
         assert isinstance(model.bias, float)
         assert set(model.weights) == set(FEATURE_KEYS)
-        assert len(FEATURE_KEYS) == 11
+        assert len(FEATURE_KEYS) == 15
 
     def testDefaultWeightFileCarriesRequiredSchemaFields(self):
         payload = json.loads(DEFAULT_WEIGHTS_PATH.read_text(encoding="utf-8"))

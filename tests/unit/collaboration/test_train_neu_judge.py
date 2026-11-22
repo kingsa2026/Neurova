@@ -90,11 +90,11 @@ class TestTrainingPipeline:
         assert outPath.exists()
         payload = json.loads(outPath.read_text(encoding="utf-8"))
         assert payload["model_version"] == "0.2.0-trained"
-        assert payload["feature_version"] == FEATURE_VERSION == "triage-features-v1"
+        assert payload["feature_version"] == FEATURE_VERSION == "triage-features-v2"
         assert isinstance(payload["bias"], float)
         assert not isinstance(payload["bias"], bool)
         assert set(payload["weights"]) == set(FEATURE_KEYS)
-        assert len(payload["weights"]) == 11
+        assert len(payload["weights"]) == 15
         assert payload["data_fingerprint"].startswith("sha256:")
         metrics = payload["eval_metrics"]
         assert isinstance(metrics, dict)
@@ -186,7 +186,7 @@ class TestTrainingPipeline:
 
     def testFeatureVersionMismatchStillRejected(self, trained, tmp_path):
         payload = dict(trained["payload"])
-        payload["feature_version"] = "triage-features-v2"
+        payload["feature_version"] = "triage-features-v1"
         tampered = tmp_path / "tampered.json"
         tampered.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         with pytest.raises(NeuJudgeUnavailable):

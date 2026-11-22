@@ -27,7 +27,7 @@ from typing import Dict, List
 
 # --- 特征与阈值常量（阈值 = 原分诊门自述值，triage.py:87-115） ---
 
-TRIAGE_FEATURE_VERSION = "triage-features-v1"
+TRIAGE_FEATURE_VERSION = "triage-features-v2"
 
 HUMAN_WINDOW_EVENTS = 10
 HUMAN_WINDOW_SECONDS = 300.0
@@ -39,6 +39,25 @@ SIMILARITY_THRESHOLD = 0.9
 MAX_WINDOW = 50
 
 _QUESTION_MARKERS = ("?", "？", "吗", "么")
+
+# --- v2 语义标记词库（内容子串，casefold 匹配；确定性） ---
+# 产出物标记：消息里带这些词 → 大概率有实质交付，不宜静默跳过
+_DELIVERABLE_MARKERS = (
+    "已完成", "结果如下", "总结", "报告", "产出", "如下", "清单", "方案",
+    "已修复", "已部署", "已发布", "已上线", "验收", "```", "http",
+    "completed", "summary", "result", "deployed", "fixed", "https",
+)
+# 请求人类决策标记：向人要结论/回复 → 应放行
+_DECISION_MARKERS = (
+    "请确认", "请审批", "需要确认", "是否继续", "是否需要", "拍板", "请示",
+    "待确认", "等待确认", "请回复", "请指示", "请批", "麻烦", "@",
+    "please confirm", "need approval", "awaiting",
+)
+# 风险/故障标记：出状况 → 人应当知情
+_RISK_MARKERS = (
+    "失败", "报错", "异常", "错误", "阻塞", "卡住", "超时", "回滚", "事故",
+    "无法", "拒绝", "告警", "critical", "error", "fail", "exception", "timeout",
+)
 
 
 @dataclass(frozen=True)
@@ -83,7 +102,10 @@ def _contentOf(event: Dict) -> str:
 
 
 def extractTriageFeatures(events: List[Dict], currentInput: str = "") -> Dict[str, float]:
-    """从会话窗口提取分诊特征（固定 11 键，值全为 float）。
+    """从会话窗口提取分诊特征（固定 15 键，值全为 float）。
+
+    v2 = v1 的 11 个结构特征 + 4 个内容语义特征（产出物/决策请求/风险
+    标记比例与内容多样性），词库子串匹配，确定性。
 
     出处：计划文档 §4/§5.2——R1-R3 的连续化特征，规则层与 SB-2 模型
     共用同一份（特征单源）。窗口取末尾 MAX_WINDOW(50) 条；缺数据时取值
@@ -186,6 +208,32 @@ def extractTriageFeatures(events: List[Dict], currentInput: str = "") -> Dict[st
         features["questionRatio"] = questionCount / len(recentWindow)
     else:
         features["questionRatio"] = 0.0
+
+    # v2 语义特征：最近 10 条 assistant 消息的内容标记比例 + 内容多样性。
+    # 动机（v1→v2 升级）：结构特征分不清「有实质产出/需人决策的独走」与
+    # 「纯台账空转」，是误杀前沿的瓶颈（见计划 §5.2 特征语义化）。
+    semanticTexts = [
+        _contentOf(e).casefold() for e in window[-10:] if e.get("role") == "assistant"
+    ]
+
+    def _markerRatio(markers) -> float:
+        if not semanticTexts:
+            return 0.0
+        hits = sum(1 for text in semanticTexts if any(marker in text for marker in markers))
+        return hits / len(semanticTexts)
+
+    features["deliverableMarkerRatio"] = _markerRatio(_DELIVERABLE_MARKERS)
+    features["decisionRequestRatio"] = _markerRatio(_DECISION_MARKERS)
+    features["riskMarkerRatio"] = _markerRatio(_RISK_MARKERS)
+
+    diversityPrefixes = set()
+    for text in semanticTexts:
+        normalized = _normalizeText(text)
+        if len(normalized) >= REPETITION_MIN_LENGTH:
+            diversityPrefixes.add(normalized[:16])
+    features["contentDiversityRatio"] = (
+        len(diversityPrefixes) / len(semanticTexts) if semanticTexts else 0.0
+    )
 
     return features
 

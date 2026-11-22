@@ -14,6 +14,7 @@
     "greyZoneWindows": 3.0,
     "iterations": 2000.0,
     "learningRate": 0.3,
+    "migrationNote": "v1->v2 零权迁移：保留 v6 判定行为，语义特征待 v11 数据取证",
     "outcomeSamples": 23.0,
     "skipFrozenCount": 6.0,
     "skipPrecision": 0.8571428571428571,
@@ -24,7 +25,7 @@
     "teacherChecked": 0.0,
     "trainWindows": 130.0
   },
-  "feature_version": "triage-features-v1",
+  "feature_version": "triage-features-v2",
   "model_version": "0.4.0-neurova",
   "thresholds": {
     "allow_p": 0.75,
@@ -33,6 +34,9 @@
   "weights": {
     "agentStreakLength": -0.6069366370225585,
     "assistantCount": 0.3163276527907143,
+    "contentDiversityRatio": 0.0,
+    "decisionRequestRatio": 0.0,
+    "deliverableMarkerRatio": 0.0,
     "humanEventDistance": 0.3034003262783901,
     "humanTimeDistanceSec": 0.022335260517069765,
     "maxAssistantLength": -0.00016469510060891543,
@@ -41,6 +45,7 @@
     "meanAssistantLength": 0.0009430234992061337,
     "messageRatePerMin": 0.3678921527674901,
     "questionRatio": 1.0074754263771901,
+    "riskMarkerRatio": 0.0,
     "userCount": 0.507918179446908
   }
 }

@@ -32,11 +32,11 @@ __all__ = [
 ]
 
 MODEL_VERSION = "0.1.0-seed"
-FEATURE_VERSION = "triage-features-v1"
+FEATURE_VERSION = "triage-features-v2"
 SKIP_P = 0.25
 ALLOW_P = 0.75
 
-# 特征键固定名单（与规则层 triage-features-v1 契约一致）；求和按此顺序，保证确定性
+# 特征键固定名单（与规则层 triage-features-v2 契约一致）；求和按此顺序，保证确定性
 FEATURE_KEYS = (
     "humanEventDistance",
     "humanTimeDistanceSec",
@@ -49,6 +49,10 @@ FEATURE_KEYS = (
     "meanAssistantLength",
     "maxAssistantLength",
     "questionRatio",
+    "deliverableMarkerRatio",
+    "decisionRequestRatio",
+    "riskMarkerRatio",
+    "contentDiversityRatio",
 )
 
 _DEFAULT_WEIGHTS_FILENAME = "neu_judge_default.json"

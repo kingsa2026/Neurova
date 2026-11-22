@@ -51,6 +51,10 @@ EXPECTED_FEATURE_KEYS = frozenset(
         "meanAssistantLength",
         "maxAssistantLength",
         "questionRatio",
+        "deliverableMarkerRatio",
+        "decisionRequestRatio",
+        "riskMarkerRatio",
+        "contentDiversityRatio",
     }
 )
 
@@ -87,7 +91,7 @@ class TestTriageRulesContract:
         self._assertConstants()
 
     def _assertConstants(self):
-        assert TRIAGE_FEATURE_VERSION == "triage-features-v1"
+        assert TRIAGE_FEATURE_VERSION == "triage-features-v2"
         assert HUMAN_WINDOW_EVENTS == 10
         assert HUMAN_WINDOW_SECONDS == 300.0
         assert AGENT_LOOP_THRESHOLD == 20
