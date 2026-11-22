@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .term_registry import IS_A_PREDICATE
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 _SCHEMA_V9 = """
 CREATE TABLE IF NOT EXISTS ontology_rules (
@@ -235,9 +236,11 @@ class ForwardChainingEngine:
                                         tenantId=tenant)
         stamp = _now()
         with self._store._lock, self._store._conn:
+            existClause, existParams = tenant_sql_where(tenant)
             existing = self._store._conn.execute(
                 "SELECT created_at, version FROM ontology_rules"
-                " WHERE tenant_id = ? AND rule_id = ?", (tenant, ruleId)).fetchone()
+                " WHERE %s AND rule_id = ?" % existClause,
+                (*existParams, ruleId)).fetchone()
             self._store._conn.execute(
                 "INSERT OR REPLACE INTO ontology_rules (tenant_id, rule_id, head_predicate,"
                 " head_subject_var, body_json, negated_predicates, stratification_level,"
@@ -322,19 +325,21 @@ class ForwardChainingEngine:
             return
         preds = sorted({a["predicate"] for a in rule["body"] if a["predicate"]})
         with self._store._lock:
+            agentsClause, agentsParams = tenant_sql_where(tenantId)
             agents = [r["agent_id"] for r in self._store._conn.execute(
                 "SELECT DISTINCT agent_id FROM knowledge_facts"
-                " WHERE tenant_id = ? AND predicate_term_id IN (%s)"
-                " AND status = 'active'" % ",".join("?" * len(preds)),
-                [tenantId] + preds).fetchall()]
+                " WHERE %s AND predicate_term_id IN (%s)"
+                " AND status = 'active'" % (agentsClause, ",".join("?" * len(preds))),
+                [*agentsParams] + preds).fetchall()]
         for agentId in agents:
             self._fireRule(rule, agentId, tenantId=tenantId)
 
     def _dropRule(self, ruleId: str, tenantId: str = "default") -> None:
         with self._store._lock, self._store._conn:
+            dropClause, dropParams = tenant_sql_where(str(tenantId or "default"))
             self._store._conn.execute(
-                "DELETE FROM ontology_rules WHERE tenant_id = ? AND rule_id = ?",
-                (str(tenantId or "default"), ruleId))
+                "DELETE FROM ontology_rules WHERE %s AND rule_id = ?" % dropClause,
+                (*dropParams, ruleId))
 
     @staticmethod
     def toAuthoringBody(hydratedBody: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -430,15 +435,17 @@ class ForwardChainingEngine:
 
     def rule(self, ruleId: str, tenantId: str = "default") -> Optional[Dict[str, Any]]:
         with self._store._lock:
+            getClause, getParams = tenant_sql_where(str(tenantId or "default"))
             row = self._store._conn.execute(
-                "SELECT * FROM ontology_rules WHERE tenant_id = ? AND rule_id = ?",
-                (str(tenantId or "default"), ruleId)).fetchone()
+                "SELECT * FROM ontology_rules WHERE %s AND rule_id = ?" % getClause,
+                (*getParams, ruleId)).fetchone()
         return self._hydrate(row) if row else None
 
     def rules(self, includeDisabled: bool = True,
               tenantId: str = "default") -> List[Dict[str, Any]]:
-        sql = "SELECT * FROM ontology_rules WHERE tenant_id = ?"
-        params: List[Any] = [str(tenantId or "default")]
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+        sql = "SELECT * FROM ontology_rules WHERE " + tenantClause
+        params: List[Any] = list(tenantParams)
         if not includeDisabled:
             sql += " AND enabled = 1"
         sql += " ORDER BY stratification_level, rule_id"
@@ -449,9 +456,10 @@ class ForwardChainingEngine:
     def ensureRuleSeeds(self, tenantId: str = "default") -> int:
         """非 default 租户的种子在写入首跳幂等补齐：一次计数查询挡住逐条重复判。"""
         with self._store._lock:
+            seedClause, seedParams = tenant_sql_where(str(tenantId or "default"))
             n = self._store._conn.execute(
-                "SELECT COUNT(*) AS n FROM ontology_rules WHERE tenant_id = ?",
-                (str(tenantId or "default"),)).fetchone()["n"]
+                "SELECT COUNT(*) AS n FROM ontology_rules WHERE %s" % seedClause,
+                seedParams).fetchone()["n"]
         if int(n) > 0:
             return 0
         return seedBuiltinRules(self, tenantId=tenantId)
@@ -475,9 +483,10 @@ class ForwardChainingEngine:
         ruleId = str(ruleId or "").strip()
         tenant = str(tenantId or "default")
         with self._store._lock:
+            findClause, findParams = tenant_sql_where(tenant)
             row = self._store._conn.execute(
-                "SELECT rule_id FROM ontology_rules WHERE tenant_id = ? AND rule_id = ?",
-                (tenant, ruleId)).fetchone()
+                "SELECT rule_id FROM ontology_rules WHERE %s AND rule_id = ?" % findClause,
+                (*findParams, ruleId)).fetchone()
         if row is None:
             raise LookupError("规则未登记: %s" % ruleId)
         self._store._derivationLedger.retractAllFromRule(
@@ -586,6 +595,7 @@ class ForwardChainingEngine:
         """rete alpha 节点：规则 body 各原子的谓词在域内是否有 active 事实
         （单次 COUNT 命中即真——零命中规则跳过整轮求值）。"""
         live = "status = 'active' AND record_kind = 'triple'"
+        alphaTenantClause, alphaTenantParams = tenant_sql_where(tenantId)
         for atom in rule.get("body") or []:
             pred = str(atom.get("predicate") or atom.get("atom") or "")
             if not pred:
@@ -598,9 +608,9 @@ class ForwardChainingEngine:
             if agentId:
                 sql += " AND agent_id = ?"
                 params.append(agentId)
-            if tenantId:
-                sql += " AND tenant_id = ?"
-                params.append(tenantId)
+            if alphaTenantClause:
+                sql += " AND " + alphaTenantClause
+                params.extend(alphaTenantParams)
             sql += " LIMIT 1"
             with self._store._lock:
                 if self._store._conn.execute(sql, params).fetchone() is not None:
@@ -685,30 +695,35 @@ class ForwardChainingEngine:
         """
         positive = [a for a in rule["body"] if a["kind"] == "atom"]
         negated = [a for a in rule["body"] if a["kind"] == "not"]
+        conjTenantClause, conjTenantParams = tenant_sql_where(tenantId)
         if len(positive) == 1:
             a0 = positive[0]
             inner = ("SELECT subject_key, fact_id AS pair FROM knowledge_facts"
                      " WHERE predicate_term_id = ? AND object_term = ?"
-                     " AND tenant_id = ? AND status = 'active' AND record_kind = 'triple'")
-            params: List[Any] = [a0["predicate"], a0["objectConst"], tenantId]
+                     " AND %s AND status = 'active' AND record_kind = 'triple'"
+                     % conjTenantClause)
+            params: List[Any] = [a0["predicate"], a0["objectConst"], *conjTenantParams]
             if agentId:
                 inner += " AND agent_id = ?"
                 params.append(agentId)
         else:
             a0, a1 = positive[0], positive[1]
+            aTenantClause, aTenantParams = tenant_sql_where(tenantId, alias="a")
+            bTenantClause, bTenantParams = tenant_sql_where(tenantId, alias="b")
             inner = ("SELECT a.subject_key AS subject_key,"
                      " a.fact_id || '+' || b.fact_id AS pair"
                      " FROM knowledge_facts a"
                      " JOIN knowledge_facts b ON b.subject_key = a.subject_key"
                      "  AND b.agent_id = a.agent_id AND b.tenant_id = a.tenant_id"
                      " WHERE a.predicate_term_id = ? AND a.object_term = ?"
-                     "  AND a.tenant_id = ? AND a.status = 'active'"
+                     "  AND %s AND a.status = 'active'"
                      "  AND a.record_kind = 'triple'"
                      "  AND b.predicate_term_id = ? AND b.object_term = ?"
-                     "  AND b.tenant_id = ? AND b.status = 'active'"
-                     "  AND b.record_kind = 'triple'")
-            params = [a0["predicate"], a0["objectConst"], tenantId,
-                      a1["predicate"], a1["objectConst"], tenantId]
+                     "  AND %s AND b.status = 'active'"
+                     "  AND b.record_kind = 'triple'"
+                     % (aTenantClause, bTenantClause))
+            params = [a0["predicate"], a0["objectConst"], *aTenantParams,
+                      a1["predicate"], a1["objectConst"], *bTenantParams]
             if agentId:
                 inner += " AND a.agent_id = ?"
                 params.append(agentId)
@@ -738,10 +753,12 @@ class ForwardChainingEngine:
                            subjectKey: str, tenantId: str = "default") -> bool:
         """条件类的否定判定：每个否定原子自带常量客体，逐原子查活事实。"""
         for atom in negated:
+            negTenantClause, negTenantParams = tenant_sql_where(tenantId)
             sql = ("SELECT 1 FROM knowledge_facts WHERE subject_key = ?"
                    " AND predicate_term_id = ? AND object_term = ?"
-                   " AND tenant_id = ? AND status = 'active'")
-            params: List[Any] = [subjectKey, atom["predicate"], atom["objectConst"], tenantId]
+                   " AND %s AND status = 'active'" % negTenantClause)
+            params: List[Any] = [subjectKey, atom["predicate"], atom["objectConst"],
+                                 *negTenantParams]
             if agentId:
                 sql += " AND agent_id = ?"
                 params.append(agentId)
@@ -763,14 +780,15 @@ class ForwardChainingEngine:
         positive = [a for a in rule["body"] if a["kind"] == "atom"]
         negated = [a for a in rule["body"] if a["kind"] == "not"]
         a0 = positive[0]
+        invTenantClause, invTenantParams = tenant_sql_where(tenantId, alias="a")
         inner = ("SELECT a.subject_key AS x_key, MIN(s1.canonical_label) AS x_label,"
                  " a.object_term AS y_label,"
                  " GROUP_CONCAT(DISTINCT a.fact_id) AS pairs"
                  " FROM knowledge_facts a"
                  " JOIN knowledge_subjects s1 ON s1.subject_key = a.subject_key"
-                 " WHERE a.predicate_term_id = ? AND a.tenant_id = ?"
-                 "  AND a.status = 'active' AND a.record_kind = 'triple'")
-        params: List[Any] = [a0["predicate"], tenantId]
+                 " WHERE a.predicate_term_id = ? AND %s"
+                 "  AND a.status = 'active' AND a.record_kind = 'triple'" % invTenantClause)
+        params: List[Any] = [a0["predicate"], *invTenantParams]
         if agentId:
             inner += " AND a.agent_id = ?"
             params.append(agentId)

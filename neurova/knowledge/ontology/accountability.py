@@ -14,6 +14,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import tenant_sql_where
 
 logger = get_logger(__name__)
 
@@ -61,10 +62,11 @@ def _inWindow(stamp: str, start: Optional[str], end: Optional[str]) -> bool:
 def _fromChangeLog(store: Any, tenant: str, subject: Optional[str],
                    actor: Optional[str], start: Optional[str],
                    end: Optional[str], counts: Dict[str, int]) -> List[Dict[str, Any]]:
+    tenantClause, tenantParams = tenant_sql_where(tenant)
     sql = ("SELECT change_id, target_type, target_id, action, actor, reason,"
-           " created_at FROM ontology_change_log WHERE tenant_id = ?"
-           " ORDER BY created_at DESC LIMIT ?")
-    rows = store._conn.execute(sql, (tenant, _PER_LEDGER_LIMIT)).fetchall()
+           " created_at FROM ontology_change_log WHERE %s"
+           " ORDER BY created_at DESC LIMIT ?" % tenantClause)
+    rows = store._conn.execute(sql, (*tenantParams, _PER_LEDGER_LIMIT)).fetchall()
     out: List[Dict[str, Any]] = []
     for row in rows:
         stamp = str(row["created_at"] or "")

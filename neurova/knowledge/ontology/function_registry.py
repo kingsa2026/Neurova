@@ -15,6 +15,7 @@ import datetime
 import json
 from typing import Any, Dict, List, Optional
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 _SCHEMA_V43_FUNCTIONS = """
 CREATE TABLE IF NOT EXISTS ontology_functions (
@@ -137,28 +138,31 @@ class FunctionRegistry:
             "function:%s" % functionId,
             reason or "函数 %s 已删除" % functionId, tenantId=tenant)
         with self._store._lock, self._store._conn:
+            delClause, delParams = tenant_sql_where(tenant)
             self._store._conn.execute(
-                "DELETE FROM ontology_functions WHERE tenant_id = ? AND function_id = ?",
-                (tenant, functionId))
+                "DELETE FROM ontology_functions WHERE %s AND function_id = ?" % delClause,
+                (*delParams, functionId))
         return 1
 
     # ── 读 ────────────────────────────────────────────────────
 
     def get(self, functionId: str, tenantId: str = "default") -> Optional[Dict[str, Any]]:
         with self._store._lock:
+            getClause, getParams = tenant_sql_where(str(tenantId or "default"))
             row = self._store._conn.execute(
-                "SELECT * FROM ontology_functions WHERE tenant_id = ? AND function_id = ?",
-                (str(tenantId or "default"), str(functionId or "").strip())).fetchone()
+                "SELECT * FROM ontology_functions WHERE %s AND function_id = ?" % getClause,
+                (*getParams, str(functionId or "").strip())).fetchone()
         return self._hydrate(row) if row is not None else None
 
     def list(self, tenantId: str = "default",
              includeDisabled: bool = False) -> List[Dict[str, Any]]:
-        sql = "SELECT * FROM ontology_functions WHERE tenant_id = ?"
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+        sql = "SELECT * FROM ontology_functions WHERE " + tenantClause
         if not includeDisabled:
             sql += " AND enabled = 1"
         sql += " ORDER BY function_id"
         with self._store._lock:
-            rows = self._store._conn.execute(sql, (str(tenantId or "default"),)).fetchall()
+            rows = self._store._conn.execute(sql, tenantParams).fetchall()
         return [self._hydrate(row) for row in rows]
 
     @staticmethod

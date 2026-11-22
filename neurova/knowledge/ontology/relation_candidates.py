@@ -16,6 +16,7 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 _CANDIDATE_STATUSES = ("pending", "approved", "rejected")
 
@@ -85,10 +86,11 @@ class RelationCandidateStore:
         evidenceHash = hashlib.sha256(
             str(sourceText or "").encode("utf-8")).hexdigest()[:16]
         with self._store._lock, self._store._conn:
+            existClause, existParams = tenant_sql_where(tenant)
             existing = self._store._conn.execute(
                 "SELECT candidate_id FROM ontology_relation_candidates"
-                " WHERE tenant_id = ? AND normalized_surface = ? AND source_entry_id = ?",
-                (tenant, normalized, str(sourceEntryId or ""))).fetchone()
+                " WHERE %s AND normalized_surface = ? AND source_entry_id = ?" % existClause,
+                (*existParams, normalized, str(sourceEntryId or ""))).fetchone()
             if existing:
                 return existing["candidate_id"]
             candidateId = "relcand_%s" % uuid.uuid4().hex[:12]
@@ -107,11 +109,12 @@ class RelationCandidateStore:
             raise ValueError(
                 "未知候选状态 %r（有效值: %s）" % (status, " / ".join(_CANDIDATE_STATUSES)))
         with self._store._lock:
+            listClause, listParams = tenant_sql_where(str(tenantId or "default"))
             rows = self._store._conn.execute(
                 "SELECT * FROM ontology_relation_candidates"
-                " WHERE tenant_id = ? AND status = ?"
-                " ORDER BY created_at, candidate_id LIMIT ?",
-                (str(tenantId or "default"), status, int(limit))).fetchall()
+                " WHERE %s AND status = ?"
+                " ORDER BY created_at, candidate_id LIMIT ?" % listClause,
+                (*listParams, status, int(limit))).fetchall()
         return [dict(r) for r in rows]
 
     def approve(self, candidateId: str, tenantId: str = "default",
@@ -172,10 +175,11 @@ class RelationCandidateStore:
 
     def get(self, candidateId: str, tenantId: str = "default") -> Optional[Dict[str, Any]]:
         with self._store._lock:
+            getClause, getParams = tenant_sql_where(str(tenantId or "default"))
             row = self._store._conn.execute(
                 "SELECT * FROM ontology_relation_candidates"
-                " WHERE tenant_id = ? AND candidate_id = ?",
-                (str(tenantId or "default"), candidateId)).fetchone()
+                " WHERE %s AND candidate_id = ?" % getClause,
+                (*getParams, candidateId)).fetchone()
         return dict(row) if row else None
 
     def _requireCandidate(self, candidateId: str, tenantId: str) -> Dict[str, Any]:

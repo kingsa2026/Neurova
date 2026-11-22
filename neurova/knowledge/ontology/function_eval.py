@@ -20,6 +20,7 @@ import ast
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
 from neurova.core.ast_scan import parseSource
+from neurova.core.tenant_scope import tenant_sql_where
 
 #: selector 取数上限（D1：超限显式拒，不静默截断）
 SELECTOR_ROW_CAP = 5000
@@ -234,11 +235,12 @@ def makeSelectorRunner(store: Any, agentId: str, tenantId: str = "default",
         asOf = str(selector.get("asOf") or asOfDefault or "")
         factStore = store if store is not None else get_knowledge_fact_store()
         with factStore._lock:
+            capClause, capParams = tenant_sql_where(tenantId)
             total = factStore._conn.execute(
                 "SELECT COUNT(*) AS n FROM knowledge_facts"
-                " WHERE agent_id = ? AND tenant_id = ? AND predicate_term_id = ?"
-                " AND status = 'active' AND record_kind = 'triple'",
-                (agentId, tenantId, predicate)).fetchone()["n"]
+                " WHERE agent_id = ? AND %s AND predicate_term_id = ?"
+                " AND status = 'active' AND record_kind = 'triple'" % capClause,
+                (agentId, *capParams, predicate)).fetchone()["n"]
         if int(total) > SELECTOR_ROW_CAP:
             raise SelectorCapError(
                 "selector %r 命中 %d 行超上限 %d（D1：显式拒不截断）"
@@ -305,17 +307,18 @@ def makeSelectorRunner(store: Any, agentId: str, tenantId: str = "default",
     def _resolveSubjectKey(expected: str) -> str:
         """先按 subject_key 精确匹配，再按规范标签解析（绑定值语义是规范标签）。"""
         with store._lock:
+            keyClause, keyParams = tenant_sql_where(tenantId)
             row = store._conn.execute(
                 "SELECT subject_key FROM knowledge_subjects"
-                " WHERE agent_id = ? AND tenant_id = ? AND subject_key = ?"
-                " AND status = 'active'",
-                (agentId, tenantId, expected)).fetchone()
+                " WHERE agent_id = ? AND %s AND subject_key = ?"
+                " AND status = 'active'" % keyClause,
+                (agentId, *keyParams, expected)).fetchone()
             if row is None:
                 row = store._conn.execute(
                     "SELECT subject_key FROM knowledge_subjects"
-                    " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?"
-                    " AND status = 'active'",
-                    (agentId, tenantId, expected.strip().casefold())).fetchone()
+                    " WHERE agent_id = ? AND %s AND normalized_label = ?"
+                    " AND status = 'active'" % keyClause,
+                    (agentId, *keyParams, expected.strip().casefold())).fetchone()
         return str(row["subject_key"]) if row is not None else "\x00no-such-subject"
 
     return run

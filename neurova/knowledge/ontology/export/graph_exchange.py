@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 from xml.sax.saxutils import escape as _xmlEscape
 
+from neurova.core.tenant_scope import tenant_sql_where
+
 _KB_NS = "https://neurova.local/knowledge/"
 
 
@@ -19,17 +21,19 @@ def _readGraph(store: Any, tenantId: str = "default",
                agentId: str = "") -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """读 (nodes, edges)：nodes = 概念术语＋主体（去重），edges = active triple。"""
     with store._lock:
+        termClause, termParams = tenant_sql_where(tenantId)
         termRows = store._conn.execute(
             "SELECT term_id, kind, label FROM ontology_terms"
-            " WHERE tenant_id = ? AND kind = 'concept' ORDER BY term_id",
-            (tenantId,)).fetchall()
+            " WHERE %s AND kind = 'concept' ORDER BY term_id" % termClause,
+            termParams).fetchall()
+        factTenantClause, factTenantParams = tenant_sql_where(tenantId, alias="f")
         factSql = ("SELECT f.subject_key, s.canonical_label AS src,"
                    " f.predicate_term_id, f.object_term"
                    " FROM knowledge_facts f JOIN knowledge_subjects s"
                    " ON s.subject_key = f.subject_key"
-                   " WHERE f.tenant_id = ? AND f.status = 'active'"
-                   " AND f.record_kind = 'triple'")
-        params: list = [tenantId]
+                   " WHERE %s AND f.status = 'active'"
+                   " AND f.record_kind = 'triple'" % factTenantClause)
+        params: list = list(factTenantParams)
         if agentId:
             factSql += " AND f.agent_id = ?"
             params.append(agentId)

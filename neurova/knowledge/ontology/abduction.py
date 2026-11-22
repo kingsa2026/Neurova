@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import tenant_sql_where
 
 logger = get_logger(__name__)
 
@@ -24,13 +25,14 @@ MAX_ABDUCTION_BRANCHES = 50
 def _factsFor(store: Any, agentId: str, predicate: str,
               subjectKey: str = "", objectTerm: str = "",
               tenantId: str = "default") -> List[Dict[str, Any]]:
+    factTenantClause, factTenantParams = tenant_sql_where(tenantId, alias="f")
     sql = ("SELECT f.fact_id, s.canonical_label AS subject_label,"
            " f.predicate_term_id, f.object_term FROM knowledge_facts f"
            " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
-           " WHERE f.agent_id = ? AND f.tenant_id = ?"
+           " WHERE f.agent_id = ? AND %s"
            " AND f.predicate_term_id = ? AND f.status = 'active'"
-           " AND f.record_kind = 'triple'")
-    params: List[Any] = [agentId, tenantId, predicate]
+           " AND f.record_kind = 'triple'" % factTenantClause)
+    params: List[Any] = [agentId, *factTenantParams, predicate]
     if subjectKey:
         sql += " AND f.subject_key = ?"
         params.append(subjectKey)
@@ -55,11 +57,12 @@ def explainGoal(store: Any, subjectLabel: str, predicate: str, objectTerm: str,
         if hasattr(store, "resolveSubjectKey") else ""
     row = None
     with store._lock:
+        goalClause, goalParams = tenant_sql_where(tenantId)
         row = store._conn.execute(
             "SELECT subject_key FROM knowledge_subjects"
-            " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?"
-            " AND status = 'active'",
-            (agentId, tenantId, str(subjectLabel or "").strip().casefold())).fetchone()
+            " WHERE agent_id = ? AND %s AND normalized_label = ?"
+            " AND status = 'active'" % goalClause,
+            (agentId, *goalParams, str(subjectLabel or "").strip().casefold())).fetchone()
     subjectKey = str(row["subject_key"]) if row is not None else ""
 
     steps: List[Dict[str, Any]] = []
@@ -82,11 +85,12 @@ def explainGoal(store: Any, subjectLabel: str, predicate: str, objectTerm: str,
         subKey = ""
         row = None
         with store._lock:
+            subClause, subParams = tenant_sql_where(tenantId)
             row = store._conn.execute(
                 "SELECT subject_key FROM knowledge_subjects"
-                " WHERE agent_id = ? AND tenant_id = ? AND canonical_label = ?"
-                " AND status = 'active'",
-                (agentId, tenantId, subject)).fetchone()
+                " WHERE agent_id = ? AND %s AND canonical_label = ?"
+                " AND status = 'active'" % subClause,
+                (agentId, *subParams, subject)).fetchone()
         subKey = str(row["subject_key"]) if row is not None else ""
 
         # ① 已有事实直接满足

@@ -24,6 +24,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 #: v52：schema 建议表。关系候选不在此表（复用 ontology_relation_candidates）。
 _SCHEMA_V52_SUGGESTIONS = """
@@ -250,8 +251,10 @@ class SchemaSuggester:
         if status not in _SUGGESTION_STATUSES:
             raise ValueError("未知建议状态 %r（有效值: %s）"
                              % (status, " / ".join(_SUGGESTION_STATUSES)))
-        sql = "SELECT * FROM ontology_schema_suggestions WHERE tenant_id = ? AND status = ?"
-        params: List[Any] = [str(tenantId or "default"), status]
+        listClause, listParams = tenant_sql_where(str(tenantId or "default"))
+        sql = ("SELECT * FROM ontology_schema_suggestions WHERE "
+               + listClause + " AND status = ?")
+        params: List[Any] = [*listParams, status]
         if sourceId:
             sql += " AND source_id = ?"
             params.append(str(sourceId))
@@ -279,10 +282,11 @@ class SchemaSuggester:
             raise ValueError("decision 只允许 approved|rejected，收到 %r" % decision)
         tenant = str(tenantId or "default")
         with self._store._lock:
+            getClause, getParams = tenant_sql_where(tenant)
             row = self._store._conn.execute(
                 "SELECT * FROM ontology_schema_suggestions"
-                " WHERE tenant_id = ? AND suggestion_id = ?",
-                (tenant, str(suggestionId or ""))).fetchone()
+                " WHERE %s AND suggestion_id = ?" % getClause,
+                (*getParams, str(suggestionId or ""))).fetchone()
         if row is None:
             raise LookupError("建议不存在: %s" % suggestionId)
         if row["status"] != "pending":
@@ -329,11 +333,12 @@ class SchemaSuggester:
         """同目标已有任何状态的建议行即跳过：pending/approved 不重复生成，
         rejected 也不重生——人工否决是决定，不是噪声（机器不再纠缠）。"""
         with self._store._lock:
+            dupClause, dupParams = tenant_sql_where(tenant)
             row = self._store._conn.execute(
                 "SELECT 1 FROM ontology_schema_suggestions"
-                " WHERE tenant_id = ? AND source_id = ? AND kind = ? AND target = ?"
-                " LIMIT 1",
-                (tenant, source, kind, target)).fetchone()
+                " WHERE %s AND source_id = ? AND kind = ? AND target = ?"
+                " LIMIT 1" % dupClause,
+                (*dupParams, source, kind, target)).fetchone()
         return row is not None
 
     def _recordSuggestion(self, tenant: str, source: str, kind: str, target: str,

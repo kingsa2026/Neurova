@@ -17,6 +17,7 @@ import json
 from typing import Any
 
 from ..term_registry import NAMESPACE_REGISTRY, versionedIri
+from neurova.core.tenant_scope import tenant_sql_where
 
 
 def _literal(text: str) -> str:
@@ -42,9 +43,10 @@ def exportOwlAxioms(store: Any, tenantId: str = "default",
                     version: str = "") -> str:
     tenant = str(tenantId or "default")
     with store._lock:
+        termClause, termParams = tenant_sql_where(tenant)
         termRows = store._conn.execute(
-            "SELECT * FROM ontology_terms WHERE tenant_id = ? ORDER BY term_id",
-            (tenant,)).fetchall()
+            "SELECT * FROM ontology_terms WHERE %s ORDER BY term_id" % termClause,
+            termParams).fetchall()
 
     lines = [
         "@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .",

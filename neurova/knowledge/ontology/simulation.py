@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 logger = get_logger(__name__)
 
@@ -47,11 +48,12 @@ class ScopeTooLargeError(ValueError):
 def _snapshot(store: Any, agentId: str, tenantId: str) -> Dict[str, Dict[str, Any]]:
     """(agent, tenant) 域内事实快照：fact_id → 行（diff 的比较基线）。"""
     with store._lock:
+        snapClause, snapParams = tenant_sql_where(tenantId)
         rows = store._conn.execute(
             "SELECT fact_id, subject_key, predicate_term_id, object_term, status,"
             " qualifier_json FROM knowledge_facts"
-            " WHERE agent_id = ? AND tenant_id = ?"
-            " ORDER BY fact_id", (agentId, tenantId)).fetchall()
+            " WHERE agent_id = ? AND %s"
+            " ORDER BY fact_id" % snapClause, (agentId, *snapParams)).fetchall()
     return {str(r["fact_id"]): {
         "fact_id": str(r["fact_id"]),
         "subject_key": str(r["subject_key"]),
@@ -134,10 +136,11 @@ def runSimulation(store: Any, scope: Dict[str, Any], hypotheses: Dict[str, Any],
 
     # 规模边界：scope 事实行数（agent+tenant 域）超上限显式拒
     with store._lock:
+        capClause, capParams = tenant_sql_where(tenantId)
         n = store._conn.execute(
             "SELECT COUNT(*) AS n FROM knowledge_facts"
-            " WHERE agent_id = ? AND tenant_id = ?",
-            (agentId, tenantId)).fetchone()["n"]
+            " WHERE agent_id = ? AND %s" % capClause,
+            (agentId, *capParams)).fetchone()["n"]
     if int(n) > SCOPE_FACT_CAP:
         raise ScopeTooLargeError(
             "scope 过大：%d 行事实超上限 %d（推演只收 ≤%d 行的域，不静默截断）"

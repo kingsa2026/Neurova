@@ -21,6 +21,7 @@ import threading
 import uuid
 from typing import Any, Dict, List, Optional
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 _SCHEMA_V10 = """
 CREATE TABLE IF NOT EXISTS knowledge_derivation_edges (
@@ -188,13 +189,15 @@ class DerivationLedger:
         天然不在这个集合里（子查询只从账本取数），不需要额外保护。
         """
         tenant = str(tenantId or "default")
+        hiddenClause, hiddenParams = tenant_sql_where(tenant, alias="f")
         sql = ("SELECT f.fact_id FROM knowledge_facts f"
-               " WHERE f.tenant_id = ? AND f.fact_id IN (%s)"
-               % self._observeSideSubquery("?"))
+               " WHERE %s AND f.fact_id IN (%s)"
+               % (hiddenClause, self._observeSideSubquery("?")))
         # W2：子查询从 1 个占位涨到 2 个（规则边 join ＋函数边 CASE）——参数序
         # 跟占位出现序走：外层 f.tenant_id → 子查询 r.tenant_id → 子查询 f2.tenant_id
         with self._store._lock:
-            rows = self._store._conn.execute(sql, (tenant, tenant, tenant)).fetchall()
+            rows = self._store._conn.execute(
+                sql, (*hiddenParams, tenant, tenant)).fetchall()
         return [str(row["fact_id"]) for row in rows]
 
     def hasEnforceRules(self, tenantId: str = "default") -> bool:
@@ -204,10 +207,11 @@ class DerivationLedger:
         一旦出现 enforce 档，标注就得照取，否则放进来的推导行没了 `via_derived`。
         """
         with self._store._lock:
+            enforceClause, enforceParams = tenant_sql_where(str(tenantId or "default"))
             row = self._store._conn.execute(
-                "SELECT 1 FROM ontology_rules WHERE tenant_id = ?"
-                " AND materialization = 'enforce' LIMIT 1",
-                (str(tenantId or "default"),)).fetchone()
+                "SELECT 1 FROM ontology_rules WHERE %s"
+                " AND materialization = 'enforce' LIMIT 1" % enforceClause,
+                enforceParams).fetchone()
         return row is not None
 
     def retractAllDerivedFrom(self, premiseFactId: str, reason: str = "") -> int:
@@ -231,13 +235,14 @@ class DerivationLedger:
         """规则改版：旧版本推出的结论全部撤回，新版本自己重推（不留"两版并存"）。
         同 rule_id 跨租户（v25）互不波及。"""
         with self._store._lock:
+            verClause, verParams = tenant_sql_where(str(tenantId or "default"), alias="f")
             rows = self._store._conn.execute(
                 "SELECT DISTINCT e.derived_fact_id AS derived_fact_id"
                 " FROM knowledge_derivation_edges e"
                 " JOIN knowledge_facts f ON f.fact_id = e.derived_fact_id"
-                " WHERE e.rule_id = ? AND e.rule_version <> ? AND f.tenant_id = ?"
-                " ORDER BY e.derived_fact_id",
-                (ruleId, keepVersion, str(tenantId or "default"))).fetchall()
+                " WHERE e.rule_id = ? AND e.rule_version <> ? AND %s"
+                " ORDER BY e.derived_fact_id" % verClause,
+                (ruleId, keepVersion, *verParams)).fetchall()
         return sum(self._retractDerived(r["derived_fact_id"], "规则 %s 改版为 %s" % (ruleId, keepVersion))
                    for r in rows)
 
@@ -247,13 +252,14 @@ class DerivationLedger:
         保留任何一批"规则已不存在"的结论，都是拿着死规则对外检索。
         同 rule_id 跨租户（v25）互不波及：撤回只对本租户的派生事实。"""
         with self._store._lock:
+            dropClause, dropParams = tenant_sql_where(str(tenantId or "default"), alias="f")
             rows = self._store._conn.execute(
                 "SELECT DISTINCT e.derived_fact_id AS derived_fact_id"
                 " FROM knowledge_derivation_edges e"
                 " JOIN knowledge_facts f ON f.fact_id = e.derived_fact_id"
-                " WHERE e.rule_id = ? AND f.tenant_id = ?"
-                " ORDER BY e.derived_fact_id",
-                (ruleId, str(tenantId or "default"))).fetchall()
+                " WHERE e.rule_id = ? AND %s"
+                " ORDER BY e.derived_fact_id" % dropClause,
+                (ruleId, *dropParams)).fetchall()
         return sum(self._retractDerived(r["derived_fact_id"],
                                         reason or "规则 %s 已删除" % ruleId)
                    for r in rows)

@@ -21,6 +21,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 _TERM_KINDS = ("concept", "relation", "property")
 
@@ -369,9 +370,10 @@ class OntologyTermRegistry:
 
         stamp = _now()
         with self._store._lock, self._store._conn:
+            existingClause, existingParams = tenant_sql_where(tenant)
             existing = self._store._conn.execute(
-                "SELECT created_at FROM ontology_terms WHERE tenant_id = ? AND term_id = ?",
-                (tenant, termId)).fetchone()
+                "SELECT created_at FROM ontology_terms WHERE %s AND term_id = ?" % existingClause,
+                (*existingParams, termId)).fetchone()
             self._store._conn.execute(
                 "INSERT OR REPLACE INTO ontology_terms (tenant_id, term_id, kind, label,"
                 " parent_term_id, domain_terms, range_terms, range_kinds, cardinality,"
@@ -405,10 +407,11 @@ class OntologyTermRegistry:
         # 单边态在存储层不存在；目标行其他字段不动，只补这一列）。
         if inverseOf and inverseOf != termId:
             with self._store._lock, self._store._conn:
+                invClause, invParams = tenant_sql_where(tenant)
                 self._store._conn.execute(
                     "UPDATE ontology_terms SET inverse_of = ?, updated_at = ?"
-                    " WHERE tenant_id = ? AND term_id = ?",
-                    (termId, _now(), tenant, inverseOf))
+                    " WHERE %s AND term_id = ?" % invClause,
+                    (termId, _now(), *invParams, inverseOf))
         return self.term(termId, tenantId=tenant) or {}
 
     def declarePartial(self, termId: str, kind: str, declared: Dict[str, Any],
@@ -584,9 +587,10 @@ class OntologyTermRegistry:
         if not termId:
             return None
         with self._store._lock:
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
             row = self._store._conn.execute(
-                "SELECT * FROM ontology_terms WHERE tenant_id = ? AND term_id = ?",
-                (str(tenantId or "default"), str(termId))).fetchone()
+                "SELECT * FROM ontology_terms WHERE %s AND term_id = ?" % tenantClause,
+                (*tenantParams, str(termId))).fetchone()
         if row is None:
             return None
         d = dict(row)
@@ -615,8 +619,9 @@ class OntologyTermRegistry:
         return d
 
     def terms(self, kind: Optional[str] = None, tenantId: str = "default") -> List[Dict[str, Any]]:
-        sql = "SELECT term_id FROM ontology_terms WHERE tenant_id = ?"
-        params: List[Any] = [str(tenantId or "default")]
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+        sql = "SELECT term_id FROM ontology_terms WHERE " + tenantClause
+        params: List[Any] = list(tenantParams)
         if kind:
             sql += " AND kind = ?"
             params.append(kind)
@@ -631,16 +636,17 @@ class OntologyTermRegistry:
         事实/主体类型/规则引用由写入口按 impactOf 面先行裁定。"""
         termId = str(termId or "").strip()
         tenant = str(tenantId or "default")
+        tenantClause, tenantParams = tenant_sql_where(tenant)
         with self._store._lock, self._store._conn:
             child = self._store._conn.execute(
-                "SELECT term_id FROM ontology_terms WHERE tenant_id = ? AND parent_term_id = ?",
-                (tenant, termId)).fetchone()
+                "SELECT term_id FROM ontology_terms WHERE %s AND parent_term_id = ?" % tenantClause,
+                (*tenantParams, termId)).fetchone()
             if child:
                 raise ValueError(
                     "术语 %s 仍有子术语 %s——先处理子术语" % (termId, child["term_id"]))
             cur = self._store._conn.execute(
-                "DELETE FROM ontology_terms WHERE tenant_id = ? AND term_id = ?",
-                (tenant, termId))
+                "DELETE FROM ontology_terms WHERE %s AND term_id = ?" % tenantClause,
+                (*tenantParams, termId))
             if cur.rowcount == 0:
                 raise LookupError("术语未登记: %s" % termId)
 
@@ -651,19 +657,20 @@ class OntologyTermRegistry:
         不在这里替规则表抄一遍清单。
         """
         tenant = str(tenantId or "default")
+        tenantClause, tenantParams = tenant_sql_where(tenant)
         with self._store._lock:
             factCount = self._store._conn.execute(
                 "SELECT COUNT(*) AS n FROM knowledge_facts"
-                " WHERE tenant_id = ? AND predicate_term_id = ? AND status = 'active'",
-                (tenant, termId)).fetchone()["n"]
+                " WHERE %s AND predicate_term_id = ? AND status = 'active'" % tenantClause,
+                (*tenantParams, termId)).fetchone()["n"]
             typedSubjects = self._store._conn.execute(
                 "SELECT COUNT(*) AS n FROM knowledge_subjects"
-                " WHERE tenant_id = ? AND type_term_id = ?",
-                (tenant, termId)).fetchone()["n"]
+                " WHERE %s AND type_term_id = ?" % tenantClause,
+                (*tenantParams, termId)).fetchone()["n"]
             children = [r["term_id"] for r in self._store._conn.execute(
                 "SELECT term_id FROM ontology_terms"
-                " WHERE tenant_id = ? AND parent_term_id = ? ORDER BY term_id",
-                (tenant, termId)).fetchall()]
+                " WHERE %s AND parent_term_id = ? ORDER BY term_id" % tenantClause,
+                (*tenantParams, termId)).fetchall()]
         return {
             "term_id": termId,
             "fact_count": int(factCount),

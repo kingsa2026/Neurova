@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 logger = get_logger(__name__)
 
@@ -125,17 +126,19 @@ class DecisionLedger:
 
     def get(self, decisionId: str, tenantId: str = "default") -> Optional[Dict[str, Any]]:
         with self._store._lock:
+            getClause, getParams = tenant_sql_where(str(tenantId or "default"))
             row = self._store._conn.execute(
-                "SELECT * FROM ontology_decisions WHERE tenant_id = ? AND decision_id = ?",
-                (str(tenantId or "default"), str(decisionId or "").strip())).fetchone()
+                "SELECT * FROM ontology_decisions WHERE %s AND decision_id = ?" % getClause,
+                (*getParams, str(decisionId or "").strip())).fetchone()
         return self._hydrate(row) if row is not None else None
 
     def list(self, tenantId: str = "default", limit: int = 50) -> List[Dict[str, Any]]:
         with self._store._lock:
+            listClause, listParams = tenant_sql_where(str(tenantId or "default"))
             rows = self._store._conn.execute(
-                "SELECT * FROM ontology_decisions WHERE tenant_id = ?"
-                " ORDER BY created_at DESC LIMIT ?",
-                (str(tenantId or "default"), int(limit))).fetchall()
+                "SELECT * FROM ontology_decisions WHERE %s"
+                " ORDER BY created_at DESC LIMIT ?" % listClause,
+                (*listParams, int(limit))).fetchall()
         return [self._hydrate(r) for r in rows]
 
     # ── 链接 ──────────────────────────────────────────────────
@@ -183,11 +186,13 @@ class DecisionLedger:
                 break
             placeholders = ",".join("?" * len(frontier))
             with self._store._lock:
+                closureClause, closureParams = tenant_sql_where(tenant)
                 rows = self._store._conn.execute(
                     "SELECT target_decision_id FROM ontology_decision_links"
-                    " WHERE tenant_id = ? AND source_decision_id IN (%s)"
-                    " AND link_kind IN ('caused','precedent')" % placeholders,
-                    [tenant] + frontier).fetchall()
+                    " WHERE %s AND source_decision_id IN (%s)"
+                    " AND link_kind IN ('caused','precedent')"
+                    % (closureClause, placeholders),
+                    [*closureParams] + frontier).fetchall()
             frontier = []
             for row in rows:
                 dst = str(row["target_decision_id"])
@@ -214,18 +219,21 @@ class DecisionLedger:
             placeholders = ",".join("?" * len(frontier))
             rows: List[Any] = []
             with self._store._lock:
+                traceClause, traceParams = tenant_sql_where(tenant)
                 if direction in ("up", "both"):
                     rows += self._store._conn.execute(
                         "SELECT source_decision_id AS node, link_kind,"
                         " 'up' AS side FROM ontology_decision_links"
-                        " WHERE tenant_id = ? AND target_decision_id IN (%s)"
-                        % placeholders, [tenant] + frontier).fetchall()
+                        " WHERE %s AND target_decision_id IN (%s)"
+                        % (traceClause, placeholders),
+                        [*traceParams] + frontier).fetchall()
                 if direction in ("down", "both"):
                     rows += self._store._conn.execute(
                         "SELECT target_decision_id AS node, link_kind,"
                         " 'down' AS side FROM ontology_decision_links"
-                        " WHERE tenant_id = ? AND source_decision_id IN (%s)"
-                        % placeholders, [tenant] + frontier).fetchall()
+                        " WHERE %s AND source_decision_id IN (%s)"
+                        % (traceClause, placeholders),
+                        [*traceParams] + frontier).fetchall()
             nextFrontier: List[str] = []
             for row in rows:
                 node = str(row["node"])
@@ -249,11 +257,12 @@ class DecisionLedger:
         if not query:
             return []
         with self._store._lock:
+            searchClause, searchParams = tenant_sql_where(str(tenantId or "default"))
             rows = self._store._conn.execute(
                 "SELECT decision_id, category, scenario, reasoning, outcome,"
                 " confidence, decision_maker FROM ontology_decisions"
-                " WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 500",
-                (str(tenantId or "default"),)).fetchall()
+                " WHERE %s ORDER BY created_at DESC LIMIT 500" % searchClause,
+                searchParams).fetchall()
         if ownerId is not None:
             tenant = str(tenantId or "default")
             rows = [r for r in rows if str(r["decision_maker"]) == str(ownerId)
@@ -295,10 +304,11 @@ class DecisionLedger:
     def _ownerMatches(self, decisionId: str, tenant: str, ownerId: str) -> bool:
         row = None
         with self._store._lock:
+            ownerClause, ownerParams = tenant_sql_where(tenant)
             row = self._store._conn.execute(
                 "SELECT owner_id FROM ontology_decisions"
-                " WHERE tenant_id = ? AND decision_id = ?",
-                (tenant, decisionId)).fetchone()
+                " WHERE %s AND decision_id = ?" % ownerClause,
+                (*ownerParams, decisionId)).fetchone()
         return row is not None and str(row["owner_id"]) == str(ownerId)
 
     @staticmethod

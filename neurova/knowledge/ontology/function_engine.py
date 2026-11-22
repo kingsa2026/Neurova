@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import tenant_sql_where
 
 logger = get_logger(__name__)
 
@@ -116,9 +117,11 @@ class FunctionEngine:
                " WHERE f.predicate_term_id = ? AND f.status = 'active'"
                " AND f.record_kind = 'triple' AND f.agent_id = ? AND s.agent_id = ?")
         params: List[Any] = [predicate, agentId, agentId]
-        if tenantId:
-            sql += " AND f.tenant_id = ? AND s.tenant_id = ?"
-            params.extend([str(tenantId or "default"), str(tenantId or "default")])
+        fTenantClause, fTenantParams = tenant_sql_where(tenantId, alias="f")
+        sTenantClause, sTenantParams = tenant_sql_where(tenantId, alias="s")
+        if fTenantClause and sTenantClause:
+            sql += " AND %s AND %s" % (fTenantClause, sTenantClause)
+            params.extend([*fTenantParams, *sTenantParams])
         sql += " LIMIT ?"
         params.append(_SUBJECT_FIRE_CAP)
         with self._store._lock:

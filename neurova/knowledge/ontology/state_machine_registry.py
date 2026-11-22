@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 SCHEMA_V44_STATE_MACHINES = "_SCHEMA_V44_STATE_MACHINES"
 
@@ -89,10 +90,11 @@ class StateMachineRegistry:
         if term is None or str(term.get("kind")) != "concept":
             raise ValueError("term_id %r 须是注册表在册 concept（状态机挂主体类型）" % termId)
         with self._store._lock, self._store._conn:
+            existClause, existParams = tenant_sql_where(str(tenantId or "default"))
             existing = self._store._conn.execute(
                 "SELECT created_at FROM ontology_state_machines"
-                " WHERE tenant_id = ? AND term_id = ?",
-                (str(tenantId or "default"), termId)).fetchone()
+                " WHERE %s AND term_id = ?" % existClause,
+                (*existParams, termId)).fetchone()
             self._store._conn.execute(
                 "INSERT OR REPLACE INTO ontology_state_machines"
                 " (tenant_id, term_id, states_json, transitions_json, initial_state,"
@@ -126,28 +128,31 @@ class StateMachineRegistry:
 
     def delete(self, termId: str, tenantId: str = "default") -> bool:
         with self._store._lock, self._store._conn:
+            delClause, delParams = tenant_sql_where(str(tenantId or "default"))
             cursor = self._store._conn.execute(
-                "DELETE FROM ontology_state_machines WHERE tenant_id = ? AND term_id = ?",
-                (str(tenantId or "default"), str(termId or "").strip()))
+                "DELETE FROM ontology_state_machines WHERE %s AND term_id = ?" % delClause,
+                (*delParams, str(termId or "").strip()))
             return cursor.rowcount > 0
 
     # ── 读 ────────────────────────────────────────────────────
 
     def get(self, termId: str, tenantId: str = "default") -> Optional[Dict[str, Any]]:
         with self._store._lock:
+            getClause, getParams = tenant_sql_where(str(tenantId or "default"))
             row = self._store._conn.execute(
-                "SELECT * FROM ontology_state_machines WHERE tenant_id = ? AND term_id = ?",
-                (str(tenantId or "default"), str(termId or "").strip())).fetchone()
+                "SELECT * FROM ontology_state_machines WHERE %s AND term_id = ?" % getClause,
+                (*getParams, str(termId or "").strip())).fetchone()
         return self._hydrate(row) if row is not None else None
 
     def list(self, tenantId: str = "default",
              includeDisabled: bool = False) -> List[Dict[str, Any]]:
-        sql = "SELECT * FROM ontology_state_machines WHERE tenant_id = ?"
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+        sql = "SELECT * FROM ontology_state_machines WHERE " + tenantClause
         if not includeDisabled:
             sql += " AND enabled = 1"
         sql += " ORDER BY term_id"
         with self._store._lock:
-            rows = self._store._conn.execute(sql, (str(tenantId or "default"),)).fetchall()
+            rows = self._store._conn.execute(sql, tenantParams).fetchall()
         return [self._hydrate(row) for row in rows]
 
     def eventBindings(self, tenantId: str = "default") -> List[Dict[str, Any]]:

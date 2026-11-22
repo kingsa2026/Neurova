@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 _TOKEN_SPLIT = re.compile(r"[\W_]+", re.UNICODE)
 
@@ -99,14 +100,17 @@ def auditOntologyCoverage(store: Any, tenantId: str, sourceId: str = "",
     if staleDays > 0:
         horizon = (datetime.utcnow() - timedelta(days=int(staleDays))).isoformat()
         with store._lock:
+            staleClause, staleParams = tenant_sql_where(tenant)
             staleCandidates = store._conn.execute(
                 "SELECT surface, created_at FROM ontology_relation_candidates"
-                " WHERE tenant_id = ? AND status = 'pending' AND created_at < ?"
-                " ORDER BY created_at LIMIT 50", (tenant, horizon)).fetchall()
+                " WHERE %s AND status = 'pending' AND created_at < ?"
+                " ORDER BY created_at LIMIT 50" % staleClause,
+                (*staleParams, horizon)).fetchall()
             staleSuggestions = store._conn.execute(
                 "SELECT target, created_at FROM ontology_schema_suggestions"
-                " WHERE tenant_id = ? AND status = 'pending' AND created_at < ?"
-                " ORDER BY created_at LIMIT 50", (tenant, horizon)).fetchall()
+                " WHERE %s AND status = 'pending' AND created_at < ?"
+                " ORDER BY created_at LIMIT 50" % staleClause,
+                (*staleParams, horizon)).fetchall()
         for row in staleCandidates:
             findings.append(_finding(
                 "stale", "candidate:%s" % row["surface"],

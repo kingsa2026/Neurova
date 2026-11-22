@@ -10,6 +10,7 @@ import json
 from typing import Any
 
 from ..term_registry import NAMESPACE_REGISTRY
+from neurova.core.tenant_scope import tenant_sql_where
 
 NAMESPACE = "https://neurova.local/knowledge/"
 
@@ -17,13 +18,15 @@ NAMESPACE = "https://neurova.local/knowledge/"
 def exportJsonLd(store: Any, tenantId: str = "default", agentId: str = "") -> str:
     tenant = str(tenantId or "default")
     with store._lock:
+        termClause, termParams = tenant_sql_where(tenant)
         termRows = store._conn.execute(
             "SELECT term_id, kind, label, parent_term_id, definition, namespace FROM ontology_terms"
-            " WHERE tenant_id = ? ORDER BY term_id", (tenant,)).fetchall()
+            " WHERE %s ORDER BY term_id" % termClause, termParams).fetchall()
+        factTenantClause, factTenantParams = tenant_sql_where(tenant)
         factSql = ("SELECT subject_key, predicate_term_id, object_term"
-                   " FROM knowledge_facts WHERE tenant_id = ?"
-                   " AND status = 'active' AND record_kind = 'triple'")
-        params: list = [tenant]
+                   " FROM knowledge_facts WHERE %s"
+                   " AND status = 'active' AND record_kind = 'triple'" % factTenantClause)
+        params: list = list(factTenantParams)
         if agentId:
             factSql += " AND agent_id = ?"
             params.append(str(agentId))

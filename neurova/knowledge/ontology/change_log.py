@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Dict, List
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 _SCHEMA_V33 = """
 CREATE TABLE IF NOT EXISTS ontology_change_log (
@@ -66,8 +67,9 @@ class ChangeLog:
 
     def list(self, tenantId: str = "default", limit: int = 200) -> List[Dict[str, Any]]:
         with self._store._lock:
+            listClause, listParams = tenant_sql_where(str(tenantId or "default"))
             rows = self._store._conn.execute(
-                "SELECT * FROM ontology_change_log WHERE tenant_id = ?"
-                " ORDER BY created_at, change_id LIMIT ?",
-                (str(tenantId or "default"), int(limit))).fetchall()
+                "SELECT * FROM ontology_change_log WHERE %s"
+                " ORDER BY created_at, change_id LIMIT ?" % listClause,
+                (*listParams, int(limit))).fetchall()
         return [dict(r) for r in rows]

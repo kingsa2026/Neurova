@@ -15,6 +15,7 @@ import hashlib
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import tenant_sql_where
 
 logger = get_logger(__name__)
 
@@ -105,9 +106,10 @@ def verifyArtifact(store: Any, sha256: str) -> Dict[str, Any]:
 def latestArtifact(store: Any, kind: str, tenantId: str = "default",
                    agentId: str = "") -> Optional[Dict[str, Any]]:
     """最近一次登记的某类工件（含字节）——C1 字节往返的读数单源。"""
+    latestClause, latestParams = tenant_sql_where(tenantId)
     sql = ("SELECT artifact_sha256, kind, source_ref, tenant_id, agent_id, content,"
-           " registered_at FROM ontology_artifacts WHERE kind = ? AND tenant_id = ?")
-    params: List[Any] = [kind, tenantId]
+           " registered_at FROM ontology_artifacts WHERE kind = ? AND " + latestClause)
+    params: List[Any] = [kind, *latestParams]
     if agentId:
         sql += " AND agent_id = ?"
         params.append(agentId)
@@ -125,9 +127,10 @@ def latestArtifact(store: Any, kind: str, tenantId: str = "default",
 def listArtifacts(store: Any, kind: Optional[str] = None,
                   tenantId: str = "default", limit: int = 100) -> List[Dict[str, Any]]:
     """工件清单（不含字节，只含元数据＋哈希——读面按哈希引用）。"""
+    listClause, listParams = tenant_sql_where(tenantId)
     sql = ("SELECT artifact_sha256, kind, source_ref, tenant_id, agent_id, registered_at,"
-           " LENGTH(content) AS byte_count FROM ontology_artifacts WHERE tenant_id = ?")
-    params: List[Any] = [tenantId]
+           " LENGTH(content) AS byte_count FROM ontology_artifacts WHERE " + listClause)
+    params: List[Any] = list(listParams)
     if kind:
         sql += " AND kind = ?"
         params.append(kind)

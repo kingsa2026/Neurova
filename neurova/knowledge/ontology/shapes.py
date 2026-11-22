@@ -16,6 +16,7 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 #: 内置 constraintKind 闭集：这些维度由 validation.py 的固定校验拥有，
 #: 用户 shape 声明同名维度即撞车（单一事实源，教义第 6 条）。
@@ -89,9 +90,11 @@ class ShapeRegistry:
             raise ValueError("未知 severity %r（有效值: %s）" % (severity, " / ".join(_SEVERITIES)))
         stamp = _now()
         with self._store._lock, self._store._conn:
+            existClause, existParams = tenant_sql_where(tenant)
             existing = self._store._conn.execute(
                 "SELECT created_at FROM ontology_shapes"
-                " WHERE tenant_id = ? AND shape_id = ?", (tenant, shapeId)).fetchone()
+                " WHERE %s AND shape_id = ?" % existClause,
+                (*existParams, shapeId)).fetchone()
             self._store._conn.execute(
                 "INSERT OR REPLACE INTO ontology_shapes (tenant_id, shape_id, target_kind,"
                 " target_term_id, path_json, constraint_kind, constraint_json, severity,"
@@ -106,35 +109,39 @@ class ShapeRegistry:
         return self.get(shapeId, tenantId=tenant) or {}
 
     def list(self, tenantId: str = "default", enabledOnly: bool = False) -> List[Dict[str, Any]]:
-        sql = "SELECT * FROM ontology_shapes WHERE tenant_id = ?"
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+        sql = "SELECT * FROM ontology_shapes WHERE " + tenantClause
         if enabledOnly:
             sql += " AND enabled = 1"
         sql += " ORDER BY shape_id"
         with self._store._lock:
-            rows = self._store._conn.execute(sql, (str(tenantId or "default"),)).fetchall()
+            rows = self._store._conn.execute(sql, tenantParams).fetchall()
         return [self._hydrate(r) for r in rows]
 
     def get(self, shapeId: str, tenantId: str = "default") -> Optional[Dict[str, Any]]:
         with self._store._lock:
+            getClause, getParams = tenant_sql_where(str(tenantId or "default"))
             row = self._store._conn.execute(
-                "SELECT * FROM ontology_shapes WHERE tenant_id = ? AND shape_id = ?",
-                (str(tenantId or "default"), str(shapeId or ""))).fetchone()
+                "SELECT * FROM ontology_shapes WHERE %s AND shape_id = ?" % getClause,
+                (*getParams, str(shapeId or ""))).fetchone()
         return self._hydrate(row) if row else None
 
     def setEnabled(self, shapeId: str, enabled: bool, tenantId: str = "default") -> None:
         with self._store._lock, self._store._conn:
+            setClause, setParams = tenant_sql_where(str(tenantId or "default"))
             cursor = self._store._conn.execute(
                 "UPDATE ontology_shapes SET enabled = ?, updated_at = ?"
-                " WHERE tenant_id = ? AND shape_id = ?",
-                (1 if enabled else 0, _now(), str(tenantId or "default"), str(shapeId or "")))
+                " WHERE %s AND shape_id = ?" % setClause,
+                (1 if enabled else 0, _now(), *setParams, str(shapeId or "")))
             if cursor.rowcount == 0:
                 raise LookupError("形状不存在: %s" % shapeId)
 
     def delete(self, shapeId: str, tenantId: str = "default") -> None:
         with self._store._lock, self._store._conn:
+            delClause, delParams = tenant_sql_where(str(tenantId or "default"))
             cursor = self._store._conn.execute(
-                "DELETE FROM ontology_shapes WHERE tenant_id = ? AND shape_id = ?",
-                (str(tenantId or "default"), str(shapeId or "")))
+                "DELETE FROM ontology_shapes WHERE %s AND shape_id = ?" % delClause,
+                (*delParams, str(shapeId or "")))
             if cursor.rowcount == 0:
                 raise LookupError("形状不存在: %s" % shapeId)
 

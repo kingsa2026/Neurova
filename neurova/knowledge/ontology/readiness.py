@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
+from neurova.core.tenant_scope import tenant_sql_where
+
 
 def knowledgeReadiness(store: Any, tenantId: str = "default",
                        modelProbe: Optional[Callable[[], Dict[str, Any]]] = None
@@ -34,8 +36,9 @@ def knowledgeReadiness(store: Any, tenantId: str = "default",
     termsCount = len(registry.terms(tenantId=tenant))
     rulesCount = len(engine.rules(tenantId=tenant))
 
+    factClause, factParams = tenant_sql_where(tenant)
     factRows = store.queryReadOnly(
-        "SELECT COUNT(*) AS n FROM knowledge_facts WHERE tenant_id = ?", (tenant,))
+        "SELECT COUNT(*) AS n FROM knowledge_facts WHERE %s" % factClause, factParams)
     factsCount = int(factRows[0]["n"]) if factRows else 0
 
     catalogSources = catalogTables = 0

@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.knowledge.foundation.admission import AdmissionRequest
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 from .rule_engine import ForwardChainingEngine
 from .shapes import ShapeRegistry
@@ -608,10 +609,11 @@ def checkGate(store: Any, agentId: str, tenantId: str,
 def _factSnapshot(store: Any, agentId: str, tenantId: str) -> Dict[str, Dict[str, Any]]:
     """(agent, tenant) 域内事实快照（与 simulation._snapshot 同法；门禁私用）。"""
     with store._lock:
+        snapClause, snapParams = tenant_sql_where(tenantId)
         rows = store._conn.execute(
             "SELECT fact_id, subject_key, predicate_term_id, object_term, status"
-            " FROM knowledge_facts WHERE agent_id = ? AND tenant_id = ?"
-            " ORDER BY fact_id", (agentId, tenantId)).fetchall()
+            " FROM knowledge_facts WHERE agent_id = ? AND %s"
+            " ORDER BY fact_id" % snapClause, (agentId, *snapParams)).fetchall()
     return {str(r["fact_id"]): {"subject_key": str(r["subject_key"]),
                                 "predicate_term_id": str(r["predicate_term_id"]),
                                 "object_term": str(r["object_term"]),

@@ -8,20 +8,24 @@ from __future__ import annotations
 
 from typing import Any
 
+from neurova.core.tenant_scope import tenant_sql_where
+
 
 def exportProv(store: Any, tenantId: str = "default") -> str:
     tenant = str(tenantId or "default")
     with store._lock:
+        actClause, actParams = tenant_sql_where(tenant)
         activityRows = store._conn.execute(
             "SELECT activity_id, activity_kind, started_at FROM knowledge_activities"
-            " WHERE tenant_id = ? ORDER BY activity_id LIMIT 5000",
-            (tenant,)).fetchall()
+            " WHERE %s ORDER BY activity_id LIMIT 5000" % actClause,
+            actParams).fetchall()
+        derivClause, derivParams = tenant_sql_where(tenant, alias="f")
         derivationRows = store._conn.execute(
             "SELECT e.derived_fact_id, e.premise_fact_id, e.rule_id"
             " FROM knowledge_derivation_edges e"
             " JOIN knowledge_facts f ON f.fact_id = e.derived_fact_id"
-            " WHERE f.tenant_id = ? ORDER BY e.derived_fact_id, e.premise_fact_id"
-            " LIMIT 5000", (tenant,)).fetchall()
+            " WHERE %s ORDER BY e.derived_fact_id, e.premise_fact_id"
+            " LIMIT 5000" % derivClause, derivParams).fetchall()
 
     lines = [
         "@prefix prov: <http://www.w3.org/ns/prov#> .",

@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import tenant_sql_where
 
 logger = get_logger(__name__)
 
@@ -46,11 +47,12 @@ def evaluatePrecondition(action: Dict[str, Any], params: Dict[str, Any],
                     if hasattr(store, "resolveSubjectKey") else ""
                 row = None
                 with store._lock:
+                    subjClause, subjParams = tenant_sql_where(tenantId)
                     row = store._conn.execute(
                         "SELECT subject_key FROM knowledge_subjects"
-                        " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?"
-                        " AND status = 'active'",
-                        (agentId, tenantId, label.casefold())).fetchone()
+                        " WHERE agent_id = ? AND %s AND normalized_label = ?"
+                        " AND status = 'active'" % subjClause,
+                        (agentId, *subjParams, label.casefold())).fetchone()
                 subjectKey = str(row["subject_key"]) if row is not None else ""
         facts = termRegistry.activeFactsForPredicate(
             agentId, subjectKey, predicate) if subjectKey else []

@@ -23,6 +23,8 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from neurova.core.tenant_scope import tenant_sql_where
+
 NAMESPACE = "https://neurova.local/knowledge/"
 PREFIX_LINE = "@prefix kbg: <%s> ."
 LANG = "zh"
@@ -169,15 +171,19 @@ def serializeAll(store: Any, tenantId: str = "default",
     """
     tenant = str(tenantId or "default")
     with store._lock:
+        termClause, termParams = tenant_sql_where(tenant)
         termRows = store._conn.execute(
-            "SELECT * FROM ontology_terms WHERE tenant_id = ? ORDER BY term_id",
-            (tenant,)).fetchall()
+            "SELECT * FROM ontology_terms WHERE %s ORDER BY term_id" % termClause,
+            termParams).fetchall()
+        ruleClause, ruleParams = tenant_sql_where(tenant)
         ruleRows = store._conn.execute(
-            "SELECT * FROM ontology_rules WHERE tenant_id = ? ORDER BY rule_id",
-            (tenant,)).fetchall()
+            "SELECT * FROM ontology_rules WHERE %s ORDER BY rule_id" % ruleClause,
+            ruleParams).fetchall()
+        factTenantClause, factTenantParams = tenant_sql_where(tenant)
         factSql = ("SELECT subject_key, predicate_term_id, object_term FROM knowledge_facts"
-                   " WHERE tenant_id = ? AND status = 'active' AND record_kind = 'triple'")
-        factParams: List[Any] = [tenant]
+                   " WHERE %s AND status = 'active' AND record_kind = 'triple'"
+                   % factTenantClause)
+        factParams: List[Any] = list(factTenantParams)
         if agentId:
             factSql += " AND agent_id = ?"
             factParams.append(str(agentId))

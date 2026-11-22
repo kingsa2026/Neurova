@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 logger = get_logger(__name__)
 
@@ -117,10 +118,11 @@ class ActionRegistry:
                     "state_change 须带 subjectParam 与 toState（执行成功后写 has_state）")
         stamp = _now()
         with self._store._lock, self._store._conn:
+            existClause, existParams = tenant_sql_where(tenantId)
             existing = self._store._conn.execute(
                 "SELECT created_at FROM ontology_actions"
-                " WHERE tenant_id = ? AND action_id = ?", (tenantId, actionId)
-            ).fetchone()
+                " WHERE %s AND action_id = ?" % existClause,
+                (*existParams, actionId)).fetchone()
             self._store._conn.execute(
                 "INSERT OR REPLACE INTO ontology_actions"
                 " (tenant_id, action_id, label, definition, param_schema_json,"
@@ -138,17 +140,19 @@ class ActionRegistry:
 
     def action(self, actionId: str, tenantId: str = "default") -> Optional[Dict[str, Any]]:
         with self._store._lock:
+            getClause, getParams = tenant_sql_where(str(tenantId or "default"))
             row = self._store._conn.execute(
-                "SELECT * FROM ontology_actions WHERE tenant_id = ? AND action_id = ?",
-                (str(tenantId or "default"), str(actionId))).fetchone()
+                "SELECT * FROM ontology_actions WHERE %s AND action_id = ?" % getClause,
+                (*getParams, str(actionId))).fetchone()
         if row is None:
             return None
         return self._hydrate(row)
 
     def list(self, tenantId: str = "default",
              riskTier: Optional[str] = None) -> List[Dict[str, Any]]:
-        sql = "SELECT * FROM ontology_actions WHERE tenant_id = ?"
-        params: List[Any] = [str(tenantId or "default")]
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+        sql = "SELECT * FROM ontology_actions WHERE " + tenantClause
+        params: List[Any] = list(tenantParams)
         if riskTier:
             sql += " AND risk_tier = ?"
             params.append(riskTier)
@@ -159,9 +163,10 @@ class ActionRegistry:
 
     def drop(self, actionId: str, tenantId: str = "default") -> bool:
         with self._store._lock, self._store._conn:
+            dropClause, dropParams = tenant_sql_where(str(tenantId or "default"))
             cur = self._store._conn.execute(
-                "DELETE FROM ontology_actions WHERE tenant_id = ? AND action_id = ?",
-                (str(tenantId or "default"), str(actionId)))
+                "DELETE FROM ontology_actions WHERE %s AND action_id = ?" % dropClause,
+                (*dropParams, str(actionId)))
         return cur.rowcount > 0
 
     def _hydrate(self, row: Any) -> Dict[str, Any]:
