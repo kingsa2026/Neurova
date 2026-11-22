@@ -702,7 +702,7 @@ def trainNeuJudgeFromRealData(
     )
 
     windows = _mixWindows(
-        harvestSessionWindows(dataRoot, maxWindows=1_000_000, minMessages=minMessages),
+        harvestSessionWindows(dataRoot, maxWindows=10_000_000, minMessages=minMessages),
         seed, maxWindows)
     windows = filterExcludedAgents(windows, excludeAgents)
     if not windows:

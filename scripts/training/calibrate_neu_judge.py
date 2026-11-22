@@ -57,7 +57,7 @@ CATALOGUE_PATH = (
 #: 不随外部数据规模漂移
 EVAL_EXCLUDE_PREFIXES = (
     "glaive", "taubench", "tooltalk", "agentcompany", "agentinstruct",
-    "synth-gray", "whowhen",
+    "synth-gray", "whowhen", "openhermes",
 )
 
 

@@ -300,7 +300,7 @@ def buildOutcomeSweepDataset(
     labeled: List[Dict[str, Any]] = []
     windows = harvestSessionWindows(
         dataRoot,
-        maxWindows=(1_000_000 if mixSeed is not None else maxWindows),
+        maxWindows=(10_000_000 if mixSeed is not None else maxWindows),
         minMessages=minMessages,
     )
     if mixSeed is not None:
