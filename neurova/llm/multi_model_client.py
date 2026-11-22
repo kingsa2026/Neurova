@@ -66,6 +66,16 @@ def _usageAgentId() -> str:
     return str(get_llm_cost_context().get("agent_id") or "")
 
 
+def _providerRequiresKey(provider) -> bool:
+    """该服务商是否必须具备 api_key 才建运行面客户端。
+
+    R9 收尾：ollama 本地部署通常免鉴权（原生客户端空 key 不带
+    Authorization 头），key 门对其豁免；其余服务商维持
+    “无 key 不建客户端”。key 门的唯一判据（init/建客户端/懒建候选同源）。
+    """
+    return str(getattr(provider, "provider", "")).lower() != "ollama"
+
+
 # 已知模型版本后缀（L-20）：匹配请求模型时剥掉任一方的这类后缀再比较，
 # 使 "qwen-plus" 能命中客户端名 "qwen-plus-latest"，反之亦然。
 _KNOWN_MODEL_VERSION_SUFFIXES = ("-latest", "-preview")
@@ -244,10 +254,11 @@ class MultiModelLLMClient:
         if not default_provider.enabled:
             logger.warning("Skip init default clients: default provider %s is disabled", default_provider.id)
             return
-        if not default_provider.api_key:
+        if not default_provider.api_key and _providerRequiresKey(default_provider):
             # 默认服务商无 key（常见于 api_key 解密失败/未配置）时，
             # 不应因此阻塞整个多模型客户端，回退到任意 enabled 且有 key 的服务商，
             # 否则 _clients 恒为空 → "[LLM Error] No client available"。
+            # （ollama 免 key：见 _providerRequiresKey，无 key 也直接初始化。）
             logger.warning(
                 "Default provider %s has empty api_key; falling back to a keyed provider",
                 default_provider.id,
@@ -291,7 +302,10 @@ class MultiModelLLMClient:
             return self._clients[client_key]
 
         try:
-            if not provider.api_key:
+            # R9 收尾：ollama 本地部署通常免鉴权——key 门对 ollama 豁免
+            # （原生客户端空 key 不带 Authorization 头；compat 路径缺 key
+            # 仍在调用期诚实失败）。其余服务商维持“无 key 不建客户端”。
+            if not provider.api_key and _providerRequiresKey(provider):
                 logger.warning("No API key for provider %s", provider.id)
                 return None
 
@@ -1704,7 +1718,8 @@ class MultiModelLLMClient:
                 providers = []
             for provider in providers:
                 if not (getattr(provider, "api_key", None) or getattr(provider, "encrypted_api_key", None)):
-                    continue
+                    if _providerRequiresKey(provider):
+                        continue
                 candidates = [getattr(provider, "default_model", None)] + list(
                     getattr(provider, "models", None) or []
                 )

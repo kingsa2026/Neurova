@@ -244,3 +244,46 @@ class TestRuntimeFallback:
             assert result.get("success") is False
         finally:
             stub.stop()
+
+    def test_ollama_without_api_key_still_wires(self, tmp_path):
+        """ollama 本地部署免鉴权：无 key 也建客户端、原生路径可聊天。"""
+        from neurova.llm.multi_model_client import MultiModelLLMClient
+        from neurova.llm.providers.ollama_native import _resetOllamaProbeCache
+
+        stub = _OllamaStub("native")
+        try:
+            _resetOllamaProbeCache()
+            from neurova.llm.provider_manager import LLMProviderManager
+
+            pm = LLMProviderManager(config={"config_path": str(tmp_path / "p.json")})
+            pm.add_provider(name="ollama-nosk", provider="ollama",
+                            base_url=stub.base_url(), api_key="",
+                            models=["stub-model"], default_model="stub-model",
+                            priority=20)
+            mmc = MultiModelLLMClient(provider_manager=pm)
+            result = asyncio.run(mmc.chat([{"role": "user", "content": "hi"}]))
+            assert result.get("success") is True, result.get("error")
+            assert "native-ok" in getattr(result.get("response"), "content", "")
+        finally:
+            stub.stop()
+
+    def test_non_ollama_without_key_still_gated(self, tmp_path):
+        """非 ollama 无 key 维持既有语义：不建客户端，chat 失败。"""
+        from neurova.llm.multi_model_client import MultiModelLLMClient
+        from neurova.llm.providers.ollama_native import _resetOllamaProbeCache
+
+        stub = _OllamaStub("compat")
+        try:
+            _resetOllamaProbeCache()
+            from neurova.llm.provider_manager import LLMProviderManager
+
+            pm = LLMProviderManager(config={"config_path": str(tmp_path / "p.json")})
+            pm.add_provider(name="nosk-openai", provider="openai",
+                            base_url=stub.base_url(), api_key="",
+                            models=["stub-model"], default_model="stub-model",
+                            priority=20)
+            mmc = MultiModelLLMClient(provider_manager=pm)
+            result = asyncio.run(mmc.chat([{"role": "user", "content": "hi"}]))
+            assert result.get("success") is False
+        finally:
+            stub.stop()
