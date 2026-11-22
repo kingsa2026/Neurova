@@ -169,10 +169,10 @@
 拍板结果（2026-11-22 用户交互拍板）：
 - **D-R1**：核验判定**渠道配置能力本仓已齐备**——前端 ModelPage（顶栏「模型与工具」）多服务商行增删改（每行独立 base_url/api_key/models+连接测试+模型发现）、后端 provider.py 完整 CRUD+scope 隔离、路由层每行即独立回退候选（R1/R3 live-verify 实证跨服务商同名模型回退可用）。无需新建配置面。
 - **D-R2**：加权分流**先观测**（用户要求核验多渠道现状后再定；现状=多服务商行+优先级/健康度排序已可用）→ **2026-11-22 用户确认多渠道配置在位，拍板落地**（执行记录见下节 D-R2）。
-- **D-R3**：embedding API 通道（R11）**暂缓**（本地 bge-small-zh 已满足现用场景）。
+- **D-R3**：embedding API 通道（R11）**暂缓**（本地 bge-small-zh 已满足现用场景）→ **2026-11-22 用户重开拍板实施**（按原方案：llm 层通道+可选切换，默认仍本地；见下节收尾批）。
 - **D-R4**：**补国产主流+聚合商**（已实施，见上表 D-R4 行）。
 - **D-R5**：协议自动选择规则链**暂缓**（随 D-R4 铺量后再评估）。
-- **R9**（ollama 运行面原生分支）：**缓办**——兼容端点路径已经三轮 live-verify 实证可用，原生分支收益仅剩管理面已有的拉取能力，避免双轨漂移。
+- **R9**（ollama 运行面原生分支）：**缓办**——兼容端点路径已经三轮 live-verify 实证可用，原生分支收益仅剩管理面已有的拉取能力，避免双轨漂移。→ **2026-11-22 用户重开拍板实施**（兼容优先、/v1 探测 404 才启用原生；见下节收尾批）。
 - tests/unit/agent 存量 1 红（身份读方台账未同步，a16ff1c91/ead7506bf/bae2b703c 引入）维持移交。
 
 ### D-R2 加权分流（2026-11-22，用户拍板落地，本地未推）
@@ -190,3 +190,22 @@
 - 与 R3 能力选型正交：能力过滤先裁掉不合格候选，加权只在合格的同优先级组内生效。
 
 遗留：前端 ModelPage 未加 weight 编辑位（API 已可配，配置面后置另批）；统计性观测（真实流量分布回读）未建，需要时借 usage 台账按 provider 聚合即可。
+
+### 收尾批（2026-11-22，R2 取消标定 + R9 + R11 用户拍板实施）
+
+用户问询「R2 的 CANCELLED 结局标定、R9/R11 是不是也可以实施落地」→ 三项按原方案边界当日实施完毕。提交：**c6505ff54**（feat(llm)，含三卡生产码+三组契约测试）。
+
+| 卡 | 内容 | 验证 |
+|----|------|------|
+| R2 收尾 | 消费方中断/取消标 CANCELLED：chat() 包 CancelledError、chat_stream 增 `except (GeneratorExit, CancelledError)`（重抛交还关闭协议，不 increment 不计 provider 失败）——批一遗留「CANCELLED 已备未标定」清偿 | 3 用例先红（3F 实测）后绿；live-verify：真 socket 挂起桩，流式 aclose→['cancelled']、任务取消→['cancelled']（同步 chat 经 asyncio.to_thread 装配，取消在挂起点立即生效） |
+| R9 | ollama 运行面原生分支（兼容优先门控）：providers/ollama_native.py（/api/chat NDJSON 流式+非流式+工具透传）；_create_model_client 对 ollama 先探测 /v1/models——404 才落原生，其余/异常按兼容处理（fail-open），探测按 base_url 缓存 | 行为级红灯（无接线时 mmc 兜底 4 failed 实证）→绿；live-verify：原生桩 chat/stream 通、OllamaNativeClient 装配确认、compat 桩走 /v1 零 /api/chat 触碰、非 ollama 不受染 |
+| R11 | embeddings 通道（默认本地）：llm/embeddings_channel.py（OpenAI 兼容 /embeddings，失败抛 EmbeddingChannelError 不回落本地防跨空间污染）+ embedding/remote_engine.py（duck-type 本地引擎消费面）+ 工厂开关（NEUROVA_EMBEDDING_PROVIDER+MODEL 双键齐备才启用） | 红灯（无工厂接线时 factory 切换 failed 实证）→绿；embeddings 消费方回归 641 passed 零失败；live-verify：env 双键→RemoteEmbeddingEngine 取桩向量、缺省→本地 ONNX 引擎不变 |
+
+验证汇总：定向 routing+ollama+embeddings 94 passed；全量 tests/unit/llm **1080 passed 零回归**（基线 1059+21 新约）；embedding 消费方（memory_layer/tool_search/denseCosine）641 passed。
+
+执行注记：
+- 红灯形态：模块缺失类红测先收集期 ImportError、再以「有模块无接线」的行为红补证（临时 worktree@HEAD 实测 4 failed）——两段式红据多模态批先例成立。
+- 真 LLMClient.chat 为同步 httpx 经 asyncio.to_thread 装配：消费方取消在 to_thread 挂起点立即生效，attempt 标 CANCELLED；被弃 worker 线程照跑至读超时（live-verify 桩需配短 timeout 让进程干净退出）。
+- live-verify 观察到 httpx2 流式 asyncgen 收尾期 `aclose(): already running` 噪声（LLMClient 既有收尾竞态，非本批引入；行为与台账正确），登记待观测。
+- 提交由并行会话统合落库（c6505ff54，含三卡全部生产码与测试）；本仓 D-R2 前两笔（fe4deb521/44396334f）仍在主线历史。
+- 遗留移交：ollama 无 api_key 仍被运行面 key 门拦截（既有行为，未在本批放宽）；R11 每服务商 embedding_model 配置面未建（env 双键先行）；前端 weight/embedding 配置位后置。
