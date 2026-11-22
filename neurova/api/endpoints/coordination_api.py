@@ -199,9 +199,18 @@ async def reset_yield_checker_endpoint(admin: Dict[str, Any] = Depends(require_a
 
 @router.get("/triage/stats")
 async def get_triage_stats():
-    """获取 Triage Gate 统计信息"""
+    """获取 Triage Gate 统计信息（双源合并）。
+
+    - `triage_gate`：旧 LLM 分诊门（SmallBrainTriageGate）自身计数；
+    - `yield_checker`：Layer 6 让位闸（GlanceYieldChecker，SB-4 接线后的
+      规则/模型拦截与 shadow 计数）——live-verify 实测旧形态只透出前者，
+      Layer 6 计数器无任何端点可见，属可观测性断点，本修复合并双源。
+    """
     gate = get_small_brain_triage_gate()
-    return {"triage_gate": gate.get_stats()}
+    from neurova.collaboration.glance_yield_rules import get_glance_yield_checker
+
+    checker = await get_glance_yield_checker()
+    return {"triage_gate": gate.get_stats(), "yield_checker": checker.get_stats()}
 
 
 @router.post("/triage/check")

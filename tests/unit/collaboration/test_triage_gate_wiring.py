@@ -602,3 +602,38 @@ class TestTriageCacheRetired:
                     if pattern.search(path.read_text(encoding="utf-8", errors="replace")):
                         leftovers.append(f"{symbol} @ {path}")
         assert not leftovers, "旧缓存面残留：\n  " + "\n  ".join(leftovers)
+
+
+class TestTriageStatsMerged:
+    """SB-4/SB-5 收官补验：/triage/stats 必须同时透出 Layer 6 让位闸计数器。
+
+    live-verify 实测发现：/triage/stats 只返回旧 LLM 分诊门（SmallBrainTriageGate）
+    的 stats，SB-4 新增的 GlanceYieldChecker.triage_* 计数器无任何端点透出——
+    可观测性断点。修复后双源合并：triage_gate（旧门）+ yield_checker（让位闸）。
+    """
+
+    def testStatsEndpointExposesYieldCheckerCounters(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from neurova.api.endpoints.coordination_api import router
+
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app)
+
+        from neurova.api.auth import create_access_token
+
+        token = create_access_token({"sub": "livetest", "role": "admin", "type": "access"})
+        resp = client.get(
+            "/coordination/triage/stats",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert "triage_gate" in body, "旧分诊门 stats 键不得丢（向后兼容）"
+        checkerStats = body.get("yield_checker") or {}
+        assert "triage_checks" in checkerStats, f"yield_checker 缺 triage_checks: {list(body)}"
+        assert "triage_rule_skips" in checkerStats
+        assert "triage_model_skips" in checkerStats
+        assert "triage_shadow_would_skip" in checkerStats
