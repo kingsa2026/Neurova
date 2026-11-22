@@ -189,7 +189,7 @@
 - **weight=0 语义**：该 provider 不参与日常分配，但仍在注册表中，其余候选全故障时经 failover 链可达；
 - 与 R3 能力选型正交：能力过滤先裁掉不合格候选，加权只在合格的同优先级组内生效。
 
-遗留：前端 ModelPage 未加 weight 编辑位（API 已可配，配置面后置另批）；统计性观测（真实流量分布回读）未建，需要时借 usage 台账按 provider 聚合即可。
+遗留清偿：weight 编辑位已进 ModelPage 配置弹窗高级区（7ed9022e2，含 embedding_model 声明位与 i18n×11）；真实流量分布观测已建——usage_history.provider_totals 聚合 + /stats/usage-overview by_provider 段（tokens 降序+份额%）+ Token 活动仪表盘「服务商流量分布」卡（份额条），配置的 weight 份额与实跑分布可对账。
 
 ### 收尾批（2026-11-22，R2 取消标定 + R9 + R11 用户拍板实施）
 
