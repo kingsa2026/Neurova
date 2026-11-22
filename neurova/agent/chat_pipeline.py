@@ -18,6 +18,7 @@ ChatPipeline — 对话流程管线
 from neurova.core.logger import get_logger
 from neurova.skills.library_service import agentLibrary
 from neurova.core.lazy_singleton import lazySingleton
+from neurova.core.tenant_scope import resolve_tenant
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import asyncio
@@ -420,7 +421,7 @@ class ChatPipeline:
             "session_id": ctx.session_id,
             "trace_id": ctx.trace_id,
             "role": (ctx.metadata or {}).get("role", "user"),
-            "tenant_id": str((ctx.metadata or {}).get("tenant_id") or "default"),
+            "tenant_id": resolve_tenant(ctx.metadata),
             "agent_id": self._factDomain(),
         }
         # 部门分类白名单（specs/2026-11-07 批 E）：请求边界注入则透传三条读面；
@@ -3691,7 +3692,7 @@ class ChatPipeline:
                 ctx.relevant_memories or [],
                 get_knowledge_fact_store(),
                 self._factDomain(),
-                str((ctx.metadata or {}).get("tenant_id") or "default"),
+                resolve_tenant(ctx.metadata),
             )
         except Exception as exc:  # noqa: BLE001 - 守卫失败绝不影响回复
             logger.debug("事实回查跳过: %s", exc)

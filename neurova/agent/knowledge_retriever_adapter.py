@@ -16,6 +16,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant
 from neurova.knowledge.ambiguity_clarification import ambiguityMode, buildAmbiguityBlock
 from neurova.knowledge.feedback_prior import rerankByAdoption
 from neurova.knowledge.query_normalization import normalizeMode, normalizeQueryForRetrieval
@@ -110,10 +111,7 @@ class KnowledgeRetrieverAdapter:
                 walker = GraphFactWalker(
                     get_knowledge_fact_store(), agentId=agentId
                 )
-            tenantId = str(
-                (getattr(context, "metadata", None) or {}).get("tenant_id")
-                or "default"
-            )
+            tenantId = resolve_tenant(getattr(context, "metadata", None))
             # 部门分类白名单（specs/2026-11-07 批 E）：请求边界注入，走查同口径收口
             allowedCats = (getattr(context, "metadata", None) or {}).get("allowed_categories")
             hops = walker.walkFromQuery(
@@ -247,9 +245,7 @@ class KnowledgeRetrieverAdapter:
                 metadataRole = (getattr(context, "metadata", None) or {}).get("role")
                 if metadataRole:
                     user["role"] = str(metadataRole)
-                user["tenant_id"] = str(
-                    (getattr(context, "metadata", None) or {}).get("tenant_id") or "default"
-                )
+                user["tenant_id"] = resolve_tenant(getattr(context, "metadata", None))
 
             metadata = getattr(context, "metadata", None) or {}
             agent_id = metadata.get("agent_id")
@@ -266,7 +262,7 @@ class KnowledgeRetrieverAdapter:
                     )
                     from neurova.knowledge.retrieval_metrics import get_retrieval_metrics
 
-                    tenantId = str(metadata.get("tenant_id") or "default")
+                    tenantId = resolve_tenant(metadata)
                     norm = normalizeQueryForRetrieval(
                         get_knowledge_fact_store(), searchQuery, str(agent_id), tenantId
                     )
@@ -408,7 +404,7 @@ class KnowledgeRetrieverAdapter:
                         str(context.query or ""),
                         knowledge_items,
                         str(agent_id) if agent_id else None,
-                        str(metadata.get("tenant_id") or "default"),
+                        resolve_tenant(metadata),
                     )
                     if ambiguityBlock is not None:
                         ambiguityMeta = ambiguityBlock.toMetadata()
@@ -426,7 +422,7 @@ class KnowledgeRetrieverAdapter:
                     # 归一已命中主体的查询不算脱靶（别名已知，缺的是内容本身）
                     _captureRetrievalMiss(
                         str(agent_id),
-                        str(metadata.get("tenant_id") or "default"),
+                        resolve_tenant(metadata),
                         searchQuery,
                     )
                 emptyMetadata: Dict[str, Any] = {

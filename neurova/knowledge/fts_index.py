@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant, tenant_sql_where
 from neurova.knowledge.lifecycle import isRetrievable
 from neurova.knowledge.search import tokenize
 from neurova.knowledge.share_segment import tenantSegment
@@ -97,7 +98,7 @@ class KnowledgeFtsIndex:
             str(agentId),
             str(item.get("visibility") or "private"),
             str(item.get("owner_user_id") or ""),
-            str(item.get("tenant_id") or "default"),
+            resolve_tenant(item),
             json.dumps(item.get("shared_with") or [], ensure_ascii=False),
             str(item.get("category") or ""),
             json.dumps(item.get("tags") or [], ensure_ascii=False),
@@ -219,14 +220,15 @@ class KnowledgeFtsIndex:
         params: List[Any] = [match, _nowIso()]
         user = user or {}
         uid = str(user.get("user_id") or "")
-        tenant = str(user.get("tenant_id") or "default")
+        tenant = resolve_tenant(user)
         # §8-E1：本租户条目 + 显式分享给本租户的条目（shared_with 的 tenant:<id> 段）
         tenantSeg = tenantSegment(tenant)
+        tenantClause, tenantParams = tenant_sql_where(tenant, alias="d")
         clauses.append(
-            "(d.tenant_id = ? OR EXISTS"
+            "(" + tenantClause + " OR EXISTS"
             " (SELECT 1 FROM json_each(d.shared_with_json) WHERE value = ?))"
         )
-        params.extend([tenant, tenantSeg])
+        params.extend([*tenantParams, tenantSeg])
         admin = str(user.get("role") or "") == "admin"
         if not admin:
             if scope == "public":

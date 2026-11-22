@@ -37,6 +37,7 @@ import time
 import uuid
 from contextvars import ContextVar
 from typing import Any, Callable, Dict, List, Optional
+from neurova.core.tenant_scope import resolve_tenant
 from neurova.agent.task_unit import parseTaskUnit, renderTaskUnitPrompt
 from neurova.agent.acceptance_gate import runAcceptanceLoop
 from neurova.agent.review_gate import runReviewLoop
@@ -2421,7 +2422,7 @@ class SwarmManager:
         from neurova.core.identity_context import get_request_user_id
 
         initiatorTenant = self._currentTenantId()
-        targetTenant = str(getattr(old, "tenant_id", "") or "default")
+        targetTenant = resolve_tenant(old)
         teamTenant = self._teamTenantId(old.team_id)
         crossTenant = (
             targetTenant != initiatorTenant
@@ -2689,7 +2690,7 @@ class SwarmManager:
             from neurova.api.endpoints.teams_api import getTeamRoster
 
             team = getTeamRoster(tid) or {}
-            return str(team.get("tenant_id") or "default")
+            return resolve_tenant(team)
         except Exception:  # noqa: BLE001 - 读失败不猜租户，交由 run 租户判定
             return None
 
@@ -3059,7 +3060,7 @@ class SwarmManager:
                 f"名册成员 {agent_id} 配置了外部执行体，无法派活"
             )
         initiator_tenant = self._currentTenantId()
-        team_tenant = str(team.get("tenant_id") or "default")
+        team_tenant = resolve_tenant(team)
         if initiator_tenant != team_tenant:
             # D-B：平台 admin 豁免跨租户限制（users 表 role 单源判定，留审计
             # 日志）——续跑链的租户闸已先行拦截/放行并留痕，这里豁免才能让

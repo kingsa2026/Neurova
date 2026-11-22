@@ -13,6 +13,8 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List
 
+from neurova.core.tenant_scope import resolve_tenant
+
 
 class GraphRetrieverAdapter:
     """把多跳走查的终点事实转成检索链标准 memory dict。"""
@@ -35,7 +37,7 @@ class GraphRetrieverAdapter:
 
         start = time.monotonic()
         metadata = getattr(context, "metadata", None) or {}
-        tenantId = str(metadata.get("tenant_id") or "default")
+        tenantId = resolve_tenant(metadata)
         # 部门分类白名单（specs/2026-11-07 批 E）：请求边界注入，走查同口径收口
         allowedCats = metadata.get("allowed_categories")
         hops = self._walker.walkFromQuery(

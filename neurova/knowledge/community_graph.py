@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 logger = get_logger(__name__)
 
@@ -106,19 +107,23 @@ class CommunityGraphBuilder:
 
     def _readGraph(self) -> tuple:
         # P3-6：图读数走 store 只读公开口，不再直摸 `_lock`/`_conn`。
+        tenantClause, tenantParams = tenant_sql_where(self._tenantId)
         nodeRows = self._store.queryReadOnly(
             "SELECT canonical_label FROM knowledge_subjects"
-            " WHERE agent_id = ? AND tenant_id = ? AND status = 'active'"
+            " WHERE agent_id = ? AND " + tenantClause +
+            " AND status = 'active'"
             " ORDER BY canonical_label",
-            (self._agentId, self._tenantId))
+            (self._agentId, *tenantParams))
+        fTenantClause, fTenantParams = tenant_sql_where(self._tenantId, alias="f")
         edgeRows = self._store.queryReadOnly(
             "SELECT s.canonical_label AS src, f.object_term AS dst"
             " FROM knowledge_facts f JOIN knowledge_subjects s"
             " ON s.subject_key = f.subject_key"
-            " WHERE f.agent_id = ? AND f.tenant_id = ? AND f.status = 'active'"
+            " WHERE f.agent_id = ? AND " + fTenantClause +
+            " AND f.status = 'active'"
             " AND f.record_kind = 'triple' AND s.canonical_label = s.canonical_label"
             " ORDER BY s.canonical_label, f.object_term, f.fact_id",
-            (self._agentId, self._tenantId))
+            (self._agentId, *fTenantParams))
         nodes = [str(r["canonical_label"]) for r in nodeRows]
         edges = [(str(r["src"]), str(r["dst"])) for r in edgeRows]
         return nodes, edges
@@ -147,8 +152,9 @@ class CommunityGraphBuilder:
         return out
 
     def loadCommunities(self, level: Optional[int] = None) -> List[Dict[str, Any]]:
-        sql = "SELECT * FROM ontology_communities WHERE tenant_id = ?"
-        params: List[Any] = [self._tenantId]
+        tenantClause, tenantParams = tenant_sql_where(self._tenantId)
+        sql = "SELECT * FROM ontology_communities WHERE " + tenantClause
+        params: List[Any] = list(tenantParams)
         if level is not None:
             sql += " AND level = ?"
             params.append(int(level))
@@ -180,9 +186,11 @@ class CommunityGraphBuilder:
             return {"refreshed": False, "drift": drift,
                     "communities": len(existing)}
         with self._store._lock, self._store._conn:
+            delTenantClause, delTenantParams = tenant_sql_where(self._tenantId)
             self._store._conn.execute(
-                "DELETE FROM ontology_communities WHERE tenant_id = ? AND level = ?",
-                (self._tenantId, int(level)))
+                "DELETE FROM ontology_communities WHERE " + delTenantClause +
+                " AND level = ?",
+                (*delTenantParams, int(level)))
             for members in groups:
                 summary = ""
                 if summarizer is not None:
@@ -252,10 +260,11 @@ def communityGlobalSearch(store: Any, query: str, agentId: str = "default",
     queryTokens = set(query.casefold())
     hits: List[Dict[str, Any]] = []
     # P3-6：读数走 store 只读公开口（表随 store 建库时就绪，无需此地再保一次 schema）。
+    tenantClause, tenantParams = tenant_sql_where(tenantId)
     rows = store.queryReadOnly(
         "SELECT community_id, member_labels_json, summary_text"
-        " FROM ontology_communities WHERE tenant_id = ? ORDER BY level",
-        (tenantId,))
+        " FROM ontology_communities WHERE " + tenantClause + " ORDER BY level",
+        tenantParams)
     for row in rows:
         summary = str(row["summary_text"] or "")
         summaryTokens = set(summary.casefold())
@@ -274,17 +283,19 @@ def communityDriftSearch(store: Any, entityLabel: str, agentId: str = "default",
                          limit: int = 5) -> List[Dict[str, Any]]:
     """drift 检索：实体邻域（knowledge_facts 既有客体接力一跳）＋所属社区摘要混合。"""
     # P3-6：读数走 store 只读公开口（同 communityGlobalSearch）。
+    sTenantClause, sTenantParams = tenant_sql_where(tenantId, alias="s")
     rows = store.queryReadOnly(
         "SELECT DISTINCT f.object_term FROM knowledge_facts f"
         " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
-        " WHERE s.canonical_label = ? AND s.agent_id = ? AND s.tenant_id = ?"
+        " WHERE s.canonical_label = ? AND s.agent_id = ? AND " + sTenantClause +
         " AND f.status = 'active' AND f.record_kind = 'triple' LIMIT ?",
-        (entityLabel, agentId, tenantId, int(limit)))
+        (entityLabel, agentId, *sTenantParams, int(limit)))
     neighbors = [str(r["object_term"]) for r in rows]
     hits: List[Dict[str, Any]] = []
+    commTenantClause, commTenantParams = tenant_sql_where(tenantId)
     rows = store.queryReadOnly(
         "SELECT community_id, member_labels_json, summary_text"
-        " FROM ontology_communities WHERE tenant_id = ?", (tenantId,))
+        " FROM ontology_communities WHERE " + commTenantClause, commTenantParams)
     for row in rows:
         labels = json.loads(row["member_labels_json"] or "[]")
         if entityLabel in labels or any(n in labels for n in neighbors):

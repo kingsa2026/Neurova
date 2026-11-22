@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 logger = get_logger(__name__)
 
@@ -77,26 +78,29 @@ class ChunkStrategyRegistry:
         return self.get(strategyId, tenantId=tenantId) or {}
 
     def get(self, strategyId: str, tenantId: str = "default") -> Optional[Dict[str, Any]]:
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
         with self._store._lock:
             row = self._store._conn.execute(
                 "SELECT * FROM ontology_chunk_strategies"
-                " WHERE tenant_id = ? AND strategy_id = ?",
-                (str(tenantId or "default"), str(strategyId or "").strip())).fetchone()
+                " WHERE " + tenantClause + " AND strategy_id = ?",
+                (*tenantParams, str(strategyId or "").strip())).fetchone()
         return self._hydrate(row) if row is not None else None
 
     def list(self, tenantId: str = "default") -> List[Dict[str, Any]]:
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
         with self._store._lock:
             rows = self._store._conn.execute(
-                "SELECT * FROM ontology_chunk_strategies WHERE tenant_id = ?"
-                " ORDER BY strategy_id", (str(tenantId or "default"),)).fetchall()
+                "SELECT * FROM ontology_chunk_strategies WHERE " + tenantClause
+                + " ORDER BY strategy_id", tenantParams).fetchall()
         return [self._hydrate(r) for r in rows]
 
     def delete(self, strategyId: str, tenantId: str = "default") -> bool:
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
         with self._store._lock, self._store._conn:
             cur = self._store._conn.execute(
-                "DELETE FROM ontology_chunk_strategies WHERE tenant_id = ?"
-                " AND strategy_id = ?", (str(tenantId or "default"),
-                                         str(strategyId or "").strip()))
+                "DELETE FROM ontology_chunk_strategies WHERE " + tenantClause
+                + " AND strategy_id = ?", (*tenantParams,
+                                           str(strategyId or "").strip()))
             return cur.rowcount > 0
 
     @staticmethod

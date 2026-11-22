@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.lazy_singleton import lazySingleton
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant
 from neurova.knowledge.document_pipeline import DocumentParseError, parse_document, resolveSourceDates
 from neurova.knowledge.ingest_bus import (
     KB_INGEST_RESULT_TOPIC,
@@ -105,7 +106,7 @@ class KnowledgeIngestBridge:
         chat_id = str(getattr(message, "chat_id", "") or "")
         source = "wecom:%s:%s" % (chat_id, message_id or "no-id")
         agent = agent_id or str(metadata.get("agent_id") or "default")
-        tenant = str(metadata.get("tenant_id") or "default")
+        tenant = resolve_tenant(metadata)
         event = {
             "event_id": source,
             "channel": str(getattr(message, "channel_type", "") or ""),
@@ -181,7 +182,7 @@ class KnowledgeIngestBridge:
         message = SimpleNamespace(**encodedMessage)
         message.metadata = metadata
         agent = str(payload.get("agent_id") or "default")
-        tenant = str(payload.get("tenant_id") or "default")
+        tenant = resolve_tenant(payload)
         source = str(event.get("event_id") or "")
         get_ingest_bus().publish(KB_INGEST_WECOM_TOPIC, event)
         try:

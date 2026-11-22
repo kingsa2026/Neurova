@@ -16,6 +16,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant
 
 logger = get_logger(__name__)
 
@@ -50,7 +51,7 @@ class TKGRetrieverAdapter:
             # query_tkg_for_context：关键词抽取 + 时效窗口 + 置信度排序，
             # 直接返回 dict 列表（query_current 只按 S/P/O 精确匹配，不适合文本查询）
             metadata = getattr(context, "metadata", None) or {}
-            tenantId = str(metadata.get("tenant_id") or "default")
+            tenantId = resolve_tenant(metadata)
             # 部门分类白名单（specs/2026-11-07 批 E）：时效读面同口径收口
             allowedCats = metadata.get("allowed_categories")
             allowedArg = list(allowedCats) if allowedCats is not None else None

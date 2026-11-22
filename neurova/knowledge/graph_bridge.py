@@ -30,6 +30,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant
 from neurova.knowledge.ontology.term_registry import IS_A_PREDICATE
 
 logger = get_logger(__name__)
@@ -235,7 +236,7 @@ def admitExtractedFacts(
 
     gate = productionAdmissionGate(factStore, toolVersion="graph-bridge")
     agentId = str(item.get("agent_id", "") or "default")
-    tenantId = str(item.get("tenant_id") or "default")
+    tenantId = resolve_tenant(item)
     def _requestFor(subjectLabel: str, predicateTermId: str, objectTerm: str,
                     qualifier: Optional[Dict[str, Any]] = None) -> AdmissionRequest:
         statement = _statementOf(subjectLabel, predicateTermId, objectTerm)
@@ -446,7 +447,7 @@ def extract_knowledge_to_graph(
     content = str(item.get("content", ""))
     if not (title or content):
         return []
-    tenantId = str(item.get("tenant_id") or "default")
+    tenantId = resolve_tenant(item)
 
     try:
         raw = llm_call(extractionPrompt(termRegistry, title=title, content=content))
@@ -604,7 +605,7 @@ def extractionPending(item: Dict[str, Any], store: Any, agentId: str) -> bool:
     """
     return not _authorityFactsForEntry(
         store, agentId, str(item.get("knowledge_id", "") or ""),
-        str(item.get("tenant_id") or "default"),
+        resolve_tenant(item),
     )
 
 

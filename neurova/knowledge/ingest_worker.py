@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant
 from neurova.knowledge.repository import get_knowledge_repository
 
 logger = get_logger(__name__)
@@ -53,7 +54,7 @@ def extract_after_ingest(event: Dict[str, Any], item_ids: List[str]) -> str:
         _try_extract_to_graph(
             items, None,
             agent_id=str(event.get("agent_id") or "default"),
-            tenant_id=str(event.get("tenant_id") or "default"),
+            tenant_id=resolve_tenant(event),
         )
         return "extracted"
     except Exception as exc:  # noqa: BLE001 - 补偿失败不影响摄取主流程

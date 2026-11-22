@@ -39,6 +39,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from neurova.core.tenant_scope import resolve_tenant
+
 logger = logging.getLogger(__name__)
 
 LEVEL_L0 = "L0"
@@ -808,7 +810,7 @@ def _deciderTenant(actor: str) -> str:
     try:
         from neurova.auth.user_group_model import resolveUserDepartment
 
-        return str((resolveUserDepartment(actor) or {}).get("tenant_id") or "default")
+        return resolve_tenant(resolveUserDepartment(actor))
     except Exception:
         return "default"
 
@@ -867,7 +869,7 @@ def decideSwarmApproval(
     # 例外）；parent_agent 通道是 L1 代理给父的既有链路（信任链在 spawn 时建立），
     # 不做用户租户判定。存量无租户单按 default 口径。
     if channel != "parent_agent":
-        request_tenant = str((request.metadata or {}).get("tenant_id") or "default")
+        request_tenant = resolve_tenant(request.metadata)
         decider_tenant = _deciderTenant(actor)
         if decider_tenant != request_tenant and not _deciderIsPlatformAdmin(actor):
             return {
