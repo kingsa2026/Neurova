@@ -457,7 +457,7 @@
 > 守卫 `tests/unit/api/test_authSurfaceFreshness.py` 逐字比对，漂移即红。
 > 口径：只认**路由依赖图**里的身份/角色门；在 handler 体内自验 token 的那一类**未覆盖**，要确认它只能真打请求。404/405 不算门。
 
-**汇总**：路由 1061 条（含方法展开）——需认证 **1037**、公开 **24**。
+**汇总**：路由 1062 条（含方法展开）——需认证 **1038**、公开 **24**。
 
 | 模块前缀 | 路由 | 需认证 | 公开 |
 |----------|------|--------|------|
@@ -465,7 +465,7 @@
 | `agent-enhancement` | 4 | 4 | 0 |
 | `agents` | 15 | 15 | 0 |
 | `analytics` | 5 | 5 | 0 |
-| `api` | 37 | 37 | 0 |
+| `api` | 39 | 39 | 0 |
 | `artifacts` | 2 | 2 | 0 |
 | `audio` | 9 | 9 | 0 |
 | `audit` | 6 | 6 | 0 |
@@ -483,7 +483,7 @@
 | `computer` | 25 | 25 | 0 |
 | `computers` | 11 | 10 | 1 |
 | `console` | 31 | 31 | 0 |
-| `context` | 10 | 10 | 0 |
+| `context` | 11 | 11 | 0 |
 | `cost-rollup` | 8 | 8 | 0 |
 | `diagnostics` | 1 | 1 | 0 |
 | `enhanced-memory-search` | 11 | 11 | 0 |
@@ -521,7 +521,7 @@
 | `neurflow` | 47 | 47 | 0 |
 | `notifications` | 9 | 9 | 0 |
 | `openplatform` | 8 | 8 | 0 |
-| `phase3` | 15 | 15 | 0 |
+| `phase3` | 12 | 12 | 0 |
 | `plans` | 6 | 6 | 0 |
 | `plugins` | 24 | 24 | 0 |
 | `projects` | 16 | 16 | 0 |
@@ -546,7 +546,7 @@
 | `tasks` | 8 | 8 | 0 |
 | `teams` | 10 | 10 | 0 |
 | `tool-layers` | 11 | 11 | 0 |
-| `tools` | 7 | 7 | 0 |
+| `tools` | 8 | 8 | 0 |
 | `trace` | 5 | 5 | 0 |
 | `webhooks` | 7 | 7 | 0 |
 | `workspace` | 5 | 5 | 0 |
