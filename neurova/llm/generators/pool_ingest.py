@@ -33,13 +33,14 @@ async def archiveGenerationToPool(
     agent_id: str = "",
     session_id: str = "",
     turn: int = 0,
+    tenant_id: str = "",
 ) -> bool:
     """把一条生成产物归档进该会话归属的活水上下文池，返回是否入池。
 
     content 带提示词摘要与产物 URL（池 draw/query 语义召回用）；
-    metadata 带 session_id/turn/task_id/kind/protocol/model——满足
-    「生成物可按会话与轮次追溯」的读侧需求。池既有折叠/淘汰/租户隔离
-    语义不变（隔离标签仍由 add_context 注入）。
+    metadata 带 session_id/turn/task_id/kind/protocol/model/tenant_id——
+    满足「生成物可按会话与轮次追溯」的读侧需求。池既有折叠/淘汰/租户
+    隔离语义不变（隔离标签仍由 add_context 注入）。
     """
     clean_urls = [str(u) for u in (urls or []) if u]
     if not clean_urls:
@@ -64,6 +65,7 @@ async def archiveGenerationToPool(
             "model": model,
             "user_id": user_id or "",
             "agent_id": agent_id or "",
+            "tenant_id": tenant_id or "",
         }
         pool.add_context(ContextInput(
             source=ContextSource.GENERATION,

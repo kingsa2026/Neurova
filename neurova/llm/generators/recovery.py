@@ -145,7 +145,8 @@ async def _archiveSettledToPool(record: TaskRecord, url: str) -> None:
         urls=[url] if url else [],
         task_id=record.task_id, protocol=record.protocol, model=record.model,
         user_id=record.owner_user_id, agent_id=record.agent_id,
-        session_id=record.session_id, turn=record.turn)
+        session_id=record.session_id, turn=record.turn,
+        tenant_id=str(getattr(record, "tenant_id", "") or ""))
 
 
 def _recovery_interval() -> float:

@@ -59,6 +59,9 @@ class TaskRecord:
     prompt: str = ""
     # P1-9（审计 2026-09-11）：任务属主——/video/status 与 /tasks 据此做归属校验
     owner_user_id: str = ""
+    # 租户列（多模态追平遗留审计）：与 agent_runs 的 tenant 列同纪律——
+    # owner_user_id 校验之外再落记录级租户，防 user_id 跨租户复用时越权
+    tenant_id: str = ""
     # 批次0：产物溯源——rest/channel/workflow 三入口同池区分；
     # execution_id 关联画布工作流执行实例（workflow 来源时）
     source: str = "rest"

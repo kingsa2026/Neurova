@@ -351,6 +351,7 @@ async def generate_image(
         default_base="https://api.openai.com/v1",
     )
     uid = str(current_user.get("user_id") or "")
+    tenant = str(current_user.get("tenant_id") or "default")
 
     def _ledger_add(status: str, local_path: str = "", error: str = "",
                     ignored: str = "") -> None:
@@ -367,6 +368,7 @@ async def generate_image(
             error=error[:300],
             prompt=body.prompt[:500],
             owner_user_id=uid,
+            tenant_id=tenant,
             ignored_params=ignored,
         ))
         # L4：AIGC 用量统计（张数计 items，写失败静默不阻断主流程）
@@ -419,7 +421,8 @@ async def generate_image(
         urls=[img["url"] for img in images if img.get("url")],
         task_id=task_id, protocol=protocol.value, model=creds.model or "",
         user_id=uid, agent_id=str(body.agent_id or ""),
-        session_id=str(body.session_id or ""), turn=int(body.turn or 0))
+        session_id=str(body.session_id or ""), turn=int(body.turn or 0),
+        tenant_id=tenant)
     data: Dict[str, Any] = {"images": images, "task_id": task_id}
     if ignored_csv:
         data["ignored_params"] = ignored_csv
@@ -499,6 +502,7 @@ async def generate_audio(
             prompt=body.text[:500],
             local_path=str(path),
             owner_user_id=str(current_user.get("user_id") or ""),
+            tenant_id=str(current_user.get("tenant_id") or "default"),
         ))
         # L4：AIGC 用量统计（音频条数；写失败静默）
         from neurova.core.aigc_usage import get_aigc_usage
@@ -647,6 +651,7 @@ async def generate_video(
         poll_url=str(submitted.get("poll_url") or ""),
         prompt=body.prompt[:500],
         owner_user_id=str(current_user.get("user_id") or ""),
+        tenant_id=str(current_user.get("tenant_id") or "default"),
         ignored_params=ignored_csv,
         # M9：收口成功时产物凭此归属入活水池
         session_id=str(body.session_id or ""), agent_id=str(body.agent_id or ""),
@@ -704,6 +709,7 @@ async def generate_music(
         poll_url=str(submitted.get("poll_url") or ""),
         prompt=body.prompt[:500],
         owner_user_id=str(current_user.get("user_id") or ""),
+        tenant_id=str(current_user.get("tenant_id") or "default"),
         # M9：收口成功时产物凭此归属入活水池
         session_id=str(body.session_id or ""), agent_id=str(body.agent_id or ""),
         turn=int(body.turn or 0),
@@ -757,6 +763,12 @@ def _get_owned_task_record(task_id: str, current_user: Dict[str, Any]):
     if owner and owner != uid:
         raise HTTPException(status_code=403, detail="无权访问该任务")
     if not owner and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="无权访问该任务")
+    # 租户校验（多模态追平遗留审计）：记录带租户时须与请求者同租户——
+    # 防 user_id 跨租户复用时的越权；无租户的存量记录按既有规则放行。
+    rec_tenant = str(getattr(record, "tenant_id", "") or "")
+    cur_tenant = str(current_user.get("tenant_id") or "default")
+    if rec_tenant and rec_tenant != cur_tenant:
         raise HTTPException(status_code=403, detail="无权访问该任务")
     return record
 
