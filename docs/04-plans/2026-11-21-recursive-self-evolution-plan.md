@@ -654,6 +654,7 @@ class PrPatchChannel:
 - 终验回归（evolution 全目录+guards+治理/审批/世代端点+evals+benchmark）：**2345 passed / 1 failed**——唯一失败为 `test_wiring_signatures_alive[tool_executor-signatures19]` 预存红（他会在途禁碰件，历次 A/B 均记录），**零新增失败**；
 - 全自动闭环三段演练全过（零人工晋升/自动回滚/失败淘汰）；swarm 外部成员补丁接线清偿（`ecac8ea46`）；
 - 闲置件 8 件处置完毕（退役或接线，零静默遗留）；双文档与 0-index 已入库。
+- **P2-2 全目录 A/B 补跑已清偿（2026-11-22）**：以 `git worktree` 在父提交 `8db54e4d3` 建基线工作树，跑与终验完全相同的套件——基线 **2298 passed / 1 failed**（同一条 tool_executor 预存红），终验 **2345 passed / 1 failed**；失败集合逐行一致，passed 差值 47 与 P2-2 新增 10 例 + P3-1 19 例 + P3-2 18 例精确对账——**零新增失败**，P2-2 提交（`6bd9ec3d9`）洁净性坐实。另：nl_synthesizer 零引用单例对已退役（`8183591b0`，§11.5 所列相邻观察清偿）。
 
 ### 11.5 移交二期（Harness^N）与后续
 
