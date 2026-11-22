@@ -2,7 +2,7 @@
 
 - 日期：2026-11-22
 - 来源：总报告《reference_ad_vs_neurova_fullstack_evaluation_2026-11-21.md》D4 维两份专项拆解的可借鉴点全量收口（21 项，见《reference_ad_remote_execution_teardown_2026-11-22.md》§4）
-- 性质：**实施计划（备稿待拍板）**——按卡实施、每卡先红后绿+live-verify；竞品/外部对标，研究参考，不作产品事实源
+- 性质：**实施计划（六项拍板已落定 2026-11-22，可开工）**——按卡实施、每卡先红后绿+live-verify；竞品/外部对标，研究参考，不作产品事实源
 - 目标：D4 专项十轴复评 82.0→90.0+（轴1 8.5→9.0/轴3 6.5→8.0/轴6 7.0→8.5/轴7 7.0→9.0/轴9 8.5→9.0/轴10 8.5→9.0）；总报告 D4 11.5→13.0+、总分 96.0→98.0+
 - 范围红线：只吸收借鉴点，不动既有已验收行为；净新增 LOC 逐卡申报；不引第三方重依赖（paramiko/pyotp 级别以下优先标准库）
 
@@ -58,8 +58,8 @@
 
 ## 2. 批二 P1（可靠性/架构，七卡）
 
-**U5 沙箱第二档（评估+最小落地，依赖拍板 D-T1）**
-- 做法：评估三路线——Docker 容器档（推荐：run_code/exec_command 增加 `isolation="strong"` 走容器执行，镜像最小化+无网络+只读根+临时可写 tmpfs）、Windows Sandbox 自动化档（已有 sandbox_provider 雏形）、Pyodide WASM 档（仅纯计算）。最小落地=容器档跑通 run_code 一条链。
+**U5 沙箱第二档（最小落地，路线已拍板 D-T1）**
+- 做法（D-T1 已拍板=Docker 容器档）：run_code/exec_command 增加 `isolation="strong"` 走最小镜像容器（无网络+只读根+临时可写 tmpfs）；Windows Sandbox 自动化与 Pyodide WASM 不做。最小落地=容器档跑通 run_code 一条链。
 - 红绿：红=strong 档缺实现时参数被忽略按旧档执行；绿=strong 档真实在容器内执行且宿主文件系统不可见（挂载白名单外路径探测失败）。
 - live-verify：容器内执行读 `/etc/passwd` 外探测+正常计算两 case。
 
@@ -74,7 +74,7 @@
 - live-verify：构造慢工具（sleep）验证 clamp 生效。
 
 **U8 长命令 park+迟交回灌**
-- 做法：ssh/exec 类命令超过 soft 阈值（默认 45s）→返回 park 信封 `{parked: true, park_id, poll_after}`，后台任务继续执行；结果落 `tool_park_results`（内存+落盘），新增 `/v1/tools/park/{park_id}` 查询端点+WS 事件；模型可凭 park_id 再查。上限对齐 800s。
+- 做法：ssh/exec 类命令超过 soft 阈值（默认 45s）→返回 park 信封 `{parked: true, park_id, poll_after}`，后台任务继续执行；结果落 `tool_park_results`（内存+落盘），新增 `/v1/tools/park/{park_id}` 查询端点（REST 轮询，D-T2 已拍板；WS 推送/webhook 不做）；模型可凭 park_id 再查。上限对齐 800s。
 - 红绿：红=120s 命令当前 60s 超时即失败且无法取回；绿=park 后首响应为信封、到期后 park_id 可取到完整结果，重复查询幂等。
 - live-verify：真 sshd 跑 `sleep 90 && echo done` 全链取回。
 
@@ -96,22 +96,22 @@
 ## 3. 批三 P2（体验/生态/强制面，八卡）
 
 **U12 结构化 \*\_UNSUPPORTED 拒绝+端能力声明路由**：工具因能力未装配/端不支持时返回稳定 `{error_code: "TOOL_UNSUPPORTED", reason, supported: [...]}`；多后端桌面执行（本机/来宾机/RDP/Sandbox）按端能力声明选端器（computer_use 注册表扩 capability 字段）。红绿：未装浏览器引擎时 browser_navigate 返回结构化不支持而非异常。
-**U13 HPKE 凭据信道评估（评估卡）**：评估 RFC 9180 形态对本仓凭据跨端传递（移动端/来宾机）的收益；产出评估结论，不接线不加分。
-**U14 MCP Apps 交互 UI（评估卡）**：评估 SEP-1865 形态对本仓 MCP server 面的增量；产出结论。
+**U13 HPKE 凭据信道评估（评估卡，D-T6 已拍板：评估后拍板）**：评估 RFC 9180 形态对本仓凭据跨端传递（移动端/来宾机）的收益；产出评估结论，不接线不加分。
+**U14 MCP Apps 交互 UI（评估卡，D-T6 已拍板：评估后拍板）**：评估 SEP-1865 形态对本仓 MCP server 面的增量；产出结论。
 **U15 云沙箱双 provider（评估卡，依赖 U5）**：托管/自托管双轨可行性（对标对方 market/onlyboxes）；产出结论。
 **U16 设备通道多型 token**：relay/tunnel/mobile 的准入 token 分型（agent-token/user-token/service-token），撤销粒度到型。红绿：错误型 token 访问控制面被拒。
 **U17 不可信会话凭据隔离**：分享/来宾会话禁用凭据类工具与凭据卡弹卡（fail-closed），凭据注入面加会话信任级检查。红绿：来宾会话触发 ssh 工具→直接结构化拒绝且不弹卡。
 **U18 浏览器会话 topic 键控+截图落盘核对**：核对 browser_* 工具会话隔离与截图产物落盘路径，补齐缺口（如已有则核销）。
-**U19 alint 式安全 lint 试点**：模型背书 lint 试点两条判据——"新出站代码必须走 safe_fetch（配合 U2）""shell 拼接必须过 command_segments"；先 warning 档跑误报率，达标后升 error 接入 static-gate。
+**U19 alint 式安全 lint 试点**：模型背书 lint 试点两条判据——"新出站代码必须走 safe_fetch（配合 U2）""shell 拼接必须过 command_segments"；先 warning 档跑误报率，达标后升 error 接入 static-gate（D-T5 已拍板：先 warning 观察）。
 
-## 4. 待拍板（D-T1..D-T6）
+## 4. 拍板结果（2026-11-22 交互拍板，六项全落定）
 
-- **D-T1 U5 技术路线**：Docker 容器档（推荐，跨平台+生态熟）/ Windows Sandbox 自动化 / Pyodide WASM——影响 sandbox/ 新增模块与 run_code 参数面。
-- **D-T2 U8 回灌通道**：REST 轮询（推荐，简单幂等）/ WS 事件推送 / webhook 回调——影响端点形态与前端配合。
-- **D-T3 U1 known_hosts 存储**：数据根 JSON（推荐）/ 凭据桶扩展——影响 ssh_host_store 形态。
-- **D-T4 U2 迁移范围**：一次全量迁移所有出站点（推荐）/ 先咽喉点后扫尾——影响 static-gate 首轮告警量。
-- **D-T5 U19 是否接 CI 阻断**：先 warning 观察（推荐）/ 直接 error——影响误报成本。
-- **D-T6 U13/U14 是否立项**：评估后拍板，可缓。
+- **D-T1 沙箱第二档路线：Docker 容器档**——U5 按此实施（run_code/exec_command 增 `isolation="strong"`）；Windows Sandbox 自动化与 Pyodide WASM 不做。
+- **D-T2 park 回灌通道：REST 轮询**——/v1/tools/park/{park_id} 查询端点；WS 事件推送与 webhook 回调不做。
+- **D-T3 known_hosts 存储：数据根 JSON**——data/<agent_id>/ssh_known_hosts.json；凭据桶扩展不做。
+- **D-T4 SSRF 迁移范围：一次全量迁移**——5-8 个出站文件同批改走 safe_fetch，静态检查直接开严格模式。
+- **D-T5 lint 门禁：先 warning 观察**——两判据 warning 跑误报率，清零后升 error 接 static-gate。
+- **D-T6 评估卡：评估后拍板**——U13/U14 各出评估结论再定是否实施。
 
 ## 5. 明确不做
 
