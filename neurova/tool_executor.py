@@ -45,6 +45,175 @@ logger = get_logger(__name__)
 
 
 # ════════════════════════════════════════════════════════════════
+# U12 结构化拒绝分类学：能力未装配 / 端不支持的稳定错误形状
+# ════════════════════════════════════════════════════════════════
+
+#: 稳定错误码：工具能力未装配，或该端不支持所请求的工具/输入域。
+TOOL_UNSUPPORTED_CODE = "TOOL_UNSUPPORTED"
+
+
+class ToolUnsupportedError(RuntimeError):
+    """能力未装配 / 端不支持的信号异常——执行边界统一翻译成结构化拒绝 dict。
+
+    为什么是异常而不是各执行体直接返回 dict：不支持情形可能产生在深层
+    （如 create_skill 的注入扫描器缺失），裸异常逸出会给模型一句
+    "工具执行异常: …" 的散装串；逐层传 dict 又会误触发回退链的
+    "失败→换下一档"。异常只在执行边界（_execute_single_tool）翻译一次。
+    """
+
+    def __init__(self, reason: str, supported: Optional[List[str]] = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.supported = list(supported or [])
+
+
+def toolUnsupportedResult(reason: str, supported: Optional[List[str]] = None) -> Dict[str, Any]:
+    """U12 稳定拒绝形状（单源构造点）。
+
+    `error` 键保留原文原因：`_result_is_success` 与既有消费方按 error 判失败，
+    字符串断言（如 "未知工具" 子串）继续成立；`error_code`/`reason`/`supported`
+    是新增的结构化判别面。
+    """
+    return {
+        "success": False,
+        "error_code": TOOL_UNSUPPORTED_CODE,
+        "reason": reason,
+        "supported": list(supported or []),
+        "error": reason,
+    }
+
+
+# ════════════════════════════════════════════════════════════════
+# U11 失败分级重试守卫（工具调用级）
+# ════════════════════════════════════════════════════════════════
+# 与 tool_layers/mcp_resilience.py 的分工：那里管 MCP **连接级**状态机
+# （熔断/半开/重连退避），这里管**工具调用级**的重试纪律——
+# 仅 transport/连接级失败允许换连接/会话重试；应用层失败零重试；
+# 变异类工具（写/发）默认不重试，除非 schema runtime 声明 idempotent。
+# 执行器公开入口（execute/execute_tool）按同参指纹执行该纪律：
+# 上一轮同参调用以不可重试形态失败后，紧随的同参调用被结构化拒绝，
+# 不再产生第二次真实执行（弹性超时重试/模型盲重试同参一并拦下）。
+
+#: 稳定错误码：同参调用因上一轮不可重试失败而被拒绝重试。
+TOOL_RETRY_SUPPRESSED_CODE = "TOOL_RETRY_SUPPRESSED"
+#: 同参不可重试失败的抑制窗（秒）：窗内同参调用被拒绝，过窗视为新调用。
+TOOL_RETRY_SUPPRESSION_WINDOW_S = 60.0
+#: 在途登记的安全 TTL（秒）——异常路径漏清账时不至于永久抑制。
+_RETRY_INFLIGHT_TTL_S = 600.0
+#: 抑制登记表容量上限（有界，防无界增长；淘汰最老）。
+_RETRY_LEDGER_MAX = 256
+
+#: transport 级失败的异常类型名（保守列举；拿不准的一律按 application 处置）。
+_TRANSPORT_ERROR_TYPE_NAMES = frozenset({
+    "ConnectionError", "ConnectionResetError", "ConnectionRefusedError",
+    "ConnectionAbortedError", "BrokenPipeError", "TimeoutError", "InterruptedError",
+    "SSLError", "SSHException", "ConnectError", "ConnectTimeout", "ReadTimeout",
+    "WriteTimeout", "PoolTimeout", "NetworkError", "ClientConnectionError",
+    "CancelledError",
+})
+
+#: transport 级失败的错误文本标记（小写匹配；保守列举）。
+_TRANSPORT_TEXT_MARKERS = (
+    "timed out", "timeout", "超时", "connection", "连接", "network", "网络",
+    "unreachable", "reset by peer", "broken pipe", "econnrefused", "econnreset",
+    "etimedout", "refused", "channel closed", "ssh session", "socket",
+)
+
+
+def classifyToolFailure(tool_name: str, error: Optional[BaseException] = None,
+                        result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """U11 失败分级：transport（连接/会话层，可换连接重试）vs application（零重试）。
+
+    判定顺序：
+    1. 结果里的显式 `retryable` 键（U3 REMOTE_NOT_EXECUTED 契约）最优先——
+       执行体自己声明过"能不能重试"，分类器不越权改口；
+    2. 异常类型名命中 transport 特征 → transport；
+    3. 错误文本命中 transport 标记 → transport；
+    4. 其余一律 application（保守：默认不可重试）。
+    """
+    if isinstance(result, dict) and "retryable" in result:
+        retryable = bool(result.get("retryable"))
+        return {
+            "failure_class": "transport" if retryable else "application",
+            "retry_allowed": retryable,
+            "reason": str(result.get("error") or "执行体显式声明 retryable"),
+        }
+    if isinstance(error, BaseException):
+        if type(error).__name__ in _TRANSPORT_ERROR_TYPE_NAMES:
+            return {"failure_class": "transport", "retry_allowed": True,
+                    "reason": f"{type(error).__name__}: {error}"}
+        text = str(error).lower()
+        if any(marker in text for marker in _TRANSPORT_TEXT_MARKERS):
+            return {"failure_class": "transport", "retry_allowed": True,
+                    "reason": f"{type(error).__name__}: {error}"}
+        return {"failure_class": "application", "retry_allowed": False,
+                "reason": f"{type(error).__name__}: {error}"}
+    errorText = ""
+    if isinstance(result, dict):
+        errorText = str(result.get("error") or "")
+    lowered = errorText.lower()
+    if any(marker in lowered for marker in _TRANSPORT_TEXT_MARKERS):
+        return {"failure_class": "transport", "retry_allowed": True, "reason": errorText}
+    return {"failure_class": "application", "retry_allowed": False,
+            "reason": errorText or "应用层失败"}
+
+
+def _toolIsMutation(tool_name: str) -> bool:
+    """变异类判定：只读声明取不到 / readOnly=False 一律按变异（保守侧）。"""
+    try:
+        from neurova.agent.tool_coordinator import resolveToolCapability
+
+        capability = resolveToolCapability(tool_name)
+    except Exception:  # noqa: BLE001 - 能力面故障按保守侧（变异）处置
+        return True
+    if capability is None:
+        return True
+    return not bool(getattr(capability, "readOnly", False))
+
+
+def _toolIdempotentDeclared(tool_name: str) -> bool:
+    """schema runtime.idempotent 声明（U7 元数据的 U11 消费点）。"""
+    try:
+        from neurova.builtin_tools import get_builtin_tool_runtime
+
+        runtime = get_builtin_tool_runtime(tool_name)
+    except Exception:  # noqa: BLE001 - 取不到声明按未声明（不幂等）
+        return False
+    return bool(runtime and runtime.get("idempotent") is True)
+
+
+def retryDecisionFor(tool_name: str, error: Optional[BaseException] = None,
+                     result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """U11 重试裁决：失败分级 + 变异/幂等声明 → 是否允许重试。
+
+    - 应用层失败：一律不重试；
+    - transport 级失败：只读工具可换连接/会话重试；变异类工具未声明
+      idempotent 时**默认不重试**（重复执行的副作用不可撤回）。
+    """
+    classification = classifyToolFailure(tool_name, error=error, result=result)
+    if classification["failure_class"] != "transport":
+        return {
+            "allowed": False,
+            "failure_class": classification["failure_class"],
+            "reason": classification["reason"] or "应用层失败不重试",
+        }
+    if _toolIsMutation(tool_name) and not _toolIdempotentDeclared(tool_name):
+        return {
+            "allowed": False,
+            "failure_class": "transport",
+            "reason": (
+                f"变异类工具 {tool_name} 未声明 idempotent，"
+                f"transport 级失败也不自动重试（副作用不可撤回）：{classification['reason']}"
+            ),
+        }
+    return {
+        "allowed": True,
+        "failure_class": "transport",
+        "reason": classification["reason"] or "transport 级失败，可换连接/会话重试",
+    }
+
+
+# ════════════════════════════════════════════════════════════════
 # SC-3 折叠时机判读块（context_status 回执）——长度纪律：判读块有界，
 # 文本字段截断与整块上限均具名；只走模型主动查询面，不进上下文信封恒定注入。
 # ════════════════════════════════════════════════════════════════
@@ -781,6 +950,9 @@ class ToolExecutor:
         self._somMarksLock = threading.RLock()
         self._agent = agent_ref
         self._messages_list: List[Dict] = []
+        # U11：同参重试抑制登记表（fingerprint → {"state","decision","expires"}）
+        self._retryLedger: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        self._retryLedgerLock = threading.RLock()
         # P1-2：工具执行协调器（per-tool 超时 + 超时转后台 + pending hints）
         # 懒加载（AGENTS.md 纪律）：neurova.agent 包 __init__ 链回本模块，模块级导入会循环
         from neurova.agent.tool_coordinator import ToolCoordinator
@@ -1457,7 +1629,129 @@ class ToolExecutor:
         # （尺寸棘轮：本文件只减不增，编排逻辑不回填）。
         from neurova.core import tool_call_journal
 
-        return await tool_call_journal.executeWithJournal(self, tool_name, params)
+        # U11：失败分级重试守卫——上一轮同参调用以不可重试形态失败后，
+        # 拒绝再次真实执行（应用层零重试；变异工具默认不重试）。
+        suppressed = self._retryGateCheck(tool_name, params)
+        if suppressed is not None:
+            return suppressed
+        self._retryGateMarkRunning(tool_name, params)
+        try:
+            result = await tool_call_journal.executeWithJournal(self, tool_name, params)
+        except asyncio.CancelledError:
+            # 取消/超时中断：结果未知。变异类工具不盲重试（U3 同口径），
+            # 只读工具放行后续重试。
+            self._retryGateRecordAbort(tool_name, params)
+            raise
+        except Exception as exc:
+            self._retryGateRecordOutcome(tool_name, params, None, error=exc)
+            raise
+        self._retryGateRecordOutcome(tool_name, params, result, error=None)
+        return result
+
+    def _retryGateCheck(self, tool_name: str, params: Dict) -> Optional[Dict[str, Any]]:
+        """U11 入口闸：同参指纹命中不可重试抑制（或在途变异调用）→ 结构化拒绝。"""
+        from neurova.security.tool_metadata import executionFingerprint
+
+        fingerprint = executionFingerprint(tool_name, params)
+        now = time.monotonic()
+        with self._retryLedgerLock:
+            entry = self._retryLedger.get(fingerprint)
+            if entry is None:
+                return None
+            if now > float(entry.get("expires") or 0.0):
+                self._retryLedger.pop(fingerprint, None)
+                return None
+            if entry.get("state") == "running":
+                # 同参调用仍在执行中：变异类工具拒绝并发重入（双执行隐患），
+                # 只读工具放行（并发读安全）。
+                if _toolIsMutation(tool_name) and not _toolIdempotentDeclared(tool_name):
+                    return self._retrySuppressedResult(tool_name, {
+                        "allowed": False, "failure_class": "in_flight",
+                        "reason": "同参调用仍在执行中（变异类工具拒绝并发重入）",
+                    })
+                return None
+            decision = entry.get("decision") or {}
+            if decision.get("allowed", True) is False:
+                return self._retrySuppressedResult(tool_name, decision)
+            return None
+
+    def _retryGateMarkRunning(self, tool_name: str, params: Dict) -> None:
+        """登记在途（并发同参识别用）；已有抑制登记时此调用不会发生（先被闸拒绝）。"""
+        from neurova.security.tool_metadata import executionFingerprint
+
+        fingerprint = executionFingerprint(tool_name, params)
+        with self._retryLedgerLock:
+            entry = self._retryLedger.get(fingerprint)
+            if entry is not None and entry.get("state") == "suppressed":
+                return  # 抑制中的登记不被在途标记覆盖（闸已拦截，防御性兜底）
+            self._retryLedger[fingerprint] = {
+                "state": "running",
+                "expires": time.monotonic() + _RETRY_INFLIGHT_TTL_S,
+            }
+            while len(self._retryLedger) > _RETRY_LEDGER_MAX:
+                self._retryLedger.popitem(last=False)
+
+    def _retryGateRecordOutcome(self, tool_name: str, params: Dict,
+                                result: Optional[Dict], error: Optional[BaseException]) -> None:
+        """按失败分级纪律落账：成功/可重试 → 清账；不可重试 → 抑制窗内拒绝同参重试。"""
+        from neurova.security.tool_metadata import executionFingerprint
+
+        fingerprint = executionFingerprint(tool_name, params)
+        failed = error is not None or (
+            isinstance(result, dict) and not self._result_is_success(result)
+        )
+        if not failed:
+            with self._retryLedgerLock:
+                self._retryLedger.pop(fingerprint, None)
+            return
+        decision = retryDecisionFor(
+            tool_name, error=error, result=result if isinstance(result, dict) else None)
+        if decision.get("allowed"):
+            with self._retryLedgerLock:
+                self._retryLedger.pop(fingerprint, None)
+            return
+        with self._retryLedgerLock:
+            self._retryLedger[fingerprint] = {
+                "state": "suppressed",
+                "decision": decision,
+                "expires": time.monotonic() + TOOL_RETRY_SUPPRESSION_WINDOW_S,
+            }
+            while len(self._retryLedger) > _RETRY_LEDGER_MAX:
+                self._retryLedger.popitem(last=False)
+
+    def _retryGateRecordAbort(self, tool_name: str, params: Dict) -> None:
+        """执行被取消/超时中断：结果未知。变异类工具按"不可盲重试"抑制；
+        只读工具清账（transport 级重试保留）。"""
+        from neurova.security.tool_metadata import executionFingerprint
+
+        fingerprint = executionFingerprint(tool_name, params)
+        decision = retryDecisionFor(
+            tool_name, result={"error": "执行被取消（超时/停止），结果未知", "executed": "unknown"})
+        with self._retryLedgerLock:
+            if decision.get("allowed"):
+                self._retryLedger.pop(fingerprint, None)
+                return
+            self._retryLedger[fingerprint] = {
+                "state": "suppressed",
+                "decision": decision,
+                "expires": time.monotonic() + TOOL_RETRY_SUPPRESSION_WINDOW_S,
+            }
+            while len(self._retryLedger) > _RETRY_LEDGER_MAX:
+                self._retryLedger.popitem(last=False)
+
+    @staticmethod
+    def _retrySuppressedResult(tool_name: str, decision: Dict[str, Any]) -> Dict[str, Any]:
+        """U11 稳定拒绝形状：同参重试被失败分级纪律拦下。"""
+        return {
+            "success": False,
+            "error_code": TOOL_RETRY_SUPPRESSED_CODE,
+            "retry": dict(decision),
+            "error": (
+                f"工具 {tool_name} 的上一次同参调用以"
+                f"{decision.get('failure_class', '应用层')}失败告终，"
+                "按失败分级重试纪律不自动重试；请修正参数或改用其他方法后再试"
+            ),
+        }
 
     async def execute_tool(self, tool_name: str, params: Dict, user_input: str = "") -> Dict:
         """ToolExecutionManager 三条超时策略（strict/elastic/infinite）的执行契约名。
@@ -1502,6 +1796,28 @@ class ToolExecutor:
             get_trajectory_recorder().record_event(traceId, event_type, data)
         except Exception:  # noqa: BLE001 - 轨迹是增强面，故障不阻断执行
             logger.debug("工具轨迹事件落点失败（忽略）", exc_info=True)
+
+    def _resolveToolTimeoutSeconds(self, tool_name: str) -> float:
+        """U7：工具执行超时的单源解析。
+
+        优先读 schema 的 runtime.default_timeout_ms 声明，并经
+        clampRuntimeTimeoutMs 钳进 [1000, 800000]ms——**声明与执行体不一致时
+        以执行体钳制为准**；未声明 / 声明非法回落既有 per-tool 超时表
+        （agent/tool_coordinator.get_tool_timeout），存量口径零变化。
+        """
+        from neurova.builtin_tools import clampRuntimeTimeoutMs, get_builtin_tool_runtime
+
+        runtime = get_builtin_tool_runtime(tool_name)
+        if runtime:
+            declared = runtime.get("default_timeout_ms")
+            if isinstance(declared, (int, float)) and not isinstance(declared, bool) and declared > 0:
+                try:
+                    return clampRuntimeTimeoutMs(declared) / 1000.0
+                except (TypeError, ValueError):
+                    pass  # 非法声明按未声明处理，回落超时表
+        from neurova.agent.tool_coordinator import get_tool_timeout
+
+        return get_tool_timeout(tool_name)
 
     async def _execute_single_tool(self, tool_name: str, params: Dict,
                                    skip_governance: bool = False) -> Dict:
@@ -1573,6 +1889,24 @@ class ToolExecutor:
         started = time.monotonic()
         try:
             result = await self._execute_single_tool_inner(tool_name, params, skip_governance)
+        except ToolUnsupportedError as exc:
+            # U12：能力未装配/端不支持 → 稳定结构化拒绝（诚实暴露，不伪装成功，
+            # 也不以裸异常形态逸出执行边界）。
+            result = toolUnsupportedResult(exc.reason, exc.supported)
+            recordToolTrace(
+                tool_name, params, success=False,
+                error=exc.reason,
+                duration_ms=(time.monotonic() - started) * 1000,
+                layer="executor",
+            )
+            self._recordToolSpanEvent(tool_name, "tool_call_error", {
+                "tool_name": tool_name,
+                "success": False,
+                "error_message": exc.reason[:TOOL_SPAN_ERROR_CHARS],
+                "error_code": TOOL_UNSUPPORTED_CODE,
+                "execution_time_ms": round((time.monotonic() - started) * 1000, 2),
+            })
+            return result
         except Exception as exc:
             recordToolTrace(
                 tool_name, params, success=False,
@@ -1750,6 +2084,22 @@ class ToolExecutor:
                 result = precheck
                 return result
 
+            # U6：动态干预审计注册表（治理预检后、执行前）——命中转审批链
+            # （待审批 / 阻塞等待 / 带外重放全走既有审批通路）。
+            if not skip_governance:
+                intervention = await self._dynamicInterventionCheck(tool_name, params)
+                if intervention is not None:
+                    result = intervention
+                    return result
+
+            # U4：派发前最后一刻授权复验（审批重放/持久授权路径）——
+            # 当前执行入参与已批准对象不一致 → 转回审批队列并审计，不执行。
+            if skip_governance:
+                recheck = await self._final_dispatch_recheck(tool_name, params)
+                if recheck is not None:
+                    result = recheck
+                    return result
+
             # V3 调控门（治理预检后、执行前）：开关开时（治理设置 metacog_gate_enabled
             # 或 env，见 _metacog_gate_check），命中活跃 avoid_tool 教训的工具返回结构化
             # 拦截建议（fail-open，默认关）。
@@ -1762,8 +2112,9 @@ class ToolExecutor:
                 }
 
             # P1-2：per-tool 超时 + 超时转后台（单一咽喉点覆盖全部执行路径——
-            # loop 原生/文本兜底/肌肉记忆自动执行最终都汇到这里）
-            from neurova.agent.tool_coordinator import get_tool_timeout
+            # loop 原生/文本兜底/肌肉记忆自动执行最终都汇到这里）。
+            # U7：超时值单源解析——优先 schema runtime 声明（执行体钳制），
+            # 未声明回落既有 per-tool 超时表。
 
             # 审批重放/持久授权（skip_governance=True）旁路桌面运行门，避免审核模式
             # 批准后重放再次触发审批成死循环。
@@ -1775,7 +2126,7 @@ class ToolExecutor:
                     core_out = await self.tool_coordinator.run_with_timeout(
                         tool_name,
                         self._execute_tool_core(tool_name, params),
-                        timeout=get_tool_timeout(tool_name),
+                        timeout=self._resolveToolTimeoutSeconds(tool_name),
                     )
             finally:
                 reset_gate_bypass(_bypass_tok)
@@ -1940,7 +2291,10 @@ class ToolExecutor:
             except Exception as e:
                 logger.debug("工具路由器执行失败: %s", e)
 
-        return {"error": f"未知工具: {tool_name}"}, success, tool_source
+        # U12：未知工具 = 端不支持该工具名 → 结构化拒绝（supported=内置工具面）
+        return toolUnsupportedResult(
+            f"未知工具: {tool_name}", supported=sorted(self._builtin_dispatch)
+        ), success, tool_source
 
     @staticmethod
     def _check_skill_declaration(tool_name: str, permissions) -> Optional[Dict]:
@@ -2255,6 +2609,11 @@ class ToolExecutor:
 
         if status == "approved":
             logger.info("审批 %s 已获准，由本调用在完整管线内执行: %s", approval_id, tool_name)
+            # U4：批准唤醒后、真执行前——最后一刻授权复验。
+            # （审批创建到唤醒之间入参可能已被篡改；不一致 → 转回审批队列。）
+            recheck = await self._final_dispatch_recheck(tool_name, params, approval_id=approval_id)
+            if recheck is not None:
+                return recheck
             return None
 
         logger.info("审批 %s 终态为 %s，回结构化裁决: %s", approval_id, status, tool_name)
@@ -2263,6 +2622,212 @@ class ToolExecutor:
             "approval_status": status,
             "error": f"操作未获批准（{status}）：" + "; ".join(verdict.reasons),
         })
+
+    # ── U6 动态干预审计注册表 + U4 派发前最后一刻授权复验 ──────────────
+
+    #: U4 复验覆盖面：文件写类（路径必须仍在会话工作根内）
+    _FINAL_RECHECK_FILE_TOOLS = frozenset({"file_write", "file_create", "file_edit", "file_delete"})
+    #: U4 复验覆盖面：exec 类（命令首段仍须过 command_segments 白名单）
+    _FINAL_RECHECK_EXEC_TOOLS = frozenset({"exec_command", "computer_shell"})
+    #: U4 复验覆盖面：ssh 类（目标 host 在凭据桶已有条目）
+    _FINAL_RECHECK_SSH_TOOLS = frozenset({"computer_ssh_exec"})
+
+    async def _dynamicInterventionCheck(self, tool_name: str, params: Dict) -> Optional[Dict]:
+        """U6：治理预检后查动态干预注册表；命中 → 审计 + 转审批链。
+
+        复用 `_awaitApprovalVerdict` 的完整裁决通路（待审批/阻塞等待/带外重放），
+        批准才执行；审计走 `_audit_governance`（decision=ask，source 可溯）。
+        """
+        from neurova.security.dynamic_interventions import evaluateDynamicInterventions
+
+        user_id, agent_id = self._agent_identity()
+        ctx: Dict[str, Any] = {"agent_id": agent_id or "", "user_id": user_id or ""}
+        try:
+            hits = evaluateDynamicInterventions(tool_name, params, ctx)
+        except Exception as e:  # noqa: BLE001 - 注册表故障不阻断执行（评估口自兜底）
+            logger.warning("动态干预评估故障（放行）: %s", e)
+            return None
+        if not hits:
+            return None
+        reasons = [f"[{h['rule']}/{h['level']}] {h['reason']}" for h in hits]
+        logger.info("动态干预命中 %s: %s", tool_name, "; ".join(reasons))
+        from neurova.security.governance import GovernanceDecision, GovernanceResult
+
+        verdict = GovernanceResult(decision=GovernanceDecision.ASK, reasons=reasons)
+        self._audit_governance(tool_name, {
+            "decision": "ask",
+            "reasons": reasons,
+            "severity": "medium",
+            "finding_count": len(hits),
+            "source": "dynamic_intervention",
+            "rules": [h["rule"] for h in hits],
+        }, params)
+        return await self._awaitApprovalVerdict(tool_name, params, verdict)
+
+    async def _final_dispatch_recheck(self, tool_name: str, params: Dict,
+                                      approval_id: Optional[str] = None) -> Optional[Dict]:
+        """U4：审批通过后、真正执行前的最后一刻授权复验。
+
+        对 ssh / exec / 文件写类复验：
+        - 当前执行入参指纹必须对上**已批准**的同一对象（防审批后篡改参数）；
+        - ssh：目标 host 在凭据桶已有条目（或即批准对象本身的 host——
+          首连主机的凭据卡在执行期补填，不得因复验被卡死）；
+        - exec：命令首段仍过 command_segments 白名单（或即批准对象本身的命令）；
+        - 文件写：路径仍在会话工作根内（或即批准对象本身的路径）。
+        不一致 → 审计 + 新建审批单（转回审批队列），返回待审批形态，不执行。
+
+        Returns:
+            None: 复验通过（或该工具不在复验面），调用方继续执行。
+            Dict: 待审批形态，调用方直接返回（不执行）。
+        """
+        if not (tool_name in self._FINAL_RECHECK_FILE_TOOLS
+                or tool_name in self._FINAL_RECHECK_EXEC_TOOLS
+                or tool_name in self._FINAL_RECHECK_SSH_TOOLS):
+            return None
+        from neurova.security.tool_metadata import executionFingerprint
+
+        fingerprint = executionFingerprint(tool_name, params)
+        approvedParams: Optional[Dict[str, Any]] = None
+        verified = False
+        if approval_id:
+            am = _get_approval_manager()
+            record = am.get_request(approval_id)
+            if record is not None:
+                verified = True
+                metadata = getattr(record, "metadata", {}) or {}
+                approvedParams = metadata.get("params") or {}
+                stored = str(metadata.get("execution_fingerprint") or "")
+                if stored and stored != fingerprint:
+                    return self._finalRecheckBounce(tool_name, params, [
+                        "当前执行入参与已批准对象不一致（指纹漂移）"])
+        if not verified:
+            matched = self._findApprovedApproval(tool_name, fingerprint)
+            if matched is not None:
+                verified = True
+                approvedParams = (getattr(matched, "metadata", {}) or {}).get("params") or {}
+        if approval_id and not verified:
+            # 带着审批单号却在本进程审批管理器里对不到账（如测试注入的独立
+            # ApprovalManager）——批准事实以该管理器为准，本处不越权拦。
+            return None
+        reasons = self._finalRecheckIntrinsic(tool_name, params, approvedParams)
+        if not reasons:
+            return None
+        return self._finalRecheckBounce(tool_name, params, reasons)
+
+    def _findApprovedApproval(self, tool_name: str, fingerprint: str):
+        """在审批管理器里找 (agent, tool) 已批准且指纹一致的审批单（只读）。
+
+        事实源仍是 ApprovalManager；此处只做按指纹的只读对账。找不到返回 None。
+        """
+        try:
+            am = _get_approval_manager()
+            requests = list(getattr(am, "_requests", {}).values())
+        except Exception:  # noqa: BLE001 - 审批面不可用时按"无批准对象"严格档复验
+            return None
+        from neurova.security.approval_manager import ApprovalStatus
+
+        for record in requests:
+            if getattr(record, "status", None) != ApprovalStatus.APPROVED:
+                continue
+            metadata = getattr(record, "metadata", {}) or {}
+            if str(metadata.get("tool_name") or "") != tool_name:
+                continue
+            if str(metadata.get("execution_fingerprint") or "") == fingerprint:
+                return record
+        return None
+
+    def _finalRecheckIntrinsic(self, tool_name: str, params: Dict,
+                               approvedParams: Optional[Dict]) -> List[str]:
+        """U4 内在条件复验（与批准对象本身的值相等时豁免——防误伤合法批准链）。"""
+        reasons: List[str] = []
+        approved = approvedParams or {}
+        if tool_name in self._FINAL_RECHECK_SSH_TOOLS:
+            host = str(params.get("host") or "").strip()
+            approvedHost = str(approved.get("host") or "").strip()
+            if host and host != approvedHost and not self._sshHostKnownInBucket(host):
+                reasons.append(f"ssh 目标 host 在凭据桶无条目: {host}")
+        elif tool_name in self._FINAL_RECHECK_EXEC_TOOLS:
+            command = str(params.get("command") or "").strip()
+            approvedCommand = str(approved.get("command") or "").strip()
+            if command and command != approvedCommand and not self._execHeadWhitelisted(command, tool_name):
+                reasons.append("exec 命令首段未过 command_segments 白名单: "
+                               + command[:60])
+        elif tool_name in self._FINAL_RECHECK_FILE_TOOLS:
+            approvedPath = str(approved.get("file_path") or "")
+            resolved, err = self._resolve_agent_path(str(params.get("file_path") or ""))
+            if err is None and resolved and resolved != approvedPath \
+                    and not self._pathWithinSessionRoot(resolved):
+                reasons.append(f"文件写路径越出会话工作根: {params.get('file_path')}")
+        return reasons
+
+    def _sshHostKnownInBucket(self, host: str) -> bool:
+        """目标 host 是否在凭据桶（SSH 凭据或已确认主机库）已有条目。"""
+        try:
+            from neurova.computer_use.ssh_runner import resolve_ssh_credentials
+            from neurova.security.ssh_host_store import get_ssh_host_store
+
+            user_id, agent_id = self._agent_identity()
+            creds = resolve_ssh_credentials(user_id or "", host) or {}
+            if creds.get("user") or creds.get("key_text") or creds.get("password"):
+                return True
+            return get_ssh_host_store().lookup(agent_id or "", host, 22) is not None
+        except Exception:  # noqa: BLE001 - 凭据面不可用按"无条目"（严格档）
+            return False
+
+    @staticmethod
+    def _execHeadWhitelisted(command: str, tool_name: str) -> bool:
+        """exec 命令首段是否过治理白名单（与治理面同一 match_whitelist 单源）。"""
+        try:
+            from neurova.security.command_segments import parse_command_segments
+            from neurova.security.governance import get_governance
+
+            segments = parse_command_segments(command)
+            if not segments:
+                return False
+            return get_governance().match_whitelist(segments[0].text, tool_name) is not None
+        except Exception:  # noqa: BLE001 - 白名单面不可用按未命中（严格档）
+            return False
+
+    def _pathWithinSessionRoot(self, resolvedPath: str) -> bool:
+        """绝对路径是否落在会话工作根内；无有效工作区（回退 "."）时不判定。"""
+        import os
+
+        base = self._workspace_base()
+        if not base or base == ".":
+            return True  # 无 agent 工作区上下文（CLI/带外）—— containment 不可判，不拦
+        baseAbs = os.path.abspath(base)
+        childAbs = os.path.abspath(resolvedPath)
+        return self._path_within(childAbs, baseAbs)
+
+    def _finalRecheckBounce(self, tool_name: str, params: Dict,
+                            reasons: List[str]) -> Dict[str, Any]:
+        """复验不一致：审计 + 新建审批单（转回审批队列）+ 待审批形态返回。"""
+        from neurova.security.governance import GovernanceDecision, GovernanceResult
+
+        logger.warning("U4 派发前复验不一致 %s: %s", tool_name, "; ".join(reasons))
+        verdict = GovernanceResult(
+            decision=GovernanceDecision.ASK,
+            reasons=[f"派发前复验: {r}" for r in reasons],
+        )
+        self._audit_governance(tool_name, {
+            "decision": "ask",
+            "reasons": verdict.reasons,
+            "severity": "high",
+            "finding_count": len(reasons),
+            "source": "final_dispatch_recheck",
+        }, params)
+        newApprovalId = self._create_approval_request(tool_name, params, verdict)
+        return {
+            "success": False,
+            "pending_approval": True,
+            "error_code": "FINAL_DISPATCH_RECHECK_FAILED",
+            "approval_id": newApprovalId,
+            "final_dispatch_recheck": {"status": "mismatch", "reasons": reasons},
+            "error": (
+                "派发前复验发现当前执行入参与已批准对象不一致，"
+                "已转回审批队列重新确认: " + "; ".join(reasons)
+            ),
+        }
 
     # 审计 A3：治理故障时允许放行的内置只读工具白名单——这些工具无
     # command/code 执行语义，故障放行的最坏后果是查询失败；shell/run_code/
@@ -2824,7 +3389,10 @@ class ToolExecutor:
         """执行内置工具(分派表驱动,见 _builtin_dispatch 注释)"""
         method_name = self._builtin_dispatch.get(tool_name)
         if method_name is None:
-            return {"error": f"未知内置工具: {tool_name}"}
+            # U12：分派表缺项 = 端不支持（schema/分派不变量测试堵漏前的诚实拒绝）
+            return toolUnsupportedResult(
+                f"未知内置工具: {tool_name}", supported=sorted(self._builtin_dispatch)
+            )
         _build_gate = self._buildGateGuard(tool_name, params)
         if _build_gate is not None:
             return _build_gate
@@ -2842,7 +3410,11 @@ class ToolExecutor:
             try:
                 params = normalize_computer_params(tool_name, params)
             except ValueError as e:
-                return {"error": f"参数非法: {e}"}
+                # U12：端不支持该输入域 → 结构化拒绝（supported=该工具放行参数表）
+                return toolUnsupportedResult(
+                    f"参数非法: {e}",
+                    supported=sorted(_COMPUTER_TOOL_PARAM_KEYS.get(tool_name) or ()),
+                )
         # 桌面运行权限档（full/sandbox/review/auto）：computer_* 变更动作按档决定
         # 本机执行 / 进沙箱 / 先审批；只读与 full 档直接放行（现状零回归）。
         if tool_name.startswith("computer_"):
@@ -3792,8 +4364,15 @@ class ToolExecutor:
                     )
                 }
         except Exception as scan_error:
-            if type(scan_error).__name__ == "ImportError":
-                raise  # 扫描器缺失是部署错误，不静默
+            if isinstance(scan_error, ImportError):
+                # U12：扫描器缺失是部署错误——保持 fail-closed（绝不静默放行），
+                # 但以结构化拒绝暴露，不再让裸 ImportError 逸出执行边界。
+                # （isinstance 覆盖 ModuleNotFoundError 子类；原 `type().__name__`
+                # 精确匹配会把子类漏进泛化分支。）
+                raise ToolUnsupportedError(
+                    "提示注入扫描器未装配（neurova.security.skill_scanner 缺失），"
+                    "create_skill 能力在本部署不可用",
+                ) from scan_error
             return {"error": f"create_skill 拒绝：注入扫描器异常（fail-closed）: {scan_error}"}
 
         # P0-4：create_skill 自动产出与行为一致的声明——步进用到的工具
@@ -6686,7 +7265,11 @@ class ToolExecutor:
             return {"error": "缺少 git 子命令"}
         subcommand = argv[i]
         if subcommand not in self._GIT_ALLOWED_SUBCOMMANDS:
-            return {"error": f"不支持的 git 子命令: {subcommand}"}
+            # U12：端不支持该子命令 → 结构化拒绝（supported=子命令白名单）
+            return toolUnsupportedResult(
+                f"不支持的 git 子命令: {subcommand}",
+                supported=sorted(self._GIT_ALLOWED_SUBCOMMANDS),
+            )
 
         path, err = self._resolve_agent_path(params.get("path") or ".")
         if err:

@@ -2401,6 +2401,88 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
 }
 
 # ═══════════════════════════════════════════════════════════════
+# U7 工具运行元数据（runtime 声明位）
+# ═══════════════════════════════════════════════════════════════
+# 语义：schema 条目可携带与 description/parameters 平级的 `runtime` 键，声明
+# **执行期契约**：default_timeout_ms（建议超时）、timeout_ms_clamp（钳制域，
+# 单源常量 RUNTIME_TIMEOUT_CLAMP_MS）、serializable（结果可稳定序列化）、
+# ordered_group（同组调用须保序）、idempotent（重复执行是否安全，U11 重试
+# 纪律消费）。
+# 声明不进 to_openai_format()（模型可见面零变化）；执行体（ToolExecutor）
+# 读取并**单源钳制**——声明越界时以执行体钳制为准，不另立第二份口径。
+_RUNTIME_KEY = "runtime"
+
+#: 超时钳制域（毫秒）：低于下界取下界、高于上界取上界（执行体单源钳制）。
+RUNTIME_TIMEOUT_CLAMP_MS = (1000, 800000)
+
+#: U7 首批声明（ssh / exec / file 写 / recall 族）——挂在各工具 schema 条目上。
+#: default_timeout_ms 与 agent/tool_coordinator.TOOL_TIMEOUTS_S 的既有显式值
+#: 对齐（表内无该工具时取其默认 60s），不新造第二套时长口径。
+_RUNTIME_FIRST_BATCH: Dict[str, Dict[str, Any]] = {
+    # ssh 族
+    "computer_ssh_exec": {"default_timeout_ms": 180000, "serializable": True, "ordered_group": False, "idempotent": False},
+    # exec 族（execute_code 是 run_code 的分派表别名，无独立 schema 条目，
+    # 声明随 run_code 走）
+    "exec_command": {"default_timeout_ms": 60000, "serializable": True, "ordered_group": False, "idempotent": False},
+    "computer_shell": {"default_timeout_ms": 60000, "serializable": True, "ordered_group": False, "idempotent": False},
+    "run_code": {"default_timeout_ms": 60000, "serializable": True, "ordered_group": False, "idempotent": False},
+    # file 写族（共享工作区变异，组内保序；overwrite 语义 → 幂等）
+    "file_write": {"default_timeout_ms": 60000, "serializable": True, "ordered_group": True, "idempotent": True},
+    "file_create": {"default_timeout_ms": 60000, "serializable": True, "ordered_group": True, "idempotent": True},
+    "file_edit": {"default_timeout_ms": 60000, "serializable": True, "ordered_group": True, "idempotent": False},
+    "file_delete": {"default_timeout_ms": 60000, "serializable": True, "ordered_group": True, "idempotent": True},
+    # recall 族（只读召回）
+    "recall_history": {"default_timeout_ms": 10000, "serializable": True, "ordered_group": False, "idempotent": True},
+    "recall_context_span": {"default_timeout_ms": 10000, "serializable": True, "ordered_group": False, "idempotent": True},
+    "recall_query": {"default_timeout_ms": 60000, "serializable": True, "ordered_group": False, "idempotent": True},
+    "memory_search": {"default_timeout_ms": 10000, "serializable": True, "ordered_group": False, "idempotent": True},
+}
+
+for _toolName, _runtime in _RUNTIME_FIRST_BATCH.items():
+    if _toolName in _BUILTIN_SCHEMAS and isinstance(_BUILTIN_SCHEMAS[_toolName], dict):
+        _BUILTIN_SCHEMAS[_toolName][_RUNTIME_KEY] = {
+            "default_timeout_ms": _runtime["default_timeout_ms"],
+            "timeout_ms_clamp": list(RUNTIME_TIMEOUT_CLAMP_MS),
+            "serializable": _runtime["serializable"],
+            "ordered_group": _runtime["ordered_group"],
+            "idempotent": _runtime.get("idempotent", False),
+        }
+del _toolName, _runtime
+
+
+def get_builtin_tool_runtime(tool_name: str) -> Optional[Dict[str, Any]]:
+    """读取工具的 runtime 运行元数据；未声明 / 非内置返回 None。
+
+    返回**浅拷贝**——调用方改写不污染事实源。
+    """
+    schema = _BUILTIN_SCHEMAS.get(tool_name)
+    if not isinstance(schema, dict):
+        return None
+    runtime = schema.get(_RUNTIME_KEY)
+    return dict(runtime) if isinstance(runtime, dict) else None
+
+
+def listRuntimeDeclaredTools() -> List[str]:
+    """枚举声明了 runtime 的内置工具名（一致性判据的取数口）。"""
+    return [
+        name
+        for name, schema in _BUILTIN_SCHEMAS.items()
+        if isinstance(schema, dict) and isinstance(schema.get(_RUNTIME_KEY), dict)
+    ]
+
+
+def clampRuntimeTimeoutMs(value: Any) -> int:
+    """把声明超时钳进 RUNTIME_TIMEOUT_CLAMP_MS（执行体单源钳制）。
+
+    非数值输入抛 ValueError——调用方（执行体解析器）据此回落既有超时表，
+    不替臆造值编一个"看起来合法"的数。
+    """
+    lo, hi = RUNTIME_TIMEOUT_CLAMP_MS
+    converted = int(value)
+    return max(lo, min(hi, converted))
+
+
+# ═══════════════════════════════════════════════════════════════
 # 内置工具执行映射（占位，实际执行逻辑在 ToolExecutor）
 # ═══════════════════════════════════════════════════════════════
 

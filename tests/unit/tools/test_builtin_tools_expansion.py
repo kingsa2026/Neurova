@@ -126,9 +126,14 @@ class TestSchemaDispatchConsistency:
 class TestDispatchBehavior:
     @pytest.mark.asyncio
     async def test_unknown_tool_error_semantics_unchanged(self):
-        """未知工具的错误语义必须与原 if/elif 实现完全一致（tool_router 依赖）"""
+        """未知工具的错误语义（U12 结构化拒绝）：error 原文案保留
+        （tool_router 等消费方的子串判据不破），并新增稳定判别面。"""
         result = await _make_executor()._execute_builtin_tool("no_such_tool_xyz", {})
-        assert result == {"error": "未知内置工具: no_such_tool_xyz"}
+        assert result["error"] == "未知内置工具: no_such_tool_xyz"
+        assert result["error_code"] == "TOOL_UNSUPPORTED"
+        assert result["success"] is False
+        assert result["reason"] == "未知内置工具: no_such_tool_xyz"
+        assert isinstance(result["supported"], list)
 
     @pytest.mark.asyncio
     async def test_execute_code_alias_still_works(self):
