@@ -31,6 +31,7 @@ from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 from neurova.core.atomic_io import loadJsonStore, saveJsonStore
 from neurova.core.data_root import dataPath
+from neurova.core.tenant_scope import tenant_matches
 from neurova.agent.neuacp.catalog import refuseExecutorSpec
 
 logger = get_logger(__name__)
@@ -338,8 +339,7 @@ async def create_team(body: TeamCreate, current_user: Dict[str, Any] = Depends(g
 @router.get("", response_model=List[TeamInfo])
 async def list_teams(current_user: Dict[str, Any] = Depends(get_current_user)):
     """列出团队（A5：仅本租户）"""
-    tenant = _userTenant(current_user)
-    return [_team_view(t) for t in _teams_store.values() if _userTenant(t) == tenant]
+    return [_team_view(t) for t in _teams_store.values() if tenant_matches(current_user, t)]
 
 
 @router.get("/{team_id}", response_model=TeamInfo)

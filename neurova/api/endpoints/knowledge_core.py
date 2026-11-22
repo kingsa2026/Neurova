@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import tenant_matches
 from neurova.skills.models import OutcomeLiteral
 from neurova.api.endpoints.knowledge_common import (
     KnowledgeCreate,
@@ -77,8 +78,7 @@ def _factStoreForTenant(fact_id: str, current_user: Dict[str, Any]):
 
     store = get_knowledge_fact_store()
     fact = store.fact(fact_id)
-    tenant = str(current_user.get("tenant_id") or "default")
-    if fact is None or str(fact.get("tenant_id") or "default") != tenant:
+    if fact is None or not tenant_matches(current_user, fact):
         raise HTTPException(status_code=404, detail="事实不存在: %s" % fact_id)
     return store
 

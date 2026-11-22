@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.core.db_migration import migrate as apply_migrations, register_migration
+from neurova.core.tenant_scope import tenant_sql_where
 from neurova.core.logger import get_logger
 from neurova.core.data_root import get_data_root
 
@@ -534,9 +535,10 @@ class AgentRunStore:
         """
         limit = max(1, min(int(limit or 100), 500))
         where, params = [], []
-        if str(tenant_id or "").strip():
-            where.append("tenant_id=?")
-            params.append(str(tenant_id).strip())
+        tenant_clause, tenant_params = tenant_sql_where(tenant_id)
+        if tenant_clause:
+            where.append(tenant_clause)
+            params.extend(tenant_params)
         if str(project_id or "").strip():
             where.append("project_id=?")
             params.append(str(project_id).strip())
