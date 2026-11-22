@@ -7,13 +7,6 @@ from typing import List, Optional, Dict, Any
 
 from neurova.api.auth import get_current_user
 from neurova.core.logger import get_logger
-from neurova.collaboration.small_brain_router import (
-    SmallBrainRouter,
-    RoutingContext,
-    RoutingDecisionResult,
-    get_small_brain_router,
-    reset_small_brain_router,
-)
 from neurova.collaboration.outbox_handler import (
     OutboxEvent,
     EventStatus,
@@ -28,10 +21,12 @@ from neurova.collaboration.cost_ledger_integration import (
 
 logger = get_logger(__name__)
 
-#: 本面是小脑路由 / outbox / 成本告警三类运行态的单一只读+运维入口。
-#: 三者都已在生产链路被消费（`agent/model_selector.py`、`agent/turn_coordinator.py`），
+#: 本面是 outbox / 成本告警两类运行态的只读+运维入口。
 #: 但此前该面**零鉴权且零挂载**——挂上去即匿名可改全局态。故先补身份闸口再接线，
 #: 且破坏性动作（reset / 清理旧事件）再收一道管理员闸。
+#: （小脑路由 SmallBrainRouter 已按教义第 7 条先比后合退役：选模型能力由
+#: `neurova/llm/llm_router.py` 单源承担，原三端点零生产消费方，详见
+#: docs/04-plans/2026-11-22-small-brain-triage-gate-wiring-plan.md D-SB4。）
 router = APIRouter(
     prefix="/phase3",
     tags=["Phase 3 Intelligence"],
@@ -46,85 +41,6 @@ def _requireAdmin(identity: Dict[str, Any]) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient permissions. Required role: admin",
         )
-
-# ============================================================================
-# Small-Brain Router Endpoints
-# ============================================================================
-
-@router.post("/route/request")
-async def route_request(
-    user_query: str,
-    agent_id: str,
-    model_name: str = "gpt-4-turbo",
-    cost_budget: float = 0.1,
-    urgency_level: int = 5,
-    available_models: Optional[List[str]] = None,
-):
-    """
-    路由请求到最佳模型
-
-    - **user_query**: 用户查询
-    - **agent_id**: Agent ID
-    - **model_name**: 建议的模型
-    - **cost_budget**: 成本预算
-    - **urgency_level**: 紧急程度 (1-10)
-    - **available_models**: 可用模型列表
-    """
-    try:
-        router_instance = get_small_brain_router()
-
-        context = RoutingContext(
-            agent_id=agent_id,
-            model_name=model_name,
-            user_query=user_query,
-            cost_budget=cost_budget,
-            urgency_level=urgency_level,
-        )
-
-        result = router_instance.route_request(context, available_models)
-
-        return result.to_dict()
-
-    except Exception as e:
-        logger.error(f"Failed to route request: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/router/stats")
-async def get_router_stats():
-    """获取路由器统计信息"""
-    try:
-        router_instance = get_small_brain_router()
-
-        stats = router_instance.get_routing_stats()
-
-        return stats
-
-    except Exception as e:
-        logger.error(f"Failed to get router stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/classify/query")
-async def classify_query(
-    query: str,
-):
-    """
-    分类查询
-
-    - **query**: 查询文本
-    """
-    try:
-        router_instance = get_small_brain_router()
-
-        category, confidence = router_instance.classify_query(query)
-
-        return {
-            "category": category,
-            "confidence": confidence,
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to classify query: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
 # Outbox Handler Endpoints
@@ -390,7 +306,6 @@ async def reset_phase3_state(
 ):
     """重置所有 Phase 3 状态（仅管理员；原为测试后门）"""
     _requireAdmin(current_user)
-    reset_small_brain_router()
     reset_outbox_handler()
     reset_cost_alert_system()
 

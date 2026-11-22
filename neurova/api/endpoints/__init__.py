@@ -333,9 +333,10 @@ ENDPOINT_MODULES = [
     #     `api/computer.ts` 是 React 原型（`main.ts` 从不加载、`package.json` 无 react）。
     #     本批两处同批收口：身份改真实 JWT `get_current_user`，
     #     前端 `api/computer.ts` 回归唯一 axios 实例并按 `/api/v1` 请求。
-    #   phase3_api ― 小脑路由 / outbox / 成本告警的运维面。三类运行态在生产链路
-    #     另有主线消费方（`agent/model_selector.py`、`agent/turn_coordinator.py`），
-    #     此前零挂载且零鉴权；本批补身份闸口（破坏性动作另加管理员闸）后接线。
+    #   phase3_api ― outbox / 成本告警的运维面。此前零挂载且零鉴权；本批补身份
+    #     闸口（破坏性动作另加管理员闸）后接线。原「小脑路由」三端点已随
+    #     SmallBrainRouter 退役（教义第 7 条先比后合：选模型单源归
+    #     `neurova/llm/llm_router.py`，该模块零生产消费方）。
     ("neurova.api.endpoints.computer_api", "/v1", "Computer API"),
     ("neurova.api.endpoints.phase3_api", "/v1", "Phase 3 Intelligence API"),
     # 语言面（台账 §6-145 裁定乙）：`neurova/language/` 这个包此前全仓零生产消费者——

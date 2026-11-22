@@ -5,12 +5,6 @@ Final Phase Testing
 
 import pytest
 import time
-from neurova.collaboration.small_brain_router import (
-    SmallBrainRouter,
-    RoutingContext,
-    RoutingDecision,
-    reset_small_brain_router,
-)
 from neurova.collaboration.outbox_handler import (
     OutboxEvent,
     EventStatus,
@@ -23,13 +17,6 @@ from neurova.collaboration.cost_ledger_integration import (
     reset_cost_alert_system,
 )
 
-
-@pytest.fixture
-def router():
-    """Create fresh SmallBrainRouter for each test"""
-    router_instance = SmallBrainRouter()
-    yield router_instance
-    reset_small_brain_router()
 
 
 @pytest.fixture
@@ -47,110 +34,6 @@ def alert_system():
     yield system
     reset_cost_alert_system()
 
-
-class TestSmallBrainRouter:
-    """Test Small-Brain Router functionality"""
-    
-    def test_classify_simple_question(self, router):
-        """Test simple question classification"""
-        query = "What is the weather today?"
-        
-        category, confidence = router.classify_query(query)
-        
-        # Should classify as something (confidence may vary)
-        assert category is not None
-        assert confidence >= 0.1
-    
-    def test_classify_code_generation(self, router):
-        """Test code generation classification"""
-        query = "Write a function to sort an array"
-        
-        category, confidence = router.classify_query(query)
-        
-        # Should classify as something
-        assert category is not None
-        assert confidence >= 0.1
-    
-    def test_classify_complex_task(self, router):
-        """Test complex task classification"""
-        query = "Design a microservices architecture for e-commerce"
-        
-        category, confidence = router.classify_query(query)
-        
-        # Should classify as something
-        assert category is not None
-        assert confidence >= 0.1
-    
-    def test_estimate_cost(self, router):
-        """Test cost estimation"""
-        cost = router.estimate_cost("gpt-4", 1000, direction="output")
-        
-        # gpt-4 output: $0.06/1K tokens
-        assert cost == pytest.approx(0.06, rel=0.01)
-    
-    def test_select_model_for_simple_query(self, router):
-        """Test model selection for simple queries"""
-        context = RoutingContext(
-            agent_id="agent_1",
-            model_name="gpt-4",
-            user_query="What is 2+2?",
-            urgency_level=5,
-        )
-        
-        available_models = ["gpt-3.5-turbo", "gpt-4", "claude-3"]
-        
-        selected_model, decision = router.select_model(context, available_models)
-        
-        # Should select a valid model
-        assert selected_model in available_models
-        assert decision in [RoutingDecision.ALLOW, RoutingDecision.ESCALATE]
-    
-    def test_route_request_simple(self, router):
-        """Test routing simple request"""
-        context = RoutingContext(
-            agent_id="agent_simple",
-            model_name="gpt-4",
-            user_query="What is Python?",
-            cost_budget=0.1,
-            urgency_level=5,
-        )
-        
-        result = router.route_request(context, ["gpt-3.5-turbo", "gpt-4"])
-        
-        assert result.decision in [RoutingDecision.ALLOW, RoutingDecision.ESCALATE]
-        assert result.confidence_score > 0
-    
-    def test_route_request_exceeds_budget(self, router):
-        """Test routing when budget exceeded"""
-        context = RoutingContext(
-            agent_id="agent_budget",
-            model_name="gpt-4",
-            user_query="Design enterprise architecture",
-            cost_budget=0.001,  # Very low budget
-            urgency_level=5,
-        )
-        
-        result = router.route_request(context, ["gpt-4"])
-        
-        assert result.decision == RoutingDecision.DENY
-        assert "budget" in result.reason.lower()
-    
-    def test_routing_stats(self, router):
-        """Test routing statistics collection"""
-        # Make several requests
-        for _ in range(5):
-            context = RoutingContext(
-                agent_id="agent_stats",
-                model_name="gpt-4",
-                user_query="test query",
-                cost_budget=0.1,
-            )
-            router.route_request(context)
-        
-        stats = router.get_routing_stats()
-        
-        assert stats["total_requests"] == 5
-        assert "decision_distribution" in stats
 
 
 class TestOutboxHandler:
@@ -317,32 +200,6 @@ class TestCostAlertSystem:
 class TestIntegration:
     """Integration tests combining all Phase 3 components"""
     
-    def test_full_intelligence_pipeline(self, router, outbox):
-        """Test complete intelligence pipeline"""
-        # 1. Route request
-        context = RoutingContext(
-            agent_id="pipeline_agent",
-            model_name="gpt-4",
-            user_query="Write a Python script",
-            cost_budget=0.5,
-        )
-        
-        routing_result = router.route_request(context, ["gpt-4", "gpt-3.5"])
-        
-        # 2. Based on routing, publish event
-        if routing_result.decision.value == "allow":
-            event = outbox.publish(
-                event_type="task_started",
-                agent_id="pipeline_agent",
-                payload={
-                    "routing_decision": routing_result.to_dict(),
-                    "selected_model": routing_result.suggested_model,
-                },
-                priority=7,
-            )
-            
-            assert event.event_id is not None
-    
     def test_cost_tracking_with_alerts(self, outbox, alert_system):
         """Test cost tracking with alerts"""
         # Set threshold
@@ -372,15 +229,6 @@ class TestIntegration:
 
 class TestEdgeCases:
     """Test edge cases and error handling"""
-    
-    def test_router_unknown_category(self, router):
-        """Test router with unknown query type"""
-        query = "xyz123randomtext"
-        
-        category, confidence = router.classify_query(query)
-        
-        # Should default to something
-        assert category is not None
     
     def test_outbox_expired_event(self, outbox):
         """Test expired event handling"""
