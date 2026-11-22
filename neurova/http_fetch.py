@@ -6,7 +6,7 @@
 
 约定：
 - 仅供线程池内同步调用（P2-11 契约：不得在事件循环直接执行）
-- SSRF/协议守卫归调用方（web_reach._http_get_text / rss_read 等咽喉点先行校验）；
+- SSRF/协议守卫归调用方（safe_fetch 等咽喉点先行校验）；
   重定向不交引擎自动跟随——本层显式逐跳续抓，每跳回调调用方注入的
   url_validator 复核（P1-3：只守首跳 + 引擎自动跟随 = 可被 302 绕过）；
   未注入 validator 的调用方保持跟随重定向的旧行为，跳数封顶 MAX_REDIRECT_HOPS
@@ -18,6 +18,10 @@
 - 调用方 UA 永远原样传递（Jina Reader 等按 UA 识别调用方，层不得替换）；
   impersonate 只对浏览器系（Mozilla 开头）UA 启用，只升级 TLS/H2 握手指纹
   与头部顺序，不接管 UA
+
+U2 收敛（SSRF 防护单门化）：本层另提供 request_once 单跳原语——状态透明
+（不代判 4xx/5xx）、不跟随重定向（3xx 交上层逐跳处理）、按 max_bytes 流式
+限量读体，供 neurova.security.safe_fetch 驱动逐跳安全门。
 """
 
 from __future__ import annotations
@@ -29,11 +33,12 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Callable, Optional, Tuple
+from typing import Callable, Dict, Iterable, NamedTuple, Optional, Tuple
 
 DEFAULT_TIMEOUT = 20.0
 MAX_REDIRECT_HOPS = 5
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_CHUNK_SIZE = 8192
 
 # Windows libcurl 读不了非 ASCII 路径的 CA 文件（curl 77），而 venv 常位于
 # 含中文的目录（如 E:\项目\...）。检测后一次性复制到 ASCII 临时目录复用。
@@ -206,3 +211,150 @@ def fetch_text(
     return fetch_bytes(url, user_agent, timeout, url_validator=url_validator).decode(
         "utf-8", errors="replace"
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# U2：单跳流式原语（safe_fetch 的引擎底座）
+# ══════════════════════════════════════════════════════════════
+
+
+class PayloadTooLargeError(ValueError):
+    """响应体超过 max_bytes 上限：诚实报错，不静默截断。"""
+
+
+class HopResult(NamedTuple):
+    """单跳结果：状态透明（含 4xx/5xx），3xx 带 Location 交上层逐跳处理。"""
+
+    status: int
+    headers: Dict[str, str]  # 键统一小写
+    content: bytes
+    location: Optional[str]  # 3xx 重定向目标（相对/绝对原样）
+
+
+def _lowerHeaders(items: Iterable) -> Dict[str, str]:
+    return {str(k).lower(): str(v) for k, v in items}
+
+
+def _locationFromHeaders(headers: Dict[str, str], status: int) -> Optional[str]:
+    if status not in _REDIRECT_STATUSES:
+        return None
+    location = (headers.get("location") or "").strip()
+    return location or None
+
+
+def _readCapped(readable, max_bytes: Optional[int]) -> bytes:
+    """分块流式读取，超 max_bytes 立即拒绝（不把超大体全量读进内存）。"""
+    if max_bytes is None:
+        return readable.read()
+    buf = bytearray()
+    while True:
+        chunk = readable.read(_CHUNK_SIZE)
+        if not chunk:
+            break
+        buf += chunk
+        if len(buf) > max_bytes:
+            raise PayloadTooLargeError(f"响应体超过上限 {max_bytes} 字节")
+    return bytes(buf)
+
+
+def _contentLengthExceeds(headers: Dict[str, str], max_bytes: Optional[int]) -> bool:
+    if max_bytes is None:
+        return False
+    raw = headers.get("content-length") or ""
+    return raw.isdigit() and int(raw) > max_bytes
+
+
+def _curl_once(
+    url: str,
+    method: str,
+    headers: Dict[str, str],
+    data: Optional[bytes],
+    timeout: float,
+    max_bytes: Optional[int],
+) -> HopResult:
+    """curl_cffi 单跳（禁自动跟随）。引擎不可用抛 ImportError 交上层回落。"""
+    from curl_cffi import requests as curl_requests
+
+    kw: Dict = {"timeout": timeout, "headers": headers, "allow_redirects": False}
+    ca = _ascii_ca()
+    if ca:
+        kw["verify"] = ca
+    if (headers.get("User-Agent") or "").startswith("Mozilla"):
+        kw["impersonate"] = "chrome"
+    resp = curl_requests.request(method, url, data=data, **kw)
+    resp_headers = _lowerHeaders(resp.headers.items())
+    status = int(resp.status_code)
+    location = _locationFromHeaders(resp_headers, status)
+    content = b""
+    if not (location is not None):
+        # 3xx 跳转不读体（Location 已取）；其余按上限读取
+        if _contentLengthExceeds(resp_headers, max_bytes):
+            raise PayloadTooLargeError(f"响应体超过上限 {max_bytes} 字节")
+        content = resp.content
+        if max_bytes is not None and len(content) > max_bytes:
+            raise PayloadTooLargeError(f"响应体超过上限 {max_bytes} 字节")
+    return HopResult(status, resp_headers, content, location)
+
+
+def _urllib_once(
+    url: str,
+    method: str,
+    headers: Dict[str, str],
+    data: Optional[bytes],
+    timeout: float,
+    max_bytes: Optional[int],
+) -> HopResult:
+    """urllib 兜底单跳（禁自动跟随，流式限量读体）。
+
+    3xx 经 _NoRedirectHandler 转成 HTTPError，此处归一成 HopResult(location)
+    交上层循环；4xx/5xx 状态透明返回（体按上限读取供诊断），不代判成败。
+    """
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    opener = urllib.request.build_opener(_NoRedirectHandler())
+    try:
+        with opener.open(req, timeout=timeout) as resp:
+            status = int(getattr(resp, "status", resp.getcode()))
+            resp_headers = _lowerHeaders(resp.headers.items())
+            location = _locationFromHeaders(resp_headers, status)
+            if location is not None:
+                return HopResult(status, resp_headers, b"", location)
+            return HopResult(status, resp_headers, _readCapped(resp, max_bytes), None)
+    except urllib.error.HTTPError as e:
+        resp_headers = _lowerHeaders((e.headers or {}).items())
+        location = _locationFromHeaders(resp_headers, e.code)
+        if location is not None:
+            return HopResult(e.code, resp_headers, b"", location)
+        try:
+            body = _readCapped(e, max_bytes)
+        except Exception:  # noqa: BLE001 - 错误体读不动不掩盖状态码本身
+            body = b""
+        return HopResult(e.code, resp_headers, body, None)
+
+
+def request_once(
+    url: str,
+    *,
+    method: str = "GET",
+    headers: Optional[Dict[str, str]] = None,
+    data: Optional[bytes] = None,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_bytes: Optional[int] = None,
+) -> HopResult:
+    """单跳请求：curl_cffi 优先，ImportError/引擎故障回落 urllib 一次。
+
+    与 fetch_bytes 的差异：不跟随重定向（3xx 交上层）、状态透明（4xx/5xx
+    不抛）、按 max_bytes 流式限量读体。SSRF 校验不在此层——归 safe_fetch
+    统一安全门（连接前逐跳校验）。
+    """
+    hdrs = dict(headers or {})
+    try:
+        return _curl_once(url, method, hdrs, data, timeout, max_bytes)
+    except PayloadTooLargeError:
+        raise
+    except ImportError:
+        return _urllib_once(url, method, hdrs, data, timeout, max_bytes)
+    except Exception as curl_err:
+        try:
+            return _urllib_once(url, method, hdrs, data, timeout, max_bytes)
+        except Exception:
+            raise curl_err

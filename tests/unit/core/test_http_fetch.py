@@ -226,12 +226,18 @@ def test_fetch_bytes_network_error_falls_back_to_urllib(monkeypatch):
 def test_http_get_text_delegates_after_guards(monkeypatch):
     from neurova.web_reach import reach
 
-    monkeypatch.setattr(reach, "_assert_public_host", lambda url: None)
-    with patch("neurova.http_fetch.fetch_text", return_value="OK") as m:
+    class _Resp:
+        status = 200
+        headers = {}
+        content = b"OK"
+        text = "OK"
+        url = "https://example.com/d"
+
+    with patch("neurova.web_reach.reach.safe_fetch", return_value=_Resp()) as m:
         text = reach._http_get_text("https://example.com/d", 3.0)
     assert text == "OK"
     m.assert_called_once()
-    assert m.call_args[0][0] == "https://example.com/d"
+    assert m.call_args.args[0] == "https://example.com/d"
 
 
 def test_http_get_text_still_blocks_private_before_fetch():

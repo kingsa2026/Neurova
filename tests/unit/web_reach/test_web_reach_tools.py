@@ -60,6 +60,16 @@ class TestWebRead:
         assert result2["success"] is False
 
 
+class _FakeSafeResp:
+    """safe_fetch 返回替身（rss_read 只消费 .content）。"""
+
+    def __init__(self, content: bytes):
+        self.content = content
+        self.status = 200
+        self.headers = {}
+        self.url = ""
+
+
 class TestRssRead:
     def test_rss_parses_entries(self):
         import feedparser
@@ -74,36 +84,37 @@ class TestRssRead:
         )
         with (
             patch("neurova.web_reach.reach.feedparser.parse", return_value=fake_feed),
-            patch("neurova.web_reach.reach._assert_public_host", return_value=None),
-            patch("neurova.http_fetch.fetch_bytes", return_value=b"<rss/>"),
+            patch("neurova.web_reach.reach.safe_fetch",
+                  return_value=_FakeSafeResp(b"<rss/>")) as sf,
         ):
             result = rss_read("https://blog.example/feed.xml", limit=2)
 
         assert result["success"] is True
         assert result["data"][0]["title"] == "Entry A"
         assert result["data"][1]["link"] == "https://blog.example/b"
+        sf.assert_called_once()
 
-    def test_rss_fetches_via_shared_layer_not_feedparser_url(self):
-        """契约(2026-09-14)：RSS 不得走 feedparser 内建裸 urllib 连接，
-        必须经 neurova.http_fetch.fetch_bytes 拿原始字节再解析
-        （TLS 指纹层覆盖 + 保留 feedparser 自身编码探测）。"""
+    def test_rss_fetches_via_safe_fetch_not_feedparser_url(self):
+        """契约(2026-09-14，U2 更新)：RSS 不得走 feedparser 内建裸 urllib 连接，
+        必须经 safe_fetch 单门抓原始字节再解析（SSRF 逐跳校验 + TLS 指纹层
+        覆盖 + 保留 feedparser 自身编码探测）。"""
         import feedparser
 
         from neurova.web_reach import rss_read
 
         fake_feed = feedparser.FeedParserDict(entries=[])
         with (
-            patch("neurova.web_reach.reach._assert_public_host", return_value=None),
-            patch("neurova.http_fetch.fetch_bytes", return_value=b"<rss/>") as fb,
+            patch("neurova.web_reach.reach.safe_fetch",
+                  return_value=_FakeSafeResp(b"<rss/>")) as sf,
             patch("neurova.web_reach.reach.feedparser.parse", return_value=fake_feed) as fp,
         ):
             result = rss_read("https://blog.example/feed.xml")
 
         assert result["success"] is True
-        fb.assert_called_once()
-        assert fb.call_args[0][0] == "https://blog.example/feed.xml"
+        sf.assert_called_once()
+        assert sf.call_args.args[0] == "https://blog.example/feed.xml"
         assert isinstance(fp.call_args[0][0], bytes), (
-            "feedparser 应收到共享层抓取的字节内容，而不是 URL（内建连接绕过指纹层）"
+            "feedparser 应收到安全门抓取的字节内容，而不是 URL（内建连接绕过守卫）"
         )
 
     def test_rss_rejects_non_http(self):

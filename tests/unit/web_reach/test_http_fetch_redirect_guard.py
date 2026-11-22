@@ -5,11 +5,14 @@
 重定向——公网 URL 一跳进 127.0.0.1:9527 / 169.254.169.254，响应正文原样
 返回调用方（可读型 SSRF）。
 
-契约（绿灯态）：
-- 两引擎一律不自动跟随重定向；共享层显式逐跳续抓，每一跳都过调用方注入的
-  url_validator（scheme + assert_public_host 同一道门）；
-- 私网/环回目标在任何一跳被拒（诚实抛 ValueError，不返回其内容）；
+契约（绿灯态，U2 收敛后）：
+- 出站抓取统一走 neurova.security.safe_fetch 单门：两引擎一律不自动跟随
+  重定向，safe_fetch 显式逐跳续抓，每一跳（含首跳）都过 assertHopAllowed
+  （scheme + url_guard 单源判定）；
+- 私网/环回目标在任何一跳被拒（诚实抛 SSRFBlockedError，不返回其内容）；
 - 公网重定向链正常可达（合法跳转能力不降级）；跳数超上限诚实报错。
+本文件保留共享层 fetch_bytes/fetch_text 的 validator 注入口回归；
+reach 咽喉点的逐跳行为迁移到 safe_fetch 门上复验。
 """
 import io
 import sys
@@ -42,7 +45,11 @@ def _install_fake_curl(monkeypatch, calls, routes):
             raise ConnectionError(f"fake curl: no route for {url}")
         return resp
 
+    def _request(method, url, **kwargs):
+        return _get(url, **kwargs)
+
     requests_mod.get = _get
+    requests_mod.request = _request
     curl.requests = requests_mod
     monkeypatch.setitem(sys.modules, "curl_cffi", curl)
     monkeypatch.setitem(sys.modules, "curl_cffi.requests", requests_mod)
@@ -50,19 +57,20 @@ def _install_fake_curl(monkeypatch, calls, routes):
 
 
 class TestReachPerHopGuard:
-    """咽喉点（reach._http_get_text）的逐跳守卫接线。"""
+    """咽喉点（reach._http_get_text）经 safe_fetch 单门的逐跳守卫。"""
 
     def test_redirectToLoopback_is_rejected(self, monkeypatch):
+        from neurova.security import safe_fetch as safe_fetch_mod
         from neurova.web_reach import reach
 
         seen = []
 
-        def fake_assert(url):
+        def fake_gate(url, *args, **kwargs):
             seen.append(url)
             if url.startswith("http://127.0.0.1"):
                 raise ValueError("私网拒绝(测试桩): " + url)
 
-        monkeypatch.setattr(reach, "_assert_public_host", fake_assert)
+        monkeypatch.setattr(safe_fetch_mod, "assert_public_url", fake_gate)
         calls = []
         _install_fake_curl(monkeypatch, calls, {
             "http://public.example/a": _Resp(b"", 302, {"Location": "http://127.0.0.1:9527/admin"}),
@@ -71,11 +79,13 @@ class TestReachPerHopGuard:
         with pytest.raises(ValueError, match="私网拒绝"):
             reach._http_get_text("http://public.example/a", 3.0)
         assert "http://127.0.0.1:9527/admin" in seen, "重定向第二跳必须过同一道守卫"
+        assert len(calls) == 1, "第二跳必须在连接前被拒，不得发出对环回的请求"
 
     def test_publicRedirect_still_follows_and_returns_content(self, monkeypatch):
+        from neurova.security import safe_fetch as safe_fetch_mod
         from neurova.web_reach import reach
 
-        monkeypatch.setattr(reach, "_assert_public_host", lambda url: None)
+        monkeypatch.setattr(safe_fetch_mod, "assert_public_url", lambda url, *a, **k: None)
         calls = []
         _install_fake_curl(monkeypatch, calls, {
             "http://public.example/a": _Resp(b"", 302, {"Location": "https://public2.example/b"}),

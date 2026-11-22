@@ -2,14 +2,14 @@
 
 安全边界：
 - URL 仅接受 http/https（file/ftp 等本地协议在入口拒绝）
-- _http_get_text 在请求前解析目标主机并阻断私网/环回/链路本地/保留段/
-  组播地址（SSRF 防护：防内网、云元数据、本机服务探测）
+- 出站抓取一律走 neurova.security.safe_fetch（U2 收敛单门）：连接前与
+  每一跳 redirect 都过 SSRF 校验（私网/环回/链路本地/云元数据/IPv6 ULA
+  全拒），响应体限量读取——防内网、云元数据、本机服务探测与 302 绕过
 - YouTube 字幕仅限 youtube 域名；社交平台渐进式暴露，不自动登录
 """
 
 from __future__ import annotations
 
-import ipaddress
 import json
 import subprocess
 import sys
@@ -17,12 +17,12 @@ import tempfile
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import feedparser
 
-from neurova import http_fetch
 from neurova.core.logger import get_logger
+from neurova.security.safe_fetch import safe_fetch
 
 logger = get_logger(__name__)
 
@@ -42,52 +42,22 @@ _SOCIAL_CHANNELS = {
 
 
 # P0-1：SSRF 边界实现抽取至 neurova.security.url_guard（供 MCP http 配置门、
-# P1-7 全局出网层复用）。以下保留原名字与语义做委托，兼容既有调用与测试 patch。
-from neurova.security.url_guard import BLOCKED_NETS as _URL_GUARD_BLOCKED_NETS
+# P1-7 全局出网层复用）。_assert_public_host 保留原名与语义做委托——
+# browser_read 等同域模块与既有测试仍以该名字引用本模块的 SSRF 边界。
 from neurova.security.url_guard import assert_public_url as _url_guard_assert_public
-
-_BLOCKED_NETS = _URL_GUARD_BLOCKED_NETS
 
 
 from neurova.core.text_encoding import utf8ChildEnv
-
-
-def _check_scheme(url: str) -> Optional[str]:
-    """协议校验（仅 http/https），非法返回错误消息"""
-    scheme = urllib.parse.urlparse(url).scheme.lower()
-    if scheme not in ("http", "https"):
-        return f"仅支持 http/https 协议（收到 {scheme or '空'}）"
-    return None
 
 
 def _assert_public_host(url: str) -> None:
     """解析目标主机并阻断私网/环回/链路本地地址（SSRF 防护）。
 
     实现见 neurova.security.url_guard.assert_public_url（含 scheme 校验）。
+    抓取路径的强制点已收敛到 safe_fetch（逐跳）；本函数保留为同域模块
+    （browser_read）与测试的命名边界。
     """
     _url_guard_assert_public(url)
-
-
-def _validateHopUrl(url: str) -> None:
-    """逐跳 SSRF 复核（P1-3）：重定向每一跳都过与首跳同一道门。"""
-    scheme_err = _check_scheme(url)
-    if scheme_err:
-        raise ValueError(scheme_err)
-    _assert_public_host(url)
-
-
-def _http_get_text(url: str, timeout: float) -> str:
-    """GET 请求并返回 UTF-8 文本（请求前做 SSRF 主机边界校验）。
-
-    TLS 指纹走共享层 neurova.http_fetch（curl_cffi 浏览器指纹优先，urllib 兜底）。
-    重定向不交引擎自动跟随：每一跳都过 _validateHopUrl 同一道门（P1-3）——
-    只守首跳时，公网 URL 可 302 跳进环回/云元数据。
-    """
-    scheme_err = _check_scheme(url)
-    if scheme_err:
-        raise ValueError(scheme_err)
-    _assert_public_host(url)
-    return http_fetch.fetch_text(url, _USER_AGENT, timeout, url_validator=_validateHopUrl)
 
 
 def _error(msg: str, **extra) -> Dict[str, Any]:
@@ -96,6 +66,18 @@ def _error(msg: str, **extra) -> Dict[str, Any]:
 
 def _ok(data: Any, source: str, **extra) -> Dict[str, Any]:
     return {"success": True, "data": data, "source": source, **extra}
+
+
+def _http_get_text(url: str, timeout: float) -> str:
+    """GET 请求并返回 UTF-8 文本（经 safe_fetch 单一 SSRF 安全门）。
+
+    U2 收敛：连接前与每一跳 redirect 的 SSRF 校验、响应体限量读取统一由
+    neurova.security.safe_fetch 强制；TLS 指纹仍由其引擎层（curl_cffi
+    浏览器指纹优先，urllib 兜底）升级。
+    """
+    return safe_fetch(
+        url, timeout=timeout, headers={"User-Agent": _USER_AGENT},
+    ).text
 
 
 # ══════════════════════════════════════════════════════════════
@@ -152,11 +134,12 @@ def rss_read(url: str, limit: int = 10, timeout: float = _DEFAULT_TIMEOUT) -> Di
     if not url or not url.strip():
         return _error("缺少 URL")
     try:
-        # 经共享层抓取：feedparser 传 URL 会内建裸 urllib 连接（绕过 TLS 指纹层，
-        # 且连接错误被其 bozo 吞成空结果）。传原始字节保留其编码自动探测。
-        _check_scheme(url)
-        _assert_public_host(url)
-        raw = http_fetch.fetch_bytes(url, _USER_AGENT, timeout, url_validator=_validateHopUrl)
+        # 经 safe_fetch 抓原始字节：feedparser 传 URL 会内建裸 urllib 连接
+        # （绕过安全门与 TLS 指纹层，且连接错误被其 bozo 吞成空结果）。
+        # 传原始字节保留其编码自动探测；SSRF 门（逐跳）由 safe_fetch 强制。
+        raw = safe_fetch(
+            url, timeout=timeout, headers={"User-Agent": _USER_AGENT},
+        ).content
         parsed = feedparser.parse(raw)
         if parsed.get("bozo") and not parsed.get("entries"):
             return _error(f"RSS 解析失败: {parsed.get('bozo_exception')}")

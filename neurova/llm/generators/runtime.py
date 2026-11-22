@@ -21,6 +21,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 import uuid
@@ -38,6 +39,10 @@ logger = get_logger(__name__)
 # P1-8 同源：仓库根绝对路径（端点 generation.py 引用本常量，杜绝两处漂移）
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 GENERATION_OUTPUT_DIR = get_data_root() / "generations"
+
+# 产物下载体积上限（256MB）：生成媒体（图/短视频/音频）的宽松上界，防异常
+# 回包把内存吃穿；safe_fetch 超限诚实报错，不静默截断。
+_MAX_MEDIA_DOWNLOAD_BYTES = 256 * 1024 * 1024
 
 DEFAULT_OPENAI_BASE = "https://api.openai.com/v1"
 DEFAULT_WAN_BASE = "https://dashscope.aliyuncs.com/api/v1"
@@ -221,7 +226,6 @@ async def persist_media(
     out_dir=None 时落到模块级 GENERATION_OUTPUT_DIR；端点包装层传入自身模块全局
     （tests/api/test_generation_security.py 的 monkeypatch 契约保持）。
     """
-    import aiohttp
     import base64 as _b64
 
     root = Path(out_dir) if out_dir else GENERATION_OUTPUT_DIR
@@ -236,23 +240,26 @@ async def persist_media(
         path = out_dir_path / f"{safe_name}_{index}.{ext}"
         content = _b64.b64decode(payload)
     else:
-        # P1-7：产物 URL 来自 provider 响应（base_url 可被调用方指定为自建端点），
-        # 下载前必须过全局出网校验，防 SSRF 打内网/云元数据。
-        from neurova.security.governance import check_outbound_url
+        # P1-7/U2：产物 URL 来自 provider 响应（base_url 可被调用方指定为自建
+        # 端点），下载走 safe_fetch 单一 SSRF 安全门——连接前与每一跳 redirect
+        # 都过出网校验（旧 aiohttp 路径仅首跳校验且自动跟随重定向，可被 302
+        # 绕进内网/云元数据），响应体限量读取。阻塞下载入线程池，不堵事件
+        # 循环（P1-10b 同款）。
+        from neurova.security.safe_fetch import safe_fetch
 
-        check_outbound_url(url_or_data)
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
-            async with session.get(url_or_data) as resp:
-                if resp.status >= 400:
-                    raise RuntimeError(f"产物下载失败 HTTP {resp.status}")
-                content_type = resp.headers.get("content-type", "")
-                ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
-                       "video/mp4": "mp4", "audio/mpeg": "mp3", "audio/mp3": "mp3",
-                       "audio/wav": "wav", "audio/x-wav": "wav", "audio/mp4": "m4a",
-                       "audio/ogg": "ogg", "audio/flac": "flac"}.get(
-                    content_type.split(";")[0], "bin")
-                path = out_dir_path / f"{safe_name}_{index}.{ext}"
-                content = await resp.read()
+        resp = await asyncio.to_thread(
+            safe_fetch, url_or_data,
+            timeout=120.0, max_bytes=_MAX_MEDIA_DOWNLOAD_BYTES,
+            headers={"User-Agent": "Neurova-Generation/1.0"},
+        )
+        content_type = resp.headers.get("content-type", "")
+        ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
+               "video/mp4": "mp4", "audio/mpeg": "mp3", "audio/mp3": "mp3",
+               "audio/wav": "wav", "audio/x-wav": "wav", "audio/mp4": "m4a",
+               "audio/ogg": "ogg", "audio/flac": "flac"}.get(
+            content_type.split(";")[0], "bin")
+        path = out_dir_path / f"{safe_name}_{index}.{ext}"
+        content = resp.content
     if not content:
         raise RuntimeError(f"产物为空（0 字节），不落盘：{str(url_or_data)[:120]}")
     path.write_bytes(content)
