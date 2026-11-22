@@ -143,4 +143,5 @@
 | v2v 三家请求体真 key 实测 | **待凭据**（providers.json 仅元数据、凭据在 keyring；真实生成产生费用，需用户提供/批准可用 key 后执行） | — |
 
 - 遗留清偿后复评：轴 7 音乐 3.5→**4.5**（前端页接通，与对方同为单 provider+完整产品面），专项总分 74.5→**75.5**，达成 75.0 目标；其余轴不变。
+- fal 契约核实（2026-11-22）：队列信封（提交/状态/取回 URL、Key 鉴权、IN_QUEUE/IN_PROGRESS/COMPLETED 状态机、error/error_type、owner/app 405 规则、request_id/response_url/status_url/cancel_url 回执）与音频产物字段（官方明示 audio_url 或 audio）已按官方 OpenAPI/文档实核，M1 实现逐项一致；musicgen duration 入参字段名/单位仍按桩锁定（模型卡动态渲染未能抓取，真 key 实测待凭据）。
 - 线B 连带发现（已登记待裁，非本批引入）：handle_webhook 全仓零生产调用者（webhook 分派缺 voice 支，test_channelVoiceFactorySeamCloses.py 因分派链无验签刻意不接）——HTTP 路由接线仍按该登记待安全批处理。

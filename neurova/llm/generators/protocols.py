@@ -996,7 +996,15 @@ async def generate_video_wait(
 # 状态/取回 URL 只含 owner/app 两段（官方明示：带 endpoint 子路径返回 405）。
 
 DEFAULT_FAL_QUEUE_BASE = "https://queue.fal.run"
-DEFAULT_FAL_MUSIC_MODEL = "fal-ai/musicgen"  # 请求体契约按桩锁定，官方文档待核
+# 队列信封已按官方实核（2026-11-22，fal.ai/docs/model-endpoints/queue 与
+# fal.ai/api/openapi/queue/openapi.json）：提交 POST /{endpoint_id}、状态/取回
+# URL 只含 owner/app 两段（带子路径 405）、鉴权 Authorization: Key、状态机
+# IN_QUEUE/IN_PROGRESS/COMPLETED（失败附 error/error_type）、submit 回执含
+# request_id/response_url/status_url/cancel_url。音频产物字段官方明示为
+# audio_url 或 audio（模型各异）——_fal_audio_url 两者均已覆盖。
+# 仍未核：musicgen 模型卡入参 duration 字段名/单位（模型卡动态渲染未能抓取，
+# 契约按桩锁定；真 key 实测待凭据）。
+DEFAULT_FAL_MUSIC_MODEL = "fal-ai/musicgen"
 
 
 def _fal_owner_app(model_id: str) -> str:
@@ -1051,9 +1059,10 @@ async def submit_music(
 ) -> Dict[str, Any]:
     """提交 fal 音乐生成任务（M1）。
 
-    请求体字段按既有协议族形态设计：prompt 必带，duration 秒数透传——
-    具体音频模型的入参字段名以其官方模型卡为准
-    （契约按桩锁定，官方文档待核）。
+    队列信封已按官方实核（见 DEFAULT_FAL_QUEUE_BASE 注释）。请求体为模型
+    专属自由对象：prompt 必带，duration 秒数透传——musicgen 模型卡的
+    duration 字段名/单位未能从公开渠道抓取，契约按桩锁定（真 key 实测
+    待凭据后回填）。
     """
     protocol = resolve_music_protocol(creds.protocol, creds.model, creds.base_url)
     if protocol is not MusicProtocol.FAL:
