@@ -222,3 +222,31 @@
 - 本体域序列：reference_l（2026-11-05，本体+知识库）→ reference_n（2026-11-15，本体对照框架）→ reference_y（2026-11-19，本体专项 90 vs 77，借鉴 P1–P3 已全部落地）→ **本文 reference_ae（2026-11-22）**。
 - 相对 reference_y，参照系 ae 强得多（89 vs 77）：Y 的短板（扁平类型/无标准格式/引擎黑盒）在 ae 上全部不成立——ae 有完整 OWL/SHACL/SKOS、多后端存储与开放 Python API；因此本文对本仓的借鉴清单重心从「建模表达力」转向「**基础设施宽度**（存储/查询/可视化/生态）与**标准运行时**（SHACL 校验/时间推理）」。
 - 关联专项：reference_s（知识图谱，2026-10-09）、reference_i（时序 KG，2026-11-13）、reference_r（事件图检索，2026-11-05）已覆盖图存储与检索的更多侧面，本文不重复其结论。
+
+---
+
+## 9. 实施回执（2026-11-23，§5 借鉴清单十三卡全量落地）
+
+用户拍板「不分批不留候选，一次全做」后，十三卡（U1–U11 + 增补 U12/U13/U14）全部实施完毕并逐卡提交（20 笔，本地 main）：
+
+| 卡 | 提交 | 交付 |
+|---|---|---|
+| U1 SHACL 运行时 | `049e53672` | shacl_runtime.py（形状单源→pyshacl）+ 咽喉段 3 后半三档闸 + export/shacl rdf 前缀修复 |
+| U2 查询缓存 | `ed2bddec4` | query_cache.py 库指纹进键（terms+rules+facts 水位），失效与写路径解耦 |
+| U3 批量装载 | `bffefcd30` | bulk_load.py 两段式，逐行过咽喉+整批零落盘+补偿撤销 |
+| U4 Allen 引擎 | `547981aef` | temporal_algebra.py 13 关系判定+程序化完整合成表（169 格对拍） |
+| U5 Rete v2 | `60456672a` | rete_network.py 完整网络 + rete_network 第三档 + 3 原子显式放宽 + v58 迁移 |
+| U6 质量门+冲突建议 | `753a2eba7` | 可计算指标+阈值门（退役恒 1.0）+ 只读建议面五策略 |
+| U7 Studio 三视图 | `9f39a44e1` | 决策因果图/推导谱系/双时态时间线 + i18n 25 键×11 locale |
+| U8 图存储门面 | `0f49f6128` | GraphBackend 契约 + SQLite 默认 + oxigraph 可选第二实现 |
+| U9 教程示例 | `cc7ab6c7b` | 教程 5 篇 + 离线示例 3 个（逐个真跑） |
+| U10 列画像 | `d727d4d4f` | 采样画像入目录（v59）+ suggester 证据消费（权重全序不倒挂） |
+| U11 CLI | `34eb736cc` | neurova-ontology 四命令薄壳 + pyproject 入口 |
+| U12 反向链 | `443b5b79d` | backward_chaining.py 目标证明树，与前向链对拍 |
+| U13 解释生成器 | `6a61405b5` | explanation.py 账本/证明树统一投影 + 中文模板 |
+| U14 差分测试 | `65fda2e32` | 随机序列对拍——**首跑即抓出两处真引擎缺陷**（否定后到不退场、环形推导边递归爆栈）并根修 |
+| 收口 | `ee189a045` | 五条新 REST 路由 + 干跑形状闸根因修复（新主体逃过形状闸）+ 路由判据测试 |
+
+**复评（同卡同锚点）**：A3 5、B1 5、C1 4、C2 4、D1 5、D2 5、E2 5、G2 5、G3 4、H2 5（其余子项不变）——**总分 91～93（保守 91 / 全量 93） vs 参照系 ae 89，反超成立**。保守与全量的差值在 E2（冲突消解仍为只读建议+人工，未做自动改写——有意取舍）与 G2（MCP 未扩容，仅 CLI+REST）。收口后全量回归：ontology+api+enterprise+迁移守卫 **1146 passed** 零新增失败；前端 vitest **2910 passed** + vue-tsc 0 错；live-verify 真后端（create_app 工厂，启动 183s）五路由全过。
+
+**过程新增的实测教训**（已写入教程/注释）：① export/shacl 形状文档缺 rdf 前缀（rdflib 必炸）；② minCount/maxCount 导出为 NodeShape 过不了 pyshacl（ConstraintLoadError），sh:in 字符串值导出非法 Turtle——教程 5 已注明边界；③ validation.findings 对新主体跳过形状求值的干跑保真缺口（本批根修）；④ 差分测试抓出否定后到不退场与环形推导边递归爆栈两处引擎缺陷；⑤ 跨进程 live-verify 的 401 排查链：僵尸 uvicorn 顶替端口（netstat+taskkill 清场）+ 签发/验签数据根必须一致 + 签发子进程 stdout 会被导入期日志污染（取 tail -n 1）。

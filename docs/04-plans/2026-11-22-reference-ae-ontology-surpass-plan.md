@@ -261,3 +261,14 @@
 ```
 
 路由统一挂：U1/U3/U6/U12/U13 的 REST 端点由主控在 `knowledge_ontology.py` 一次性集中添加（避免并行会话同文件冲突）；各实施卡只交付处理函数与测试。
+
+---
+
+## 12. 实施回执（2026-11-23，十三卡+收口全部落地）
+
+十三卡全部实施并逐卡提交（含拍板后增补的 U12/U13/U14）：U4 `547981aef`、U2 `ed2bddec4`、U6 `753a2eba7`、U3 `bffefcd30`、U12 `443b5b79d`、U13 `6a61405b5`、U1 `049e53672`、U11 `34eb736cc`、U10 `d727d4d4f`、U8 `0f49f6128`、U9 `cc7ab6c7b`、U7 `9f39a44e1`、U5 `60456672a`、U14 `65fda2e32`、收口（五条 REST 路由+干跑形状闸根因修复）`ee189a045`、迁移守卫判据同步 `d8c8613ce`。
+
+- 每卡先红后绿（多张卡的测试在实现前/中间态实测抓到真缺陷：U4 合成表漏端点相等形态、U5 的 3 原子放宽与档位校验、U14 抓出否定后到不退场与环形推导边递归爆栈两处引擎缺陷、收口批抓出 validation.findings 对新主体跳过形状求值的干跑保真缺口）——均根因处修复。
+- 收口后全量回归：ontology+api+enterprise+迁移守卫 **1146 passed** 零新增失败；前端 vitest **2910 passed** + vue-tsc 0 错；live-verify 真后端五路由全过（validate/shacl、facts/bulk、quality/gate、prove、explain）。
+- 复评（同卡同锚点）：**总分 91～93 vs 参照系 ae 89，反超成立**（保守 91：A3/B1/C1/C2/D1/D2/G3/H2 各 +1；全量 93：E2/G2 再各 +1）。逐项回执见评测报告 §9。
+- 遗留登记：MCP 面未扩 prove/explain 工具（REST 已覆盖，另卡可做）；rete_network 的 3 原子仅该档放行；oxigraph 档导出 500 未映射 501；temporal_reasoner 旧文件退役挂 021 收编批次。
