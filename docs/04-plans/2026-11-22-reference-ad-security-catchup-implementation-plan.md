@@ -126,6 +126,14 @@
 - 补提：auth.py 挑战令牌块 41 行=7107d32a7（上笔暂存遗漏，HEAD grep 2fa_challenge=0 → 工作树 5 处）。
 - 回归：global_auth/endpoint_registry/auth_system/auth_audit_wiring/auth_hardening/enhanced_users 159 项全绿；vue-tsc 0 错。
 
+**遗留清偿（D9 专项遗留三项）已实施（2026-11-22，六笔提交 ec5462de3/642d42984c/d931cc40f/7797129962/5bd0a31ba/36d4daa41）**：
+- S5 余量扫荡（D-S3 试点后扫余量）：批一 api 侧 4 SQL 点（knowledge_ontology_iri/enterprise/ontology）=ec5462de3（净 +13，回归 809 passed）；批二 agent/core 侧 12 文件=642d42984c（净 +23，回归 341 passed）；批三 ontology 全族 83 处 30 文件=d931cc40f（净 +121，回归 567 passed）；批四 repository/foundation/enterprise/mcp_source/state_event_bridge 87 处 10 文件=7797129962（净 +62，含 latestFactsByPredicate 歧义列修复 alias="f"，回归 78+275+90 passed）——192 处租户过滤全量收敛 core/tenant_scope.py 单源，四份覆盖判据测试钉住（误删即红），白名单=语义不同构点（进程池键/HMAC 凭据段/写路打戳/排除式等）。
+- OIDC state 落 users.db=5bd0a31ba（oidc_states 表 sha256(state)、TTL 600s、BEGIN IMMEDIATE 原子一次性消费——双实例 live 实测 authorize 经 :9781、callback 落 :9782 跨实例换发）+ id_token RS256/ES256 JWKS 验签（kid 匹配、依赖缺失诚实 401、RS256 假 IdP 全链实测）同笔。
+- surface 重生成=36d4daa41（authSurfaceFreshness 2 failed→7 passed，纳入 oidc/2fa/U 系列端点）。
+- 统一扩展 live-verify（.git/tmp/live_verify_ext.py，已删）：9/9 PASS（双实例启动/authorize/:9781→IdP→callback 落 :9782 跨实例消费/me 双实例可用/RS256+JWKS 生效/重放拒绝）。
+- 合并态回归：security+knowledge+core+api 判据 **3573 passed/0 failed**（唯一收集错误为并行会话在途测试，已忽略）。
+- D9 复评：专项 73.5→**74.5，本仓反超 LobeHub 72.5（+2.0）**；主报告 D9 8.5→**9.0 追平**；总分 96.5→**97.0**。
+
 **统一 live-verify（2026-11-22，真后端 127.0.0.1:9781 + 临时数据根 + 真 socket 假 IdP）：20/20 PASS**——后端启动/401 全安全头/HSTS 默认不发/错码 401/登录 token/审计含 AUTH_LOGIN+AUTH_FAILED/integrity ok/私网 webhook 400/OIDC status enabled/authorize 带 state+nonce/IdP 回 callback/callback 换 JWT/me 可用/2FA setup/enable/登录挑战/错码拒/OTP 换 token/me 可用/恢复码单次。
 
 **D9 复评（实施后）**：专项 70.0→**73.5，本仓反超 LobeHub 72.5（+1.0）**（A2 6→7/A3 7→7.5/A7 9→9.5/A9 5.5→7）；主报告 D9 8.0→**8.5**（运行安全 2.0→2.5），总分 96.0→**96.5**。S5 余量 28 文件迁移按 D-S3 另批。

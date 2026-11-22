@@ -1,6 +1,6 @@
 # reference_ad：LobeHub（lobehub/lobehub）vs Neurova 全方位代码级对照评测
 
-- 日期：2026-11-21（v2：增补 D11 自我进化/RSI 维；v3：增补 D2 上下文活水池专项；v4：增补 D4 工具肌肉记忆专项；v5：多模态十轴专项细拆；v7：D4 工具与执行安全十轴专项细拆；v8：D9 数据/租户/认证/安全专项细拆；v10：上下文工程十轴专项细拆；v11：借鉴清单升格为最终实施目标；v12：D4 升级计划实施完毕后 D4 据实重评；v13：上下文工程三卡实施并据实回写）
+- 日期：2026-11-21（v2：增补 D11 自我进化/RSI 维；v3：增补 D2 上下文活水池专项；v4：增补 D4 工具肌肉记忆专项；v5：多模态十轴专项细拆；v7：D4 工具与执行安全十轴专项细拆；v8：D9 数据/租户/认证/安全专项细拆；v10：上下文工程十轴专项细拆；v11：借鉴清单升格为最终实施目标；v12：D4 升级计划实施完毕后 D4 据实重评；v13：上下文工程三卡实施并据实回写；v14：D9 遗留清偿（租户过滤全量收敛+OIDC state 落库+RS256/JWKS）后 D9 8.5→9.0 追平）
 - 对象：[lobehub/lobehub](https://github.com/lobehub/lobehub)（代号 reference_ad；LobeChat 同源演进后的 agent 平台主线仓库）
 - 快照：canary 分支浅克隆，版本 2.3.4，pushed_at 2026-11-21；85.9k stars / 16.3k forks；TypeScript
 - 体量：124 个 pnpm 子包；ts/tsx 共 **3,777,641 行**；`*.test.*` 文件 **7,321** 个；18 种界面语言；32 条 GitHub workflow
@@ -10,7 +10,7 @@
 
 ## 0. 结论摘要
 
-**总分（11 维 120 分）：LobeHub 97.5 vs Neurova 97.5。**（v2 自进化维 L 5.5 / N 8.5；v3 活水池专项 N 上下文工程 4.0→4.5；v4 肌肉记忆专项 N 工具框架 3.0→3.5；v5 多模态专项细拆后 D8 据实重评 L 6.5→6.0 / N 3.5→7.0；v6 多模态追平三批实施后 D8 7.0→7.5；v8 D9 安全域专项细拆 L 72.5/N 70.0；v9 安全追平八卡实施后 D9 据实重评 N 8.0→8.5；v10 上下文工程十轴细拆 L 79.0/N 75.5，D2 上下文工程子项据实重评 4.0/4.5→4.5/4.0；v12 工具与执行安全升级十九卡+U20 实施完毕后 D4 据实重评 L 12.0 / N 12.5——本仓反超 0.5；v13 上下文工程三卡实施后专项 N 83.5 净反超 4.5，D2 子项 4.5/4.0→4.0/4.5——总分追平）
+**总分（11 维 120 分）：LobeHub 97.5 vs Neurova 98.0。**（v2 自进化维 L 5.5 / N 8.5；v3 活水池专项 N 上下文工程 4.0→4.5；v4 肌肉记忆专项 N 工具框架 3.0→3.5；v5 多模态专项细拆后 D8 据实重评 L 6.5→6.0 / N 3.5→7.0；v6 多模态追平三批实施后 D8 7.0→7.5；v8 D9 安全域专项细拆 L 72.5/N 70.0；v9 安全追平八卡实施后 D9 据实重评 N 8.0→8.5；v10 上下文工程十轴细拆 L 79.0/N 75.5，D2 上下文工程子项据实重评 4.0/4.5→4.5/4.0；v12 工具与执行安全升级十九卡+U20 实施完毕后 D4 据实重评 L 12.0 / N 12.5——本仓反超 0.5；v13 上下文工程三卡实施后专项 N 83.5 净反超 4.5，D2 子项 4.5/4.0→4.0/4.5——总分追平；v14 D9 遗留清偿（租户过滤 192 处全量收敛+OIDC state 落库+RS256/JWKS）后 D9 8.5→9.0 追平、总分 97.5→98.0）
 
 - LobeHub 是当前公开仓里**工程完成度最高**的 agent 平台之一：agent 运行时（分布式步调度/parked-resume/成本预算）、44 个全真内置工具、三档沙箱、91 家模型 provider、7,321 个测试文件、四通道桌面 OTA 发布，均为第一梯队。
 - Neurova 反超的八处：**多智能体治理深度**（审批链 L0-L2/候选 CAS/依赖门控/评审相位/台账重放）、**记忆生命周期**（睡眠整理/遗忘/污染清除/纪律准入 vs 对方无遗忘无衰减）、**本体知识图谱**（对方为零）、**租户隔离的真实执行**（对方 OSS 侧 RBAC 是空壳 stub）、**MCP server 面**（对方仅 client）、**自我进化/RSI**（对方=默认关闭的受控自改进：无评测闭环、无影子/灰度、回滚靠人；本仓=门禁链+影子验证+回滚+存活探针的世代闭环）、**多模态**（v5 十轴细拆 69.0 vs 68.5 接近反超：语音双栈/屏幕视觉/OCR 本仓胜，生成广度对方胜）、**工具生态与执行安全**（v12 升级十九卡+U20 实施后 D4 反超 0.5：SSRF 收敛/容器沙箱档/park 回灌/动态干预/最后一刻复验/进程树清算/结构化错误/浏览器多属主隔离全部落地）。
@@ -35,10 +35,10 @@
 | D6 | 记忆系统 | 8 | 5.5 | 7.0 | **N 胜** |
 | D7 | 多模型接入 | 10 | 9.5 | 5.5 | L 大胜 |
 | D8 | 多模态 | 8 | 6.0 | 7.5 | **N 反超（v5 细拆/v6 追平）** |
-| D9 | 数据/租户/认证/安全 | 12 | 9.0 | 8.5 | L 小胜（安全追平八卡实施后差距 0.5） |
+| D9 | 数据/租户/认证/安全 | 12 | 9.0 | 9.0 | **追平（v14 遗留清偿后）** |
 | D10 | 工程纪律 | 14 | 12.5 | 11.0 | L 胜 |
 | D11 | 自我进化/RSI | 10 | 5.5 | 8.5 | **N 胜** |
-| | **合计** | **120** | **97.5** | **97.5** | |
+| | **合计** | **120** | **97.5** | **98.0** | |
 
 ## 3. 分域详评
 
@@ -118,13 +118,13 @@
 
 > 细分拆解（十轴逐项）见同目录《[reference_ad_multimodal_teardown_2026-11-22.md](reference_ad_multimodal_teardown_2026-11-22.md)》：专项口径 LobeHub 68.5 / Neurova 69.0（/100）——生成广度对方胜、语音/屏幕视觉/OCR 本仓胜，总体接近、本仓反超；追平方案见《docs/04-plans/2026-11-22-reference-ad-multimodal-catchup-implementation-plan.md》（三批十卡，已拍板：fal/深化 SIP/三家视频协议全做用户可选/生成物入池）；追平三批已实施（2026-11-22，七笔），复评 N 69.0→74.5、D8 7.0→7.5。
 
-### D9 数据/租户/认证/安全（L 9 / N 8）
+### D9 数据/租户/认证/安全（L 9 / N 9，v14 遗留清偿后追平）
 
 **LobeHub**：数据层强——242 张表、228 个 drizzle 迁移、软删+回收站+FTS outbox+autovacuum 调优（`packages/database/src/schemas/`、`migrations/`）；认证=better-auth 引擎+17 个 SSO/OAuth 提供商+Passkey/WebAuthn+magic link+Email OTP+**自建 OIDC IdP**（`apps/auth/src/libs/better-auth/define-config.ts:132-393`、`src/libs/oidc-provider/`）；API key 的工作区绑定纪律好（个人 key 禁跨工作区、签发者在职校验、RBAC 降权自动收紧，`packages/trpc/src/lambda/context.ts:281-339`）；设备链路三层纵深（deviceId 哈希+token 握手+设备端 symlink 逃逸防护，`device-identity/src/index.ts:54-79`、`device-control/src/workspaceGuard.ts:28-63`）。**硬扣分（OSS 快照）**：RBAC 系统性门禁是空壳——`business-server/src/trpc-middlewares/rbacPermission.ts:14-28` 直通 stub、`workspaceAuth.ts:18-36` 只查 workspaceId 非空，注释明言"Cloud overrides this entire module"；无数据库 RLS，行级隔离全靠应用层 WHERE；主站无实质 CSP（仅 frame-ancestors，`src/libs/next/config/define-config.ts:113-117`）；业务 API 无通用限流；Electron IPC 裸 socket 无对端鉴权（`electron-server-ipc/ipcServer.ts:35-56`）；无原生 SAML/LDAP。
 **Neurova**：JWT 身份单通道（`core/identity_context.py`）+**租户校验在 API 层真实执行**（auth.py:743-751 租户提取、global_auth.py:178-190、8+ 端点文件消费；外部代理全生命周期按租户隔离为强制红线）；RBAC 角色+审计日志（security/audit_logger.py、desktop_audit、endpoints/audit.py）+webhook 验签 8 处+沙箱族+keyring。扣分：SSO 生态（OAuth 提供商矩阵/Passkey/OIDC IdP）缺位；租户隔离为字段级而非行级策略引擎。
-**子项**（v8 据实重排、v9 安全追平八卡实施后复核，合计 9.0/8.5）：数据层工程 3.0/2.0；认证 2.5/2.0；租户与权限执行 1.5/2.0（**本仓反超**：对方 OSS 侧为 stub）；运行安全 2.0/2.5（**本仓反超**：审计接线+哈希链+SSRF 扫荡补齐）。
+**子项**（v8 据实重排、v9 八卡复核、v14 遗留清偿后终评，合计 9.0/9.0）：数据层工程 3.0/2.0；认证 2.5/2.0；租户与权限执行 1.5/2.5（**本仓反超**：对方 OSS 侧为 stub，本仓 192 处已全量收敛单源）；运行安全 2.0/2.5（**本仓反超**：审计接线+哈希链+SSRF 扫荡补齐）。
 
-> 细分拆解（十轴逐项+四判定题）见同目录《[reference_ad_data_tenant_auth_security_teardown_2026-11-22.md](reference_ad_data_tenant_auth_security_teardown_2026-11-22.md)》：专项口径实施前 L 72.5 / N 70.0，**安全追平八卡实施并 live-verify 20/20 后复评 N 73.5，本仓反超 1.0 分**（身份通道/租户执行/网络边界/秘密保护/审计五轴领先；2FA 双方均可用、登录审计双方均已覆盖）。
+> 细分拆解（十轴逐项+四判定题）见同目录《[reference_ad_data_tenant_auth_security_teardown_2026-11-22.md](reference_ad_data_tenant_auth_security_teardown_2026-11-22.md)》：专项口径实施前 L 72.5 / N 70.0，**安全追平八卡实施并 live-verify 20/20 后复评 N 73.5，本仓反超 1.0 分**（身份通道/租户执行/网络边界/秘密保护/审计五轴领先；2FA 双方均可用、登录审计双方均已覆盖）。**v14 遗留清偿：租户过滤 192 处全量收敛 tenant_scope 单源（批一 api 4 点/批二 agent·core 12 文件/批三 ontology 83 处/批四 repository 等 87 处，覆盖判据钉住）+OIDC state 落 users.db（双实例 live 实测跨实例消费）+RS256/ES256 JWKS 验签（live 实测）——专项 73.5→74.5，反超 2.0 分。**
 
 ### D10 工程纪律（L 12.5 / N 11）
 
@@ -222,3 +222,4 @@ P2：
 - v11（2026-11-22）：应评审拍板，第 4 节升格为**最终实施目标**——借鉴清单逐项落地+总分净反超（里程碑一 ≥98.5、收官 ≥100，对 LobeHub 快照 98.0）；新增差距分解表（D7 路由追平已实施待回写/D4 U 批落地中/D2·D5·D10 对应借鉴项待实施/D1 不追）；本笔不改任何维度分数。
 - v12（2026-11-22）：工具与执行安全升级十九卡+U20 实施完毕（提交簇 6fd2f600e/372e12c95/bf5bd9368 等），工具安全专项复评 N 86.5 / L 78.0，D4 据实重评 L 12.0 / N 12.5 本仓反超 0.5，总分 96.5→97.0（L 98.0 不变）——见《reference_ad_tool_security_teardown_2026-11-22.md》复评节与升级计划执行记录。
 - v13（2026-11-22）：上下文工程专项三卡并行实施完毕（P0-1 缓存经济学闸/P0-2 计量分桶+保证金透传/P0-3 结构 Doctor+P1-6 迟滞，提交 42c0916a6/20649f46e/fafd74af8；新增测试 71 用例先红后绿，tests/unit/context 全目录 1344 passed 零回归，真管线 live-verify 6/6+真后端 9791 端点实测）。专项据实复评 N 75.5→**83.5 净反超 4.5**（里程碑一 ≥79.5 达成）；D2 上下文工程子项 4.5/4.0→4.0/4.5，D2 12.5/11.0→12.0/11.5，总分 98.0/97.0→97.5/97.5（追平）。
+- v14（2026-11-22）：D9 遗留清偿完毕（安全追平计划遗留三项）——租户过滤余量全量收敛（api 4 SQL 点/agent·core 12 文件/ontology 族 83 处 30 文件/repository 等 87 处 10 文件，全入 core/tenant_scope.py 单源，行为逐字节一致，四份覆盖判据测试钉住）、OIDC state 落 users.db（sha256(state)、TTL 600s、BEGIN IMMEDIATE 原子一次性消费，双实例 live 实测 authorize 经 :9781、callback 落 :9782 跨实例换发）、id_token RS256/ES256 JWKS 验签（kid 匹配、依赖缺失诚实 401，RS256 假 IdP 全链 live 实测）。D9 据实重评：N 8.5→9.0（租户执行 2.0→2.5），与 L 9.0 追平；按当前评分卡总分 97.5/97.5 → 97.5/98.0；专项复评 73.5→74.5（见 D9 专项 §7 遗留清偿复评）。
