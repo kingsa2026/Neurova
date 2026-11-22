@@ -58,7 +58,7 @@ from ..ontology.simulation import _SCHEMA_V46_SIMULATIONS
 from ..ontology.state_machine_registry import _SCHEMA_V44_STATE_MACHINES
 from ..ontology.derivation_ledger import _SCHEMA_V10
 from ..ontology.relation_candidates import _SCHEMA_V29_CANDIDATES
-from ..ontology.rule_engine import _SCHEMA_V28, _SCHEMA_V35, _SCHEMA_V9
+from ..ontology.rule_engine import _SCHEMA_V28, _SCHEMA_V35, _SCHEMA_V58, _SCHEMA_V9
 from ..ontology.shapes import _SCHEMA_V31_SHAPES
 from ..ontology.term_registry import (
     _SCHEMA_V29_TERMS,
@@ -215,7 +215,9 @@ _STEPS: List[tuple] = [
     #      投影式复制：源租户每轮拉取成功后同批断言投影到目标租户分区
     #      （qualifier.shared_from 血缘注记，内容键按租户分区各自幂等）
     (57, _SCHEMA_V57_SHARE_TENANTS),
-]
+    # v58：Rete v2 求值档（U5）——ontology_rules 加 evaluation_strategy 注册档位；
+    #      缺省空串＝默认语言（≤2 正原子），rete_network 档显式放宽到 ≤3（写入口声明）
+    (58, _SCHEMA_V58),]
 
 _registered = False
 

@@ -66,12 +66,22 @@ ALTER TABLE ontology_rules ADD COLUMN materialization TEXT NOT NULL DEFAULT 'obs
 #: 档位闭集：写错一个字母就当没写过，等于偷偷把一条规则转正——所以在写入处拒。
 MATERIALIZATION_MODES = ("observe", "enforce")
 
+# v58：Rete v2 求值档（U5）——规则行带注册档位 evaluation_strategy。
+# 空串＝默认语言（≤2 正原子）；rete_network＝显式放宽到 ≤3 正原子（relay 链/合取）。
+# 档位只放宽 authoring，不改求值语义：同一规则在 full_replay 与 rete_network 下
+# 结论集逐条相等（test_reteNetwork 对拍钉住）。
+_SCHEMA_V58 = """
+ALTER TABLE ontology_rules ADD COLUMN evaluation_strategy TEXT NOT NULL DEFAULT '';
+"""
+
 
 #: 求值策略闭集（specs/2026-11-12 §10 W9，D9：策略是数据不是第二引擎）——
 #: full_replay＝既有全量重放（缺省，存量零漂移）；rete＝alpha 预筛（单原子
-#: 命中缓存过滤，同一规则表同一账本同一 fireFor 契约）。NEUROVA_RULE_EVALUATION_STRATEGY
-#: 翻 rete 须等价性＋性能判据（不达标不翻）。
-EVALUATION_STRATEGIES = ("full_replay", "rete")
+#: 命中缓存过滤，同一规则表同一账本同一 fireFor 契约）；rete_network（U5）＝
+#: AlphaNode/BetaNode/TerminalNode 网络（rete_network.py），只换匹配段、同咽喉
+#: 同账本。NEUROVA_RULE_EVALUATION_STRATEGY 翻 rete/rete_network 须等价性判据
+#: （test_semiNaiveEquivalence / test_reteNetwork 对拍不齐不翻）。
+EVALUATION_STRATEGIES = ("full_replay", "rete", "rete_network")
 
 
 class RuleError(ValueError):
@@ -156,7 +166,8 @@ class ForwardChainingEngine:
                     tenantId: str = "default",
                     headObjectConst: str = "",
                     shape: str = "",
-                    materialization: str = "observe") -> Dict[str, Any]:
+                    materialization: str = "observe",
+                    evaluationStrategy: str = "") -> Dict[str, Any]:
         """登记一条规则。形状、变量、层序在这里一次判完——坏规则进不了表。
 
         body 元素：`{"atom": predicate, "subject": var, "object": var}` 或
@@ -179,6 +190,10 @@ class ForwardChainingEngine:
         检索主路按观察态排除；`enforce` 的结论即便全局灰度 `NEUROVA_CONDITION_CLASSES_ROUTE`
         仍为 off 也进主路（并照旧带 `via_derived`）。一条结论被多条规则共同推出时按
         保守侧处理——只要有任一来源是 observe 就不进（见 `test_materializationModes`）。
+
+        注册档位（`evaluationStrategy`，v58/U5）：空串＝默认语言（≤2 个正原子）；
+        `rete_network`＝显式放宽到 ≤3 个正原子（relay 链式/同主体合取）。放宽必须
+        在注册时显式声明，默认语言语义不因此改变；其余取值在写入处拒。
         """
         ruleId = str(ruleId or "").strip()
         tenant = str(tenantId or "default")
@@ -191,6 +206,17 @@ class ForwardChainingEngine:
             raise RuleError(
                 "规则 %s 的物化档位 %r 不在闭集（%s）"
                 % (ruleId, mode, " / ".join(MATERIALIZATION_MODES)))
+        # 注册档位（U5）：3 原子放宽只在 rete_network 档，且必须显式声明——
+        # 默认语言（空档位）语义不动，拼错档位名不许被当成"没写过"放行。
+        tier = str(evaluationStrategy or "").strip()
+        if tier and tier not in EVALUATION_STRATEGIES:
+            raise RuleError(
+                "规则 %s 的注册档位 %r 不在闭集（%s）"
+                % (ruleId, tier, " / ".join(EVALUATION_STRATEGIES)))
+        if tier and tier != "rete_network":
+            raise RuleError(
+                "规则 %s 的注册档位只能是 rete_network（3 原子放宽仅该档），收到 %r"
+                % (ruleId, tier))
         headConst = str(headObjectConst or "").strip()
         shape = str(shape or "").strip() or ("conjunction" if headConst else "relay")
         if shape not in ("relay", "conjunction", "inverse"):
@@ -205,8 +231,12 @@ class ForwardChainingEngine:
         negated = [a for a in atoms if a["kind"] == "not"]
         if not positive:
             raise RuleError("规则 %s 没有任何肯定正文——没有依据的推导不叫推理" % ruleId)
-        if len(positive) > 2:
-            raise RuleError("规则 %s 正文超过 2 个原子；本引擎是三元组接力片段，"
+        atomLimit = 3 if tier == "rete_network" else 2
+        if len(positive) > atomLimit:
+            if atomLimit == 2:
+                raise RuleError("规则 %s 正文超过 2 个原子；本引擎是三元组接力片段，"
+                                "更长链条请写成多条规则逐层推" % ruleId)
+            raise RuleError("规则 %s 正文超过 3 个原子；rete_network 档最多 3 个正原子，"
                             "更长链条请写成多条规则逐层推" % ruleId)
         if shape == "inverse":
             if len(positive) != 1:
@@ -220,9 +250,13 @@ class ForwardChainingEngine:
             self._validateConditionClass(ruleId, headPredicate, headConst,
                                          positive, negated, headSubjectVar, tenantId=tenant)
         else:
-            if len(positive) == 2 and positive[0]["object"] != positive[1]["subject"]:
-                raise RuleError("规则 %s 的两个原子接不上（%s 与 %s 不是同一个变元）"
-                                % (ruleId, positive[0]["object"], positive[1]["subject"]))
+            # relay 链式：逐跳要求"上一跳客体 = 下一跳主体"（2 原子是既有判据，
+            # 3 原子只在 rete_network 档放行，接法判据同源）
+            for i in range(len(positive) - 1):
+                if positive[i]["object"] != positive[i + 1]["subject"]:
+                    raise RuleError("规则 %s 的两个原子接不上（%s 与 %s 不是同一个变元）"
+                                    % (ruleId, positive[i]["object"],
+                                       positive[i + 1]["subject"]))
             if positive[-1]["object"] not in {headSubjectVar} | {a["object"] for a in positive}:
                 raise RuleError("规则 %s 的 head 客体未在正文中出现" % ruleId)
             for atom in atoms:
@@ -245,13 +279,13 @@ class ForwardChainingEngine:
                 "INSERT OR REPLACE INTO ontology_rules (tenant_id, rule_id, head_predicate,"
                 " head_subject_var, body_json, negated_predicates, stratification_level,"
                 " enabled, version, created_at, updated_at, shape, head_object_const,"
-                " materialization)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " materialization, evaluation_strategy)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (tenant, ruleId, headPredicate, headSubjectVar, json.dumps(body, ensure_ascii=False),
                  json.dumps(sorted({a["predicate"] for a in negated}), ensure_ascii=False),
                  stratum, 1 if enabled else 0, version,
                  existing["created_at"] if existing else stamp, stamp, shape, headConst,
-                 mode),
+                 mode, tier),
             )
             if cycles:
                 self._dropRule(ruleId, tenantId=tenant)
@@ -513,6 +547,8 @@ class ForwardChainingEngine:
         d["head_object_const"] = str(d.get("head_object_const") or "")
         # v35 之前落库的行同理：缺省 observe ⇒ 存量规则一律留在观察态。
         d["materialization"] = str(d.get("materialization") or "observe")
+        # v58 之前落库的行没有这一列：缺省空串＝默认语言（≤2 个正原子）。
+        d["evaluation_strategy"] = str(d.get("evaluation_strategy") or "")
         return d
 
     # ── 求值 ──────────────────────────────────────────────────
@@ -544,9 +580,16 @@ class ForwardChainingEngine:
         rounds: List[int] = []
         derived: List[str] = []
         deltaPredicates: Optional[set] = None  # None＝首轮全量
+        network = None
+        if self._evaluationStrategy == "rete_network":
+            # U5：网络跨轮复用——TerminalNode 的激活去重集合覆盖整个 fireAll，
+            # 同一（规则, 绑定）即使被后续 delta 轮重新匹配也不重复点火。
+            from .rete_network import ReteNetwork
+
+            network = ReteNetwork(self)
         for _ in range(max(int(maxIterations), 1)):
             produced = self._oneRound(agentId, tenantId=tenant,
-                                      deltaPredicates=deltaPredicates)
+                                      deltaPredicates=deltaPredicates, network=network)
             rounds.append(len(produced))
             if not produced:
                 break
@@ -574,7 +617,12 @@ class ForwardChainingEngine:
         return produced
 
     def _oneRound(self, agentId: Optional[str], tenantId: str = "default",
-                  deltaPredicates: Optional[set] = None) -> List[str]:
+                  deltaPredicates: Optional[set] = None,
+                  network: Any = None) -> List[str]:
+        # rete_network（U5）：整轮交给 Rete 网络——同一规则表同一咽喉，只换匹配段。
+        if network is not None:
+            return network.runRound(agentId=agentId, tenantId=tenantId,
+                                    deltaPredicates=deltaPredicates)
         produced: List[str] = []
         allRules = sorted(self.rules(includeDisabled=False, tenantId=tenantId),
                           key=lambda r: (r["stratification_level"], r["rule_id"]))
@@ -619,6 +667,10 @@ class ForwardChainingEngine:
 
     def _fireRule(self, rule: Dict[str, Any], agentId: Optional[str],
                   tenantId: str = "default") -> List[str]:
+        # 分层否定的真值维护：否定前提已成立时，本规则被阻断的既有结论先退场，
+        # 再求值新增结论——增量态才停在本规则的分层不动点上（U14 差分实测：
+        # 否定前提晚于结论到达时，不退场就与全量重放逐条不一致）。
+        self._retireNegationBlocked(rule, tenantId=tenantId)
         if rule.get("shape") == "conjunction":
             return self._fireConjunction(rule, agentId, tenantId=tenantId)
         if rule.get("shape") == "inverse":
@@ -630,7 +682,11 @@ class ForwardChainingEngine:
         first, second = positive[0], (positive[1] if len(positive) > 1 else None)
         live = "status = 'active' AND record_kind = 'triple'"
         aLive, bLive = "a." + live.replace(" AND ", " AND a."), "b." + live.replace(" AND ", " AND b.")
-        if second is None:
+        if len(positive) > 2:
+            # rete_network 档放宽出的 3 原子接力链：与两原子路径同一接法逐跳 JOIN，
+            # 结论集与 Rete 网络逐字一致（test_reteNetwork 对拍钉住）。
+            sql, params = self._relayChainQuery(positive, agentId, live)
+        elif second is None:
             scope = " AND agent_id = ?" if agentId else ""
             sql = ("SELECT subject_key, object_term, fact_id AS pair FROM knowledge_facts"
                    " WHERE predicate_term_id = ? AND %s%s" % (live, scope))
@@ -670,6 +726,40 @@ class ForwardChainingEngine:
                 written.append(factId)
         return written
 
+    @staticmethod
+    def _relayChainQuery(positive: List[Dict[str, str]], agentId: Optional[str],
+                         live: str) -> Tuple[str, List[Any]]:
+        """≥3 个正原子的接力链 SQL（rete_network 档放宽，登记闸限 3）。
+
+        与两原子路径同一接法：上一跳客体按规范标签找到下一跳主体，逐跳 JOIN；
+        head 主语取首原子主体、head 客体取末原子客体；agent 圈域与 live 条件
+        与既有路径逐字同源。
+        """
+        from string import ascii_lowercase
+
+        aliases = ["f%s" % c for c in ascii_lowercase[:len(positive)]]
+        sql = ("SELECT %s.subject_key AS subject_key, %s.object_term AS object_term,"
+               " %s AS pair FROM knowledge_facts %s"
+               % (aliases[0], aliases[-1],
+                  " || '+' || ".join("%s.fact_id" % a for a in aliases), aliases[0]))
+        for i in range(1, len(positive)):
+            prev, cur, subj = aliases[i - 1], aliases[i], "s%d" % i
+            sql += (" JOIN knowledge_subjects %s ON %s.agent_id = %s.agent_id"
+                    "  AND %s.normalized_label = lower(trim(%s.object_term))"
+                    "  AND %s.status = 'active'"
+                    " JOIN knowledge_facts %s ON %s.subject_key = %s.subject_key"
+                    "  AND %s.agent_id = %s.agent_id"
+                    % (subj, subj, prev, subj, prev, subj, cur, cur, subj, cur, prev))
+        where = ["%s.predicate_term_id = ?" % alias for alias in aliases]
+        params: List[Any] = [atom["predicate"] for atom in positive]
+        for alias in aliases:
+            where.append("%s.%s" % (alias, live.replace(" AND ", " AND %s." % alias)))
+        if agentId:
+            where.append("%s.agent_id = ?" % aliases[0])
+            params.append(agentId)
+        sql += " WHERE " + " AND ".join(where)
+        return sql, params
+
     def _negatedHolds(self, agentId: Optional[str], negated: List[Dict[str, str]],
                       subjectKey: str, objectTerm: str) -> bool:
         if not negated:
@@ -706,7 +796,7 @@ class ForwardChainingEngine:
             if agentId:
                 inner += " AND agent_id = ?"
                 params.append(agentId)
-        else:
+        elif len(positive) == 2:
             a0, a1 = positive[0], positive[1]
             aTenantClause, aTenantParams = tenant_sql_where(tenantId, alias="a")
             bTenantClause, bTenantParams = tenant_sql_where(tenantId, alias="b")
@@ -724,6 +814,34 @@ class ForwardChainingEngine:
                      % (aTenantClause, bTenantClause))
             params = [a0["predicate"], a0["objectConst"], *aTenantParams,
                       a1["predicate"], a1["objectConst"], *bTenantParams]
+            if agentId:
+                inner += " AND a.agent_id = ?"
+                params.append(agentId)
+        else:
+            # rete_network 档放宽出的 3 原子同主体合取（登记闸限 3）：全部正原子
+            # 钉在同一 subject_key 上、客体全为常量；同 agent 同租户的接法与
+            # 两原子路径同源，结论集与 Rete 网络逐字一致。
+            a0, a1, a2 = positive[0], positive[1], positive[2]
+            aTenantClause, aTenantParams = tenant_sql_where(tenantId, alias="a")
+            bTenantClause, bTenantParams = tenant_sql_where(tenantId, alias="b")
+            cTenantClause, cTenantParams = tenant_sql_where(tenantId, alias="c")
+            inner = ("SELECT a.subject_key AS subject_key,"
+                     " a.fact_id || '+' || b.fact_id || '+' || c.fact_id AS pair"
+                     " FROM knowledge_facts a"
+                     " JOIN knowledge_facts b ON b.subject_key = a.subject_key"
+                     "  AND b.agent_id = a.agent_id AND b.tenant_id = a.tenant_id"
+                     " JOIN knowledge_facts c ON c.subject_key = a.subject_key"
+                     "  AND c.agent_id = a.agent_id AND c.tenant_id = a.tenant_id"
+                     " WHERE a.predicate_term_id = ? AND a.object_term = ?"
+                     "  AND %s AND a.status = 'active' AND a.record_kind = 'triple'"
+                     "  AND b.predicate_term_id = ? AND b.object_term = ?"
+                     "  AND %s AND b.status = 'active' AND b.record_kind = 'triple'"
+                     "  AND c.predicate_term_id = ? AND c.object_term = ?"
+                     "  AND %s AND c.status = 'active' AND c.record_kind = 'triple'"
+                     % (aTenantClause, bTenantClause, cTenantClause))
+            params = [a0["predicate"], a0["objectConst"], *aTenantParams,
+                      a1["predicate"], a1["objectConst"], *bTenantParams,
+                      a2["predicate"], a2["objectConst"], *cTenantParams]
             if agentId:
                 inner += " AND a.agent_id = ?"
                 params.append(agentId)
@@ -767,6 +885,91 @@ class ForwardChainingEngine:
             if row:
                 return True
         return False
+
+    def _retireNegationBlocked(self, rule: Dict[str, Any],
+                               tenantId: str = "default") -> int:
+        """分层否定的真值维护（U14 差分实测暴露的缺口）：否定前提成立时，本规则
+        已被它阻断的结论必须退场。
+
+        前向链只会「加」结论：否定前提比结论后到时，先前推出的结论不会自己消失，
+        增量态就不再是规则的分层不动点——全量重放推不出它，留着它就是拿着
+        「否定前提已成立」的结论对外检索。这里沿账本找出本规则的活动结论，按
+        `_negatedHolds` / `_negatedConstHolds` 的同一口径复查否定前提，被阻断的
+        经 `store.retract` 退场（下游级联由推导账本接手）。否定前提之后再撤销时，
+        常规求值经 `_renewDerived` 把结论长回来——撤销不会比故障更持久。
+        """
+        negated = [a for a in rule.get("body") or [] if a.get("kind") == "not"]
+        if not negated:
+            return 0
+        tenant = str(tenantId or rule.get("tenant_id") or "default")
+        retired = 0
+        for factId, agentId, label in self._activeConclusionsOfRule(
+                rule["rule_id"], tenant):
+            if self._conclusionBlockedByNegation(rule, negated, factId,
+                                                 agentId, label, tenant):
+                self._store.retract(
+                    factId,
+                    reason="规则 %s 的否定前提已成立，结论失去推导依据" % rule["rule_id"])
+                retired += 1
+        return retired
+
+    def _activeConclusionsOfRule(self, ruleId: str,
+                                 tenantId: str) -> List[Tuple[str, str, str]]:
+        """本规则（不分版本——推导账是追加的）名下仍 active 的结论行。"""
+        clause, params = tenant_sql_where(tenantId, alias="f")
+        sql = ("SELECT f.fact_id AS fact_id, f.agent_id AS agent_id,"
+               " s.canonical_label AS label FROM knowledge_derivation_edges e"
+               " JOIN knowledge_facts f ON f.fact_id = e.derived_fact_id"
+               " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
+               " WHERE e.rule_id = ? AND f.status = 'active' AND " + clause)
+        with self._store._lock:
+            rows = self._store._conn.execute(sql, (ruleId, *params)).fetchall()
+        return [(r["fact_id"], r["agent_id"], r["label"]) for r in rows]
+
+    def _conclusionBlockedByNegation(self, rule: Dict[str, Any],
+                                     negated: List[Dict[str, str]], factId: str,
+                                     agentId: str, label: str,
+                                     tenantId: str) -> bool:
+        """按各形状的求值口径复查否定前提——与 `_negatedHolds` /
+        `_negatedConstHolds` 同一判据，只是反过来用于退役已不成立的结论。"""
+        fact = self._store.fact(factId)
+        if not fact:
+            return False
+        if rule.get("shape") == "conjunction":
+            # 合取的否定钉在同主体与常量客体上（_negatedConstHolds 口径）
+            return any(self._negatedFactExists(agentId, fact.get("subject_key"),
+                                               atom["predicate"], atom["objectConst"],
+                                               tenantId)
+                       for atom in negated)
+        if rule.get("shape") == "inverse":
+            # _fireInverse 的否定按正文变元 (X, Y) 评估：
+            # 阻断事实 = (X 的主体键, 否定谓词, Y 的词形)
+            xKey = self._store.resolveSubjectKey(agentId,
+                                                 str(fact.get("object_term") or ""),
+                                                 tenantId=tenantId)
+            if not xKey:
+                return False
+            return any(self._negatedFactExists(agentId, xKey, atom["predicate"],
+                                               label, tenantId)
+                       for atom in negated)
+        # relay：否定按 head 绑定 (X, Z) 评估（_negatedHolds 口径）
+        return any(self._negatedFactExists(agentId, fact.get("subject_key"),
+                                           atom["predicate"], fact.get("object_term"),
+                                           tenantId)
+                   for atom in negated)
+
+    def _negatedFactExists(self, agentId: Optional[str], subjectKey: Any,
+                           predicate: str, objectTerm: Any, tenantId: str) -> bool:
+        clause, params = tenant_sql_where(tenantId)
+        sql = ("SELECT 1 FROM knowledge_facts WHERE subject_key = ?"
+               " AND predicate_term_id = ? AND object_term = ?"
+               " AND status = 'active' AND " + clause)
+        args: List[Any] = [subjectKey, predicate, objectTerm, *params]
+        if agentId:
+            sql += " AND agent_id = ?"
+            args.append(agentId)
+        with self._store._lock:
+            return self._store._conn.execute(sql, args).fetchone() is not None
 
     def _fireInverse(self, rule: Dict[str, Any], agentId: Optional[str],
                      tenantId: str = "default") -> List[str]:

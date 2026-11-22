@@ -209,7 +209,8 @@ class TestMigrationVersions:
         # v55：断言位置锚定（对照研究 P3-1b，2026-11-19）——knowledge_assertions 加 source_span_json。
         # v56：企业源同步历史（可靠性方案 D1，2026-11-19）——enterprise_sync_history。
         # v57：企业源租户级共享策略（§8.3-P2，2026-11-19）——enterprise_source_configs 加 share_tenants_json。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 57
+        # v58：Rete v2 求值档（U5）——ontology_rules 加 evaluation_strategy 注册档位。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 58
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
                 'ontology_change_log', 'enterprise_source_configs',

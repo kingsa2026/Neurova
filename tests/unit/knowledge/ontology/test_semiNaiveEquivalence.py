@@ -96,7 +96,7 @@ class TestSemiNaiveEquivalence:
         """evaluation_strategy 缺省 full_replay：存量零漂移。"""
         from neurova.knowledge.ontology import rule_engine
 
-        assert rule_engine.EVALUATION_STRATEGIES == ("full_replay", "rete")
+        assert rule_engine.EVALUATION_STRATEGIES == ("full_replay", "rete", "rete_network")
         s, registry, gate, engine = kb
         assert engine.evaluationStrategy == "full_replay"
 
