@@ -45,6 +45,7 @@ import { SandboxApi } from './modules/SandboxApi';
 import { ProvidersApi } from './modules/ProvidersApi';
 import { AudioApi } from './modules/AudioApi';
 import { ConsoleApi } from './modules/ConsoleApi';
+import { GovernanceApi } from './modules/GovernanceApi';
 
 export class ApiFacade {
   private static instance: ApiFacade;
@@ -95,6 +96,8 @@ export class ApiFacade {
   public console: ConsoleApi;
   // 演化状态域（P1-8：世代谱系只读面，对齐 PC RsiGovernancePage 世代区块）
   public evolution: EvolutionApi;
+  // 治理审批域（批五 B 卡：移动端审批卡裁决出口，对齐 /v1/governance 契约）
+  public governance: GovernanceApi;
 
   private constructor() {
     this.client = HttpClient.getInstance();
@@ -137,6 +140,7 @@ export class ApiFacade {
     this.audio = new AudioApi(this.client);
     this.console = new ConsoleApi(this.client);
     this.evolution = new EvolutionApi(this.client);
+    this.governance = new GovernanceApi(this.client);
   }
 
   static getInstance(): ApiFacade {

@@ -19,6 +19,15 @@ export interface SettingUpdateBody {
   value: Object;
 }
 
+/** SSH 首连主机公钥确认请求体（settings.py SshHostKeyConfirmRequest） */
+export interface SshHostKeyConfirmBody {
+  agent_id: string;
+  host: string;
+  port: number;
+  fingerprint: string;
+  key_type: string;
+}
+
 /** GET/PUT /settings 的响应体（settings.py SettingsResponse） */
 interface SettingsResponseDto {
   settings: Record<string, Object>;
@@ -193,6 +202,26 @@ export class SettingsApi {
   async clearCache(): Promise<ApiResponse<Object>> {
     const body: Record<string, Object> = {};
     return this.client.post<Object>('/settings/clear-cache', body);
+  }
+
+  /**
+   * 确认 SSH 首连主机公钥（POST /settings/ssh-credentials/host-key/confirm）。
+   *
+   * U1 TOFU 信任锚：needs_host_confirmation 确认卡的确认动作——用户核对指纹后提交，
+   * 服务端经 SshHostStore.mark_confirmed 按 (agent_id, host, port) 落库，
+   * 工具执行侧轮询到同指纹记录后原地重连。body 与后端 SshHostKeyConfirmRequest
+   * 同形（snake_case）。
+   */
+  async confirmSshHostKey(agentId: string, host: string, port: number,
+                          fingerprint: string, keyType: string = ''): Promise<ApiResponse<Object>> {
+    const body: SshHostKeyConfirmBody = {
+      agent_id: agentId,
+      host: host,
+      port: port,
+      fingerprint: fingerprint,
+      key_type: keyType,
+    };
+    return this.client.post<Object>('/settings/ssh-credentials/host-key/confirm', body);
   }
 
   /** @deprecated 后端无 POST /v1/settings/reset（最近真面是 POST /v1/settings/clear-cache，语义不同不冒充） */

@@ -50,6 +50,22 @@ import { speechRecognizer } from '@kit.CoreSpeechKit';
 import { audio } from '@kit.AudioKit';
 import { abilityAccessCtrl, Permissions } from '@kit.AbilityKit';
 import { AsrStreamClient } from '../libs/adapters/AsrStreamClient';
+import {
+  ApprovalCard,
+  HostConfirmationCard,
+  APPROVAL_APPROVED,
+  APPROVAL_FAILED,
+  APPROVAL_PENDING,
+  APPROVAL_REJECTED,
+  HOST_CONFIRM_CONFIRMED,
+  HOST_CONFIRM_FAILED,
+  HOST_CONFIRM_PENDING,
+  HOST_CONFIRM_REJECTED,
+  approvalStatusText,
+  hostConfirmStatusText,
+  parseApprovalCard,
+  parseHostConfirmationCard,
+} from '../libs/chat/ActionCardModels';
 import { HttpClient } from '../libs/api/HttpClient';
 import { util } from '@kit.ArkTS';
 
@@ -64,7 +80,9 @@ interface ChatMessageView {
   toolCalls: ToolCallView[]; // 工具调用/结果卡（chat:tool_call / chat:tool_result）
   artifacts: ArtifactView[]; // 产出物卡（chat:artifact，console 从 tool_result 派生）
   plan: PlanStepView[];     // 计划时间轴（chat:plan_update）
-  approval: string;         // 最近一条治理审批请求摘要（chat:approval_required；裁决在 PC 端）
+  approval: string;         // 最近一条治理审批请求摘要（chat:approval_required）
+  approvalCard?: ApprovalCard | null;             // U6 审批卡（可裁决）
+  hostConfirm?: HostConfirmationCard | null;      // U1 主机确认卡（可确认/拒绝）
 }
 
 /** 工具调用卡片视图模型 */
@@ -86,6 +104,57 @@ interface ArtifactView {
 interface PlanStepView {
   step: string;
   status: string;
+}
+
+/** 缓存 JSON → 审批卡（缺省/坏形回 undefined，不崩） */
+function reviveApprovalCard(raw: Object | undefined): ApprovalCard | null | undefined {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+  try {
+    const rec = raw as Record<string, Object>;
+    const id = String(rec['approvalId'] ?? '');
+    if (id === '') {
+      return undefined;
+    }
+    const card: ApprovalCard = {
+      approvalId: id,
+      toolName: String(rec['toolName'] ?? ''),
+      reason: String(rec['reason'] ?? ''),
+      status: String(rec['status'] ?? APPROVAL_PENDING),
+      detail: String(rec['detail'] ?? ''),
+    };
+    return card;
+  } catch (e) {
+    return undefined;
+  }
+}
+
+/** 缓存 JSON → 主机确认卡（缺省/坏形回 undefined，不崩） */
+function reviveHostConfirm(raw: Object | undefined): HostConfirmationCard | null | undefined {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+  try {
+    const rec = raw as Record<string, Object>;
+    const host = String(rec['host'] ?? '');
+    const fingerprint = String(rec['fingerprint'] ?? '');
+    if (host === '' || fingerprint === '') {
+      return undefined;
+    }
+    const card: HostConfirmationCard = {
+      agentId: String(rec['agentId'] ?? ''),
+      host: host,
+      port: Number(rec['port'] ?? 22),
+      fingerprint: fingerprint,
+      keyType: String(rec['keyType'] ?? ''),
+      status: String(rec['status'] ?? HOST_CONFIRM_PENDING),
+      detail: String(rec['detail'] ?? ''),
+    };
+    return card;
+  } catch (e) {
+    return undefined;
+  }
 }
 
 /** 日志标签 */
@@ -528,6 +597,12 @@ export struct ChatPage {
           calls[calls.length - 1].result = String(ev['content'] ?? '');
           last.toolCalls = [...calls];
         }
+        // 历史重放同样弹主机确认卡（结果 JSON 携 needs_host_confirmation 时）
+        const event_any = ev as Object as Record<string, Object>;
+        const card = parseHostConfirmationCard(event_any);
+        if (card !== null) {
+          last.hostConfirm = card;
+        }
         continue;
       }
       if (type === 'artifact') {
@@ -565,7 +640,12 @@ export struct ChatPage {
         const d = (ev['data'] ?? {}) as Record<string, Object>;
         const toolName = String(d['tool_name'] ?? '');
         const reason = String(d['reason'] ?? '');
-        last.approval = `工具「${toolName}」等待审批${reason === '' ? '' : '：' + reason}（请在 PC 端裁决）`;
+        last.approval = `工具「${toolName}」等待审批${reason === '' ? '' : '：' + reason}`;
+        // 历史重放同样还原可裁决审批卡（单据仍 pending 时按钮可用）
+        const card = parseApprovalCard(d);
+        if (card !== null) {
+          last.approvalCard = card;
+        }
         continue;
       }
       // done/usage/其他：回合边界或记账事件，不产生视图
@@ -638,6 +718,8 @@ export struct ChatPage {
       artifacts: artifacts,
       plan: plan,
       approval: String(o['approval'] ?? ''),
+      approvalCard: reviveApprovalCard(o['approvalCard']),
+      hostConfirm: reviveHostConfirm(o['hostConfirm']),
     };
   }
 
@@ -861,7 +943,7 @@ export struct ChatPage {
     };
     this.bus.on('chat:tool_call', this.toolCallHandler);
 
-    // 工具结果事件：回填到最后一张工具卡
+    // 工具结果事件：回填到最后一张工具卡；结果携 needs_host_confirmation 时弹主机确认卡
     this.toolResultHandler = (data: Object) => {
       const ev = data as WSChatToolResult;
       const d = ev.data ?? {};
@@ -874,6 +956,16 @@ export struct ChatPage {
         last.toolCalls = [...calls];
         this.messages = [...this.messages];
         this.messagesDs.setData(this.messages);
+      }
+      // U1 主机确认卡：SSH 首连公钥未确认 → 结果 JSON 透传 host/port/fingerprint/key_type/agent_id
+      if (last && last.role === 'assistant') {
+        const card = parseHostConfirmationCard(d);
+        if (card !== null) {
+          last.hostConfirm = card;
+          this.messages = [...this.messages];
+          this.messagesDs.setData(this.messages);
+          this.scrollToBottom();
+        }
       }
     };
     this.bus.on('chat:tool_result', this.toolResultHandler);
@@ -935,10 +1027,16 @@ export struct ChatPage {
       const hint = typeof rec['dreaming_hint'] === 'string' ? rec['dreaming_hint'] as string : '';
       const last = this.messages[this.messages.length - 1];
       if (last && last.role === 'assistant') {
-        last.approval = `工具「${toolName}」等待审批${reason === '' ? '' : '：' + reason}（请在 PC 端裁决）`
+        last.approval = `工具「${toolName}」等待审批${reason === '' ? '' : '：' + reason}`
           + (hint === '' ? '' : `\n${hint}`);
+        // U6 审批卡（批五 B 卡）：移动端可直接裁决——批准/拒绝调 governance 审批口
+        const card = parseApprovalCard(rec);
+        if (card !== null) {
+          last.approvalCard = card;
+        }
         this.messages = [...this.messages];
         this.messagesDs.setData(this.messages);
+        this.scrollToBottom();
       }
     };
     this.bus.on('chat:approval_required', this.approvalHandler);
@@ -1971,6 +2069,74 @@ export struct ChatPage {
     }
   }
 
+  // ===========================================================================
+  // 确认/审批卡动作（批五 B 卡：U1 主机确认 + U6 治理审批，移动端可裁决）
+  // ===========================================================================
+
+  /** 卡片状态变更后刷新列表（messages 重赋值驱动 ArkUI 重渲染） */
+  private refreshCards(): void {
+    this.messages = [...this.messages];
+    this.messagesDs.setData(this.messages);
+  }
+
+  /** U1 主机确认卡：确认（POST /settings/ssh-credentials/host-key/confirm 落 TOFU 信任锚） */
+  async confirmHostKey(msg: ChatMessageView): Promise<void> {
+    const card = msg.hostConfirm;
+    if (!card || card.status !== HOST_CONFIRM_PENDING) {
+      return;
+    }
+    try {
+      const res = await this.api.settings.confirmSshHostKey(
+        card.agentId, card.host, card.port, card.fingerprint, card.keyType);
+      if (res.code === 0) {
+        card.status = HOST_CONFIRM_CONFIRMED;
+        card.detail = '已确认，命令将自动重试执行';
+      } else {
+        card.status = HOST_CONFIRM_FAILED;
+        card.detail = '确认未落库：' + (res.message ?? '');
+      }
+    } catch (e) {
+      card.status = HOST_CONFIRM_FAILED;
+      card.detail = '确认请求失败：' + (e as Error).message;
+    }
+    this.refreshCards();
+  }
+
+  /** U1 主机确认卡：拒绝（纯本地终态——后端无拒绝口，超时即命令未执行） */
+  rejectHostKey(msg: ChatMessageView): void {
+    const card = msg.hostConfirm;
+    if (!card || card.status !== HOST_CONFIRM_PENDING) {
+      return;
+    }
+    card.status = HOST_CONFIRM_REJECTED;
+    card.detail = '已拒绝：本次命令未执行';
+    this.refreshCards();
+  }
+
+  /** U6 审批卡：批准（approve 会按单据原参重放执行）/ 拒绝 */
+  async decideApproval(msg: ChatMessageView, approve: boolean): Promise<void> {
+    const card = msg.approvalCard;
+    if (!card || card.status !== APPROVAL_PENDING) {
+      return;
+    }
+    try {
+      const res = approve
+        ? await this.api.governance.approve(card.approvalId)
+        : await this.api.governance.reject(card.approvalId);
+      if (res.code === 0) {
+        card.status = approve ? APPROVAL_APPROVED : APPROVAL_REJECTED;
+        card.detail = approve ? '已批准，等待执行结果回传' : '已拒绝：本次操作不执行';
+      } else {
+        card.status = APPROVAL_FAILED;
+        card.detail = (approve ? '批准失败' : '拒绝失败') + '：' + (res.message ?? '');
+      }
+    } catch (e) {
+      card.status = APPROVAL_FAILED;
+      card.detail = '请求失败：' + (e as Error).message;
+    }
+    this.refreshCards();
+  }
+
   /** 模型菜单：仅收录可用（connectable）模型并按服务商分组（用户拍板） */
   private modelGroups(): PillMenuGroup[] {
     const groups: PillMenuGroup[] = [];
@@ -2739,8 +2905,125 @@ export struct ChatPage {
             .margin({ bottom: 6 })
           }
 
-          // 治理审批请求卡（移动端只读展示，裁决走 PC 端治理面）
-          if (msg.approval !== '') {
+          // U1 主机确认卡（needs_host_confirmation：SSH 首连公钥核对后确认/拒绝）
+          if (msg.hostConfirm) {
+            Column() {
+              Row() {
+                AppIcon({ name: 'shield', iconSize: 13, color: this.sm.getColor('error') })
+                Text('SSH 主机公钥确认')
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('text_primary'))
+                  .fontWeight(FontWeight.Medium)
+                  .margin({ left: 6 })
+                  .layoutWeight(1)
+                Text(msg.hostConfirm.status === HOST_CONFIRM_PENDING ? '待确认' : '已处理')
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('text_tertiary'))
+              }
+              .width('100%')
+              Text(`${msg.hostConfirm.host}:${msg.hostConfirm.port}` +
+                (msg.hostConfirm.keyType === '' ? '' : ` · ${msg.hostConfirm.keyType}`))
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .width('100%')
+                .margin({ top: 4 })
+              Text('指纹 ' + msg.hostConfirm.fingerprint)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%')
+                .margin({ top: 2 })
+              Text(hostConfirmStatusText(msg.hostConfirm))
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(msg.hostConfirm.status === HOST_CONFIRM_FAILED
+                  ? this.sm.getColor('error') : this.sm.getColor('text_secondary'))
+                .width('100%')
+                .margin({ top: 4 })
+              if (msg.hostConfirm.status === HOST_CONFIRM_PENDING) {
+                Row() {
+                  Text('确认连接')
+                    .fontSize(this.sm.getFontSize('caption'))
+                    .fontColor(this.sm.getColor('text_on_primary'))
+                    .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+                    .borderRadius(8)
+                    .backgroundColor(this.sm.getColor('primary'))
+                    .onClick(() => { this.confirmHostKey(msg); })
+                  Text('拒绝')
+                    .fontSize(this.sm.getFontSize('caption'))
+                    .fontColor(this.sm.getColor('error'))
+                    .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+                    .borderRadius(8)
+                    .border({ width: 1, color: 'rgba(248,113,113,0.40)' })
+                    .margin({ left: 8 })
+                    .onClick(() => { this.rejectHostKey(msg); })
+                }
+                .width('100%')
+                .margin({ top: 8 })
+              }
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+            .padding(8)
+            .borderRadius(8)
+            .backgroundColor('rgba(248,113,113,0.12)')
+            .border({ width: 1, color: 'rgba(248,113,113,0.40)' })
+            .margin({ bottom: 6 })
+          }
+
+          // U6 治理审批卡（pending_approval：移动端直接批准/拒绝；无卡时退回摘要文本）
+          if (msg.approvalCard) {
+            Column() {
+              Row() {
+                AppIcon({ name: 'shield', iconSize: 13, color: this.sm.getColor('error') })
+                Text('操作审批' +
+                  (msg.approvalCard.toolName === '' ? '' : ` · ${msg.approvalCard.toolName}`))
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('text_primary'))
+                  .fontWeight(FontWeight.Medium)
+                  .margin({ left: 6 })
+                  .layoutWeight(1)
+                Text(msg.approvalCard.status === APPROVAL_PENDING ? '待裁决' : '已处理')
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('text_tertiary'))
+              }
+              .width('100%')
+              Text(approvalStatusText(msg.approvalCard))
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(msg.approvalCard.status === APPROVAL_FAILED
+                  ? this.sm.getColor('error') : this.sm.getColor('text_secondary'))
+                .width('100%')
+                .margin({ top: 4 })
+              if (msg.approvalCard.status === APPROVAL_PENDING) {
+                Row() {
+                  Text('批准')
+                    .fontSize(this.sm.getFontSize('caption'))
+                    .fontColor(this.sm.getColor('text_on_primary'))
+                    .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+                    .borderRadius(8)
+                    .backgroundColor(this.sm.getColor('primary'))
+                    .onClick(() => { this.decideApproval(msg, true); })
+                  Text('拒绝')
+                    .fontSize(this.sm.getFontSize('caption'))
+                    .fontColor(this.sm.getColor('error'))
+                    .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+                    .borderRadius(8)
+                    .border({ width: 1, color: 'rgba(248,113,113,0.40)' })
+                    .margin({ left: 8 })
+                    .onClick(() => { this.decideApproval(msg, false); })
+                }
+                .width('100%')
+                .margin({ top: 8 })
+              }
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+            .padding(8)
+            .borderRadius(8)
+            .backgroundColor('rgba(248,113,113,0.12)')
+            .border({ width: 1, color: 'rgba(248,113,113,0.40)' })
+            .margin({ bottom: 6 })
+          } else if (msg.approval !== '') {
             Row() {
               AppIcon({ name: 'shield', iconSize: 13, color: this.sm.getColor('error') })
               Text(msg.approval)

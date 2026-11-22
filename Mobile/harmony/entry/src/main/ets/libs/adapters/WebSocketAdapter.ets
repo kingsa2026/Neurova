@@ -34,6 +34,7 @@ import { AuthStore } from '../state/stores/AuthStore';
 import { ApiFacade } from '../api/ApiFacade';
 import { ErrorManager, ErrorCategory } from '../error/ErrorManager';
 import { WSMessage, WsConnectionRuntimeContract } from '../types';
+import { resolveTunnelAuthFrame, randomNonceHex } from '../protocol/TunnelTokenCrypto';
 
 /** 日志标签 */
 const TAG = 'WebSocketAdapter';
@@ -133,6 +134,14 @@ export class WebSocketAdapter {
   private lastUrl: string = '';
   /** 最近一次连接的 token（用于重连） */
   private lastToken: string = '';
+  /**
+   * relay 模式（wsUrl 含 /t/ 路由前缀，与 ServerProfiles.entryMode 同判据）。
+   * U9.1：连接建立后**首条**消息必须是 auth 帧（含 nv1 信封 token）——
+   * 中继默认 fail-closed 拒绝 URL 携 token 旧形态。直连模式不发 auth 帧（行为不变）。
+   */
+  private relayMode: boolean = false;
+  /** auth 首帧已发出、尚未收到任何回帧：此窗口内服务端 unknown_type 回执按握手噪声记日志 */
+  private authFrameInFlight: boolean = false;
   /** 是否为主动断开（主动断开时不触发自动重连） */
   private manualClose: boolean = false;
   /** 外部注册的原始消息处理器列表 */
@@ -165,6 +174,9 @@ export class WebSocketAdapter {
   async connect(url: string, token?: string, skipRefresh: boolean = false): Promise<void> {
     // 记录连接参数以便重连复用
     this.lastUrl = url;
+    // relay 模式判定：中继入口是 /t/<routeId> 前缀（ServerProfiles.entryMode 同一判据）。
+    // 判定取**传入 URL**——重连时 lastUrl 即原始入参，口径一致。
+    this.relayMode = url.indexOf('/t/') >= 0;
     if (token !== undefined) {
       this.lastToken = token;
     }
@@ -296,10 +308,8 @@ export class WebSocketAdapter {
       this.logger.info(TAG, 'WebSocket 已连接');
       const payload: WsConnectedPayload = { url: this.lastUrl };
       this.bus.emit('ws:connected', payload);
-      // 启动心跳保活
-      this.startHeartbeat();
-      // 远程驾驶可靠性：重连后按游标补拉断线期间错过的帧（首次连接游标为 0 不发）
-      this.resumeMissedFrames();
+      // relay 模式先发 auth 首帧，再起心跳/补拉（U9.1：auth 前不接受任何其他帧）
+      this.onConnectionOpened();
     });
 
     // 收到消息：SDK 签名为 AsyncCallback<string | ArrayBuffer>，即 (err, data) 两参回调；
@@ -326,6 +336,19 @@ export class WebSocketAdapter {
 
       if (this.manualClose) {
         // 主动关闭：由 disconnect() 负责发事件，此处不处理
+        return;
+      }
+      if (code === 4401 || code === 4403) {
+        // relay 鉴权被拒（4401=凭据/首帧不合规，4403=令牌型进错通道）：
+        // 同一凭据重试必然再拒——诚实上报并停止自动重连，不拖成重连风暴
+        this.logger.error(TAG, `relay 鉴权被拒 code=${code} reason=${reason}`);
+        this.errorManager.reportError(
+          'relay_auth_rejected',
+          `中继准入被拒（${code}）：${reason}`,
+          ErrorCategory.WEBSOCKET,
+        );
+        const authPayload: WsErrorPayload = { message: 'relay_auth_rejected: ' + reason };
+        this.bus.emit('ws:error', authPayload);
         return;
       }
       const payload: WsDisconnectedPayload = { code, reason, manual: false };
@@ -397,6 +420,22 @@ export class WebSocketAdapter {
       this.logger.warn(TAG, '消息缺少 type 字段');
       return;
     }
+    // 服务端 unknown_type 回执：auth 首帧窗口内是预期噪声（当前后端不在移动入口
+    // 消费 auth 帧，中继也不经手手机侧帧），窗口外是调用方拼错类型——都只记日志，
+    // 不当聊天失败上抛（误触发 isGenerating 复位与错误文案）。
+    if (type === 'error') {
+      const rec = parsed as Object as Record<string, Object>;
+      if (String(rec['code'] ?? '') === 'unknown_type') {
+        if (this.authFrameInFlight) {
+          this.logger.debug(TAG, 'auth 首帧被对端按 unknown_type 回执（预期：入口未启用 auth 帧校验）');
+        } else {
+          this.logger.warn(TAG, `服务端未知消息类型回执: ${raw.slice(0, 200)}`);
+        }
+        return;
+      }
+    }
+    // 任何非 unknown_type 帧（含 pong/业务帧）到达即说明 auth 交换期已过
+    this.authFrameInFlight = false;
     // 服务端快照重同步通告：游标过旧/非法/预算耗尽时增量必不完整——
     // 立即弃游标并复用既有重连路径，以首屏快照恢复（不做会漏帧的部分重放）
     if (type === 'sync_snapshot_required') {
@@ -478,6 +517,39 @@ export class WebSocketAdapter {
   // ===========================================================================
   // 断线重连补拉（远程驾驶可靠性）
   // ===========================================================================
+
+  /**
+   * 连接建立后的首帧序列：relay 模式先 auth（服务端 5s 窗），再心跳与补拉。
+   *
+   * U9.1/U16：中继对 agent 通道 fail-closed——连接建立后首条消息必须是
+   * `{"type":"auth","token":...,"tokenType":...}`。token 已是 nv1 信封则原样用；
+   * 裸密钥则按 protocol.signTunnelToken 口径本地签 nv1:agent 信封（凭据全文不进帧）。
+   * 直连模式不发 auth 帧（行为不变）。
+   */
+  private async onConnectionOpened(): Promise<void> {
+    if (this.relayMode && this.lastToken !== '') {
+      this.authFrameInFlight = true;
+      try {
+        const nonce = await randomNonceHex(8);
+        const frame = await resolveTunnelAuthFrame(
+          this.lastToken, Math.floor(Date.now() / 1000), nonce);
+        await this.send(JSON.stringify(frame));
+        this.logger.info(TAG, `relay auth 首帧已发送（tokenType=${frame.tokenType}）`);
+      } catch (e) {
+        this.authFrameInFlight = false;
+        const err = e as Error;
+        this.logger.error(TAG, 'relay auth 首帧发送失败', err);
+        const payload: WsErrorPayload = { message: 'relay_auth_send_failed: ' + err.message };
+        this.bus.emit('ws:error', payload);
+        // auth 都发不出去：不起心跳，不把未认证连接当可用连接用
+        return;
+      }
+    }
+    // 启动心跳保活
+    this.startHeartbeat();
+    // 远程驾驶可靠性：重连后按游标补拉断线期间错过的帧（首次连接游标为 0 不发）
+    this.resumeMissedFrames();
+  }
 
   /** 重连后按游标补拉：服务端出站帧先落账再发送（带单调 seq），发 sync_resume
    * 让服务端补发 lastServerSeq 之后的帧（带 replay 标记）。首次连接游标为 0
