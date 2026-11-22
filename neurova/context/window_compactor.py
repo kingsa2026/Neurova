@@ -10,6 +10,12 @@ import json
 import typing
 from dataclasses import dataclass
 
+# P2-7 同组单元聚合：组边界判定单源在 window_partition（纯函数，无环）。
+from neurova.context.window_partition import snapBoundaryToGroup
+
+
+_COMPACT_EVENT_SOURCE = "window_compactor"
+
 # 每条消息的协议开销（role/分隔符等的保守估计）。
 # 单一事实源：模块内一切"整窗计量"与"逐条计量"都必须经 WindowTokenMeter，
 # 它按此常量补开销；`estimate_window_tokens` 只是它的无状态入口。
@@ -294,6 +300,9 @@ def split_window_by_budget(
     - 超预算：从尾部保留至 target=budget×target_ratio（至少 keep_min_messages
       条，保证单条巨消息不会把窗口清空），其余折叠。
     kept 是 msgs 的尾部切片、dropped 是头部切片，时序不打乱。
+    同组单元聚合（P2-7）：切点吸附到组边界——assistant(tool_calls) 与其连续
+    tool 结果段同进同出，不落在折叠边界两侧（吸附只减不增 kept，无工具组时
+    切点与原算法逐字节一致）。
     """
     msgs = list(msgs or [])
     if not msgs:
@@ -313,6 +322,8 @@ def split_window_by_budget(
         kept_count += 1
 
     kept_count = min(kept_count, len(msgs))
+    # 组边界吸附：kept 条数只减不增（宁多折叠以保组完整），见 window_partition。
+    kept_count = snapBoundaryToGroup(msgs, kept_count)
     kept = msgs[len(msgs) - kept_count:] if kept_count else []
     dropped = msgs[: len(msgs) - kept_count] if kept_count < len(msgs) else []
     return dropped, kept
@@ -378,6 +389,7 @@ async def compact_window(
 
     # 单源计量：整段折叠（含递进各轮）共用同一个 meter，同一条消息只算一次。
     meter = meter or WindowTokenMeter()
+
 
     summary = None
     ratio = target_ratio
