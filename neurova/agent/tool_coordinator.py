@@ -79,9 +79,16 @@ _OFFLOAD_HINTS: Dict[str, str] = {
 }
 
 def get_tool_timeout(tool_name: str, default: Optional[float] = None) -> float:
-    """per-tool 超时；未知工具回落默认（大小写不敏感）。"""
+    """per-tool 超时；未知工具回落默认（大小写不敏感）。
+
+    资源治理 P1-1：表值/缺省一律经超时策略单源钳进 [1, 800]s——表是
+    元数据声明制，钳制在取值面统一收口（策略见 core/timeout_policy）。
+    """
     name = (tool_name or "").strip().lower()
-    return TOOL_TIMEOUTS_S.get(name, default if default is not None else TOOL_DEFAULT_TIMEOUT_S)
+    from neurova.core.timeout_policy import clampToolTimeoutSeconds
+
+    fallback = default if default is not None else TOOL_DEFAULT_TIMEOUT_S
+    return clampToolTimeoutSeconds(TOOL_TIMEOUTS_S.get(name, fallback), default=fallback)
 
 
 def resolveToolCapability(tool_name: str):

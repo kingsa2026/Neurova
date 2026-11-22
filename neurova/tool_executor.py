@@ -2073,6 +2073,8 @@ class ToolExecutor:
                     pass  # 非法声明按未声明处理，回落超时表
         from neurova.agent.tool_coordinator import get_tool_timeout
 
+        # 资源治理 P1-1：表值/缺省的钳制收口在 get_tool_timeout 单点
+        # （core/timeout_policy），此处不再二次钳——保持测试/调用方打桩接缝。
         return get_tool_timeout(tool_name)
 
     # ── U8：长命令 park + 迟交回灌（ssh/exec 类，REST 轮询取回）──
@@ -10408,7 +10410,11 @@ class ToolExecutor:
         """
         code = params.get("code", "")
         language = params.get("language", "python")
-        timeout = params.get("timeout", 60)
+        # 资源治理 P1-1：用户参 timeout 是执行层旁路——直通容器/本地运行时前
+        # 必须经超时策略单源钳进 [1, 800]s（此前 10**9 之类可原样直达）。
+        from neurova.core.timeout_policy import clampToolTimeoutSeconds
+
+        timeout = clampToolTimeoutSeconds(params.get("timeout", 60))
         env = params.get("env")
         cwd = params.get("cwd")
 
