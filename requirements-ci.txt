@@ -158,3 +158,8 @@ rich>=13.0
 # 装了 rdflib 也不允许 `neurova/` 里出现它的 import（由 test_rdflibInterop 的对照格与
 # tests/unit/test_dev_path_and_runtime_dep_guards.py 的运行时面比对共同钉住）。
 rdflib>=7.0
+
+# 本体 SHACL 运行时（2026-11-22 用户拍板：首启自动安装，requirements.txt 已同声明）。
+# shacl_runtime.py 点名豁免（惰性 import＋fail-soft，形态同 sparql_query.py 的 rdflib）；
+# 测试仍以 importorskip 兜底，双清单都声明后常态必装、skip 不会再触发。
+pyshacl>=0.25.0

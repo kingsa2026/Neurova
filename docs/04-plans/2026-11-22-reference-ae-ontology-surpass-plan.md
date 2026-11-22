@@ -220,7 +220,7 @@
 
 **拍板决议**：本计划全部卡片一次全量实施，原「三批/机动/后续候选」分期框架作废；§5 机动卡 U10/U11 转正式卡；推理域增补三张新卡 U12/U13/U14（源自推理引擎对照结论：对方反向链/解释生成/差分测试可鉴，本仓补齐后推理维 D1 冲 5 分）。六项待拍板全部按 §6 建议执行：
 
-- D-U1 **做**：pyshacl 走可选依赖（pyproject extras `ontology-shacl`），代码内 lazy import + fail-soft，不入核心 requirements；开发/测试环境装入 .venv。
+- D-U1 **做（2026-11-22 二次拍板升级）**：pyshacl 声明进 `requirements.txt` 与 `requirements-ci.txt`——install.py 与桌面端首启链都只消费 requirements.txt，声明即两条首启路径自动安装（单一事实源，不另造安装名单）；代码侧仍 lazy import + fail-soft（shacl_runtime.py 点名豁免，形态同 sparql_query.py 的 rdflib）；开发/测试环境装入 .venv。
 - D-U2 **做**：`NEUROVA_ONTOLOGY_SHACL_RUNTIME` 默认 `off`，实现 off/shadow/enforce 三档；enforce 段挂 admission 段 3.5。
 - D-U3 **做**：3 原子放宽仅限 `rete_network` 档内支持，默认语言保持 2 原子。
 - D-U4 **做**：图存储门面立项，SQLite 为唯一默认生产实现，oxigraph 为可选第二实现（fail-soft，未装显式 not_supported），默认不切换。

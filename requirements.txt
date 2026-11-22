@@ -169,3 +169,10 @@ rich>=13.0
 # rdflib>=7.0             # SPARQL 只读面（specs/2026-11-12 W9，D8 已裁可选生产
 #                          依赖——sparql_query.py 惰性 import＋fail-soft，未装时
 #                          端点显式 501 not_supported；DB 驱动同款豁免形态）
+
+# ── 本体语义运行时（2026-11-22 用户拍板：首次运行系统时自动安装）────────
+# install.py 与桌面端首启链（NeurUI/src-tauri 首启 pip 装本清单）都只消费
+# 本文件，故在此声明即两条首启路径自动生效，不另造第二份安装名单。
+# pyshacl 传递依赖 rdflib，SPARQL 投影面随之获得 rdflib；代码侧仍惰性
+# import＋fail-soft（shacl_runtime.py 点名豁免，形态同 sparql_query.py）。
+pyshacl>=0.25.0
