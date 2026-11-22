@@ -483,17 +483,18 @@ class TestCancelledBackgroundFeedback:
 
 class TestKillPrimitiveIsSingleSource:
     def testProcessGroupKillHasOneSite(self):
-        """全仓只有一处 `killpg`：进程组杀灭不许有第二份实现。"""
+        """进程组击杀的 os.killpg 真调用只允许一处：security/process_reaper（U10 后单源）。"""
         from tests import ast_scan
 
         offenders = []
-        for ref in ast_scan.sourceRefsUnder(ast_scan.PRODUCTION_ROOT, hints=("killpg",)):
+        for ref in ast_scan.sourceRefsUnder(ast_scan.PRODUCTION_ROOT, hints=("os.killpg",)):
             for lineno, line in enumerate(ref.code.splitlines(), start=1):
-                if "killpg" in line and not line.lstrip().startswith("#"):
+                if "os.killpg(" in line and not line.lstrip().startswith("#"):
                     offenders.append(f"{ref.path}:{lineno}")
         assert len(offenders) == 1, (
-            "进程组杀灭出现了第二处实现（应全部经 exec_sandbox.killProcessTree）：\n  "
-            + "\n  ".join(offenders)
+            "进程组击杀出现了第二处 os.killpg 真调用（单源=security/process_reaper，"
+            "其余模块一律经 kill_tree/signalGroup 委托）：\\n  "
+            + "\\n  ".join(offenders)
         )
 
     def testKillProcessTreeIsPublicSingleEntry(self):

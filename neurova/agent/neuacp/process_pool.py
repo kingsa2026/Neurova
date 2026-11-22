@@ -22,6 +22,9 @@ from collections import deque
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from neurova.agent.neuacp.acp_client import NeuacpError
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 MAX_PROCS_ENV = "NEUROVA_EXTERNAL_AGENTS_MAX_PROCS"
 IDLE_SECONDS_ENV = "NEUROVA_EXTERNAL_AGENTS_IDLE_S"
@@ -107,8 +110,21 @@ def _isAlive(process: Any) -> bool:
     return bool(alive)
 
 
-def _closeProcess(process: Any) -> None:
-    """关闭进程：优先 terminate（NeuacpClient/Popen 语义），退回 close。"""
+def _processPid(process: Any) -> Optional[int]:
+    """从池内进程对象尽力提取真实 OS pid；取不到返回 None（走单 pid 降级）。
+
+    认得两种形态：Popen 直露 ``pid``；NeuacpClient 内持 Popen（``_process.pid``）。
+    替身对象（无 pid）一律返回 None——树清算只认真实 pid，防误杀任意数字 pid。
+    """
+    for candidate in (getattr(process, "pid", None),
+                      getattr(getattr(process, "_process", None), "pid", None)):
+        if isinstance(candidate, int) and candidate > 0:
+            return candidate
+    return None
+
+
+def _terminateQuietly(process: Any) -> None:
+    """原单 pid 终止：优先 terminate（NeuacpClient/Popen 语义），退回 close。"""
     for name in ("terminate", "close"):
         method = getattr(process, name, None)
         if callable(method):
@@ -117,6 +133,29 @@ def _closeProcess(process: Any) -> None:
                 return
             except Exception:  # noqa: BLE001 - 关闭失败不抛（池回收路径）
                 continue
+
+
+def _closeProcess(process: Any) -> None:
+    """关闭进程（U10）：先按树清算（kill_tree，含孙进程），失败降级单 pid 终止。
+
+    树清算只对带真实 pid 的进程生效；成功后仍走一次 terminate/close
+    收口包装层状态（NeuacpClient 的流关闭/等待者唤醒/退出观测——进程已死
+    时幂等早退）。清算失败或对象无 pid 时保留原单 pid 终止路径。
+    """
+    pid = _processPid(process)
+    if pid is not None:
+        try:
+            from neurova.security.process_reaper import kill_tree
+
+            outcome = kill_tree(pid)
+            if all(item.ok for item in outcome):
+                _terminateQuietly(process)
+                return
+            logger.warning("进程树清算存在残留，降级单 pid 终止 (pid=%s): %s",
+                           pid, [str(item) for item in outcome if not item.ok])
+        except Exception as exc:  # noqa: BLE001 - 池回收路径 fail-soft，降级保底
+            logger.warning("进程树清算失败，降级单 pid 终止 (pid=%s): %s", pid, exc)
+    _terminateQuietly(process)
 
 
 class _PoolEntry:

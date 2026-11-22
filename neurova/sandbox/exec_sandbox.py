@@ -61,12 +61,11 @@ def killProcessTree(proc: subprocess.Popen) -> None:
         return
     if proc.poll() is not None:      # 已退出：见 docstring，不发信号
         return
-    import signal
+    from neurova.security.process_reaper import kill_tree
 
-    try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        proc.kill()
+    # POSIX 树杀委托 process_reaper 单源（SIGTERM→宽限→SIGKILL；grace=0 即快杀），
+    # 本文件不再自带 os.killpg 第二实现。
+    kill_tree(proc.pid, grace_seconds=0)
 
 
 def spawnKwargsForKill() -> Dict[str, Any]:

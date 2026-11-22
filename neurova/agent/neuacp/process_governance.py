@@ -54,8 +54,10 @@ def _defaultGroupKill(pid: int, force: bool) -> None:
         return
     import signal
 
+    from neurova.security.process_reaper import signalGroup
+
     sig = signal.SIGKILL if force else signal.SIGTERM
-    os.killpg(os.getpgid(pid), sig)
+    signalGroup(os.getpgid(pid), sig)
 
 
 def _fallbackKill(proc) -> None:
