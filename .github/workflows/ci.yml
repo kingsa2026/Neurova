@@ -61,6 +61,16 @@ jobs:
       - name: Ruff (规则集与 per-file 豁免见 pyproject)
         run: python -m ruff check neurova tests --no-cache
 
+      # 安全 lint 双保险（拍板 D-W2：两扫描器均默认 strict，违规即阻断）——
+      # U19：shell 拼接必须过 command_segments 分段治理（或登记 ALLOW）；
+      # U2：出站 HTTP 直用点必须登记 ALLOW（走 safe_fetch/url_guard 通路）。
+      # 与 .cnb.yml 的 static-gate 流水线一对一、同命令、同判据。
+      - name: Shell segment governance lint (strict)
+        run: python scripts/check_shell_segments.py
+
+      - name: Outbound fetch lint (strict)
+        run: python scripts/check_outbound_fetch.py
+
   deploy-config:
     name: Deploy config consistency (Dockerfile / compose / Helm)
     runs-on: ubuntu-latest

@@ -3,12 +3,13 @@
 
 - 检出能力：subprocess.run/Popen/call/check_output(shell=True)、os.system、
   paramiko ``exec_command``、asyncio.create_subprocess_shell，且命令串含
-  拼接/格式化（f-string / + / .format / %）→ 必须标红（warning 档）；
+  拼接/格式化（f-string / + / .format / %）→ 必须标红；
 - 豁免：plain 变量透传（无拼接）、shell=False、注释/字符串里的字样、
   tests/ 与 scripts/ 目录、ALLOW 登记文件、文件 import 了
   command_segments/governance 且在调用邻近（同一函数内）实际使用；
-- 档位：默认 warning 恒退出 0；--strict 违规退出 1（误报清零后升档用）；
-- 真实仓实跑：可执行、产出结构化结果。
+- 档位（D-W2 拍板：默认 strict+双保险）：默认（无参）即 strict，违规退出 1；
+  --strict 显式仍为 strict；--warn 降回 warning 档（恒退出 0，仅供本地排查）；
+- 真实仓实跑：可执行、产出结构化结果、当前仓 0 违规（违规即本文件红）。
 """
 from __future__ import annotations
 
@@ -16,6 +17,8 @@ import ast
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from scripts.check_shell_segments import (
     ALLOW_REGISTRY,
@@ -35,6 +38,12 @@ _VIOLATOR = (
     "\n\n"
     "def go(name):\n"
     "    return subprocess.run(f'ls {name}', shell=True)\n"
+)
+
+#: 一个标准的"变量透传、无拼接"干净样例
+_CLEAN = (
+    "import subprocess\n\n\ndef go(cmd):\n"
+    "    return subprocess.run(cmd, shell=True)\n"
 )
 
 
@@ -230,28 +239,60 @@ class TestExemptions:
 
 
 class TestCliModes:
-    def test_warningMode_exitZeroDespiteViolations(self, tmp_path, capsys):
-        _write(tmp_path, "svc.py", _VIOLATOR)
-        assert main([], root=tmp_path) == 0
-        out = capsys.readouterr().out
-        assert "warning" in out and "svc.py" in out
+    """D-W2 拍板：默认 strict+双保险；--warn 仅供本地排查降档。"""
 
-    def test_strictMode_exitOneOnViolations(self, tmp_path):
+    def test_defaultMode_isStrict_exitOneOnViolations(self, tmp_path):
+        _write(tmp_path, "svc.py", _VIOLATOR)
+        assert main([], root=tmp_path) == 1
+
+    def test_defaultMode_exitZeroWhenClean(self, tmp_path):
+        _write(tmp_path, "clean.py", _CLEAN)
+        assert main([], root=tmp_path) == 0
+
+    def test_strictMode_explicitStillStrict_exitOneOnViolations(self, tmp_path):
         _write(tmp_path, "svc.py", _VIOLATOR)
         assert main(["--strict"], root=tmp_path) == 1
 
     def test_strictMode_exitZeroWhenClean(self, tmp_path):
-        _write(tmp_path, "clean.py", "import subprocess\n\n\ndef go(cmd):\n    return subprocess.run(cmd, shell=True)\n")
+        _write(tmp_path, "clean.py", _CLEAN)
         assert main(["--strict"], root=tmp_path) == 0
+
+    def test_warnMode_exitZeroDespiteViolations(self, tmp_path, capsys):
+        _write(tmp_path, "svc.py", _VIOLATOR)
+        assert main(["--warn"], root=tmp_path) == 0
+        out = capsys.readouterr().out
+        assert "warning" in out and "svc.py" in out
+
+    def test_warnMode_exitZeroWhenClean(self, tmp_path):
+        _write(tmp_path, "clean.py", _CLEAN)
+        assert main(["--warn"], root=tmp_path) == 0
+
+    def test_strictAndWarn_mutuallyExclusive(self, tmp_path):
+        _write(tmp_path, "svc.py", _VIOLATOR)
+        with pytest.raises(SystemExit) as excinfo:
+            main(["--strict", "--warn"], root=tmp_path)
+        assert excinfo.value.code == 2
 
 
 class TestFullRepoScan:
-    def test_warningModeCli_exitsZero_withStructuredOutput(self):
+    def test_defaultCli_cleanRepo_exitsZero_withStructuredOutput(self):
+        # D-W2 起默认即 strict：本测试同时钉住"真实仓 0 违规"——
+        # 任何未治理拼接点进来，这里（连同 CI static-gate）一起红。
         result = subprocess.run(
             [sys.executable, "-I", "-X", "utf8", str(_SCRIPT)],
             capture_output=True, text=True, encoding="utf-8", timeout=300,
         )
-        assert result.returncode == 0, f"warning 档不得阻断：\n{result.stdout}\n{result.stderr}"
+        assert result.returncode == 0, (
+            f"真实仓须 0 违规（默认 strict 档）：\n{result.stdout}\n{result.stderr}"
+        )
+        assert "误报率" in (result.stdout or "")
+
+    def test_warnCli_exitsZero_withStructuredOutput(self):
+        result = subprocess.run(
+            [sys.executable, "-I", "-X", "utf8", str(_SCRIPT), "--warn"],
+            capture_output=True, text=True, encoding="utf-8", timeout=300,
+        )
+        assert result.returncode == 0, f"--warn 档恒退出 0：\n{result.stdout}\n{result.stderr}"
         assert "误报率" in (result.stdout or "")
 
     def test_collectReport_isStructured(self):
@@ -261,7 +302,7 @@ class TestFullRepoScan:
             "violations", "falsePositiveRate", "mode",
         }
         assert report["scannedFiles"] > 0
-        assert report["mode"] == "warning"
+        assert report["mode"] == "strict"
         assert 0.0 <= report["falsePositiveRate"] <= 1.0
         for v in report["violations"]:
             assert {"file", "line", "snippet", "kind"} <= set(v)

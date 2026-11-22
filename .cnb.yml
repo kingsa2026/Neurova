@@ -99,6 +99,16 @@ main:
         - name: ruff check
           script: python -m ruff check neurova tests --no-cache
           timeout: 15m
+        # ── 安全 lint 双保险（拍板 D-W2：两扫描器均默认 strict，违规即阻断）──
+        # U19 判据：shell 拼接必须过 command_segments 分段治理（或登记 ALLOW）；
+        # U2 判据：出站 HTTP 直用点必须登记 ALLOW（走 safe_fetch/url_guard 通路）。
+        # 两步与 GitHub 侧 static-gate job 的对应步骤一对一、同命令、同判据。
+        - name: shell segment governance lint (strict)
+          script: python scripts/check_shell_segments.py
+          timeout: 10m
+        - name: outbound fetch lint (strict)
+          script: python scripts/check_outbound_fetch.py
+          timeout: 10m
 
     # ── 3. 导入巡检 + 审计回归 ───────────────────────────────────────────
     - name: import-and-regression

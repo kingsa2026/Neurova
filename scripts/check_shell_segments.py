@@ -17,9 +17,10 @@ inline 子命令拆段，``neurova/security/governance.py`` 对**每一段**做�
 - AST 判定（非正则）：注释、docstring、普通字符串字面量里的 ``os.system(``
   等字样一律不命中，先例扫描器的整行正则误报面在此收掉。
 
-档位（拍板 D-T5：先 warning 跑误报率，误报清零后升 error 接 static-gate）：
-- 默认 warning：列出违规点，**退出码恒 0**，不阻断；
-- ``--strict``：违规退出 1——供误报清零后升档，本期不挂门禁。
+档位（拍板 D-W2：默认 strict + 双保险——两扫描器显性写入 CI static-gate）：
+- 默认 strict：违规退出 1，阻断（CI static-gate 已显性挂载本扫描器）；
+- ``--strict``：显式 strict，语义与默认一致（保留以明示升档口径）；
+- ``--warn``：降回 warning 档——列出违规点、退出码恒 0，仅供本地排查。
 
 扫描自身豁免：``tests/``、``scripts/``、ALLOW 登记文件。
 
@@ -28,7 +29,7 @@ inline 子命令拆段，``neurova/security/governance.py`` 对**每一段**做�
 ``self.run`` 落到 ``exec_command``）——这类点由后续卡接过程间分析，或按
 修复教义改成 argv 列表传递消掉拼接面。
 
-用法：``python scripts/check_shell_segments.py [--strict]``。
+用法：``python scripts/check_shell_segments.py [--warn]``。
 """
 from __future__ import annotations
 
@@ -268,7 +269,7 @@ def collectReport(root: Path | None = None, registry: dict[str, str] | None = No
         "concatSites": concatSites,
         "violations": violations,
         "falsePositiveRate": VERIFIED_FALSE_POSITIVE_RATE,
-        "mode": "warning",
+        "mode": "strict",
     }
 
 
@@ -279,18 +280,22 @@ def scanTree(root: Path, registry: dict[str, str] | None = None) -> list[dict]:
 
 def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     parser = argparse.ArgumentParser(description="shell 分段治理静态扫描（U19 试点）")
-    parser.add_argument("--strict", action="store_true",
-                        help="升档开关：存在违规退出 1（误报清零后接 static-gate 用）")
+    modeGroup = parser.add_mutually_exclusive_group()
+    modeGroup.add_argument("--strict", action="store_true",
+                           help="显式 strict（与默认一致；D-W2 起默认即 strict，违规退出 1）")
+    modeGroup.add_argument("--warn", action="store_true",
+                            help="降回 warning 档：列出违规点、退出码恒 0（仅供本地排查）")
     args = parser.parse_args(argv)
+    strict = not args.warn
     report = collectReport(root=root)
-    report["mode"] = "strict" if args.strict else "warning"
+    report["mode"] = "warning" if args.warn else "strict"
     scope = root.name if root is not None else "neurova/"
     print(f"[check_shell_segments] 扫描 {scope}：{report['scannedFiles']} 个文件，"
           f"shell 执行点 {report['shellExecSites']} 处，"
           f"其中命令串含拼接/格式化 {report['concatSites']} 处。")
     violations = report["violations"]
     if violations:
-        tail = "，不阻断" if not args.strict else ""
+        tail = "" if strict else "，不阻断"
         print(f"[check_shell_segments] 未接分段治理的拼接型 shell 调用 "
               f"{len(violations)} 处（{report['mode']} 档{tail}）：")
         for v in violations:
@@ -301,7 +306,7 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     fpCount = round(VERIFIED_FALSE_POSITIVE_RATE * hitCount)
     print(f"[check_shell_segments] 误报率统计：人工核实误报 {fpCount} / 命中 {hitCount} "
           f"= {VERIFIED_FALSE_POSITIVE_RATE:.0%}（逐条核实口径见脚本 VERIFIED_FALSE_POSITIVE_RATE 注释）。")
-    if args.strict and violations:
+    if strict and violations:
         return 1
     return 0
 
