@@ -10,6 +10,8 @@
 - 凭据经 web_reach 凭据库加密落盘（只写不读），任务视图与日志不落全文；
 - 部署步骤幂等（重复执行=更新；服务器上已有准入令牌则复用，不换令牌）；
 - 全程审计留痕（CONFIG_CHANGE/HIGH）；提供 remote-undeploy 撤销；
+- 主机密钥严格校验与 computer_ssh_exec 同源（U1：弃 AutoAddPolicy，部署目标
+  首连同样须经 known_hosts 确认，指纹变化 fail-closed 拒连）；
 - 部署包源（systemd 单元模板 + 最小文件集清单）以 `deploy/relay-systemd/`
   为唯一出处，本模块就地读取，不另抄第二份。
 """
@@ -82,15 +84,23 @@ class _SshSession:
         self._password = password
         self._key_text = key_text
         self._client = None
+        self._hostKeyPolicy = None
 
     def connect(self) -> None:
         if _sshClientFactory is not None:
             self._client = _sshClientFactory()
             return
-        import paramiko
+        from neurova.computer_use.ssh_runner import _buildClient, strictHostKeyEnabled
+        from neurova.security.ssh_host_store import get_ssh_host_store
 
-        self._client = paramiko.SSHClient()
-        self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # U1：部署目标也是主机——与 computer_ssh_exec 共用同一 known_hosts 信任锚
+        # （NEUROVA_SSH_STRICT_HOSTKEY 同源开关；部署是 admin 全局操作，记 default 桶）。
+        # 首连未确认 → HostKeyConfirmationNeeded 上抛（任务失败并提示指纹）；
+        # 指纹变化 → HostKeyMismatchError fail-closed（审计 HIGH 已在策略内落）。
+        strict = strictHostKeyEnabled()
+        store = get_ssh_host_store() if strict else None
+        self._client, self._hostKeyPolicy = _buildClient(
+            strict=strict, store=store, agent_id="", host=self._host, port=self._port)
         kwargs: Dict[str, Any] = {"hostname": self._host, "port": self._port,
                                   "timeout": 30.0, "username": self._username}
         if self._key_text:

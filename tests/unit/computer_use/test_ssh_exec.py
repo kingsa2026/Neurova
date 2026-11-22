@@ -67,14 +67,20 @@ class TestSSHRunner:
         out = run_ssh_command("", "ls")
         assert out["returncode"] == -1 and "host" in out["stderr"]
 
-    def test_connect_failure_structured(self):
+    def test_connect_failure_raises_phase_error(self):
+        """U3：连接失败不再回结构化 dict，而是抛相位化 RemoteNotExecutedError。"""
+        from neurova.computer_use.ssh_runner import RemoteNotExecutedError
+
         class Boom:
             def set_missing_host_key_policy(self, p): pass
             def connect(self, **kw): raise RuntimeError("refused")
             def close(self): pass
 
-        out = run_ssh_command("h", "ls", client_factory=lambda: Boom())
-        assert out["returncode"] == -1 and "refused" in out["stderr"]
+        with pytest.raises(RemoteNotExecutedError) as ei:
+            run_ssh_command("h", "ls", client_factory=lambda: Boom())
+        assert ei.value.phase == "connect"
+        assert ei.value.executed is False and ei.value.retryable is True
+        assert "refused" in str(ei.value)
 
 
 class TestRuntimePolicyForSSH:

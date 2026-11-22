@@ -5301,6 +5301,14 @@ class ToolExecutor:
         scheme = urllib.parse.urlparse(url).scheme.lower()
         if scheme not in ("http", "https"):
             return {"error": f"不支持的协议: {scheme or '(空)'}，仅支持 http/https"}
+        # SSRF 单源校验（url_guard）：web_fetch 的 url 由模型/用户完全指定，
+        # 私网/环回/链路本地目标 fail-closed（不合规以 error 诚实回，不吞）
+        from neurova.security.url_guard import assert_public_url
+
+        try:
+            assert_public_url(url)
+        except ValueError as e:
+            return {"error": f"URL 未通过出站安全校验: {e}"}
         try:
             max_chars = int(params.get("max_chars", 8000))
         except (TypeError, ValueError):
@@ -7597,6 +7605,9 @@ class ToolExecutor:
 
         凭据（user/key/password）从当前用户的凭据分桶 platform=ssh 解析；host/command
         由调用方给。结果经 terminal 事件推面板渲染成 SSH 终端窗口。
+        U1：首连主机公钥未经确认时弹主机确认卡（needs_host_confirmation），确认后重连；
+        指纹变化 fail-closed 报 HOST_KEY_MISMATCH。
+        U3：RemoteNotExecutedError 映射为结构化错误载荷（error_code/phase/retryable/executed）。
         """
         try:
             host = params.get("host")
@@ -7606,7 +7617,13 @@ class ToolExecutor:
             if not command:
                 return {"error": "缺少 command 参数"}
 
-            from neurova.computer_use.ssh_runner import resolve_ssh_credentials, run_ssh_command
+            from neurova.computer_use.ssh_runner import (
+                HostKeyConfirmationNeeded,
+                HostKeyMismatchError,
+                RemoteNotExecutedError,
+                resolve_ssh_credentials,
+                run_ssh_command,
+            )
 
             # 凭据桶键必须与凭据 API（current_user["user_id"]）同源：优先请求级
             # identity_context（chat 流由 JWT user_id 注入），回退 agent 身份。
@@ -7614,6 +7631,7 @@ class ToolExecutor:
             from neurova.core.identity_context import get_request_user_id
 
             user_id = get_request_user_id() or self._agent_identity()[0]
+            _user_id, agent_id = self._agent_identity()
 
             def _has_cred(c: Dict) -> bool:
                 return bool(c.get("user") or c.get("key_text") or c.get("password") or params.get("user"))
@@ -7632,38 +7650,136 @@ class ToolExecutor:
                         "success": False, "needs_credential": True, "host": host,
                         "error": f"等待主机 {host} 凭据超时，命令未执行",
                     }
-            result = await asyncio.to_thread(
-                run_ssh_command,
-                host,
-                command,
-                user=params.get("user") or creds.get("user"),
-                port=int(params.get("port") or creds.get("port") or 22),
-                key_text=creds.get("key_text"),
-                password=creds.get("password"),
-                timeout=float(params.get("timeout") or 60),
-            )
-            compact = {
-                "success": result.get("returncode") == 0,
-                "returncode": result.get("returncode", -1),
-                "stdout": result.get("stdout", ""),
-                "stderr": result.get("stderr", ""),
-                "command": command,
-                "host": host,
+            ssh_kwargs: Dict[str, Any] = {
+                "user": params.get("user") or creds.get("user"),
+                "port": int(params.get("port") or creds.get("port") or 22),
+                "key_text": creds.get("key_text"),
+                "password": creds.get("password"),
+                "timeout": float(params.get("timeout") or 60),
+                "agent_id": agent_id or "",
             }
-            await self._emit_computer_event(
-                "computer_ssh_exec", params, compact,
-                terminal={
-                    "command": command,
-                    "stdout": compact["stdout"],
-                    "stderr": compact["stderr"],
-                    "host": host,
-                    "exit": compact["returncode"],
-                },
-            )
+            try:
+                result = await asyncio.to_thread(run_ssh_command, host, command, **ssh_kwargs)
+            except HostKeyConfirmationNeeded as hk:
+                # U1：主机公钥未经用户确认（fail-closed）——弹主机确认卡征求用户，
+                # 确认记录落库后原地重连一次。
+                return await self._handleSshHostConfirmation(
+                    host, command, hk, agent_id or "", params, run_ssh_command, ssh_kwargs)
+            except HostKeyMismatchError as hkm:
+                # U1：指纹变化 fail-closed（审计 HIGH 已在 ssh_runner 策略内落）。
+                return {
+                    "success": False, "error_code": "HOST_KEY_MISMATCH",
+                    "host": host, "port": hkm.port,
+                    "fingerprint": hkm.fingerprint,
+                    "stored_fingerprint": hkm.stored_fingerprint,
+                    "error": str(hkm),
+                }
+            except RemoteNotExecutedError as rne:
+                return self._sshNotExecutedPayload(rne, host, command)
+            compact = self._sshCompactResult(result, host, command)
+            await self._emitSshTerminalEvent(params, compact)
             return compact
         except Exception as e:
             logger.error("SSH 命令执行失败: %s", e)
             return {"error": f"SSH 命令执行失败: {str(e)}"}
+
+    @staticmethod
+    def _sshCompactResult(result: Dict, host: str, command: str) -> Dict:
+        """SSH 执行结果 → 面板/模型共用的紧凑形态。"""
+        return {
+            "success": result.get("returncode") == 0,
+            "returncode": result.get("returncode", -1),
+            "stdout": result.get("stdout", ""),
+            "stderr": result.get("stderr", ""),
+            "command": command,
+            "host": host,
+        }
+
+    async def _emitSshTerminalEvent(self, params: Dict, compact: Dict) -> None:
+        """SSH 结果推终端窗口（terminal 视图渲染进分屏面板）。"""
+        await self._emit_computer_event(
+            "computer_ssh_exec", params, compact,
+            terminal={
+                "command": compact.get("command", ""),
+                "stdout": compact.get("stdout", ""),
+                "stderr": compact.get("stderr", ""),
+                "host": compact.get("host", ""),
+                "exit": compact.get("returncode", -1),
+            },
+        )
+
+    @staticmethod
+    def _sshNotExecutedPayload(rne, host: str, command: str) -> Dict:
+        """U3：RemoteNotExecutedError → 结构化错误载荷（模型/前端据此判断可否重试）。
+
+        executed=False=确认未执行可重试；executed="unknown"=已获部分输出后中断，
+        retryable=False，不可盲目重试。
+        """
+        return {
+            "success": False,
+            "error_code": "REMOTE_NOT_EXECUTED",
+            "phase": rne.phase,
+            "retryable": rne.retryable,
+            "executed": rne.executed,
+            "error": str(rne),
+            "command": command,
+            "host": host,
+        }
+
+    async def _handleSshHostConfirmation(
+        self, host: str, command: str, hk, agent_id: str, params: Dict,
+        run_ssh_command, ssh_kwargs: Dict[str, Any],
+    ) -> Dict:
+        """U1 主机确认卡：与按需凭据卡同通道同形态（WS computer_action 弹卡 + 有限轮询）。
+
+        首连公钥未确认 → 弹卡展示指纹，轮询等待确认记录进 SshHostStore
+        （用户在前端确认卡上确认后，确认动作经 mark_confirmed 落库）；
+        确认到位 → 原地重连一次；超时 → 以 needs_host_confirmation 终止，命令未执行。
+        """
+        from neurova.computer_use.ssh_runner import RemoteNotExecutedError
+        from neurova.security.ssh_host_store import get_ssh_host_store
+
+        store = get_ssh_host_store()
+        await self._emit_computer_event("computer_ssh_exec", params, {
+            "success": False, "needs_host_confirmation": True,
+            "host": host, "port": hk.port,
+            "fingerprint": hk.fingerprint, "key_type": hk.key_type,
+            "error": (f"主机 {host}:{hk.port} 首次连接，公钥指纹 {hk.fingerprint}，"
+                      f"请在确认卡中核对后确认"),
+        })
+        if not await self._awaitSshHostConfirmation(
+                store, agent_id, host, hk.port, hk.fingerprint):
+            return {
+                "success": False, "needs_host_confirmation": True,
+                "host": host, "port": hk.port, "fingerprint": hk.fingerprint,
+                "error": f"等待主机 {host} 公钥确认超时，命令未执行",
+            }
+        try:
+            result = await asyncio.to_thread(run_ssh_command, host, command, **ssh_kwargs)
+        except RemoteNotExecutedError as rne:
+            return self._sshNotExecutedPayload(rne, host, command)
+        compact = self._sshCompactResult(result, host, command)
+        await self._emitSshTerminalEvent(params, compact)
+        return compact
+
+    async def _awaitSshHostConfirmation(
+        self, store, agent_id: str, host: str, port: int, fingerprint: str,
+        timeout: float = 90.0, interval: float = 1.5,
+    ) -> bool:
+        """主机确认卡弹出后有限轮询确认记录（与 _await_ssh_credential 同形态）。
+
+        确认记录（指纹一致）出现即 True；超时 False。本方法只读——写入方是
+        前端确认动作（经确认接口调 SshHostStore.mark_confirmed）。
+        """
+        import time
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            await asyncio.sleep(interval)
+            entry = store.lookup(agent_id, host, port)
+            if entry and entry.get("key_fingerprint") == fingerprint:
+                return True
+        return False
 
     async def _await_ssh_credential(
         self, user_id: str, host: str, timeout: float = 90.0, interval: float = 1.5
@@ -8008,6 +8124,14 @@ class ToolExecutor:
             if isinstance(result, dict) and result.get("needs_credential"):
                 payload["needs_credential"] = True
                 payload["host"] = result.get("host")
+            # U1 主机确认卡：首连公钥未确认 → 指纹/端口/密钥类型随卡透传
+            #（前端渲染确认对话框，确认动作经 SshHostStore.mark_confirmed 落库）
+            if isinstance(result, dict) and result.get("needs_host_confirmation"):
+                payload["needs_host_confirmation"] = True
+                payload["host"] = result.get("host")
+                payload["port"] = result.get("port")
+                payload["fingerprint"] = result.get("fingerprint")
+                payload["key_type"] = result.get("key_type")
             # R0-3 刷新标记 + R1-2 动作结果契约（新增字段，旧前端不受影响）
             if isinstance(result, dict) and result.get("refreshed"):
                 payload["refreshed"] = True
