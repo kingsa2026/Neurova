@@ -98,31 +98,38 @@
 - **不改总报告 D4 评分**：工具安全拆解（v7）已把该差距计入轴3/轴6（L 9/7.5 与 L 9/7），本专项未发现新的方向性误判；D4 维持 L 12.0 / N 11.5。
 - 本仓反超项（轴9 审计）与可借鉴点清单见下节。
 
-## 4. 可借鉴点（待拍板，非立即实施）
+## 4. 可借鉴点——工具与执行安全全量（待拍板，非立即实施）
 
-以下为对方远程执行面中值得本仓吸收的全部可借鉴点，按价值分档，均附对方证据与本仓落点。
+本节为 **D4 工具与执行安全全域的可借鉴点单一收口**（不止远程执行——含《reference_ad_tool_security_teardown_2026-11-22.md》全部轴与远程执行二级专项的全部条目；工具安全拆解 §4 已改为指向本节，不另立第二份清单）。按价值分档；来源轴标注在条目首，均附对方证据与本仓落点。
 
 P0（安全实益，直接补缺口）：
-1. **SSH host key 校验收紧**：本仓两处 paramiko 均 AutoAddPolicy（TOFU，`ssh_runner.py:64`、`remote_deploy.py:92-93`）——改为 known_hosts 校验+新主机首接确认卡（可配置严格模式）。这是本仓远程链路当前最实的安全缺口。
-2. **离线 hold 与"never ran, safe to retry"语义**（`http.ts:24-31`）：设备/主机失联时先 hold 至超时+宽限窗，再返回明确的"未执行、可安全重试"错误——消除本仓同步模型下"不确定远端是否已执行"的重复执行风险。
-3. **派发前最后一刻授权复验**（`dispatchAuthorization.ts:20-40`）：审批通过与命令真正发出之间存在时间窗，目标/范围可能已被改——发出前再验一次归属与范围。
+1. **SSRF 防护收敛为专用包+lint 强制**（源：工具安全轴7）：把 http_fetch 逐跳守卫与各咽喉点校验收敛为单一 safe-fetch 模块（私网/环回/link-local/meta IP 逐跳过滤+体积上限+可识别异常），并以自定义静态检查强制新出站代码走它。影响面=http_fetch.py、web_reach、rss_read、knowledge_ingestion、model_runtime 媒体下载（对方 `ssrf-safe-fetch/index.ts:182-213`+alint no-unsafe-user-url-fetch 规则）。
+2. **SSH host key 校验收紧**（源：远程执行轴3）：本仓两处 paramiko 均 AutoAddPolicy（TOFU，`ssh_runner.py:64`、`remote_deploy.py:92-93`）——改为 known_hosts 校验+新主机首接确认卡（可配置严格模式）。本仓远程链路当前最实的安全缺口。
+3. **离线 hold 与"never ran, safe to retry"语义**（源：远程执行轴7，`http.ts:24-31`）：设备/主机失联时先 hold 至超时+宽限窗，再返回明确的"未执行、可安全重试"错误——消除"不确定远端是否已执行"的重复执行风险。
+4. **派发前最后一刻授权复验**（源：远程执行轴4，`dispatchAuthorization.ts:20-40`）：审批通过与命令真正发出之间存在时间窗，目标/范围可能已被改——发出前再验一次归属与范围。
 
 P1（可靠性/架构增强）：
-4. **长命令 park+迟交回灌**（`asyncShellPark.ts:15-54`、`deviceToolCompletion.ts:50-112`）：超窗命令转后台承诺+结果迟交+ack 超时重发——补本仓 SSH 同步 60s 模型对长任务的表达力。
-5. **token 后置连接认证**（`client.ts:99,448-454`）：token 不进 URL、作为连接后首条 auth 消息、服务端复验 claim——可加固本仓 relay/tunnel 通道（现凭据经 URL/头，中继侧可见）。
-6. **newest-wins 连接顶替+全窗口 watchdog**（`client.ts:51,572-589,36-42`）：同 connectionId 新连接顶替旧连接防回抢；watchdog 覆盖 TCP+TLS+upgrade+auth 全窗口——本仓 TunnelAgent 重连逻辑可借。
-7. **进程树清算**（`process-tree.ts:41-75`）：PowerShell CIM 快照 BFS 收集后代 pid+taskkill 批量击杀（20/批）——补强本仓进程池清扫与子代理进程回收。
-8. **失败分级重试守卫**（`sessionGuards.ts:44-51`）：仅传输级失败允许换会话重试，应用层失败不重试——防变异类工具被重试造成二次副作用。
-9. **结构化 \*\_UNSUPPORTED 拒绝**（`dispatch.ts:168-185,587-643`）：能力未注入时返回稳定错误形态而非异常——本仓工具错误分类学可对齐。
-10. **设备能力声明路由**（`systemInfo.ts:93-119`+Redis 缓存 `keys.ts:374-377`）：按端上报的 supportedTools/clientKinds 把调用路由到能执行的端——本仓多后端桌面执行（本机/来宾机/RDP/Sandbox）可借此做统一选端。
+5. **沙箱补档位**（源：工具安全轴6）：现有 restricted_token/appcontainer 之上评估容器级或 WASM 级第二档（对方 Pyodide/云沙箱形态），让 run_code 有"进程隔离"与"强隔离"两档可选。
+6. **动态干预审计注册表**（源：工具安全轴9）：把"越出工作区即问/永久删除必问"类参数级动态审计做成声明式注册表（对方 `dynamicInterventionAudits.ts:13-20` 形态），与本仓审批链 L0-L2 叠加。
+7. **工具 manifest 增补运行元数据**（源：工具安全轴1）：defaultTimeoutMs clamp 区间、是否可序列化/有序执行等进 `_BUILTIN_SCHEMAS` 单源（本仓已有 capability 声明，补齐超时/序列化维度；对方 `types/src/tool/builtin.ts:144-151`）。
+8. **长命令 park+迟交回灌**（源：远程执行轴7，`asyncShellPark.ts:15-54`、`deviceToolCompletion.ts:50-112`）：超窗命令转后台承诺+结果迟交+ack 超时重发——补 SSH 同步 60s 模型对长任务的表达力。
+9. **token 后置连接认证**（源：远程执行轴2，`client.ts:99,448-454`）：token 不进 URL、作为连接后首条 auth 消息、服务端复验 claim——加固本仓 relay/tunnel 通道（现凭据经 URL/头，中继侧可见）。
+10. **newest-wins 连接顶替+全窗口 watchdog**（源：远程执行轴2，`client.ts:51,572-589,36-42`）：同 connectionId 新连接顶替旧连接防回抢；watchdog 覆盖 TCP+TLS+upgrade+auth 全窗口——本仓 TunnelAgent 重连逻辑可借。
+11. **进程树清算**（源：远程执行轴8，`process-tree.ts:41-75`）：PowerShell CIM 快照 BFS 收集后代 pid+taskkill 批量击杀（20/批）——补强本仓进程池清扫与子代理进程回收。
+12. **失败分级重试守卫**（源：远程执行轴8，`sessionGuards.ts:44-51`）：仅传输级失败允许换会话重试，应用层失败不重试——防变异类工具被重试造成二次副作用。
 
-P2（体验/生态）：
-11. **云沙箱双 provider**（`deployment.ts:6-14`）：market 托管/onlyboxes 自托管双轨——本仓沙箱档位可评估同款"托管+自托管"并存。
-12. **设备通道多型 token**（apiKey/jwt/serviceToken，`client.ts:99`）：不同信任域用不同 token 类型，便于撤销与最小授权。
-13. **不可信会话凭据隔离**（`cloudSandbox.ts:27-45`）：share visitor 场景禁用凭据 shim，防凭据交给不可信 shell——本仓分享/来宾场景可借。
-14. **浏览器会话按 topic 键控+截图落盘**（`browser.ts:28-31,74-111`）：会话隔离与产物落盘纪律。
+P2（体验/生态/强制面）：
+13. **结构化 \*\_UNSUPPORTED 拒绝**（源：远程执行轴8，`dispatch.ts:168-185,587-643`）：能力未注入时返回稳定错误形态而非异常——本仓工具错误分类学可对齐。
+14. **设备/端能力声明路由**（源：远程执行轴8，`systemInfo.ts:93-119`+Redis 缓存 `keys.ts:374-377`）：按端上报的 supportedTools/clientKinds 把调用路由到能执行的端——本机/来宾机/RDP/Sandbox 多后端统一选端。
+15. **HPKE 级凭据信道评估**（源：工具安全轴8）：对方 secret-channel（RFC 9180）实现精良但未接线——本仓凭据面若需跨进程/跨端传递可参考，不接线不加分。
+16. **MCP Apps 交互 UI**（源：工具安全轴4）：对方 SEP-1865 支持——本仓 MCP server 面可评估补 UI 约定。
+17. **云沙箱双 provider**（源：远程执行轴5，`deployment.ts:6-14`）：market 托管/onlyboxes 自托管双轨——本仓沙箱档位可评估同款"托管+自托管"并存。
+18. **设备通道多型 token**（源：远程执行轴2，apiKey/jwt/serviceToken，`client.ts:99`）：不同信任域用不同 token 类型，便于撤销与最小授权。
+19. **不可信会话凭据隔离**（源：远程执行轴5，`cloudSandbox.ts:27-45`）：share visitor 场景禁用凭据 shim，防凭据交给不可信 shell——本仓分享/来宾场景可借。
+20. **浏览器会话按 topic 键控+截图落盘**（源：远程执行轴5，`browser.ts:28-31,74-111`）：会话隔离与产物落盘纪律。
+21. **alint 式安全 lint 扩展**（源：工具安全轴10）：以模型背书 lint 守 no-shell-command-injection/no-secret-exposure/no-unsafe-raw-sql 类安全判据（误报率定级后设 error）——补静态规则表达不了的安全判据。
 
-不照搬：Electron IPC 零对端鉴权的本地信任模型（对方最弱环之一，`ipcServer.ts:64-102`）；闭源云侧网关依赖（本仓中继自托管可审计是对应优势，补 TLS 终结说明即可）；DO 状态机整体迁移（成本高且强绑云服务）。
+不照搬：Electron IPC 零对端鉴权的本地信任模型（对方最弱环之一，`ipcServer.ts:64-102`）；闭源云侧网关依赖（本仓中继自托管可审计是对应优势，补 TLS 终结说明即可）；DO 状态机整体迁移（成本高且强绑云服务）；local-system 主进程直执行（对方弱项，本仓沙箱族路线更对）。
 
 ## 5. 本仓守卫提示（对方没有、勿被"对齐"掉）
 

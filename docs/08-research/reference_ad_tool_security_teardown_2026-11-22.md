@@ -100,19 +100,9 @@
 - D4 合计：L 12.5/10.5 → **L 12.0 / N 11.5**（L 险胜 0.5）；总报告总分 98.0/95.0 → **97.5/96.0**。
 - 口径说明：十轴等权下本仓 82.0 vs 78.0 反超；总报告 D4 因"执行安全"占 5.5/14 权重且对方在沙箱/SSRF/凭据三轴领先，判 L 险胜 0.5——两个口径并存，实质是"工具智能 vs 执行安全基建"的画像差，差距已收敛到 0.5 分。
 
-## 4. 追平指向（待拍板，非立即实施）
+## 4. 可借鉴点
 
-P0：
-1. **SSRF 防护收敛为专用包+lint 强制**：把 http_fetch 逐跳守卫与各咽喉点校验收敛为单一 safe-fetch 模块（私网/环回/link-local/meta IP 逐跳过滤+体积上限+可识别异常），并以自定义静态检查强制新出站代码走它。影响面=http_fetch.py、web_reach、rss_read、knowledge_ingestion、model_runtime 媒体下载。
-P1：
-2. **沙箱补档位**：现有 restricted_token/appcontainer 之上评估容器级或 WASM 级第二档（对方 Pyodide/云沙箱形态），让 run_code 有"进程隔离"与"强隔离"两档可选。
-3. **动态干预审计注册表**：把"越出工作区即问/永久删除必问"类参数级动态审计做成声明式注册表（对方 dynamicInterventionAudits 形态），与本仓审批链 L0-L2 叠加。
-4. **工具 manifest 增补运行元数据**：defaultTimeoutMs clamp 区间、是否可序列化/有序执行等进 _BUILTIN_SCHEMAS 单源（本仓已有 capability 声明，补齐超时/序列化维度）。
-P2：
-5. **HPKE 级凭据信道评估**：对方 secret-channel（RFC 9180）实现精良但未接线——本仓凭据面若需跨进程/跨端传递可参考，不接线不加分。
-6. **MCP Apps 交互 UI**：对方 SEP-1865 支持，本仓 MCP server 面可评估补 UI 约定。
-
-不照搬：local-system 主进程直执行（对方弱项）；device-gateway 双执行面的全套分布式复杂度（本仓单管道+span 已满足当前形态）。
+D4 全域可借鉴点清单（21 项：P0×4/P1×8/P2×9）统一收口在《reference_ad_remote_execution_teardown_2026-11-22.md》§4——本节不另立第二份清单（教义第 6 条）。原轴级指向（SSRF 专用包收敛=轴7/沙箱补档位=轴6/动态干预审计注册表=轴9/manifest 运行元数据=轴1/HPKE 凭据信道=轴8/MCP Apps UI=轴4）均已并入该汇总。
 
 ## 5. 本仓守卫提示（对方没有、勿被"对齐"掉）
 
