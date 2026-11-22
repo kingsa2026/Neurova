@@ -308,3 +308,57 @@ class TestDistillContentCap:
         assert captured["events"], "种子事件必须已落"
         for event in captured["events"]:
             assert len(event.get("content") or "") <= 400
+
+    def testAuditOrderPrefersDeepestLoop(self):
+        """审计顺序按独走长度降序：最深的独走环优先复核，配额不足时浅环让位。"""
+        from neurova.collaboration.triage_dataset import labelWindows
+
+        audited = []
+
+        def fakeGate(window):
+            audited.append(window["conversationId"])
+            return False
+
+        windows = [
+            {"conversationId": "a/shallow", "events": (
+                [{"role": "assistant", "content": f"独白{i}"} for i in range(22)]
+                + [{"role": "user", "content": "我在"}]
+                + [{"role": "assistant", "content": f"续{i}"} for i in range(2)])},
+            {"conversationId": "a/deep", "events": _soloLoop(30)},
+            {"conversationId": "a/mid", "events": (
+                [{"role": "assistant", "content": f"独白{i}"} for i in range(22)]
+                + [{"role": "user", "content": "我在"}]
+                + [{"role": "assistant", "content": f"续{i}"} for i in range(8)])},
+        ]
+        result = labelWindows(windows, distillLimit=2, triageFn=fakeGate,
+                              distillScope="audit")
+        assert audited == ["a/deep", "a/mid"]
+        assert result["distillUsed"] == 2
+
+    def testTeacherCallsArePaced(self, monkeypatch):
+        """教师调用间保持最小间隔（moss 对连续调用会回 429 concurrency_limit）。"""
+        import neurova.collaboration.triage_dataset as datasetMod
+        from neurova.collaboration.triage_dataset import realGateTriageFn
+        from neurova.llm import triage as triageMod
+        from neurova.sync import session_sync_manager as ssm
+        from neurova.sync.session_sync_manager import SessionSyncManager
+
+        ssm.reset_session_sync_manager()
+        manager = SessionSyncManager(
+            config={"max_sessions": 200, "session_timeout": 3600, "max_history_size": 5000}
+        )
+        monkeypatch.setattr(ssm, "_manager_instance", manager)
+        monkeypatch.setattr(datasetMod, "_lastTeacherCallAt", 0.0)
+        monkeypatch.setenv("NEUROVA_DISTILL_TEACHER_MIN_INTERVAL", "0.3")
+        sleeps = []
+        monkeypatch.setattr(datasetMod.time, "sleep", lambda s: sleeps.append(s))
+
+        class FakeGate:
+            async def triage_message(self, conversation_id):
+                return type("R", (), {"actionable": False})()
+
+        monkeypatch.setattr(triageMod, "get_small_brain_triage_gate", lambda: FakeGate())
+        window = {"conversationId": "agentA/paced", "events": _alternating(8)}
+        realGateTriageFn(window)
+        realGateTriageFn(window)
+        assert any(s >= 0.2 for s in sleeps), f"第二次调用前应有节流等待: {sleeps}"

@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List
@@ -33,6 +35,9 @@ MAX_WINDOW_EVENTS = 50
 
 #: 蒸馏种子单条消息内容截断（字符）——防超长消息把教师 prompt 顶过 token 上限
 MAX_DISTILL_CONTENT_CHARS = 400
+
+#: 教师调用节流状态（monotonic；realGateTriageFn 串行调用间保持最小间隔）
+_lastTeacherCallAt = 0.0
 
 
 def harvestSessionWindows(
@@ -185,8 +190,15 @@ def labelWindows(
         else:
             grayUnlabeled += 1
 
-    # 蒸馏第二优先（audit 范围）：教师复核规则已决窗口，裁决覆盖规则标签
+    # 蒸馏第二优先（audit 范围）：教师复核规则已决窗口，裁决覆盖规则标签。
+    # 审计顺序按独走长度降序——最深的独走环是跳过判据的最高风险点，优先复核。
     if distillScope == "audit":
+        auditPending.sort(
+            key=lambda pair: (
+                -float(pair[0]["features"].get("agentStreakLength") or 0.0),
+                str(pair[0]["conversationId"]),
+            )
+        )
         for entry, window in auditPending:
             def _applyAudit(actionable: bool, entry: Dict[str, Any] = entry) -> None:
                 entry.update({
@@ -233,6 +245,14 @@ def realGateTriageFn(window: Dict[str, Any]) -> bool:
             payload={"content": content[:MAX_DISTILL_CONTENT_CHARS]},
             timestamp=timestamp,
         ))
+    # 教师调用节流：moss 对连续调用会以 429 concurrency_limit_exceeded 应对
+    # （实测连续蒸馏 101 次仅 12 次成功），串行 + 最小间隔可大幅提高成功率。
+    global _lastTeacherCallAt
+    interval = float(os.environ.get("NEUROVA_DISTILL_TEACHER_MIN_INTERVAL", "6"))
+    wait = _lastTeacherCallAt + interval - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+    _lastTeacherCallAt = time.monotonic()
     # triage_message 是协程：离线脚本无事件循环，用 asyncio.run 驱动真门
     result = asyncio.run(get_small_brain_triage_gate().triage_message(seedId))
     return bool(result.actionable)
