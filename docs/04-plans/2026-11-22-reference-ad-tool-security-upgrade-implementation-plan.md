@@ -3,7 +3,7 @@
 - 日期：2026-11-22
 - 来源：总报告《reference_ad_vs_neurova_fullstack_evaluation_2026-11-21.md》D4 维两份专项拆解的可借鉴点全量收口（21 项，见《reference_ad_remote_execution_teardown_2026-11-22.md》§4）
 - 性质：**实施计划（已实施完毕 2026-11-22：三批十九卡+U20 全部落地，D4 专项复评 86.5/100）**——按卡实施、每卡先红后绿+live-verify；竞品/外部对标，研究参考，不作产品事实源
-- 目标：D4 专项十轴复评 82.0→90.0+（轴1 8.5→9.0/轴3 6.5→8.0/轴6 7.0→8.5/轴7 7.0→9.0/轴9 8.5→9.0/轴10 8.5→9.0）；总报告 D4 11.5→13.0+、总分 96.0→98.0+
+- 目标：D4 专项十轴复评 82.0→86.5 已达（批一~三）；批四（W1 统一远程执行面+W2 lint 升 error）目标=轴3 8.0→9.0、轴7 8.5→9.0，专项 86.5→89.0+；总报告 D4 12.5→13.0+、总分 98.0→98.5+（对 LobeHub 97.5 领先扩大至 1.0+）
 - 范围红线：只吸收借鉴点，不动既有已验收行为；净新增 LOC 逐卡申报；不引第三方重依赖（paramiko/pyotp 级别以下优先标准库）
 
 ## 0. 卡位总览
@@ -30,6 +30,10 @@
 | 批三 P2 | U17 | 远程执行轴5 | 不可信会话凭据隔离 |
 | 批三 P2 | U18 | 远程执行轴5 | 浏览器会话 topic 键控+截图落盘核对 |
 | 批三 P2 | U19 | 工具安全轴10 | alint 式安全 lint 试点 |
+| 批四 P0 | W1a | 复评轴3 剩余差距 | 统一远程执行面·端点注册表（SQLite+六形态登记） |
+| 批四 P0 | W1b | 复评轴3 剩余差距 | 统一分派漏斗+离线 hold 全覆盖 |
+| 批四 P0 | W1c | 复评轴3 剩余差距 | 工具面收口+绕过静态守卫 |
+| 批四 P0 | W2 | 复评轴7 剩余差距 | lint 升 error（shell 分段默认 strict+static-gate 双保险） |
 
 ## 1. 批一 P0（安全实益，四卡，无阻塞可开工）
 
@@ -112,7 +116,29 @@
 **U18 浏览器会话 topic 键控+截图落盘核对**：核对 browser_* 工具会话隔离与截图产物落盘路径，补齐缺口（如已有则核销）。
 **U19 alint 式安全 lint 试点**：模型背书 lint 试点两条判据——"新出站代码必须走 safe_fetch（配合 U2）""shell 拼接必须过 command_segments"；先 warning 档跑误报率，达标后升 error 接入 static-gate（D-T5 已拍板：先 warning 观察）。
 
-## 4. 拍板结果（2026-11-22 交互拍板，六项全落定）
+## 4. 批四（复评剩余差距追平，2026-11-22 二次立卡；D-W1a/b/c、D-W2 已拍板）
+
+**W1a 统一远程执行面·端点注册表（SQLite，D-W1b 已拍板=SQLite+离线 hold 全覆盖）**
+- 现状：六形态（SSH/guest/隧道/neuacp/远程 MCP/中继代部署）各自为政——ssh_runner/guest_agent/tunnel/neuacp 名册/mcp_source 各自记录连接信息，无统一注册表与审计面（grep 实证）。
+- 做法：新建 `neurova/remote_exec/registry.py`——RemoteEndpoint（endpoint_id/kind: ssh|guest|tunnel|neuacp|mcp/owner+tenant/capability 声明/health+last_seen/连接信息引用）落 SQLite（core/db_migration 注册迁移）；六形态接入登记（全命中点扫荡：ssh_runner 建连、guest_agent 注册、tunnel 配对/relay、neuacp 名册、mcp_source）。
+- 红绿：红=六形态当前无统一注册表面（grep 实证各自为政）；绿=六形态注册可查、租户段隔离、审计事件齐全。
+- live-verify：真后端注册 ssh+guest 两端点→查询→租户隔离断言。
+
+**W1b 统一分派漏斗+离线 hold 全覆盖**
+- 做法：新建 `neurova/remote_exec/dispatch.py`——dispatch(tool_call, endpoint) 统一入口：准入（租户/能力/审批复验，复用 U4）→路由形态执行体（ssh_runner/guest_agent/tunnel/neuacp）→统一结果信封（executed/phase/retryable，U3 语义）→离线 hold（端点不可达 hold 至超时+宽限，返回"未执行、可安全重试"）→清算（kill_tree）。computer_ssh_exec/guest 工具/隧道形态先行接入。
+- 红绿：红=ssh/guest 当前各自为政无统一信封（各返回各的）；绿=两形态经漏斗执行、离线 hold 生效、审计一致。
+- live-verify：真 sshd+guest 桩双形态经漏斗执行+离线 hold 实测。
+
+**W1c 工具面收口+静态守卫**
+- 做法：tool_executor 的远程工具（computer_ssh_exec/guest_*）全走漏斗（全命中点扫荡）；新增守卫测试——远程形态绕过漏斗（直调 ssh_runner/guest client）即红。
+- 红绿：红=存在绕过漏斗的直调；绿=守卫断言零绕过。
+
+**W2 lint 升 error（D-W2 已拍板=默认 strict+双保险）**
+- 做法：check_shell_segments.py 默认档 strict（--warn 才降档）；check_outbound_fetch 已 strict；两扫描器显性写入 .cnb.yml static-gate；单测继续钉住（违规即测试红）。
+- 红绿：红=引入一个未登记出站点/拼接点→static-gate 红；绿=当前仓零违规通过。
+- live-verify：本地跑两扫描器+单测。
+
+## 5. 拍板结果（2026-11-22 交互拍板，六项全落定）
 
 - **D-T1 沙箱第二档路线：Docker 容器档**——U5 按此实施（run_code/exec_command 增 `isolation="strong"`）；Windows Sandbox 自动化与 Pyodide WASM 不做。
 - **D-T2 park 回灌通道：REST 轮询**——/v1/tools/park/{park_id} 查询端点；WS 事件推送与 webhook 回调不做。
@@ -120,8 +146,11 @@
 - **D-T4 SSRF 迁移范围：一次全量迁移**——5-8 个出站文件同批改走 safe_fetch，静态检查直接开严格模式。
 - **D-T5 lint 门禁：先 warning 观察**——两判据 warning 跑误报率，清零后升 error 接 static-gate。
 - **D-T6 评估卡：评估后拍板**——U13/U14 各出评估结论再定是否实施。
+- **D-W1a 统一远程执行面范围：六形态全量收口**——SSH/guest/隧道/neuacp/远程 MCP/中继代部署全部接入统一注册表与分派漏斗；先试点两形态的做法不做。
+- **D-W1b 注册表持久化与离线语义：SQLite 表+离线 hold 全覆盖**——端点注册表落 SQLite（含租户/能力/健康度），离线 hold（"未执行、可安全重试"）覆盖全部远程形态；进程内注册表不做。
+- **D-W2 lint 升 error：默认 strict+双保险**——check_shell_segments 默认 strict（--warn 才降档）、两扫描器显性写入 .cnb.yml static-gate、单测钉住；仅挂载不改默认的做法不做。
 
-## 5. 明确不做
+## 6. 明确不做
 
 - 不引入闭源云侧网关依赖与 DO 状态机形态（本仓中继自托管可审计）。
 - 不做 Electron IPC 形态（本仓无该架构）。
@@ -129,13 +158,14 @@
 - 不为追分做无消费方的表面工程（HPKE/MCP Apps 只做评估、拍板后才实施）。
 - 不改既有已验收工具的对外行为语义（仅增补元数据/错误形态，保持向后兼容）。
 
-## 6. 验收与复评
+## 7. 验收与复评
 
 - 每卡：先红后绿（失败测试先行）+真链路 live-verify 证据入提交说明；分域回归零新增失败。
 - 批验收：批一完成→D4 专项复评轴7 7.0→9.0、轴3 6.5→8.0（总分 82.0→85.0+）；批二完成→轴6 7.0→8.5、轴9 8.5→9.0、轴1 8.5→9.0（→89.0+）；批三完成→轴10 8.5→9.0、轴4 9.0→9.5（→90.0+）。
+- 批四验收：W1+W2 完成→D4 专项复评轴3 8.0→9.0、轴7 8.5→9.0（86.5→89.0+）；总报告 D4 12.5→13.0+、总分 98.0→98.5+（对 LobeHub 97.5 领先扩大至 1.0+）。轴6 云沙箱 provider 档（8.0→8.5）按 U15 评估待真实消费场景另卡。
 - 总验收：总报告 D4 11.5→13.0+、总分 96.0→98.0+；全部复评读数回填本文件执行记录与总报告复核说明。
 
-## 7. 执行记录
+## 8. 执行记录
 
 - **2026-11-22 评估卡回填（U13/U14/U15/U18）**：U13 HPKE=**暂缓**（本仓凭据不穿不可信中转：一次性配对码+connect ticket+TLS+SSH 信道+本地注入四条链路均已闭环；引入 HPKE=第二套并行凭据面，违教义第 6 条）；U14 MCP Apps UI=**暂缓不立项**（本仓 MCP 消费方全为无头 agent，无 UI 宿主，做了即"注册无消费者模块"）；U15 云沙箱双 provider=**暂缓**（单机部署形态零云沙箱消费方，先落 U5 容器档，未来上云时 provider seam 长在 code_sandbox 既有后端选择处）；U18 核对=截图链已规范（核销），但发现两个真实隔离缺口→**新增 U20 卡**入批二（浏览器 context 跨用户共享；浏览器产物共享目录无属主登记可被任意登录用户跨读）。
 - **2026-11-22 U19 试点回填（shell 分段判据）**：`scripts/check_shell_segments.py`（AST 判定四类 shell 执行点 × 拼接/格式化，豁免 tests//scripts//ALLOW 登记/治理 import 邻近使用）+ `tests/unit/security/test_shell_segments_scan.py` 先红后绿 32 例全绿；全仓实跑 1273 文件、shell 执行点 5 处（hooks_engine:118、shell_sessions:96、computer.py:461、ssh_runner:273、remote_deploy:113）、调用点拼接 0 处 → 违规 0，warning 档退出 0；误报率 0/0 按 0.0 记（5 处命令串均变量透传，逐条人工复核无拼接面）；已知盲区=跨函数先拼接再透传（remote_deploy.writeText f-string → self.run → exec_command），待后续卡接过程间分析或按教义改 argv 传递；误报清零前维持 warning 不升 error（D-T5）。
