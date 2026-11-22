@@ -234,7 +234,11 @@ Agent: "Starting task Y with deadline tomorrow"
         return cfg
 
     async def _call_triage_model(self, messages: List[Message]) -> CallResult:
-        """Call small model for triage decision"""
+        """Call small model for triage decision
+
+        P1-10：凭据缺失/适配器故障等基础设施性失败一律以 TriageGateError
+        诚实上抛（本类 docstring 的既定契约），不裸传底层异常类型。
+        """
         registry = get_provider_registry()
 
         # Create adapter instance
@@ -250,9 +254,12 @@ Agent: "Starting task Y with deadline tomorrow"
         ] + messages
 
         # Execute call
-        result = await adapter.call(full_messages)
-
-        return result
+        try:
+            return await adapter.call(full_messages)
+        except TriageGateError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 基础设施性失败统一为门语义
+            raise TriageGateError(f"分诊模型调用失败: {exc}") from exc
 
     def _prepare_triage_messages(self, conversation_history: List[Dict]) -> List[Message]:
         """Prepare conversation history for triage"""

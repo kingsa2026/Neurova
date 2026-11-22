@@ -180,3 +180,51 @@ class TestTrainingPipeline:
         tampered.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         with pytest.raises(NeuJudgeUnavailable):
             NeuJudge.loadFrom(tampered)
+
+
+class TestRealSourceTraining:
+    """D-SB3：--source real 从真实会话文件收割窗口训练（不再只有合成数据）。"""
+
+    def testRealSourceMainTrainsFromSessionFiles(self, script, tmp_path):
+        dataRoot = tmp_path / "data"
+
+        def writeSession(agentDir: str, sessionId: str, messages: list) -> None:
+            sessionsDir = dataRoot / agentDir / "sessions"
+            sessionsDir.mkdir(parents=True, exist_ok=True)
+            base = datetime(2026, 11, 22, 9, 0, 0)
+            payload = {
+                "agent_id": agentDir,
+                "session_id": sessionId,
+                "messages": [
+                    {"role": m["role"], "content": m["content"],
+                     "timestamp": (base + timedelta(seconds=i * 5)).isoformat()}
+                    for i, m in enumerate(messages)
+                ],
+            }
+            (sessionsDir / f"session_{sessionId}_2026-11-22.json").write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        def alternating(count: int) -> list:
+            msgs = [{"role": "user" if i % 2 == 0 else "assistant",
+                     "content": f"问题{i}，各不相同。"} for i in range(count - 1)]
+            msgs.append({"role": "user", "content": "最后一条人类消息"})
+            return msgs
+
+        def solo(count: int) -> list:
+            return [{"role": "assistant", "content": f"独走{i}"} for i in range(count)]
+
+        for i in range(6):
+            writeSession(f"agentH{i}", f"human{i}", alternating(8))
+        for i in range(6):
+            writeSession(f"agentL{i}", f"loop{i}", solo(25))
+
+        out = tmp_path / "artifact.json"
+        rc = script.main([
+            "--source", "real", "--data-root", str(dataRoot),
+            "--out", str(out), "--min-messages", "6", "--max-windows", "50",
+        ])
+        assert rc == 0
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["model_version"] == "0.3.0-real"
+        assert payload["feature_version"] == FEATURE_VERSION
+        assert NeuJudge.loadFrom(out) is not None

@@ -392,8 +392,51 @@ def _dataFingerprint(trainSamples: List[Dict]) -> str:
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _trainAndEvaluate(
+    labelled: List[Dict],
+    greyCount: int,
+    totalWindows: int,
+    seed: int,
+    modelVersion: str = MODEL_VERSION_TRAINED,
+) -> Dict:
+    """标注样本 → 标准化训练 → 冻结集评测 → 权重产物（合成/真实两源共用）。"""
+    trainSamples = [sample for sample in labelled if _isTrainSplit(sample["sessionId"])]
+    frozenSamples = [sample for sample in labelled if not _isTrainSplit(sample["sessionId"])]
+    if not trainSamples or not frozenSamples:
+        raise RuntimeError("训练/冻结验证集切分为空，请增大 --windows 或提供更多会话")
+
+    mean, sigma, constantKeys = _standardize([sample["features"] for sample in trainSamples])
+    weightsStd, biasStd, iterations, finalLoss = _trainLogisticRegression(
+        trainSamples, mean, sigma, random.Random(seed)
+    )
+    rawWeights, rawBias = _foldIntoRawSpace(weightsStd, biasStd, mean, sigma, constantKeys)
+
+    metrics: Dict[str, float] = _evaluateFrozen(frozenSamples, rawWeights, rawBias)
+    metrics.update(
+        {
+            "trainWindows": float(len(trainSamples)),
+            "frozenWindows": float(len(frozenSamples)),
+            "greyZoneWindows": float(greyCount),
+            "greyZoneRatio": greyCount / totalWindows if totalWindows else 0.0,
+            "constantFeatureCount": float(len(constantKeys)),
+            "iterations": float(iterations),
+            "finalLoss": finalLoss,
+            "learningRate": LEARNING_RATE,
+        }
+    )
+
+    return {
+        "model_version": modelVersion,
+        "feature_version": FEATURE_VERSION,
+        "bias": rawBias,
+        "weights": {key: rawWeights[key] for key in FEATURE_KEYS},
+        "data_fingerprint": _dataFingerprint(trainSamples),
+        "eval_metrics": metrics,
+    }
+
+
 def trainNeuJudge(windowCount: int = DEFAULT_WINDOWS, seed: int = DEFAULT_SEED) -> Dict:
-    """跑完整训练管线，返回可被 NeuJudge.loadFrom 加载的权重产物 payload。"""
+    """跑完整训练管线（合成窗口），返回可被 NeuJudge.loadFrom 加载的权重产物。"""
     windows = buildSyntheticWindows(windowCount, seed)
     if not windows:
         raise RuntimeError("--windows 必须为正整数")
@@ -417,47 +460,89 @@ def trainNeuJudge(windowCount: int = DEFAULT_WINDOWS, seed: int = DEFAULT_SEED) 
             }
         )
 
-    trainSamples = [sample for sample in labelled if _isTrainSplit(sample["sessionId"])]
-    frozenSamples = [sample for sample in labelled if not _isTrainSplit(sample["sessionId"])]
-    if not trainSamples or not frozenSamples:
-        raise RuntimeError("训练/冻结验证集切分为空，请增大 --windows")
+    return _trainAndEvaluate(labelled, len(greyWindows), len(windows), seed)
 
-    mean, sigma, constantKeys = _standardize([sample["features"] for sample in trainSamples])
-    weightsStd, biasStd, iterations, finalLoss = _trainLogisticRegression(
-        trainSamples, mean, sigma, random.Random(seed)
+
+def trainNeuJudgeFromRealData(
+    dataRoot: str,
+    seed: int = DEFAULT_SEED,
+    distill: int = 0,
+    minMessages: int = 6,
+    maxWindows: int = 200,
+) -> Dict:
+    """D-SB3/D-SB1：真实会话窗口收割 → 规则/离线蒸馏弱标注 → 训练。
+
+    - D-SB3：窗口来自数据根的真实会话落盘文件（不再只有合成模板）；
+    - D-SB1：灰区窗口可用既有 LLM 分诊门离线打弱标签（--distill 封顶，
+      人工触发、全部离线，运行时路径零改动）。
+    """
+    from neurova.collaboration.triage_dataset import (
+        harvestSessionWindows,
+        labelWindows,
+        realGateTriageFn,
     )
-    rawWeights, rawBias = _foldIntoRawSpace(weightsStd, biasStd, mean, sigma, constantKeys)
 
-    metrics: Dict[str, float] = _evaluateFrozen(frozenSamples, rawWeights, rawBias)
-    metrics.update(
+    windows = harvestSessionWindows(dataRoot, maxWindows=maxWindows, minMessages=minMessages)
+    if not windows:
+        raise RuntimeError(
+            f"真实数据源未收割到可用窗口（数据根 {dataRoot} 下无 ≥{minMessages} 条消息的会话）"
+        )
+    labelledRaw = labelWindows(
+        windows,
+        distillLimit=distill,
+        triageFn=realGateTriageFn if distill > 0 else None,
+    )
+    labelled = [
         {
-            "trainWindows": float(len(trainSamples)),
-            "frozenWindows": float(len(frozenSamples)),
-            "greyZoneWindows": float(len(greyWindows)),
-            "greyZoneRatio": len(greyWindows) / len(windows),
-            "constantFeatureCount": float(len(constantKeys)),
-            "iterations": float(iterations),
-            "finalLoss": finalLoss,
-            "learningRate": LEARNING_RATE,
+            "sessionId": entry["conversationId"],
+            "category": entry["labeler"],
+            "features": _prepareFeatureVector(entry["features"]),
+            "label": float(entry["label"]),
         }
+        for entry in labelledRaw["labeled"]
+    ]
+    if len(labelled) < 8:
+        raise RuntimeError(
+            f"可训练样本不足（{len(labelled)} < 8）——需要更多会话流量、"
+            "调低 --min-messages，或开启 --distill 让灰区窗口离线蒸馏打标"
+        )
+    payload = _trainAndEvaluate(
+        labelled, labelledRaw["grayUnlabeled"], len(windows), seed,
+        modelVersion="0.3.0-real",
     )
-
-    return {
-        "model_version": MODEL_VERSION_TRAINED,
-        "feature_version": FEATURE_VERSION,
-        "bias": rawBias,
-        "weights": {key: rawWeights[key] for key in FEATURE_KEYS},
-        "data_fingerprint": _dataFingerprint(trainSamples),
-        "eval_metrics": metrics,
-    }
+    payload["eval_metrics"]["distillUsed"] = float(labelledRaw["distillUsed"])
+    payload["eval_metrics"]["distillErrors"] = float(labelledRaw["distillErrors"])
+    return payload
 
 
 def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="SB-3 离线训练 NeuJudge：合成窗口规则弱标注自举（计划 §5.3/§8-SB-3）"
+        description="SB-3 离线训练 NeuJudge：合成窗口规则弱标注自举（计划 §5.3/§8-SB-3）；"
+        "D-SB3 真实会话数据源 + D-SB1 离线 LLM 蒸馏（--source real，全部离线、运行路径零改动）"
     )
     parser.add_argument("--windows", type=int, default=DEFAULT_WINDOWS, help="合成窗口数量（默认 400）")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="固定随机种子（默认 42）")
+    parser.add_argument(
+        "--source", choices=("synthetic", "real"), default="synthetic",
+        help="训练数据源：synthetic=规则自举合成窗口（默认）；real=从数据根收割真实会话窗口",
+    )
+    parser.add_argument(
+        "--data-root", type=str, default="",
+        help="real 源的数据根目录（默认仓库 data/）",
+    )
+    parser.add_argument(
+        "--distill", type=int, default=0,
+        help="D-SB1 离线蒸馏配额：灰区窗口用既有 LLM 分诊门离线打弱标签的最大条数"
+        "（默认 0=不蒸馏；仅 real 源生效，成本封顶、人工触发）",
+    )
+    parser.add_argument(
+        "--min-messages", type=int, default=6,
+        help="real 源会话入样的最小消息数（默认 6）",
+    )
+    parser.add_argument(
+        "--max-windows", type=int, default=200,
+        help="real 源收割窗口上限（默认 200）",
+    )
     parser.add_argument(
         "--out",
         type=str,
@@ -466,7 +551,17 @@ def main(argv: List[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    payload = trainNeuJudge(args.windows, args.seed)
+    if args.source == "real":
+        dataRoot = args.data_root or str(Path(__file__).resolve().parents[2] / "data")
+        payload = trainNeuJudgeFromRealData(
+            dataRoot,
+            seed=args.seed,
+            distill=args.distill,
+            minMessages=args.min_messages,
+            maxWindows=args.max_windows,
+        )
+    else:
+        payload = trainNeuJudge(args.windows, args.seed)
     outPath = Path(args.out)
     outPath.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -488,6 +583,10 @@ def main(argv: List[str] | None = None) -> int:
         f"accuracy={metrics['accuracy']:.4f} skipPrecision={metrics['skipPrecision']:.4f} "
         f"skipRecall={metrics['skipRecall']:.4f}"
     )
+    if "distillUsed" in metrics:
+        print(
+            f"distillUsed={metrics['distillUsed']:.0f} distillErrors={metrics['distillErrors']:.0f}"
+        )
     return 0
 
 
