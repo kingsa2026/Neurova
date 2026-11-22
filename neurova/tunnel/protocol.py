@@ -11,7 +11,11 @@
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import secrets
+import time
+from typing import Any, Dict, Optional, Sequence
 
 # ---------------------------------------------------------------------------
 # 尺度与序（唯一出处）
@@ -138,6 +142,9 @@ RELAY_ROUTE_PREFIX = "/t/"
 ENROLLMENT_TOKEN_PARAM = "enrollmentToken"
 ENROLLMENT_TOKEN_ENV = "NEUROVA_TUNNEL_ENROLLMENT_TOKEN"
 RELAY_URL_ENV = "NEUROVA_TUNNEL_RELAY_URL"
+#: U9.1 兼容开关：`NEUROVA_TUNNEL_URL_TOKEN=1` 时中继临时回退「URL 携 token」旧形态。
+#: 默认关（fail-closed：URL 带令牌的连接一律拒绝）。回滚时**两端同开**。
+URL_TOKEN_COMPAT_ENV = "NEUROVA_TUNNEL_URL_TOKEN"
 
 FRAME_REGISTER = "register"
 FRAME_REGISTERED = "registered"
@@ -148,6 +155,12 @@ FRAME_END = "end"
 FRAME_PING = "ping"
 FRAME_PONG = "pong"
 FRAME_ERROR = "error"
+#: U9.1：连接建立后的**首条**消息 `{"type":"auth","token":...,"tokenType":...}`。
+FRAME_AUTH = "auth"
+#: 数据面 auth 成功回执（控制面用既有 `registered` 兼任，不再多发一条）。
+FRAME_AUTH_OK = "auth_ok"
+#: U9.2 newest-wins：同 routeId 新连接顶替时，旧连接收到的通知帧，随后服务端断开。
+FRAME_SUPERSEDED = "superseded"
 
 #: 手机侧一次请求等 agent 把数据通道开出来的窗口。到点必须显式 503，
 #: 不许静默重发或降级成 warning（教义第 2 条）。
@@ -156,13 +169,126 @@ TUNNEL_STREAM_OPEN_TIMEOUT_SECONDS = 5.0
 #: 边界写在这里，不假装隧道什么都能流。
 TUNNEL_MAX_BUFFERED_BYTES = 4 * 1024 * 1024
 
+#: U9/U16 追加的错误码（命名常量先立，元组引用之——不另立第二份字面量）。
+TUNNEL_ERROR_AUTH_REJECTED = "auth_rejected"           # auth 缺失/首帧不是 auth/签名不成立/声明型不符
+TUNNEL_ERROR_TOKEN_TYPE_REJECTED = "token_type_rejected"  # 令牌型进错通道（U16 通道校验型）
+TUNNEL_ERROR_AUTH_TIMEOUT = "auth_timeout"             # 连接建立后窗口内没收到合格 auth
+TUNNEL_ERROR_URL_TOKEN_REJECTED = "url_token_rejected"  # URL 携 token 旧形态在默认（fail-closed）下被拒
+
 TUNNEL_ERROR_CODES = (
     "tunnel_not_ready",       # 数据通道没在窗口内开出来
     "enrollment_rejected",    # 准入凭据缺失或不匹配
     "route_conflict",         # 别人的 routeId 想被覆盖
     "route_unknown",          # 入口按不认识的 routeId 敲门
     "payload_too_large",
+    # U9/U16 追加（只增不改，既有下标语义不动）
+    TUNNEL_ERROR_AUTH_REJECTED,
+    TUNNEL_ERROR_TOKEN_TYPE_REJECTED,
+    TUNNEL_ERROR_AUTH_TIMEOUT,
+    TUNNEL_ERROR_URL_TOKEN_REJECTED,
 )
+
+# ---------------------------------------------------------------------------
+# U9/U16 · 隧道认证口径（token 后置 + 多型 + newest-wins + 全窗 watchdog）
+# ---------------------------------------------------------------------------
+
+#: 准入令牌分型（U16）：签发时定型，通道校验型。
+TOKEN_TYPE_AGENT = "agent"        # 数据面
+TOKEN_TYPE_USER = "user"          # 管理面
+TOKEN_TYPE_SERVICE = "service"    # 运维面（agent 的控制连接即此型）
+TUNNEL_TOKEN_TYPES = (TOKEN_TYPE_AGENT, TOKEN_TYPE_USER, TOKEN_TYPE_SERVICE)
+
+#: 通道 → 允许的令牌型：控制面仅 user/service；数据面仅 agent/service。
+CONTROL_PLANE_TOKEN_TYPES = (TOKEN_TYPE_USER, TOKEN_TYPE_SERVICE)
+DATA_PLANE_TOKEN_TYPES = (TOKEN_TYPE_AGENT, TOKEN_TYPE_SERVICE)
+
+#: 定型令牌的信封版本前缀：`nv1:{type}:{issuedAt}:{nonce}:{hmac}`。
+#: 无此前缀的令牌 = legacy（旧裸密钥），按 agent 型降级处理（放行数据面、拒绝控制面，
+#: 并在日志标注 legacy）。
+TUNNEL_TOKEN_ENVELOPE = "nv1"
+
+#: U9.1 auth 交换窗：连接建立后 5s 内收不到合格 auth ⇒ 断开。
+TUNNEL_AUTH_TIMEOUT_SECONDS = 5.0
+#: U9.3 全窗 watchdog：拨号→TLS→握手→auth 整窗 15s，到点强制放弃并按退避重试。
+TUNNEL_CONNECT_WINDOW_SECONDS = 15.0
+
+
+def urlTokenCompatEnabled() -> bool:
+    """URL 携 token 旧形态的兼容开关（默认关）。中继与 agent 同读这份口径。"""
+    import os
+
+    return os.environ.get(URL_TOKEN_COMPAT_ENV, "").strip() == "1"
+
+
+def signTunnelToken(secret: str, tokenType: str, issuedAt: Optional[float] = None,
+                    nonce: Optional[str] = None) -> str:
+    """定型签发准入令牌（U16 签发点）：HMAC 机制不变，payload 增 `type` 字段。
+
+    信封 `nv1:{type}:{issuedAt}:{nonce}` + HMAC-SHA256(secret, 信封)。
+    原始密钥只参与签名、不再上线——新形态下凭据全文不出进程（URL 兼容形态除外）。
+    """
+    if tokenType not in TUNNEL_TOKEN_TYPES:
+        raise ValueError(f"未知令牌型 {tokenType!r}（须为 {'/'.join(TUNNEL_TOKEN_TYPES)}）")
+    if not secret:
+        raise ValueError("签发定型令牌必须提供密钥（空密钥等于任何人都能自签）")
+    stamp = int(issuedAt if issuedAt is not None else time.time())
+    nonce = nonce or secrets.token_hex(8)
+    message = f"{TUNNEL_TOKEN_ENVELOPE}:{tokenType}:{stamp}:{nonce}"
+    signature = hmac.new(secret.encode("utf-8"), message.encode("utf-8"),
+                         hashlib.sha256).hexdigest()
+    return f"{message}:{signature}"
+
+
+def parseTunnelToken(token: str) -> Optional[Dict[str, Any]]:
+    """解析定型令牌信封；非信封形态（含空值）回 `None`＝legacy，由验签方降级处置。"""
+    if not isinstance(token, str) or not token.startswith(TUNNEL_TOKEN_ENVELOPE + ":"):
+        return None
+    parts = token.split(":")
+    if len(parts) != 5:
+        return None
+    _, tokenType, issuedAt, nonce, signature = parts
+    if tokenType not in TUNNEL_TOKEN_TYPES or not issuedAt.isdigit() or not nonce or not signature:
+        return None
+    return {"type": tokenType, "issuedAt": int(issuedAt),
+            "nonce": nonce, "signature": signature}
+
+
+def verifyTunnelToken(token: str, secret: str, allowedTypes: Sequence[str]) -> Dict[str, Any]:
+    """通道校验型（U16）：验签 ＋ 校验令牌型是否允许进这条通道。
+
+    回 `{"ok", "type", "legacy", "reason"}`：
+    - 定型令牌：HMAC 验签后比对 `allowedTypes`，错型 `reason=token_type_rejected`；
+    - legacy（无信封旧令牌）：按 **agent 型**降级——数据面放行、控制面按错型拒绝；
+    - 签名不成立：`reason=auth_rejected`。调用方对 `ok=False` 必须给明确拒绝帧＋审计。
+    """
+    verdict = {"ok": False, "type": "", "legacy": False,
+               "reason": TUNNEL_ERROR_AUTH_REJECTED}
+    if not secret:
+        return verdict
+    parsed = parseTunnelToken(token)
+    if parsed is None:
+        verdict["legacy"] = True
+        if isinstance(token, str) and token and hmac.compare_digest(token, secret):
+            verdict["type"] = TOKEN_TYPE_AGENT
+            if TOKEN_TYPE_AGENT in allowedTypes:
+                verdict["ok"] = True
+                verdict["reason"] = ""
+            else:
+                verdict["reason"] = TUNNEL_ERROR_TOKEN_TYPE_REJECTED
+        return verdict
+    message = ":".join([TUNNEL_TOKEN_ENVELOPE, parsed["type"],
+                        str(parsed["issuedAt"]), parsed["nonce"]])
+    expected = hmac.new(secret.encode("utf-8"), message.encode("utf-8"),
+                        hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(parsed["signature"], expected):
+        return verdict
+    verdict["type"] = parsed["type"]
+    if parsed["type"] not in allowedTypes:
+        verdict["reason"] = TUNNEL_ERROR_TOKEN_TYPE_REJECTED
+        return verdict
+    verdict["ok"] = True
+    verdict["reason"] = ""
+    return verdict
 
 # ---------------------------------------------------------------------------
 # M3 · 设备连接会话（App 侧字面量；服务端也用它回话，故在此单源）

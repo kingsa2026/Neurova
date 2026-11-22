@@ -50,6 +50,14 @@ def _relayParts(relayUrl: str) -> tuple:
     return wsScheme, parts.netloc, parts.path.rstrip("/")
 
 
+class TunnelAdmissionError(RuntimeError):
+    """中继拒绝准入（auth 失败/令牌错型/URL 形态被拒）——点名原因，按重试处置。"""
+
+
+class TunnelSupersededError(RuntimeError):
+    """本连接被同 routeId 的新连接顶替（U9.2）——干净退出并退避，不回抢。"""
+
+
 class TunnelAgent:
     """一条控制连接 ＋ N 条按需数据连接的出站代理。
 
@@ -61,13 +69,22 @@ class TunnelAgent:
     def __init__(self, relayUrl: str = "", enrollmentToken: str = "",
                  instanceId: str = "", localBaseUrl: Optional[str] = None,
                  heartbeatSeconds: float = protocol.TUNNEL_HEARTBEAT_INTERVAL_SECONDS,
-                 openTimeoutSeconds: float = protocol.TUNNEL_STREAM_OPEN_TIMEOUT_SECONDS):
+                 openTimeoutSeconds: float = protocol.TUNNEL_STREAM_OPEN_TIMEOUT_SECONDS,
+                 connectWindowSeconds: float = protocol.TUNNEL_CONNECT_WINDOW_SECONDS,
+                 authTimeoutSeconds: float = protocol.TUNNEL_AUTH_TIMEOUT_SECONDS,
+                 reconnectBackoffSeconds: float = protocol.TUNNEL_RECONNECT_MAX_BACKOFF_SECONDS):
         self.relayUrl = relayUrl.strip()
         self.enrollmentToken = enrollmentToken
         self.instanceId = instanceId
         self.localBaseUrl = (localBaseUrl or _localBaseUrl()).rstrip("/")
         self.heartbeatSeconds = heartbeatSeconds
         self.openTimeoutSeconds = openTimeoutSeconds
+        #: U9.3 全窗 watchdog：拨号→TLS→握手→auth 整窗上限（到点强制重试）。
+        self.connectWindowSeconds = connectWindowSeconds
+        #: U9.1 auth 交换窗：连接建立后等 auth 回执的窗口。
+        self.authTimeoutSeconds = authTimeoutSeconds
+        #: 重连退避上限（默认 30s；判据可收紧）。
+        self.reconnectBackoffSeconds = reconnectBackoffSeconds
 
         self.state = protocol.TUNNEL_STATES[0] if not self.relayUrl else "probing"
         self.routeId: Optional[str] = None
@@ -121,50 +138,109 @@ class TunnelAgent:
             self._task = None
 
     async def run(self) -> None:
-        """控制连接主循环：失败按指数退避＋抖动重连，永不放弃、也不刷屏。"""
-        attempt = 0
+        """控制连接主循环：拨号→TLS→握手→auth 整窗受 watchdog 管辖（U9.3），
+        失败按指数退避＋抖动重连，永不放弃、也不刷屏。"""
         import websockets
 
         scheme, netloc, prefix = _relayParts(self.relayUrl)
-        url = (f"{scheme}://{netloc}{prefix}{protocol.RELAY_CONTROL_PATH}"
-               f"?{protocol.ENROLLMENT_TOKEN_PARAM}={self.enrollmentToken}"
-               f"&instanceId={self.instanceId}")
+        attempt = 0
         while not self._stop.is_set():
             self.state = "probing"
             try:
-                async with websockets.connect(url, ping_interval=None) as socket:
-                    await self._serveControl(socket)
-                attempt = 0
+                socket = await self._dialControl(websockets, scheme, netloc, prefix)
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # noqa: BLE001 - 网络类失败全部按"等一会儿再试"处置
-                self.state = "relay_down"
-                self.lastError = f"{type(e).__name__}: {e}"
                 attempt += 1
-                backoff = min(2 ** min(attempt, 5), protocol.TUNNEL_RECONNECT_MAX_BACKOFF_SECONDS)
-                backoff += random.uniform(0, 0.5)
-                logger.warning("隧道第 %s 次重连，%.1fs 后重试：%s", attempt, backoff, self.lastError)
-                try:
-                    await asyncio.wait_for(self._stop.wait(), timeout=backoff)
+                if not await self._sleepBeforeRetry(attempt, e):
                     return
-                except asyncio.TimeoutError:
+                continue
+            try:
+                await self._serveControl(socket)
+                attempt = 0
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 - 含 superseded：退避后再试，不回抢
+                attempt += 1
+                if not await self._sleepBeforeRetry(attempt, e):
+                    return
+            finally:
+                try:
+                    await socket.close()
+                except Exception:  # noqa: BLE001 - 已断即达目的
                     pass
 
+    async def _sleepBeforeRetry(self, attempt: int, error: Exception) -> bool:
+        """指数退避＋抖动后重试；回 False＝外部已要求停止。状态如实落 relay_down。"""
+        self.state = "relay_down"
+        self.lastError = f"{type(error).__name__}: {error}"
+        backoff = min(2 ** min(attempt, 5), self.reconnectBackoffSeconds)
+        backoff += random.uniform(0, 0.5)
+        logger.warning("隧道第 %s 次重连，%.1fs 后重试：%s", attempt, backoff, self.lastError)
+        try:
+            await asyncio.wait_for(self._stop.wait(), timeout=backoff)
+            return False
+        except asyncio.TimeoutError:
+            return True
+
+    async def _dialControl(self, websockets, scheme: str, netloc: str, prefix: str):
+        """拨号→TLS→握手→auth 的**整窗**watchdog（U9.3，默认 15s）。
+
+        到点未完成＝强制放弃（含掐断半开连接），由 run() 按指数退避重试。
+        """
+        return await asyncio.wait_for(
+            self._dialAndAuth(websockets, scheme, netloc, prefix),
+            timeout=self.connectWindowSeconds)
+
+    async def _dialAndAuth(self, websockets, scheme: str, netloc: str, prefix: str):
+        """建控制连接并完成 auth 交换（U9.1：token 后置，首条消息即 auth）。
+
+        准入令牌**不进 URL**；线上只出现定型签名（service 型），裸密钥不出进程。
+        仅 `NEUROVA_TUNNEL_URL_TOKEN=1` 时回退 URL 携 token 旧形态。
+        """
+        urlTokenMode = protocol.urlTokenCompatEnabled()
+        url = (f"{scheme}://{netloc}{prefix}{protocol.RELAY_CONTROL_PATH}"
+               f"?instanceId={self.instanceId}")
+        if urlTokenMode:
+            url += f"&{protocol.ENROLLMENT_TOKEN_PARAM}={self.enrollmentToken}"
+        socket = await websockets.connect(url, ping_interval=None,
+                                          open_timeout=self.connectWindowSeconds)
+        try:
+            if urlTokenMode:
+                # 旧形态：token 在 URL 上，服务端验过直接回 registered
+                registered = json.loads(await asyncio.wait_for(
+                    socket.recv(), timeout=self.connectWindowSeconds))
+            else:
+                await socket.send(json.dumps({
+                    "type": protocol.FRAME_AUTH,
+                    "token": protocol.signTunnelToken(self.enrollmentToken,
+                                                      protocol.TOKEN_TYPE_SERVICE),
+                    "tokenType": protocol.TOKEN_TYPE_SERVICE}))
+                registered = json.loads(await asyncio.wait_for(
+                    socket.recv(), timeout=self.authTimeoutSeconds))
+            if registered.get("type") == protocol.FRAME_ERROR:
+                raise TunnelAdmissionError(str(registered.get("code") or "auth_rejected"))
+            if registered.get("type") != protocol.FRAME_REGISTERED:
+                raise TunnelAdmissionError(f"注册回话形状不对：{registered}")
+            self.routeId = registered.get("routeId")
+            self.state = "via_relay"
+            self.lastHeartbeatAt = time.time()
+            self.lastError = ""
+            logger.info("隧道已注册 route=%s", self.routeId)
+            return socket
+        except BaseException:
+            try:
+                await socket.close()
+            except Exception:  # noqa: BLE001 - 已断即达目的
+                pass
+            raise
+
     async def _serveControl(self, socket) -> None:
-        """注册 → 心跳 → 收 `open` 就派一条数据连接去接这条请求。"""
-        import websockets
+        """已注册连接的服务环：心跳 → 收 `open` 就派一条数据连接去接这条请求。
 
-        registered = json.loads(await socket.recv())
-        if registered.get("type") != protocol.FRAME_REGISTERED:
-            self.lastError = f"注册回话形状不对：{registered}"
-            self.state = "relay_down"
-            return
-        self.routeId = registered.get("routeId")
-        self.state = "via_relay"
-        self.lastHeartbeatAt = time.time()
-        self.lastError = ""
-        logger.info("隧道已注册 route=%s", self.routeId)
-
+        注册与 auth 已在 `_dialAndAuth` 完成（U9.1），这里只处理注册后的帧；
+        收到 `superseded` 按 U9.2 退避退出，不回抢。
+        """
         misses = 0
         tasks: Set[asyncio.Task] = set()
         recvTask = asyncio.create_task(socket.recv())
@@ -188,6 +264,14 @@ class TunnelAgent:
                 recvTask = asyncio.create_task(socket.recv())
                 message = json.loads(frame) if isinstance(frame, (str, bytes)) else {}
                 kind = message.get("type")
+                if kind == protocol.FRAME_SUPERSEDED:
+                    # U9.2：被同 route 的新连接顶替——raise 走 run() 的退避路径，
+                    # 干净退出且不立刻回抢（回抢会跟新连接打成顶替乒乓）。
+                    self.state = "relay_down"
+                    self.lastError = "superseded by a newer connection"
+                    logger.warning("隧道连接被同 route=%s 的新连接顶替，退出并退避不回抢",
+                                   self.routeId)
+                    raise TunnelSupersededError(self.lastError)
                 if kind == protocol.FRAME_PONG:
                     misses = 0
                     self.lastHeartbeatAt = time.time()
@@ -209,20 +293,40 @@ class TunnelAgent:
                 task.cancel()
 
     async def _serveStream(self, openFrame: Dict[str, Any]) -> None:
-        """按中继的 `open` 指令另开一条数据连接，把这条请求接到本机后端。"""
+        """按中继的 `open` 指令另开一条数据连接，把这条请求接到本机后端。
+
+        U9.1/U16：先发 auth（agent 型）→ 等 `auth_ok` → 再发 `hello`；
+        auth 被拒（错型/验签失败）就舍弃这条流，不把流量送进未授权通道。
+        """
         import websockets
 
         streamId = str(openFrame.get("streamId") or "")
         if not streamId:
             return
         self._activeStreams.add(streamId)
+        urlTokenMode = protocol.urlTokenCompatEnabled()
         scheme, netloc, prefix = _relayParts(self.relayUrl)
-        dataUrl = (f"{scheme}://{netloc}{prefix}{protocol.RELAY_DATA_PATH}"
-                   f"?{protocol.ENROLLMENT_TOKEN_PARAM}={self.enrollmentToken}")
+        dataUrl = f"{scheme}://{netloc}{prefix}{protocol.RELAY_DATA_PATH}"
+        if urlTokenMode:
+            dataUrl += f"?{protocol.ENROLLMENT_TOKEN_PARAM}={self.enrollmentToken}"
         try:
             async with websockets.connect(dataUrl, ping_interval=None,
                                           open_timeout=self.openTimeoutSeconds) as socket:
-                await socket.send(json.dumps({"type": "hello", "streamId": streamId}))
+                if urlTokenMode:
+                    await socket.send(json.dumps({"type": "hello", "streamId": streamId}))
+                else:
+                    await socket.send(json.dumps({
+                        "type": protocol.FRAME_AUTH,
+                        "token": protocol.signTunnelToken(self.enrollmentToken,
+                                                          protocol.TOKEN_TYPE_AGENT),
+                        "tokenType": protocol.TOKEN_TYPE_AGENT}))
+                    ack = json.loads(await asyncio.wait_for(
+                        socket.recv(), timeout=self.authTimeoutSeconds))
+                    if ack.get("type") == protocol.FRAME_ERROR:
+                        raise TunnelAdmissionError(str(ack.get("code") or "auth_rejected"))
+                    if ack.get("type") != protocol.FRAME_AUTH_OK:
+                        raise TunnelAdmissionError(f"数据通道 auth 回执形状不对：{ack}")
+                    await socket.send(json.dumps({"type": "hello", "streamId": streamId}))
                 if openFrame.get("kind") == "ws":
                     await self._pumpWebSocket(socket, openFrame)
                 else:

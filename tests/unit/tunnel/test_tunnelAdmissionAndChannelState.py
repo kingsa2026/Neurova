@@ -55,22 +55,31 @@ class TestEnrollmentAdmission:
         assert first != _routeIdFor(TOKEN_A, "nv-instance-2")
 
     def test_control_websocket_without_valid_enrollment_is_closed(self):
-        app = create_relay_app(TOKEN_A)
-        with TestClient(app) as c:
-            with pytest.raises(Exception) as raised:
-                with c.websocket_connect(
-                        f"{protocol.RELAY_CONTROL_PATH}?{protocol.ENROLLMENT_TOKEN_PARAM}=wrong"
-                        "&instanceId=nv-x"):
-                    pass
-            assert getattr(raised.value, "code", None) == 4401, (
-                f"错凭据的控制连接被回成 {raised.value!r}，不是 4401 拒绝")
-
-    def test_control_websocket_with_valid_enrollment_gets_a_route(self):
+        """错凭据在 auth 阶段被拒：明确拒绝帧＋4401 断开（token 后置后仍 fail-closed）。"""
         app = create_relay_app(TOKEN_A)
         with TestClient(app) as c:
             with c.websocket_connect(
-                    f"{protocol.RELAY_CONTROL_PATH}?{protocol.ENROLLMENT_TOKEN_PARAM}={TOKEN_A}"
-                    "&instanceId=nv-stable") as ws:
+                    f"{protocol.RELAY_CONTROL_PATH}?instanceId=nv-x") as ws:
+                ws.send_json({"type": protocol.FRAME_AUTH,
+                              "token": "not-the-enrollment-token",
+                              "tokenType": protocol.TOKEN_TYPE_SERVICE})
+                frame = ws.receive_json()
+                assert frame["type"] == protocol.FRAME_ERROR, frame
+                assert frame["code"] == protocol.TUNNEL_ERROR_AUTH_REJECTED, frame
+                with pytest.raises(Exception) as raised:
+                    ws.receive_json()
+        assert getattr(raised.value, "code", None) == 4401, (
+            f"错凭据的控制连接被回成 {raised.value!r}，不是 4401 拒绝")
+
+    def test_control_websocket_with_valid_enrollment_gets_a_route(self):
+        """token 后置（U9.1）：连接建立后首条 auth(service 型) → registered ＋派生 routeId。"""
+        app = create_relay_app(TOKEN_A)
+        with TestClient(app) as c:
+            with c.websocket_connect(
+                    f"{protocol.RELAY_CONTROL_PATH}?instanceId=nv-stable") as ws:
+                ws.send_json({"type": protocol.FRAME_AUTH,
+                              "token": protocol.signTunnelToken(TOKEN_A, protocol.TOKEN_TYPE_SERVICE),
+                              "tokenType": protocol.TOKEN_TYPE_SERVICE})
                 registered = ws.receive_json()
         assert registered["type"] == protocol.FRAME_REGISTERED, registered
         assert registered["routeId"] == _routeIdFor(TOKEN_A, "nv-stable"), (

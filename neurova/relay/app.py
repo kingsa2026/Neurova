@@ -23,6 +23,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -35,6 +36,18 @@ from neurova.core.logger import get_logger
 from neurova.tunnel import protocol
 
 logger = get_logger(__name__)
+
+
+def _auditTunnel(action: str, **fields: Any) -> None:
+    """中继侧安全审计（错型拒绝、连接顶替、URL 旧形态放行等）。
+
+    中继是**独立部署件**（最小文件集见 `deploy/relay-systemd/install.sh`），不带主仓
+    的审计栈——这里以结构化 `AUDIT tunnel ...` 日志行落盘，供服务器侧日志采集与告警
+    咬合（U16：错型=明确拒绝帧+审计，两者都不可少）。
+    """
+    parts = " ".join(f"{key}={value}" for key, value in fields.items()
+                     if value not in (None, ""))
+    logger.warning("AUDIT tunnel %s %s", action, parts)
 
 
 #: 入口路径模板：`/t/<routeId>/<后端路径>`。
@@ -87,10 +100,12 @@ class _Stream:
 class RelayState:
     """控制面注册表：谁在册、每条 routeId 现在归哪条控制连接、在途 stream。"""
 
-    def __init__(self, enrollmentToken: str) -> None:
+    def __init__(self, enrollmentToken: str,
+                 authTimeoutSeconds: float = protocol.TUNNEL_AUTH_TIMEOUT_SECONDS) -> None:
         if not enrollmentToken:
             raise ValueError("中继必须配置准入凭据（空凭据＝任何人都能注册）")
         self.enrollmentToken = enrollmentToken
+        self.authTimeoutSeconds = authTimeoutSeconds
         self.controlByRoute: Dict[str, WebSocket] = {}
         self.lastSeenByRoute: Dict[str, float] = {}
         self.routeByInstance: Dict[str, str] = {}
@@ -98,17 +113,31 @@ class RelayState:
         self._lock = asyncio.Lock()
 
     def admits(self, presentedToken: Optional[str]) -> bool:
+        """裸密钥比对——仅剩 URL-token 兼容形态（开关开启）在用（U9.1）。"""
         return bool(presentedToken) and hmac.compare_digest(
             str(presentedToken), self.enrollmentToken)
 
-    async def register(self, instanceId: str, socket: WebSocket) -> str:
+    def channelAllowedTypes(self, channel: str) -> tuple:
+        """U16 通道校验型的允许集合单点：控制面 user/service，数据面 agent/service。"""
+        return (protocol.CONTROL_PLANE_TOKEN_TYPES if channel == "control"
+                else protocol.DATA_PLANE_TOKEN_TYPES)
+
+    async def register(self, instanceId: str, socket: WebSocket) -> tuple:
+        """注册控制连接；同 routeId 已有在册连接时 **newest-wins**（U9.2）。
+
+        回 `(routeId, supersededSocket)`：`supersededSocket` 非空时由调用方对其发
+        superseded 帧并断开——旧连接就此停止服务；"不回抢"由 `drop()` 的
+        `is socket` 判定保证（旧连接收尾摘不掉新连接的在册状态）。
+        """
         async with self._lock:
             routeId = self.routeByInstance.get(instanceId) or _routeIdFor(
                 self.enrollmentToken, instanceId)
             self.routeByInstance[instanceId] = routeId
+            previous = self.controlByRoute.get(routeId)
             self.controlByRoute[routeId] = socket
             self.lastSeenByRoute[routeId] = time.time()
-            return routeId
+            return routeId, (previous if previous is not None and previous is not socket
+                             else None)
 
     async def drop(self, routeId: str, socket: WebSocket) -> None:
         async with self._lock:
@@ -140,11 +169,109 @@ class RelayState:
         }
 
 
-def create_relay_app(enrollmentToken: str) -> FastAPI:
-    """建中继应用。`enrollmentToken` 为空 ⇒ 直接拒绝启动（空凭据等于没有入口）。"""
-    state = RelayState(enrollmentToken)
+def create_relay_app(enrollmentToken: str,
+                     authTimeoutSeconds: Optional[float] = None) -> FastAPI:
+    """建中继应用。`enrollmentToken` 为空 ⇒ 直接拒绝启动（空凭据等于没有入口）。
+
+    `authTimeoutSeconds` 仅供判据收紧 auth 窗；生产缺省走 protocol 单源的 5s。
+    """
+    state = RelayState(enrollmentToken,
+                       authTimeoutSeconds=(protocol.TUNNEL_AUTH_TIMEOUT_SECONDS
+                                           if authTimeoutSeconds is None
+                                           else authTimeoutSeconds))
     app = FastAPI(title="Neurova Tunnel Relay")
     app.state.relay = state
+
+    # -------------------------------------------------------------- 认证握手
+
+    async def _reject(websocket: WebSocket, *, channel: str, errorCode: str,
+                      httpClose: int, message: str,
+                      tokenType: str = "", legacy: Optional[bool] = None) -> None:
+        """明确拒绝帧＋审计，随后断开（教义第 2 条：诚实暴露，不静默吞）。"""
+        try:
+            await websocket.send_json({"type": protocol.FRAME_ERROR, "code": errorCode,
+                                       "message": message})
+        except Exception:  # noqa: BLE001 - 客户端已断也要走完审计
+            pass
+        try:
+            await websocket.close(code=httpClose, reason=errorCode)
+        except Exception:  # noqa: BLE001
+            pass
+        _auditTunnel("auth_rejected", channel=channel, reason=errorCode,
+                     tokenType=tokenType, legacy=legacy)
+
+    async def _consumeAuth(websocket: WebSocket, *, channel: str) -> Dict[str, Any]:
+        """U9.1：连接建立后**首条**消息必须是 `auth`，auth 前不接受任何其他帧。
+
+        `state.authTimeoutSeconds`（默认 5s）内收不到合格 auth ⇒ 断开。
+        U16：令牌按通道校验型；legacy 裸密钥按 agent 型降级（数据面放行、控制面按
+        错型拒绝），日志标注 legacy。回 `{"ok", "code", "closeCode", "message",
+        "tokenType", "legacy"}`。
+        """
+        allowed = state.channelAllowedTypes(channel)
+        try:
+            frame = await asyncio.wait_for(websocket.receive_json(),
+                                           timeout=state.authTimeoutSeconds)
+        except asyncio.TimeoutError:
+            return {"ok": False, "code": protocol.TUNNEL_ERROR_AUTH_TIMEOUT,
+                    "closeCode": 4401,
+                    "message": "auth timeout: first message must be auth",
+                    "tokenType": "", "legacy": None}
+        except Exception:  # noqa: BLE001 - 客户端在 auth 前就断了
+            return {"ok": False, "code": protocol.TUNNEL_ERROR_AUTH_REJECTED,
+                    "closeCode": 4401, "message": "closed before auth",
+                    "tokenType": "", "legacy": None}
+        if not isinstance(frame, dict) or frame.get("type") != protocol.FRAME_AUTH:
+            return {"ok": False, "code": protocol.TUNNEL_ERROR_AUTH_REJECTED,
+                    "closeCode": 4401,
+                    "message": "first message must be auth; other frames are not accepted",
+                    "tokenType": "", "legacy": None}
+        verdict = protocol.verifyTunnelToken(frame.get("token"),
+                                             state.enrollmentToken, allowed)
+        if not verdict["ok"]:
+            return {"ok": False, "code": verdict["reason"],
+                    "closeCode": (4403 if verdict["reason"] ==
+                                  protocol.TUNNEL_ERROR_TOKEN_TYPE_REJECTED else 4401),
+                    "message": ("token type not allowed on this channel"
+                                if verdict["reason"] ==
+                                protocol.TUNNEL_ERROR_TOKEN_TYPE_REJECTED
+                                else "credential rejected"),
+                    "tokenType": verdict["type"], "legacy": verdict["legacy"]}
+        if str(frame.get("tokenType") or "") != verdict["type"]:
+            # 声明型与签名型不一致：声明不作为凭据，直接拒
+            return {"ok": False, "code": protocol.TUNNEL_ERROR_AUTH_REJECTED,
+                    "closeCode": 4401,
+                    "message": "tokenType claim does not match the signed token",
+                    "tokenType": verdict["type"], "legacy": verdict["legacy"]}
+        if verdict["legacy"]:
+            logger.warning("legacy 准入令牌按 agent 型降级放行（channel=%s）——"
+                           "请尽快换发定型令牌（protocol.signTunnelToken）", channel)
+        return {"ok": True, "code": "", "closeCode": 0, "message": "",
+                "tokenType": verdict["type"], "legacy": verdict["legacy"]}
+
+    async def _gateUrlToken(websocket: WebSocket, *, channel: str) -> bool:
+        """U9.1 URL 门：URL 携 token 的旧形态默认 fail-closed 拒绝。
+
+        回 True＝放行（兼容开关开启且裸密钥命中）；False＝已发拒绝帧并断开。
+        """
+        urlToken = websocket.query_params.get(protocol.ENROLLMENT_TOKEN_PARAM)
+        if urlToken is None:
+            return True
+        if not protocol.urlTokenCompatEnabled():
+            await _reject(websocket, channel=channel,
+                          errorCode=protocol.TUNNEL_ERROR_URL_TOKEN_REJECTED,
+                          httpClose=4401,
+                          message="URL-token form is disabled; "
+                                  "connect first, then send an auth message")
+            return False
+        if not state.admits(urlToken):
+            await _reject(websocket, channel=channel,
+                          errorCode=protocol.TUNNEL_ERROR_AUTH_REJECTED,
+                          httpClose=4401, message="enrollment rejected")
+            return False
+        logger.warning("%s 通道以 URL-token 旧形态准入（兼容开关开启）——"
+                       "请尽快切换到首消息 auth", channel)
+        return True
 
     # ------------------------------------------------------------------ 控制面
 
@@ -154,19 +281,46 @@ def create_relay_app(enrollmentToken: str) -> FastAPI:
 
     @app.websocket(protocol.RELAY_CONTROL_PATH)
     async def control(websocket: WebSocket):
-        """agent 的出站长连接：注册、心跳、接收 `open` 指令。"""
-        if not state.admits(websocket.query_params.get(protocol.ENROLLMENT_TOKEN_PARAM)):
-            await websocket.close(code=4401, reason=protocol.TUNNEL_ERROR_CODES[1])
+        """agent 的出站长连接：auth → 注册、心跳、接收 `open` 指令。
+
+        U9.1：准入 token 不进 URL——连接建立后**首条**消息必须是 `auth`，
+        auth 前不接受任何其他帧，auth 失败/超时（5s）断开。
+        """
+        await websocket.accept()
+        if not await _gateUrlToken(websocket, channel="control"):
             return
+        urlToken = websocket.query_params.get(protocol.ENROLLMENT_TOKEN_PARAM)
+        if urlToken is None:
+            verdict = await _consumeAuth(websocket, channel="control")
+            if not verdict["ok"]:
+                await _reject(websocket, channel="control", errorCode=verdict["code"],
+                              httpClose=verdict["closeCode"], message=verdict["message"],
+                              tokenType=verdict["tokenType"], legacy=verdict["legacy"])
+                return
+
         instanceId = (websocket.query_params.get("instanceId") or "").strip()
         if not instanceId:
             await websocket.close(code=4400, reason="missing instanceId")
             return
 
-        await websocket.accept()
-        routeId = await state.register(instanceId, websocket)
+        routeId, supersededSocket = await state.register(instanceId, websocket)
         await websocket.send_json({"type": protocol.FRAME_REGISTERED, "routeId": routeId})
         logger.info("隧道注册 instance=%s route=%s", instanceId, routeId)
+
+        if supersededSocket is not None:
+            # U9.2 newest-wins：旧连接停止服务——通知后断开；"不回抢"由 drop() 的
+            # `is socket` 判定保证（旧连接收尾摘不掉新连接的在册状态）。
+            try:
+                await supersededSocket.send_json({"type": protocol.FRAME_SUPERSEDED,
+                                                  "routeId": routeId})
+            except Exception:  # noqa: BLE001 - 旧连接可能已断
+                pass
+            try:
+                await supersededSocket.close(code=4409, reason=protocol.FRAME_SUPERSEDED)
+            except Exception:  # noqa: BLE001
+                pass
+            _auditTunnel("connection_superseded", channel="control", route=routeId,
+                         instance=instanceId)
 
         try:
             while True:
@@ -189,15 +343,29 @@ def create_relay_app(enrollmentToken: str) -> FastAPI:
     async def dataChannel(websocket: WebSocket):
         """agent 为某条 stream 另开的数据连接。
 
-        先收一个 `hello{streamId}` 再绑定：握手阶段还不能确定它属于哪条请求，
-        而 streamId 是一次性的随机数——凭它认领即可，不需要额外的授权面。
+        U9.1/U16：先收 `auth`（agent/service 型）→ 回 `auth_ok` → 再收
+        `hello{streamId}` 绑定。streamId 是一次性的随机数——凭它认领即可，
+        不需要额外的授权面。
         """
-        if not state.admits(websocket.query_params.get(protocol.ENROLLMENT_TOKEN_PARAM)):
-            await websocket.close(code=4401, reason=protocol.TUNNEL_ERROR_CODES[1])
-            return
         await websocket.accept()
+        if not await _gateUrlToken(websocket, channel="data"):
+            return
+        urlToken = websocket.query_params.get(protocol.ENROLLMENT_TOKEN_PARAM)
+        if urlToken is None:
+            verdict = await _consumeAuth(websocket, channel="data")
+            if not verdict["ok"]:
+                await _reject(websocket, channel="data", errorCode=verdict["code"],
+                              httpClose=verdict["closeCode"], message=verdict["message"],
+                              tokenType=verdict["tokenType"], legacy=verdict["legacy"])
+                return
+            await websocket.send_json({"type": protocol.FRAME_AUTH_OK})
+
         try:
-            hello = await websocket.receive_json()
+            hello = await asyncio.wait_for(websocket.receive_json(),
+                                           timeout=state.authTimeoutSeconds)
+        except asyncio.TimeoutError:
+            await websocket.close(code=4400, reason="hello timeout")
+            return
         except Exception:  # noqa: BLE001
             await websocket.close(code=4400)
             return
