@@ -18,12 +18,16 @@ LLM Router - 多模态自适应路由器
 """
 
 from neurova.core.logger import get_logger
+import random
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
+
+# D-R2：加权分流的随机源（模块级，测试可注入/播种）
+_rng = random.Random()
 
 
 class RequestType(Enum):
@@ -276,6 +280,26 @@ class LLMRouter:
         # 按优先级和响应时间排序
         candidates.sort(key=lambda x: (-x.priority, x.response_time, -x.weight))
 
+        # D-R2：同优先级组内加权分流——组内权重不全相等时按份额加权抽取；
+        # 全相等 → 保持既有确定性序（不进随机分支，零回归）。
+        # weight=0 = 仅兜底（不参与日常分配，failover 链仍可达）。
+        top_priority = candidates[0].priority
+        group = [c for c in candidates if c.priority == top_priority]
+        if len(group) > 1:
+            weights = [max(0.0, float(c.weight or 0.0)) for c in group]
+            if len(set(weights)) > 1:
+                total = sum(weights)
+                if total > 0:
+                    pick = _rng.random() * total
+                    acc = 0.0
+                    for candidate, weight in zip(group, weights):
+                        if weight <= 0:
+                            continue
+                        acc += weight
+                        if pick <= acc:
+                            return candidate
+                    return group[-1]
+
         selected = candidates[0]
         logger.info("Model selected: %s/%s " f"for %s", selected.provider_name, selected.model, request_type.value)
 
@@ -414,6 +438,7 @@ def register_provider_from_config(
     model_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
     scope: str = "admin",
     priority: int = 0,
+    weight: float = 1.0,
 ) -> None:
     """将 ProviderConfig 风格的 providers 注册到全局 LLMRouter。
 
@@ -422,6 +447,8 @@ def register_provider_from_config(
     scope 透传给注册表复合键（P2-10），缺省 "admin"＝全局表。
     priority 透传 provider 配置的优先级（R3，2026-11-22：此前硬编码 1，
     provider 优先级进不了路由表，选型排序退化为插入序）。
+    weight 透传同优先级组内的流量份额（D-R2，2026-11-22：此前硬编码
+    1.0，weight 仅是排序末位 tiebreaker；负值钳 0，0=仅兜底）。
     """
     from neurova.llm.capability_detector import detect_model_capabilities
 
@@ -444,7 +471,7 @@ def register_provider_from_config(
                 "priority": priority,
                 "health_status": "healthy",
                 "response_time": 0.0,
-                "weight": 1.0,
+                "weight": max(0.0, float(weight)),
             }
         )
     router.register_provider(provider_id, provider_name, models, scope=scope)
@@ -469,6 +496,7 @@ def sync_llm_router(scope: Optional[str] = None) -> None:
             register_provider_from_config(
                 pid, pconf.name, pconf.models, pconf.model_metadata,
                 scope=target_scope, priority=getattr(pconf, "priority", 0),
+                weight=getattr(pconf, "weight", 1.0),
             )
     except Exception as e:  # noqa: BLE001
         logger.warning("sync_llm_router 失败（多模态路由将惰性回退）: %s", e)

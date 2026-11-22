@@ -231,6 +231,10 @@ class ProviderConfig:
     # 键名由 update_provider 校验（unknown 键拒绝），手改配置由 merged 点名后忽略。
     compat_dict: Dict[str, Any] = field(default_factory=dict)
     priority: int = 0
+    # D-R2（2026-11-22）：同优先级组内的流量份额（0=仅兜底，不参与日常分配）；
+    # 经 register_provider_from_config 进 llm_router 选型。默认 1.0=各行使
+    # 用既有确定性排序，行为不变。
+    weight: float = 1.0
     is_builtin: bool = False
     icon: Optional[str] = None
     description: Optional[str] = None
@@ -518,6 +522,7 @@ class LLMProviderManager(Module):
         api_key: Optional[str] = None,
         default_model: Optional[str] = None,
         models: Optional[List[str]] = None,
+        weight: Optional[float] = None,
         **kwargs,
     ) -> ProviderConfig:
         """添加服务商"""
@@ -531,6 +536,7 @@ class LLMProviderManager(Module):
             api_key=api_key,
             default_model=default_model,
             models=models or [],
+            weight=1.0 if weight is None else max(0.0, float(weight)),
             **kwargs,
         )
 
@@ -554,6 +560,7 @@ class LLMProviderManager(Module):
         description: Optional[str] = None,
         usage_collection: Optional[bool] = None,
         compat_dict: Optional[Dict[str, Any]] = None,
+        weight: Optional[float] = None,
     ) -> bool:
         """更新服务商配置"""
         # 校验放在进锁之前：不认识键名就拒绝，既不半写配置也不碰磁盘。
@@ -608,6 +615,9 @@ class LLMProviderManager(Module):
             # compat 声明位落地：读到什么就写什么（键名已在校验处过单源）
             if compat_dict is not None:
                 provider.compat_dict = dict(compat_dict)
+            # D-R2：同优先级组内流量份额（负值钳 0；0=仅兜底）
+            if weight is not None:
+                provider.weight = max(0.0, float(weight))
 
             provider.updated_at = datetime.now().isoformat()
 

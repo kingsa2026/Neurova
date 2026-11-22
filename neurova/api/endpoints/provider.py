@@ -54,6 +54,8 @@ class CreateProviderRequest(BaseModel):
     provider_type: str = Field(..., description="服务商类型 (openai, anthropic, gemini, ollama, openrouter)")
     base_url: Optional[str] = Field(default=None, description="API 基础 URL")
     api_key: Optional[str] = Field(default=None, description="API Key")
+    # D-R2：同优先级组内流量份额（0=仅兜底，failover 链仍可达；缺省=1.0）
+    weight: Optional[float] = Field(default=None, description="同优先级组内加权分流份额")
     config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
 
 
@@ -73,6 +75,8 @@ class UpdateProviderRequest(BaseModel):
     compat: Optional[Dict[str, Any]] = Field(
         default=None, description="provider 兼容开关显式声明（ProviderCompat 字段名）"
     )
+    # D-R2：同优先级组内流量份额（None=不改动；0=仅兜底）
+    weight: Optional[float] = Field(default=None, description="同优先级组内加权分流份额")
 
 
 class ActivateModelRequest(BaseModel):
@@ -332,6 +336,7 @@ async def create_provider(
                 provider=body.provider_type,
                 base_url=body.base_url or "",
                 api_key=body.api_key,
+                weight=body.weight,
             )
             logger.info(f"Provider created successfully: {provider.id}")
 
@@ -392,6 +397,9 @@ async def update_provider(
                 update_kwargs["usage_collection"] = body.usage_collection
             if body.compat is not None:
                 update_kwargs["compat_dict"] = body.compat
+            # D-R2：weight 同样显式转发（None=不改动）
+            if body.weight is not None:
+                update_kwargs["weight"] = body.weight
 
             # 如果有 add_model 指令，先获取当前 models 再合并
             if add_model_id:
