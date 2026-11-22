@@ -2,7 +2,10 @@
 
 内置服务商模板从代码元组迁到 config/llm_provider_templates.json（单一事实源），
 装载时逐条校验（必填字段 / base_url 形态 / id 唯一）；仓库数据坏了就显式红，
-不静默少装一批。11 个内置 id 与迁移前逐一对齐（防迁移丢数据）。
+不静默少装一批。11 个内置 id 与迁移前逐一对齐（防迁移丢数据）；
+2026-11-22 D-R4 铺量（参照系 ad 追平批三，用户拍板）：尾部追加 5 家
+国产主流+聚合商（deepseek/moonshot/zhipu/siliconflow/dashscope-compatible，
+均 OpenAI 兼容零代码），原 11 家顺序不变。
 """
 
 import json
@@ -27,6 +30,12 @@ EXPECTED_IDS = [
     "mimo-tokenplan",
     "agnes-intl",
     "agnes-cn",
+    # D-R4 铺量（2026-11-22 用户拍板）：国产主流 + 聚合商，均 OpenAI 兼容
+    "deepseek",
+    "moonshot",
+    "zhipu",
+    "siliconflow",
+    "dashscope-compatible",
 ]
 
 
@@ -44,7 +53,8 @@ class TestTemplateFile:
 
 
 class TestLoader:
-    def test_eleven_builtin_ids_preserved_in_order(self):
+    def test_builtin_ids_preserved_in_order(self):
+        """原 11 家顺序不变；D-R4 铺量的 5 家追加于尾部。"""
         defs = pm.builtinProviderDefs()
         assert [d["id"] for d in defs] == EXPECTED_IDS
 

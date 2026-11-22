@@ -1,5 +1,5 @@
 {
-  "revision": 1,
+  "revision": 2,
   "note": "内置服务商模板（P1-5 数据驱动化，单一事实源）。由 neurova/llm/provider_manager.builtinProviderDefs() 读取并逐条校验；与前端 ModelPage 种子卡片对齐；缺失时才补入，绝不覆盖用户配置。models 仅收录已证实存在的模型 ID。",
   "providers": [
     {
@@ -94,7 +94,10 @@
       "provider": "openai",
       "base_url": "https://api.xiaomimimo.com/v1",
       "api_key_prefix": "sk-",
-      "models": ["mimo-v2.5", "mimo-v2.5-pro"]
+      "models": [
+        "mimo-v2.5",
+        "mimo-v2.5-pro"
+      ]
     },
     {
       "id": "mimo-tokenplan",
@@ -102,7 +105,10 @@
       "provider": "openai",
       "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
       "api_key_prefix": "",
-      "models": ["mimo-v2.5", "mimo-v2.5-pro"]
+      "models": [
+        "mimo-v2.5",
+        "mimo-v2.5-pro"
+      ]
     },
     {
       "id": "agnes-intl",
@@ -139,6 +145,76 @@
         "agnes-image-2.0-flashv",
         "agnes-video-v2.0"
       ]
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "provider": "openai",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key_prefix": "sk-",
+      "default_model": "deepseek-chat",
+      "models": [
+        "deepseek-chat",
+        "deepseek-reasoner"
+      ],
+      "note": "D-R4 铺量（参照系 ad 追平批三）：OpenAI 兼容，零新代码。"
+    },
+    {
+      "id": "moonshot",
+      "name": "Moonshot（Kimi）",
+      "provider": "openai",
+      "base_url": "https://api.moonshot.cn/v1",
+      "api_key_prefix": "sk-",
+      "default_model": "kimi-latest",
+      "models": [
+        "kimi-latest",
+        "moonshot-v1-128k",
+        "moonshot-v1-32k",
+        "moonshot-v1-8k"
+      ],
+      "note": "D-R4 铺量：OpenAI 兼容。"
+    },
+    {
+      "id": "zhipu",
+      "name": "智谱（BigModel）",
+      "provider": "openai",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "api_key_prefix": "",
+      "default_model": "glm-4-plus",
+      "models": [
+        "glm-4-plus",
+        "glm-4-air",
+        "glm-4-flash"
+      ],
+      "note": "D-R4 铺量：OpenAI 兼容端点（paas/v4）。"
+    },
+    {
+      "id": "siliconflow",
+      "name": "SiliconFlow（硅基流动）",
+      "provider": "openai",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key_prefix": "sk-",
+      "default_model": "deepseek-ai/DeepSeek-V3",
+      "models": [
+        "deepseek-ai/DeepSeek-V3",
+        "deepseek-ai/DeepSeek-R1",
+        "Qwen/Qwen2.5-72B-Instruct"
+      ],
+      "note": "D-R4 铺量：聚合商（多模型目录，OpenAI 兼容）。"
+    },
+    {
+      "id": "dashscope-compatible",
+      "name": "阿里云百炼（DashScope 兼容）",
+      "provider": "openai",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key_prefix": "sk-",
+      "default_model": "qwen-plus",
+      "models": [
+        "qwen-max",
+        "qwen-plus",
+        "qwen-turbo"
+      ],
+      "note": "D-R4 铺量：DashScope 的 OpenAI 兼容模式端点。"
     }
   ]
 }
