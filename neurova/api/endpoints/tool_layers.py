@@ -596,10 +596,16 @@ async def execute_tool(
             result = await executor.execute(body.tool_name, body.arguments)
             # 成败判据单源：咽喉的 `_result_is_success`，不在此另写一套
             if not executor._result_is_success(result):
+                # 结构化错误信封透传（U3 失联相位/U12 UNSUPPORTED/U1 主机密钥/
+                # 凭据卡等语义）：失败不再压扁成裸 error 字符串——原始载荷原样
+                # 进 data.result 供前端/模型判读；顶层 error 串保留兼容既有消费方。
+                data: Dict[str, Any] = {"execution_time": time.time() - start}
+                if isinstance(result, dict) and result:
+                    data["result"] = result
                 return {
                     "code": 1,
                     "error": str((result or {}).get("error") or "工具执行失败"),
-                    "data": {"execution_time": time.time() - start},
+                    "data": data,
                 }
             return {"code": 0, "data": {"result": result, "execution_time": time.time() - start}}
         except Exception as e:
