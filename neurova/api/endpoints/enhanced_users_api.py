@@ -72,6 +72,16 @@ def _get_model():
     return _get_user_model()
 
 
+def _auditRoleChange(actorId: str, targetUserId: str, oldRole: str, newRole: str) -> None:
+    """角色变更入审计（ROLE_CHANGE，audit_logs 单源）。审计失败只记日志，不阻断更新。"""
+    try:
+        from neurova.security.audit_logger import get_audit_logger
+
+        get_audit_logger().log_role_change(actorId, targetUserId, oldRole, newRole)
+    except Exception as e:  # noqa: BLE001 - 审计失败不阻断
+        logger.warning("role change 审计写入失败: %s", e)
+
+
 def _userOut(user: User) -> UserOut:
     return UserOut(
         id=user.id,
@@ -127,7 +137,9 @@ async def create_user(body: UserCreate):
 
 
 @router.put("/{user_id}", response_model=UserOut)
-async def update_user(user_id: int, body: UserUpdate):
+async def update_user(
+    user_id: int, body: UserUpdate, current: Dict[str, Any] = Depends(require_admin())
+):
     """更新用户（email/role/启用状态 → 账本字段 email/role/status）。"""
     model = _get_model()
     user = model.get_user_by_id(user_id)
@@ -147,6 +159,12 @@ async def update_user(user_id: int, body: UserUpdate):
         kwargs["status"] = "active" if body.active else "disabled"
     if kwargs and not model.update_user(user_id, **kwargs):
         raise HTTPException(status_code=500, detail="用户更新失败")
+    if body.role is not None:
+        # S1 认证审计接线：角色写盘点 ROLE_CHANGE（old_role 取改前账本行）
+        actorId = str(
+            current.get("user_id") or current.get("neuser_id") or current.get("username") or ""
+        )
+        _auditRoleChange(actorId, str(user_id), user.role, body.role)
     return _userOut(model.get_user_by_id(user_id))
 
 

@@ -165,6 +165,44 @@ def _get_request_id(request: Request) -> str:
     return getattr(request.state, "request_id", str(uuid.uuid4()))
 
 
+def _clientIp(request: Request) -> str:
+    """请求来源 IP（TestClient/代理后无 client 时返回空串，不臆造）。"""
+    return request.client.host if request.client else ""
+
+
+def _auditAuthLogin(
+    user_id: Optional[str], request: Request, success: bool, attempted_username: str = ""
+) -> None:
+    """登录/刷新成败入审计（AUTH_LOGIN / AUTH_FAILED，audit_logs 单源）。
+
+    user_id 未解析（用户不存在、令牌不可解）时传 None（审计侧落空串），
+    尝试的用户名经 attempted_username 进 details 供事后追溯；审计失败只记
+    日志，不阻断认证主流程（与 _alertRecoveryHit 同一容错口径）。
+    """
+    try:
+        from neurova.security.audit_logger import get_audit_logger
+
+        get_audit_logger().log_auth_login(
+            user_id,
+            ip_address=_clientIp(request),
+            user_agent=request.headers.get("user-agent", "") or "",
+            success=success,
+            attempted_username=attempted_username,
+        )
+    except Exception as e:  # noqa: BLE001 - 审计失败不阻断认证
+        logger.warning("auth 审计写入失败: %s", e)
+
+
+def _auditLogout(user_id: Optional[str], request: Request) -> None:
+    """登出入审计（AUTH_LOGOUT）。审计失败只记日志，不阻断登出主流程。"""
+    try:
+        from neurova.security.audit_logger import get_audit_logger
+
+        get_audit_logger().log_auth_logout(user_id, ip_address=_clientIp(request))
+    except Exception as e:  # noqa: BLE001 - 审计失败不阻断登出
+        logger.warning("logout 审计写入失败: %s", e)
+
+
 # BUG AUDIT S-04 残余: 首账号注册引导令牌（部署加固; 环境门控, 未配置=行为不变）
 _BOOTSTRAP_ADMIN_TOKEN_ENV = "NEUROVA_BOOTSTRAP_ADMIN_TOKEN"
 
@@ -260,16 +298,25 @@ async def login(request: Request, body: LoginRequest):
             if user_obj:
                 user_model.increment_failed_attempts(user_obj.id)
 
+            # S1 认证审计接线：失败落 AUTH_FAILED（user_id 尽力归因，尝试用户名进 details）
+            _auditAuthLogin(
+                str(user_obj.id) if user_obj else None,
+                request,
+                success=False,
+                attempted_username=body.username,
+            )
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
         # 检查用户状态
         if user.get("status") != "active":
             logger.warning("Login attempt for inactive user: %s", body.username)
+            _auditAuthLogin(str(user["id"]), request, success=False, attempted_username=body.username)
             raise HTTPException(status_code=403, detail="Account is inactive")
 
         # 检查失败尝试次数（可选：如果超过5次则锁定账户）
         if user.get("failed_attempts", 0) >= 5:
             logger.warning("Login attempt for locked user: %s", body.username)
+            _auditAuthLogin(str(user["id"]), request, success=False, attempted_username=body.username)
             raise HTTPException(status_code=403, detail="Account is locked due to too many failed attempts")
 
         # 生成 token
@@ -289,6 +336,9 @@ async def login(request: Request, body: LoginRequest):
             user_agent=request.headers.get("user-agent"),
             success=True,
         )
+
+        # S1 认证审计接线：成功登录落 AUTH_LOGIN
+        _auditAuthLogin(str(user["id"]), request, success=True)
 
         return TokenResponse(
             access_token=access_token,
@@ -465,15 +515,31 @@ async def refresh_token(request: Request, body: RefreshRequest):
     try:
         # 检查 token 是否在黑名单中
         if is_token_blacklisted(body.refresh_token):
+            # S1 认证审计接线：已撤销令牌通常仍可解码，尽力归因
+            revoked = decode_token(body.refresh_token) or {}
+            _auditAuthLogin(
+                str(revoked["sub"]) if revoked.get("sub") else None,
+                request,
+                success=False,
+                attempted_username=str(revoked.get("username") or ""),
+            )
             raise HTTPException(status_code=401, detail="Token has been revoked")
 
         # 解码 refresh token
         payload = decode_token(body.refresh_token)
         if not payload:
+            # S1 认证审计接线：令牌不可解，user_id 留空不臆造
+            _auditAuthLogin(None, request, success=False)
             raise HTTPException(status_code=401, detail="Invalid refresh token")
 
         # 验证 token 类型
         if payload.get("type") != "refresh":
+            _auditAuthLogin(
+                str(payload["sub"]) if payload.get("sub") else None,
+                request,
+                success=False,
+                attempted_username=str(payload.get("username") or ""),
+            )
             raise HTTPException(status_code=401, detail="Invalid token type")
 
         user_id = payload.get("sub")
@@ -483,16 +549,21 @@ async def refresh_token(request: Request, body: RefreshRequest):
         user_model = _get_user_model()
         user = user_model.get_user_by_id(int(user_id))
         if not user:
+            _auditAuthLogin(str(user_id), request, success=False, attempted_username=str(username or ""))
             raise HTTPException(status_code=401, detail="User not found")
 
         # 检查用户状态
         if user.status != "active":
+            _auditAuthLogin(str(user.id), request, success=False, attempted_username=str(user.username))
             raise HTTPException(status_code=403, detail="Account is inactive")
 
         # 生成新 token (审计修复 P0-2: 补齐身份声明；批 B: 部门 tenant claim 走同一单源)
         identity_claims = buildIdentityClaims({"id": user.id, "username": user.username})
         access_token = create_access_token(data={**identity_claims, "role": user.role})
         refresh_token = create_refresh_token(data=identity_claims)
+
+        # S1 认证审计接线：刷新成功落 AUTH_LOGIN
+        _auditAuthLogin(str(user.id), request, success=True, attempted_username=str(user.username))
 
         return TokenResponse(
             access_token=access_token,
@@ -833,6 +904,9 @@ async def logout(request: Request):
         # 将 token 加入黑名单（全局单源：api/auth 的 SQLite 黑名单，
         # verify_access_token 与 refresh 均查同一份——登出对全部受保护端点生效）
         if token:
+            # S1 认证审计接线：尽力从所撤令牌解析登出者（解不出留空，不臆造）
+            logoutPayload = decode_token(token) or {}
+            logoutUserId = str(logoutPayload["sub"]) if logoutPayload.get("sub") else None
             try:
                 from neurova.api.auth import blacklist_token
 
@@ -845,6 +919,7 @@ async def logout(request: Request):
                     status_code=500, detail="Logout failed: unable to invalidate token"
                 )
             logger.info("Token added to blacklist")
+            _auditLogout(logoutUserId, request)
 
     return {
         "code": 0,
