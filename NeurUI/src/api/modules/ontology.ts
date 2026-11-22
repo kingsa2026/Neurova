@@ -50,9 +50,14 @@ import type {
   PipelineDiffResponse,
   PipelineRollbackResponse,
   PipelineRunResponse,
+  ProveGoalResponse,
+  QualityGateResponse,
+  QualityGateThresholds,
   RelationCandidate,
   SchemaSuggestion,
   SchemaSuggestionRunResult,
+  ShaclValidateReport,
+  ExplainFactResponse,
   ValidateTriple,
 } from '@/types/ontology'
 
@@ -272,6 +277,47 @@ export function exportOntologyProv() {
 /** GET /ontology/quality：OOPS! 结构子集＋两个可计算指标；事实源在 ontology/quality.py。 */
 export function getOntologyQuality() {
   return api.get<ApiResponse<OntologyQualityReport>>(`${BASE}/ontology/quality`)
+}
+
+// ---------------------------------------------------------------------------
+// SHACL 运行时体检 / 质量门 / 反向链证明 / 推导解释（U1/U6/U12/U13）
+// ---------------------------------------------------------------------------
+
+/**
+ * U1：POST /ontology/validate/shacl——真跑 pyshacl 的只读体检面。
+ * 形状单源=注册表；subject_key 缺省=全库 dry-run；mode 缺省 enforce（真跑）。
+ * supported=false = 环境缺 pyshacl 的诚实降级，调用方必须如实展示而非当错误吞掉。
+ */
+export function validateShacl(body?: {
+  subject_key?: string
+  agent_id?: string
+  mode?: 'off' | 'shadow' | 'enforce'
+}) {
+  return api.post<ApiResponse<ShaclValidateReport>>(
+    `${BASE}/ontology/validate/shacl`, body ?? {})
+}
+
+/** U6：POST /ontology/quality/gate——报告与 GET /ontology/quality 同源现算，门只补阈值判定。 */
+export function qualityGate(thresholds: QualityGateThresholds) {
+  return api.post<ApiResponse<QualityGateResponse>>(
+    `${BASE}/ontology/quality/gate`, { thresholds })
+}
+
+/** U12：POST /ontology/prove——反向链定理证明（严格只读，不写表不产派生事实）。 */
+export function proveGoal(body: {
+  subject: string
+  predicate: string
+  object: string
+  agent_id?: string
+  max_depth?: number
+}) {
+  return api.post<ApiResponse<ProveGoalResponse>>(`${BASE}/ontology/prove`, body)
+}
+
+/** U13：GET /ontology/explain/{fact_id}——沿推导账本回溯结论来路；未知 fact_id 显式 404。 */
+export function explainFact(factId: string) {
+  return api.get<ApiResponse<ExplainFactResponse>>(
+    `${BASE}/ontology/explain/${encodeURIComponent(factId)}`)
 }
 
 // ---------------------------------------------------------------------------

@@ -316,12 +316,29 @@ export interface QualityFinding {
   message: string
 }
 
-/** GET /ontology/quality：term_count + findings + 两个可计算指标。 */
+/**
+ * GET /ontology/quality 的 metrics：consistency/conciseness 既有两键不变；
+ * U6 起新增六个可选键（orphanRate/missingLabelRate/inverseOneSidedCount/
+ * parentCycleCount/referenceIntegrity/coverage），与质量门同源计算——
+ * 缺省（旧后端/空库）不显示的键不硬造。
+ */
+export interface OntologyQualityMetrics {
+  consistency: number
+  conciseness: number
+  orphanRate?: number
+  missingLabelRate?: number
+  inverseOneSidedCount?: number
+  parentCycleCount?: number
+  referenceIntegrity?: number
+  coverage?: number
+}
+
+/** GET /ontology/quality：term_count + findings + metrics。 */
 export interface OntologyQualityReport {
   tenant_id: string
   term_count: number
   findings: QualityFinding[]
-  metrics: { consistency: number; conciseness: number }
+  metrics: OntologyQualityMetrics
 }
 
 /** POST/GET /enterprise/sources 单源回显。 */
@@ -592,6 +609,14 @@ export interface CatalogColumn {
   foreign_key_target: string
   description: string
   term_id: string
+  /** U10 列画像（v59）：无行数据连接的源型未采样——distinct/null_rate/min/max 落 NULL、sample_rows 落 0，不冒充 0 值画像 */
+  profile_distinct?: number | null
+  profile_null_rate?: number | null
+  profile_min?: string | null
+  profile_max?: string | null
+  /** 样例值 JSON 数组文本（≤5 个） */
+  profile_samples_json?: string
+  profile_sample_rows?: number
 }
 
 export interface CatalogTable {
@@ -649,4 +674,94 @@ export interface OssieImportResult {
   baselineId?: string
   note?: string
   imported_id?: string
+}
+
+// ---------------------------------------------------------------------------
+// U1/U6/U12/U13：SHACL 运行时体检 / 质量门 / 反向链证明 / 推导解释
+//（端点：/knowledge/ontology/{validate/shacl,quality/gate,prove,explain/{id}}）
+// ---------------------------------------------------------------------------
+
+/** 共享三元组投影（prove.goal / explain.conclusion / missing.goal）。 */
+export interface OntologyTriple {
+  subject: string
+  predicate: string
+  object: string
+}
+
+/** POST /ontology/validate/shacl 单条违规（pyshacl results graph 投影，字段保持原文）。 */
+export interface ShaclViolation {
+  focusNode: string
+  path: string
+  value: string
+  message: string
+  /** SHACL 原始严重度（Violation/Warning/Info），与 §15.4 小写闭集不同源，不强行归一。 */
+  severity: string
+  component: string
+}
+
+/**
+ * POST /ontology/validate/shacl 报告。
+ * supported=false = 环境缺 pyshacl 的诚实降级（reason 给原话），不是错误；
+ * note = 服务端附注（如「无已注册用户形状」）；skipped = mode=off 显式跳过。
+ */
+export interface ShaclValidateReport {
+  supported: boolean
+  mode: string
+  conforms: boolean
+  violations: ShaclViolation[]
+  text: string
+  note?: string
+  reason?: string
+  skipped?: boolean
+}
+
+/** 质量门阈值（三个键都可留空=不判该维）。 */
+export interface QualityGateThresholds {
+  min_coverage?: number
+  max_findings?: number
+  max_orphan_rate?: number
+}
+
+/** 质量门判定结果（threshold_failures 按后端固定顺序回执）。 */
+export interface QualityGateResult {
+  passed: boolean
+  threshold_failures: string[]
+}
+
+/** POST /ontology/quality/gate 响应：报告与 GET /ontology/quality 同源，门只补判定。 */
+export interface QualityGateResponse {
+  report: OntologyQualityReport
+  gate: QualityGateResult
+}
+
+/**
+ * 证明/解释共用的 step 树节点。
+ * prove 的子步在 `sub`（无 triple）；explain 的子步在 `steps`（带 triple）——
+ * 两键都可选，前端按存在者展开，不臆造归一层。
+ */
+export interface OntologyProofStep {
+  kind: 'rule' | 'fact' | string
+  ref: string
+  ruleVersion?: string
+  binding?: Record<string, unknown>
+  triple?: OntologyTriple | null
+  premiseIds?: string[]
+  sub?: OntologyProofStep[]
+  steps?: OntologyProofStep[]
+}
+
+/** POST /ontology/prove：反向链证明（steps=证明树；missing=缺失前提目标）。 */
+export interface ProveGoalResponse {
+  proved: boolean
+  goal: OntologyTriple
+  steps: OntologyProofStep[]
+  missing: Array<{ goal: OntologyTriple; reason: string }>
+}
+
+/** GET /ontology/explain/{fact_id}：推导解释（conclusion+steps 树+中文模板 text）。 */
+export interface ExplainFactResponse {
+  conclusion: OntologyTriple
+  steps: OntologyProofStep[]
+  missing: Array<{ ref?: string; reason: string }>
+  text: string
 }

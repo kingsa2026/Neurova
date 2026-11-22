@@ -30,6 +30,9 @@ vi.mock('@/api/modules/ontology', () => ({
   rotateWebhookSecret: vi.fn(),
   simulateWebhookPush: vi.fn(),
   getWebhookDedupStats: vi.fn(),
+  listCatalogTables: vi.fn(),
+  getCatalogTableDetail: vi.fn(),
+  refreshSourceCatalog: vi.fn(),
 }))
 
 vi.mock('ant-design-vue', () => ({
@@ -89,7 +92,7 @@ const stubs = {
     emits: ['click'],
     template: '<button class="stub-glass-btn" :disabled="disabled" @click="$emit(\'click\')"><slot /></button>',
   },
-  SourceCatalogDrawer: { template: '<div />' },
+  SourceCatalogPanel: { template: '<div />' },
   SourceNl2SqlDrawer: { template: '<div />' },
 }
 

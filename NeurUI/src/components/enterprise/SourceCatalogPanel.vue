@@ -1,11 +1,5 @@
 <template>
-  <a-drawer
-    :open="open"
-    :title="`${t('ontology.catalogDrawerTitle')} — ${sourceId}`"
-    width="720px"
-    :destroy-on-close="true"
-    @close="emit('close')"
-  >
+  <div class="catalog-panel" data-testid="catalog-panel">
     <div class="catalog-toolbar">
       <a-input
         v-model:value="needle"
@@ -53,11 +47,11 @@
       <a-empty v-else-if="!loading" :description="t('ontology.catalogEmpty')" />
     </a-spin>
 
-    <!-- 列明细（含主外键与术语链接） -->
+    <!-- 列明细（含主外键与术语链接 + U10 列画像） -->
     <a-modal
       v-model:open="detailOpen"
       :title="detailTableName"
-      width="680px"
+      width="960px"
       :footer="null"
     >
       <a-spin :spinning="detailLoading">
@@ -69,6 +63,7 @@
           size="small"
           :pagination="false"
           data-testid="catalog-columns"
+          class="catalog-columns-table"
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'column_name'">
@@ -87,16 +82,34 @@
               <a-tag v-if="record.term_id" color="blue" class="mono">{{ record.term_id }}</a-tag>
               <span v-else class="mono">—</span>
             </template>
+            <!-- U10 列画像：sample_rows=0/NULL＝未采样，显式占位不冒充 0 值 -->
+            <template v-else-if="isProfileKey(column.key)">
+              <span v-if="isSampled(record)" class="mono profile-value">{{ profileCellText(column.key, record) }}</span>
+              <span v-else class="profile-unsampled" data-testid="catalog-unsampled">
+                {{ t('ontology.catalogProfileNotSampled') }}
+              </span>
+            </template>
           </template>
         </a-table>
         <a-empty v-else :description="t('ontology.catalogEmpty')" />
       </a-spin>
     </a-modal>
-  </a-drawer>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+/**
+ * P1-1 schema 目录面板（自 SourceCatalogDrawer 抽屉内容提取为内联组件，
+ * 2026-11-23 目录主视图重构：抽屉退役，本面板常驻页面主体）。
+ *
+ * - props 与原抽屉对齐（sourceId/isAdmin）；原 close 事件是抽屉开合专用，
+ *   内联面板无开合语义，不再保留（避免死事件）。
+ * - 换源（sourceId 变更）＝新目录面：重置搜索词与已开列明细，等价于原
+ *   抽屉 destroy-on-close 的每次全新打开。
+ * - U10 列画像：后端 tableDetail SELECT * 透出 profile_* 六列；
+ *   profile_sample_rows 为 0/NULL 时画像列一律显「未采样」。
+ */
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -107,8 +120,7 @@ import {
 } from '@/api/modules/ontology'
 import type { CatalogColumn, CatalogTable } from '@/types/ontology'
 
-const props = defineProps<{ open: boolean; sourceId: string; isAdmin: boolean }>()
-const emit = defineEmits<{ (e: 'close'): void }>()
+const props = defineProps<{ sourceId: string; isAdmin: boolean }>()
 const { t } = useI18n()
 
 const loading = ref(false)
@@ -120,18 +132,58 @@ const detailLoading = ref(false)
 const detailTableName = ref('')
 const detailColumns = ref<CatalogColumn[]>([])
 
-const tableColumns = [
+const tableColumns = computed(() => [
   { key: 'table_name', title: t('ontology.catalogTables'), dataIndex: 'table_name' },
   { key: 'column_count', title: t('ontology.catalogColumns'), dataIndex: 'column_count', width: 80 },
   { key: 'term_id', title: t('ontology.catalogTermLinked'), dataIndex: 'term_id' },
   { key: 'detail', title: '', width: 90 },
-]
-const columnColumns = [
+])
+
+const PROFILE_KEYS = ['profile_distinct', 'profile_null_rate', 'profile_min', 'profile_max', 'profile_samples', 'profile_sample_rows'] as const
+type ProfileKey = (typeof PROFILE_KEYS)[number]
+
+const columnColumns = computed(() => [
   { key: 'column_name', title: t('ontology.catalogColumns'), dataIndex: 'column_name' },
-  { key: 'data_type', title: 'type', dataIndex: 'data_type', width: 110 },
-  { key: 'flags', title: '', width: 220 },
+  { key: 'data_type', title: t('ontology.catalogColumnType'), dataIndex: 'data_type', width: 110 },
+  { key: 'flags', title: '', width: 200 },
   { key: 'term_id', title: t('ontology.catalogTermLinked'), dataIndex: 'term_id' },
-]
+  { key: 'profile_distinct', title: t('ontology.catalogProfileDistinct'), dataIndex: 'profile_distinct', width: 90 },
+  { key: 'profile_null_rate', title: t('ontology.catalogProfileNullRate'), dataIndex: 'profile_null_rate', width: 90 },
+  { key: 'profile_min', title: t('ontology.catalogProfileMin'), dataIndex: 'profile_min', width: 110 },
+  { key: 'profile_max', title: t('ontology.catalogProfileMax'), dataIndex: 'profile_max', width: 110 },
+  { key: 'profile_samples', title: t('ontology.catalogProfileSamples'), dataIndex: 'profile_samples' },
+  { key: 'profile_sample_rows', title: t('ontology.catalogProfileSampleRows'), dataIndex: 'profile_sample_rows', width: 90 },
+])
+
+const isProfileKey = (key: string): key is ProfileKey =>
+  (PROFILE_KEYS as readonly string[]).includes(key)
+
+/** 未采样判据：后端对无行数据连接的源型落 sample_rows=0/NULL（不造 0 值画像） */
+const isSampled = (record: CatalogColumn) => Number(record.profile_sample_rows ?? 0) > 0
+
+const formatNullRate = (rate: number | null | undefined) =>
+  rate == null ? '—' : `${(rate * 100).toFixed(2)}%`
+
+/** profile_samples_json → ≤5 个样例的文本；损坏 JSON 按空样例处理不炸面板 */
+const sampleValues = (record: CatalogColumn): string[] => {
+  try {
+    const parsed = JSON.parse(record.profile_samples_json ?? '[]') as unknown
+    return Array.isArray(parsed) ? parsed.map((v) => String(v)).slice(0, 5) : []
+  } catch {
+    return []
+  }
+}
+
+const profileCellText = (key: ProfileKey, record: CatalogColumn): string => {
+  switch (key) {
+    case 'profile_distinct': return record.profile_distinct == null ? '—' : String(record.profile_distinct)
+    case 'profile_null_rate': return formatNullRate(record.profile_null_rate)
+    case 'profile_min': return record.profile_min == null || record.profile_min === '' ? '—' : record.profile_min
+    case 'profile_max': return record.profile_max == null || record.profile_max === '' ? '—' : record.profile_max
+    case 'profile_samples': return sampleValues(record).join(', ') || '—'
+    case 'profile_sample_rows': return record.profile_sample_rows == null ? '—' : String(record.profile_sample_rows)
+  }
+}
 
 async function loadTables() {
   if (!props.sourceId) return
@@ -173,9 +225,12 @@ async function refreshCatalog() {
   }
 }
 
-watch(() => props.open, (open) => {
-  if (open) void loadTables()
-})
+watch(() => props.sourceId, () => {
+  needle.value = ''
+  detailOpen.value = false
+  detailColumns.value = []
+  void loadTables()
+}, { immediate: true })
 </script>
 
 <style scoped>
@@ -193,5 +248,15 @@ watch(() => props.open, (open) => {
 }
 .table-name {
   font-size: 12px;
+}
+.catalog-columns-table :deep(th) {
+  white-space: nowrap;
+}
+.profile-value {
+  font-size: 12px;
+}
+.profile-unsampled {
+  font-size: 11px;
+  color: var(--nr-text-muted);
 }
 </style>

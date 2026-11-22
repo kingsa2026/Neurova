@@ -83,6 +83,61 @@
       />
       <a-empty v-else-if="!loading" data-testid="shapes-empty" :description="t('ontology.shapesEmpty')" />
     </a-spin>
+
+    <!-- U1：SHACL 运行时体检（POST /ontology/validate/shacl，只读 dry-run；
+         supported=false = 环境缺 pyshacl 的诚实降级态，不当错误吞掉） -->
+    <div class="shacl-panel" data-testid="shacl-panel">
+      <h4 class="section-title">{{ t('ontology.shaclRunTitle') }}</h4>
+      <p class="shapes-note">{{ t('ontology.shaclRunNote') }}</p>
+      <div class="shacl-form">
+        <a-input
+          v-model:value="shaclSubject"
+          class="mono"
+          :placeholder="t('ontology.shaclSubjectPh')"
+          data-testid="shacl-subject"
+        />
+        <GlassButton size="sm" :loading="shaclLoading" data-testid="shacl-run" @click="runShaclCheck">
+          {{ t('ontology.shaclRunBtn') }}
+        </GlassButton>
+      </div>
+      <div v-if="shaclError" class="inline-error" data-testid="shacl-error">{{ shaclError }}</div>
+      <div v-if="shaclReport" class="shacl-result" data-testid="shacl-result">
+        <a-alert
+          v-if="!shaclReport.supported"
+          type="warning"
+          show-icon
+          data-testid="shacl-unsupported"
+          :message="t('ontology.shaclUnsupported')"
+          :description="shaclReport.reason || ''"
+        />
+        <template v-else>
+          <p class="shacl-verdict" data-testid="shacl-conforms">
+            <a-tag :color="shaclReport.conforms ? 'green' : 'red'">
+              {{ shaclReport.conforms ? t('ontology.shaclConformsTrue') : t('ontology.shaclConformsFalse') }}
+            </a-tag>
+            <span class="mono">mode={{ shaclReport.mode }}</span>
+          </p>
+          <p v-if="shaclReport.note" class="shapes-note" data-testid="shacl-note">{{ shaclReport.note }}</p>
+          <template v-if="shaclReport.violations.length">
+            <h5 class="shacl-violations-title">{{ t('ontology.shaclViolationsTitle', { count: shaclReport.violations.length }) }}</h5>
+            <table class="shapes-table" data-testid="shacl-violations">
+              <thead>
+                <tr><th>severity</th><th>component</th><th>message</th><th>value</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="(violation, index) in shaclReport.violations" :key="index" :data-testid="`shacl-violation-${index}`">
+                  <td><a-tag :color="shaclSeverityColor(violation.severity)">{{ violation.severity }}</a-tag></td>
+                  <td class="mono">{{ violation.component }}</td>
+                  <td>{{ violation.message }}</td>
+                  <td class="mono">{{ violation.value || '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
+          <p v-else class="shapes-note" data-testid="shacl-no-violations">{{ t('ontology.shaclNoViolations') }}</p>
+        </template>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -95,8 +150,9 @@ import {
   createOntologyShape,
   deleteOntologyShape,
   listOntologyShapes,
+  validateShacl,
 } from '@/api/modules/ontology'
-import type { OntologyShape } from '@/types/ontology'
+import type { OntologyShape, ShaclValidateReport } from '@/types/ontology'
 import { severityColor } from '@/utils/ontologyFormat'
 
 const props = defineProps<{ isAdmin: boolean }>()
@@ -189,6 +245,35 @@ async function deleteShape(shapeId: string) {
   }
 }
 
+// ── U1：SHACL 运行时体检（只读 dry-run；无主体=全库）─────────────────────
+
+const shaclSubject = ref('')
+const shaclLoading = ref(false)
+const shaclError = ref('')
+const shaclReport = ref<ShaclValidateReport | null>(null)
+
+/** SHACL 严重度（Violation/Warning/Info）→ 既有 severityColor 三级色（小写归一）。 */
+function shaclSeverityColor(severity: string): string {
+  return severityColor(String(severity || '').toLowerCase())
+}
+
+async function runShaclCheck() {
+  shaclLoading.value = true
+  shaclError.value = ''
+  shaclReport.value = null
+  try {
+    const subjectKey = shaclSubject.value.trim()
+    const res = await validateShacl(subjectKey ? { subject_key: subjectKey } : {})
+    shaclReport.value = (res.data ?? null) as ShaclValidateReport | null
+  } catch (err) {
+    // 失败显式暴露（不吞）：优先回显后端 detail 原话
+    const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+    shaclError.value = typeof detail === 'string' && detail ? detail : t('common.error')
+  } finally {
+    shaclLoading.value = false
+  }
+}
+
 onMounted(reload)
 </script>
 
@@ -256,5 +341,38 @@ onMounted(reload)
 }
 .mono {
   font-family: var(--nr-font-mono, monospace);
+}
+.shacl-panel {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--nr-border, rgba(128, 128, 128, 0.18));
+}
+.shacl-form {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+.shacl-form .ant-input-wrapper,
+.shacl-form input {
+  flex: 1;
+}
+.shacl-result {
+  margin-top: 6px;
+}
+.shacl-violations-title {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.shacl-verdict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+.inline-error {
+  margin: 6px 0;
+  color: var(--nr-error, #ef4444);
+  font-size: 12px;
 }
 </style>

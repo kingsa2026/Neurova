@@ -38,6 +38,71 @@
             <span class="k">{{ t('ontology.evalQualityConciseness') }}</span>
             <span class="v mono">{{ fmtNum(quality?.metrics?.conciseness) }}</span>
           </div>
+          <!-- U6 新增 metrics 键：报告只增不改，缺省（旧后端/空库）不显示的键不硬造 -->
+          <div v-if="quality?.metrics?.orphanRate !== undefined" class="metric" data-testid="eval-metric-orphanRate">
+            <span class="k">{{ t('ontology.evalMetricOrphanRate') }}</span>
+            <span class="v mono">{{ fmtNum(quality.metrics.orphanRate) }}</span>
+          </div>
+          <div v-if="quality?.metrics?.missingLabelRate !== undefined" class="metric" data-testid="eval-metric-missingLabelRate">
+            <span class="k">{{ t('ontology.evalMetricMissingLabelRate') }}</span>
+            <span class="v mono">{{ fmtNum(quality.metrics.missingLabelRate) }}</span>
+          </div>
+          <div v-if="quality?.metrics?.inverseOneSidedCount !== undefined" class="metric" data-testid="eval-metric-inverseOneSidedCount">
+            <span class="k">{{ t('ontology.evalMetricInverseOneSidedCount') }}</span>
+            <span class="v mono">{{ quality.metrics.inverseOneSidedCount }}</span>
+          </div>
+          <div v-if="quality?.metrics?.parentCycleCount !== undefined" class="metric" data-testid="eval-metric-parentCycleCount">
+            <span class="k">{{ t('ontology.evalMetricParentCycleCount') }}</span>
+            <span class="v mono">{{ quality.metrics.parentCycleCount }}</span>
+          </div>
+          <div v-if="quality?.metrics?.referenceIntegrity !== undefined" class="metric" data-testid="eval-metric-referenceIntegrity">
+            <span class="k">{{ t('ontology.evalMetricReferenceIntegrity') }}</span>
+            <span class="v mono">{{ fmtNum(quality.metrics.referenceIntegrity) }}</span>
+          </div>
+          <div v-if="quality?.metrics?.coverage !== undefined" class="metric" data-testid="eval-metric-coverage">
+            <span class="k">{{ t('ontology.evalMetricCoverage') }}</span>
+            <span class="v mono">{{ fmtNum(quality.metrics.coverage) }}</span>
+          </div>
+        </div>
+        <!-- U6：质量门阈值判定（POST /ontology/quality/gate；阈值可留空） -->
+        <div class="quality-gate" data-testid="eval-gate-panel">
+          <h4 class="findings-title">{{ t('ontology.evalGateTitle') }}</h4>
+          <p class="honest-note">{{ t('ontology.evalGateNote') }}</p>
+          <div class="gate-form">
+            <label class="gate-field">
+              <span>{{ t('ontology.evalGateMinCoverage') }}</span>
+              <a-input-number v-model:value="gateThresholds.minCoverage" :min="0" :max="1" :step="0.01" class="gate-input" data-testid="gate-min-coverage" />
+            </label>
+            <label class="gate-field">
+              <span>{{ t('ontology.evalGateMaxFindings') }}</span>
+              <a-input-number v-model:value="gateThresholds.maxFindings" :min="0" :precision="0" class="gate-input" data-testid="gate-max-findings" />
+            </label>
+            <label class="gate-field">
+              <span>{{ t('ontology.evalGateMaxOrphanRate') }}</span>
+              <a-input-number v-model:value="gateThresholds.maxOrphanRate" :min="0" :max="1" :step="0.01" class="gate-input" data-testid="gate-max-orphan-rate" />
+            </label>
+            <GlassButton size="sm" :loading="gateLoading" data-testid="gate-run" @click="runQualityGate">
+              {{ t('ontology.evalGateRunBtn') }}
+            </GlassButton>
+          </div>
+          <p v-if="gateError" class="honest-note honest-note--error" data-testid="gate-error">
+            {{ t('knowledgeEval.loadFailed') }}
+          </p>
+          <div v-else-if="gateResult" class="gate-result" data-testid="gate-result">
+            <p class="gate-verdict">
+              <a-tag :color="gateResult.passed ? 'green' : 'red'" data-testid="gate-verdict">
+                {{ gateResult.passed ? t('ontology.evalGatePassed') : t('ontology.evalGateFailed') }}
+              </a-tag>
+            </p>
+            <template v-if="gateResult.threshold_failures.length">
+              <p class="gate-failures-title">{{ t('ontology.evalGateFailures') }}</p>
+              <ul class="gate-failures" data-testid="gate-failures">
+                <li v-for="(failure, index) in gateResult.threshold_failures" :key="index" :data-testid="`gate-failure-${index}`">
+                  {{ failure }}
+                </li>
+              </ul>
+            </template>
+          </div>
         </div>
         <p v-if="qualityLoading" class="honest-note" data-testid="eval-quality-loading">…</p>
         <p v-else-if="qualityError" class="honest-note honest-note--error" data-testid="eval-quality-error">
@@ -174,9 +239,9 @@ import {
   getRetrievalMetricsSnapshot,
   type EvaluationBaseline,
 } from '@/api/modules/knowledgeEval'
-import { getOntologyQuality, listCqMatrix, listDefaultOffFlags } from '@/api/modules/ontology'
+import { getOntologyQuality, listCqMatrix, listDefaultOffFlags, qualityGate } from '@/api/modules/ontology'
 import { severityColor } from '@/utils/ontologyFormat'
-import type { CqRow, DefaultOffReading, OntologyQualityReport } from '@/types/ontology'
+import type { CqRow, DefaultOffReading, OntologyQualityReport, QualityGateResult } from '@/types/ontology'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -220,6 +285,37 @@ async function loadQuality() {
     qualityError.value = true
   } finally {
     qualityLoading.value = false
+  }
+}
+
+// ── U6：质量门阈值判定（报告与 GET /ontology/quality 同源，门只补判定）────
+
+const gateThresholds = ref<{ minCoverage: number | null; maxFindings: number | null; maxOrphanRate: number | null }>({
+  minCoverage: null,
+  maxFindings: null,
+  maxOrphanRate: null,
+})
+const gateLoading = ref(false)
+const gateError = ref(false)
+const gateResult = ref<QualityGateResult | null>(null)
+
+async function runQualityGate() {
+  gateLoading.value = true
+  gateError.value = false
+  gateResult.value = null
+  try {
+    const thresholds: Record<string, number> = {}
+    // 留空 = 不判该维；只回传实际填了的键，不硬造 0
+    if (gateThresholds.value.minCoverage !== null) thresholds.min_coverage = gateThresholds.value.minCoverage
+    if (gateThresholds.value.maxFindings !== null) thresholds.max_findings = gateThresholds.value.maxFindings
+    if (gateThresholds.value.maxOrphanRate !== null) thresholds.max_orphan_rate = gateThresholds.value.maxOrphanRate
+    const res = await qualityGate(thresholds)
+    gateResult.value = (res.data?.gate ?? null) as QualityGateResult | null
+  } catch {
+    // 判定失败显式报错，不冒充「门通过」
+    gateError.value = true
+  } finally {
+    gateLoading.value = false
   }
 }
 
@@ -431,6 +527,47 @@ watch(isAdmin, (allowed) => { if (allowed) void loadDefaultOffMatrix() }, { imme
   color: var(--nr-text-primary);
 }
 .honest-note--error {
+  color: var(--nr-error);
+}
+
+.quality-gate {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--nr-border, rgba(128, 128, 128, 0.2));
+}
+.gate-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.gate-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+}
+.gate-input {
+  width: 180px;
+}
+.gate-verdict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+}
+.gate-failures-title {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nr-text-primary);
+}
+.gate-failures {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
   color: var(--nr-error);
 }
 

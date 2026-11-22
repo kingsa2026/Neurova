@@ -41,6 +41,9 @@ vi.mock('@/api/modules/ontology', () => ({
   rotateWebhookSecret: vi.fn(),
   simulateWebhookPush: vi.fn(),
   getWebhookDedupStats: vi.fn(),
+  listCatalogTables: vi.fn(),
+  getCatalogTableDetail: vi.fn(),
+  refreshSourceCatalog: vi.fn(),
 }))
 
 vi.mock('ant-design-vue', () => ({
@@ -48,7 +51,7 @@ vi.mock('ant-design-vue', () => ({
 }))
 
 import EnterpriseSourcesPage from '@/pages/EnterpriseSourcesPage.vue'
-import { listEnterpriseSources, getEnterpriseSyncHistory } from '@/api/modules/ontology'
+import { listEnterpriseSources, getEnterpriseSyncHistory, listCatalogTables } from '@/api/modules/ontology'
 import { ontologySection } from '@/i18n/locales/_ontologySection'
 import zhCN from '@/i18n/locales/zh-CN'
 import enUS from '@/i18n/locales/en-US'
@@ -64,6 +67,7 @@ import hiIN from '@/i18n/locales/hi-IN'
 
 const listMock = listEnterpriseSources as unknown as ReturnType<typeof vi.fn>
 const historyMock = getEnterpriseSyncHistory as unknown as ReturnType<typeof vi.fn>
+const catalogListMock = listCatalogTables as unknown as ReturnType<typeof vi.fn>
 
 const i18n = createI18n({
   legacy: false,
@@ -194,6 +198,8 @@ beforeEach(() => {
   listMock.mockResolvedValue({ code: 0, message: 'ok', data: { items: [sourceRow()], total: 1 } })
   historyMock.mockReset()
   historyMock.mockResolvedValue({ code: 0, message: 'ok', data: { source_id: 'erp_orders', items: [] } })
+  catalogListMock.mockReset()
+  catalogListMock.mockResolvedValue({ code: 0, message: 'ok', data: { items: [], total: 0 } })
   authUser.role = 'admin'
 })
 

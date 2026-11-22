@@ -36,6 +36,9 @@ vi.mock('@/api/modules/ontology', () => ({
   getEnterpriseSourceHealth: vi.fn(),
   deleteEnterpriseSource: vi.fn(),
   triggerEnterpriseMedia: vi.fn(),
+  listCatalogTables: vi.fn(),
+  getCatalogTableDetail: vi.fn(),
+  refreshSourceCatalog: vi.fn(),
 }))
 
 vi.mock('ant-design-vue', () => ({
@@ -50,6 +53,7 @@ import {
   getEnterpriseSourceHealth,
   deleteEnterpriseSource,
   triggerEnterpriseMedia,
+  listCatalogTables,
 } from '@/api/modules/ontology'
 import { ontologySection } from '@/i18n/locales/_ontologySection'
 
@@ -59,6 +63,7 @@ const ingestMock = triggerEnterpriseIngest as unknown as ReturnType<typeof vi.fn
 const healthMock = getEnterpriseSourceHealth as unknown as ReturnType<typeof vi.fn>
 const deleteMock = deleteEnterpriseSource as unknown as ReturnType<typeof vi.fn>
 const mediaMock = triggerEnterpriseMedia as unknown as ReturnType<typeof vi.fn>
+const catalogListMock = listCatalogTables as unknown as ReturnType<typeof vi.fn>
 
 const i18n = createI18n({
   legacy: false,
@@ -132,6 +137,9 @@ const stubs = {
   },
   'a-row': { template: '<div class="stub-row-el"><slot /></div>' },
   'a-col': { template: '<div class="stub-col"><slot /></div>' },
+  'a-drawer': { props: ['open', 'title'], template: '<div v-if="open" class="stub-drawer"><slot /></div>' },
+  'a-spin': { props: ['spinning'], template: '<div class="stub-spin"><slot /></div>' },
+  'a-divider': { template: '<div class="stub-divider"><slot /></div>' },
   'a-descriptions': { template: '<div class="stub-desc"><slot /></div>' },
   'a-descriptions-item': { props: ['label'], template: '<div class="stub-desc-item"><slot /></div>' },
   GlassPanel: { template: '<div class="stub-panel"><slot /></div>' },
@@ -183,6 +191,8 @@ beforeEach(() => {
     message: 'ok',
     data: { status: 'staged', msgid: 'm1', path: 'staged/m1.pdf', size: 9 },
   })
+  catalogListMock.mockReset()
+  catalogListMock.mockResolvedValue({ code: 0, message: 'ok', data: { items: [], total: 0 } })
   authUser.role = 'admin'
 })
 
@@ -275,7 +285,8 @@ describe('EnterpriseSourcesPage（新增向导）', () => {
 
     // 步 1 必填未填 → 下一步禁用
     expect((wrapper.find('[data-testid="ent-wizard-next"]').element as HTMLButtonElement).disabled).toBe(true)
-    const inputs = wrapper.findAll('.stub-input')
+    // 目录主视图面板自带搜索输入框：按序号定位必须圈定在向导弹层内
+    const inputs = wrapper.find('.stub-modal').findAll('.stub-input')
     // 顺序：source_id / cursorColumn / host / port / database / table（driver 是 select）
     await inputs[0].setValue('orders_src')
     await inputs[1].setValue('updated_at')
@@ -286,7 +297,7 @@ describe('EnterpriseSourcesPage（新增向导）', () => {
     await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
 
     // 步 2 映射
-    const step2Inputs = wrapper.findAll('.stub-input')
+    const step2Inputs = wrapper.find('.stub-modal').findAll('.stub-input')
     await step2Inputs[0].setValue('order_id, status') // columns
     await step2Inputs[1].setValue('order_id') // subject column
     await step2Inputs[2].setValue('has_status') // predicate
@@ -318,10 +329,11 @@ describe('EnterpriseSourcesPage（新增向导）', () => {
     await wrapper.find('[data-testid="ent-add-btn"]').trigger('click')
     await wrapper.findAll('.kind-card')[2].trigger('click') // 企微
     await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
-    const inputs = wrapper.findAll('.stub-input')
+    // 目录主视图面板自带搜索输入框：按序号定位必须圈定在向导弹层内
+    const inputs = wrapper.find('.stub-modal').findAll('.stub-input')
     await inputs[0].setValue('wecom_src')
     await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
-    const step2Inputs = wrapper.findAll('.stub-input')
+    const step2Inputs = wrapper.find('.stub-modal').findAll('.stub-input')
     await step2Inputs[0].setValue('msg_id, content')
     await step2Inputs[1].setValue('sender')
     await step2Inputs[2].setValue('has_status')
@@ -343,21 +355,22 @@ describe('EnterpriseSourcesPage（新增向导）', () => {
     await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
 
     // 步 1 缺省 capture：source_id 填完即可过
-    const inputs = wrapper.findAll('.stub-input')
+    // 目录主视图面板自带搜索输入框：按序号定位必须圈定在向导弹层内
+    const inputs = wrapper.find('.stub-modal').findAll('.stub-input')
     await inputs[0].setValue('archive_src')
     // 切存档面：未填存档字段 → 守门禁用
     await wrapper.find('.stub-radio').setValue('archive')
     expect((wrapper.find('[data-testid="ent-wizard-next"]').element as HTMLButtonElement).disabled).toBe(true)
     // 存档字段：sdk / secretEnv 为 stub-input，私钥映射为 stub-textarea
-    const archiveInputs = wrapper.findAll('.stub-input')
+    const archiveInputs = wrapper.find('.stub-modal').findAll('.stub-input')
     await archiveInputs[1].setValue('C:/sdk/libweworkarchive.dll')
     await archiveInputs[2].setValue('NEUROVA_ARCHIVE_SECRET')
-    await wrapper.findAll('.stub-textarea')[0].setValue('v1=private_v1.pem')
+    await wrapper.find('.stub-modal').findAll('.stub-textarea')[0].setValue('v1=private_v1.pem')
     expect((wrapper.find('[data-testid="ent-wizard-next"]').element as HTMLButtonElement).disabled).toBe(false)
     await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
 
     // 步 2 映射：object 取结构化列 sender（text 已被编译期守卫拒）
-    const step2Inputs = wrapper.findAll('.stub-input')
+    const step2Inputs = wrapper.find('.stub-modal').findAll('.stub-input')
     await step2Inputs[0].setValue('msg_id, sender')
     await step2Inputs[1].setValue('chat_id')
     await step2Inputs[2].setValue('spoke_in')
@@ -486,5 +499,31 @@ describe('EnterpriseSourcesPage（摄取）', () => {
     await flushPromises()
     const { message } = await import('ant-design-vue')
     expect((message.info as ReturnType<typeof vi.fn>).mock.calls.some((c) => String(c[0]).includes('未启用'))).toBe(true)
+  })
+})
+
+describe('EnterpriseSourcesPage（目录主视图）', () => {
+  it('目录缺省取第一个已注册源；行「目录」按钮切换面板当前源并重拉目录（抽屉已退役）', async () => {
+    listMock.mockResolvedValue({
+      code: 0,
+      data: {
+        items: [sourceRow(), sourceRow({ source_id: 'wecom_src' })],
+        total: 2,
+      },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    // 目录主视图缺省加载第一个源
+    expect(catalogListMock).toHaveBeenCalledWith('erp_orders', '')
+    const select = wrapper.find('[data-testid="catalog-source-select"]')
+    expect((select.element as HTMLSelectElement).value).toBe('erp_orders')
+
+    // 行「目录」按钮 → 切换目录面板当前源（原抽屉形态已退役，不再有开抽屉断言）
+    catalogListMock.mockClear()
+    await wrapper.findAll('[data-testid="ent-catalog-btn"]')[1].trigger('click')
+    await flushPromises()
+    expect(catalogListMock).toHaveBeenCalledTimes(1)
+    expect(catalogListMock).toHaveBeenCalledWith('wecom_src', '')
+    expect((select.element as HTMLSelectElement).value).toBe('wecom_src')
   })
 })

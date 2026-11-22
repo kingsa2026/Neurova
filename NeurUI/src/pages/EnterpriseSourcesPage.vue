@@ -10,7 +10,25 @@
       </GlassButton>
     </div>
 
-    <!-- 连接器列表 -->
+    <!-- 目录主视图：源选择器 + schema 目录（P1-1；抽屉内容提取为内联面板常驻） -->
+    <div ref="catalogSectionRef" class="catalog-section">
+      <GlassPanel :title="t('ontology.catalogPanelTitle')">
+        <div class="catalog-source-row">
+          <span class="source-label">{{ t('ontology.catalogSourceLabel') }}</span>
+          <a-select
+            v-model:value="activeCatalogSourceId"
+            class="source-select"
+            :options="catalogSourceOptions"
+            size="small"
+            data-testid="catalog-source-select"
+          />
+          <span v-if="!sources.length" class="field-hint">{{ t('ontology.catalogSourceEmpty') }}</span>
+        </div>
+        <SourceCatalogPanel :source-id="activeCatalogSourceId" :is-admin="isAdmin" />
+      </GlassPanel>
+    </div>
+
+    <!-- 连接器列表（次级分区：行「目录」按钮改为切换上方目录面板的当前源） -->
     <GlassPanel :title="t('ontology.entListTitle')">
       <div v-if="listError" class="honest-note honest-note--error" data-testid="ent-list-error">
         {{ t('ontology.entListFailed') }}
@@ -88,8 +106,8 @@
               <GlassButton
                 variant="ghost" size="sm"
                 data-testid="ent-catalog-btn"
-                @click="openCatalogDrawer(record.source_id)"
-              >{{ t('ontology.catalogDrawerTitle') }}</GlassButton>
+                @click="openCatalog(record.source_id)"
+              >{{ t('ontology.catalogViewBtn') }}</GlassButton>
               <GlassButton
                 variant="ghost" size="sm"
                 data-testid="ent-nl2sql-btn"
@@ -552,13 +570,6 @@
       </div>
     </a-drawer>
 
-    <!-- P1-1：schema 目录抽屉（表/列/主外键/术语链接 + 手动刷新） -->
-    <SourceCatalogDrawer
-      :open="catalogDrawerOpen"
-      :source-id="catalogDrawerSourceId"
-      :is-admin="isAdmin"
-      @close="catalogDrawerOpen = false"
-    />
     <!-- P1-4：问数抽屉（自然语言→SQL→只读执行；env 门控默认关，403 如实转述） -->
     <SourceNl2SqlDrawer
       :open="nl2sqlDrawerOpen"
@@ -570,12 +581,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
-import SourceCatalogDrawer from '@/components/enterprise/SourceCatalogDrawer.vue'
+import SourceCatalogPanel from '@/components/enterprise/SourceCatalogPanel.vue'
 import SourceNl2SqlDrawer from '@/components/enterprise/SourceNl2SqlDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -974,15 +985,34 @@ const wizardForm = reactive(emptyForm())
 const showMediaModal = ref(false)
 const mediaSourceId = ref('')
 
-// P1-1/P1-4：schema 目录与问数抽屉（逐源打开；门控/权限由后端裁决、前端如实转述）
-const catalogDrawerOpen = ref(false)
-const catalogDrawerSourceId = ref('')
+// P1-4：问数抽屉（逐源打开；门控/权限由后端裁决、前端如实转述）
 const nl2sqlDrawerOpen = ref(false)
 const nl2sqlDrawerSourceId = ref('')
 
-function openCatalogDrawer(sourceId: string) {
-  catalogDrawerSourceId.value = sourceId
-  catalogDrawerOpen.value = true
+// P1-1：目录主视图的当前源（选择器 v-model；行「目录」按钮切换同源并滚回目录区）
+const catalogSectionRef = ref<HTMLElement | null>(null)
+const activeCatalogSourceId = ref('')
+
+const catalogSourceOptions = computed(() =>
+  sources.value.map((s) => ({ label: s.source_id, value: s.source_id })))
+
+/** 源清单变化时保持目录当前源有效：缺省取第一个源；当前源被删则回落第一个 */
+watch(() => sources.value.map((s) => s.source_id).join(','), () => {
+  const ids = sources.value.map((s) => s.source_id)
+  if (!ids.includes(activeCatalogSourceId.value)) {
+    activeCatalogSourceId.value = ids[0] ?? ''
+  }
+})
+
+/** 行「目录」按钮：切换目录面板当前源并滚回目录区（替代原抽屉打开） */
+function openCatalog(sourceId: string) {
+  activeCatalogSourceId.value = sourceId
+  void nextTick(() => {
+    const el = catalogSectionRef.value
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  })
 }
 
 function openNl2SqlDrawer(sourceId: string) {
@@ -1265,6 +1295,11 @@ onMounted(loadSources)
 .page-title { font-family: var(--nr-font-display); font-size: 22px; font-weight: 700; color: var(--nr-text-primary); margin: 0; }
 .page-subtitle { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-secondary); }
 .page-header { display: flex; justify-content: space-between; align-items: center; }
+/* 目录主视图分区：滚回锚点 + 源选择器行（颜色全部走 tokens） */
+.catalog-section { scroll-margin-top: 16px; }
+.catalog-source-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.source-label { font-size: 12px; color: var(--nr-text-secondary); }
+.source-select { min-width: 220px; }
 .mono { font-family: var(--nr-font-mono, monospace); font-size: 12px; }
 .source-id { color: var(--nr-text-primary); }
 .honest-note { font-size: 12px; color: var(--nr-text-secondary); margin: 0; }
