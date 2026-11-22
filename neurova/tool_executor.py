@@ -8961,6 +8961,7 @@ class ToolExecutor:
             "success": False, "needs_host_confirmation": True,
             "host": host, "port": hk.port,
             "fingerprint": hk.fingerprint, "key_type": hk.key_type,
+            "agent_id": agent_id,
             "error": (f"主机 {host}:{hk.port} 首次连接，公钥指纹 {hk.fingerprint}，"
                       f"请在确认卡中核对后确认"),
         })
@@ -9345,13 +9346,15 @@ class ToolExecutor:
                 payload["needs_credential"] = True
                 payload["host"] = result.get("host")
             # U1 主机确认卡：首连公钥未确认 → 指纹/端口/密钥类型随卡透传
-            #（前端渲染确认对话框，确认动作经 SshHostStore.mark_confirmed 落库）
+            #（前端渲染确认对话框，确认动作经 SshHostStore.mark_confirmed 落库）；
+            # agent_id 随卡透传——前端确认时回带（known_hosts 按 agent 分桶）
             if isinstance(result, dict) and result.get("needs_host_confirmation"):
                 payload["needs_host_confirmation"] = True
                 payload["host"] = result.get("host")
                 payload["port"] = result.get("port")
                 payload["fingerprint"] = result.get("fingerprint")
                 payload["key_type"] = result.get("key_type")
+                payload["agent_id"] = result.get("agent_id")
             # R0-3 刷新标记 + R1-2 动作结果契约（新增字段，旧前端不受影响）
             if isinstance(result, dict) and result.get("refreshed"):
                 payload["refreshed"] = True

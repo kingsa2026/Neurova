@@ -122,6 +122,27 @@ export function deleteSSHCredential(host: string) {
 }
 
 // ---------------------------------------------------------------------------
+// SSH 首连主机公钥确认（U1 TOFU：needs_host_confirmation 确认卡的确认动作）
+// ---------------------------------------------------------------------------
+
+export interface SshHostKeyConfirmPayload {
+  /** 发起连接的 agent（known_hosts 按 agent 分桶，后端做属主校验） */
+  agent_id: string
+  host: string
+  port: number
+  /** 服务器公钥 SHA256 指纹（OpenSSH 风格，来自确认卡透传） */
+  fingerprint: string
+  key_type?: string
+}
+
+export function confirmSshHostKey(data: SshHostKeyConfirmPayload) {
+  return api.post<ApiResponse<{ host: string; port: number; confirmed: boolean }>>(
+    `${BASE}/ssh-credentials/host-key/confirm`,
+    data,
+  )
+}
+
+// ---------------------------------------------------------------------------
 // RDP 直连凭据（rdp_provider 消费；单记录，token 加密落盘永不回显）
 // ---------------------------------------------------------------------------
 

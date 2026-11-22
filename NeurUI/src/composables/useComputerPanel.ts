@@ -99,6 +99,12 @@ export interface ComputerPanelApi {
   handleComputerAction: (payload: Record<string, any> | undefined | null) => void
   handleToolCall: (toolName: string) => void
   markIdle: () => void
+  /** U8：park 轮询开始 → 终端视图提示（按 poll_after 间隔轮询中） */
+  noteParkPolling: (park: { parkId: string; pollAfterSec: number }) => void
+  /** U8：park 终态回灌 → 用最终结果刷新终端视图（completed=结果，failed=失败原因） */
+  applyParkResult: (data: Record<string, unknown>) => void
+  /** U8：轮询自身失败（404/超限/网络）→ 终端视图诚实报错 */
+  applyParkFailure: (reason: string) => void
   open: () => void
   close: () => void
   toggleMinimized: () => void
@@ -452,13 +458,7 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
     if (entry.windows && entry.windows.length) state.latestWindows = entry.windows
     // 终端视图：SSH/shell 命令到达 → 累积转录并切到终端视口；截图动作切回桌面
     if (entry.terminal) {
-      const t = entry.terminal
-      const head = t.host ? `$ [${t.host}] ${t.command}` : `$ ${t.command}`
-      state.terminalTranscript += (state.terminalTranscript ? '\n' : '') + head
-      if (t.stdout) state.terminalTranscript += '\n' + t.stdout.replace(/\n+$/, '')
-      if (t.stderr) state.terminalTranscript += '\n' + t.stderr.replace(/\n+$/, '')
-      if (typeof t.exit === 'number' && t.exit !== 0) state.terminalTranscript += `\n[exit ${t.exit}]`
-      state.view = 'terminal'
+      appendTerminal(entry.terminal)
     } else if (entry.screenshot) {
       state.view = 'desktop'
     }
@@ -482,6 +482,59 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
     setTimeout(() => {
       if (state.clickMarker?.ts === ts) state.clickMarker = undefined
     }, 2000)
+  }
+
+  /** 终端转录追加（$ 命令头 + stdout/stderr + 非 0 exit），并切到终端视口 */
+  function appendTerminal(t: { command: string; stdout: string; stderr: string; host?: string; exit?: number }): void {
+    const head = t.host ? `$ [${t.host}] ${t.command}` : `$ ${t.command}`
+    state.terminalTranscript += (state.terminalTranscript ? '\n' : '') + head
+    if (t.stdout) state.terminalTranscript += '\n' + t.stdout.replace(/\n+$/, '')
+    if (t.stderr) state.terminalTranscript += '\n' + t.stderr.replace(/\n+$/, '')
+    if (typeof t.exit === 'number' && t.exit !== 0) state.terminalTranscript += `\n[exit ${t.exit}]`
+    state.view = 'terminal'
+  }
+
+  /** U8：park 轮询开始 → 终端视图提示一行（不打断既有转录） */
+  function noteParkPolling(park: { parkId: string; pollAfterSec: number }): void {
+    state.terminalTranscript +=
+      (state.terminalTranscript ? '\n' : '') +
+      i18n.global.t('computerPanel.parkPolling', { seconds: park.pollAfterSec }) +
+      ` [${park.parkId}]`
+    state.view = 'terminal'
+    state.busy = true
+  }
+
+  /** U8：park 终态回灌 → 用最终结果刷新终端视图 */
+  function applyParkResult(data: Record<string, unknown>): void {
+    if (data.status === 'failed') {
+      const reason = String(data.error || '')
+      state.terminalTranscript +=
+        (state.terminalTranscript ? '\n' : '') +
+        `[park] ${i18n.global.t('computerPanel.parkFailed', { error: reason })}`
+      state.view = 'terminal'
+      state.busy = false
+      return
+    }
+    const result = (data.result && typeof data.result === 'object' ? data.result : {}) as Record<string, unknown>
+    appendTerminal({
+      command: String(result.command ?? ''),
+      stdout: String(result.stdout ?? ''),
+      stderr: String(result.stderr ?? ''),
+      host: result.host ? String(result.host) : undefined,
+      exit: typeof result.returncode === 'number' ? result.returncode : undefined,
+    })
+    state.terminalTranscript += `\n[park] ${i18n.global.t('computerPanel.parkDone')}`
+    state.busy = false
+  }
+
+  /** U8：轮询自身失败（404/超限/网络）→ 终端视图诚实报错 */
+  function applyParkFailure(reason: string): void {
+    state.terminalTranscript +=
+      (state.terminalTranscript ? '\n' : '') +
+      `[park] ${i18n.global.t('computerPanel.parkTimeout')}` +
+      (reason ? ` (${reason})` : '')
+    state.view = 'terminal'
+    state.busy = false
   }
 
   /** 打开 dock 的 computer tab（延迟导入防循环依赖：rightDock 不依赖本模块） */
@@ -525,7 +578,19 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
     state.latestWindows = undefined
   }
 
-  return (_sharedPanel = { state, handleComputerAction, handleToolCall, markIdle, open, close, toggleMinimized, clear })
+  return (_sharedPanel = {
+    state,
+    handleComputerAction,
+    handleToolCall,
+    markIdle,
+    noteParkPolling,
+    applyParkResult,
+    applyParkFailure,
+    open,
+    close,
+    toggleMinimized,
+    clear,
+  })
 }
 
 /**

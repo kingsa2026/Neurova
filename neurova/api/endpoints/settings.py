@@ -126,6 +126,16 @@ class RdpCredentialRequest(BaseModel):
     token: str = Field("", description="guest agent 访问令牌（首次必填；留空不覆盖已设值）")
 
 
+class SshHostKeyConfirmRequest(BaseModel):
+    """SSH 首连主机公钥确认（U1 TOFU：用户在主机确认卡核对指纹后提交）"""
+
+    agent_id: str = Field(..., description="发起连接的 agent（known_hosts 按 agent 分桶）")
+    host: str = Field(..., description="目标主机 IP/域名")
+    port: int = Field(22, ge=1, le=65535, description="SSH 端口")
+    fingerprint: str = Field(..., description="服务器公钥 SHA256 指纹（OpenSSH 风格）")
+    key_type: str = Field("", description="公钥类型（ssh-ed25519/ssh-rsa/...）")
+
+
 def _get_request_id(request: Request) -> str:
     """安全获取 request_id"""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
@@ -290,6 +300,40 @@ async def delete_ssh_credential(
     if not get_credential_store().delete_ssh_host(uid, host):
         raise HTTPException(status_code=404, detail=f"未找到主机凭据: {host}")
     return {"code": 0, "data": {"host": host, "deleted": True}}
+
+
+@router.post("/ssh-credentials/host-key/confirm")
+async def confirmSshHostKey(
+    request: Request,
+    body: SshHostKeyConfirmRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """确认 SSH 首连主机公钥（needs_host_confirmation 确认卡的确认动作）。
+
+    U1 TOFU 信任锚：用户核对指纹后，确认记录经 SshHostStore.mark_confirmed
+    按 (agent_id, host, port) 落库；工具执行侧轮询到同指纹记录后原地重连。
+    鉴权与 agent 归属校验对齐同文件既有 ssh-credentials 端点的形态
+    （登录用户 + requireAgentOwner 执行门：admin 全量/属主本人/无主仅 admin）。
+    """
+    _get_request_id(request)
+    from neurova.api.agent_access import requireAgentOwner
+    from neurova.security.ssh_host_store import get_ssh_host_store
+
+    requireAgentOwner(body.agent_id, current_user, action="确认主机公钥")
+    host = (body.host or "").strip()
+    fingerprint = (body.fingerprint or "").strip()
+    if not host or not fingerprint:
+        raise HTTPException(status_code=422, detail="host 与 fingerprint 不能为空")
+    ok = get_ssh_host_store().mark_confirmed(
+        body.agent_id, host, body.port, fingerprint,
+        confirmed_via="user_card", key_type=body.key_type)
+    if not ok:
+        raise HTTPException(status_code=422, detail="主机公钥确认未落库（host/fingerprint 校验未过）")
+    logger.info(
+        "SSH 主机公钥已确认 agent=%s host=%s:%s fp=%s",
+        body.agent_id, host, body.port, fingerprint[:20],
+    )
+    return {"code": 0, "data": {"host": host, "port": body.port, "confirmed": True}}
 
 
 # ─── RDP 直连凭据（rdp_provider 消费；单记录，登录用户自管）───

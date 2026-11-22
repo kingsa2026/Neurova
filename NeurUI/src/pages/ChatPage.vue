@@ -450,6 +450,19 @@
       />
     </div>
 
+    <!-- U1 主机确认卡（首连主机公钥未经确认触发；确认后后端轮询到记录自动重连） -->
+    <div v-if="sshHostConfirm" class="ssh-cred-overlay" @click.self="sshHostConfirm = null">
+      <SshHostConfirmCard
+        :host="sshHostConfirm.host"
+        :port="sshHostConfirm.port"
+        :fingerprint="sshHostConfirm.fingerprint"
+        :key-type="sshHostConfirm.keyType"
+        :agent-id="sshHostConfirm.agentId"
+        @done="sshHostConfirm = null"
+        @cancel="sshHostConfirm = null"
+      />
+    </div>
+
     <!-- 计划模式面板（/plan）：澄清问答 → MD 计划预览 → 审批执行 -->
     <PlanPanel
       :open="planPanelOpen"
@@ -543,12 +556,14 @@ import ChatSessionSidebar from '@/components/chat/ChatSessionSidebar.vue'
 import ChatComposerArea from '@/components/chat/ChatComposerArea.vue'
 import GovernanceApprovalModal from '@/components/chat/GovernanceApprovalModal.vue'
 import SshCredentialCard from '@/components/chat/SshCredentialCard.vue'
+import SshHostConfirmCard from '@/components/chat/SshHostConfirmCard.vue'
 import RightDock from '@/components/chat/dock/RightDock.vue'
 import PlanPanel from '@/components/chat/PlanPanel.vue'
 import BuildPanel from '@/components/chat/BuildPanel.vue'
 import type { BuildInteraction } from '@/api/modules/build'
 import CrossSessionSearch from '@/components/chat/CrossSessionSearch.vue'
 import { useComputerPanel, isComputerTool, } from '@/composables/useComputerPanel'
+import { parseParkedEnvelope, pollParkedResult } from '@/utils/toolPark'
 import { useRightDockStore } from '@/stores/rightDock'
 import { useSessionOps } from '@/composables/useSessionOps'
 import { registerRateLimitSwitchHook, useChatModels } from '@/composables/useChatModels'
@@ -721,6 +736,16 @@ function onSessionSyncEvent(event: { event_type: string; payload: Record<string,
     if (p && p.needs_credential && p.host) {
       sshCredRequest.value = { host: String(p.host) }
     }
+    // U1 主机确认卡：首连公钥未确认 → WS 通道携带 needs_host_confirmation + 指纹/端口/agent_id
+    if (p && p.needs_host_confirmation && p.host) {
+      sshHostConfirm.value = {
+        host: String(p.host),
+        port: Number(p.port) || 22,
+        fingerprint: String(p.fingerprint || ''),
+        keyType: String(p.key_type || ''),
+        agentId: String(p.agent_id || ''),
+      }
+    }
     return
   }
   handleSubAgentSyncEvent(event)
@@ -891,6 +916,11 @@ const { openApprovalModal } = useGovernanceApproval()
 
 // 会话内按需 SSH 凭据卡（computer_ssh_exec 缺凭据 → needs_credential 触发，按当前用户隔离）
 const sshCredRequest = ref<{ host: string } | null>(null)
+
+// U1 主机确认卡（首连公钥未确认 → needs_host_confirmation 触发；agent_id 由 WS 载荷带回）
+const sshHostConfirm = ref<{
+  host: string; port: number; fingerprint: string; keyType: string; agentId: string
+} | null>(null)
 
 // 斜杠命令面板（共享单例；命令注册表在 ChatComposerArea 组装）
 const { closeSlashPanel } = useSlashCommands()
@@ -1817,6 +1847,20 @@ function adoptStreamedSession(sid?: string): void {
   rememberSession(sid)
 }
 
+/** U8 park 轮询：computer_* 工具结果为 parked 信封时，按 poll_after 轮询取回终态并刷新终端视图。 */
+function maybePollParkedTool(resultText: string, toolName: string): void {
+  const park = parseParkedEnvelope(resultText)
+  if (!park || !isComputerTool(toolName)) return
+  computerPanel.noteParkPolling({ parkId: park.parkId, pollAfterSec: park.pollAfterSec })
+  void pollParkedResult(park)
+    .then((outcome) => {
+      computerPanel.applyParkResult(outcome.data)
+    })
+    .catch((e: unknown) => {
+      computerPanel.applyParkFailure(e instanceof Error ? e.message : String(e))
+    })
+}
+
 function processSSEEvent(event: any, msg: ChatMessage) {
   const type = event.type || event.event
 
@@ -1921,6 +1965,9 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       if (isComputerTool(event.name || '')) {
         computerPanel.markIdle()
       }
+      // U8 park 轮询：SSH/shell 长命令 parked 信封 → 按 poll_after 轮询取回终态，
+      // 完成后用最终结果刷新终端视图（有次数上限/超时兜底）
+      maybePollParkedTool(resultText, String(event.name || event.tool_name || ''))
       break
     }
 

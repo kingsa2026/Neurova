@@ -6,6 +6,56 @@
  * core_out 原样，_safe_json_dumps 后透传 SSE）。前端据此渲染
  * "后台运行中" 徽章与提示，不与"失败"混淆。
  */
+import i18n from '@/i18n'
+
+/** 已知 error_code 的专用提示键（其余走 phase/通用映射） */
+const ERROR_CODE_HINT_KEYS: Record<string, string> = {
+  HOST_KEY_MISMATCH: 'chat.failHostKeyMismatch',
+  TOOL_UNSUPPORTED: 'chat.failUnsupported',
+}
+
+/**
+ * E1/E3/E4：结构化失败载荷 → 一行可读提示。
+ *
+ * /tools/execute 失败响应 data.result 携带 error_code/phase/retryable/
+ * executed/param_errors/pending_approval（45a8c452c 起透传），此前前端只显示
+ * 裸 error 串。本函数把可判读语义映射为本地化提示；非 JSON/成功结果/
+ * 无结构化字段 → 空串（回退原有裸 error 展示，存量载荷行为不变）。
+ */
+export function toolFailureHint(result?: string | null): string {
+  if (!result) return ''
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(String(result)) as Record<string, unknown>
+  } catch {
+    return ''
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return ''
+  if (parsed.success !== false && parsed.pending_approval !== true && !parsed.error) return ''
+  const t = i18n.global.t
+  const parts: string[] = []
+  if (parsed.pending_approval === true) parts.push(t('chat.failPendingApproval'))
+  const code = typeof parsed.error_code === 'string' ? parsed.error_code : ''
+  const phase = typeof parsed.phase === 'string' ? parsed.phase : ''
+  const knownCode = ERROR_CODE_HINT_KEYS[code]
+  if (knownCode) {
+    parts.push(t(knownCode))
+  } else if (code === 'REMOTE_NOT_EXECUTED') {
+    if (phase === 'auth') parts.push(t('chat.failAuthFailed'))
+    else if (phase === 'connect' || phase === 'timeout') parts.push(t('chat.failHostUnreachable'))
+    else parts.push(t('chat.failRemoteFailed'))
+  } else if (code) {
+    parts.push(t('chat.failErrorCode', { code }))
+  }
+  if (parsed.executed === false) parts.push(t('chat.failNotExecuted'))
+  if (parsed.retryable === true) parts.push(t('chat.failRetryable'))
+  else if (parsed.executed === 'unknown') parts.push(t('chat.failNoRetry'))
+  if (Array.isArray(parsed.param_errors) && parsed.param_errors.length > 0) {
+    parts.push(t('chat.failParamErrors', { errors: parsed.param_errors.map(String).join('; ') }))
+  }
+  return parts.join(' · ')
+}
+
 export function isBackgroundResult(result?: string | null): boolean {
   if (!result) return false
   const text = String(result)

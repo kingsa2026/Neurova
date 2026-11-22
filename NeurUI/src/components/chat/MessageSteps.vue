@@ -36,6 +36,11 @@
                   @click.stop="emit('openToolArtifacts', step.result)"
                 ><UiIcon name="eye" :size="12" /></button>
               </div>
+              <!-- E1/E3/E4：结构化失败载荷（error_code/phase/retryable/param_errors/
+                   pending_approval）→ 一行可读提示；无结构化字段时不渲染（裸 error 照旧） -->
+              <div v-if="failureHint(step.result)" class="nr-tool-failure-hint" data-testid="tool-failure-hint">
+                {{ failureHint(step.result) }}
+              </div>
               <pre class="nr-tool-result-content">{{ step.result }}</pre>
             </div>
           </template>
@@ -79,6 +84,9 @@
                 @click.stop="emit('openToolArtifacts', tc.result)"
               ><UiIcon name="eye" :size="12" /></button>
             </div>
+            <div v-if="failureHint(tc.result)" class="nr-tool-failure-hint" data-testid="tool-failure-hint">
+              {{ failureHint(tc.result) }}
+            </div>
             <pre class="nr-tool-result-content">{{ tc.result }}</pre>
           </div>
         </div>
@@ -101,7 +109,7 @@ import { useI18n } from 'vue-i18n'
 import UiIcon from '@/components/UiIcon.vue'
 import { toggleStep, isNearBottom, followActiveReasoningScroll, type ChatStep } from '@/utils/chatSteps'
 import { toolCardVariant, variantIcon } from '@/utils/toolCardVariant'
-import { isToolFailureResult, isBackgroundResult } from '@/utils/toolCallStatus'
+import { isToolFailureResult, isBackgroundResult, toolFailureHint } from '@/utils/toolCallStatus'
 import '@/styles/messageRender.css'
 
 const props = defineProps<{
@@ -153,6 +161,11 @@ function formatJSON(str?: string): string {
   }
 }
 
+/** E1/E3/E4：结构化失败载荷 → 可读提示（无结构化字段返回空串，模板不渲染） */
+function failureHint(result?: string): string {
+  return toolFailureHint(result)
+}
+
 function onReasoningScroll(e: Event): void {
   const el = e.target as HTMLElement
   reasoningStick.value = isNearBottom(el.scrollTop, el.scrollHeight, el.clientHeight)
@@ -169,3 +182,19 @@ watch(
   follow,
 )
 </script>
+
+<style scoped>
+/* E1/E3/E4：结构化失败可读提示条（颜色走既有 error 令牌，不新增裸色值） */
+.nr-tool-failure-hint {
+  margin: 4px 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  border-radius: 6px;
+  color: var(--nr-error);
+  background: var(--nr-error-soft-bg);
+  border: 1px solid var(--nr-error-soft-border);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+</style>
