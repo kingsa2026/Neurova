@@ -96,6 +96,44 @@ def poolKey(tenant: str, tool: str, command, cwd: str,
     return _normalizeKey((tenant, tool, tuple(command or ()), cwd, transport, remote))
 
 
+def _registerSpawnedEndpoint(key: PoolKey) -> None:
+    """W1a：外部成员进程 spawn 成功 → 统一端点注册表登记（fail-soft）。
+
+    - 租户取池键租户段（§6.4 租户段键同源，勿另造第二套租户口径）；池键无
+      属主段，ownerId 留空（诚实缺省，不臆造属主）；
+    - name 取池键 tool 段（外部成员在池内的成员名）；
+    - connectionRef：ssh 远程段只存引用名（remote.key_ref 纪律，不含明文密钥），
+      stdio 存「transport:命令头」；
+    - 仅在 factory() 成功（进程已拉起并完成握手）后调用——连接失败不登记；
+    - 登记失败仅告警，绝不阻断派活链路。
+    """
+    tenant, tool, command, _cwd, transport, remote = key
+    if not tool:
+        logger.debug("neuacp 端点登记跳过：池键缺工具名 (tenant=%s)", tenant)
+        return
+    try:
+        from neurova.remote_exec.registry import (
+            KIND_NEUACP,
+            RemoteEndpoint,
+            getRemoteEndpointRegistry,
+        )
+
+        registered = getRemoteEndpointRegistry().registerEndpoint(RemoteEndpoint(
+            endpointId="",
+            kind=KIND_NEUACP,
+            name=tool,
+            ownerId="",
+            tenantId=tenant or "default",
+            capabilities={"agent": True},
+            connectionRef=remote if remote else f"{transport}:{(command[0] if command else '')}",
+            health="online",
+        ))
+        logger.info("neuacp 端点已登记: %s (endpoint=%s tenant=%s)",
+                    registered.name, registered.endpointId, registered.tenantId)
+    except Exception as exc:  # noqa: BLE001 - 登记失败不阻断派活
+        logger.warning("neuacp 端点登记失败（不阻断派活）: %s", exc)
+
+
 def _isAlive(process: Any) -> bool:
     """进程存活判定：is_alive 兼容属性/property/方法三种形态。"""
     try:
@@ -237,7 +275,9 @@ class NeuacpProcessPool:
                 self._liveCount -= 1
                 self._condition.notify()
             raise
-        return _PoolEntry(key, process)
+        entry = _PoolEntry(key, process)
+        _registerSpawnedEndpoint(key)
+        return entry
 
     def release(self, key: PoolKey, entry: _PoolEntry) -> None:
         """归还进程：无人排队且进程健康 → 驻留空闲池待复用；否则关闭腾位。"""

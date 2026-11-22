@@ -227,6 +227,7 @@ class TunnelAgent:
             self.lastHeartbeatAt = time.time()
             self.lastError = ""
             logger.info("隧道已注册 route=%s", self.routeId)
+            self._registerRemoteEndpoint()
             return socket
         except BaseException:
             try:
@@ -234,6 +235,41 @@ class TunnelAgent:
             except Exception:  # noqa: BLE001 - 已断即达目的
                 pass
             raise
+
+    def _registerRemoteEndpoint(self) -> None:
+        """W1a：隧道注册成功（FRAME_REGISTERED 且 routeId 落定）→ 统一端点注册表登记。
+
+        owner/tenant 取自本 agent 作用域：owner=稳定实例号（stableInstanceId 语义，
+        即本部署实例的身份），隧道是部署级出站通道、无请求级身份，租户按注册表
+        缺省（default）落段——不臆造请求级属主。connectionRef 存中继地址，
+        准入令牌不落明文。fail-soft：登记失败仅告警，绝不影响隧道控制链路。
+        """
+        routeId = str(self.routeId or "").strip()
+        ownerId = str(self.instanceId or "").strip()
+        if not routeId or not ownerId:
+            logger.debug("隧道端点登记跳过：routeId/instanceId 未落定 (route=%s instance=%s)",
+                         routeId, ownerId)
+            return
+        try:
+            from neurova.remote_exec.registry import (
+                KIND_TUNNEL,
+                RemoteEndpoint,
+                getRemoteEndpointRegistry,
+            )
+
+            registered = getRemoteEndpointRegistry().registerEndpoint(RemoteEndpoint(
+                endpointId="",
+                kind=KIND_TUNNEL,
+                name=f"tunnel:{routeId}",
+                ownerId=ownerId,
+                capabilities={"proxy": True},
+                connectionRef=self.relayUrl,
+                health="online",
+            ))
+            logger.info("隧道端点已登记: %s (endpoint=%s instance=%s)",
+                        registered.name, registered.endpointId, ownerId)
+        except Exception as exc:  # noqa: BLE001 - 登记失败不阻断隧道链路
+            logger.warning("隧道端点登记失败（不阻断隧道链路）: %s", exc)
 
     async def _serveControl(self, socket) -> None:
         """已注册连接的服务环：心跳 → 收 `open` 就派一条数据连接去接这条请求。

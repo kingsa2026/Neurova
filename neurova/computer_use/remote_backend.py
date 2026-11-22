@@ -131,6 +131,23 @@ def attach_remote_action_result(result: Dict[str, Any], *, confirmed: bool) -> D
     return result
 
 
+def _tenantForOwner(user_id: str) -> str:
+    """属主租户解析（W1a guest 端点登记用）：租户单源 resolveUserDepartment。
+
+    解析失败回落 default（与全仓租户缺省同源，不另造第二套口径）；
+    user_id 为空（调用链无可信身份）回空串——客户端据此跳过登记，不臆造租户。
+    """
+    owner = str(user_id or "").strip()
+    if not owner:
+        return ""
+    try:
+        from neurova.auth.user_group_model import resolveUserDepartment
+
+        return str((resolveUserDepartment(owner) or {}).get("tenant_id") or "default")
+    except Exception:  # noqa: BLE001 - 租户解析失败不阻断桌面领用
+        return "default"
+
+
 @contextmanager
 def use_remote_session(pool: Any, user_id: str) -> Iterator[RemoteComputerUseManager]:
     """闭环胶水：从会话池领用一个来宾桌面 → 绑定为当前上下文的活动远程桌面
@@ -145,7 +162,8 @@ def use_remote_session(pool: Any, user_id: str) -> Iterator[RemoteComputerUseMan
 
     session = pool.claim(user_id)
     try:
-        client = GuestAgentClient(session.base_url, token=session.token)
+        client = GuestAgentClient(session.base_url, token=session.token,
+                                  ownerId=user_id, tenantId=_tenantForOwner(user_id))
         manager = RemoteComputerUseManager(client, session_id=session.session_id)
         session.manager = manager
         token = bind_remote_desktop(manager)

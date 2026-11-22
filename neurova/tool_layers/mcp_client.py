@@ -184,6 +184,7 @@ class MCPToolClient:
         server["connected"] = True
         server["last_connected"] = datetime.datetime.now().isoformat()
         res.on_connect_success()
+        self._registerRemoteEndpoint(server_id, cfg)
 
         # 连接即发现：拉取工具清单并缓存（失败不视为连接失败）
         try:
@@ -197,6 +198,56 @@ class MCPToolClient:
         self._sync_tools_to_engine(server_id, server["tools"])
         logger.info("Connected to MCP server: %s (%d tools)", server_id, len(server["tools"]))
         return True
+
+    def _registerRemoteEndpoint(self, server_id: str, cfg: typing.Dict[str, typing.Any]) -> None:
+        """W1a：远程 MCP server 连接成功 → 统一端点注册表登记（fail-soft）。
+
+        - owner 取客户端构造身份（MCP server 配置为部署级共享，配置作用域身份
+          即客户端装配身份）；tenant 经 resolveUserDepartment 租户单源解析，
+          失败回落 default（与全仓缺省同源，不另造口径）；
+        - name=server id；connectionRef 只存 URL /「stdio:命令头」引用名，
+          headers/env/args 中的凭据不落明文；
+        - 仅在会话建立成功（_open_session 完成 initialize）后调用——失败不登记；
+        - 登记失败仅告警，绝不阻断连接/工具发现/同步链路。
+        """
+        ownerId = str(self._user_id or "").strip()
+        if not ownerId:
+            logger.debug("MCP 端点 %s 登记跳过：客户端无可信属主身份", server_id)
+            return
+        try:
+            tenantId = "default"
+            try:
+                from neurova.auth.user_group_model import resolveUserDepartment
+
+                tenantId = str(
+                    (resolveUserDepartment(ownerId) or {}).get("tenant_id") or "default"
+                )
+            except Exception:  # noqa: BLE001 - 租户解析失败回落 default
+                pass
+            from neurova.remote_exec.registry import (
+                KIND_MCP,
+                RemoteEndpoint,
+                getRemoteEndpointRegistry,
+            )
+
+            transport = str(cfg.get("transport") or "")
+            url = str(cfg.get("url") or "")
+            command = str(cfg.get("command") or "")
+            registered = getRemoteEndpointRegistry().registerEndpoint(RemoteEndpoint(
+                endpointId="",
+                kind=KIND_MCP,
+                name=server_id,
+                ownerId=ownerId,
+                tenantId=tenantId,
+                capabilities={"tools": True},
+                connectionRef=url if url else f"stdio:{command}",
+                meta={"transport": transport} if transport else {},
+                health="online",
+            ))
+            logger.info("MCP 端点已登记: %s (endpoint=%s owner=%s tenant=%s)",
+                        registered.name, registered.endpointId, ownerId, tenantId)
+        except Exception as exc:  # noqa: BLE001 - 登记失败不阻断连接链路
+            logger.warning("MCP 端点 %s 登记失败（不阻断连接链路）: %s", server_id, exc)
 
     def _on_connect_failed(self, server_id: str, res, error: str) -> None:
         """连接失败回投状态机并调度重连（重连循环内复用 connect 时幂等跳过）。"""
