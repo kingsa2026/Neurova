@@ -111,4 +111,21 @@
 
 ## 5. 执行记录
 
-（待实施回填：逐卡 commit、红绿实测输出、live-verify 证据、复评读数。）
+**批一/批二五卡已实施（2026-11-22，五笔提交，逐卡先红后绿+定向回归零新增）**：
+- S4 审计哈希链=e1f55d4d1（红：收集期 ImportError 无 GENESIS_PREV_HASH；绿：9 passed——3 条链校验/中间行篡改断链定位 (False,2)/legacy 跳过/4 线程并发 60 条连续；迁移 audit_log 域 v1 基线+v2 补列；净 +260/−62 含同文件落库的 S1 签名扩展）
+- S1 认证审计接线=da68be6a18（红：8 failed/1 passed；绿：9 passed；全命中点扫荡=账号角色唯一写点 update_user 无漏接；净 +94/−1）
+- S6 安全响应头移层=cc8ed1ed5（红：3 failed——401 实头仅 content-type+www-authenticate；绿：3 passed；净 +35/−9）
+- S2 SSRF 点位扫荡=a75430127（红：B 类 5 点位 import/call 双 False；绿：2 passed；tool_executor 点位随并行安全提交 10b9cf7b2 先行落库，本笔其余四点+清单守卫；净 +26/−0）
+- S5 租户过滤集中化=f455a64443（红：ModuleNotFoundError；绿：15 passed；三形态试点行为逐字节一致，余量 28 文件另批；净 +62/−7）
+- 合并态回归：tests/unit/security 全目录+租户助手+安全头 **1442 passed/3 skipped/0 failed**（忽略并行会话未落地模块的在途测试文件）。
+- 遗留：authSurfaceFreshness 2 条预存失败（并行端点新增后 surface 文档未重生成）——波二落库后统一重生成；S3 API key CSPRNG 核销闭案（已达标零码改）。
+
+**批三（S7 OIDC/S8 TOTP 2FA）已实施（2026-11-22，合并提交 407d06cca，prod +957/−9、NeurUI +552/−11）**：
+- S7 通用 OIDC SSO：新增 auth_oidc.py（authorize 302 带 state+nonce→callback code 换 token→PyJWT HS256 验 id_token→sub 供应（sub 查找→email 绑定→建号沿首用户 admin 规则）→复用 auth.py 签发 JWT 对；status 暴露 {enabled}；缺配置 503 诚实）；users.oidc_sub 列+索引（迁移注册表 domain=auth_oidc）；db_migration 增 apply_domain_steps（同库多域幂等扩展）；前端 LoginPage SSO 按钮（status.enabled 才显示）。红：收集期 ImportError 无 auth_oidc；绿：test_oidc_sso 15 passed（进程内真 socket 假 IdP 全链）+前端 3 passed。
+- S8 TOTP 2FA：新增 security/totp.py（stdlib RFC 6238，零新依赖，RFC 附录 B 全向量）+auth_2fa.py（setup/enable/disable 需登录；verify 公开：challenge 一次性入黑名单+错码按 jti 限 5 次+恢复码 sha256 单次消费）；auth.py 增 2fa_challenge token 类型（5 分钟与 access/refresh 互斥），login 密码过且启用 2FA→{two_factor_required, challenge_token}；users 加 totp_secret/two_factor_enabled/recovery_codes_hash（domain=auth_2fa）；前端 LoginPage 二步态+stores/auth 挑战态。红：收集期 ImportError 无 auth_2fa；绿：test_totp_2fa 19 passed+前端 4 passed。
+- 补提：auth.py 挑战令牌块 41 行=7107d32a7（上笔暂存遗漏，HEAD grep 2fa_challenge=0 → 工作树 5 处）。
+- 回归：global_auth/endpoint_registry/auth_system/auth_audit_wiring/auth_hardening/enhanced_users 159 项全绿；vue-tsc 0 错。
+
+**统一 live-verify（2026-11-22，真后端 127.0.0.1:9781 + 临时数据根 + 真 socket 假 IdP）：20/20 PASS**——后端启动/401 全安全头/HSTS 默认不发/错码 401/登录 token/审计含 AUTH_LOGIN+AUTH_FAILED/integrity ok/私网 webhook 400/OIDC status enabled/authorize 带 state+nonce/IdP 回 callback/callback 换 JWT/me 可用/2FA setup/enable/登录挑战/错码拒/OTP 换 token/me 可用/恢复码单次。
+
+**D9 复评（实施后）**：专项 70.0→**73.5，本仓反超 LobeHub 72.5（+1.0）**（A2 6→7/A3 7→7.5/A7 9→9.5/A9 5.5→7）；主报告 D9 8.0→**8.5**（运行安全 2.0→2.5），总分 96.0→**96.5**。S5 余量 28 文件迁移按 D-S3 另批。

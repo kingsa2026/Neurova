@@ -134,3 +134,17 @@ P2：
 - lobehub 为 canary 单日快照（v2.3.4），其 RBAC stub 的云版覆盖不可见，"云版更强"无法证实也无法计入；
 - 本仓"投递执行期 SSRF 复检""Gemini 链路收图"等两项标"待核实"，未据此扣分；
 - Electron IPC 的 Windows DACL、share URL 具体形态两处标"待核实"，未据此加分。
+
+## 7. 实施后复评（2026-11-22）
+
+安全追平计划（docs/04-plans/2026-11-22-reference-ad-security-catchup-implementation-plan.md）三批八卡已实施完毕：S1-S2-S4-S5-S6 五笔（e1f55d4d1/da68be6a18/a75430127/cc8ed1ed5/f455a64443）+ S7/S8 合并笔（407d06cca）+ S8 补提（7107d32a7）+ surface 重生成（30f0943167）。**真后端 live-verify 20/20 PASS**：错误密码/成功登录入审计（AUTH_FAILED/AUTH_LOGIN 行实测可见）、/audit/integrity ok、401 响应带全部五只安全头、HSTS 默认不发、私网 webhook 创建 400 拒绝、OIDC authorize(带 state+nonce)→假 IdP→callback→换发本仓 JWT→me 全链、2FA setup→enable→登录挑战→错码拒→OTP 换 token→恢复码单次。
+
+| 轴 | 实施前 | 实施后 | 依据 |
+|---|---:|---:|---|
+| A2 登录方式矩阵 | 6.0 | 7.0 | 通用 OIDC SSO 0→1（假 IdP 全链实测）+ TOTP 2FA 可用；仍低于对方 17 SSO+Passkey |
+| A3 会话与凭据生命周期 | 7.0 | 7.5 | 5 分钟 scope 限定 challenge token、恢复码 sha256 单次消费、错码按 jti 限 5 次 |
+| A7 网络边界安全 | 9.0 | 9.5 | 出站点位 SSRF 扫荡补齐 5 处（tool_executor 点位随 10b9cf7b2 先行落库） |
+| A9 审计与可追责 | 5.5 | 7.0 | 登录成败/登出/改角色入审计（零调用函数接线）+ 全量哈希链 + /integrity 校验面 |
+| **合计** | **70.0** | **73.5** | **本仓反超 LobeHub 72.5（+1.0）** |
+
+主报告 D9 据实重评：N 8.0→8.5（运行安全子项 2.0→2.5，其余不动），L 9.0 不变；总分 96.0→96.5。对方快照未变（canary@2026-11-21）。
