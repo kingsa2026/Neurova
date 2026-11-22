@@ -165,6 +165,12 @@
 - **B（鸿蒙）**：relay 鉴权新形态（token 从 URL 挪到连接后首条 auth 帧；裸密钥按 protocol.signTunnelToken 口径本地签 `nv1:agent` 信封，直连模式不变）+ 聊天流确认/审批卡（needs_host_confirmation→confirm 接口；pending_approval→approvals/{id}/approve）。
 - **C（安卓）**：relay 鉴权新形态（同 B 口径）+ computer_action 工具事件呈现 + 确认/审批卡。
 - 验收：各端红→绿（vitest/JUnit/ArkTS 单测+nv1 签名与 python signTunnelToken 对拍）+ 编译门（vue-tsc 0 错/hvigor 绿/compileDebugKotlin 绿）+ 后端端点真后端 live-verify。
+- **2026-11-22 批五实施完毕（三卡三笔=281028fb8 A / 56427b2a7 B / 8cdca67f4 C）**：
+  - A=后端 `POST /ssh-credentials/host-key/confirm`（settings.py，mark_confirmed 首个生产调用方，鉴权对齐既有 ssh-credentials 端点）+ WS needs_host_confirmation 载荷补 agent_id + NeurUI SshHostConfirmCard + E1/E3/E4 结构化失败友好提示（toolFailureHint）+ E2 park 轮询（toolPark）；后端 4 例+vite 三新套件 21 例+全量 vitest 363 文件 2889 例 0 失败+vue-tsc 0 错+真后端确认落库 live-verify（lookup 实查 key_fingerprint/confirmed_via=user_card）；同名函数盘点台账按守卫再生（新 util 入册）。
+  - B=鸿蒙 auth 帧（token 从 URL 挪到连接后首帧；裸密钥本地签 `nv1:agent` 信封，直连模式零变化）+聊天流主机确认卡/审批卡（历史重放与缓存复活同步还原）；Node 直跑 61 例（含 python signTunnelToken 对拍 4 向量）+hvigor assembleHap 绿+真中继活体 5/5。
+  - C=安卓同口径 auth 帧+computer_action/chat:approval_required/chat:tool_result 三类帧解析+聊天页两卡片；compileDebugKotlin 绿+23 套件 112 用例 0 失败（新增 17）+nv1 对拍三向量。
+  - **范围修正（诚实记档）**：中继手机入口（/t/&lt;routeId&gt;）现不做令牌校验（U9 的 5s auth 门只挂 agent 通道），旧形态手机连接实际仍可用——两端 auth 帧系**形态就绪/未来防护**，非抢救性修复；治理审批接口为 admin 门，非管理员移动端批准 403 诚实呈现（是否放开属产品拍板）。
+  - 遗留：鸿蒙 cryptoFramework HMAC 未上机实跑（纯逻辑已对拍，改动收敛单文件）；审批 admin 门移动端放开待产品拍板。
 
 ## 5. 拍板结果（2026-11-22 交互拍板，六项全落定）
 
