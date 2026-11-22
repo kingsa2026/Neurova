@@ -1,11 +1,13 @@
 /**
- * AIGC 二级菜单渲染契约（2026-09-16 用户决策）
+ * AIGC 二级菜单渲染契约（2026-09-16 用户决策；2026-11-22 音乐生成页入组）
  *
  * 背景: 「模型与工具」下拉原为 8 个平铺项，其中 文本生成/图片生成/音频生成/
  * 视频生成/创作专区 五个 AIGC 页收拢为「AIGC工具」二级菜单组。
+ * 2026-11-22 多模态追平批（fal 音乐闭环，858be6f87）新增 /aigc/music
+ * 音乐生成页，入组后二级菜单为六项。
  *
  * 契约:
- *  1. 五个 AIGC 子页渲染在 .nr-glass-submenu-panel 面板内，路由与顺序不变。
+ *  1. 六个 AIGC 子页渲染在 .nr-glass-submenu-panel 面板内，路由与顺序不变。
  *  2. 组头（.nr-glass-dropdown-group）不是导航链接，仅悬停展开子项。
  *  3. 当前路由命中任一子项时，组头与「模型与工具」分类同时高亮。
  *  4. 权限过滤作用于子项：部分授权只渲染允许项；全部拒绝则整组隐藏。
@@ -49,7 +51,8 @@ function makeI18n() {
           platformAdmin: '平台管理', platformService: '平台服务',
           models: '模型服务', toolLayers: '工具层', sandbox: '沙箱',
           aigcTools: 'AIGC工具', aigcText: '文本生成', aigcImage: '图片生成',
-          aigcAudio: '音频生成', aigcVideo: '视频生成', aigcStudio: '创作专区',
+          aigcAudio: '音频生成', aigcVideo: '视频生成', aigcMusic: '音乐生成',
+          aigcStudio: '创作专区',
         },
       },
     },
@@ -69,14 +72,14 @@ function mountMenu() {
 }
 
 describe('TopNavMenu AIGC 二级菜单', () => {
-  it('五个 AIGC 子页渲染在子菜单面板内，组头不是链接', () => {
+  it('六个 AIGC 子页渲染在子菜单面板内，组头不是链接', () => {
     const wrapper = mountMenu()
     const submenu = wrapper.find('.nr-glass-dropdown-submenu')
     expect(submenu.exists(), '缺少 AIGC 二级菜单组').toBe(true)
     const panel = submenu.find('.nr-glass-submenu-panel')
     expect(panel.exists()).toBe(true)
     expect(panel.findAll('.topnav-link').map(a => a.attributes('data-to'))).toEqual([
-      '/aigc/text', '/aigc/image', '/aigc/audio', '/aigc/video', '/aigc/studio',
+      '/aigc/text', '/aigc/image', '/aigc/audio', '/aigc/video', '/aigc/music', '/aigc/studio',
     ])
     // 组头是纯标签：无 data-to，不在任何 router-link 内
     const group = submenu.find('.nr-glass-dropdown-group')
