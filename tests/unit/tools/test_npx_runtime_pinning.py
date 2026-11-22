@@ -236,13 +236,14 @@ class TestNoKnownVulnerableRuntimePackages:
         # 2026-11 公告批（同轮 npm audit 实扫）：@hono/node-server 2.0.0–2.1.5 两条——
         # WebSocket 升级中套接字 ECONNRESET 未处理，异步升级崩溃终止 Node 进程；
         # 请求路径反斜杠被解析为路径分隔符，绕过反向代理的路径访问控制。
+        # 括号内 CVE 别名供外部 SCA 报告（以 CVE 编号呈现）直接对照仓内台账。
         # 修复线 2.1.6；引入链两条（@modelcontextprotocol/node 声明 ^1.19.9 || ^2.1.3、
         # @modelcontextprotocol/sdk 声明 ^1.19.9 || ^2.0.5），锁粘性同 hono，
         # 由 tools/npx-runtime/package.json 的 overrides 抬升。
         "@hono/node-server": (
             "2.1.6",
             ("node_modules/@modelcontextprotocol/node", "node_modules/@modelcontextprotocol/sdk"),
-            "GHSA-qv5m-9pm6-hqp3 / GHSA-jpvv-r467-5p4w",
+            "GHSA-qv5m-9pm6-hqp3（CVE-2026-126343）/ GHSA-jpvv-r467-5p4w（CVE-2026-126210）",
             "WebSocket 升级 ECONNRESET 崩溃进程；反斜杠路径绕过反代访问控制",
         ),
         "zod": (
@@ -481,7 +482,7 @@ class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
         ),
         "@hono/node-server": (
             "2.1.6",
-            "GHSA-qv5m-9pm6-hqp3 / GHSA-jpvv-r467-5p4w",
+            "GHSA-qv5m-9pm6-hqp3（CVE-2026-126343）/ GHSA-jpvv-r467-5p4w（CVE-2026-126210）",
             "WebSocket 升级 ECONNRESET 崩溃进程；反斜杠路径绕过反代访问控制",
         ),
         "ip-address": (
