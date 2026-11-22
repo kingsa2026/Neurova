@@ -34,6 +34,8 @@
 | 批四 P0 | W1b | 复评轴3 剩余差距 | 统一分派漏斗+离线 hold 全覆盖 |
 | 批四 P0 | W1c | 复评轴3 剩余差距 | 工具面收口+绕过静态守卫 |
 | 批四 P0 | W2 | 复评轴7 剩余差距 | lint 升 error（shell 分段默认 strict+static-gate 双保险） |
+| 批四收尾 | W3 | 移交项扫荡 | 工具执行结构化错误信封全端点透传（console/governance/skill/computer 同根因压扁点） |
+| 批四收尾 | W4 | 移交项 | neuacp 池键属主段补全（登记行 ownerId 完整） |
 
 ## 1. 批一 P0（安全实益，四卡，无阻塞可开工）
 
@@ -138,6 +140,20 @@
 - 红绿：红=引入一个未登记出站点/拼接点→static-gate 红；绿=当前仓零违规通过。
 - live-verify：本地跑两扫描器+单测。
 
+**W3 工具执行结构化错误信封全端点透传（移交项扫荡卡，2026-11-22 立）**
+- 现状：/tools/execute 已单点修复（45a8c452c——失败响应 data.result 携带原始结构化载荷，顶层 error 串保留兼容）；同一根因（结构化失败载荷压扁成裸 error 串）仍散布于 console.py:950、governance.py:245/365、skill.py:418、computer.py:785/901/919/933/972（HTTPException detail 形态，结构化字段同丢）。
+- 做法：逐点把失败响应升级为「顶层 error/message 串保留 + 结构化载荷随响应透传」（各端点按自身契约选 data.result/extra 字段承载，不破坏既有消费方）；HTTPException 形态改挂 detail=结构化对象或附 X- 结构化头，取不破坏前端既有判读的最小形。
+- 红绿：红=各命中点以结构化失败载荷调用→响应仅见裸串；绿=结构化字段全部可达且既有断言零回归。
+- live-verify：真后端逐端点打失败探针（治理拦截/技能失败/浏览器失败各一）。
+
+**W4 neuacp 池键属主段补全（移交项卡，2026-11-22 立）**
+- 现状：NeuacpProcessPool 池键只有「租户+成员」段无属主段，remote_endpoints 登记行 ownerId 恒空（运行台账属主在 agent_run_ledger 有权威记录，登记表属辅助盘点面——属主缺省影响 owner 维度检索/审计连接）。
+- 做法：attachProcessPool 装配期把 swarm 成员 id 带入池键（新键段追加，兼容读旧键——存量在飞池按旧键取得到）；registry 登记行 ownerId 随之补全；§6.4 租户段语义不变。
+- 红绿：红=登记行 ownerId 恒空；绿=装配期带属主后登记行 ownerId=swarm 成员 id、旧键兼容读取不破。
+- live-verify：真后端 spawn 一个 neuacp 成员→查登记行属主。
+
+**登记不立卡（无消费场景不做表面工程）**：mcp 单例属主恒 default——MCP server 配置当前为部署级共享，per-user 作用域不存在；出现 per-user MCP 配置场景时再立卡把属主随配置传入。
+
 ## 5. 拍板结果（2026-11-22 交互拍板，六项全落定）
 
 - **D-T1 沙箱第二档路线：Docker 容器档**——U5 按此实施（run_code/exec_command 增 `isolation="strong"`）；Windows Sandbox 自动化与 Pyodide WASM 不做。
@@ -181,3 +197,7 @@
   - W1a 四形态登记=3b74367ae：guest（GuestAgentClient health/action 成功 DCL 一次性，owner=领用 user_id、tenant=resolveUserDepartment 单源）/tunnel（_dialAndAuth 收 FRAME_REGISTERED 且 routeId 落定，owner=instanceId）/neuacp（进程池 factory 成功后登记，tenant=池键租户段同源、ownerId 诚实缺省）/mcp（connect_server 会话建立成功，connectionRef=url 或 stdio 命令头不落凭据）；全 fail-soft+拿不到租户上下文跳过不臆造；15 用例先红后绿；真 guest FastAPI+真 SQLite live-verify（health 即登记/action 不重复/token 不落登记面/跨租户隔离成立）。
   - W2 lint 升 error=51276d9f8：check_shell_segments 默认 strict（违规退出 1）+--warn 降档；check_shell_segments+check_outbound_fetch 双扫描器显性挂进 .cnb.yml 与 GitHub ci.yml static-gate（**补上 U2 交付时实际未挂载 outbound_fetch 的缺口**）；红 5F→绿 37P；全仓实跑双扫描器 0 违规；红色演示（临时拼接文件 strict 拦截）已验已清。
 - **2026-11-22 批四复评回填（v17）**：工具安全专项 86.5→**88.0**（轴3 8.0→9.0 统一执行面、轴10 9.0→9.5 lint 强制）。立卡验收线「轴7 8.5→9.0、86.5→89.0+」系轴归属标注误差（lint 属轴10 测试/供应链；轴7=SSRF 已于批三复评至 8.5）——按「只经据实复评回写、不许预支」纪律落档 88.0，总目标 90.0 仍未达（差 2.0）。主报告 D4 12.5→**13.0**/14 反超 1.0；总分在并行 v15（上下文收官 85.5）/v16（D7 路由复评 7.5）之后 97.0/100.5→**97.0/101.0**（对 LobeHub 快照领先 4.0）。剩余差距=轴6 云沙箱三档（U15 评估：待真实消费场景另卡）+对方设备 attestation/多版本兼容深度。
+- **2026-11-22 移交项处置（用户指令「处理一下移交项，该立卡的立卡」）**：
+  - 已清偿=**/tools/execute 失败面结构化错误信封透传**=45a8c452c（失败响应 data.result 携带原始结构化载荷、顶层 error 串保留兼容；红 4F→绿 19P；live-verify 真后端 9575 两案：缺参 param_errors 透传+未登记主机首见 U6 L1 审批信封 approval_id/governance/pending_approval 完整透传，启动 [ERROR]=0）。
+  - 已立卡=**W3 结构化错误信封全端点扫荡**（console/governance/skill/computer 同根因压扁点，见 §4）+**W4 neuacp 池键属主段补全**（见 §4）。
+  - 登记不立卡=**mcp 单例属主 default**（per-user MCP 配置场景不存在，出现消费场景再立卡）。
