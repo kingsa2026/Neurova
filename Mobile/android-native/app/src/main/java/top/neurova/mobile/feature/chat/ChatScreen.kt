@@ -136,6 +136,29 @@ fun ChatScreen(sessionId: String, initialTitle: String, onBack: () -> Unit, show
                     }
                 }
             }
+            // U1/U6 确认与审批卡：needs_host_confirmation / pending_approval 到达即内联弹出
+            controller.hostConfirmation?.let { card ->
+                Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
+                    HostKeyConfirmCard(
+                        card = card,
+                        acting = controller.cardActing,
+                        error = controller.cardError,
+                        onConfirm = { controller.confirmHostKey() },
+                        onDismiss = { controller.dismissHostKey() },
+                    )
+                }
+            }
+            controller.approval?.let { card ->
+                Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
+                    ApprovalCardView(
+                        card = card,
+                        acting = controller.cardActing,
+                        error = controller.cardError,
+                        onApprove = { controller.approvePending() },
+                        onReject = { controller.rejectPending() },
+                    )
+                }
+            }
             controller.sendError?.let { message ->
                 Text(
                     message,

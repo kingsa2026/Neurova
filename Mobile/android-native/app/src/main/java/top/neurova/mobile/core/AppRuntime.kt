@@ -16,6 +16,7 @@ import top.neurova.mobile.feature.agents.AgentsStore
 import top.neurova.mobile.feature.auth.AuthStore
 import top.neurova.mobile.feature.chat.ChatRepository
 import top.neurova.mobile.feature.chat.ChatSessionController
+import top.neurova.mobile.feature.chat.ToolActionRepository
 import top.neurova.mobile.feature.knowledge.KnowledgeRepository
 import top.neurova.mobile.feature.models.ModelsRepository
 import top.neurova.mobile.feature.pairing.PairingStore
@@ -44,14 +45,18 @@ class AppRuntime(context: Context) {
     val auth = AuthStore(http, credentials, servers)
     val pairing = PairingStore(http, credentials)
     val chatSse = ChatSseChannel(::activeProfile, http)
+    val toolActions = ToolActionRepository(http)
     val ws = MobileWsChannel(
         scope = scope,
         wsUrlProvider = { pairing.wsUrl.ifBlank { null } },
         ticketProvider = { pairing.ticket.ifBlank { null } },
         refreshTicket = { pairing.refreshTicket() },
+        // U9/U16 relay 鉴权新形态：relay 模式连接后首条 auth 帧的裸密钥取当前配对
+        // ticket（本地签 nv1:agent 信封后再上线，裸密钥不进 URL/日志）；直连模式不签发。
+        relayAuthSecretProvider = { pairing.ticket.ifBlank { null } },
     )
     val chatRepo = ChatRepository(http)
-    val chatSessions = ChatSessionController(scope, ws, pairing, chatRepo)
+    val chatSessions = ChatSessionController(scope, ws, pairing, chatRepo, toolActions)
     val agents = AgentsStore(http, scope)
     val knowledgeRepo = KnowledgeRepository(http)
     val modelsRepo = ModelsRepository(http)

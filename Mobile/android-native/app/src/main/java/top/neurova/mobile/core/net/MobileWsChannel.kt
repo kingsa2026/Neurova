@@ -18,7 +18,11 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import top.neurova.mobile.core.protocol.ApprovalCard
+import top.neurova.mobile.core.protocol.HostConfirmationCard
 import top.neurova.mobile.core.protocol.MobileWsClosePolicy
+import top.neurova.mobile.core.protocol.ToolActionEvents
+import top.neurova.mobile.core.protocol.TunnelTokenSigner
 
 /**
  * 移动 WS 通道（手机客户端设计方案 §5.3；对齐鸿蒙 WebSocketAdapter 语义）：
@@ -29,7 +33,9 @@ import top.neurova.mobile.core.protocol.MobileWsClosePolicy
  *   mobile_pairing.py 消息循环、鸿蒙 WebSocketAdapter 三方同源）；pong 超时 10s 视为断流
  *   （中继上静默断流没有 close 帧）；
  * - 关闭分档：由 MobileWsClosePolicy 裁决——4001 先续签重试一次（唯一需重新配对的是
- *   续签被拒 device_deregistered）；4008 不重连；manual 恒终态。
+ *   续签被拒 device_deregistered）；4008 不重连；manual 恒终态；
+ * - relay 鉴权新形态（U9/U16）：relay 模式（`/t/<routeId>` 入口）连接建立后**首条**
+ *   消息必须是 `auth` 帧（本地签 `nv1:agent` 信封，裸密钥不上线）；直连模式不变。
  */
 class MobileWsChannel(
     private val scope: CoroutineScope,
@@ -37,6 +43,12 @@ class MobileWsChannel(
     private val ticketProvider: () -> String?,
     /** 4001 续签：成功返回新 ticket，失败抛出（= 设备已解除，终态） */
     private val refreshTicket: suspend () -> String,
+    /**
+     * U9/U16 relay 鉴权新形态：relay 模式（/t/<routeId> 入口）连接后首条消息必须是
+     * `auth` 帧。裸密钥由此提供（移动数据面现取配对 connect_ticket），本地签成
+     * `nv1:agent` 信封后再上线；已是信封则原样用。直连模式不提供、不发 auth 帧。
+     */
+    private val relayAuthSecretProvider: () -> String? = { null },
     /** 心跳间隔与 pong 超时：生产用常量默认值，测试注入短周期（行为路径同一份） */
     private val heartbeatIntervalMs: Long = HEARTBEAT_MS,
     private val pongTimeoutMs: Long = PONG_TIMEOUT_MS,
@@ -61,9 +73,28 @@ class MobileWsChannel(
             val parked: Boolean = false,
         ) : Event
 
-        /** 管线思考流（reasoning）片段 */
-        data class Reasoning(val sessionId: String, val content: String) : Event
-    }
+    /** 管线思考流（reasoning）片段 */
+    data class Reasoning(val sessionId: String, val content: String) : Event
+
+    /**
+     * 电脑/浏览器操作实时事件（tool_executor._emit_computer_event 单源广播）：
+     * 驱动聊天页工具事件卡；needs_host_confirmation / pending_approval 随载荷
+     * 到达时另行发 HostConfirmationRequired / ApprovalRequired（同一载荷双卡面）。
+     */
+    data class ComputerAction(
+        val sessionId: String,
+        val tool: String,
+        val summary: String?,
+        val success: Boolean?,
+        val payload: JsonObject,
+    ) : Event
+
+    /** U1 主机确认卡（needs_host_confirmation）：确认/拒绝调 host-key confirm 接口 */
+    data class HostConfirmationRequired(val sessionId: String, val card: HostConfirmationCard) : Event
+
+    /** U6 动态干预审批卡（pending_approval / chat:approval_required）：批准/拒绝调 approvals 接口 */
+    data class ApprovalRequired(val sessionId: String, val card: ApprovalCard) : Event
+}
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -79,6 +110,16 @@ class MobileWsChannel(
 
     private var socket: WebSocket? = null
     private var heartbeatJob: Job? = null
+
+    /**
+     * U9：本次连接若为 relay 模式，onOpen 后**先发**这条 auth 帧（先于 sync_resume
+     * 与心跳——中继/后端对首帧的契约就是 auth）。直连模式恒 null。
+     */
+    @Volatile
+    private var pendingRelayAuthFrame: JsonObject? = null
+    /** 本连接已发过 relay auth 帧：用于识别后端 unknown_type 的已知良性回声 */
+    @Volatile
+    private var sentRelayAuthThisConnection: Boolean = false
 
     /** 本周期是否仍在等 pong（OkHttp 读线程置 false，心跳协程读；判定超时的唯一依据） */
     private val awaitingPong = AtomicBoolean(false)
@@ -134,6 +175,8 @@ class MobileWsChannel(
         manualClosed = false
         val url = wsUrlProvider() ?: run { stateFlow.value = State.FAILED; return }
         val ticket = ticketProvider() ?: run { stateFlow.value = State.FAILED; return }
+        pendingRelayAuthFrame = buildRelayAuthFrame(url, relayAuthSecretProvider)
+        sentRelayAuthThisConnection = false
         stateFlow.value = State.CONNECTING
         socket = client.newWebSocket(buildHandshakeRequest(url, ticket), Listener())
     }
@@ -155,6 +198,8 @@ class MobileWsChannel(
     fun close() {
         manualClosed = true
         heartbeatJob?.cancel()
+        pendingRelayAuthFrame = null
+        sentRelayAuthThisConnection = false
         socket?.close(1000, "manual")
         socket = null
         stateFlow.value = State.CLOSED
@@ -280,6 +325,12 @@ class MobileWsChannel(
             reconnectCount = 0
             refreshAlreadyTried = false
             stateFlow.value = State.AUTHED
+            // U9：relay 模式连接后首条消息必须是 auth 帧——先于 sync_resume/心跳发出
+            val authFrame = pendingRelayAuthFrame
+            pendingRelayAuthFrame = null
+            if (authFrame != null && sendFrame(authFrame)) {
+                sentRelayAuthThisConnection = true
+            }
             startHeartbeat()
             // D3 断线补拉：游标 > 0（断线前收过账本帧）时发 sync_resume，
             // 服务端补发 (cursor, head] 的帧（带 replay 标记）；首连游标 0 不发
@@ -324,12 +375,20 @@ class MobileWsChannel(
                 "chat:cancelled" -> eventsFlow.tryEmit(
                     Event.Cancelled(frame["session_id"]?.toString()?.trim('"').orEmpty()),
                 )
-                "chat:error", "error" -> eventsFlow.tryEmit(
-                    Event.Error(
-                        code = frame["code"]?.toString()?.trim('"').orEmpty(),
-                        message = frame["message"]?.toString()?.trim('"').orEmpty(),
-                    ),
-                )
+                "chat:error", "error" -> {
+                    val errorCode = frame["code"]?.toString()?.trim('"').orEmpty()
+                    val errorMessage = frame["message"]?.toString()?.trim('"').orEmpty()
+                    // U9 relay auth 首帧的已知良性回声：mobile WS 消息循环尚未消费
+                    // auth 帧时按 unknown_type 退回（{"...Unknown message type: auth"}）。
+                    // auth 帧本身已按新形态发出，这不是链路故障；上抛成对话错误会让
+                    // 每次 relay 连接都误报。只压这一种回声，其余错误照常上抛。
+                    if (sentRelayAuthThisConnection && errorCode == "unknown_type" &&
+                        errorMessage.contains("auth")
+                    ) {
+                        return
+                    }
+                    eventsFlow.tryEmit(Event.Error(code = errorCode, message = errorMessage))
+                }
                 "agent:switched" -> eventsFlow.tryEmit(
                     Event.AgentSwitched(frame["agent_id"]?.toString()?.trim('"').orEmpty()),
                 )
@@ -349,6 +408,46 @@ class MobileWsChannel(
                         content = frame["content"]?.toString()?.trim('"').orEmpty(),
                     ),
                 )
+                // 工具事件呈现（卡 C）：computer_action 实时动作流 + 两类交互卡
+                "computer_action" -> {
+                    val sessionId = frame["session_id"]?.toString()?.trim('"').orEmpty()
+                    val payload = ToolActionEvents.payloadOf(frame)
+                    if (payload != null) {
+                        eventsFlow.tryEmit(
+                            Event.ComputerAction(
+                                sessionId = sessionId,
+                                tool = payload["tool"]?.toString()?.trim('"').orEmpty(),
+                                summary = payload["summary"]?.toString()?.trim('"'),
+                                success = payload["success"]?.toString()?.trim('"')?.toBooleanStrictOrNull(),
+                                payload = payload,
+                            ),
+                        )
+                        ToolActionEvents.parseHostConfirmation(sessionId, payload)?.let {
+                            eventsFlow.tryEmit(Event.HostConfirmationRequired(sessionId, it))
+                        }
+                        ToolActionEvents.parseApproval(sessionId, payload)?.let {
+                            eventsFlow.tryEmit(Event.ApprovalRequired(sessionId, it))
+                        }
+                    }
+                }
+                // U6 审批：console._extract_approval_payload 同源的移动派生帧
+                "chat:approval_required" -> {
+                    val sessionId = frame["session_id"]?.toString()?.trim('"').orEmpty()
+                    (frame["data"] as? JsonObject)?.let { data ->
+                        ToolActionEvents.parseApproval(sessionId, data)?.let {
+                            eventsFlow.tryEmit(Event.ApprovalRequired(sessionId, it))
+                        }
+                    }
+                }
+                // U1 主机确认：现行移动通路经 tool_result 内容 JSON 透传
+                "chat:tool_result" -> {
+                    val sessionId = frame["session_id"]?.toString()?.trim('"').orEmpty()
+                    (frame["data"] as? JsonObject)?.let { data ->
+                        ToolActionEvents.parseHostConfirmationFromToolResult(sessionId, data)?.let {
+                            eventsFlow.tryEmit(Event.HostConfirmationRequired(sessionId, it))
+                        }
+                    }
+                }
             }
         }
 
@@ -383,6 +482,40 @@ class MobileWsChannel(
                 .url(url)
                 .header("Authorization", "Bearer $ticket")
                 .build()
+
+        /**
+         * 中继入口前缀（后端 protocol.RELAY_ROUTE_PREFIX 同一口径）：
+         * relay 模式回连地址形如 `wss://<relay>/t/<routeId>/api/v1/mobile/ws`。
+         */
+        internal const val RELAY_ROUTE_PREFIX = "/t/"
+
+        /** relay 模式判定：路径段含 /t/<routeId>（直连地址不含，不受影响） */
+        internal fun isRelayEntryUrl(url: String): Boolean {
+            val afterScheme = url.substringAfter("://", url)
+            val pathStart = afterScheme.indexOf('/')
+            val path = if (pathStart >= 0) afterScheme.substring(pathStart) else ""
+            return path.contains(RELAY_ROUTE_PREFIX)
+        }
+
+        /**
+         * U9 首条 auth 帧构造：仅 relay 模式且持有裸密钥时成帧；
+         * `{"type":"auth","token":"nv1:agent:{stamp}:{nonce}:{hmac}","tokenType":"agent"}`。
+         * 裸密钥本地签 nv1 信封（正解），已是信封则原样用；直连模式返回 null（不发）。
+         */
+        internal fun buildRelayAuthFrame(url: String, secretProvider: () -> String?): JsonObject? {
+            if (!isRelayEntryUrl(url)) return null
+            val secret = secretProvider()?.trim().orEmpty()
+            if (secret.isEmpty()) return null
+            val token = if (TunnelTokenSigner.isEnveloped(secret)) secret
+            else TunnelTokenSigner.signTunnelToken(secret, TunnelTokenSigner.TYPE_AGENT)
+            return JsonObject(
+                mapOf(
+                    "type" to JsonPrimitive("auth"),
+                    "token" to JsonPrimitive(token),
+                    "tokenType" to JsonPrimitive(TunnelTokenSigner.TYPE_AGENT),
+                ),
+            )
+        }
 
         private const val HEARTBEAT_MS = 30_000L
         private const val PONG_TIMEOUT_MS = 10_000L

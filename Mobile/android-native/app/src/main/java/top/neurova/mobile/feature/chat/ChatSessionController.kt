@@ -8,7 +8,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import top.neurova.mobile.core.model.ChatMessage
 import top.neurova.mobile.core.net.MobileWsChannel
+import top.neurova.mobile.core.protocol.ApprovalCard
 import top.neurova.mobile.core.protocol.ChunkBatcher
+import top.neurova.mobile.core.protocol.HostConfirmationCard
 import top.neurova.mobile.feature.pairing.PairingStore
 
 /**
@@ -23,6 +25,7 @@ class ChatSessionController(
     private val ws: MobileWsChannel,
     private val pairing: PairingStore,
     private val repository: ChatRepository,
+    private val toolActions: ToolActionRepository? = null,
 ) {
 
     var sessionId by mutableStateOf("")
@@ -56,6 +59,22 @@ class ChatSessionController(
     var chunkCount by mutableStateOf(0)
         private set
 
+    /** U1 主机确认卡（needs_host_confirmation）：null=无待确认卡 */
+    var hostConfirmation by mutableStateOf<HostConfirmationCard?>(null)
+        private set
+
+    /** U6 动态干预审批卡（pending_approval / approval_required）：null=无待审批卡 */
+    var approval by mutableStateOf<ApprovalCard?>(null)
+        private set
+
+    /** 卡片动作进行中（确认/批准/拒绝按钮禁用位） */
+    var cardActing by mutableStateOf(false)
+        private set
+
+    /** 卡片动作失败信息（诚实暴露，不静默吞） */
+    var cardError by mutableStateOf<String?>(null)
+        private set
+
     private val batcher = ChunkBatcher()
     private var eventsJob: Job? = null
     private var collecting = false
@@ -70,6 +89,11 @@ class ChatSessionController(
             queueReason = null
             reasoningSnippet = null
             chunkCount = 0
+            // 确认/审批卡随会话走：切会话不留上一会话的待办卡
+            hostConfirmation = null
+            approval = null
+            cardActing = false
+            cardError = null
         }
         sessionId = targetSessionId
         if (title.isNotBlank()) sessionTitle = title
@@ -123,6 +147,71 @@ class ChatSessionController(
     /** F5 头部切换 Agent：后续 chat:send 使用新 agent_id（会话已存记录的归属不改写） */
     fun useAgent(agentId: String) {
         if (agentId.isNotBlank()) this.agentId = agentId
+    }
+
+    /**
+     * U1 主机确认卡·确认：POST /settings/ssh-credentials/host-key/confirm
+     * （经 SshHostStore.mark_confirmed 落库，SSH 首连轮询命中后原地重连放行）。
+     * agent 归属优先用卡面回带的 agent_id（known_hosts 按 agent 分桶），缺省回退当前会话 Agent。
+     */
+    fun confirmHostKey() {
+        val card = hostConfirmation ?: return
+        val repo = toolActions ?: return
+        if (cardActing) return
+        cardActing = true
+        cardError = null
+        scope.launch {
+            runCatching {
+                repo.confirmSshHostKey(
+                    agentId = card.agentId?.takeIf { it.isNotBlank() } ?: agentId.ifBlank { "default" },
+                    host = card.host,
+                    port = card.port ?: 22,
+                    fingerprint = card.fingerprint,
+                    keyType = card.keyType,
+                )
+            }.onSuccess {
+                hostConfirmation = null
+            }.onFailure { failure ->
+                cardError = failure.message?.ifBlank { null } ?: "主机确认失败，请重试"
+            }
+            cardActing = false
+        }
+    }
+
+    /** U1 主机确认卡·拒绝：不落确认记录，SSH 侧按 fail-closed 超时终止（命令未执行） */
+    fun dismissHostKey() {
+        hostConfirmation = null
+        cardError = null
+    }
+
+    /** U6 审批卡·批准：POST /governance/approvals/{id}/approve（批准后服务端重放执行） */
+    fun approvePending() {
+        val card = approval ?: return
+        actOnApproval(card, approve = true)
+    }
+
+    /** U6 审批卡·拒绝：POST /governance/approvals/{id}/reject（审批单进 rejected 终态） */
+    fun rejectPending() {
+        val card = approval ?: return
+        actOnApproval(card, approve = false)
+    }
+
+    private fun actOnApproval(card: ApprovalCard, approve: Boolean) {
+        val repo = toolActions ?: return
+        if (cardActing) return
+        cardActing = true
+        cardError = null
+        scope.launch {
+            runCatching {
+                if (approve) repo.approveApproval(card.approvalId) else repo.rejectApproval(card.approvalId)
+            }.onSuccess {
+                approval = null
+            }.onFailure { failure ->
+                cardError = failure.message?.ifBlank { null }
+                    ?: if (approve) "批准失败，请重试" else "拒绝失败，请重试"
+            }
+            cardActing = false
+        }
     }
 
     /**
@@ -193,6 +282,17 @@ class ChatSessionController(
                     }
                     is MobileWsChannel.Event.Reasoning -> if (event.sessionId == sessionId) {
                         reasoningSnippet = event.content.ifBlank { reasoningSnippet }
+                    }
+                    is MobileWsChannel.Event.ComputerAction -> if (event.sessionId == sessionId) {
+                        // 工具事件流（卡 C）：载荷已由通道解析成卡事件，这里只留扩展位
+                    }
+                    is MobileWsChannel.Event.HostConfirmationRequired -> if (event.sessionId == sessionId) {
+                        hostConfirmation = event.card
+                        cardError = null
+                    }
+                    is MobileWsChannel.Event.ApprovalRequired -> if (event.sessionId == sessionId) {
+                        approval = event.card
+                        cardError = null
                     }
                 }
             }
