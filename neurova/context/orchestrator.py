@@ -358,9 +358,25 @@ class ContextOrchestrator:
             "fold_suppression": {
                 "phase_hits": 0,
                 "stuck_hits": 0,
+                "cache_hits": 0,
                 "protected_all_hits": 0,
                 "lesson_protected_last": 0,
                 "last_stuck_reason": None,
+            },
+            # P0-1（上下文工程十轴 · 轴8）：缓存盈亏平衡闸读数。`reason` 取
+            # 判据封闭集合（compression_economics.CACHE_BREAK_EVEN_REASONS）；
+            # `savings`/`rewrite_cost` 是判据的两个数值（同源，不另算一份）。
+            "cache_break_even": {
+                "model": None,
+                "provider": None,
+                "remaining_steps": 0,
+                "tokens_saved_per_call": 0,
+                "invalidation_tokens": 0,
+                "savings": 0.0,
+                "rewrite_cost": 0.0,
+                "defer": False,
+                "reason": None,
+                "last_error": None,
             },
             # SC-6（对照改进项）：折叠后 N 轮召回率读数（折叠时机质量的量化
             # 指标，池形态独有）。分母 = 被折叠区间 hash 数（去重），分子 =
@@ -1506,31 +1522,8 @@ class ContextOrchestrator:
         if tools_desc:
             developer_instructions.append(tools_desc)
 
-        # N6：只读常驻面预算报告（不改写 prompt；路径见 /v1/context/budget）。
-        try:
-            from neurova.context.budget_report import recordContextBudget
-
-            from neurova.context_pool import identityStrings as _identityStrings
-
-            agent_id = _identityStrings(self._agent)[0] or "default"
-            recordContextBudget(
-                str(agent_id or "default"),
-                {
-                    "soul": soul_text,
-                    "personality": personality_text,
-                    "personality_traits": personality_traits_text,
-                    "constitution": constitution_text,
-                    "constitution_rules": constitution_rules_text,
-                    "time": time_section,
-                    "rules": rules_section,
-                    "workspace_docs": workspace_section or "",
-                    "skill_catalog": catalog_section or "",
-                    "behavior_rules": "\n".join(str(x) for x in behavior_rules),
-                    "tools": tools_desc or "",
-                },
-            )
-        except Exception as budget_err:  # noqa: BLE001 - 观测面故障不阻断上下文
-            logger.debug("常驻上下文预算记录失败: %s", budget_err)
+        # N6：只读常驻面预算报告挪到窗口装配后记（见下方 recordContextBudget）——
+        # 分桶读数要的是**当轮真实窗口载荷**，此处尚不可得。
 
         # Phase 2.5: 分析用户输入的情感状态（并更新长期情感状态机）
         agent_emotion = self._analyze_user_emotion(user_input)
@@ -1729,6 +1722,36 @@ class ContextOrchestrator:
             # 行数按**实际发给模型**的形状刷新：与上段的配对读数各记一处，
             # 「重建产出合法」与「最终视图合法」因此可分，不是同一份账抄两遍。
             self._refreshToolRows(window_msgs)
+
+            # N6：只读常驻面预算报告（不改写 prompt；路径见 /v1/context/budget）。
+            # 在窗口装配后记：payload_buckets 分桶吃**当轮真实窗口载荷**
+            # （window_msgs），并带当前模型的溢出保证金（B 卡合流口径）。
+            try:
+                from neurova.context.budget_report import recordContextBudget
+
+                from neurova.context_pool import identityStrings as _identityStrings
+
+                agent_id = _identityStrings(self._agent)[0] or "default"
+                recordContextBudget(
+                    str(agent_id or "default"),
+                    {
+                        "soul": soul_text,
+                        "personality": personality_text,
+                        "personality_traits": personality_traits_text,
+                        "constitution": constitution_text,
+                        "constitution_rules": constitution_rules_text,
+                        "time": time_section,
+                        "rules": rules_section,
+                        "workspace_docs": workspace_section or "",
+                        "skill_catalog": catalog_section or "",
+                        "behavior_rules": "\n".join(str(x) for x in behavior_rules),
+                        "tools": tools_desc or "",
+                    },
+                    messages=window_msgs,
+                    model_id=str(getattr(self.config, "llm_model", "") or ""),
+                )
+            except Exception as budget_err:  # noqa: BLE001 - 观测面故障不阻断上下文
+                logger.debug("常驻上下文预算记录失败: %s", budget_err)
             # 视图装配保留协议契约字段（含工具寻址字段）：`tool_call_id` / `name`
             # / `tool_calls` 被裁掉时，`_tool_placeholder` 的硬地址指针恒为空、
             # `repair_tool_turns` 也把完整的 tool 轮误判成孤儿转成 user 注记——
@@ -2885,6 +2908,10 @@ class ContextOrchestrator:
             normalizeViewMessages,
         )
 
+        # 计量带模型名（B 卡合流）：现场有模型名即传，溢出保证金按模型生效
+        # （无记录=1.0，估算与既有行为一致）。
+        modelName = str(getattr(self.config, "llm_model", "") or "")
+
         # P0-2：显式关闭语义——超预算也原样返回（调用方自行承担窗口超限）
         if not getattr(self, "auto_compact_enabled", True):
             return normalizeViewMessages(conversation_context)
@@ -2899,7 +2926,7 @@ class ContextOrchestrator:
             return []
 
         cache = self._window_cache_slot(cache_key or self._resolve_window_cache_key())
-        total_tokens = estimate_window_tokens(msgs)
+        total_tokens = estimate_window_tokens(msgs, model_id=modelName)
 
         # ── SC-7：反思游标水印刷新（MetaLedger 只读；每轮建图一次 SELECT）。
         self._refreshReflectionWatermark(cache, len(msgs))
@@ -2909,6 +2936,7 @@ class ContextOrchestrator:
         # 关闭时只有击穿才折，
         # 与改前行为一致。
         from neurova.context.fold_trigger import (
+            REASON_CACHE_DEFERRED,
             REASON_FIXED_INTERVAL,
             REASON_GROWTH_GATE,
             REASON_STUCK_SUPPRESSED,
@@ -2917,14 +2945,23 @@ class ContextOrchestrator:
             suppressProactiveFold,
         )
 
+        # 计量带模型名（B 卡合流）：溢出保证金按模型生效（无记录=1.0，行为不变）。
         # SC-3：判定经 assessFoldTrigger 取得（内部即 decideFoldTrigger 单源，
         # foldable 推导收口到判据层，本层不再另写 len-6 一份）。
+        # P1-6：池里已有摘要覆盖（covered/summary/增量基线任一在场）时如实传入，
+        # 增长门占用下限按迟滞抬升——刚折过的窗口不因小幅增长立刻再折。
+        hasSummaryCover = (
+            bool(cache.get("covered"))
+            or bool(cache.get("summary"))
+            or int(cache.get("last_fold_tokens") or 0) > 0
+        )
         decision = assessFoldTrigger(
             total_tokens=total_tokens,
             budget_tokens=budget_tokens,
             last_fold_tokens=int(cache.get("last_fold_tokens") or 0),
             last_fold_msgs=int(cache.get("last_fold_msgs") or 0),
             total_msgs=len(msgs),
+            has_existing_summary=hasSummaryCover,
         ).decision
 
         # ── SC-2：卡住抑制（接现成元认知读数，不新造卡住检测器）——命中时
@@ -2935,6 +2972,15 @@ class ContextOrchestrator:
             if stuckSignal.get("hit"):
                 self._recordFoldSuppression("stuck", stuckSignal)
                 decision = suppressProactiveFold(decision, REASON_STUCK_SUPPRESSED)
+
+        # ── P0-1：缓存盈亏平衡闸（只管辖增长门主动折叠；预算击穿与固定间隔
+        # 不受管辖——安全线优先，与卡住抑制同序）。命中 defer 改判不折，
+        # 归因 cache_deferred：读数面看到"门想折、被缓存经济学按住"。
+        if decision.should_fold and decision.reason == REASON_GROWTH_GATE:
+            cacheGate = self._cacheBreakEvenSignal(decision, cache, modelName)
+            if cacheGate.get("defer"):
+                self._recordFoldSuppression("cache", cacheGate)
+                decision = suppressProactiveFold(decision, REASON_CACHE_DEFERRED)
 
         self._recordFoldTriggerReadout(decision)
         if not decision.should_fold:
@@ -2954,11 +3000,11 @@ class ContextOrchestrator:
             head_rows = cache.get("frozen_head_rows")
             if not head_rows:
                 head_rows = self._renderFrozenHead(cache, budget_tokens)
-            head_tokens = estimate_window_tokens(head_rows)
+            head_tokens = estimate_window_tokens(head_rows, model_id=modelName)
             fold_budget = max(1000, budget_tokens - head_tokens)
             if (
                 decision.reason != REASON_FIXED_INTERVAL
-                and estimate_window_tokens(rest) <= fold_budget
+                and estimate_window_tokens(rest, model_id=modelName) <= fold_budget
             ):
                 # 尾部未超份额：本轮零折叠（无摘要调用，头部字节稳定）。
                 # SC-4 固定间隔臂例外：间隔到期即折是其政策本体，不受
@@ -2966,7 +3012,7 @@ class ContextOrchestrator:
                 cache["frozen_head_rows"] = head_rows
                 logger.info(
                     "[WINDOW_COMPACT] 增量尾部未超份额，零折叠（reason=%s, 尾部 %d 条/%d token，份额 %d）",
-                    decision.reason, len(rest), estimate_window_tokens(rest), fold_budget,
+                    decision.reason, len(rest), estimate_window_tokens(rest, model_id=modelName), fold_budget,
                 )
                 return head_rows + rest
             fold_source: list = rest
@@ -3272,6 +3318,92 @@ class ContextOrchestrator:
             }
         )
         return signal
+
+    def _resolveProviderFamily(self, model: str) -> str:
+        """当前模型在 provider 注册表里的服务商族（openai/anthropic/...）。
+
+        注册表是"这个模型由哪家服务商供给"的现成单源；查无此模型返回空串，
+        由判据层按模型名家族别名兜底——本层不另写一份模型→家族映射。
+        """
+        try:
+            from neurova.llm.provider_manager import get_provider_manager
+
+            cfg = get_provider_manager().get_provider_for_model(model)
+            return str(getattr(cfg, "provider", "") or "") if cfg else ""
+        except Exception as e:  # noqa: BLE001 - 注册表不可得按无元数据处置
+            logger.debug("provider 家族解析失败，按无元数据处置: %s", e)
+            return ""
+
+    def _cacheBreakEvenSignal(self, decision, cache: dict, modelName: str) -> Dict[str, Any]:
+        """P0-1：缓存盈亏平衡闸信号（判据单源 compression_economics，本层只取现场量）。
+
+        现场量口径（全部取代码里实际已有的量；某项拿不到即按"无元数据"不拦，
+        默认行为不变，不为了喂判据编数）：
+        - pricing：当前模型 → provider 注册表服务商族 → 计价元数据；注册表查无
+          此模型时以模型名交判据层按家族别名兜底。
+        - tokens_saved_per_call：增长门本轮拟折叠的增量 = decision.growth_tokens
+          （折叠落地后视图每次调用少带这部分；实际折叠量由 compact_window 定，
+          此处不预演）。
+        - invalidation_tokens：现存冻结头（frozen_head_rows）的 token 量——折叠
+          重渲染头部代际会使这段已存活前缀缓存失效；无冻结头（首折）记 0。
+        - remaining_steps：工具轮预算单源 resolveToolRoundBudget()——折叠发生在
+          轮首装配，本轮内后续模型调用至多该预算次。
+        """
+        readout = self._contextHealthSlot("cache_break_even")
+        try:
+            from neurova.context.compression_economics import (
+                evaluateCacheBreakEven,
+                getProviderCachePricing,
+            )
+            from neurova.context.window_compactor import estimate_window_tokens
+
+            providerKey = self._resolveProviderFamily(modelName) or modelName
+            pricing = getProviderCachePricing(providerKey)
+            headRows = cache.get("frozen_head_rows") or []
+            headTokens = (
+                estimate_window_tokens(headRows, model_id=modelName) if headRows else 0
+            )
+            readout.update(
+                {
+                    "model": modelName,
+                    "provider": providerKey,
+                    "tokens_saved_per_call": int(decision.growth_tokens),
+                    "invalidation_tokens": int(headTokens),
+                    "defer": False,
+                    "reason": "no_pricing",
+                    "last_error": None,
+                }
+            )
+            if pricing is None:
+                return {"defer": False, "reason": "no_pricing"}
+            try:
+                from neurova.agent.loops.turn_run_state import resolveToolRoundBudget
+
+                remainingSteps = int(resolveToolRoundBudget())
+            except Exception as e:  # noqa: BLE001 - 剩余步数不可得按数据不足不拦
+                logger.debug("工具轮预算不可得，缓存闸按无元数据处置: %s", e)
+                return {"defer": False, "reason": "no_pricing"}
+            verdict = evaluateCacheBreakEven(
+                remaining_steps=remainingSteps,
+                tokens_saved_per_call=int(decision.growth_tokens),
+                invalidation_tokens=int(headTokens),
+                pricing=pricing,
+            )
+            readout.update(
+                {
+                    "remaining_steps": remainingSteps,
+                    "savings": round(float(verdict.savings), 6),
+                    "rewrite_cost": round(float(verdict.rewrite_cost), 6),
+                    "defer": bool(verdict.defer),
+                    "reason": verdict.reason,
+                }
+            )
+            return {"defer": bool(verdict.defer), "reason": verdict.reason}
+        except Exception as e:  # noqa: BLE001 - 判据链路失败按不拦处置（默认行为不变），读数留痕
+            readout["last_error"] = str(e)
+            readout["reason"] = "no_pricing"
+            logger.debug("缓存盈亏平衡闸解析失败，按不拦处置: %s", e)
+            return {"defer": False, "reason": "no_pricing"}
 
     def _activeLessonMetas(self) -> List[dict]:
         """SC-8：活跃教训元数据快照（MetaLedger 只读；任何失败按无教训处理）。"""

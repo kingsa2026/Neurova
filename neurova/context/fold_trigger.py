@@ -52,6 +52,9 @@ REASON_INSUFFICIENT_MASS = "insufficient_mass"
 REASON_STUCK_SUPPRESSED = "stuck_suppressed"
 #: SC-4 基准臂1：固定间隔触发的归因（封闭集合新成员，读数面按此归因）。
 REASON_FIXED_INTERVAL = "fixed_interval"
+#: P0-1 缓存盈亏平衡闸的归因：增长门想折、被缓存经济学改判不折
+#: （判据单源在 compression_economics.evaluateCacheBreakEven）。
+REASON_CACHE_DEFERRED = "cache_deferred"
 
 #: SC-2：工具失败率阈值（失败率 = 1 - 成功率，**严格大于**该值判卡住）。
 STUCK_FAILURE_RATE_THRESHOLD = 0.5
@@ -143,6 +146,45 @@ def fixedIntervalMsgs() -> int:
     return max(0, value)
 
 
+# ── P1-6（上下文工程十轴 · 轴4）：压缩迟滞双阈值 ─────────────────────────
+# 池里已有摘要覆盖时，再次主动折叠的占用门槛比首折更高：刚折过的窗口
+# 不因小幅增长立刻再折（给摘要覆盖区留出消化增量的空间）。双阈值 =
+# 基础下限（首折，growthGateParams()["floor"]=0.6）+ 迟滞下限（再折）。
+
+#: 迟滞下限默认值：高于基础下限 0.6 一档。
+FOLD_HYSTERESIS_FLOOR_DEFAULT = 0.7
+#: 迟滞下限 env 覆盖键。
+HYSTERESIS_FLOOR_ENV = "NEUROVA_FOLD_HYSTERESIS_FLOOR"
+
+
+def foldHysteresisFloor() -> float:
+    """迟滞下限（env `NEUROVA_FOLD_HYSTERESIS_FLOOR` 可覆盖，钳位 [0.05, 1.0]）。
+
+    只在增长门**已有摘要覆盖**的路径生效；预算击穿/固定间隔/门关闭三路径
+    不读它（安全线与既有政策不受迟滞管辖）。
+    """
+    try:
+        value = float(
+            os.environ.get(HYSTERESIS_FLOOR_ENV, str(FOLD_HYSTERESIS_FLOOR_DEFAULT))
+        )
+    except (TypeError, ValueError):
+        value = FOLD_HYSTERESIS_FLOOR_DEFAULT
+    return min(max(value, 0.05), 1.0)
+
+
+def effectiveGrowthFloor(*, has_existing_summary: bool, last_fold_tokens: int) -> float:
+    """增长门本轮的**有效占用下限**（单源：decideFoldTrigger 与 assessFoldTrigger
+    都从这里取，消费方不得另写 max(基础下限, 迟滞下限) 的第二份——教义第 6 条）。
+
+    池里已有摘要覆盖（调用方显式声明，或增量基线非零）时取
+    max(基础下限, 迟滞下限)——迟滞只抬高、绝不把门槛降到基础下限以下。
+    """
+    base = growthGateParams()["floor"]
+    if has_existing_summary or int(last_fold_tokens or 0) > 0:
+        return max(base, foldHysteresisFloor())
+    return base
+
+
 def decideFoldTrigger(
     *,
     total_tokens: int,
@@ -153,13 +195,15 @@ def decideFoldTrigger(
     foldable_msgs: int,
     keep_min_messages: int = FOLD_KEEP_MIN_MESSAGES,
     enabled: bool = None,
+    has_existing_summary: bool = False,
 ) -> FoldTriggerDecision:
     """判一轮该不该折叠（B5）。次序：
 
     1. 预算击穿 ⇒ 直接折（安全线，不受门管辖）；
     2. 固定间隔到期（SC-4 基准臂，默认关）⇒ 折（可折质量不足则不折）；
     3. 门未开 ⇒ 不折（行为与改前逐字一致：只有击穿才折）；
-    4. 占用 < 下限 ⇒ 不折（省 token 不省到影响质量为止——压缩按需不按比例）；
+    4. 占用 < 有效下限 ⇒ 不折（省 token 不省到影响质量为止——压缩按需不按比例；
+       P1-6：池里已有摘要覆盖时有效下限按迟滞抬升，见 `effectiveGrowthFloor`）；
     5. 增量不足（token 与条数双门槛）⇒ 不折（增量太小，摘要不划算且打断任务）；
     6. 可折质量不足（去掉 keep_min 后没有可折对象）⇒ 不折；
     7. 其余 ⇒ 增长门触发折叠。
@@ -195,7 +239,11 @@ def decideFoldTrigger(
         return FoldTriggerDecision(False, REASON_GATE_DISABLED, occupancy, growth_tokens, growth_msgs)
 
     params = growthGateParams()
-    if occupancy < params["floor"]:
+    # P1-6 迟滞：有效下限单源 `effectiveGrowthFloor`（已有摘要覆盖时抬升）。
+    floorEffective = effectiveGrowthFloor(
+        has_existing_summary=bool(has_existing_summary), last_fold_tokens=last_fold_tokens
+    )
+    if occupancy < floorEffective:
         return FoldTriggerDecision(False, REASON_BELOW_FLOOR, occupancy, growth_tokens, growth_msgs)
     # 窗口自适应（B5 追加批）：增量门槛随预算缩放——大窗口模型要积累更多
     # 增量才主动折，小窗口模型更早折；静态下限兜住小预算场景。
@@ -213,11 +261,14 @@ class FoldTriggerReadout:
 
     `decision` 即 `decideFoldTrigger` 的原判定（不复制不改装）；其余字段是
     判据阈值与逐项达标位，供 `context_status` 等盘点面拼装回执，不参与控制流。
+    `floor` 是基础下限（首折门槛，读数契约不变）；`floor_effective` 是本轮
+    实际生效的下限（P1-6：已有摘要覆盖时 = max(基础下限, 迟滞下限)）。
     """
 
     decision: FoldTriggerDecision
     gate_enabled: bool
     floor: float
+    floor_effective: float
     growth_floor_tokens: int
     growth_min_msgs: int
     keep_min_messages: int
@@ -237,13 +288,16 @@ def assessFoldTrigger(
     total_msgs: int,
     enabled: bool = None,
     keep_min_messages: int = FOLD_KEEP_MIN_MESSAGES,
+    has_existing_summary: bool = False,
 ) -> FoldTriggerReadout:
     """只读判定辅助（SC-3）：折叠时机判读 = 单源判定 + 四判据各自读数。
 
     判定**直接复用** `decideFoldTrigger`（本函数不写第二套判据）；阈值一律取
-    自本模块既有单源（`growthGateParams` / `growthFloorTokens`）。`foldable_msgs`
-    由 `total_msgs - keep_min_messages` 就地推导（与编排层调用点同口径），
-    调用方无需自带。
+    自本模块既有单源（`growthGateParams` / `growthFloorTokens` /
+    `effectiveGrowthFloor`）。`foldable_msgs` 由 `total_msgs - keep_min_messages`
+    就地推导（与编排层调用点同口径），调用方无需自带。
+    `has_existing_summary` 透传单源判定（P1-6 迟滞：池里已有摘要覆盖时
+    占用下限抬升）。
     """
     keep_min = max(0, int(keep_min_messages))
     foldable_msgs = max(0, int(total_msgs) - keep_min)
@@ -256,21 +310,26 @@ def assessFoldTrigger(
         foldable_msgs=foldable_msgs,
         keep_min_messages=keep_min,
         enabled=enabled,
+        has_existing_summary=has_existing_summary,
     )
     params = growthGateParams()
     gate_enabled = growthGateEnabled() if enabled is None else bool(enabled)
     budget = max(1, int(budget_tokens))
     floor_tokens = growthFloorTokens(budget)
     occupancy = min(1.0, max(0, int(total_tokens)) / budget)
+    floor_effective = effectiveGrowthFloor(
+        has_existing_summary=bool(has_existing_summary), last_fold_tokens=last_fold_tokens
+    )
     return FoldTriggerReadout(
         decision=decision,
         gate_enabled=gate_enabled,
         floor=params["floor"],
+        floor_effective=floor_effective,
         growth_floor_tokens=floor_tokens,
         growth_min_msgs=int(params["growth_min_msgs"]),
         keep_min_messages=keep_min,
         foldable_msgs=foldable_msgs,
-        occupancy_met=occupancy >= params["floor"],
+        occupancy_met=occupancy >= floor_effective,
         growth_tokens_met=int(decision.growth_tokens) >= floor_tokens,
         growth_msgs_met=int(decision.growth_msgs) >= int(params["growth_min_msgs"]),
         mass_met=foldable_msgs >= keep_min,
