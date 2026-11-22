@@ -12,6 +12,7 @@ FastAPI 中间件集合
 
 from neurova.api import cors_policy
 from neurova.core.logger import get_logger
+import os
 import threading
 import time
 import uuid
@@ -107,17 +108,39 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         return response
 
 
+#: HSTS 开关（拍板 D-S4）：仅当 `NEUROVA_FORCE_HTTPS=1` 时下发 Strict-Transport-Security。
+#: 发 HSTS 等于向浏览器承诺全站 HTTPS，本地明文调试环境不得发，否则 http 访问被强转。
+HSTS_FORCE_HTTPS_ENV = "NEUROVA_FORCE_HTTPS"
+HSTS_HEADER_VALUE = "max-age=31536000; includeSubDomains"
+
+#: 每个响应都必带的安全头（HSTS 除外，受上面的开关控制）。
+#: CSP 只落 `frame-ancestors 'none'`——本仓 API 无 HTML 面，防的是被第三方页面 iframe 嵌套。
+BASE_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "X-XSS-Protection": "1; mode=block",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Content-Security-Policy": "frame-ancestors 'none'",
+}
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """安全响应头中间件"""
+    """安全响应头中间件。
+
+    必须装配在**最外层**（见 setup_middleware）：安全头属于响应出口面，与请求
+    是否通过鉴权/限流无关，GlobalAuth/RateLimit 的 401/429 短路响应同样要盖到。
+    HSTS 按 env 开关每请求读取（与 global_auth 的模式读取同惯例，便于测试与热切换）。
+    """
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
 
-        # 安全头
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        for name, value in BASE_SECURITY_HEADERS.items():
+            response.headers[name] = value
+
+        if (os.environ.get(HSTS_FORCE_HTTPS_ENV) or "").strip() == "1":
+            response.headers["Strict-Transport-Security"] = HSTS_HEADER_VALUE
 
         return response
 
@@ -235,9 +258,6 @@ def setup_middleware(app: FastAPI) -> None:
         allow_headers=list(cors_policy.ALLOW_HEADERS),
     )
 
-    # 安全响应头
-    app.add_middleware(SecurityHeadersMiddleware)
-
     # 请求 ID
     app.add_middleware(RequestIDMiddleware)
 
@@ -271,5 +291,11 @@ def setup_middleware(app: FastAPI) -> None:
     from neurova.api.http_metrics import HttpMetricsMiddleware
 
     app.add_middleware(HttpMetricsMiddleware)
+
+    # 安全响应头（S6 移层）：注册在**最外层**（最后注册 = 最外层）。原先挂在 CORS
+    # 之后的内层，GlobalAuth/RateLimit 的 401/429 短路响应根本到不了它——未带 token
+    # 的 401 一只安全头都没有。安全头属于响应出口面，与鉴权/限流结果无关，必须盖住
+    # 全部响应；本中间件只补头不短路，不改变 CORS/限流/鉴权任何既有语义。
+    app.add_middleware(SecurityHeadersMiddleware)
 
     logger.info("Middleware setup complete")
