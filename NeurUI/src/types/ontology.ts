@@ -498,6 +498,39 @@ export interface EnterpriseDescriptor {
   /** chat archive：隐私白名单（通道层落库前过滤） */
   archiveRoomAllowlist?: string[]
   archiveUserAllowlist?: string[]
+  // U-conn 扩展批（对齐参照系连接器矩阵）：湖仓 SQL REST / SaaS REST / NoSQL / 代码仓
+  /** 湖仓 SQL REST＋SaaS REST：基地址（bigquery 缺省 https://bigquery.googleapis.com） */
+  base_url?: string
+  /** 单 env 指针（湖仓 SQL REST/salesforce：Bearer 令牌等）——只放环境变量名，值不落明文 */
+  credential_env?: string
+  /** 水位列（snowflake/bigquery，可选增量列） */
+  watermark_column?: string
+  /** sap_odata：entity set 名 */
+  entity_set?: string
+  /** http_pull：拉取 URL（url 即数据） */
+  url?: string
+  /** bigquery：项目 ID */
+  project_id?: string
+  /** databricks：SQL 仓库 ID */
+  warehouse_id?: string
+  /** cassandra：节点列表（逗号分隔，后端自行切分） */
+  contact_points?: string
+  /** cassandra：键空间 */
+  keyspace?: string
+  /** cassandra：CQL 查询 */
+  cql?: string
+  /** salesforce：SOQL 查询 */
+  soql?: string
+  /** looker：查询 ID */
+  query_id?: string
+  /** airflow：DAG ID */
+  dag_id?: string
+  /** git：仓库地址 */
+  repo_url?: string
+  /** git：分支（可选） */
+  branch?: string
+  // git：文件匹配 glob（可选，缺省 **/*）
+  file_glob?: string
 }
 
 // ---------------------------------------------------------------------------

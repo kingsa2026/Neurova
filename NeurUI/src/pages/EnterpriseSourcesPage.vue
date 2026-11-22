@@ -268,18 +268,21 @@
         <a-step :title="t('ontology.entStepConfirm')" />
       </a-steps>
 
-      <!-- 步 0：选连接对象 -->
+      <!-- 步 0：选连接对象（按连接器族分组展示；组序即 KIND_GROUPS） -->
       <div v-if="wizardStep === 0" class="kind-cards" data-testid="ent-kind-cards">
-        <div
-          v-for="card in KIND_CARDS"
-          :key="card.kind"
-          class="kind-card"
-          :class="{ active: wizardForm.kind === card.kind }"
-          @click="wizardForm.kind = card.kind"
-        >
-          <div class="kind-name">{{ t(card.labelKey) }}</div>
-          <div class="kind-desc">{{ t(card.descKey) }}</div>
-        </div>
+        <template v-for="group in KIND_GROUPS" :key="group.titleKey">
+          <div class="kind-group-title">{{ t(group.titleKey) }}</div>
+          <div
+            v-for="card in kindCardsIn(group)"
+            :key="card.kind"
+            class="kind-card"
+            :class="{ active: wizardForm.kind === card.kind }"
+            @click="wizardForm.kind = card.kind"
+          >
+            <div class="kind-name">{{ t(card.labelKey) }}</div>
+            <div class="kind-desc">{{ t(card.descKey) }}</div>
+          </div>
+        </template>
       </div>
 
       <!-- 步 1：连接参数 -->
@@ -293,12 +296,19 @@
             />
           </a-form-item>
 
-          <!-- 湖仓/HTTP（W10）：base_url＋credentialEnv 指针＋kind 专属字段 -->
+          <!-- 湖仓/HTTP（W10；U-conn 扩展批纳入 bigquery/databricks）：base_url＋credential_env 指针＋kind 专属字段 -->
           <template v-if="isLakehouseKind(wizardForm.kind)">
             <a-form-item :label="t('ontology.entKindBaseUrl')" required>
               <a-input v-model:value="wizardForm.base_url" data-testid="ent-base-url" />
             </a-form-item>
-            <a-form-item :label="t('ontology.entKindCredentialEnv')">
+            <a-form-item
+              :label="t('ontology.entKindCredentialEnv')"
+              :required="wizardForm.kind === 'bigquery' || wizardForm.kind === 'databricks'"
+            >
+              <p
+                v-if="wizardForm.kind === 'bigquery' || wizardForm.kind === 'databricks'"
+                class="field-hint"
+              >{{ t('ontology.entKindCredEnvPointerHint') }}</p>
               <a-input v-model:value="wizardForm.credentialEnv" data-testid="ent-cred-env" />
             </a-form-item>
             <a-form-item v-if="wizardForm.kind === 'unity_catalog'" :label="t('ontology.entKindUnityTable')" required>
@@ -315,6 +325,107 @@
             </a-form-item>
             <a-form-item v-if="wizardForm.kind === 'http_pull'" :label="t('ontology.entKindHttpUrl')" required>
               <a-input v-model:value="wizardForm.url" data-testid="ent-http-url" />
+            </a-form-item>
+            <!-- U-conn 扩展批：bigquery/databricks（湖仓 SQL REST，query 驱动） -->
+            <a-form-item v-if="wizardForm.kind === 'bigquery'" :label="t('ontology.entKindProjectId')" required>
+              <a-input v-model:value="wizardForm.project_id" data-testid="ent-bq-project" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.kind === 'databricks'" :label="t('ontology.entKindWarehouseId')" required>
+              <a-input v-model:value="wizardForm.warehouse_id" data-testid="ent-db-warehouse" />
+            </a-form-item>
+            <a-form-item
+              v-if="wizardForm.kind === 'bigquery' || wizardForm.kind === 'databricks'"
+              :label="t('ontology.entKindQuery')" required
+            >
+              <a-textarea v-model:value="wizardForm.query" :rows="3" data-testid="ent-sql-rest-query" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.kind === 'bigquery'" :label="t('ontology.entKindWatermarkColumn')">
+              <a-input v-model:value="wizardForm.watermark_column" data-testid="ent-bq-watermark" />
+            </a-form-item>
+          </template>
+          <!-- SaaS REST（U-conn 扩展批）：base_url＋kind 专属字段＋凭据 env 指针（salesforce 单指针，其余对象双指针） -->
+          <template v-if="isSaasRestKind(wizardForm.kind)">
+            <a-form-item :label="t('ontology.entKindBaseUrl')" required>
+              <a-input v-model:value="wizardForm.base_url" data-testid="ent-base-url" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.kind === 'salesforce'" :label="t('ontology.entKindSoql')" required>
+              <a-textarea v-model:value="wizardForm.soql" :rows="3" data-testid="ent-soql" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.kind === 'salesforce'" :label="t('ontology.entKindCredentialEnv')" required>
+              <p class="field-hint">{{ t('ontology.entKindCredEnvPointerHint') }}</p>
+              <a-input v-model:value="wizardForm.credentialEnv" data-testid="ent-cred-env" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.kind === 'servicenow'" :label="t('ontology.entKindTable')" required>
+              <a-input v-model:value="wizardForm.table" data-testid="ent-sn-table" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.kind === 'servicenow'" :label="t('ontology.entKindEncodedQuery')">
+              <a-input v-model:value="wizardForm.query" data-testid="ent-sn-query" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.kind === 'looker'" :label="t('ontology.entKindQueryId')" required>
+              <a-input v-model:value="wizardForm.query_id" data-testid="ent-looker-query-id" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.kind === 'airflow'" :label="t('ontology.entKindDagId')" required>
+              <a-input v-model:value="wizardForm.dag_id" data-testid="ent-airflow-dag" />
+            </a-form-item>
+            <!-- credentialEnv 对象型：拆成两个输入框，各自填环境变量名（值不落明文） -->
+            <template v-if="wizardForm.kind === 'servicenow' || wizardForm.kind === 'airflow'">
+              <a-form-item :label="t('ontology.entKindCredUserEnv')" required>
+                <p class="field-hint">{{ t('ontology.entKindCredEnvPointerHint') }}</p>
+                <a-input v-model:value="wizardForm.credUserEnv" data-testid="ent-cred-user" />
+              </a-form-item>
+              <a-form-item :label="t('ontology.entKindCredPasswordEnv')" required>
+                <a-input v-model:value="wizardForm.credPasswordEnv" data-testid="ent-cred-password" />
+              </a-form-item>
+            </template>
+            <template v-if="wizardForm.kind === 'looker'">
+              <a-form-item :label="t('ontology.entKindCredClientIdEnv')" required>
+                <p class="field-hint">{{ t('ontology.entKindCredEnvPointerHint') }}</p>
+                <a-input v-model:value="wizardForm.credClientIdEnv" data-testid="ent-cred-client-id" />
+              </a-form-item>
+              <a-form-item :label="t('ontology.entKindCredClientSecretEnv')" required>
+                <a-input v-model:value="wizardForm.credClientSecretEnv" data-testid="ent-cred-client-secret" />
+              </a-form-item>
+            </template>
+          </template>
+          <!-- NoSQL（U-conn 扩展批：cassandra CQL 只读拉取） -->
+          <template v-if="wizardForm.kind === 'cassandra'">
+            <a-form-item :label="t('ontology.entKindContactPoints')" required>
+              <a-input v-model:value="wizardForm.contact_points" data-testid="ent-cassandra-contact-points" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindKeyspace')" required>
+              <a-input v-model:value="wizardForm.keyspace" data-testid="ent-cassandra-keyspace" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindTable')" required>
+              <a-input v-model:value="wizardForm.table" data-testid="ent-cassandra-table" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindCql')" required>
+              <a-textarea v-model:value="wizardForm.cql" :rows="3" data-testid="ent-cassandra-cql" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindCredUserEnv')" required>
+              <p class="field-hint">{{ t('ontology.entKindCredEnvPointerHint') }}</p>
+              <a-input v-model:value="wizardForm.credUserEnv" data-testid="ent-cred-user" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindCredPasswordEnv')" required>
+              <a-input v-model:value="wizardForm.credPasswordEnv" data-testid="ent-cred-password" />
+            </a-form-item>
+          </template>
+          <!-- 代码仓（U-conn 扩展批：git 仓库文件清单；公共仓免凭据） -->
+          <template v-if="wizardForm.kind === 'git'">
+            <a-form-item :label="t('ontology.entKindRepoUrl')" required>
+              <a-input v-model:value="wizardForm.repo_url" data-testid="ent-git-repo-url" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindBranch')">
+              <a-input v-model:value="wizardForm.branch" data-testid="ent-git-branch" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindFileGlob')">
+              <a-input v-model:value="wizardForm.file_glob" data-testid="ent-git-file-glob" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindCredUserEnv') + t('ontology.entFieldOptional')">
+              <p class="field-hint">{{ t('ontology.entKindCredEnvPointerHint') }}</p>
+              <a-input v-model:value="wizardForm.credUserEnv" data-testid="ent-cred-user" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindCredTokenEnv') + t('ontology.entFieldOptional')">
+              <a-input v-model:value="wizardForm.credTokenEnv" data-testid="ent-cred-token" />
             </a-form-item>
           </template>
           <!-- 数据库（sql） -->
@@ -655,13 +766,30 @@ const triggerKindLabel = (kind: unknown) => {
   return labelKey ? t(labelKey) : String(kind ?? '')
 }
 
+// 湖仓/SaaS/NoSQL/代码仓 sourceType → 列表类型标签（未知值仍诚实回退原值）
+const TYPE_LABEL_I18N_KEYS: Record<string, string> = {
+  unity_catalog: 'ontology.entTypeUnityCatalog',
+  snowflake: 'ontology.entTypeSnowflake',
+  sap_odata: 'ontology.entTypeSapOdata',
+  http_pull: 'ontology.entTypeHttpPull',
+  bigquery: 'ontology.entTypeBigquery',
+  databricks: 'ontology.entTypeDatabricks',
+  cassandra: 'ontology.entTypeCassandra',
+  salesforce: 'ontology.entTypeSalesforce',
+  servicenow: 'ontology.entTypeServicenow',
+  looker: 'ontology.entTypeLooker',
+  airflow: 'ontology.entTypeAirflow',
+  git: 'ontology.entTypeGit',
+}
+
 const typeLabel = (row: EnterpriseSourceConfig) => {
   const d = row.descriptor as Record<string, string>
   if (d.sourceType === 'sql') return t('ontology.entTypeDatabase')
   if (d.sourceType === 'erp_api') return t('ontology.entTypeErp')
   if (d.sourceType === 'file') return t('ontology.entTypeFile')
   if (d.sourceType === 'chat') return d.vendor === 'wecom' ? t('ontology.entTypeWecom') : t('ontology.entTypeWechat')
-  return String(d.sourceType || '—')
+  const labelKey = TYPE_LABEL_I18N_KEYS[String(d.sourceType || '')]
+  return labelKey ? t(labelKey) : String(d.sourceType || '—')
 }
 
 const vendorLabel = (row: EnterpriseSourceConfig) => {
@@ -845,7 +973,10 @@ const openHistoryDrawer = async (sourceId: string) => {
 
 // ── 向导（新增/编辑共用，四步） ──────────────────────────────
 
-type ConnectKind = 'sql' | 'erp' | 'wecom' | 'wechat' | 'file' | 'unity_catalog' | 'snowflake' | 'sap_odata' | 'http_pull'
+type ConnectKind = 'sql' | 'erp' | 'wecom' | 'wechat' | 'file'
+  | 'unity_catalog' | 'snowflake' | 'sap_odata' | 'http_pull'
+  | 'bigquery' | 'databricks' | 'cassandra'
+  | 'salesforce' | 'servicenow' | 'looker' | 'airflow' | 'git'
 
 const KIND_CARDS: { kind: ConnectKind; labelKey: string; descKey: string }[] = [
   { kind: 'sql', labelKey: 'ontology.entTypeDatabase', descKey: 'ontology.entKindDatabaseDesc' },
@@ -858,6 +989,16 @@ const KIND_CARDS: { kind: ConnectKind; labelKey: string; descKey: string }[] = [
   { kind: 'snowflake', labelKey: 'ontology.entTypeSnowflake', descKey: 'ontology.entKindSnowflakeDesc' },
   { kind: 'sap_odata', labelKey: 'ontology.entTypeSapOdata', descKey: 'ontology.entKindSapOdataDesc' },
   { kind: 'http_pull', labelKey: 'ontology.entTypeHttpPull', descKey: 'ontology.entKindHttpPullDesc' },
+  // U-conn 扩展批（对齐参照系连接器矩阵）：bigquery/databricks（湖仓 SQL REST）、
+  // cassandra（NoSQL CQL）、salesforce/servicenow/looker/airflow（SaaS REST）、git（代码仓）
+  { kind: 'bigquery', labelKey: 'ontology.entTypeBigquery', descKey: 'ontology.entKindBigqueryDesc' },
+  { kind: 'databricks', labelKey: 'ontology.entTypeDatabricks', descKey: 'ontology.entKindDatabricksDesc' },
+  { kind: 'cassandra', labelKey: 'ontology.entTypeCassandra', descKey: 'ontology.entKindCassandraDesc' },
+  { kind: 'salesforce', labelKey: 'ontology.entTypeSalesforce', descKey: 'ontology.entKindSalesforceDesc' },
+  { kind: 'servicenow', labelKey: 'ontology.entTypeServicenow', descKey: 'ontology.entKindServicenowDesc' },
+  { kind: 'looker', labelKey: 'ontology.entTypeLooker', descKey: 'ontology.entKindLookerDesc' },
+  { kind: 'airflow', labelKey: 'ontology.entTypeAirflow', descKey: 'ontology.entKindAirflowDesc' },
+  { kind: 'git', labelKey: 'ontology.entTypeGit', descKey: 'ontology.entKindGitDesc' },
 ]
 
 const SQL_DRIVERS = ['postgresql', 'mysql', 'mssql', 'oracle', 'sqlite'].map((d) => ({ label: d, value: d }))
@@ -926,8 +1067,25 @@ async function doSimulate(mode: 'ok' | 'duplicate' | 'bad_signature') {
 }
 const typeCardOf = (kind: string) => KIND_CARDS.find((c) => c.kind === kind) ?? KIND_CARDS[0]
 
-const LAKEHOUSE_KINDS: ConnectKind[] = ['unity_catalog', 'snowflake', 'sap_odata', 'http_pull']
+// 连接器族分组（单一出处）：步 0 卡片分组展示与步 1 共享字段模板门控都从这几组取。
+// U-conn 扩展批：bigquery/databricks 归湖仓 SQL REST 组（沿用 W10 组名），
+// salesforce/servicenow/looker/airflow 归 SaaS REST 组，cassandra 归 NoSQL 组，git 归代码仓组。
+const LAKEHOUSE_KINDS: ConnectKind[] = ['unity_catalog', 'snowflake', 'sap_odata', 'http_pull', 'bigquery', 'databricks']
+const SAAS_REST_KINDS: ConnectKind[] = ['salesforce', 'servicenow', 'looker', 'airflow']
+const NOSQL_KINDS: ConnectKind[] = ['cassandra']
+const CODE_KINDS: ConnectKind[] = ['git']
 const isLakehouseKind = (kind: ConnectKind | '') => LAKEHOUSE_KINDS.includes(kind as ConnectKind)
+const isSaasRestKind = (kind: ConnectKind | '') => SAAS_REST_KINDS.includes(kind as ConnectKind)
+
+/** 步 0 卡片分组（标题走 i18n；组内卡序跟随 KIND_CARDS） */
+const KIND_GROUPS: { titleKey: string; kinds: ConnectKind[] }[] = [
+  { titleKey: 'ontology.entGroupCore', kinds: ['sql', 'erp', 'wecom', 'wechat', 'file'] },
+  { titleKey: 'ontology.entGroupLakehouse', kinds: LAKEHOUSE_KINDS },
+  { titleKey: 'ontology.entGroupNosql', kinds: NOSQL_KINDS },
+  { titleKey: 'ontology.entGroupSaasRest', kinds: SAAS_REST_KINDS },
+  { titleKey: 'ontology.entGroupCode', kinds: CODE_KINDS },
+]
+const kindCardsIn = (group: { kinds: ConnectKind[] }) => KIND_CARDS.filter((c) => group.kinds.includes(c.kind))
 
 const showWizard = ref(false)
 const wizardStep = ref(0)
@@ -946,6 +1104,22 @@ const emptyForm = () => ({
   watermark_column: '',
   entity_set: '',
   url: '',
+  project_id: '',
+  warehouse_id: '',
+  contact_points: '',
+  keyspace: '',
+  cql: '',
+  soql: '',
+  query_id: '',
+  dag_id: '',
+  repo_url: '',
+  branch: '',
+  file_glob: '',
+  credUserEnv: '',
+  credPasswordEnv: '',
+  credClientIdEnv: '',
+  credClientSecretEnv: '',
+  credTokenEnv: '',
   host: '',
   port: '',
   database: '',
@@ -1078,6 +1252,52 @@ const canProceed = computed(() => {
         && !!wizardForm.archivePrivateKeys.trim()
     }
     if (wizardForm.kind === 'file') return !!wizardForm.format && !!wizardForm.path
+    // 湖仓 SQL REST（含 U-conn 扩展 bigquery/databricks）：base_url 必填；
+    // 既有四连接器凭据不强制（后端 health 如实报缺凭据），bigquery/databricks 凭据指针必填
+    if (isLakehouseKind(wizardForm.kind)) {
+      if (!wizardForm.base_url.trim()) return false
+      if ((wizardForm.kind === 'bigquery' || wizardForm.kind === 'databricks')
+        && !wizardForm.credentialEnv.trim()) return false
+      if (wizardForm.kind === 'unity_catalog') return !!wizardForm.table.trim()
+      if (wizardForm.kind === 'snowflake') return !!wizardForm.sf_query.trim()
+      if (wizardForm.kind === 'sap_odata') return !!wizardForm.entity_set.trim()
+      if (wizardForm.kind === 'http_pull') return !!wizardForm.url.trim()
+      if (wizardForm.kind === 'bigquery') {
+        return !!wizardForm.project_id.trim() && !!wizardForm.query.trim()
+      }
+      if (wizardForm.kind === 'databricks') {
+        return !!wizardForm.warehouse_id.trim() && !!wizardForm.query.trim()
+      }
+      return false
+    }
+    // SaaS REST（U-conn 扩展批）：base_url＋kind 主字段＋凭据 env 指针必填
+    if (isSaasRestKind(wizardForm.kind)) {
+      if (!wizardForm.base_url.trim()) return false
+      if (wizardForm.kind === 'salesforce') {
+        return !!wizardForm.soql.trim() && !!wizardForm.credentialEnv.trim()
+      }
+      if (wizardForm.kind === 'servicenow') {
+        return !!wizardForm.table.trim()
+          && !!wizardForm.credUserEnv.trim() && !!wizardForm.credPasswordEnv.trim()
+      }
+      if (wizardForm.kind === 'looker') {
+        return !!wizardForm.query_id.trim()
+          && !!wizardForm.credClientIdEnv.trim() && !!wizardForm.credClientSecretEnv.trim()
+      }
+      if (wizardForm.kind === 'airflow') {
+        return !!wizardForm.dag_id.trim()
+          && !!wizardForm.credUserEnv.trim() && !!wizardForm.credPasswordEnv.trim()
+      }
+      return false
+    }
+    // NoSQL：cassandra 全字段必填
+    if (wizardForm.kind === 'cassandra') {
+      return !!wizardForm.contact_points.trim() && !!wizardForm.keyspace.trim()
+        && !!wizardForm.table.trim() && !!wizardForm.cql.trim()
+        && !!wizardForm.credUserEnv.trim() && !!wizardForm.credPasswordEnv.trim()
+    }
+    // 代码仓：git 只强制 repo_url（branch/file_glob 有缺省；公共仓免凭据）
+    if (wizardForm.kind === 'git') return !!wizardForm.repo_url.trim()
     return false
   }
   if (wizardStep.value === 2) {
@@ -1095,6 +1315,16 @@ const parsePairs = (text: string): Record<string, string> => {
     if (idx > 0) out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
   }
   return out
+}
+
+/** 对象型 credentialEnv（{逻辑名: 环境变量名}）：剔空；全空返回 undefined（git 公共仓免凭据不落空对象） */
+const credEnvPair = (entries: Record<string, string>): Record<string, string> | undefined => {
+  const out: Record<string, string> = {}
+  for (const [logical, envName] of Object.entries(entries)) {
+    const trimmed = String(envName || '').trim()
+    if (trimmed) out[logical] = trimmed
+  }
+  return Object.keys(out).length ? out : undefined
 }
 
 const buildDescriptor = (): EnterpriseDescriptor => {
@@ -1156,6 +1386,61 @@ const buildDescriptor = (): EnterpriseDescriptor => {
   } else if (wizardForm.kind === 'file') {
     d.format = wizardForm.format
     d.path = wizardForm.path
+  } else if (isLakehouseKind(wizardForm.kind)) {
+    // 湖仓 SQL REST（W10 四连接器＋U-conn 扩展 bigquery/databricks）：
+    // 后端描述符字段为 base_url＋credential_env（单 env 名指针，值不落明文）
+    if (wizardForm.base_url.trim()) d.base_url = wizardForm.base_url.trim()
+    if (wizardForm.credentialEnv.trim()) d.credential_env = wizardForm.credentialEnv.trim()
+    if (wizardForm.kind === 'unity_catalog') d.table = wizardForm.table
+    else if (wizardForm.kind === 'snowflake') {
+      d.query = wizardForm.sf_query
+      if (wizardForm.watermark_column.trim()) d.watermark_column = wizardForm.watermark_column.trim()
+    } else if (wizardForm.kind === 'sap_odata') d.entity_set = wizardForm.entity_set
+    else if (wizardForm.kind === 'http_pull') d.url = wizardForm.url
+    else if (wizardForm.kind === 'bigquery') {
+      d.project_id = wizardForm.project_id.trim()
+      d.query = wizardForm.query
+      if (wizardForm.watermark_column.trim()) d.watermark_column = wizardForm.watermark_column.trim()
+    } else if (wizardForm.kind === 'databricks') {
+      d.warehouse_id = wizardForm.warehouse_id.trim()
+      d.query = wizardForm.query
+    }
+  } else if (isSaasRestKind(wizardForm.kind)) {
+    // SaaS REST（U-conn 扩展批）：salesforce 走 credential_env 单指针，
+    // servicenow/looker/airflow 走 credentialEnv 对象双指针（值均为环境变量名）
+    if (wizardForm.base_url.trim()) d.base_url = wizardForm.base_url.trim()
+    if (wizardForm.kind === 'salesforce') {
+      d.soql = wizardForm.soql
+      if (wizardForm.credentialEnv.trim()) d.credential_env = wizardForm.credentialEnv.trim()
+    } else if (wizardForm.kind === 'servicenow') {
+      d.table = wizardForm.table
+      if (wizardForm.query.trim()) d.query = wizardForm.query.trim()
+      const pair = credEnvPair({ username: wizardForm.credUserEnv, password: wizardForm.credPasswordEnv })
+      if (pair) d.credentialEnv = pair
+    } else if (wizardForm.kind === 'looker') {
+      d.query_id = wizardForm.query_id.trim()
+      const pair = credEnvPair({ client_id: wizardForm.credClientIdEnv, client_secret: wizardForm.credClientSecretEnv })
+      if (pair) d.credentialEnv = pair
+    } else if (wizardForm.kind === 'airflow') {
+      d.dag_id = wizardForm.dag_id.trim()
+      const pair = credEnvPair({ username: wizardForm.credUserEnv, password: wizardForm.credPasswordEnv })
+      if (pair) d.credentialEnv = pair
+    }
+  } else if (wizardForm.kind === 'cassandra') {
+    // NoSQL（U-conn 扩展批）：contact_points 逗号分隔原文上送（后端自行切分）
+    d.contact_points = wizardForm.contact_points.trim()
+    d.keyspace = wizardForm.keyspace.trim()
+    d.table = wizardForm.table.trim()
+    d.cql = wizardForm.cql
+    const pair = credEnvPair({ username: wizardForm.credUserEnv, password: wizardForm.credPasswordEnv })
+    if (pair) d.credentialEnv = pair
+  } else if (wizardForm.kind === 'git') {
+    // 代码仓（U-conn 扩展批）：branch/file_glob 可选（file_glob 后端缺省 **/*）；凭据可选（公共仓免凭据）
+    d.repo_url = wizardForm.repo_url.trim()
+    if (wizardForm.branch.trim()) d.branch = wizardForm.branch.trim()
+    if (wizardForm.file_glob.trim()) d.file_glob = wizardForm.file_glob.trim()
+    const pair = credEnvPair({ username: wizardForm.credUserEnv, token: wizardForm.credTokenEnv })
+    if (pair) d.credentialEnv = pair
   }
   return d
 }
@@ -1172,10 +1457,13 @@ const openCreate = () => {
 const openEdit = (row: EnterpriseSourceConfig) => {
   editingSource.value = row
   const d = row.descriptor as Record<string, any>
+  // kind 反推：erp_api/chat 是前端 kind 的后端映射名，其余按 KIND_CARDS 直查（湖仓/SaaS/NoSQL/git 与 sourceType 同名）
+  const directCard = KIND_CARDS.find((c) => c.kind === d.sourceType)
   const kind: ConnectKind = d.sourceType === 'sql' ? 'sql'
     : d.sourceType === 'erp_api' ? 'erp'
     : d.sourceType === 'chat' ? (d.vendor === 'wecom' ? 'wecom' : 'wechat')
-    : d.sourceType === 'file' ? 'file' : 'sql'
+    : d.sourceType === 'file' ? 'file'
+    : directCard ? directCard.kind : 'sql'
   Object.assign(wizardForm, emptyForm(), {
     source_id: row.source_id,
     kind,
@@ -1187,7 +1475,29 @@ const openEdit = (row: EnterpriseSourceConfig) => {
     sqlMode: d.query ? 'query' : 'table',
     table: d.table || '',
     query: d.query || '',
-    credentialEnv: Object.entries(d.credentialEnv || {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+    // 湖仓/SaaS 单指针（credential_env 字符串）优先；sql/erp 的对象映射展开成 k=v 行
+    credentialEnv: d.credential_env
+      || Object.entries(d.credentialEnv || {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+    // U-conn 扩展批：湖仓 SQL REST / SaaS REST / NoSQL / 代码仓字段反填
+    base_url: d.base_url || '',
+    project_id: d.project_id || '',
+    warehouse_id: d.warehouse_id || '',
+    watermark_column: d.watermark_column || '',
+    entity_set: d.entity_set || '',
+    contact_points: d.contact_points || '',
+    keyspace: d.keyspace || '',
+    cql: d.cql || '',
+    soql: d.soql || '',
+    query_id: d.query_id || '',
+    dag_id: d.dag_id || '',
+    repo_url: d.repo_url || '',
+    branch: d.branch || '',
+    file_glob: d.file_glob || '',
+    credUserEnv: d.credentialEnv?.username || '',
+    credPasswordEnv: d.credentialEnv?.password || '',
+    credClientIdEnv: d.credentialEnv?.client_id || '',
+    credClientSecretEnv: d.credentialEnv?.client_secret || '',
+    credTokenEnv: d.credentialEnv?.token || '',
     vendor: d.vendor === 'yongyou' ? 'yongyou' : 'kingdee',
     baseUrl: d.baseUrl || '',
     formId: d.formId || '',
@@ -1309,6 +1619,9 @@ onMounted(loadSources)
 /* 向导 */
 .wizard-steps { margin-bottom: 18px; }
 .kind-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+/* U-conn 扩展批：步 0 按连接器族分组（组标题占满整行，颜色走 tokens） */
+.kind-group-title { grid-column: 1 / -1; font-size: 11px; font-weight: 600; color: var(--nr-text-secondary); }
+.kind-group-title:not(:first-child) { margin-top: 6px; }
 .kind-card { border: 1px solid var(--nr-glass-border); border-radius: 10px; padding: 14px 12px; cursor: pointer; text-align: center; transition: border-color .15s; }
 .kind-card:hover { border-color: var(--nr-primary); }
 .kind-card.active { border-color: var(--nr-primary); background: var(--nr-primary-soft); }
