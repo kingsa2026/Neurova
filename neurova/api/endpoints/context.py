@@ -11,6 +11,7 @@ from __future__ import annotations
 5. 注入记忆 (GET /api/v1/context/inject/memories)
 6. 注入高温记忆 (GET /api/v1/context/inject/hot)
 7. 压缩上下文 (POST /api/v1/context/{context_id}/compress)
+8. 会话结构体检 (GET /api/v1/context/diagnose/structure，P0-3 轴9，只读)
 """
 
 from neurova.core.logger import get_logger
@@ -575,6 +576,42 @@ async def get_context_budget(
     if report is None:
         raise HTTPException(status_code=404, detail="No always-on budget measured for this agent yet")
     return report
+
+
+@router.get("/diagnose/structure")
+async def diagnose_context_structure(
+    request: Request,
+    session_id: str = Query(..., description="Session ID"),
+    agent_id: str = Query(default="", description="Agent ID（缺省按会话文件/时间线反查）"),
+    detail_limit: int = Query(default=50, ge=1, le=500, description="issue 明细条数上限（防爆炸）"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """会话上下文结构体检（P0-3 轴9，只读诊断）。
+
+    对消息流、上下文池归档、会话时间线三路真实存储交叉核对，检出五类
+    结构病：concurrent_fork / orphan_turn / stale_index / segment_split /
+    lost_content。**只诊断不修补**——返回 issues 计数 + 明细（明细条数
+    按 `detail_limit` 截断，总数不受影响）。查无此会话返回 404，不返回
+    空报告冒充健康。
+    """
+    request_id = _get_request_id(request)
+    try:
+        from neurova.context.structure_doctor import diagnoseSession
+
+        diagnosis = diagnoseSession(session_id, agent_id=agent_id or None)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Structure diagnosis error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to diagnose structure: {str(e)}")
+    if not diagnosis.checked.get("session_found"):
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+    return {
+        "code": 0,
+        "message": "success",
+        "data": diagnosis.to_dict(detailLimit=detail_limit),
+        "request_id": request_id,
+    }
 
 
 @router.get("/{context_id}/preview", response_model=ContextPreview)
