@@ -185,3 +185,67 @@ class TestRemoteEngineAndFactory:
         # 本地引擎或 None（薄环境无重依赖），绝不能是远程引擎
         assert not isinstance(engine, RemoteEmbeddingEngine)
         reset_embedding_engine()
+
+
+class TestProviderDeclaredEmbedding:
+    """R11 收尾：服务商级 embedding_model 声明面（env 双键仍全局覆盖）。"""
+
+    def test_provider_config_embedding_model_roundtrip(self):
+        from neurova.llm.provider_manager import ProviderConfig
+
+        pc = ProviderConfig(id="x", name="x", provider="openai",
+                            base_url="https://x.example.com/v1")
+        assert pc.embedding_model is None
+        data = pc.to_dict()
+        assert data["embedding_model"] is None
+        pc2 = ProviderConfig.from_dict({**data, "embedding_model": "bge-m3"})
+        assert pc2.embedding_model == "bge-m3"
+
+    def test_add_and_update_provider_embedding_model(self, tmp_path):
+        from neurova.llm.provider_manager import LLMProviderManager
+
+        mgr = LLMProviderManager(config={"config_path": str(tmp_path / "providers.json")})
+        mgr.add_provider(name="e1", provider="openai",
+                         base_url="https://e1.example.com/v1",
+                         api_key="sk", models=["m"], default_model="m",
+                         embedding_model="bge-m3")
+        assert mgr.get_provider("e1").embedding_model == "bge-m3"
+        assert mgr.update_provider("e1", embedding_model="text-embedding-v3")
+        assert mgr.get_provider("e1").embedding_model == "text-embedding-v3"
+        assert mgr.update_provider("e1", embedding_model="")
+        assert mgr.get_provider("e1").embedding_model is None  # 空串=清除
+
+    def test_target_from_provider_declaration(self, tmp_path, monkeypatch):
+        """服务商级声明即启用（无需 env）；env 双键仍全局覆盖。"""
+        monkeypatch.delenv("NEUROVA_EMBEDDING_PROVIDER", raising=False)
+        monkeypatch.delenv("NEUROVA_EMBEDDING_MODEL", raising=False)
+        _wire_global_provider(tmp_path, monkeypatch, "http://127.0.0.1:1/v1")
+        from neurova.llm.provider_manager import get_provider_manager
+
+        get_provider_manager().update_provider("emb-src", embedding_model="emb-model")
+        assert getEmbeddingChannelTarget() == ("emb-src", "emb-model")
+        # env 双键覆盖服务商声明
+        monkeypatch.setenv("NEUROVA_EMBEDDING_PROVIDER", "other")
+        monkeypatch.setenv("NEUROVA_EMBEDDING_MODEL", "other-model")
+        assert getEmbeddingChannelTarget() == ("other", "other-model")
+
+    def test_factory_uses_provider_declaration(self, tmp_path, monkeypatch):
+        """无 env、服务商声明 embedding_model → 工厂出远程引擎且可取向量。"""
+        from neurova.embedding import get_embedding_engine, reset_embedding_engine
+        from neurova.embedding.remote_engine import RemoteEmbeddingEngine
+
+        stub = _EmbeddingStub()
+        try:
+            monkeypatch.delenv("NEUROVA_EMBEDDING_PROVIDER", raising=False)
+            monkeypatch.delenv("NEUROVA_EMBEDDING_MODEL", raising=False)
+            _wire_global_provider(tmp_path, monkeypatch, stub.base_url())
+            from neurova.llm.provider_manager import get_provider_manager
+
+            get_provider_manager().update_provider("emb-src", embedding_model="emb-model")
+            reset_embedding_engine()
+            engine = get_embedding_engine()
+            assert isinstance(engine, RemoteEmbeddingEngine)
+            assert engine.encodeOrNone("hi") == [0.1, 0.2, 0.3]
+        finally:
+            reset_embedding_engine()
+            stub.stop()

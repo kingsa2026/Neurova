@@ -32,11 +32,27 @@ class EmbeddingChannelError(RuntimeError):
 
 
 def getEmbeddingChannelTarget() -> Optional[Tuple[str, str]]:
-    """读取远程通道配置；返回 (provider_id, model)，未配置返回 None。"""
+    """解析远程通道目标；返回 (provider_id, model)，未配置返回 None。
+
+    优先级：env 双键（全局显式覆盖）> 服务商级 embedding_model 声明
+    （list_providers 顺序 = (-priority, name)，取首个声明者）。
+    """
     provider_id = os.environ.get(EMBEDDING_PROVIDER_ENV, "").strip()
     model = os.environ.get(EMBEDDING_MODEL_ENV, "").strip()
     if provider_id and model:
         return provider_id, model
+    try:
+        from neurova.llm.provider_manager import get_provider_manager
+
+        pm = get_provider_manager()
+        if pm is None:
+            return None
+        for provider in pm.list_providers(enabled_only=True):
+            declared = (getattr(provider, "embedding_model", "") or "").strip()
+            if declared:
+                return provider.id, declared
+    except Exception as e:  # noqa: BLE001 — 目录不可用按未配置处理
+        logger.debug("服务商级嵌入声明扫描跳过: %s", e)
     return None
 
 

@@ -56,6 +56,8 @@ class CreateProviderRequest(BaseModel):
     api_key: Optional[str] = Field(default=None, description="API Key")
     # D-R2：同优先级组内流量份额（0=仅兜底，failover 链仍可达；缺省=1.0）
     weight: Optional[float] = Field(default=None, description="同优先级组内加权分流份额")
+    # R11 收尾：服务商级嵌入模型声明（设置即启用远程向量通道）
+    embedding_model: Optional[str] = Field(default=None, description="服务商级嵌入模型声明")
     config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
 
 
@@ -77,6 +79,8 @@ class UpdateProviderRequest(BaseModel):
     )
     # D-R2：同优先级组内流量份额（None=不改动；0=仅兜底）
     weight: Optional[float] = Field(default=None, description="同优先级组内加权分流份额")
+    # R11 收尾：服务商级嵌入模型声明（None=不改动；空串=清除）
+    embedding_model: Optional[str] = Field(default=None, description="服务商级嵌入模型声明")
 
 
 class ActivateModelRequest(BaseModel):
@@ -337,6 +341,7 @@ async def create_provider(
                 base_url=body.base_url or "",
                 api_key=body.api_key,
                 weight=body.weight,
+                embedding_model=body.embedding_model,
             )
             logger.info(f"Provider created successfully: {provider.id}")
 
@@ -400,6 +405,9 @@ async def update_provider(
             # D-R2：weight 同样显式转发（None=不改动）
             if body.weight is not None:
                 update_kwargs["weight"] = body.weight
+            # R11 收尾：embedding_model 显式转发（None=不改动；空串=清除）
+            if body.embedding_model is not None:
+                update_kwargs["embedding_model"] = body.embedding_model
 
             # 如果有 add_model 指令，先获取当前 models 再合并
             if add_model_id:

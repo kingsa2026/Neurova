@@ -235,6 +235,9 @@ class ProviderConfig:
     # 经 register_provider_from_config 进 llm_router 选型。默认 1.0=各行使
     # 用既有确定性排序，行为不变。
     weight: float = 1.0
+    # R11 收尾（2026-11-22）：服务商级嵌入模型声明——设置后 embeddings 通道
+    # 以该服务商+模型启用远程向量（env 双键仍可全局覆盖）。None=不声明。
+    embedding_model: Optional[str] = None
     is_builtin: bool = False
     icon: Optional[str] = None
     description: Optional[str] = None
@@ -523,6 +526,7 @@ class LLMProviderManager(Module):
         default_model: Optional[str] = None,
         models: Optional[List[str]] = None,
         weight: Optional[float] = None,
+        embedding_model: Optional[str] = None,
         **kwargs,
     ) -> ProviderConfig:
         """添加服务商"""
@@ -537,6 +541,11 @@ class LLMProviderManager(Module):
             default_model=default_model,
             models=models or [],
             weight=1.0 if weight is None else max(0.0, float(weight)),
+            embedding_model=(
+                (str(embedding_model).strip() or None)
+                if embedding_model is not None
+                else None
+            ),
             **kwargs,
         )
 
@@ -561,6 +570,7 @@ class LLMProviderManager(Module):
         usage_collection: Optional[bool] = None,
         compat_dict: Optional[Dict[str, Any]] = None,
         weight: Optional[float] = None,
+        embedding_model: Optional[str] = None,
     ) -> bool:
         """更新服务商配置"""
         # 校验放在进锁之前：不认识键名就拒绝，既不半写配置也不碰磁盘。
@@ -618,6 +628,9 @@ class LLMProviderManager(Module):
             # D-R2：同优先级组内流量份额（负值钳 0；0=仅兜底）
             if weight is not None:
                 provider.weight = max(0.0, float(weight))
+            # R11 收尾：服务商级嵌入模型声明（None=不改动；空串=清除回 None）
+            if embedding_model is not None:
+                provider.embedding_model = str(embedding_model).strip() or None
 
             provider.updated_at = datetime.now().isoformat()
 
