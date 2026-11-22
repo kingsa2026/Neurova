@@ -210,7 +210,8 @@ class TestMigrationVersions:
         # v56：企业源同步历史（可靠性方案 D1，2026-11-19）——enterprise_sync_history。
         # v57：企业源租户级共享策略（§8.3-P2，2026-11-19）——enterprise_source_configs 加 share_tenants_json。
         # v58：Rete v2 求值档（U5）——ontology_rules 加 evaluation_strategy 注册档位。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 58
+        # v59：连接器列画像（U10，2026-11-23）——ontology_catalog_columns 只增列。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 59
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
                 'ontology_change_log', 'enterprise_source_configs',
