@@ -21,6 +21,7 @@
 | 批二 P1 | U9 | 远程执行轴2 | 通道认证加固三件套（token 后置/newest-wins/watchdog） |
 | 批二 P1 | U10 | 远程执行轴8 | 进程树清算（CIM BFS+批量终止） |
 | 批二 P1 | U11 | 远程执行轴8 | 失败分级重试守卫（传输级才重试） |
+| 批二 P1 | U20 | U18 核对升级 | 浏览器 context 按用户池化+产物属主登记（核对发现跨用户可读真实缺口） |
 | 批三 P2 | U12 | 远程执行轴8 | 结构化 \*\_UNSUPPORTED 拒绝+端能力声明路由 |
 | 批三 P2 | U13 | 工具安全轴8 | HPKE 凭据信道评估（评估卡） |
 | 批三 P2 | U14 | 工具安全轴4 | MCP Apps 交互 UI（评估卡） |
@@ -93,6 +94,13 @@
 - 红绿：红=应用层失败当前存在自动重试路径；绿=transport 级重试保留、应用层失败零重试，幂等声明工具不受影响。
 - live-verify：假 MCP server 统计调用次数验证。
 
+**U20 浏览器会话隔离与产物属主（源自 U18 核对，发现真实缺口，不核销）**
+- 缺口 1：playwright 后端为进程级单例单 BrowserContext（`computer_use/browser_manager.py:1465,2438-2439,2524`），所有用户/会话共享同一批 tab/cookie/localStorage——A 会话可读 B 会话页面状态、并发互踩；车道键仅 `browser:<活动tab>`（lane_mutex.py:264-268），非会话粒度。
+- 缺口 2：browser_pdf（browser_manager.py:1326）/browser_download（:1369）/write_pdf（tool_executor.py:7157）产物经 `persist_bytes`（llm/generators/runtime.py:193-205）落**共享目录** data/generations/，不登记 generation 账本属主——serve 端反查 owner 为空→任何登录用户可读他人下载件/PDF（generation.py:902-937），同名互相覆盖。
+- 做法：playwright 后端按 user_id（至少）池化独立 BrowserContext（对齐 camofox 按 user_id 池化先例 browser_manager.py:2541-2559）；三条落盘链登记账本属主+stem 加会话/用户段+唯一后缀防覆盖。
+- 红绿：红=A 用户可读 B 用户 browser_download 产物（当前 200）；绿=403/404；红 2=B 会话写 cookie A 会话可见；绿 2=互不可见。
+- live-verify：双会话双用户真浏览器链路+产物读取跨权测试。
+
 ## 3. 批三 P2（体验/生态/强制面，八卡）
 
 **U12 结构化 \*\_UNSUPPORTED 拒绝+端能力声明路由**：工具因能力未装配/端不支持时返回稳定 `{error_code: "TOOL_UNSUPPORTED", reason, supported: [...]}`；多后端桌面执行（本机/来宾机/RDP/Sandbox）按端能力声明选端器（computer_use 注册表扩 capability 字段）。红绿：未装浏览器引擎时 browser_navigate 返回结构化不支持而非异常。
@@ -129,4 +137,4 @@
 
 ## 7. 执行记录
 
-（待实施回填：逐卡 commit、红绿实测、live-verify 证据、复评读数。）
+- **2026-11-22 评估卡回填（U13/U14/U15/U18）**：U13 HPKE=**暂缓**（本仓凭据不穿不可信中转：一次性配对码+connect ticket+TLS+SSH 信道+本地注入四条链路均已闭环；引入 HPKE=第二套并行凭据面，违教义第 6 条）；U14 MCP Apps UI=**暂缓不立项**（本仓 MCP 消费方全为无头 agent，无 UI 宿主，做了即"注册无消费者模块"）；U15 云沙箱双 provider=**暂缓**（单机部署形态零云沙箱消费方，先落 U5 容器档，未来上云时 provider seam 长在 code_sandbox 既有后端选择处）；U18 核对=截图链已规范（核销），但发现两个真实隔离缺口→**新增 U20 卡**入批二（浏览器 context 跨用户共享；浏览器产物共享目录无属主登记可被任意登录用户跨读）。
