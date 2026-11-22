@@ -1,6 +1,6 @@
 # reference_ad：LobeHub（lobehub/lobehub）vs Neurova 全方位代码级对照评测
 
-- 日期：2026-11-21（v2：增补 D11 自我进化/RSI 维；v3：增补 D2 上下文活水池专项；v4：增补 D4 工具肌肉记忆专项；v5：多模态十轴专项细拆；v7：D4 工具与执行安全十轴专项细拆；v8：D9 数据/租户/认证/安全专项细拆）
+- 日期：2026-11-21（v2：增补 D11 自我进化/RSI 维；v3：增补 D2 上下文活水池专项；v4：增补 D4 工具肌肉记忆专项；v5：多模态十轴专项细拆；v7：D4 工具与执行安全十轴专项细拆；v8：D9 数据/租户/认证/安全专项细拆；v10：上下文工程十轴专项细拆）
 - 对象：[lobehub/lobehub](https://github.com/lobehub/lobehub)（代号 reference_ad；LobeChat 同源演进后的 agent 平台主线仓库）
 - 快照：canary 分支浅克隆，版本 2.3.4，pushed_at 2026-11-21；85.9k stars / 16.3k forks；TypeScript
 - 体量：124 个 pnpm 子包；ts/tsx 共 **3,777,641 行**；`*.test.*` 文件 **7,321** 个；18 种界面语言；32 条 GitHub workflow
@@ -10,11 +10,11 @@
 
 ## 0. 结论摘要
 
-**总分（11 维 120 分）：LobeHub 97.5 vs Neurova 96.5。**（v2 自进化维 L 5.5 / N 8.5；v3 活水池专项 N 上下文工程 4.0→4.5；v4 肌肉记忆专项 N 工具框架 3.0→3.5；v5 多模态专项细拆后 D8 据实重评 L 6.5→6.0 / N 3.5→7.0；v6 多模态追平三批实施后 D8 7.0→7.5；v8 D9 安全域专项细拆 L 72.5/N 70.0；v9 安全追平八卡实施后 D9 据实重评 N 8.0→8.5）
+**总分（11 维 120 分）：LobeHub 98.0 vs Neurova 96.0。**（v2 自进化维 L 5.5 / N 8.5；v3 活水池专项 N 上下文工程 4.0→4.5；v4 肌肉记忆专项 N 工具框架 3.0→3.5；v5 多模态专项细拆后 D8 据实重评 L 6.5→6.0 / N 3.5→7.0；v6 多模态追平三批实施后 D8 7.0→7.5；v8 D9 安全域专项细拆 L 72.5/N 70.0；v9 安全追平八卡实施后 D9 据实重评 N 8.0→8.5；v10 上下文工程十轴细拆 L 79.0/N 75.5，D2 上下文工程子项据实重评 4.0/4.5→4.5/4.0）
 
 - LobeHub 是当前公开仓里**工程完成度最高**的 agent 平台之一：agent 运行时（分布式步调度/parked-resume/成本预算）、44 个全真内置工具、三档沙箱、91 家模型 provider、7,321 个测试文件、四通道桌面 OTA 发布，均为第一梯队。
 - Neurova 反超的七处：**多智能体治理深度**（审批链 L0-L2/候选 CAS/依赖门控/评审相位/台账重放）、**记忆生命周期**（睡眠整理/遗忘/污染清除/纪律准入 vs 对方无遗忘无衰减）、**本体知识图谱**（对方为零）、**租户隔离的真实执行**（对方 OSS 侧 RBAC 是空壳 stub）、**MCP server 面**（对方仅 client）、**自我进化/RSI**（对方=默认关闭的受控自改进：无评测闭环、无影子/灰度、回滚靠人；本仓=门禁链+影子验证+回滚+存活探针的世代闭环）、**多模态**（v5 十轴细拆 69.0 vs 68.5 接近反超：语音双栈/屏幕视觉/OCR 本仓胜，生成广度对方胜）。
-- LobeHub 领先的五处：模型接入广度（91 vs 7）、执行安全基建（沙箱三档/SSRF 专用包/凭据脱敏——D4 经 v7 细拆后仅余 0.5 分差，工具智能面被本仓肌肉记忆追平）、认证体系（17 SSO+Passkey+自建 OIDC IdP）、数据层工程（242 表 228 迁移）、工程纪律规模（e2e 性能预算/bundle 门禁/语义化发布）。多模态经 v5 细化后本仓反超（见 D8 专项）。
+- LobeHub 领先的六处：模型接入广度（91 vs 7）、执行安全基建（沙箱三档/SSRF 专用包/凭据脱敏——D4 经 v7 细拆后仅余 0.5 分差，工具智能面被本仓肌肉记忆追平）、认证体系（17 SSO+Passkey+自建 OIDC IdP）、数据层工程（242 表 228 迁移）、工程纪律规模（e2e 性能预算/bundle 门禁/语义化发布）、上下文工程（v10 十轴 79.0 vs 75.5：缓存经济学修剪/组装管线广度/token 计量/结构 Doctor）。多模态经 v5 细化后本仓反超（见 D8 专项）。
 - 评分不是体量加分：LobeHub 的 OSS 快照有真实短板（RBAC stub、主站 CSP 缺失、业务 API 无限流、Electron IPC 裸 socket、secret-channel 疑似未接线），均已如实扣分。
 
 ## 1. 方法与局限
@@ -28,7 +28,7 @@
 | # | 维度 | 满分 | LobeHub | Neurova | 判定 |
 |---|------|-----:|--------:|--------:|------|
 | D1 | 架构与模块化 | 12 | 10.0 | 8.0 | L 胜 |
-| D2 | Agent 核心与对话管线 | 14 | 12.0 | 11.5 | L 小胜 |
+| D2 | Agent 核心与对话管线 | 14 | 12.5 | 11.0 | L 小胜（v10 细拆） |
 | D3 | 多智能体编排 | 12 | 8.5 | 10.5 | **N 胜** |
 | D4 | 工具生态与执行安全 | 14 | 12.0 | 11.5 | L 险胜（v7 细拆） |
 | D5 | 知识库与 RAG | 10 | 7.0 | 6.5 | L 小胜 |
@@ -38,7 +38,7 @@
 | D9 | 数据/租户/认证/安全 | 12 | 9.0 | 8.5 | L 小胜（安全追平八卡实施后差距 0.5） |
 | D10 | 工程纪律 | 14 | 12.5 | 11.0 | L 胜 |
 | D11 | 自我进化/RSI | 10 | 5.5 | 8.5 | **N 胜** |
-| | **合计** | **120** | **97.5** | **96.5** | |
+| | **合计** | **120** | **98.0** | **96.0** | |
 
 ## 3. 分域详评
 
@@ -48,11 +48,11 @@
 **Neurova**：领域分层清晰（api 138 端点模块/agent 106 文件/ontology 45 文件/evolution 87 文件），单进程 FastAPI 边界清楚；扣分：巨型文件集中（`neurova/agent/swarm.py` 4069 行、`evolution/rsi/orchestrator.py` 2532 行，尺寸棘轮只在守新增）、harmony 侧 41.5 万行疑含生成物。
 **子项**：分层与依赖治理 3.5/2.5；API 形态与边界 3.5/3.0；复杂度控制 3.0/2.5。
 
-### D2 Agent 核心与对话管线（L 12 / N 11）
+### D2 Agent 核心与对话管线（L 12.5 / N 11.0）
 
 **LobeHub**：生产级状态机 `AgentState.status = idle|running|waiting_for_human|waiting_for_async_tool|waiting_for_client|done|error|interrupted`（`packages/agent-runtime/src/types/state.ts:593-601`），parked 三态可恢复不盖 completedAt（`src/utils/status.ts:6-15`）；host 无关 step 循环（`src/loop/index.ts:37-55`），服务端 QStash 步调度+分布式锁+恢复（`apps/server/src/router-hono/agent/handlers/runStep.ts:185-215`）；指令集含 call_llm/call_tool(_batch)/exec_sub_agent(s)/request_human_prompt|select|approve/compress_context/finish（`src/types/instruction.ts:244-435`）；上下文工程=ContextEngine 25 处理器管线（`packages/context-engine/src/pipeline.ts:17-27`）+ compress_context 迟滞压缩（`agents/GeneralChatAgent.ts:513-515`）+ tokenAccounting 漂移系数 1.25。成本预算与重复调用守卫俱全。弱点：单 agent 内无 ReAct 式反思循环，反思是后台 agent（self-reflection/nightly-review）形态。
 **Neurova**：增长门+主动压缩水位+溢出兜底重试+严格变小守卫+CompressionEvent 落时间线；StopGate 体系（IterationGate/TokenBudgetGate/DoomLoopGate/GoalGate，`neurova/agent/gates.py:77-394`）+ 续跑（`resumeFinishedRun` swarm.py:2321、continuation_rounds.py）；任务自评与自我模型注入（自我模型接线批）。SSE 流式管线完整。弱点：分布式调度/多实例水平扩展面弱于对方（单进程假设）。
-**子项**：运行时状态机与可靠性 4.5/4.0；上下文工程 4.0/4.5；规划与反思 3.5/3.0。
+**子项**：运行时状态机与可靠性 4.5/4.0；上下文工程 4.5/4.0（v10 据实重评）；规划与反思 3.5/3.0。
 
 #### D2 专项：上下文活水池 vs ContextEngine（v3 增补）
 
@@ -65,6 +65,8 @@
 **三问判定**：① 原文级找回——双方都能（原文都在存储层），但本仓**自动回灌模型上下文**（被动向量注入+主动召回工具），对方需人工动作；② 可逆降权——本仓"折叠即可逆降权"三形态成立（视图折叠原文保留/SUMMARY+covers 下钻/seen_confirmed 权重+restoreDedup），对方仅二元降档（预览/全文、修剪/原文）；③ 大结果句柄化——本仓工具结果有（microcompact 占位指针），对方附件有、工具结果无。
 
 **子项影响**：本仓上下文工程 4.0→4.5——活水池的"自动召回回灌 + 工具结果句柄化"是对"截断+摘要"范式的结构性增量，补齐了"压掉即失联"缺口；对方的缓存经济学修剪与附件卸载亦为独门，双方各有所长，但池机制改变了被压内容的可及性。D2 合计 L 12.0 / N 11.5。
+
+> 细分拆解（十轴逐项+借鉴清单）见同目录《[reference_ad_context_engineering_teardown_2026-11-22.md](reference_ad_context_engineering_teardown_2026-11-22.md)》：专项口径 L 79.0 / N 75.5（/100）——缓存经济学/组装管线/token 计量/结构 Doctor 对方胜，召回回灌/折叠判据/工具结果句柄化/测试密度本仓胜；据实重评上下文工程子项 4.0/4.5→4.5/4.0，D2 12.0/11.5→12.5/11.0，总分 97.5/96.5→98.0/96.0。
 
 ### D3 多智能体编排（L 8.5 / N 10.5）——本仓反超
 
@@ -168,6 +170,9 @@ P2：
 10. 验收证据链（acceptance 证据落固定可访问位置，可复用不重跑）与"每 bugfix 先红后绿"的 skills 化路由（本仓已有钩子强制，可补 skills 文档路由）。
 11. **弱信号累加器触发反思**：纠正≥2/工具失败≥2/步数≥6 等廉价阈值触发每轮反思（selfReflection.ts:66-73），比定时全量反思省成本；可作本仓元认知回路的触发源补充。
 12. **多模态契约测试矩阵+视频后台轮询兜底**：对方 MessageContent 全矩阵测试（视觉降级/多图/工具图片回灌/AVIF 特判，:38-989）纳入本仓 M8 契约棘轮；生成任务后台轮询兜底（videoBackgroundPolling.ts:43-60）可对照本仓 /video/status 轮询补后台兜底形态。
+13. **P0·缓存经济学修剪判据**（v10 上下文专项）：折叠/裁剪决策加入缓存盈亏平衡——按 provider 缓存 TTL/读写价差，「预估剩余步数×token 节省×readPrice > 重写成本×安全系数」才新增折叠，且折叠决策字节稳定保前缀缓存命中；影响面 fold_trigger/context_pool/llm 缓存元数据。
+14. **P1·结构完整性 Doctor**（v10）：会话消息树/时间线五类结构病体检（并发分叉/孤儿回合/陈旧分支索引/段裂/内容丢失）+修补留底可回退；影响面 context/ 与会话时间线重建。
+15. **P1·token 计量漂移系数+分桶**（v10）：估算×1.25 漂移补偿+分桶计量，预算判定一律用 adjustedTotal；影响面 context_pool 预算/TokenBudgetGate/swarm 软目标。
 
 不照搬：
 - 三轨 API 与 124 包超细粒度 monorepo（胶水层理解成本高，与本仓"单一事实源"教义相悖）；
@@ -196,3 +201,4 @@ P2：
 - v7（2026-11-22）：应评审要求把工具与执行安全单独拆出细化——新增专项《reference_ad_tool_security_teardown_2026-11-22.md》（十轴等权：N 82.0 / L 78.0）。首版 D4 粗评低估本仓工具面（实测 _BUILTIN_SCHEMAS 单源 139 工具 vs 对方 44）与肌肉记忆权重，据实重评 D4 工具框架子项 L 5.0→4.5 / N 3.5→4.0，总分 98.0/95.0 → 97.5/96.0；D4 判定 L 险胜 0.5。
 - v8（2026-11-22）：应评审要求把 D9 数据/租户/认证/安全单独拆出细化——新增专项《reference_ad_data_tenant_auth_security_teardown_2026-11-22.md》（十轴：L 72.5 / N 70.0，两路只读深读）。D9 子项据实重排（认证 L 3.0→2.5、N 1.5→2.0；租户执行 N 2.5→2.0；运行安全 L 1.5→2.0），D9 合计 9.0/8.0 不变，总分不受本笔影响。
 - v9（2026-11-22）：安全追平计划（docs/04-plans/2026-11-22-reference-ad-security-catchup-implementation-plan.md）三批八卡实施完毕（S1 审计接线/S2 SSRF 扫荡/S4 哈希链/S5 租户助手/S6 安全头移层/S7 OIDC/S8 TOTP 2FA，七笔+surface 重生成），真后端 live-verify 20/20 PASS。D9 据实重评：N 8.0→8.5（运行安全 2.0→2.5），总分 96.0→96.5；专项复评 70.0→73.5 本仓反超。
+- v10（2026-11-22）：应评审要求把上下文工程单独拆出细化——新增专项《reference_ad_context_engineering_teardown_2026-11-22.md》（十轴：L 79.0 / N 75.5，证据沿用 v3 两路深读+当日计数复核）。D2 上下文工程子项据实重评 4.0/4.5→4.5/4.0（对方缓存经济学/管线/计量/Doctor 合计压过本仓召回优势），D2 12.0/11.5→12.5/11.0，总分 97.5/96.5→98.0/96.0；借鉴清单增补 13/14/15 三项。
