@@ -78,14 +78,23 @@ class NeuacpStdioExecutor:
 
     # ---------- NeuacpExecutor 协议 ----------
 
-    def attachProcessPool(self, pool: Any, pool_key: tuple) -> None:
+    def attachProcessPool(self, pool: Any, pool_key: tuple, ownerId: str = "") -> None:
         """挂载进程池（swarm._resolveExternalMember 装配期调用）。
 
         ``pool`` 需提供 ``acquire(key, factory)`` / ``release(key, entry)``
         鸭子面（NeuacpProcessPool 满足）；``pool_key`` 为含租户段的池键。
+        ``ownerId``（W4）：swarm 成员 id——装配期追加为池键属主尾段
+        （<既有六段>│<ownerId>），spawn 登记行 ownerId 随之补全；缺省空 =
+        无属主装配（管理面等），保持旧键六段形态。
         """
         self._pool = pool
-        self._pool_key = tuple(pool_key)
+        try:
+            from neurova.agent.neuacp.process_pool import poolKeyWithOwner
+
+            self._pool_key = poolKeyWithOwner(tuple(pool_key), ownerId)
+        except Exception as exc:  # noqa: BLE001 - 键整形失败退回原键（acquire 侧再归一）
+            logger.debug("池键属主段追加失败，退回原键 (ownerId=%s): %s", ownerId, exc)
+            self._pool_key = tuple(pool_key)
 
     async def start(self, ctx: NeuacpSessionContext) -> None:
         self._session_id = None

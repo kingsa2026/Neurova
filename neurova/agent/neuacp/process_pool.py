@@ -3,6 +3,9 @@
 
 - **键含租户段**：``(tenant, tool, command, cwd, transport, remote)``——
   跨租户不共享进程/会话（§6.4 强制红线，租户段固定在键首位）；
+- **键含属主段（W4）**：装配期带 swarm 成员 id 时池键追加第七段
+  ``(..., remote, ownerId)``——同租户同工具不同成员不共享进程，spawn 登记
+  行 ownerId 随之补全；旧键（六元组，无属主段）兼容解析，属主按 ``""`` 缺省；
 - **全局并发上限**：``NEUROVA_EXTERNAL_AGENTS_MAX_PROCS``（默认 4）——
   计的是存活进程（空闲 + 在用），到顶后 acquire 排队等待；
 - **空闲回收**：``NEUROVA_EXTERNAL_AGENTS_IDLE_S``（默认 600s）——
@@ -34,7 +37,8 @@ DEFAULT_MAX_PROCS = 4
 DEFAULT_IDLE_SECONDS = 600.0
 DEFAULT_ACQUIRE_TIMEOUT = 30.0
 
-#: 池键：租户段在首位（§6.4），其余为执行体身份段。
+#: 池键：租户段在首位（§6.4），其余为执行体身份段；W4 起可带第七属主段
+#: （swarm 成员 id）——旧键六元组与新键七元组并存，取属主一律走 :func:`poolKeyOwner`。
 PoolKey = Tuple[str, str, Tuple[str, ...], str, str, str]
 
 
@@ -75,12 +79,17 @@ def envAcquireWaitTimeout() -> Optional[float]:
 
 
 def _normalizeKey(key: Tuple) -> PoolKey:
-    if len(key) != 6:
+    """规范化池键：六元组（旧键，无属主段）与七元组（W4 带属主段）并存。"""
+    if len(key) == 6:
+        tenant, tool, command, cwd, transport, remote = key
+        owner = ""
+    elif len(key) == 7:
+        tenant, tool, command, cwd, transport, remote, owner = key
+    else:
         raise ValueError(
-            "进程池键必须是 (tenant, tool, command, cwd, transport, remote) 六元组，"
-            f"收到 {len(key)} 元")
-    tenant, tool, command, cwd, transport, remote = key
-    return (
+            "进程池键必须是 (tenant, tool, command, cwd, transport, remote[, ownerId]) "
+            f"六/七元组，收到 {len(key)} 元")
+    base = (
         str(tenant or "default"),
         str(tool or ""),
         tuple(str(part) for part in (command or ())),
@@ -88,26 +97,56 @@ def _normalizeKey(key: Tuple) -> PoolKey:
         str(transport or "stdio"),
         str(remote or ""),
     )
+    if len(key) == 7:
+        return base + (str(owner or ""),)
+    return base
 
 
 def poolKey(tenant: str, tool: str, command, cwd: str,
-            transport: str = "stdio", remote: str = "") -> PoolKey:
-    """构造规范化池键；租户段缺省回落 default。"""
-    return _normalizeKey((tenant, tool, tuple(command or ()), cwd, transport, remote))
+            transport: str = "stdio", remote: str = "",
+            ownerId: str = "") -> PoolKey:
+    """构造规范化池键；租户段缺省回落 default；``ownerId`` 非空时追加属主尾段。"""
+    base = _normalizeKey((tenant, tool, tuple(command or ()), cwd, transport, remote))
+    owner = str(ownerId or "").strip()
+    if not owner:
+        return base
+    return base + (owner,)
+
+
+def poolKeyOwner(key: PoolKey) -> str:
+    """取池键属主段（W4）：旧键（六元组，无属主段）缺省 ``""``。"""
+    if len(key) >= 7:
+        return str(key[6] or "")
+    return ""
+
+
+def poolKeyWithOwner(key: PoolKey, ownerId: str) -> PoolKey:
+    """在既有池键上追加/覆写属主尾段（W4，attachProcessPool 装配期调用）。
+
+    ``ownerId`` 为空 → 原键原样返回（无属主装配保持旧键形态）；非空 →
+    既有六段不变、属主段以本次传入为准（重复装配取最新装配值）。
+    """
+    normalized = _normalizeKey(key)
+    owner = str(ownerId or "").strip()
+    if not owner:
+        return normalized
+    return normalized[:6] + (owner,)
 
 
 def _registerSpawnedEndpoint(key: PoolKey) -> None:
     """W1a：外部成员进程 spawn 成功 → 统一端点注册表登记（fail-soft）。
 
-    - 租户取池键租户段（§6.4 租户段键同源，勿另造第二套租户口径）；池键无
-      属主段，ownerId 留空（诚实缺省，不臆造属主）；
+    - 租户取池键租户段（§6.4 租户段键同源，勿另造第二套租户口径）；
+    - ownerId 取池键属主段（W4：装配期带入的 swarm 成员 id；旧键无属主段
+      留空——诚实缺省，不臆造属主）；
     - name 取池键 tool 段（外部成员在池内的成员名）；
     - connectionRef：ssh 远程段只存引用名（remote.key_ref 纪律，不含明文密钥），
       stdio 存「transport:命令头」；
     - 仅在 factory() 成功（进程已拉起并完成握手）后调用——连接失败不登记；
     - 登记失败仅告警，绝不阻断派活链路。
     """
-    tenant, tool, command, _cwd, transport, remote = key
+    tenant, tool, command, _cwd, transport, remote = key[:6]
+    ownerId = poolKeyOwner(key)
     if not tool:
         logger.debug("neuacp 端点登记跳过：池键缺工具名 (tenant=%s)", tenant)
         return
@@ -122,14 +161,15 @@ def _registerSpawnedEndpoint(key: PoolKey) -> None:
             endpointId="",
             kind=KIND_NEUACP,
             name=tool,
-            ownerId="",
+            ownerId=ownerId,
             tenantId=tenant or "default",
             capabilities={"agent": True},
             connectionRef=remote if remote else f"{transport}:{(command[0] if command else '')}",
             health="online",
         ))
-        logger.info("neuacp 端点已登记: %s (endpoint=%s tenant=%s)",
-                    registered.name, registered.endpointId, registered.tenantId)
+        logger.info("neuacp 端点已登记: %s (endpoint=%s tenant=%s owner=%s)",
+                    registered.name, registered.endpointId, registered.tenantId,
+                    ownerId or "-")
     except Exception as exc:  # noqa: BLE001 - 登记失败不阻断派活
         logger.warning("neuacp 端点登记失败（不阻断派活）: %s", exc)
 
@@ -416,11 +456,13 @@ class NeuacpProcessPool:
         with self._condition:
             processes = []
             for key, queue in self._idle.items():
-                tenant, tool, command, cwd, transport, remote = key
+                tenant, tool, command, cwd, transport, remote = key[:6]
+                owner = poolKeyOwner(key)
                 for entry in queue:
                     processes.append({
                         "tenant": tenant, "tool": tool, "command": list(command),
                         "cwd": cwd, "transport": transport, "remote": remote,
+                        "owner": owner,
                         "created_at": entry.created_at, "last_used": entry.last_used,
                         "state": "idle", "closed": entry.closed,
                     })

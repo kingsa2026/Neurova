@@ -3156,7 +3156,9 @@ class SwarmManager:
                 applyRemoteTransport(executor, transport, remote)
                 # P1 移交清偿：spawn 装配接入进程池（键含租户段，§6.4）；
                 # 池故障 fail-open——acquire 失败在 executor.start 内退回直启。
-                self._attachExternalProcessPool(executor, spec, team_tenant, command, cwd)
+                # W4：装配期把 swarm 成员 id 带入池键属主段（登记行 ownerId 补全）。
+                self._attachExternalProcessPool(executor, spec, team_tenant, command, cwd,
+                                                ownerId=agent_id)
             elif kind == "plugin":
                 from neurova.agent.neuacp import NeuacpMemberAdapter, NeuacpPluginExecutor
 
@@ -3171,11 +3173,14 @@ class SwarmManager:
         return NeuacpMemberAdapter(executor, name=name, cwd=cwd), None
 
     def _attachExternalProcessPool(self, executor: Any, spec: dict, tenant: str,
-                                   command: List[str], cwd: str) -> None:
+                                   command: List[str], cwd: str,
+                                   ownerId: str = "") -> None:
         """给 ACP 执行体挂进程池（NeuacpProcessPool，进程级单例）。
 
         池键 ``(tenant, tool, command, cwd, transport, remote)``——租户段固定
         首位（§6.4 跨租户不共享进程）；remote 连接参数确定性序列化进键段。
+        ``ownerId``（W4）：swarm 成员 id，装配期追加为池键属主尾段（键形变
+        七元组），spawn 登记行 ownerId 随之补全；空 = 无属主装配（旧键形态）。
         挂载失败只降级为直启（fail-open），不阻断派活。
         """
         try:
@@ -3194,7 +3199,8 @@ class SwarmManager:
                 str(spec.get("transport") or "stdio"),
                 remoteSeg,
             )
-            executor.attachProcessPool(getNeuacpProcessPool(), key)
+            executor.attachProcessPool(getNeuacpProcessPool(), key,
+                                       ownerId=str(ownerId or ""))
         except Exception as exc:  # noqa: BLE001 - fail-open：池不可用则直启
             logger.warning("外部进程池接入失败，执行体退回直启 (tool=%s): %s",
                            spec.get("tool"), exc)

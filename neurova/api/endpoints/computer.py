@@ -12,6 +12,7 @@ import typing
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 import pydantic
 from pydantic import BaseModel, model_validator
 
@@ -388,6 +389,18 @@ def _normalize_browser_result(result) -> dict:
     if callable(to_dict):
         return dict(to_dict())
     return {"success": False, "error": "浏览器返回格式未知"}
+
+
+def _browserFailureEnvelope(normalized: dict, fallbackDetail: str) -> JSONResponse:
+    """浏览器失败 502 信封（W3 结构化错误信封透传）。
+
+    detail 串原样保留（前端按字符串判读的契约不动）；normalized 里的结构化
+    字段（error_code/phase/retryable/route 等）随 result 透传，不再压扁成裸串。
+    """
+    return JSONResponse(
+        status_code=502,
+        content={"detail": normalized.get("error") or fallbackDetail, "result": normalized},
+    )
 
 
 @router.post("/screenshot")
@@ -782,7 +795,7 @@ async def browser_navigate(
     result = await _get_manager().browser_navigate(body.url)
     normalized = _normalize_browser_result(result)
     if not normalized.get("success"):
-        raise HTTPException(status_code=502, detail=normalized.get("error") or "导航失败：无可用浏览器后端")
+        return _browserFailureEnvelope(normalized, "导航失败：无可用浏览器后端")
     _recordBrowserNavigate(user_id, body.url)
     _log_action("browser_navigate", {"url": body.url})
     return {"code": 0, "message": f"Navigated to {body.url}", "data": normalized}
@@ -898,7 +911,7 @@ async def browser_snapshot(
     _log_action("browser_snapshot", {})
     result = _normalize_browser_result(await _get_manager().browser_dom_snapshot())
     if not result.get("success"):
-        raise HTTPException(status_code=502, detail=result.get("error") or "快照失败：无可用浏览器后端")
+        return _browserFailureEnvelope(result, "快照失败：无可用浏览器后端")
     return {
         "code": 0,
         "message": "Snapshot captured",
@@ -916,7 +929,7 @@ async def browser_click_role(
     _log_action("browser_click_role", {"role": body.role, "name": body.name})
     result = _normalize_browser_result(await _get_manager().browser_click_role(body.role, body.name))
     if not result.get("success"):
-        raise HTTPException(status_code=502, detail=result.get("error") or "role 点击失败")
+        return _browserFailureEnvelope(result, "role 点击失败")
     return {"code": 0, "message": f"Clicked {body.role}「{body.name or ''}」", "data": result}
 
 
@@ -930,7 +943,7 @@ async def browser_fill_role(
     _log_action("browser_fill_role", {"role": body.role, "name": body.name})
     result = _normalize_browser_result(await _get_manager().browser_fill_role(body.role, body.name, body.text))
     if not result.get("success"):
-        raise HTTPException(status_code=502, detail=result.get("error") or "role 输入失败")
+        return _browserFailureEnvelope(result, "role 输入失败")
     return {"code": 0, "message": f"Filled {body.role}「{body.name or ''}」", "data": result}
 
 
@@ -969,7 +982,7 @@ async def browser_execute_route(
     if isinstance(cmd, ScreenshotCmd):
         normalized.pop("has_screenshot", None)
     if not normalized.get("success"):
-        raise HTTPException(status_code=502, detail=normalized.get("error") or "浏览器命令执行失败")
+        return _browserFailureEnvelope(normalized, "浏览器命令执行失败")
     return {"code": 0, "message": f"Command {cmd.command} executed", "data": normalized}
 
 

@@ -56,6 +56,9 @@ class SkillExecuteResponse(BaseModel):
     success: bool
     result: Any = None
     error: Optional[str] = None
+    # W3 结构化错误信封：失败时携带咽喉层原始结构化载荷（error_code/phase/
+    # retryable/executed 等），顶层 error 串保留兼容既有消费方；成功面恒 None。
+    error_detail: Optional[Dict[str, Any]] = None
     execution_time: float = 0
     skill_id: str
 
@@ -413,9 +416,13 @@ async def execute_skill(
                 skill_id, dict(body.parameters or {}), body.context
             )
             if not executor._result_is_success(payload):
+                # W3 结构化错误信封透传：失败载荷（U3 失联相位/U12 UNSUPPORTED/
+                # 凭据卡等语义）不再压扁成裸 error 串——原始载荷原样进 error_detail
+                # 供前端/模型判读；顶层 error 串保留兼容既有消费方。
                 return SkillExecuteResponse(
                     success=False,
                     error=str((payload or {}).get("error") or "技能执行失败"),
+                    error_detail=payload if isinstance(payload, dict) else None,
                     execution_time=time.time() - start_time,
                     skill_id=skill_id,
                 )

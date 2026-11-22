@@ -45,6 +45,10 @@ class ProviderInfo(BaseModel):
     health: str = "unknown"
     # 聊天模型切换器过滤依据：未配置 key 的种子服务商模型不可联通
     api_key_configured: bool = False
+    # D-R2/R11 收尾：读投影回带配置现值（PC/移动端表单回填依赖；
+    # 旧配置缺属性时回退 1.0/None，存量行为不变）
+    weight: float = 1.0
+    embedding_model: Optional[str] = None
 
 
 class CreateProviderRequest(BaseModel):
@@ -227,6 +231,8 @@ async def list_providers(request: Request, current_user: Dict[str, Any] = Depend
                             status=getattr(provider, "health_status", "unknown"),
                             models_count=len(getattr(provider, "models", [])),
                             api_key_configured=bool(getattr(provider, "api_key", None)),
+                            weight=float(getattr(provider, "weight", 1.0) or 1.0),
+                            embedding_model=getattr(provider, "embedding_model", None),
                         )
                     )
         except Exception as e:
@@ -312,6 +318,8 @@ async def get_provider(
                     status=getattr(provider, "health_status", "unknown"),
                     models_count=len(getattr(provider, "models", [])),
                     api_key_configured=bool(getattr(provider, "api_key", None)),
+                    weight=float(getattr(provider, "weight", 1.0) or 1.0),
+                    embedding_model=getattr(provider, "embedding_model", None),
                 )
     except Exception as e:
         logger.warning("Get provider error: %s", e)
@@ -353,6 +361,8 @@ async def create_provider(
                 is_active=getattr(provider, "enabled", True),
                 status="created",
                 api_key_configured=bool(getattr(provider, "api_key", None)),
+                weight=float(getattr(provider, "weight", 1.0) or 1.0),
+                embedding_model=getattr(provider, "embedding_model", None),
             )
         else:
             logger.error("Provider manager does not have add_provider method")
@@ -443,6 +453,8 @@ async def update_provider(
                         is_active=getattr(provider, "enabled", False),
                         status="updated",
                         api_key_configured=bool(getattr(provider, "api_key", None)),
+                        weight=float(getattr(provider, "weight", 1.0) or 1.0),
+                        embedding_model=getattr(provider, "embedding_model", None),
                     )
                 return ProviderInfo(
                     provider_id=provider_id,

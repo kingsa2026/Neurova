@@ -32,6 +32,9 @@ def mock_provider_config():
     provider.is_builtin = True
     provider.description = "Test provider"
     provider.default_model = "gpt-4o"
+    # D-R2/R11 收尾：读投影须回带配置现值（PC/移动端表单回填依赖）
+    provider.weight = 3.0
+    provider.embedding_model = "bge-m3"
     return provider
 
 
@@ -196,3 +199,48 @@ class TestDisabledProvider:
         response = disabled_client.get("/providers")
         data = response.json()
         assert data[0]["models_count"] == 0
+
+
+class TestWeightEmbeddingFields:
+    """D-R2/R11 收尾：读投影必须回带 weight/embedding_model 现值。
+
+    此前只进写入侧（Create/Update 请求模型），GET /providers 回不来——
+    PC/移动端表单回填恒见缺省值，配置了也像没配。三处构造点
+    （list/get/create/update）同源补齐。
+    """
+
+    def test_list_providers_carries_weight_and_embedding_model(self, app_client):
+        response = app_client.get("/providers")
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["weight"] == 3.0
+        assert data[0]["embedding_model"] == "bge-m3"
+
+    def test_get_provider_carries_weight_and_embedding_model(self, app_client):
+        response = app_client.get("/providers/openai-1")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["weight"] == 3.0
+        assert data["embedding_model"] == "bge-m3"
+
+    def test_weight_defaults_to_one_when_absent(self, app_client, mock_provider_manager):
+        """旧配置无 weight 属性时回退 1.0（存量行为不变）。
+
+        用 SimpleNamespace 而非 MagicMock：Mock 的自动补属性会吞掉
+        getattr 默认值路径，模拟不了"属性不存在"的旧配置。
+        """
+        from types import SimpleNamespace
+
+        plain = SimpleNamespace(
+            id="openai-1", name="OpenAI", provider="openai",
+            base_url="https://api.openai.com/v1", enabled=True,
+            health_status="healthy", models=["gpt-4o", "gpt-3.5-turbo"],
+            api_key="sk-test-key",
+        )  # 故意不带 weight/embedding_model——旧配置形态
+        mock_provider_manager.list_providers.return_value = [plain]
+        mock_provider_manager.get_provider.return_value = plain
+        response = app_client.get("/providers")
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["weight"] == 1.0
+        assert data[0]["embedding_model"] is None
