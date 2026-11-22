@@ -247,6 +247,51 @@ async def reset_triage_gate_endpoint(admin: Dict[str, Any] = Depends(require_adm
     return {"status": "reset"}
 
 
+class SkipSampleRelabelRequest(BaseModel):
+    """skip 样本复核改标请求体（SB-5 人工标注回流）。"""
+
+    label: str = Field(..., description="新标签：actionable | not_actionable")
+    note: str = Field("", description="复核备注")
+
+
+@router.get("/triage/skip-samples")
+async def list_triage_skip_samples(
+    limit: int = Query(100, ge=1, le=1000, description="最多返回条数（最新在前）"),
+    admin: Dict[str, Any] = Depends(require_admin_dep()),
+):
+    """列出分诊 skip 回流样本（最新在前）— 仅管理员。
+
+    SB-5 人工标注回流（计划 §5.3 第 2 级）：shadow/enforce 期每次 skip 落
+    特征快照，admin 经本端点读取后复核改标，进入下一轮 NeuJudge 训练集。
+    """
+    from neurova.collaboration.triage_feedback import listSkipSamples
+
+    samples = listSkipSamples(limit=limit)
+    return {"code": 0, "data": {"samples": samples, "count": len(samples)}}
+
+
+@router.post("/triage/skip-samples/{sample_id}/relabel")
+async def relabel_triage_skip_sample(
+    sample_id: str,
+    body: SkipSampleRelabelRequest,
+    admin: Dict[str, Any] = Depends(require_admin_dep()),
+):
+    """复核改标一条 skip 样本 — 仅管理员。
+
+    label 非法 → 422；sample_id 不存在 → 404；成功 → code=0。
+    """
+    from neurova.collaboration.triage_feedback import relabelSample
+
+    try:
+        relabeled = relabelSample(sample_id, body.label, note=body.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not relabeled:
+        raise HTTPException(status_code=404, detail=f"skip 样本不存在: {sample_id}")
+    logger.info("分诊 skip 样本改标：%s -> %s", sample_id, body.label)
+    return {"code": 0, "data": {"sample_id": sample_id, "label": body.label, "relabeled": True}}
+
+
 # ========== Wake Debounce Endpoints（未实现，已摘除）==========
 #
 # 原 5 个 debounce 端点依赖 `neurova.agents.wake_debounce`

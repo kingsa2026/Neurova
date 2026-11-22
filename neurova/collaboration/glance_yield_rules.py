@@ -14,6 +14,7 @@ import time
 
 from neurova.core.logger import get_logger
 from neurova.core.app_settings import get_advanced_settings
+from neurova.collaboration import triage_feedback
 from neurova.collaboration.triage_rules import evaluateTriage
 from neurova.collaboration.neu_judge import NeuJudge
 
@@ -159,6 +160,8 @@ class GlanceYieldChecker:
             'triage_model_unavailable': 0,
             'triage_events_unavailable': 0,
             'triage_gate_errors': 0,
+            # SB-5 回流：skip 样本落盘失败次数（遥测旁路，不影响闸决策）
+            'triage_feedback_errors': 0,
         }
 
         logger.info("GlanceYieldChecker initialized")
@@ -508,8 +511,12 @@ class GlanceYieldChecker:
         if verdict.action == "skip":
             if mode == "shadow":
                 self._stats['triage_shadow_would_skip'] += 1
+                self._recordSkipFeedback(conversation_id, "rules", verdict.reason,
+                                         None, features, mode)
                 return YieldDecision(should_yield=False)
             self._stats['triage_rule_skips'] += 1
+            self._recordSkipFeedback(conversation_id, "rules", verdict.reason,
+                                     None, features, mode)
             logger.info(
                 "分诊门规则拦截：conversation=%s rule=%s", conversation_id, verdict.reason
             )
@@ -533,8 +540,12 @@ class GlanceYieldChecker:
         if decision == "skip":
             if mode == "shadow":
                 self._stats['triage_shadow_would_skip'] += 1
+                self._recordSkipFeedback(conversation_id, "model", verdict.reason,
+                                         p, features, mode)
                 return YieldDecision(should_yield=False)
             self._stats['triage_model_skips'] += 1
+            self._recordSkipFeedback(conversation_id, "model", verdict.reason,
+                                     p, features, mode)
             logger.info(
                 "分诊门模型拦截：conversation=%s p=%.4f", conversation_id, p
             )
@@ -545,6 +556,30 @@ class GlanceYieldChecker:
             )
         # allow / abstain → 保守放行（弃权带与原门"拿不准→响应"同构）
         return YieldDecision(should_yield=False)
+
+    def _recordSkipFeedback(
+        self,
+        conversationId: str,
+        source: str,
+        rule: str,
+        p: Optional[float],
+        features: Dict[str, Any],
+        mode: str,
+    ) -> None:
+        """SB-5 回流：skip 样本落盘（遥测旁路，失败计 triage_feedback_errors）。
+
+        出处：计划 §5.3 人工标注回流。shadow/enforce 两档都记（mode 字段区分），
+        失败只计数不外抛——回流断了闸照常工作。
+        """
+        try:
+            recorded = triage_feedback.recordSkipSample(
+                conversationId=conversationId, source=source, rule=rule,
+                p=p, features=features, mode=mode,
+            )
+        except Exception:  # noqa: BLE001 - 回流失败绝不影响闸决策
+            recorded = False
+        if not recorded:
+            self._stats['triage_feedback_errors'] += 1
 
     def _triageModel(self) -> Optional[NeuJudge]:
         """懒加载 NeuJudge 默认产物并缓存在 checker 上；失败置标记只警告一次。"""
