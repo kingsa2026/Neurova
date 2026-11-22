@@ -213,3 +213,51 @@
 | 缓存水位失效遗漏 | 读到旧图 | 水位派生自库本身（max(id)+count），免挂钩子；契约测试覆盖写后失效 |
 | 时间派生关系污染主路 | 检索被自动关系干扰 | 沿用物化档 observe/enforce 判据单源，observe 起步 |
 | 前端三视图数据量 | 大台账渲染卡顿 | 分页+渲染上限，复用既有 REST 分页契约 |
+
+---
+
+## 11. 拍板与增补（2026-11-22，用户拍板：不分批不留候选，一次全做）
+
+**拍板决议**：本计划全部卡片一次全量实施，原「三批/机动/后续候选」分期框架作废；§5 机动卡 U10/U11 转正式卡；推理域增补三张新卡 U12/U13/U14（源自推理引擎对照结论：对方反向链/解释生成/差分测试可鉴，本仓补齐后推理维 D1 冲 5 分）。六项待拍板全部按 §6 建议执行：
+
+- D-U1 **做**：pyshacl 走可选依赖（pyproject extras `ontology-shacl`），代码内 lazy import + fail-soft，不入核心 requirements；开发/测试环境装入 .venv。
+- D-U2 **做**：`NEUROVA_ONTOLOGY_SHACL_RUNTIME` 默认 `off`，实现 off/shadow/enforce 三档；enforce 段挂 admission 段 3.5。
+- D-U3 **做**：3 原子放宽仅限 `rete_network` 档内支持，默认语言保持 2 原子。
+- D-U4 **做**：图存储门面立项，SQLite 为唯一默认生产实现，oxigraph 为可选第二实现（fail-soft，未装显式 not_supported），默认不切换。
+- D-U5 **做**：冲突消解只做只读建议面 + 人工审批，不自动改写。
+- D-U6 **做**：时间派生关系不生成传递规则、不入规则库；传递性由 Allen 合成表在查询/求值期给出。
+
+### U12 反向链与定理证明（新增，D1 冲 5）
+
+- **断点**：本仓只有前向链+溯因，无反向链目标证明；对方 `deductive_reasoner.py:190-511` 有合一器+反向链定理证明+论证校验。
+- **改什么**：新增 `neurova/knowledge/ontology/backward_chaining.py`：`proveGoal(store, goalTriple, *, maxDepth)` ——从目标三元组反向展开：事实命中→证毕；否则枚举规则 head 匹配→递归证明全部 body 原子→返回证明树（规则 id+绑定+子证明）；环检测（目标栈）+深度上限（默认 16，`NEUROVA_ONTOLOGY_PROVE_DEPTH`）；与 `abduction.py` 共用解释树节点形态（fact/rule 步骤+missing 清单），**只读不写**（不产生派生事实，不碰咽喉——与 U4 前向派生严格分轨）。
+- **红灯**：构造 3 原子 relay 链+2 条基础事实，`proveGoal` 对可证目标返回完整证明树、对不可证目标返回 missing 前提清单；目标环（A⇒B⇒A）在深度上限内终止不炸。
+- **绿灯**：与前向链一致性——前向链能推出的结论，反向链必能证明（对拍测试）；既有溯因测试零回归。
+- **工作量**：M-L（3 天）。
+
+### U13 解释生成器（新增，D1/E1 增强消费面）
+
+- **断点**：本仓溯因有解释树（`abduction.py:48-170`），但无统一的「推理路径/辩护」自然语言生成面；对方 `explanation_generator.py:138-462` 按 InferenceResult/Proof/AbductiveExplanation 生成结构化+模板化文本。
+- **改什么**：新增 `neurova/knowledge/ontology/explanation.py`：`explainDerivation(store, factId)` / `explainProof(proofTree)` ——吃推导账本（derivation_ledger 既有前提边）与 U12 证明树，产出统一结构 `{conclusion, steps[{kind: fact|rule|function, ref, binding, premiseIds}], missing[], text}`，text 为中文模板化串（规则名/前提/结论三段式）；挂 MCP 溯因工具与 REST 读面复用（不建第二账本，纯投影）。
+- **红灯**：对一条两级推导链产出 steps 长度=3（2 规则+1 事实）、premiseIds 与账本一致；对无推导事实返回纯 fact 步骤。
+- **绿灯**：abduction 既有测试零回归；text 模板含规则 id 与前提三元组。
+- **工作量**：M（2 天）。
+
+### U14 真值维护差分测试（新增，护 D2 实施质量）
+
+- **断点**：对方对 TMS/时序/工件索引配了差分测试（随机操作序列对拍参考实现）；本仓推导撤销/物化档缺同强度护栏。
+- **改什么**：新增 `tests/unit/knowledge/ontology/test_derivationDifferential.py`：随机化操作序列（登记规则/断言事实/撤销前提/删规则/改版，种子固定可复现）对拍「精确撤销账本」vs「全量重放重建」两模型的结论集与账本一致性；覆盖 observe/enforce 两档读侧排除。
+- **红灯/绿灯**：首跑即以当前实现跑通（护栏性质，无行为变更）；若暴露不一致即修根因。
+- **工作量**：S-M（1–2 天）。
+
+### 全量实施顺序（单一批次，按依赖并行）
+
+```
+波1（无共文件冲突，可三路并行）：U2 缓存 │ U6 质量门+冲突建议 │ U4 Allen+死码退役
+波2：U1 SHACL 运行时（装 pyshacl）│ U3 批量装载 │ U12 反向链 │ U13 解释生成
+波3：U5 Rete v2 │ U14 差分测试 │ U11 CLI+技能包
+波4：U8 存储门面 │ U10 列画像 │ U9 教程示例 │ U7 前端三视图
+收口：admission 段 3.5 接线 + REST 路由统一挂 + 全量 A/B + live-verify + 复评回填
+```
+
+路由统一挂：U1/U3/U6/U12/U13 的 REST 端点由主控在 `knowledge_ontology.py` 一次性集中添加（避免并行会话同文件冲突）；各实施卡只交付处理函数与测试。
