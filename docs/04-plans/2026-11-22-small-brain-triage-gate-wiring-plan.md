@@ -1,6 +1,6 @@
 # 小脑分诊门接线与自研微型判定模型实施方案
 
-> 日期：2026-11-22 · 状态：**已实施并开机（2026-11-22，十一笔提交，本地已推双远端）：SB-1..SB-5 + 收官修复 + SB-6/SB-7 + D-SB1/D-SB3；分诊门已切 shadow 档收误杀率数据；D-SB1/D-SB3/D-SB4 全部裁决实施**
+> 日期：2026-11-22 · 状态：**已实施并开机（2026-11-22，十一笔提交，本地已推双远端）：SB-1..SB-5 + 收官修复 + SB-6/SB-7 + D-SB1/D-SB3；分诊门 shadow 档误杀率数据已采集（13 样本/误杀率 0.2308，A/B/C 分组对照成立）；D-SB1/D-SB3/D-SB4 全部裁决实施**
 > 来源：[多 Agent 协作实现路径分析报告](../05-reports/2026-11-21-multi-agent-collaboration-implementation-analysis.md) §8/§11 + 2026-11-21/22「双心智通路」专项剖析（会话内完成，证据链见 §1）
 > 关联计划：[2026-11-21-multi-agent-collaboration-repair-plan.md](2026-11-21-multi-agent-collaboration-repair-plan.md)（M1–M14 协作域断点修复，与本计划**文件域无交集**，可并行）
 > 纪律：每卡先红后绿（红灯实证缺陷）→ 最小实现转绿 → A/B 零新增失败 → live-verify 真链路 → `--only` 逐文件提交；净新增 LOC 尽量为负或逐条列明去向（测试不计）。
@@ -219,5 +219,6 @@ SB-1（规则，同时是模型训练数据来源，先落地当地基）→ SB-
 - **A/B 回归**：受影响域全量串行（collaboration/evals/channels/benchmark + 五入口套件）**1762 passed / 3 failed**——失败均为预存 `test_swarm_room_integration.py::TestEscalationResolve` 顺序性失败，逐卡前后失败集合逐行一致，净增失败 0。
 - **live-verify（9777 真后端，13/13 PASS）**：off 档真实回合计数冻结（零副作用）→ 运行时 PUT 切 enforce → 真实回合 `triage_checks` 0→1（**闸在自动路径真跑**）→ 人类在场回合零拦截 → `/triage/skip-samples` admin 端点在线。skip 拦截路径由 26 例接线测试以真实 SessionSyncManager 事件覆盖（人类触发型入口无法经 HTTP 构造纯 agent 环，如实登记）。
 - **开关已开（shadow，2026-11-22）**：`data/app_settings.json` 的 `triage_gate_enabled=shadow`（运行时配置不入库），复启后端活体确认三链：`GET /settings` 回读 shadow、真实回合 `triage_checks` 0→1（闸在 shadow 档真跑）、`false_rescue` 读数与 `/triage/skip-samples` 端点在线——误杀率数据自此随流量积累，达标（≥500 次判定且误救率<1%）后可切 enforce。
+- **误杀率真实数据已采集（shadow，2026-11-22，多 agent 剧本协作流量）**：moss nex-n2.6 蜂群接龙填窗 → 真实 `/v1/chat` 人类探针（进闸判定落 would-skip 样本）→ 分组救援对照。**13 样本 / falseKills=3 / 误杀率 0.2308**：A 组（+45s 人类回归）3/3 计误杀；B 组（+334.8s 回归，窗外）不计——5 分钟窗口边界判别力成立；C 组（无回归）与 legacy 0 误杀。规则分布 R3 verbatim_loop×11、R2 agent_loop_no_human×2。过程发现：① 闸窗口=SessionSyncManager（仅 USER_MESSAGE/AGENT_REPLY），房间仓库端点不可作资格依据；② moss 上游并发上限=1，共享限流器默认 8 并发致蜂群内部调用互撞 429→指数退避锁死，以 `max_concurrent=1` 启动配置串行化解决（构造参数正常配置，未改产品代码）。
 - **偏离与修正**：① SB-2 任务书契约矛盾（权重方向 vs decide 映射）按计划 §3 裁决 p=「值得响应」概率；② SB-3 修正 model_version 精确比对缺陷（重训产物永不可加载）+ 合成数据零方差特征根因修复（亚型多样化+零方差权重置 0+指标透出）；③ SB-4 增 `triage_gate_errors` 计数器、`settleResult` skipped 守卫（防完成回调竞速洗掉 skip 终态）、SSE `skipped` 具名事件；④ live-verify 发现并修复 /triage/stats 双源未合流断点（`9ae2f9b05`）。
 - **待拍板遗留**：D-SB1/D-SB3/D-SB4 已全部裁决实施（`70d844735`/`365cb3916`）。当前开关=shadow、种子模型仅结构特征、弃权带 0.25–0.75，按计划推荐值先行；D-SB1 蒸馏默认配额 0（人工触发才消费 LLM），真实数据 skip 类正样本待渠道流量积累。
