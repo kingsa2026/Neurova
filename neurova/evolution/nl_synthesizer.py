@@ -646,26 +646,3 @@ class NLToolSynthesizer:
         if budget < 1:
             return f"{ident}{self._NAME_SUFFIX}"[:64]
         return f"{name_part[:budget]}_{ident}{self._NAME_SUFFIX}"[:64]
-
-
-# ────── 单例管理 ──────
-
-_synthesizer_instance: typing.Optional[NLToolSynthesizer] = None
-_instance_lock = __import__("threading").Lock()
-
-
-def get_nl_synthesizer(**kwargs) -> NLToolSynthesizer:
-    """获取 NL 工具合成器单例"""
-    global _synthesizer_instance
-    if _synthesizer_instance is None:
-        with _instance_lock:
-            if _synthesizer_instance is None:
-                _synthesizer_instance = NLToolSynthesizer(**kwargs)
-    return _synthesizer_instance
-
-
-def reset_nl_synthesizer():
-    """重置 NL 工具合成器单例"""
-    global _synthesizer_instance
-    with _instance_lock:
-        _synthesizer_instance = None
