@@ -77,3 +77,56 @@ class TestAsyncStreamClose:
                llm.chat_stream_async([{"role": "user", "content": "x"}])]
         assert got == ["a"]
         assert spy.closed is True
+
+
+class _SpySyncStream:
+    """openai 同步 Stream 替身：可迭代分片；记录 close 是否被调用。"""
+
+    def __init__(self, chunks):
+        self.chunks = list(chunks)
+        self.closed = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if not self.chunks:
+            raise StopIteration
+        return self.chunks.pop(0)
+
+    def close(self):
+        self.closed = True
+
+
+class TestSyncStreamClose:
+    """对称契约：同步 chat_stream 与异步版同规——中断/正常都显式关流。"""
+
+    def _wire(self, llm, stream):
+        def _create(**params):
+            return stream
+
+        llm.client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=_create)))
+
+    def test_close_called_on_consumer_abort(self):
+        """消费方中途 close（GeneratorExit）→ 上游 stream.close() 必须被调用。"""
+        llm = LLMClient(LLMConfig(api_key="sk", base_url="http://127.0.0.1:1/v1",
+                                  model="m"))
+        spy = _SpySyncStream([_chunk("a"), _chunk("b")])
+        self._wire(llm, spy)
+        gen = llm.chat_stream([{"role": "user", "content": "x"}])
+        first = next(gen)
+        assert first.content == "a"
+        gen.close()
+        assert spy.closed is True
+
+    def test_close_called_on_normal_completion(self):
+        """正常收流完毕 → 上游 stream.close() 同样被调用。"""
+        llm = LLMClient(LLMConfig(api_key="sk", base_url="http://127.0.0.1:1/v1",
+                                  model="m"))
+        spy = _SpySyncStream([_chunk("a")])
+        self._wire(llm, spy)
+        got = [c.content for c in
+               llm.chat_stream([{"role": "user", "content": "x"}])]
+        assert got == ["a"]
+        assert spy.closed is True

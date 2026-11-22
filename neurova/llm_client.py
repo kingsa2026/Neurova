@@ -554,6 +554,7 @@ class LLMClient:
                 f"base_url={getattr(self.config, 'base_url', '?')} model={getattr(self.config, 'model', '?')}"
             )
 
+        stream = None  # ④ 收尾对称：上游流句柄（finally 统一显式关闭）
         start_time = time.time()
 
         try:
@@ -666,6 +667,16 @@ class LLMClient:
 
             # 分类异常包装：限流/认证/连接/token 各自成类，供上层区分处理
             raise LLMClient._wrap_llm_error(e) from e
+        finally:
+            # ④ 收尾对称：与 chat_stream_async 同规——正常/异常/消费方中断
+            # （GeneratorExit）全部退出路径显式关上游流，不依赖 GC 最终化。
+            if stream is not None:
+                _close = getattr(stream, "close", None)
+                if _close is not None:
+                    try:
+                        _close()
+                    except Exception:  # noqa: BLE001 — 关流失败不掩盖主异常
+                        self.logger.debug("流式响应关闭失败", exc_info=True)
 
     async def chat_stream_async(self, messages: List[Dict[str, str]], **kwargs) -> AsyncIterator[LLMResponse]:
         """
