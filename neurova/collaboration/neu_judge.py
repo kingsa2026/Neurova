@@ -9,6 +9,9 @@
 
 权重产物 schema（默认产物为同目录 neu_judge_default.json）：
 {"model_version", "feature_version", "bias", "weights", "data_fingerprint", "eval_metrics"}。
+版本校验口径：feature_version 是兼容性契约，必须与 FEATURE_VERSION 精确相等
+（特征口径变了旧权重即失义）；model_version 只是溯源元数据，非空字符串即可
+——重训产物（如 "0.2.0-trained"）必须能加载，否则训练流水线永远无法上岗。
 加载失败（文件缺失/JSON 损坏/缺字段/版本不匹配/权重非法）抛 NeuJudgeUnavailable，
 由调用方按计划 §5.4 诚实降级为仅规则模式（不 fail-open 到放行一切）。
 """
@@ -113,15 +116,21 @@ class NeuJudge:
 
     @classmethod
     def _fromPayload(cls, payload: object, source: str) -> "NeuJudge":
-        """校验并装配权重产物；任何 schema/版本偏差都点名拒绝，不带病上岗。"""
+        """校验并装配权重产物；任何 schema/版本偏差都点名拒绝，不带病上岗。
+
+        版本策略（SB-3 修正）：feature_version 必须与 FEATURE_VERSION 精确
+        相等——它是真正的兼容性契约；model_version 只要求非空字符串，作为
+        溯源元数据记录（精确比对会使任何重训产物永远无法加载，属设计缺陷）。
+        """
         if not isinstance(payload, dict):
             raise NeuJudgeUnavailable(f"权重产物顶层必须是 JSON 对象: {source}")
         missing = [field for field in _REQUIRED_FIELDS if field not in payload]
         if missing:
             raise NeuJudgeUnavailable(f"权重产物缺字段 {missing}: {source}")
-        if payload["model_version"] != MODEL_VERSION:
+        rawModelVersion = payload["model_version"]
+        if not isinstance(rawModelVersion, str) or not rawModelVersion.strip():
             raise NeuJudgeUnavailable(
-                f"model_version 不匹配: 期望 {MODEL_VERSION!r}, 实得 {payload['model_version']!r}: {source}"
+                f"model_version 必须是非空字符串: 实得 {rawModelVersion!r}: {source}"
             )
         if payload["feature_version"] != FEATURE_VERSION:
             raise NeuJudgeUnavailable(

@@ -173,11 +173,24 @@ class TestLoadFromValidation:
         with pytest.raises(NeuJudgeUnavailable):
             NeuJudge.loadFrom(writeWeights(tmp_path, payload))
 
-    def testModelVersionMismatchRaisesUnavailable(self, tmp_path):
-        payload = validPayload()
-        payload["model_version"] = "9.9.9-other"
-        with pytest.raises(NeuJudgeUnavailable):
-            NeuJudge.loadFrom(writeWeights(tmp_path, payload))
+    # 旧行为变更说明（SB-3，2026-11-22）：此前 loadFrom 要求 model_version 精确
+    # 等于 "0.1.0-seed"，任何重训产物（如 "0.2.0-trained"）都会被拒载，训练
+    # 流水线永远无法替换默认权重——属设计缺陷。现改为：feature_version 仍精确
+    # 匹配（真正的兼容性契约，见 testFeatureVersionMismatchRaisesUnavailable），
+    # model_version 只要求非空字符串（溯源元数据，任意取值可载）。
+    def testModelVersionAnyNonEmptyStringLoads(self, tmp_path):
+        for version in ("0.2.0-trained", "9.9.9-other", "v2026.11.22-local"):
+            payload = validPayload()
+            payload["model_version"] = version
+            model = NeuJudge.loadFrom(writeWeights(tmp_path, payload))
+            assert model.modelVersion == version
+
+    def testModelVersionEmptyOrNonStringRaisesUnavailable(self, tmp_path):
+        for badVersion in ("", "   ", 123, None):
+            payload = validPayload()
+            payload["model_version"] = badVersion
+            with pytest.raises(NeuJudgeUnavailable):
+                NeuJudge.loadFrom(writeWeights(tmp_path, payload))
 
     def testMissingFileRaisesUnavailable(self, tmp_path):
         with pytest.raises(NeuJudgeUnavailable):
