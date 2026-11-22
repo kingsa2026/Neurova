@@ -605,7 +605,7 @@ def trainNeuJudgeFromRealData(
     return payload
 
 
-def trainAxionFromRealData(
+def trainNeuJudgeFromOutcomeSweep(
     dataRoot: str,
     seed: int = DEFAULT_SEED,
     distill: int = 60,
@@ -614,11 +614,11 @@ def trainAxionFromRealData(
     windowMinutes: float = 5.0,
     thresholds: Optional[Dict[str, float]] = None,
 ) -> Dict:
-    """Axion 1.0 方学金：答案先行结果采矿 + 教师质量门 + 边界扫描蒸馏。"""
-    from neurova.collaboration.triage_axion import buildAxionDataset
+    """答案先行结果采矿 + 教师质量门 + 边界扫描蒸馏（NeuJudge 专属管线）。"""
+    from neurova.collaboration.triage_boundary import buildOutcomeSweepDataset
     from neurova.collaboration.triage_dataset import realGateTriageFn
 
-    result = buildAxionDataset(
+    result = buildOutcomeSweepDataset(
         dataRoot, realGateTriageFn, distillLimit=distill,
         windowMinutes=windowMinutes, maxWindows=maxWindows,
         minMessages=minMessages,
@@ -635,11 +635,11 @@ def trainAxionFromRealData(
         })
     if len(labelled) < 8:
         raise RuntimeError(
-            f"Axion 管线可训练样本不足（{len(labelled)} < 8）——需要更多会话流量"
+            f"边界扫描管线可训练样本不足（{len(labelled)} < 8）——需要更多会话流量"
         )
     payload = _trainAndEvaluate(
         labelled, result["grayUnlabeled"], len(labelled), seed,
-        modelVersion="0.4.0-axion", thresholds=thresholds,
+        modelVersion="0.4.0-neurova", thresholds=thresholds,
     )
     agreementValue = result["teacherAgreement"].get("agreement")
     payload["eval_metrics"].update({
@@ -662,9 +662,9 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument("--windows", type=int, default=DEFAULT_WINDOWS, help="合成窗口数量（默认 400）")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="固定随机种子（默认 42）")
     parser.add_argument(
-        "--source", choices=("synthetic", "real", "axion"), default="synthetic",
+        "--source", choices=("synthetic", "real", "sweep"), default="synthetic",
         help="训练数据源：synthetic=规则自举合成窗口（默认）；real=从数据根收割真实"
-        "会话窗口；axion=Axion 方学（答案先行结果采矿+教师质量门+边界扫描蒸馏）",
+        "会话窗口；sweep=答案先行结果采矿+教师质量门+边界扫描蒸馏",
     )
     parser.add_argument(
         "--data-root", type=str, default="",
@@ -714,9 +714,9 @@ def main(argv: List[str] | None = None) -> int:
         if thresholds["skip_p"] > thresholds["allow_p"]:
             parser.error("--skip-p 不得大于 --allow-p")
 
-    if args.source == "axion":
+    if args.source == "sweep":
         dataRoot = args.data_root or str(Path(__file__).resolve().parents[2] / "data")
-        payload = trainAxionFromRealData(
+        payload = trainNeuJudgeFromOutcomeSweep(
             dataRoot,
             seed=args.seed,
             distill=args.distill,

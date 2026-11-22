@@ -5,8 +5,10 @@ Neurova GLANCE_YIELD_RULES - Multi-Agent Coordination Protocol
 """
 
 import asyncio
+import json
 import os
 from enum import Enum
+from pathlib import Path
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -147,6 +149,11 @@ class GlanceYieldChecker:
         self._triage_model: Optional[NeuJudge] = None
         self._triage_model_failed = False
 
+        # 分域阈值目录（Jeff catalogue 启发）：agent_id → 阈值覆盖，懒加载，
+        # 文件缺失/损坏按无目录处理（全部回落默认阈值）。
+        self._judge_catalogue: Optional[Dict[str, Any]] = None
+        self._judge_catalogue_loaded = False
+
         # Statistics
         self._stats = {
             'total_checks': 0,
@@ -270,7 +277,7 @@ class GlanceYieldChecker:
 
         # Layer 6: Triage gate
         if conversation_id:
-            decision = self._check_triage_gate(conversation_id, userInput)
+            decision = self._check_triage_gate(conversation_id, userInput, agent_id)
             if decision.should_yield:
                 return decision
 
@@ -461,7 +468,8 @@ class GlanceYieldChecker:
 
         return YieldDecision(should_yield=False)
 
-    def _check_triage_gate(self, conversation_id: str, user_input: str = "") -> YieldDecision:
+    def _check_triage_gate(self, conversation_id: str, user_input: str = "",
+                           agent_id: str = "") -> YieldDecision:
         """Layer 6: Small-brain triage gate（SB-4 接线：规则守高置信区 + 模型守灰区）。
 
         计划出处：docs/04-plans/2026-11-22-small-brain-triage-gate-wiring-plan.md §3/§6/§7。
@@ -478,7 +486,7 @@ class GlanceYieldChecker:
 
         self._stats['triage_checks'] += 1
         try:
-            return self._triageGateDecision(conversation_id, user_input, mode)
+            return self._triageGateDecision(conversation_id, user_input, mode, agent_id)
         except Exception:  # noqa: BLE001 - 闸不吞异常≠不降级：计数与日志即留痕
             self._stats['triage_gate_errors'] += 1
             logger.warning(
@@ -487,7 +495,7 @@ class GlanceYieldChecker:
             return YieldDecision(should_yield=False)
 
     def _triageGateDecision(
-        self, conversation_id: str, user_input: str, mode: str
+        self, conversation_id: str, user_input: str, mode: str, agent_id: str = ""
     ) -> YieldDecision:
         """分诊门判定本体（mode 必为 shadow/enforce）。"""
         # 进料口：会话事件单一事实源（SessionSyncManager），同步内存快照
@@ -512,11 +520,11 @@ class GlanceYieldChecker:
             if mode == "shadow":
                 self._stats['triage_shadow_would_skip'] += 1
                 self._recordSkipFeedback(conversation_id, "rules", verdict.reason,
-                                         None, features, mode)
+                                         None, features, mode, events)
                 return YieldDecision(should_yield=False)
             self._stats['triage_rule_skips'] += 1
             self._recordSkipFeedback(conversation_id, "rules", verdict.reason,
-                                     None, features, mode)
+                                     None, features, mode, events)
             logger.info(
                 "分诊门规则拦截：conversation=%s rule=%s", conversation_id, verdict.reason
             )
@@ -536,26 +544,55 @@ class GlanceYieldChecker:
             return YieldDecision(should_yield=False)
 
         p = model.score(features)
-        decision = model.decide(p)
+        detailed = model.decideDetailed(p, self._agentThresholds(agent_id))
+        decision = detailed["action"]
         if decision == "skip":
             if mode == "shadow":
                 self._stats['triage_shadow_would_skip'] += 1
                 self._recordSkipFeedback(conversation_id, "model", verdict.reason,
-                                         p, features, mode)
+                                         p, features, mode, events)
                 return YieldDecision(should_yield=False)
             self._stats['triage_model_skips'] += 1
             self._recordSkipFeedback(conversation_id, "model", verdict.reason,
-                                     p, features, mode)
+                                     p, features, mode, events)
             logger.info(
                 "分诊门模型拦截：conversation=%s p=%.4f", conversation_id, p
             )
             return YieldDecision(
                 should_yield=True,
                 reason=YieldReason.TRIAGE_GATE,
-                details={"source": "model", "p": p, "features": features},
+                details={"source": "model", "p": p, "features": features,
+                         "judge": detailed},
             )
         # allow / abstain → 保守放行（弃权带与原门"拿不准→响应"同构）
         return YieldDecision(should_yield=False)
+
+    def _loadJudgeCatalogue(self) -> Dict[str, Any]:
+        """懒加载分域阈值目录（Jeff catalogue 启发）：agent_id → 阈值覆盖。
+
+        文件缺失/损坏按无目录处理（全部回落产物默认阈值）；进程内只读一次。
+        """
+        if self._judge_catalogue_loaded:
+            return self._judge_catalogue or {}
+        self._judge_catalogue_loaded = True
+        try:
+            path = Path(__file__).resolve().parent / "neu_judge_catalogue.json"
+            if path.exists():
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(payload, dict) and isinstance(payload.get("profiles"), dict):
+                    self._judge_catalogue = payload["profiles"]
+        except Exception:  # noqa: BLE001 - 目录不可用降级为无覆盖
+            self._judge_catalogue = {}
+        return self._judge_catalogue or {}
+
+    def _agentThresholds(self, agent_id: str) -> Optional[Dict[str, float]]:
+        """按 agent_id 取目录中的阈值覆盖；无目录/无档案返回 None（用默认）。"""
+        profiles = self._loadJudgeCatalogue()
+        profile = profiles.get(agent_id) if agent_id else None
+        if not isinstance(profile, dict):
+            return None
+        thresholds = profile.get("thresholds")
+        return thresholds if isinstance(thresholds, dict) and thresholds else None
 
     def _recordSkipFeedback(
         self,
@@ -565,16 +602,18 @@ class GlanceYieldChecker:
         p: Optional[float],
         features: Dict[str, Any],
         mode: str,
+        events: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         """SB-5 回流：skip 样本落盘（遥测旁路，失败计 triage_feedback_errors）。
 
         出处：计划 §5.3 人工标注回流。shadow/enforce 两档都记（mode 字段区分），
-        失败只计数不外抛——回流断了闸照常工作。
+        失败只计数不外抛——回流断了闸照常工作。events 作为窗口快照随样本落盘
+        （golden case 与 admin 复核用）。
         """
         try:
             recorded = triage_feedback.recordSkipSample(
                 conversationId=conversationId, source=source, rule=rule,
-                p=p, features=features, mode=mode,
+                p=p, features=features, mode=mode, window=events,
             )
         except Exception:  # noqa: BLE001 - 回流失败绝不影响闸决策
             recorded = False

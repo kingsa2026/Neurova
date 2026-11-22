@@ -519,3 +519,31 @@ class TestFalseRescueStats:
         body = resp.json()
         assert body["false_rescue"]["samples"] == 1
         assert "falseRescueRate" in body["false_rescue"]
+
+
+class TestWindowSnapshot:
+    def test_windowSnapshotRecordedAndCompacted(self, dataRoot):
+        """skip 样本带窗口快照（≤10 条、单条 ≤120 字符）——golden case 与复核用。"""
+        longText = "很长的上下文" * 100
+        events = [{"role": "assistant", "content": longText,
+                   "timestamp": datetime.now(timezone.utc).isoformat()}
+                  for _ in range(15)]
+        ok = recordSkipSample(
+            conversationId="conv-window", source="rules", rule="agent_loop_no_human",
+            mode="shadow", window=events,
+        )
+        assert ok is True
+        record = listSkipSamples(limit=1)[0]
+        assert len(record["window"]) == 10
+        assert all(len(event["content"]) <= 120 for event in record["window"])
+        assert all(event["role"] == "assistant" for event in record["window"])
+
+    def test_windowSnapshotOmittedWhenAbsent(self, dataRoot):
+        """未传窗口 → window 为空数组（字段仍在，契约稳定）。"""
+        ok = recordSkipSample(
+            conversationId="conv-nowin", source="rules", rule="verbatim_loop",
+            mode="shadow",
+        )
+        assert ok is True
+        record = listSkipSamples(limit=1)[0]
+        assert record["window"] == []

@@ -19,7 +19,7 @@
 import json
 import math
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 __all__ = [
     "MODEL_VERSION",
@@ -221,16 +221,38 @@ class NeuJudge:
             z += self._weights[key] * value
         return _sigmoid(z)
 
-    def decide(self, p: float) -> str:
+    def decide(self, p: float, thresholds: Optional[Dict[str, float]] = None) -> str:
         """三档裁决：p < skip_p → "skip"（拦截本轮响应）；p > allow_p → "allow"（放行）；
         其间（含恰等）→ "abstain"（弃权，由调用方保守放行）。
 
         p 为 score 产出的「值得响应」概率，与计划 §3 的级联语义一致。
-        阈值默认取模块常量 SKIP_P/ALLOW_P，可被权重产物的 thresholds 字段覆盖
-        （标定脚本按真实评估集反推，见 calibrate_neu_judge.py）。
+        阈值默认取产物 thresholds（标定脚本按真实评估集反推，见
+        calibrate_neu_judge.py），调用方可传 thresholds 覆盖（分域目录用）。
         """
-        if p < self._thresholds["skip_p"]:
+        effective = self._effectiveThresholds(thresholds)
+        if p < effective["skip_p"]:
             return "skip"
-        if p > self._thresholds["allow_p"]:
+        if p > effective["allow_p"]:
             return "allow"
         return "abstain"
+
+    def decideDetailed(self, p: float, thresholds: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+        """Jeff 式类型化 Decision：{action, p, thresholds, model_version}。
+
+        让校准概率与阈值对调用方一等可见（分诊门把它挂进 YieldDecision.details）。
+        """
+        effective = self._effectiveThresholds(thresholds)
+        action = self.decide(p, effective)
+        return {
+            "action": action,
+            "p": round(float(p), 6),
+            "thresholds": {k: round(v, 4) for k, v in effective.items()},
+            "model_version": self._modelVersion,
+        }
+
+    def _effectiveThresholds(self, overrides: Optional[Dict[str, float]]) -> Dict[str, float]:
+        effective = dict(self._thresholds)
+        for key, value in (overrides or {}).items():
+            if key in effective:
+                effective[key] = float(value)
+        return effective

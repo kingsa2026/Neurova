@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""NeuJudge skip 阈值标定（Axion/MiniMind 启发：阈值由真实评估集反推，不拍脑袋）。
+"""NeuJudge skip 阈值标定（阈值由真实评估集反推，不拍脑袋）。
 
 流程：
 1. 构建真实评估集：triage_skips.jsonl 结果采矿（skip 后 5 分钟内人类回归=误杀，
@@ -35,7 +35,7 @@ from neurova.collaboration.neu_judge import (  # noqa: E402
     NeuJudgeUnavailable,
     SKIP_P,
 )
-from neurova.collaboration.triage_axion import mineOutcomeLabels  # noqa: E402
+from neurova.collaboration.triage_boundary import mineOutcomeLabels  # noqa: E402
 from neurova.collaboration.triage_dataset import (  # noqa: E402
     harvestSessionWindows,
     labelWindows,
@@ -43,6 +43,11 @@ from neurova.collaboration.triage_dataset import (  # noqa: E402
 
 DEFAULT_ARTIFACT = (
     Path(__file__).resolve().parents[2] / "neurova" / "collaboration" / "neu_judge_default.json"
+)
+
+#: 分域阈值目录（agent_id → 阈值覆盖；运行时由分诊门懒加载）
+CATALOGUE_PATH = (
+    Path(__file__).resolve().parents[2] / "neurova" / "collaboration" / "neu_judge_catalogue.json"
 )
 
 
@@ -114,6 +119,28 @@ def applyThresholds(artifactPath: Path, skipP: float, allowP: float) -> None:
     NeuJudge.loadFrom(artifactPath)  # 试载验证（失败抛 NeuJudgeUnavailable）
 
 
+def writeCatalogueProfile(agentId: str, skipP: float, allowP: float) -> None:
+    """把分域阈值写入目录（agent_id → 阈值覆盖），保留既有档案。"""
+    profiles: Dict[str, Any] = {}
+    version = 1
+    if CATALOGUE_PATH.exists():
+        try:
+            loaded = json.loads(CATALOGUE_PATH.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                if isinstance(loaded.get("profiles"), dict):
+                    profiles = loaded["profiles"]
+                version = loaded.get("version", 1)
+        except json.JSONDecodeError:
+            pass
+    profiles[agentId] = {"thresholds": {"skip_p": round(skipP, 4),
+                                        "allow_p": round(allowP, 4)}}
+    CATALOGUE_PATH.write_text(
+        json.dumps({"version": version, "profiles": profiles},
+                   ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="NeuJudge skip 阈值标定：真实评估集上反推零误拦的最大 skip_p"
@@ -128,6 +155,8 @@ def main(argv: List[str] | None = None) -> int:
                         help="无零误拦行时的精确率门槛（默认 0.99）")
     parser.add_argument("--apply", action="store_true",
                         help="把推荐阈值写回产物 thresholds 字段（试载验证）")
+    parser.add_argument("--agent-id", type=str, default=None,
+                        help="分域目录：把阈值写为该 agent 的目录档案（替代全局产物阈值）")
     parser.add_argument("--skip-p", type=float, default=None,
                         help="跳过推荐，直接把该阈值写回产物（需 --apply）")
     args = parser.parse_args(argv)
@@ -163,9 +192,14 @@ def main(argv: List[str] | None = None) -> int:
         print("\n无满足门槛的阈值——评估集太小或特征不可分，保持现值并继续积累")
 
     if args.apply and chosen:
-        applyThresholds(Path(args.artifact), chosen["skip_p"], allowP)
-        print(f"已写回 {args.artifact}: thresholds={{'skip_p': {chosen['skip_p']}, "
-              f"'allow_p': {allowP}}}（loadFrom 试载通过）")
+        if args.agent_id:
+            writeCatalogueProfile(args.agent_id, chosen["skip_p"], allowP)
+            print(f"已写入分域目录: profiles[{args.agent_id!r}] = "
+                  f"{{'skip_p': {chosen['skip_p']}, 'allow_p': {allowP}}}")
+        else:
+            applyThresholds(Path(args.artifact), chosen["skip_p"], allowP)
+            print(f"已写回 {args.artifact}: thresholds={{'skip_p': {chosen['skip_p']}, "
+                  f"'allow_p': {allowP}}}（loadFrom 试载通过）")
     return 0
 
 

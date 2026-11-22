@@ -141,8 +141,137 @@ def _caseSpecs() -> List[TriageCaseSpec]:
     ]
 
 
+
+
+# ── 真实流量回归案例（2026-11-22 采集：规则放行的真实人类对话窗，内容截断至 120 字符冻结） ─────────────────────────
+
+def _realCaseSpecs() -> List[TriageCaseSpec]:
+    """真实会话窗口的规则放行回归保护（Jeff golden cases 启发）。"""
+    return [
+        TriageCaseSpec(
+            case_id="triage-real-allow-a1/s1-0",
+            window=(
+                {"role": "assistant", "content": "A1", "timestamp": "2026-10-04T22:12:37.272560"},
+                {"role": "user", "content": "Q1", "timestamp": "2026-10-04T22:12:37.392547"},
+                {"role": "assistant", "content": "A1", "timestamp": "2026-10-04T22:12:37.392547"},
+                {"role": "user", "content": "Q1", "timestamp": "2026-10-04T22:12:37.436247"},
+                {"role": "assistant", "content": "A1", "timestamp": "2026-10-04T22:12:37.436247"},
+                {"role": "user", "content": "Q1", "timestamp": "2026-10-04T22:12:37.472147"},
+                {"role": "assistant", "content": "A1", "timestamp": "2026-10-04T22:12:37.472147"},
+                {"role": "user", "content": "Q-only", "timestamp": "2026-10-04T22:12:37.503197"},
+                {"role": "user", "content": "Q1", "timestamp": "2026-10-04T22:12:37.540402"},
+                {"role": "assistant", "content": "A1", "timestamp": "2026-10-04T22:12:37.540402"},
+            ),
+            expect_action="allow",
+            expect_reason="human_in_window",
+        ),
+        TriageCaseSpec(
+            case_id="triage-real-allow-39e9dd-1",
+            window=(
+                {"role": "user", "content": "say hi in one short line", "timestamp": "2026-11-16T10:35:50.773109"},
+                {"role": "assistant", "content": "嗨～我在 😄", "timestamp": "2026-11-16T10:36:06.037920"},
+                {"role": "user", "content": "say hi", "timestamp": "2026-11-16T14:09:24.163751"},
+                {"role": "assistant", "content": "嗨～你好呀，我在 😄", "timestamp": "2026-11-16T14:09:35.906773"},
+                {"role": "user", "content": "tell me a two sentence story", "timestamp": "2026-11-16T16:04:23.318910"},
+                {"role": "assistant", "content": "深海里有条会发光的鱼，每晚都替迷路的船点亮回家的路。有一天它终于问船长：“你不怕我熄灭吗？”船长笑着说：“不会的，你亮着的时候，我心里也亮着。”", "timestamp": "2026-11-16T16:04:30.299893"},
+                {"role": "user", "content": "ws recovery check", "timestamp": "2026-11-16T16:13:39.589532"},
+                {"role": "assistant", "content": "恢复了，我在 ✅
+
+会话上下文还在，随时可以继续。", "timestamp": "2026-11-16T16:13:51.444550"},
+                {"role": "user", "content": "用一句话介绍你自己", "timestamp": "2026-11-16T19:20:51.886813"},
+                {"role": "assistant", "content": "我是 Neurova，一个能帮你查资料、处理文件、操作系统和规划任务的 AI 助手 😊", "timestamp": "2026-11-16T19:21:11.718851"},
+            ),
+            expect_action="allow",
+            expect_reason="human_in_window",
+        ),
+        TriageCaseSpec(
+            case_id="triage-real-allow--probe-2",
+            window=(
+                {"role": "user", "content": "算一下", "timestamp": "2026-10-04T21:57:03.246291"},
+                {"role": "assistant", "content": "好的", "timestamp": "2026-10-04T21:57:03.246291"},
+                {"role": "user", "content": "算一下", "timestamp": "2026-10-04T21:57:04.014962"},
+                {"role": "assistant", "content": "好的", "timestamp": "2026-10-04T21:57:04.014962"},
+                {"role": "user", "content": "算一下", "timestamp": "2026-10-04T21:57:04.751744"},
+                {"role": "assistant", "content": "好的", "timestamp": "2026-10-04T21:57:04.751744"},
+                {"role": "user", "content": "算一下", "timestamp": "2026-10-04T21:57:05.475815"},
+                {"role": "assistant", "content": "好的", "timestamp": "2026-10-04T21:57:05.475815"},
+                {"role": "user", "content": "算一下", "timestamp": "2026-10-04T21:57:05.952824"},
+                {"role": "assistant", "content": "好的", "timestamp": "2026-10-04T21:57:05.952824"},
+            ),
+            expect_action="allow",
+            expect_reason="human_in_window",
+        ),
+        TriageCaseSpec(
+            case_id="triage-real-allow-ee5074-3",
+            window=(
+                {"role": "user", "content": "查询最新的AI新闻", "timestamp": "2026-08-31T03:17:42.569170"},
+                {"role": "assistant", "content": "我来帮你查询最新的AI新闻。刚才的搜索结果不太理想，让我换几个关键词重新搜索。
+
+我先继续尝试帮你把许昌的天气查清楚，同时整理刚才抓到的 AI 新闻。让我再试几个渠道获取预报数据我看到您之前反复强调要查**明天的预报**，而且我这边有最新的", "timestamp": "2026-08-31T03:17:42.569170"},
+                {"role": "user", "content": "帮我看看小红书删给有什么有意思的AI新闻", "timestamp": "2026-08-31T03:21:35.691386"},
+                {"role": "assistant", "content": "看到了！我这边确实有我们的对话记忆呢 😊 你之前让我查过 AI 新闻，还特别叮嘱我要查许昌明天的预报（当时你很着急的样子，我记得很清楚）。现在你想看小红书上的 AI 新闻，我马上帮你查！
+
+让我先仔细检索一下我们的对话记忆，看看具体聊过什么", "timestamp": "2026-08-31T03:21:35.691386"},
+                {"role": "user", "content": "我没有问你刚才查了什么，现在我想知道小红书上的AI新闻", "timestamp": "2026-08-31T03:23:44.295254"},
+                {"role": "assistant", "content": "明白了！你不想听我回忆，直接要**小红书上的AI新闻**。我马上用专门的小红书工具查询～
+
+明白了！你问的是**小红书上的AI新闻**，我马上帮你查。先看看小红书平台的搜索接入状态你说得对，抱歉刚才跑题了 🙏 现在专心帮你看**小红书上的 ", "timestamp": "2026-08-31T03:23:44.295254"},
+            ),
+            expect_action="allow",
+            expect_reason="human_in_window",
+        ),
+        TriageCaseSpec(
+            case_id="triage-real-allow-ession-4",
+            window=(
+                {"role": "user", "content": "现在几点了", "timestamp": "2026-10-04T21:26:22.470073"},
+                {"role": "assistant", "content": "现在是 2026 年", "timestamp": "2026-10-04T21:26:22.470073"},
+                {"role": "user", "content": "现在几点了", "timestamp": "2026-10-04T21:26:23.220086"},
+                {"role": "assistant", "content": "现在是 2026 年", "timestamp": "2026-10-04T21:26:23.220086"},
+                {"role": "user", "content": "现在几点了", "timestamp": "2026-10-04T21:26:24.026865"},
+                {"role": "assistant", "content": "现在是 2026 年", "timestamp": "2026-10-04T21:26:24.026865"},
+                {"role": "user", "content": "现在几点了", "timestamp": "2026-10-04T21:26:24.822298"},
+                {"role": "assistant", "content": "现在是 2026 年", "timestamp": "2026-10-04T21:26:24.822298"},
+                {"role": "user", "content": "现在几点了", "timestamp": "2026-10-04T21:26:25.586991"},
+                {"role": "assistant", "content": "现在是 2026 年", "timestamp": "2026-10-04T21:26:25.586991"},
+            ),
+            expect_action="allow",
+            expect_reason="human_in_window",
+        ),
+        TriageCaseSpec(
+            case_id="triage-real-allow-da5642-5",
+            window=(
+                {"role": "user", "content": "（人类制片）继续，但每个人只保留最有信息量的一句。", "timestamp": "2026-11-22T15:08:14.465152"},
+                {"role": "assistant", "content": "
+
+好的，制片人。继续接龙，这轮按“每人只留一句最有信息量的台词”来收——女孩负责推进，老板负责埋钩，谁都不许多说。
+
+## 主推版
+
+> 女孩翻开第一页，抬头：**“一个字都没有。”**
+> 老板擦着柜台，没抬头：**“不是没有——是还没", "timestamp": "2026-11-22T15:08:33.785869"},
+                {"role": "user", "content": "（人类制片）继续，但每个人只保留最有信息量的一句。", "timestamp": "2026-11-22T15:28:47.923873"},
+                {"role": "assistant", "content": "
+
+收到，制片人。这轮接着“收了”那版往下走——书已过柜台、账已记完，轮到女孩离场前的那口气。约束不变：每人只留一句最有信息量的台词。
+
+## 主推版
+
+> 女孩在门口回头：**“这本书，多少钱？”**
+> 老板笔尖没停：**“不收钱。收你", "timestamp": "2026-11-22T15:30:46.891783"},
+                {"role": "user", "content": "（人类制片）继续，但每个人只保留最有信息量的一句。", "timestamp": "2026-11-22T15:31:24.037886"},
+                {"role": "assistant", "content": "收到，制片人。第 4 轮接着走——上一轮女孩在门口问价，老板放话“收你把它读完”，那这轮就写她带着书跨出门槛后的第一眼。约束不变：每人只留一句最有信息量的台词。
+
+## 主推版
+
+> 女孩走到门口又停下，翻开书回头：**“老板，这一页写的是", "timestamp": "2026-11-22T15:32:05.941630"},
+            ),
+            expect_action="allow",
+            expect_reason="human_in_window",
+        ),
+    ]
+
 #: 冻结案例规格（单源；check 闭包与测试直读共用这一份）。
-CASE_SPECS: Tuple[TriageCaseSpec, ...] = tuple(_caseSpecs())
+CASE_SPECS: Tuple[TriageCaseSpec, ...] = tuple(_caseSpecs() + _realCaseSpecs())
 
 
 # ── 裁决计算（check 与测试共用的单份实现） ─────────────────────────

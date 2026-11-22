@@ -25,7 +25,7 @@
     "trainWindows": 130.0
   },
   "feature_version": "triage-features-v1",
-  "model_version": "0.4.0-axion",
+  "model_version": "0.4.0-neurova",
   "thresholds": {
     "allow_p": 0.75,
     "skip_p": 0.25

@@ -57,6 +57,21 @@ def _nowIso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _compactWindow(events: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """窗口快照压缩：末尾 ≤10 条事件、单条内容 ≤120 字符（golden case 与
+    admin 复核用；省空间且不含全量上下文）。"""
+    compact: List[Dict[str, Any]] = []
+    for event in (events or [])[-10:]:
+        if not isinstance(event, dict):
+            continue
+        compact.append({
+            "role": str(event.get("role") or ""),
+            "content": str(event.get("content") or "")[:120],
+            "timestamp": event.get("timestamp"),
+        })
+    return compact
+
+
 def recordSkipSample(
     *,
     conversationId: str,
@@ -65,12 +80,14 @@ def recordSkipSample(
     p: Optional[float] = None,
     features: Optional[Dict[str, Any]] = None,
     mode: str,
+    window: Optional[List[Dict[str, Any]]] = None,
 ) -> bool:
     """追加一条 skip 样本；成功 True；任何失败 warning + False（绝不外抛）。
 
     `source`："rules"（规则 R2/R3 命中）或 "model"（灰区 NeuJudge p<SKIP_P）；
     `rule`：规则源为命中规则名；模型源为路由到模型的规则层裁决（default_allow）；
-    `mode`："shadow" 或 "enforce"（shadow 也入样本，靠该字段区分）。
+    `mode`："shadow" 或 "enforce"（shadow 也入样本，靠该字段区分）；
+    `window`：skip 时刻的会话事件快照（压缩后落盘，供 golden case 与复核）。
     """
     record: Dict[str, Any] = {
         "sample_id": uuid.uuid4().hex,
@@ -81,6 +98,7 @@ def recordSkipSample(
         "rule": str(rule or ""),
         "p": float(p) if p is not None else None,
         "features": dict(features or {}),
+        "window": _compactWindow(window),
         "label": DEFAULT_LABEL,
         "relabeled": False,
         "relabel_note": "",

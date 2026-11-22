@@ -106,7 +106,7 @@ def writeWeights(tmp_path: Path, payload: dict | None = None, raw: str | None = 
 class TestDefaultWeightsArtifact:
     def testLoadDefaultSucceedsWithValidSchemaAndVersions(self):
         model = NeuJudge.loadDefault()
-        # 默认权重可随训练/晋升演进（0.1.0-seed → 0.4.0-axion）：
+        # 默认权重可随训练/晋升演进（0.1.0-seed → 0.4.0-neurova）：
         # 契约是 feature_version 精确匹配 + model_version 非空可溯源。
         assert isinstance(model.modelVersion, str) and model.modelVersion.strip()
         assert model.featureVersion == FEATURE_VERSION
@@ -128,7 +128,7 @@ class TestDefaultWeightsArtifact:
 
     def testDefaultModelDefersToRulesOnSoloLoops(self):
         # 级联语义：R2/R3 规则先于模型裁决——纯独走环由规则拦截，模型不承担
-        # 该职责（0.4.0-axion 曾学到教师"active_work→actionable"异议，已被
+        # 该职责（0.4.0-neurova 曾学到教师"active_work→actionable"异议，已被
         # 训练管线修正：规则 skip 窗不送教师审计）。此处钉住级联契约本身。
         from neurova.collaboration.triage_rules import evaluateTriage
 
@@ -270,7 +270,7 @@ class TestScoreBehaviour:
 
     def testExtremeValuesDoNotOverflow(self):
         # 极端特征值下 score 不得溢出/抛错，且恒有界 [0,1]
-        # （权重符号随训练演进：0.1.0-seed 为负、0.4.0-axion 为正，均须有界）
+        # （权重符号随训练演进：0.1.0-seed 为负、0.4.0-neurova 为正，均须有界）
         model = NeuJudge.loadDefault()
         for value in (1e9, -1e9):
             p = model.score({"maxSimilarity": value})

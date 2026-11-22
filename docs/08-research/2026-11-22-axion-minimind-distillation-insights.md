@@ -1,6 +1,6 @@
 # Axion 1.0 与 MiniMind 方法学对照：NeuJudge 微型判定模型的蒸馏改进实录
 
-> 日期：2026-11-22 · 状态：**已实施并完成真跑对比；0.4.0-axion 已晋升默认权重**
+> 日期：2026-11-22 · 状态：**已实施并完成真跑对比；0.4.0-neurova 已晋升默认权重**
 > 来源：[Axion 1.0 论文](https://arxiv.org/abs/2611.03233) · [项目页](https://axion1-0.github.io) · [bytedance/axion1_0](https://github.com/bytedance/axion1_0) · [jingyaogong/minimind](https://github.com/jingyaogong/minimind)
 > 关联：[小脑分诊门接线与自研微型判定模型实施方案](../04-plans/2026-11-22-small-brain-triage-gate-wiring-plan.md)（NeuJudge、误杀率、enforce 晋升判据均在该计划）
 > 纪律：本报告为研究笔记+实测记录；外部项目仅作方法学参考，不构成事实源。
@@ -48,7 +48,7 @@ MiniMind 的补充启发：**白盒蒸馏→软标签**（教师置信度转软�
   窗口，裁决覆盖规则标签）；`realGateTriageFn` 种子内容按 400 字符截断
   （防教师 prompt 超 token：实测 11932>8192）；教师调用节流（最小间隔 6s，
   env `NEUROVA_DISTILL_TEACHER_MIN_INTERVAL` 可调）。
-- `scripts/training/train_neu_judge.py`：`--source axion`（0.4.0-axion）、
+- `scripts/training/train_neu_judge.py`：`--source axion`（0.4.0-neurova）、
   `--distill-scope`、`_ingestSkipFeedback`（triage_skips.jsonl 直训）、
   `_trainLogisticRegression` 类平衡权重（n/(2·类数)）、`_stratifiedSplit`
   （冻结集分层补救）。
@@ -71,8 +71,8 @@ MiniMind 的补充启发：**白盒蒸馏→软标签**（教师置信度转软�
 |---|---|---|---|---|---|
 | 0.1.0-seed（晋升前默认） | 0.7952 | 0.6000 | 0.1667 | **15** | 2 |
 | 0.3.0-real（v3） | 0.9277 | 0.7500 | 1.0000 | 0 | 6 |
-| 0.4.0-axion（v5） | 0.9518 | 0.8182 | 1.0000 | 0 | 4 |
-| **0.4.0-axion（v6，修正管线，已晋升）** | **0.9639** | **0.8571** | **1.0000** | **0** | **3** |
+| 0.4.0-neurova（v5） | 0.9518 | 0.8182 | 1.0000 | 0 | 4 |
+| **0.4.0-neurova（v6，修正管线，已晋升）** | **0.9639** | **0.8571** | **1.0000** | **0** | **3** |
 
 关键发现：**0.1.0-seed 在真实窗口上漏拦 15/18**——合成训练与真实分布的偏差实证；
 v6 全召回且误拦最少（3 条均为人为注入的 +45s 回归对照被正确放行）。
@@ -141,7 +141,7 @@ Jeff 是一个 0.8B 的"System 1"决策模型产品化框架：把判断类问�
 
 ## 7. 当前状态与后续
 
-- **0.4.0-axion（v6，修正管线）已晋升为 `neu_judge_default.json`**
+- **0.4.0-neurova（v6，修正管线）已晋升为 `neu_judge_default.json`**
   （`d840607ea`），并写入标定阈值 `thresholds={skip_p:0.25, allow_p:0.75}`
   （v6 在评估集上该点精确率 1.0/召回 0.8333，为最优工作点）；enforce 档
   后端下次重启加载新权重与阈值（当前进程仍持旧模型，属预期）。

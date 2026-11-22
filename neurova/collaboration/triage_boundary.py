@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Axion 1.0 方法学在 NeuJudge 训练数据上的落地（离线，不在运行链路上）。
+"""结果驱动 + 边界密集采样的分诊训练数据管线（离线，不在运行链路上）。
 
-方法映射（论文 arXiv:2611.03233 / bytedance/axion1_0 → 本仓）：
-- Stage II「先定答案、后出题」（参考答案由确定性程序先行算出）→
+方法要点（答案先行、边界密集采样、教师质量门）：
+- 「先定答案、后出题」（参考答案由确定性程序先行算出）→
   `mineOutcomeLabels`：skip 样本的标签由**可观测结果**决定——recorded_at
   之后 5 分钟内会话出现人类消息 = 误杀（actionable）；否则 = 真跳过。
   教师只在结果不可知的合成变体上打标；
-- Stage I「模型感知的边界增强」（组合/参数化/范围偏移/分类讨论）→
+- 「模型感知的边界增强」（组合/参数化/范围偏移/分类讨论）→
   `boundarySweepWindows`：对真实种子窗口沿判定敏感轴做参数化扰动
   （独走长度/人类距离/复读/人类疑问），相同特征向量只保留一份——
   教师一次标注即覆盖全部同特征变体；
@@ -27,12 +27,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from neurova.collaboration.triage_rules import extractTriageFeatures
+from neurova.collaboration.triage_rules import evaluateTriage, extractTriageFeatures
 
 #: 误杀判定窗口（秒）——与 falseRescueStats 同一口径
 OUTCOME_WINDOW_SECONDS = 300.0
 
-#: 边界扫描轴（Axion 参数化/范围偏移的映射）
+#: 边界扫描轴（参数化/范围偏移）
 SWEEP_HUMAN_DISTANCES = (0, 3, 6, 10, 15)
 SWEEP_STREAKS = (5, 10, 20, 30)
 
@@ -95,7 +95,7 @@ def mineOutcomeLabels(
     windowMinutes: float = 5.0,
     limit: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    """答案先行（Axion Stage II）：skip 样本的标签由可观测结果决定。
+    """答案先行（先定答案、后出题）：skip 样本的标签由可观测结果决定。
 
     对 triage_skips.jsonl 的每条样本：其会话在 recorded_at 之后
     `windowMinutes` 分钟内出现人类消息 → 误杀（label=1 actionable）；
@@ -167,7 +167,7 @@ def boundarySweepWindows(
     maxVariantsPerSeed: int = MAX_VARIANTS_PER_SEED,
     maxTotal: int = DEFAULT_MAX_SWEEP_VECTORS,
 ) -> List[Dict[str, Any]]:
-    """模型感知边界增强（Axion Stage I 的参数化/范围偏移/组合/分类讨论）。
+    """模型感知边界增强（参数化/范围偏移/组合/分类讨论）。
 
     对每个种子窗口沿判定敏感轴派生变体：独走长度（5/10/20/30）、人类距离
     （0/3/6/10/15 事件前插入人类消息）、复读（同句 ×3）、人类疑问收尾。
@@ -229,7 +229,7 @@ def teacherAgreement(
     triageFn: Callable[[Dict[str, Any]], bool],
     limit: int = 8,
 ) -> Dict[str, Any]:
-    """教师质量门（Axion：参考答案程序化核验的映射）。
+    """教师质量门（参考答案程序化核验）。
 
     在**结果已知**的窗口上测教师与结果的一致率：一致率低于阈值说明教师
     标签不可信，调用方应中止蒸馏。knownSamples 元素含 events/label。
@@ -256,7 +256,7 @@ def teacherAgreement(
     }
 
 
-def buildAxionDataset(
+def buildOutcomeSweepDataset(
     dataRoot: str,
     triageFn: Callable[[Dict[str, Any]], bool],
     distillLimit: int = 60,
@@ -266,7 +266,7 @@ def buildAxionDataset(
     minMessages: int = 6,
     maxSweepVectors: int = DEFAULT_MAX_SWEEP_VECTORS,
 ) -> Dict[str, Any]:
-    """完整 Axion 式管线：收割 → 规则直标 → 结果采矿 → 教师质量门 →
+    """完整管线：收割 → 规则直标 → 结果采矿 → 教师质量门 →
     边界扫描 → 教师标注（配额内，特征向量去重，已知标签免费继承）。
 
     返回 {"labeled": [...], "outcomeSamples", "teacherAgreement",
@@ -293,7 +293,7 @@ def buildAxionDataset(
     outcomeRows = mineOutcomeLabels(dataRoot, windowMinutes=windowMinutes)
     labeled.extend(outcomeRows)
 
-    # 教师质量门：在**结果已知**的真实窗口上测教师与结果的一致率（Axion
+    # 教师质量门：在**结果已知**的真实窗口上测教师与结果的一致率（
     # 「参考答案程序化核验」的映射）。结果行只有特征快照，这里按会话回挂
     # 收割到的真实事件窗口作为教师输入。
     agreement = {"checked": 0, "agreement": None, "disagreements": []}
@@ -327,6 +327,18 @@ def buildAxionDataset(
         for variant in variants:
             if variant["featureKey"] in knownKeys:
                 continue  # 已有同特征标签：免费继承，不花教师配额
+            # 规则已判 skip 的变体保持规则标签（教师"active_work"式异议
+            # 不覆盖既定拦截策略；结果数据支持规则）。零教师成本。
+            variantVerdict = evaluateTriage(variant["events"], "")
+            if variantVerdict.action == "skip":
+                knownKeys.add(variant["featureKey"])
+                labeled.append({
+                    "sessionId": f"sweep/{variant['conversationId']}",
+                    "features": extractTriageFeatures(variant["events"], ""),
+                    "label": 0.0,
+                    "category": "sweep_rules",
+                })
+                continue
             if distillUsed >= distillLimit:
                 break
             try:
@@ -338,13 +350,14 @@ def buildAxionDataset(
             knownKeys.add(variant["featureKey"])
             sweepVectors += 1
             labeled.append({
-                "sessionId": f"axion/{variant['conversationId']}",
+                "sessionId": f"sweep/{variant['conversationId']}",
                 "features": extractTriageFeatures(variant["events"], ""),
                 "label": 1.0 if actionable else 0.0,
-                "category": "axion_sweep",
+                "category": "sweep",
             })
     return {
         "labeled": labeled,
+        "grayUnlabeled": ruled["grayUnlabeled"],
         "outcomeSamples": len(outcomeRows),
         "teacherAgreement": agreement,
         "sweepVectors": sweepVectors,

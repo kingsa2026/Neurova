@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Axion 方学落地（triage_axion.py）单测——答案先行结果采矿、边界扫描去重、
+"""边界扫描管线（triage_boundary.py）单测——答案先行结果采矿、边界扫描去重、
 教师质量门、端到端管线。
 
 不使用 MagicMock；教师用手写确定性函数（注入边界）。
@@ -18,9 +18,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from neurova.collaboration.triage_axion import (  # noqa: E402
+from neurova.collaboration.triage_boundary import (  # noqa: E402
     boundarySweepWindows,
-    buildAxionDataset,
+    buildOutcomeSweepDataset,
     mineOutcomeLabels,
     teacherAgreement,
 )
@@ -143,7 +143,7 @@ class TestTeacherAgreement:
         assert result["checked"] == 0 and result["agreement"] is None
 
 
-class TestBuildAxionDataset:
+class TestBuildSweepDataset:
     def testEndToEndWithInjectedTeacher(self, tmp_path):
         recorded = datetime(2026, 11, 22, 12, 0, 0, tzinfo=timezone.utc)
         # 两个会话：一个 skip 后人类快速回归（误杀），一个纯独走长环（真跳过）
@@ -173,7 +173,7 @@ class TestBuildAxionDataset:
                 return sample["label"] == 1.0  # 教师与结果一致（质量门用）
             return True  # 边界扫描变体一律判可响应
 
-        result = buildAxionDataset(str(tmp_path), fakeTeacher, distillLimit=10,
+        result = buildOutcomeSweepDataset(str(tmp_path), fakeTeacher, distillLimit=10,
                                    maxWindows=50, minMessages=2, maxSweepVectors=20)
         labels = {row["sessionId"]: row["label"] for row in result["labeled"]}
         assert result["outcomeSamples"] == 1
@@ -182,7 +182,7 @@ class TestBuildAxionDataset:
         assert result["sweepVectors"] >= 1
         # 规则标签与结果标签都在训练行里
         assert any(sid.startswith("outcome/") for sid in labels)
-        assert any("axion/" in sid or sid.startswith("sweep/") for sid in labels)
+        assert any("sweep/" in sid or sid.startswith("sweep/") for sid in labels)
         assert result["distillUsed"] <= 10
 
     def testAbortsWhenTeacherUnreliable(self, tmp_path):
@@ -201,7 +201,7 @@ class TestBuildAxionDataset:
         def wrongTeacher(sample):
             return False  # 教师与已知结果全不一致
 
-        result = buildAxionDataset(str(tmp_path), wrongTeacher, distillLimit=10,
+        result = buildOutcomeSweepDataset(str(tmp_path), wrongTeacher, distillLimit=10,
                                    maxWindows=50, minMessages=2)
         assert result["aborted"] is True
         assert result["sweepVectors"] == 0
