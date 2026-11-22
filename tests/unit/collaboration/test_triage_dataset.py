@@ -203,3 +203,108 @@ class TestRealGateTriageFn:
         with pytest.raises(TriageGateError):
             realGateTriageFn(window)
         assert manager.get_session("distill::agentA/s1") is not None
+
+
+class TestAuditDistillScope:
+    """audit 范围：教师除灰区外还复核规则已决窗口（R1 放行/R2R3 拦截），
+    教师裁决覆盖规则标签（labeler=llm_distill_audit）；R0 平凡窗不送审。"""
+
+    def _windows(self):
+        return [
+            {"conversationId": "a/empty", "events": [{"role": "assistant", "content": "只有一条"}]},
+            {"conversationId": "a/humanLast", "events": _alternating(8)},
+            {"conversationId": "a/humanInWindow", "events": (
+                [{"role": "assistant", "content": f"独白{i}"} for i in range(22)]
+                + [{"role": "user", "content": "我看看"}]
+                + [{"role": "assistant", "content": f"续{i}"} for i in range(3)]
+            )},
+            {"conversationId": "a/loop", "events": _soloLoop(25)},
+            {"conversationId": "a/gray", "events": _soloLoop(12)},
+        ]
+
+    def testAuditScopeSendsDecidedWindowsToTeacher(self):
+        from neurova.collaboration.triage_dataset import labelWindows
+
+        audited = []
+
+        def fakeGate(window):
+            audited.append(window["conversationId"])
+            # 教师复核：认为 R2 拦截其实该放行（分歧样本）
+            return window["conversationId"] == "a/loop"
+
+        result = labelWindows(self._windows(), distillLimit=10,
+                              triageFn=fakeGate, distillScope="audit")
+        byId = {e["conversationId"]: e for e in result["labeled"]}
+        # R0 平凡窗（人类最后发言）不送审；单条消息窗属灰区、与 R1/R2 一样送审
+        assert "a/humanLast" not in audited
+        assert "a/empty" in audited and "a/humanInWindow" in audited \
+            and "a/loop" in audited and "a/gray" in audited
+        # 教师覆盖 R2 规则标签（规则 0 → 教师 1）
+        assert byId["a/loop"]["label"] == 1
+        assert byId["a/loop"]["labeler"] == "llm_distill_audit"
+        # 灰区照旧由教师裁决
+        assert byId["a/gray"]["label"] == 0 and byId["a/gray"]["labeler"] == "llm_distill"
+        # R1 放行也被教师复核覆盖（fakeGate 对非 a/loop 一律判不可响应）
+        assert byId["a/humanInWindow"]["label"] == 0
+        assert byId["a/humanInWindow"]["labeler"] == "llm_distill_audit"
+
+    def testGrayScopeKeepsLegacyBehavior(self):
+        from neurova.collaboration.triage_dataset import labelWindows
+
+        audited = []
+
+        def fakeGate(window):
+            audited.append(window["conversationId"])
+            return False
+
+        result = labelWindows(self._windows(), distillLimit=10,
+                              triageFn=fakeGate, distillScope="gray")
+        assert audited == ["a/empty", "a/gray"]
+        byId = {e["conversationId"]: e for e in result["labeled"]}
+        assert byId["a/loop"]["labeler"] == "rules" and byId["a/loop"]["label"] == 0
+
+    def testAuditErrorKeepsRuleLabel(self):
+        from neurova.collaboration.triage_dataset import labelWindows
+
+        def brokenGate(window):
+            raise RuntimeError("教师不可用")
+
+        result = labelWindows(self._windows(), distillLimit=10,
+                              triageFn=brokenGate, distillScope="audit")
+        byId = {e["conversationId"]: e for e in result["labeled"]}
+        # 审计失败 = 保留规则标签（audit 语义），两个灰区窗仍弃权
+        assert byId["a/loop"]["labeler"] == "rules" and byId["a/loop"]["label"] == 0
+        assert byId["a/humanInWindow"]["labeler"] == "rules" and byId["a/humanInWindow"]["label"] == 1
+        assert "a/gray" not in byId and "a/empty" not in byId
+        assert result["grayUnlabeled"] == 2 and result["distillErrors"] == 4
+
+
+class TestDistillContentCap:
+    def testRealGateTriageFnCapsSeedContent(self, monkeypatch):
+        """超长消息种子进 SessionSyncManager 前必须截断（防教师 prompt 超 token）。"""
+        from neurova.collaboration.triage_dataset import realGateTriageFn
+        from neurova.sync import session_sync_manager as ssm
+        from neurova.sync.session_sync_manager import SessionSyncManager
+
+        ssm.reset_session_sync_manager()
+        manager = SessionSyncManager(
+            config={"max_sessions": 200, "session_timeout": 3600, "max_history_size": 5000}
+        )
+        monkeypatch.setattr(ssm, "_manager_instance", manager)
+        captured = {}
+
+        import neurova.llm.triage as triageMod
+
+        class FakeGate:
+            async def triage_message(self, conversation_id):
+                captured["events"] = manager.get_messages(conversation_id, 50)
+                return type("R", (), {"actionable": False})()
+
+        monkeypatch.setattr(triageMod, "get_small_brain_triage_gate", lambda: FakeGate())
+        huge = "很长的独白" * 2000  # 远超 400 字符
+        window = {"conversationId": "agentA/big",
+                  "events": [{"role": "assistant", "content": huge}]}
+        realGateTriageFn(window)
+        assert captured["events"], "种子事件必须已落"
+        for event in captured["events"]:
+            assert len(event.get("content") or "") <= 400

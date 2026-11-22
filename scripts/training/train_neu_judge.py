@@ -288,6 +288,13 @@ def _trainLogisticRegression(
     ]
     labels = [sample["label"] for sample in trainSamples]
     count = len(stdVectors)
+    # 类平衡权重：真实流量里 skip 类稀少（多数为人类在场放行），不加权会
+    # 塌缩成"全放行"（skipRecall=0）。权重 = n / (2·类数)，两类等权贡献。
+    labelCounts: Dict[float, int] = {}
+    for label in labels:
+        labelCounts[label] = labelCounts.get(label, 0) + 1
+    sampleWeights = [count / (2.0 * labelCounts[label]) for label in labels]
+    weightTotal = sum(sampleWeights) or 1.0
     previousLoss: float | None = None
     finalLoss = 0.0
     iteration = 0
@@ -295,22 +302,23 @@ def _trainLogisticRegression(
         grad = {key: 0.0 for key in FEATURE_KEYS}
         gradBias = 0.0
         loss = 0.0
-        for vector, label in zip(stdVectors, labels):
+        for vector, label, sampleWeight in zip(stdVectors, labels, sampleWeights):
             z = bias
             for key in FEATURE_KEYS:
                 z += weights[key] * vector[key]
             probability = _sigmoid(z)
             error = probability - label
-            gradBias += error
+            gradBias += sampleWeight * error
             for key in FEATURE_KEYS:
-                grad[key] += error * vector[key]
-            loss -= label * math.log(probability + 1e-15) + (1.0 - label) * math.log(
-                1.0 - probability + 1e-15
+                grad[key] += sampleWeight * error * vector[key]
+            loss -= sampleWeight * (
+                label * math.log(probability + 1e-15)
+                + (1.0 - label) * math.log(1.0 - probability + 1e-15)
             )
-        loss /= count
-        bias -= LEARNING_RATE * gradBias / count
+        loss /= weightTotal
+        bias -= LEARNING_RATE * gradBias / weightTotal
         for key in FEATURE_KEYS:
-            weights[key] -= LEARNING_RATE * grad[key] / count
+            weights[key] -= LEARNING_RATE * grad[key] / weightTotal
         finalLoss = loss
         if previousLoss is not None and abs(previousLoss - loss) < CONVERGENCE_TOL:
             break
@@ -392,6 +400,30 @@ def _dataFingerprint(trainSamples: List[Dict]) -> str:
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _stratifiedSplit(labelled: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    """按会话哈希切分 + 分层补救：任一类整体落在一侧时，移动确定性样本，
+    保证训练/冻结两侧都见到各类（否则冻结指标退化成全类准确率，skip 能力
+    无从验证）。"""
+    train: List[Dict] = []
+    frozen: List[Dict] = []
+    for sample in labelled:
+        (train if _isTrainSplit(sample["sessionId"]) else frozen).append(sample)
+    for labelValue in (0.0, 1.0):
+        trainCount = sum(1 for sample in train if sample["label"] == labelValue)
+        frozenCount = sum(1 for sample in frozen if sample["label"] == labelValue)
+        if frozenCount == 0 and trainCount >= 2:
+            for idx in range(len(train) - 1, -1, -1):
+                if train[idx]["label"] == labelValue:
+                    frozen.append(train.pop(idx))
+                    break
+        elif trainCount == 0 and frozenCount >= 2:
+            for idx in range(len(frozen) - 1, -1, -1):
+                if frozen[idx]["label"] == labelValue:
+                    train.append(frozen.pop(idx))
+                    break
+    return train, frozen
+
+
 def _trainAndEvaluate(
     labelled: List[Dict],
     greyCount: int,
@@ -400,8 +432,7 @@ def _trainAndEvaluate(
     modelVersion: str = MODEL_VERSION_TRAINED,
 ) -> Dict:
     """标注样本 → 标准化训练 → 冻结集评测 → 权重产物（合成/真实两源共用）。"""
-    trainSamples = [sample for sample in labelled if _isTrainSplit(sample["sessionId"])]
-    frozenSamples = [sample for sample in labelled if not _isTrainSplit(sample["sessionId"])]
+    trainSamples, frozenSamples = _stratifiedSplit(labelled)
     if not trainSamples or not frozenSamples:
         raise RuntimeError("训练/冻结验证集切分为空，请增大 --windows 或提供更多会话")
 
@@ -416,6 +447,9 @@ def _trainAndEvaluate(
         {
             "trainWindows": float(len(trainSamples)),
             "frozenWindows": float(len(frozenSamples)),
+            "skipTrainCount": float(sum(1 for s in trainSamples if s["label"] == 0.0)),
+            "skipFrozenCount": float(sum(1 for s in frozenSamples if s["label"] == 0.0)),
+            "allowFrozenCount": float(sum(1 for s in frozenSamples if s["label"] == 1.0)),
             "greyZoneWindows": float(greyCount),
             "greyZoneRatio": greyCount / totalWindows if totalWindows else 0.0,
             "constantFeatureCount": float(len(constantKeys)),
@@ -463,18 +497,50 @@ def trainNeuJudge(windowCount: int = DEFAULT_WINDOWS, seed: int = DEFAULT_SEED) 
     return _trainAndEvaluate(labelled, len(greyWindows), len(windows), seed)
 
 
+def _ingestSkipFeedback(dataRoot: str) -> List[Dict]:
+    """把 triage_skips.jsonl（SB-5 回流样本）直接变训练行。
+
+    - label：not_actionable→0（真跳过）；actionable（含 admin 改标）→1（误杀）；
+    - sessionId 用 skipfb/<sample_id>（与收割窗口的会话切分空间隔离）；
+    - 坏行跳过；无文件返回空。这是**真实流量里最稀缺的 skip 类正样本**来源。
+    """
+    path = Path(dataRoot) / "triage_skips.jsonl"
+    if not path.exists():
+        return []
+    rows: List[Dict] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            record = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict) or not isinstance(record.get("features"), dict):
+            continue
+        rows.append({
+            "sessionId": f"skipfb/{record.get('sample_id') or len(rows)}",
+            "features": _prepareFeatureVector(record["features"]),
+            "label": 1.0 if record.get("label") == "actionable" else 0.0,
+        })
+    return rows
+
+
 def trainNeuJudgeFromRealData(
     dataRoot: str,
     seed: int = DEFAULT_SEED,
     distill: int = 0,
     minMessages: int = 6,
     maxWindows: int = 200,
+    distillScope: str = "gray",
 ) -> Dict:
     """D-SB3/D-SB1：真实会话窗口收割 → 规则/离线蒸馏弱标注 → 训练。
 
     - D-SB3：窗口来自数据根的真实会话落盘文件（不再只有合成模板）；
     - D-SB1：灰区窗口可用既有 LLM 分诊门离线打弱标签（--distill 封顶，
-      人工触发、全部离线，运行时路径零改动）。
+      人工触发、全部离线，运行时路径零改动）；distillScope="audit" 时
+      规则已决窗口也送教师复核（不一致即最高价值标注）；
+    - triage_skips.jsonl（SB-5 回流）直接并入训练行（skip 类稀缺正样本）。
     """
     from neurova.collaboration.triage_dataset import (
         harvestSessionWindows,
@@ -491,6 +557,7 @@ def trainNeuJudgeFromRealData(
         windows,
         distillLimit=distill,
         triageFn=realGateTriageFn if distill > 0 else None,
+        distillScope=distillScope,
     )
     labelled = [
         {
@@ -501,6 +568,8 @@ def trainNeuJudgeFromRealData(
         }
         for entry in labelledRaw["labeled"]
     ]
+    feedbackRows = _ingestSkipFeedback(dataRoot)
+    labelled.extend(feedbackRows)
     if len(labelled) < 8:
         raise RuntimeError(
             f"可训练样本不足（{len(labelled)} < 8）——需要更多会话流量、"
@@ -512,6 +581,8 @@ def trainNeuJudgeFromRealData(
     )
     payload["eval_metrics"]["distillUsed"] = float(labelledRaw["distillUsed"])
     payload["eval_metrics"]["distillErrors"] = float(labelledRaw["distillErrors"])
+    payload["eval_metrics"]["skipFeedbackSamples"] = float(len(feedbackRows))
+    payload["eval_metrics"]["distillScope"] = 1.0 if distillScope == "audit" else 0.0
     return payload
 
 
@@ -534,6 +605,11 @@ def main(argv: List[str] | None = None) -> int:
         "--distill", type=int, default=0,
         help="D-SB1 离线蒸馏配额：灰区窗口用既有 LLM 分诊门离线打弱标签的最大条数"
         "（默认 0=不蒸馏；仅 real 源生效，成本封顶、人工触发）",
+    )
+    parser.add_argument(
+        "--distill-scope", choices=("gray", "audit"), default="audit",
+        help="蒸馏范围：gray=仅灰区（规则弃权）窗口；audit=灰区之外再把规则已决"
+        "的非平凡窗口送教师复核（不一致即最高价值标注；默认 audit）",
     )
     parser.add_argument(
         "--min-messages", type=int, default=6,
@@ -559,6 +635,7 @@ def main(argv: List[str] | None = None) -> int:
             distill=args.distill,
             minMessages=args.min_messages,
             maxWindows=args.max_windows,
+            distillScope=args.distill_scope,
         )
     else:
         payload = trainNeuJudge(args.windows, args.seed)

@@ -31,6 +31,9 @@ from neurova.collaboration.triage_rules import evaluateTriage, extractTriageFeat
 
 MAX_WINDOW_EVENTS = 50
 
+#: 蒸馏种子单条消息内容截断（字符）——防超长消息把教师 prompt 顶过 token 上限
+MAX_DISTILL_CONTENT_CHARS = 400
+
 
 def harvestSessionWindows(
     dataRoot, maxWindows: int = 200, minMessages: int = 6
@@ -88,14 +91,19 @@ def labelWindows(
     windows: List[Dict[str, Any]],
     distillLimit: int = 0,
     triageFn: Optional[Callable[[Dict[str, Any]], bool]] = None,
+    distillScope: str = "gray",
 ) -> Dict[str, Any]:
-    """给窗口打弱标签（规则高置信区直标 + 灰区可选离线蒸馏）。
+    """给窗口打弱标签（规则高置信区直标 + 灰区可选离线蒸馏 + 可选审计蒸馏）。
 
     - 规则 skip（R2/R3）→ label=0（not_actionable），labeler="rules"；
     - 规则高置信放行（no_events/human_last/human_in_window）→ label=1，labeler="rules"；
     - 灰区（default_allow）：有蒸馏配额且提供 triageFn 时调其裁决
       （labeler="llm_distill"，配额 -1）；triageFn 抛异常计 distillErrors、
-      窗口弃权不入训；无配额/无 triageFn 计 grayUnlabeled 弃权。
+      窗口弃权不入训；无配额/无 triageFn 计 grayUnlabeled 弃权；
+    - distillScope="audit"：灰区之外，规则**已决**的非平凡窗口（R1 放行 /
+      R2R3 拦截；R0 平凡窗不送审）也送教师复核，教师裁决覆盖规则标签
+      （labeler="llm_distill_audit"）——审计失败/配额耗尽时保留规则标签。
+      教师与规则的不一致即最高价值的标注点（主动学习）。
 
     返回 {"labeled": [...], "grayUnlabeled": int, "distillUsed": int,
           "distillErrors": int}；labeled 元素含 conversationId/features
@@ -106,48 +114,89 @@ def labelWindows(
     distillUsed = 0
     distillErrors = 0
     remaining = int(distillLimit)
+    grayPending: List[Dict[str, Any]] = []
+    auditPending: List[Dict[str, Any]] = []
+
+    def _runDistill(window: Dict[str, Any], apply) -> bool:
+        nonlocal remaining, distillUsed, distillErrors
+        if remaining <= 0 or triageFn is None:
+            return False
+        try:
+            actionable = bool(triageFn(window))
+        except Exception:  # noqa: BLE001 - 蒸馏失败诚实计数
+            distillErrors += 1
+            return False
+        remaining -= 1
+        distillUsed += 1
+        apply(actionable)
+        return True
+
     for window in windows:
         events = window.get("events") or []
         verdict = evaluateTriage(events, "")
         features = extractTriageFeatures(events, "")
         conversationId = str(window.get("conversationId") or "")
         if verdict.action == "skip":
-            labeled.append({
+            entry = {
                 "conversationId": conversationId,
                 "features": features,
                 "label": 0,
                 "labeler": "rules",
                 "reason": verdict.reason,
-            })
+            }
+            labeled.append(entry)
+            auditPending.append((entry, window))
             continue
         if verdict.reason != "default_allow":
-            labeled.append({
+            trivial = verdict.reason in ("no_events", "human_last")
+            entry = {
                 "conversationId": conversationId,
                 "features": features,
                 "label": 1,
                 "labeler": "rules",
                 "reason": verdict.reason,
-            })
+            }
+            labeled.append(entry)
+            if not trivial:
+                auditPending.append((entry, window))
             continue
-        # 灰区：默认弃权不入训；有配额且提供蒸馏裁决器时离线问 LLM 门
-        if remaining <= 0 or triageFn is None:
-            grayUnlabeled += 1
-            continue
-        try:
-            actionable = bool(triageFn(window))
-        except Exception:  # noqa: BLE001 - 蒸馏失败诚实计数，窗口弃权
-            distillErrors += 1
-            grayUnlabeled += 1
-            continue
-        remaining -= 1
-        distillUsed += 1
-        labeled.append({
+        grayPending.append({
             "conversationId": conversationId,
             "features": features,
-            "label": 1 if actionable else 0,
-            "labeler": "llm_distill",
-            "reason": "distilled",
+            "window": window,
         })
+
+    # 蒸馏第一优先：灰区（规则弃权、教师定夺）
+    for item in grayPending:
+        entry = {
+            "conversationId": item["conversationId"],
+            "features": item["features"],
+        }
+
+        def _applyGray(actionable: bool, entry: Dict[str, Any] = entry) -> None:
+            entry.update({
+                "label": 1 if actionable else 0,
+                "labeler": "llm_distill",
+                "reason": "distilled",
+            })
+
+        if _runDistill(item["window"], _applyGray):
+            labeled.append(entry)
+        else:
+            grayUnlabeled += 1
+
+    # 蒸馏第二优先（audit 范围）：教师复核规则已决窗口，裁决覆盖规则标签
+    if distillScope == "audit":
+        for entry, window in auditPending:
+            def _applyAudit(actionable: bool, entry: Dict[str, Any] = entry) -> None:
+                entry.update({
+                    "label": 1 if actionable else 0,
+                    "labeler": "llm_distill_audit",
+                    "reason": "audited",
+                })
+
+            _runDistill(window, _applyAudit)
+
     return {
         "labeled": labeled,
         "grayUnlabeled": grayUnlabeled,
@@ -178,9 +227,10 @@ def realGateTriageFn(window: Dict[str, Any]) -> bool:
     for event in window.get("events") or []:
         eventType = EventType.USER_MESSAGE if event.get("role") == "user" else EventType.AGENT_REPLY
         timestamp = _parseTimestamp(event.get("timestamp"))
+        content = str(event.get("content") or "")
         session.add_event(SessionEvent(
             event_type=eventType,
-            payload={"content": event.get("content") or ""},
+            payload={"content": content[:MAX_DISTILL_CONTENT_CHARS]},
             timestamp=timestamp,
         ))
     # triage_message 是协程：离线脚本无事件循环，用 asyncio.run 驱动真门

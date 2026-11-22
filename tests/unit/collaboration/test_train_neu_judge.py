@@ -228,3 +228,106 @@ class TestRealSourceTraining:
         assert payload["model_version"] == "0.3.0-real"
         assert payload["feature_version"] == FEATURE_VERSION
         assert NeuJudge.loadFrom(out) is not None
+
+
+class TestDistillImprovements:
+    """D-SB1 增强：skip 样本回流直训 + 类平衡权重 + 分层切分。"""
+
+    def _labelled(self, script, allowCount: int, skipCount: int) -> list:
+        """用真实事件提取特征（不手写特征字典）：allow=人类收尾，skip=纯独走。"""
+        from datetime import datetime, timedelta, timezone
+
+        base = datetime(2026, 11, 22, 10, 0, 0, tzinfo=timezone.utc)
+        labelled = []
+        for i in range(allowCount):
+            events = []
+            for j in range(10):
+                events.append({"role": "user" if j % 2 == 0 else "assistant",
+                               "content": f"人类问题{i}_{j}，各不相同？",
+                               "timestamp": (base + timedelta(seconds=j)).isoformat()})
+            events.append({"role": "user", "content": f"最后人类消息{i}",
+                           "timestamp": (base + timedelta(seconds=99)).isoformat()})
+            labelled.append({"sessionId": f"allow/{i}",
+                             "features": script._prepareFeatureVector(
+                                 extractTriageFeatures(events, "")), "label": 1.0})
+        for i in range(skipCount):
+            events = [{"role": "assistant", "content": f"独走消息 {i} 号，完全相同的句式。",
+                       "timestamp": (base + timedelta(seconds=j)).isoformat()}
+                      for j in range(25)]
+            labelled.append({"sessionId": f"skip/{i}",
+                             "features": script._prepareFeatureVector(
+                                 extractTriageFeatures(events, "")), "label": 0.0})
+        return labelled
+
+    def testClassWeightsPreventSkipCollapse(self, script):
+        """多数类压制下（40 放行 vs 6 拦截），类平衡权重必须让 skip 类仍可学。"""
+        labelled = self._labelled(script, allowCount=40, skipCount=6)
+        payload = script._trainAndEvaluate(labelled, 0, len(labelled), 42)
+        metrics = payload["eval_metrics"]
+        assert metrics["skipFrozenCount"] >= 1, "分层切分后冻结集必须含 skip 类"
+        assert metrics["skipRecall"] > 0.0, "skip 召回不得塌缩为 0"
+        assert metrics["skipPrecision"] > 0.0, "skip 精确率不得为 0"
+
+    def testStratifiedSplitKeepsBothClassesInFrozen(self, script):
+        labelled = self._labelled(script, allowCount=30, skipCount=4)
+        payload = script._trainAndEvaluate(labelled, 0, len(labelled), 42)
+        metrics = payload["eval_metrics"]
+        assert metrics["skipFrozenCount"] >= 1 and metrics["allowFrozenCount"] >= 1
+
+    def testIngestSkipFeedbackRows(self, script, tmp_path):
+        """triage_skips.jsonl 直接回流：默认 not_actionable→0，改标 actionable→1。"""
+        records = [
+            {"sample_id": "aa11", "features": {k: 1.0 for k in FEATURE_KEYS},
+             "label": "not_actionable"},
+            {"sample_id": "bb22", "features": {k: 2.0 for k in FEATURE_KEYS},
+             "label": "actionable", "relabeled": True},
+        ]
+        (tmp_path / "triage_skips.jsonl").write_text(
+            "\n".join(json.dumps(r, ensure_ascii=False) for r in records), encoding="utf-8")
+        rows = script._ingestSkipFeedback(str(tmp_path))
+        assert len(rows) == 2
+        byId = {r["sessionId"]: r for r in rows}
+        assert byId["skipfb/aa11"]["label"] == 0.0
+        assert byId["skipfb/bb22"]["label"] == 1.0
+        assert sorted(byId["skipfb/aa11"]["features"].keys()) == sorted(FEATURE_KEYS)
+
+    def testRealSourceTrainsWithSkipFeedback(self, script, tmp_path):
+        """端到端：会话文件 + triage_skips.jsonl 同喂，skip 反馈样本计入训练。"""
+        from datetime import datetime, timedelta, timezone
+
+        dataRoot = tmp_path / "data"
+        base = datetime(2026, 11, 22, 10, 0, 0, tzinfo=timezone.utc)
+
+        def writeSession(agentDir: str, sessionId: str, messages: list):
+            sessionsDir = dataRoot / agentDir / "sessions"
+            sessionsDir.mkdir(parents=True, exist_ok=True)
+            payload = {"agent_id": agentDir, "session_id": sessionId,
+                       "messages": [{"role": m["role"], "content": m["content"],
+                                     "timestamp": (base + timedelta(seconds=i * 5)).isoformat()}
+                                    for i, m in enumerate(messages)]}
+            (sessionsDir / f"session_{sessionId}_2026-11-22.json").write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        for i in range(6):
+            writeSession(f"agentH{i}", f"human{i}",
+                         [{"role": "user" if j % 2 == 0 else "assistant",
+                           "content": f"问题{i}_{j}，各不相同。"} for j in range(8)])
+        for i in range(6):
+            writeSession(f"agentL{i}", f"loop{i}",
+                         [{"role": "assistant", "content": f"独走{i}号第{j}句。"} for j in range(25)])
+        records = [
+            {"sample_id": "fb1", "features": {k: 1.0 for k in FEATURE_KEYS},
+             "label": "not_actionable"},
+            {"sample_id": "fb2", "features": {k: 3.0 for k in FEATURE_KEYS},
+             "label": "actionable"},
+        ]
+        (dataRoot / "triage_skips.jsonl").write_text(
+            "\n".join(json.dumps(r, ensure_ascii=False) for r in records), encoding="utf-8")
+
+        out = tmp_path / "artifact.json"
+        rc = script.main(["--source", "real", "--data-root", str(dataRoot),
+                          "--out", str(out), "--min-messages", "6",
+                          "--max-windows", "50", "--distill-scope", "gray"])
+        assert rc == 0
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["eval_metrics"]["skipFeedbackSamples"] == 2
