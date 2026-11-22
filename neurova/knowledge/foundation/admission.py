@@ -385,6 +385,16 @@ class KnowledgeAdmissionGate:
             violations = ontology.violations(request, subjectKey)
             if violations:
                 raise ValueError("本体校验未过：%s" % ontology.summarize(violations))
+        # 段3 后半：SHACL 运行时校验（U1；NEUROVA_ONTOLOGY_SHACL_RUNTIME=off|
+        # shadow|enforce，默认 off）。形状单源=ShapeRegistry→exportShaclShapes
+        # （与导出面逐字节同源）；数据图=turtle.serializeAll 同一序列化出口按
+        # 主体邻域圈定+本条候选。enforce 档 sh:Violation 即拒写；shadow 只告警；
+        # off 零开销，pyshacl 缺席时 fail-soft 放行（依赖由首启链自动补齐）。
+        from ..ontology.shacl_runtime import admissionShaclCheck
+
+        shaclBlockers = admissionShaclCheck(self._store, request, subjectKey)
+        if shaclBlockers:
+            raise ValueError("SHACL 校验未过（enforce 档）：%s" % "; ".join(shaclBlockers))
         factId = self._store.upsertFact(
             agentId=request.agentId,
             subjectKey=subjectKey,

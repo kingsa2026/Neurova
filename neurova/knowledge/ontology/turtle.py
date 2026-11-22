@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from neurova.core.tenant_scope import tenant_sql_where
 
@@ -151,13 +151,19 @@ def _canonicalJson(text: Any) -> str:
 
 
 def serializeAll(store: Any, tenantId: str = "default",
-                 agentId: Optional[str] = None) -> str:
+                 agentId: Optional[str] = None,
+                 subjectKeys: Optional[Sequence[str]] = None,
+                 extraFacts: Optional[Sequence[Dict[str, Any]]] = None) -> str:
     """本租户全库导出成单个 Turtle 文档（升级计划 B5，A4 互通面）。
 
     三段注释分段：terms（ontology_terms 全部行）→ rules（ontology_rules 全部行）
     → facts（`status='active' AND record_kind='triple'` 的全部行）。
     确定性判据：排序只来自固定 ORDER BY，时间戳与写入次序一律不进文本，
     同一库内容两次输出逐字节一致。
+
+    `subjectKeys` 圈定 facts 段主体（SHACL 运行时的主体邻域子图，U1）；
+    `extraFacts` 追加尚未落库的候选行（同三列 + fact_id），与查出行走同一
+    段发射代码——候选拼进子图走的是导出层的唯一序列化出口，不另写字形。
 
     facts 段的主语用 `subject_key` 而不是 canonical_label：`iri()` 会把
     IRI 之外的字符收成下划线，中文标签经这一步全塌成同一个 `kbg:_`，
@@ -180,15 +186,31 @@ def serializeAll(store: Any, tenantId: str = "default",
             "SELECT * FROM ontology_rules WHERE %s ORDER BY rule_id" % ruleClause,
             ruleParams).fetchall()
         factTenantClause, factTenantParams = tenant_sql_where(tenant)
-        factSql = ("SELECT subject_key, predicate_term_id, object_term FROM knowledge_facts"
+        factSql = ("SELECT subject_key, predicate_term_id, object_term, fact_id FROM knowledge_facts"
                    " WHERE %s AND status = 'active' AND record_kind = 'triple'"
                    % factTenantClause)
         factParams: List[Any] = list(factTenantParams)
         if agentId:
             factSql += " AND agent_id = ?"
             factParams.append(str(agentId))
+        if subjectKeys:
+            keys = sorted({str(k or "") for k in subjectKeys if str(k or "")})
+            if keys:
+                factSql += " AND subject_key IN (%s)" % ",".join("?" * len(keys))
+                factParams.extend(keys)
         factSql += " ORDER BY subject_key, predicate_term_id, object_term, fact_id"
         factRows = store._conn.execute(factSql, factParams).fetchall()
+        if extraFacts:
+            # 候选行与查出行走同一发射代码（下方 facts 段），只在键序上并轨重排
+            merged = [{k: row[k] for k in row.keys()} for row in factRows]
+            for extra in extraFacts:
+                merged.append({"subject_key": str(extra.get("subject_key") or ""),
+                               "predicate_term_id": str(extra.get("predicate_term_id") or ""),
+                               "object_term": str(extra.get("object_term") or ""),
+                               "fact_id": str(extra.get("fact_id") or "")})
+            merged.sort(key=lambda r: (r["subject_key"], r["predicate_term_id"],
+                                       r["object_term"], r["fact_id"]))
+            factRows = merged
 
     lines: List[str] = [PREFIX_LINE % NAMESPACE]
 

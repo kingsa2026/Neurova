@@ -15,15 +15,17 @@ def exportShaclShapes(store: Any, tenantId: str = "default") -> str:
     shapes = ShapeRegistry(store).list(tenantId=tenantId, enabledOnly=False)
     lines = [
         "@prefix sh: <http://www.w3.org/ns/shacl#> .",
+        "@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .",
         "@prefix kbg: <https://neurova.local/knowledge/> .",
         "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .",
     ]
     for shape in shapes:
         subject = "kbg:shape_%s" % shape["shape_id"]
         lines.append("%s rdf:type sh:NodeShape ;" % subject)
-        lines.append("  sh:targetObjectsOf kbg:%s ;"
-                     % shape["target_term_id"] if shape["target_term_id"]
-                     else "  sh:targetClass kbg:Term ;")
+        if shape["target_term_id"]:
+            lines.append("  sh:targetObjectsOf kbg:%s ;" % shape["target_term_id"])
+        else:
+            lines.append("  sh:targetClass kbg:Term ;")
         constraint = shape["constraint"]
         kind = shape["constraint_kind"]
         if kind == "in":
