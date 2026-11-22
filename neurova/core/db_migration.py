@@ -156,3 +156,28 @@ def migrate(conn, domain: str = "memory") -> List[int]:
 # v1：基线占位——既有表结构由 memory_layer/schema.py IF NOT EXISTS 管理，
 # 本条仅确立版本起点，后续 schema 变更加 2/3/... 注册即可。
 register_migration(1, "SELECT 1", domain="memory")
+
+
+# ── remote_exec 域（W1a 统一远程执行面·端点注册表）────────────────────────
+# 端点注册表（neurova/remote_exec/registry.py）经 migrate(conn, "remote_exec")
+# 应用本链。DDL 唯一事实源落在本注册表，registry.py 不自建第二份建表语句
+# （教义第 6 条）；自然键唯一索引与 endpoint_id 主键双约束（id 由自然键派生）。
+_REMOTE_EXEC_SCHEMA = """
+CREATE TABLE IF NOT EXISTS remote_endpoints (
+    endpoint_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    owner_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    connection_ref TEXT NOT NULL DEFAULT '',
+    health TEXT NOT NULL DEFAULT 'unknown',
+    last_seen_at TEXT,
+    capabilities_json TEXT NOT NULL DEFAULT '{}',
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_remote_endpoints_natural_key
+    ON remote_endpoints(tenant_id, owner_id, kind, name);
+"""
+register_migration(1, _REMOTE_EXEC_SCHEMA, domain="remote_exec")
