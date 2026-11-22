@@ -621,6 +621,12 @@ class ForwardChainingEngine:
                   network: Any = None) -> List[str]:
         # rete_network（U5）：整轮交给 Rete 网络——同一规则表同一咽喉，只换匹配段。
         if network is not None:
+            # U14 同根因扫荡（教义第 5 条）：网络路径不经 _fireRule，否定退役
+            # 必须同拍执行——否定前提已成立的既有结论先退场，再求值新增结论
+            # （与 SQL 路径逐规则同一口径），增量态才停在分层不动点上。
+            for rule in self.rules(includeDisabled=False, tenantId=tenantId):
+                if any(a.get("kind") == "not" for a in rule.get("body") or []):
+                    self._retireNegationBlocked(rule, tenantId=tenantId)
             return network.runRound(agentId=agentId, tenantId=tenantId,
                                     deltaPredicates=deltaPredicates)
         produced: List[str] = []

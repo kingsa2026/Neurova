@@ -268,3 +268,65 @@ class TestStrategySlot:
         assert BetaNode is not None
         assert TerminalNode is not None
         assert ReteNetwork is not None
+
+
+class TestNegationRetirementParity:
+    """U14 同根因扫荡（教义第 5 条）：否定退役口径在 rete_network 路径同拍执行。
+
+    否定前提晚于结论到达时，被阻断的结论必须退场；否定前提撤销后复生——
+    网络路径与 full_replay 逐态一致（差分测试在同根因上的另一命中点）。
+    """
+
+    def _scenario(self, tmp_path, strategy):
+        store = KnowledgeFactStore(str(tmp_path / ("kf_%s.db" % strategy)))
+        engine = ForwardChainingEngine(store, gateFactory=lambda st: productionAdmissionGate(
+            st, toolVersion="rule-engine"))
+        engine.setEvaluationStrategy(strategy)
+        engine.registerRule(
+            "reach_base", "reachable",
+            body=[{"atom": "linked", "subject": "S", "object": "O"}],
+            headSubjectVar="S", materialization="enforce", tenantId="default")
+        engine.registerRule(
+            "reach_blocked", "reachable",
+            body=[{"atom": "linked", "subject": "S", "object": "M"},
+                  {"atom": "reachable", "subject": "M", "object": "O"},
+                  {"not": "blocked", "subject": "S", "object": "O"}],
+            headSubjectVar="S", materialization="enforce", tenantId="default")
+        gate = productionAdmissionGate(store, toolVersion="unit")
+
+        def _admit(s, p, o):
+            content = "%s %s %s" % (s, p, o)
+            return gate.admit(AdmissionRequest(
+                agentId="default", subjectLabel=s, predicateTermId=p, objectTerm=o,
+                content=content,
+                assertions=[{"actorType": "pipeline", "actorId": "unit",
+                             "mediumRef": "unit:test", "statementText": content}])).factId
+
+        states = []
+        blockedId = None
+        for step in ("derive", "block", "unblock"):
+            if step == "derive":
+                _admit("甲", "linked", "乙")
+                _admit("乙", "linked", "丙")
+            elif step == "block":
+                blockedId = _admit("甲", "blocked", "丙")
+            else:
+                store.retract(blockedId, reason="测试：否定前提撤销")
+            engine.fireAll(agentId="default")
+            states.append(sorted(
+                (f["canonical_label"], f["predicate_term_id"], f["object_term"])
+                for f in store.searchableFacts(agentId="default")
+                if f["predicate_term_id"] == "reachable"))
+        store.close()
+        return states
+
+    def test_negationBlockThenRetractMatchesFullReplay(self, tmp_path):
+        outcomes = {strategy: self._scenario(tmp_path, strategy)
+                    for strategy in ("full_replay", "rete_network")}
+        assert outcomes["full_replay"] == outcomes["rete_network"], \
+            "否定退役在两条求值路径下必须逐态一致"
+        # 且中间态确实发生了退役与复生（不是恒真摆设）
+        assert outcomes["full_replay"][0] != outcomes["full_replay"][1], \
+            "否定前提到达后，被阻断的结论须退场"
+        assert outcomes["full_replay"][0] == outcomes["full_replay"][2], \
+            "撤销否定前提后，结论须复生"

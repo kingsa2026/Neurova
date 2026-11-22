@@ -225,10 +225,20 @@ class DerivationLedger:
             return 0
         self._cascade.busy = True
         try:
-            return sum(self._retractDerived(edge["derived_fact_id"], reason)
-                       for edge in self.derivationsOf(premiseFactId))
+            return self._runCascade(
+                [edge["derived_fact_id"] for edge in self.derivationsOf(premiseFactId)],
+                reason)
         finally:
             self._cascade.busy = False
+
+    def _runCascade(self, factIds: List[str], reason: str) -> int:
+        """对一批结论根跑一次级联。`visiting` 钉在 thread-local 上：本次级联内
+        每个结论只走一遍，跨次级联互不串场。"""
+        self._cascade.visiting = set()
+        try:
+            return sum(self._retractDerived(factId, reason) for factId in factIds)
+        finally:
+            self._cascade.visiting = set()
 
     def retractRuleVersion(self, ruleId: str, keepVersion: str,
                            tenantId: str = "default") -> int:
@@ -243,8 +253,9 @@ class DerivationLedger:
                 " WHERE e.rule_id = ? AND e.rule_version <> ? AND %s"
                 " ORDER BY e.derived_fact_id" % verClause,
                 (ruleId, keepVersion, *verParams)).fetchall()
-        return sum(self._retractDerived(r["derived_fact_id"], "规则 %s 改版为 %s" % (ruleId, keepVersion))
-                   for r in rows)
+        return self._runCascade(
+            [r["derived_fact_id"] for r in rows],
+            "规则 %s 改版为 %s" % (ruleId, keepVersion))
 
     def retractAllFromRule(self, ruleId: str, reason: str = "",
                            tenantId: str = "default") -> int:
@@ -260,12 +271,26 @@ class DerivationLedger:
                 " WHERE e.rule_id = ? AND %s"
                 " ORDER BY e.derived_fact_id" % dropClause,
                 (ruleId, *dropParams)).fetchall()
-        return sum(self._retractDerived(r["derived_fact_id"],
-                                        reason or "规则 %s 已删除" % ruleId)
-                   for r in rows)
+        return self._runCascade(
+            [r["derived_fact_id"] for r in rows],
+            reason or "规则 %s 已删除" % ruleId)
 
     def _retractDerived(self, factId: str, reason: str) -> int:
-        """先退它自己的下游，再退它自己——深层先走，浅层才不会引用一条已经没了的前提。"""
+        """先退它自己的下游，再退它自己——深层先走，浅层才不会引用一条已经没了的前提。
+
+        `visiting`（thread-local，`_runCascade` 置位）钉住本次级联已走过的结论：
+        正递归规则（传递闭包这类自己推自己的正环）加环形数据会让推导边成环——
+        甲的结论是乙的前提、乙的结论又是甲的前提——没有 visited 级联就在环上
+        无限递归（U14 差分实测撞出 RecursionError）。环上每个结论只退一次；
+        保守侧多退的结论由前提恢复后的重推长回来。
+        """
+        visiting = getattr(self._cascade, "visiting", None)
+        if visiting is None:
+            visiting = set()
+            self._cascade.visiting = visiting
+        if factId in visiting:
+            return 0
+        visiting.add(factId)
         downstream = 0
         for edge in self.derivationsOf(factId):
             if edge["derived_fact_id"] == factId:
