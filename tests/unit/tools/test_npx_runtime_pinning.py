@@ -221,11 +221,29 @@ class TestNoKnownVulnerableRuntimePackages:
         # @modelcontextprotocol/node、@hono/node-server），都声明 `^4`。注意 `^4` 只是
         # **可解析到**修复版，重跑 npm install 实测锁逐字节不变（同 undici / yaml 的事实），
         # 故真正抬升靠 tools/npx-runtime/package.json 的 overrides。
+        # 2026-11 公告（用户通告，未附编号）：validator('form') 对 multipart/form-data 的
+        # Content-Type 只认「单个 boundary 参数」形态，头部多带合法参数（如 charset）或
+        # 分号后带空白即识别失败——验证回调收到空对象，而 parseBody 仍能解析出全部字段；
+        # 回调放行空对象时字段直达 handler，白名单/必填校验被绕过。修复线 4.13.16，
+        # 覆盖 GHSA-5r4p-p66f-jhc7 的 4.13.11，下界随之抬升。
         "hono": (
-            "4.13.11",
+            "4.13.16",
             ("node_modules/@hono/node-server", "node_modules/@modelcontextprotocol/sdk"),
-            "GHSA-5r4p-p66f-jhc7",
-            "serveStatic 与核心路由的双层解码差异（身份校验看到 A、文件落在 B）",
+            "GHSA-5r4p-p66f-jhc7 + 2026-11 公告（未附编号）",
+            "serveStatic 与核心路由的双层解码差异；validator('form') 对 Content-Type "
+            "多参数/空白识别失效，验证回调收空对象、字段绕过白名单直达 handler",
+        ),
+        # 2026-11 公告批（同轮 npm audit 实扫）：@hono/node-server 2.0.0–2.1.5 两条——
+        # WebSocket 升级中套接字 ECONNRESET 未处理，异步升级崩溃终止 Node 进程；
+        # 请求路径反斜杠被解析为路径分隔符，绕过反向代理的路径访问控制。
+        # 修复线 2.1.6；引入链两条（@modelcontextprotocol/node 声明 ^1.19.9 || ^2.1.3、
+        # @modelcontextprotocol/sdk 声明 ^1.19.9 || ^2.0.5），锁粘性同 hono，
+        # 由 tools/npx-runtime/package.json 的 overrides 抬升。
+        "@hono/node-server": (
+            "2.1.6",
+            ("node_modules/@modelcontextprotocol/node", "node_modules/@modelcontextprotocol/sdk"),
+            "GHSA-qv5m-9pm6-hqp3 / GHSA-jpvv-r467-5p4w",
+            "WebSocket 升级 ECONNRESET 崩溃进程；反斜杠路径绕过反代访问控制",
         ),
         "zod": (
             "4.6.6",
@@ -456,9 +474,15 @@ class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
             "MCP server SDK：单请求内存耗尽、跨客户端串话、bearer 未校验受众",
         ),
         "hono": (
-            "4.13.11",
-            "GHSA-5r4p-p66f-jhc7",
-            "serveStatic 二次解码绕过路由中间件",
+            "4.13.16",
+            "GHSA-5r4p-p66f-jhc7 + 2026-11 公告（未附编号：validator('form') 对 "
+            "Content-Type 多参数/空白识别失效，字段绕过验证直达 handler）",
+            "serveStatic 二次解码绕过路由中间件；validator('form') 空对象放行",
+        ),
+        "@hono/node-server": (
+            "2.1.6",
+            "GHSA-qv5m-9pm6-hqp3 / GHSA-jpvv-r467-5p4w",
+            "WebSocket 升级 ECONNRESET 崩溃进程；反斜杠路径绕过反代访问控制",
         ),
         "ip-address": (
             "10.7.4",
