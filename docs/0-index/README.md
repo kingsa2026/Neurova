@@ -161,6 +161,11 @@
 - [工作流调试指南.md](../03-user-guide/工作流调试指南.md) — NeurFlow 工作流调试
 - [触发器配置指南.md](../03-user-guide/触发器配置指南.md) — 触发器配置
 - [心流知识库功能使用指南.md](../03-user-guide/心流知识库功能使用指南.md) — 知识库使用
+- [ontology-1-modeling.md](../03-user-guide/ontology-1-modeling.md) — 本体教程 1 · 建模入门：术语、层级与关系特征（配 `examples/ontology/example_1_build_and_validate.py`）
+- [ontology-2-rules.md](../03-user-guide/ontology-2-rules.md) — 本体教程 2 · 规则与推理：前向链、溯因、反向链与解释（配 `examples/ontology/example_2_rule_derivation.py`）
+- [ontology-3-versioning.md](../03-user-guide/ontology-3-versioning.md) — 本体教程 3 · 版本门禁与回滚：流水线批次、semver 与三臂门禁
+- [ontology-4-query.md](../03-user-guide/ontology-4-query.md) — 本体教程 4 · 查询：Turtle 投影、SPARQL 只读面与图走查注入（配 `examples/ontology/example_3_export_roundtrip.py`）
+- [ontology-5-interop.md](../03-user-guide/ontology-5-interop.md) — 本体教程 5 · 互操作：九格式导出、SHACL 运行时校验与 RDF/XML 导入边界
 - [UI_FRAMEWORK_GUIDE.md](../11-legacy/UI_FRAMEWORK_GUIDE.md) — UI 框架指南（**已归档 2026-11-19**：所述原生 JS 组件体系已不存在，现行前端为 NeurUI/Vue 3）
 - [MIND_EXPANDER_USAGE.md](../03-user-guide/MIND_EXPANDER_USAGE.md) — Mind Expander 使用
 - [HARMONYOS_DESIGN.md](../03-user-guide/HARMONYOS_DESIGN.md) — HarmonyOS 设计
