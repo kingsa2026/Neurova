@@ -9,9 +9,11 @@ rdflib 可选生产依赖（惰性 import＋fail-soft，DB 驱动同款形态）
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Dict, List
 
 from neurova.core.logger import get_logger
+from neurova.knowledge.ontology.query_cache import SparqlProjectionCache
 
 logger = get_logger(__name__)
 
@@ -40,9 +42,34 @@ def _rdflibAvailable() -> bool:
         return False
 
 
+_CACHE_ATTACH_LOCK = threading.Lock()
+
+
+def _projectionCacheFor(store: Any) -> SparqlProjectionCache:
+    """store 上的进程内缓存实例（DCL + Lock，AGENTS.md §3 单例纪律）。
+
+    缓存随 store 实例走：生产 store 是进程级单例（get_knowledge_fact_store），
+    缓存即进程级；测试/多库场景每个 store 实例各自一份，键无需再掺库标识。
+    """
+    cache = getattr(store, "_sparqlProjectionCache", None)
+    if cache is not None:
+        return cache
+    with _CACHE_ATTACH_LOCK:
+        cache = getattr(store, "_sparqlProjectionCache", None)
+        if cache is None:
+            cache = SparqlProjectionCache()
+            store._sparqlProjectionCache = cache
+    return cache
+
+
 def runSparqlQuery(store: Any, query: str, agentId: str = "default",
                    tenantId: str = "default") -> Dict[str, Any]:
-    """SPARQL 只读查询：投影构图→rdflib 执行 SELECT/ASK→行集。"""
+    """SPARQL 只读查询：投影构图→rdflib 执行 SELECT/ASK→行集。
+
+    校验（空查/写形/rdflib 可用性）一律在前，缓存在后——命中不豁免任何校验，
+    也不绕过行数上限（上限在未命中路径内施加，结果整体入缓存）。缓存键带库
+    指纹与事实水印（query_cache.py）：库一动键就换，失效不挂写入口钩子。
+    """
     query = str(query or "").strip()
     if not query:
         raise ValueError("SPARQL 查询为空")
@@ -55,6 +82,15 @@ def runSparqlQuery(store: Any, query: str, agentId: str = "default",
         raise SparqlNotSupported(
             "rdflib 未安装：SPARQL 面显式 not_supported（可选生产依赖，惰性 import）")
     import rdflib
+
+    cache = _projectionCacheFor(store)
+    cacheKey = None
+    if cache.enabled:
+        cacheKey = cache.buildKey(store, tenantId=tenantId, agentId=agentId,
+                                  query=query)
+        cached = cache.lookup(cacheKey)
+        if cached is not None:
+            return cached
 
     from .turtle import serializeAll
 
@@ -70,9 +106,12 @@ def runSparqlQuery(store: Any, query: str, agentId: str = "default",
         if len(rows) >= MAX_SPARQL_ROWS:
             break
         rows.append({var: _nodeText(row[var]) for var in variables})
-    return {"variables": variables, "rows": rows,
-            "row_count": len(rows),
-            "truncated": len(rows) >= MAX_SPARQL_ROWS}
+    result = {"variables": variables, "rows": rows,
+              "row_count": len(rows),
+              "truncated": len(rows) >= MAX_SPARQL_ROWS}
+    if cacheKey is not None:
+        cache.store(cacheKey, result)
+    return result
 
 
 def _nodeText(node: Any) -> str:
