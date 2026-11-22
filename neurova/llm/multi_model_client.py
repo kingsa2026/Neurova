@@ -295,6 +295,12 @@ class MultiModelLLMClient:
                 logger.warning("No API key for provider %s", provider.id)
                 return None
 
+            # R8：出站域名策略（默认不启用；设 NEUROVA_LLM_EGRESS_ALLOWLIST
+            # 后对 base_url fail-closed，名单外/解析不出 host 一律拒绝）
+            from neurova.llm.routing.egress_policy import ensureEgressAllowed
+
+            ensureEgressAllowed(provider.base_url)
+
             from neurova.llm.model_limits import get_model_max_tokens
 
             # P0-2 声明式 compat：按 provider 解析开关注入 LLMConfig
