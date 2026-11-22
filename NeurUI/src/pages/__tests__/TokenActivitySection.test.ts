@@ -47,6 +47,10 @@ const messages = {
     tokenActivity: 'Token 活动',
     dailyTokenTrend: '每日 Token 趋势',
     providerBilling: 'Provider 余额',
+    providerTraffic: '服务商流量分布',
+    providerTrafficCalls: '调用次数',
+    providerTrafficTokens: 'Tokens',
+    providerTrafficShare: '流量份额',
     last7Days: '近 7 日',
     last30Days: '近 30 日',
     daily: '每日',
@@ -258,5 +262,41 @@ describe('TokenActivitySection provider 账单卡（P1-13）', () => {
     const text = wrapper.text()
     expect(text).toContain('weird')
     expect(text).toContain('host 无内置适配')
+  })
+})
+
+describe('TokenActivitySection 服务商流量分布（D-R2 观测项）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getUsageOverview).mockResolvedValue(mockOverview() as never)
+    vi.mocked(getProviderUsage).mockResolvedValue({ data: { snapshots: [], errors: [] } } as never)
+  })
+
+  it('renders per-provider traffic rows with share percent', async () => {
+    vi.mocked(getUsageOverview).mockResolvedValue(mockOverview({
+      by_provider: [
+        { provider: 'wa', calls: 20, tokens: 17000, share: 80.0 },
+        { provider: 'wb', calls: 5, tokens: 4256, share: 20.0 },
+      ],
+    }) as never)
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const table = wrapper.find('.nr-traffic-table')
+    expect(table.exists()).toBe(true)
+    const rows = wrapper.findAll('.nr-traffic-row')
+    // 表头 + 两个服务商
+    expect(rows.length).toBe(3)
+    const text = table.text()
+    expect(text).toContain('wa')
+    expect(text).toContain('80.0%')
+    expect(text).toContain('wb')
+    expect(text).toContain('20.0%')
+  })
+
+  it('hides traffic section when by_provider absent (old backend shape)', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('.nr-traffic-table').exists()).toBe(false)
   })
 })

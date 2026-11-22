@@ -111,8 +111,19 @@ export interface UsageOverview {
   heatmap: UsageOverviewHeatmapDay[]
   trends: UsageOverviewTrendPoint[]
   by_model: UsageOverviewModelTotal[]
+  /** D-R2 观测项：服务商真实流量分布（按 tokens 降序 + 份额%；旧后端形状缺省） */
+  by_provider?: UsageOverviewProviderTraffic[]
   /** P1-8：按模型延迟 p50/p95/max（缺延迟数据为空数组） */
   latency_stats?: UsageOverviewLatencyStat[]
+}
+
+/** D-R2 观测项：usage_history 按 provider 聚合的流量分布行。 */
+export interface UsageOverviewProviderTraffic {
+  provider: string
+  calls: number
+  tokens: number
+  /** tokens 占比（百分比一位小数；总 0 → 0） */
+  share: number
 }
 
 // ---------------------------------------------------------------------------

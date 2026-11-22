@@ -50,6 +50,25 @@
         </div>
       </GlassCard>
 
+      <!-- D-R2 观测项：服务商真实流量分布（by_provider 空/旧后端形状 → 隐藏） -->
+      <GlassCard v-if="providerTraffic.length" :title="t('usageStats.providerTraffic')" variant="default" :radius="20">
+        <div class="nr-traffic-table">
+          <div class="nr-traffic-row nr-traffic-head">
+            <span>{{ t('usageStats.providerTrafficCalls') }}</span>
+            <span>{{ t('usageStats.providerTrafficTokens') }}</span>
+            <span>{{ t('usageStats.providerTrafficShare') }}</span>
+          </div>
+          <div v-for="row in providerTraffic" :key="row.provider" class="nr-traffic-row">
+            <span class="nr-traffic-provider">{{ row.provider }} · {{ row.calls }}</span>
+            <span>{{ formatTokenCount(row.tokens) }}</span>
+            <span class="nr-traffic-share">
+              <span class="nr-traffic-bar" :style="{ width: `${Math.min(100, row.share)}%` }" />
+              {{ row.share.toFixed(1) }}%
+            </span>
+          </div>
+        </div>
+      </GlassCard>
+
       <!-- P1-13 provider 真账单（默认关，无快照恒隐藏） -->
       <GlassCard v-if="providerSnapshots.length" :title="t('usageStats.providerBilling')" variant="default" :radius="20">
         <div class="nr-provider-grid">
@@ -171,6 +190,9 @@ function aigcSpark(kind: string): number[] {
 
 /** P1-8 按模型延迟分位（后端已算，此前前端零消费——契约字段悬空） */
 const latencyStats = computed(() => overview.value.latency_stats ?? [])
+
+/** D-R2 观测项：服务商真实流量分布（weight 份额对账；旧后端形状 → 空数组隐藏） */
+const providerTraffic = computed(() => overview.value.by_provider ?? [])
 
 function formatLatency(ms: number): string {
   if (!ms) return '—'
@@ -462,5 +484,49 @@ onMounted(fetchData)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.nr-traffic-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nr-traffic-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1.4fr;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: var(--nr-text-secondary, var(--nr-text-tertiary));
+  font-size: 13px;
+}
+
+.nr-traffic-head {
+  font-weight: 600;
+  color: var(--nr-text-primary, var(--nr-neutral-100));
+}
+
+.nr-traffic-provider {
+  color: var(--nr-text-primary, var(--nr-neutral-100));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nr-traffic-share {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nr-traffic-bar {
+  display: inline-block;
+  height: 6px;
+  min-width: 2px;
+  border-radius: 3px;
+  background: var(--nr-primary);
+  opacity: 0.75;
 }
 </style>

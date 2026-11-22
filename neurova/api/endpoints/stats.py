@@ -373,9 +373,30 @@ def _empty_usage_overview(days: int, scope: str) -> Dict[str, Any]:
         ],
         "trends": [],
         "by_model": [],
+        # D-R2 收尾观测项：服务商真实流量分布（空态恒空数组）
+        "by_provider": [],
         # P1-8：按模型延迟 p50/p95/max（缺延迟数据为空数组）
         "latency_stats": [],
     }
+
+
+def _providerTrafficRows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """provider 流量分布行：按 tokens 降序 + 份额百分比（一位小数）。
+
+    D-R2 收尾观测项：加权分流配置后，真实流量分布从 usage_history 按
+    provider 聚合回读——配置的 weight 是否按预期分流，以此对账。
+    总 tokens 为 0（空窗/全零行）时份额诚实记 0，不造均匀分布。
+    """
+    total = sum(int(r.get("tokens") or 0) for r in rows)
+    return [
+        {
+            "provider": str(r.get("provider") or ""),
+            "calls": int(r.get("calls") or 0),
+            "tokens": int(r.get("tokens") or 0),
+            "share": (round(int(r.get("tokens") or 0) / total * 100, 1) if total > 0 else 0.0),
+        }
+        for r in sorted(rows, key=lambda x: int(x.get("tokens") or 0), reverse=True)
+    ]
 
 
 @router.get("/usage-overview")
@@ -465,6 +486,9 @@ async def get_usage_overview(
         except Exception:  # noqa: BLE001 — cache 汇总失败不影响主看板
             cache_summary = {}
 
+        # D-R2 收尾观测项：服务商真实流量分布（与 by_model 同源同窗）
+        by_provider = _providerTrafficRows(history.provider_totals(user_id=user_id))
+
         return {
             "scope": scope,
             "summary": {
@@ -488,6 +512,8 @@ async def get_usage_overview(
             "heatmap": heatmap,
             "trends": trends,
             "by_model": by_model,
+            # D-R2 收尾观测项：服务商真实流量分布（按 tokens 降序 + 份额%）
+            "by_provider": by_provider,
             # P1-8：按模型延迟 p50/p95/max 报表
             "latency_stats": history.latency_stats(user_id=user_id),
         }

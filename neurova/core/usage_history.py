@@ -431,6 +431,37 @@ class UsageHistoryStore:
         except Exception:
             return []
 
+    def provider_totals(self, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """按服务商累计 [{provider, calls, tokens}]，按 tokens 降序。
+
+        D-R2 收尾观测项：加权分流配置后，真实流量分布按 provider 聚合
+        回读，对账配置的 weight 份额是否按预期生效。空 provider（无主/
+        旧记录）不计入——无主流量冒充分布只会误导调参。
+        """
+        try:
+            where, params = self._where(user_id)
+            if where:
+                where = f"{where} AND provider != ''"
+            else:
+                where = "WHERE provider != ''"
+            with self._lock:
+                with self._connect() as conn:
+                    rows = conn.execute(
+                        f"""
+                        SELECT provider,
+                               COUNT(*) AS calls,
+                               SUM(total_tokens) AS tokens
+                        FROM llm_usage
+                        {where}
+                        GROUP BY provider
+                        ORDER BY tokens DESC
+                        """,
+                        params,
+                    ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+
     def latency_stats(self, user_id: Optional[str] = None, min_calls: int = 1) -> List[Dict[str, Any]]:
         """按模型聚合延迟 p50/p95/max。
 
