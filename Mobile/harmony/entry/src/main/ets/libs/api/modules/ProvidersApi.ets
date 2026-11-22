@@ -27,6 +27,10 @@ export interface ProviderInfoDto {
   models_count: number;
   health: string;
   api_key_configured: boolean;
+  /** D-R2：同优先级组内加权分流份额（0=仅兜底；缺省 1） */
+  weight: number;
+  /** R11：服务商级嵌入模型声明（空串=未声明=本地嵌入） */
+  embedding_model: string;
 }
 
 /** 活跃模型载荷（provider.py /active-model） */
@@ -41,12 +45,23 @@ export interface CheckConnectionDto {
   message: string;
 }
 
-/** 创建服务商请求（provider.py CreateProviderRequest） */
+/** 创建服务商请求（provider.py CreateProviderRequest；weight/embedding_model 选填） */
 export interface ProviderCreateRequest {
   name: string;
   provider_type: string;
   base_url: string;
   api_key: string;
+  weight?: number;
+  embedding_model?: string;
+}
+
+/** 服务商流量分布行（/stats/usage-overview 的 by_provider 段；D-R2 观测项） */
+export interface ProviderTrafficRowDto {
+  provider: string;
+  calls: number;
+  tokens: number;
+  /** tokens 占比（百分比一位小数） */
+  share: number;
 }
 
 /** 模型（model.py ModelInfo 投影子集） */
@@ -86,6 +101,8 @@ export class ProvidersApi {
         models_count: Number(p['models_count'] ?? 0),
         health: String(p['health'] ?? ''),
         api_key_configured: p['api_key_configured'] === true,
+        weight: Number(p['weight'] ?? 1),
+        embedding_model: String(p['embedding_model'] ?? ''),
       };
       out.push(item);
     }
@@ -153,5 +170,24 @@ export class ProvidersApi {
   /** 删除服务商 */
   async remove(providerId: string): Promise<ApiResponse<Object>> {
     return this.client.delete<Object>(`/providers/${providerId}`);
+  }
+
+  /** 服务商真实流量分布（D-R2 观测项：/stats/usage-overview 的 by_provider 段；
+   *  端点/段缺失或空库 → 空数组，卡片隐藏） */
+  async providerTraffic(): Promise<ProviderTrafficRowDto[]> {
+    const res = await this.client.get<Object>('/stats/usage-overview?days=7&trend_days=7');
+    const obj = res as Object as Record<string, Object>;
+    const arr = (obj['by_provider'] ?? []) as Object[];
+    const out: ProviderTrafficRowDto[] = [];
+    for (const raw of arr) {
+      const r = raw as Object as Record<string, Object>;
+      out.push({
+        provider: String(r['provider'] ?? ''),
+        calls: Number(r['calls'] ?? 0),
+        tokens: Number(r['tokens'] ?? 0),
+        share: Number(r['share'] ?? 0),
+      });
+    }
+    return out;
   }
 }

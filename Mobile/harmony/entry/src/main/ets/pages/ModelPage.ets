@@ -12,7 +12,7 @@
  * 后端不存在的端点形态，随本次重写退役（ModelsApi 整模块退役，教义第 7 条）。
  */
 
-import { ProvidersApi, ProviderInfoDto, ModelInfoDto, ProviderCreateRequest, ActiveModelDto } from '../libs/api/modules/ProvidersApi';
+import { ProvidersApi, ProviderInfoDto, ModelInfoDto, ProviderCreateRequest, ActiveModelDto, ProviderTrafficRowDto } from '../libs/api/modules/ProvidersApi';
 import { HttpClient } from '../libs/api/HttpClient';
 import { StyleManager } from '../libs/style/StyleManager';
 import { MessageManager } from '../libs/message/MessageManager';
@@ -30,6 +30,11 @@ export struct ModelPage {
   @State private newType: string = 'openai';
   @State private newBaseUrl: string = '';
   @State private newApiKey: string = '';
+  /** D-R2/R11：新增服务商声明位（weight 留空=缺省 1；嵌入模型留空=本地嵌入） */
+  @State private newWeight: string = '';
+  @State private newEmbeddingModel: string = '';
+  /** D-R2 观测项：服务商真实流量分布（usage_history 按 provider 聚合） */
+  @State private traffic: ProviderTrafficRowDto[] = [];
   @State private busy: boolean = false;
   private providersApi: ProvidersApi = new ProvidersApi(HttpClient.getInstance());
   private sm = StyleManager.getInstance();
@@ -51,6 +56,12 @@ export struct ModelPage {
       }
     } catch (e) {
       this.msg.error('模型配置加载失败：' + (e as Error).message);
+    }
+    // D-R2 观测项：流量分布副路径（失败静默回空，不影响主看板）
+    try {
+      this.traffic = await this.providersApi.providerTraffic();
+    } catch (e) {
+      this.traffic = [];
     }
     this.loading = false;
   }
@@ -107,6 +118,13 @@ export struct ModelPage {
         base_url: this.newBaseUrl.trim(),
         api_key: this.newApiKey.trim(),
       };
+      const weight = Number(this.newWeight.trim());
+      if (this.newWeight.trim().length > 0 && Number.isFinite(weight)) {
+        data.weight = weight;
+      }
+      if (this.newEmbeddingModel.trim().length > 0) {
+        data.embedding_model = this.newEmbeddingModel.trim();
+      }
       const res = await this.providersApi.create(data);
       if (res.code === 0 && res.data) {
         this.msg.success('服务商已创建');
@@ -114,6 +132,8 @@ export struct ModelPage {
         this.newName = '';
         this.newBaseUrl = '';
         this.newApiKey = '';
+        this.newWeight = '';
+        this.newEmbeddingModel = '';
         // 创建即测连通性（原型 F11 交互）
         await this.testConnection(res.data);
         this.providers = await this.providersApi.list();
@@ -276,6 +296,56 @@ export struct ModelPage {
               .border({ width: 1, color: this.sm.getColor('border') })
               .margin({ bottom: 10, left: 20, right: 20 })
             }, (p: ProviderInfoDto) => p.provider_id)
+
+            if (this.traffic.length > 0) {
+              Text('服务商流量分布（近 7 日）')
+                .fontSize(12)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.sm.getColor('text_tertiary'))
+                .margin({ left: 20, bottom: 6 })
+              Column() {
+                ForEach(this.traffic, (row: ProviderTrafficRowDto) => {
+                  Column() {
+                    Row() {
+                      Text(row.provider)
+                        .fontSize(12.5)
+                        .fontWeight(FontWeight.Medium)
+                        .fontColor(this.sm.getColor('text_primary'))
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        .layoutWeight(1)
+                      Text(row.calls + ' 次 · ' + row.tokens + ' tokens')
+                        .fontSize(10)
+                        .fontColor(this.sm.getColor('text_tertiary'))
+                      Text(row.share + '%')
+                        .fontSize(12)
+                        .fontWeight(FontWeight.Medium)
+                        .fontColor(this.sm.getColor('primary'))
+                        .margin({ left: 8 })
+                    }
+                    .width('100%')
+                    Row() {
+                      Column()
+                        .width(Math.min(100, row.share) + '%')
+                        .height(5)
+                        .borderRadius(3)
+                        .backgroundColor(this.sm.getColor('primary'))
+                    }
+                    .width('100%')
+                    .backgroundColor(this.sm.getColor('surface_strong'))
+                    .borderRadius(3)
+                    .margin({ top: 4 })
+                  }
+                  .margin({ bottom: 8 })
+                }, (row: ProviderTrafficRowDto) => row.provider)
+              }
+              .width('calc(100% - 40vp)')
+              .padding(14)
+              .borderRadius(16)
+              .backgroundColor(this.sm.getColor('glass'))
+              .border({ width: 1, color: this.sm.getColor('border') })
+              .margin({ bottom: 10, left: 20, right: 20 })
+            }
           }
           .width('100%')
         }
@@ -313,6 +383,22 @@ export struct ModelPage {
             TextInput({ text: this.newApiKey, placeholder: 'API Key' })
               .onChange((v: string) => {
                 this.newApiKey = v;
+              })
+              .height(42)
+              .borderRadius(12)
+              .backgroundColor(this.sm.getColor('surface_strong'))
+              .margin({ top: 9 })
+            TextInput({ text: this.newWeight, placeholder: '分流权重（同优先级组内；0=仅兜底；留空=1）' })
+              .onChange((v: string) => {
+                this.newWeight = v;
+              })
+              .height(42)
+              .borderRadius(12)
+              .backgroundColor(this.sm.getColor('surface_strong'))
+              .margin({ top: 9 })
+            TextInput({ text: this.newEmbeddingModel, placeholder: '嵌入模型（选填；留空=本地嵌入）' })
+              .onChange((v: string) => {
+                this.newEmbeddingModel = v;
               })
               .height(42)
               .borderRadius(12)
