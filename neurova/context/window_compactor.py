@@ -13,6 +13,17 @@ from dataclasses import dataclass
 # P2-7 同组单元聚合：组边界判定单源在 window_partition（纯函数，无环）。
 from neurova.context.window_partition import snapBoundaryToGroup
 
+# P2-8 压缩生命周期钩子：事件名常量与发射逻辑单源在 compaction_lifecycle，
+# 本模块只消费发射函数（修复教义第 6 条，不在编排层另发一套事件）。
+from neurova.context.compaction_lifecycle import (
+    emitCompactionAfter,
+    emitCompactionBefore,
+    emitCompactionError,
+)
+
+#: 本模块作为压缩事件来源的标识（事件负载 source 字段的单一定义点）。
+_COMPACT_EVENT_SOURCE = "window_compactor"
+
 
 _COMPACT_EVENT_SOURCE = "window_compactor"
 
@@ -356,6 +367,7 @@ async def compact_window(
     meter: typing.Optional["WindowTokenMeter"] = None,
     summary_max_retries: typing.Optional[int] = None,
     summary_call_budget: typing.Optional[int] = None,
+    sessionKey: str = "",
 ) -> typing.Optional[WindowCompaction]:
     """超预算时折叠窗口老消息；未超预算返回 None（零行为变化）。
 
@@ -368,6 +380,13 @@ async def compact_window(
 
     summary_max_retries: 摘要失败后"丢最旧一条重试"的上限；`None` 取本模块默认
     （`_SUMMARY_MAX_RETRIES`）。
+    sessionKey: 会话键，仅用于生命周期钩子事件的负载标注（P2-8）；不传则为
+    空串，不影响折叠行为。事件经统一总线发布（常量单源
+    `context/compaction_lifecycle.py`）：确超预算进入折叠前发
+    `context.compaction.before`，返回有效结果前发 `context.compaction.after`，
+    摘要失败发 `context.compaction.error`（phase="summarize"）；未超预算
+    零事件。发布 fail-open，不改变本函数任何折叠/返回语义。
+
     summary_call_budget: 本次调用**允许发起的摘要 LLM 调用总数**上限；`None`
     为不限。递进折叠（下面的 ratio 循环）每一轮都会对更大的折叠区重新摘要，
     于是"重试上限"单独并不足以给出成本上界。
@@ -390,6 +409,12 @@ async def compact_window(
     # 单源计量：整段折叠（含递进各轮）共用同一个 meter，同一条消息只算一次。
     meter = meter or WindowTokenMeter()
 
+    # P2-8 生命周期钩子：窗口确超预算、即将进入折叠时发 before（未超预算
+    # 零事件，不空转）。before/after 在本次调用内各只发一次，不随递进轮数重复。
+    if meter.total(msgs) > budget_tokens:
+        emitCompactionBefore(
+            sessionKey, len(msgs), budget_tokens, source=_COMPACT_EVENT_SOURCE
+        )
 
     summary = None
     ratio = target_ratio
@@ -432,8 +457,14 @@ async def compact_window(
             for attempt in range(retry_budget + 1):
                 try:
                     round_summary = await summarize(dropped_for_summary, previous_summary)
-                except Exception:  # noqa: BLE001 - 摘要失败不阻断上下文构建
+                except Exception as summarizeError:  # noqa: BLE001 - 摘要失败不阻断上下文构建
                     round_summary = None
+                    # P2-8：摘要失败以 error 事件暴露（phase="summarize"），
+                    # 不改变既有 fail-open 语义（吞异常继续折叠）。
+                    emitCompactionError(
+                        sessionKey, summarizeError, phase="summarize",
+                        source=_COMPACT_EVENT_SOURCE,
+                    )
                 if isinstance(round_summary, str) and round_summary.strip():
                     skipped_oldest = attempt
                     break
@@ -469,4 +500,7 @@ async def compact_window(
         if ratio >= 1.0:
             break
 
+    # P2-8：返回前对有效折叠结果发 after（best 为 None 即未折叠，不发）。
+    if best is not None:
+        emitCompactionAfter(sessionKey, best, source=_COMPACT_EVENT_SOURCE)
     return best
