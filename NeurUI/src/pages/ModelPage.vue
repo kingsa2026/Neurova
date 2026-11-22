@@ -230,6 +230,18 @@
                     </label>
                   </div>
                 </div>
+                <!-- Weight (D-R2 加权分流) -->
+                <div class="nr-field">
+                  <label>{{ t('model.weight') }}</label>
+                  <input v-model.number="configForm.weight" type="number" min="0" step="0.5" class="nr-input" />
+                  <span class="nr-hint">{{ t('model.weightHint') }}</span>
+                </div>
+                <!-- Embedding Model (R11 远程向量通道) -->
+                <div class="nr-field">
+                  <label>{{ t('model.embeddingModel') }}</label>
+                  <input v-model="configForm.embedding_model" class="nr-input" :placeholder="t('model.embeddingModelOptional')" />
+                  <span class="nr-hint">{{ t('model.embeddingModelHint') }}</span>
+                </div>
                 <!-- Custom Headers -->
                 <div class="nr-field">
                   <label>{{ t('model.customHeaders') }}</label>
@@ -635,6 +647,9 @@ const configForm = reactive({
   auth_method: 'api_key' as 'api_key' | 'bearer',
   headers: [] as CustomHeaderRow[],
   genParamsJson: '{}',
+  // D-R2：同优先级组内加权分流份额；R11：服务商级嵌入模型声明
+  weight: 1 as number | null,
+  embedding_model: '',
 })
 
 // Model management modal
@@ -818,6 +833,8 @@ function mergeProviders(apiList: any[]): Provider[] {
       enabled: apiData.is_active !== false && apiData.enabled !== false,
       health: apiData.health || 'unknown',
       priority: apiData.priority || 0,
+      weight: apiData.weight ?? 1,
+      embedding_model: apiData.embedding_model || '',
       config: apiData.config,
       headers: apiData.headers,
     })
@@ -841,6 +858,8 @@ function buildProvider(seed: SeedProvider, apiData?: any): Provider {
     enabled: apiData?.is_active !== false && apiData?.enabled !== false,
     health: apiData?.health || 'unknown',
     priority: apiData?.priority || 0,
+    weight: apiData?.weight ?? 1,
+    embedding_model: apiData?.embedding_model || '',
     config: apiData?.config,
     headers: apiData?.headers,
   }
@@ -1259,6 +1278,8 @@ function openConfigure(p: Provider) {
     ? Object.entries(p.headers).map(([key, value]) => ({ rowId: nextHeaderRowId(), key, value }))
     : []
   configForm.genParamsJson = p.config ? JSON.stringify(p.config, null, 2) : '{}'
+  configForm.weight = p.weight ?? 1
+  configForm.embedding_model = p.embedding_model || ''
   advancedOpen.value = false
   showConfigure.value = true
 }
@@ -1301,6 +1322,10 @@ async function saveConfiguration() {
     const configPayload = {
       base_url: configForm.base_url,
       api_key: configForm.api_key || undefined,
+      // D-R2/R11：weight 与 embedding_model 显式下发。weight 非法输入
+      // （空框）不下发避免误清；embedding_model 空串=清除声明。
+      weight: Number.isFinite(configForm.weight as number) ? configForm.weight : undefined,
+      embedding_model: configForm.embedding_model,
       config: {
         ...genParams,
         auth_method: configForm.auth_method,
@@ -1315,6 +1340,8 @@ async function saveConfiguration() {
     configureTarget.value.auth_method = configForm.auth_method
     configureTarget.value.headers = headers
     configureTarget.value.config = genParams
+    if (Number.isFinite(configForm.weight as number)) configureTarget.value.weight = configForm.weight as number
+    configureTarget.value.embedding_model = configForm.embedding_model
     message.success(t('common.success'))
     showConfigure.value = false
   } catch (err) {

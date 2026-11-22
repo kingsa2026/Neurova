@@ -43,6 +43,10 @@ export interface Provider {
   enabled: boolean
   health: 'healthy' | 'unhealthy' | 'unknown'
   priority: number
+  /** D-R2：同优先级组内加权分流份额（0=仅兜底；缺省 1=既有确定性序） */
+  weight?: number
+  /** R11：服务商级嵌入模型声明（设置即启用远程向量通道） */
+  embedding_model?: string
   description?: string
   config?: Record<string, unknown>
   headers?: Record<string, string>
