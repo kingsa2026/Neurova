@@ -224,4 +224,5 @@
 
 执行注记：
 - 磁盘满事故：C 盘 100% 阻塞 worktree 操作——清理陈旧 worktree（head-ab2，455M）与 pip/uv 缓存（~810M）后恢复；研究用参考克隆（lobehub-src 等）系有意保留未动。
+- 移动端对齐（用户指令「先把这两个小卡补上」）：**读投影缺口修复 68db162ec**（ProviderInfo 此前不回带 weight/embedding_model 现值——PC 表单回填恒见缺省的 bug 一并修复，4 构造点同源补齐+类型防御）+ **安卓 a3e58efe4**（表单两位+流量分布卡，AdminWireTest 2 新用例、全量 20 测试类绿）+ **鸿蒙 726e824fd**（表单两位+流量分布卡，hvigor assembleHap 编译过）。移动端均无强制项，此为体验对齐。
 - vitest 存量 4 failed 的 A/B 自证：stash 本笔前端改动后复跑同样失败——归属并行会话在途批（AIGC 子菜单重构 + 同名函数盘点台账未再生），不随本批清偿。
