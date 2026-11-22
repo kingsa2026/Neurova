@@ -1,0 +1,20 @@
+{
+  "model_version": "0.1.0-seed",
+  "feature_version": "triage-features-v1",
+  "bias": 2.5,
+  "weights": {
+    "humanEventDistance": 0.8,
+    "humanTimeDistanceSec": 0.05,
+    "agentStreakLength": -0.2,
+    "maxRepeatCount": -0.15,
+    "maxSimilarity": -1.0,
+    "messageRatePerMin": -0.005,
+    "userCount": 0.0,
+    "assistantCount": -0.01,
+    "meanAssistantLength": 0.0,
+    "maxAssistantLength": 0.0,
+    "questionRatio": 0.2
+  },
+  "data_fingerprint": "hand-seeded",
+  "eval_metrics": {"note": "seed model, pending real training"}
+}
