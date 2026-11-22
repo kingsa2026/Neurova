@@ -137,3 +137,5 @@
 **统一 live-verify（2026-11-22，真后端 127.0.0.1:9781 + 临时数据根 + 真 socket 假 IdP）：20/20 PASS**——后端启动/401 全安全头/HSTS 默认不发/错码 401/登录 token/审计含 AUTH_LOGIN+AUTH_FAILED/integrity ok/私网 webhook 400/OIDC status enabled/authorize 带 state+nonce/IdP 回 callback/callback 换 JWT/me 可用/2FA setup/enable/登录挑战/错码拒/OTP 换 token/me 可用/恢复码单次。
 
 **D9 复评（实施后）**：专项 70.0→**73.5，本仓反超 LobeHub 72.5（+1.0）**（A2 6→7/A3 7→7.5/A7 9→9.5/A9 5.5→7）；主报告 D9 8.0→**8.5**（运行安全 2.0→2.5），总分 96.0→**96.5**。S5 余量 28 文件迁移按 D-S3 另批。
+
+**S5 收尾批（私有租户 resolve 辅助收口）已实施（2026-11-22，0aa2a86f1）**：teams_api._userTenant、knowledge 七端点文件 _tenantOf/_tenant_of、根级 mcp_ontology_server._tenantOf——九文件私有辅助一律内部委托 `tenant_scope.resolve_tenant`（dict/None 入参行为逐字节一致）；覆盖判据 `test_privateTenantResolveHelpersDelegatedToTenantScope` 清单扩至九文件（路径改相对 neurova/ 根），白名单仅留 5 处内联调用点缺省回退（响应 dict 字面量/行级序列化/actor 取值，语义不同构归后续批）。红灯：HEAD 九文件裸公式计数 3/1/2/1/1/1/3/1/1，守卫断言必红；绿灯：覆盖测试 4 passed＋消费方定向回归 102 passed 零新增。净 +18/−12（生产池）＋67（测试池）。
