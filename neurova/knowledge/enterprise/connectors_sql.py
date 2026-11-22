@@ -181,6 +181,102 @@ _TABLE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]
 #: 单批行数上限钳制（协议义务具名化，ERP 连接器同款常量）
 _MAX_BATCH_LIMIT = 500
 
+# ── 列画像采样（U10，2026-11-23）────────────────────────────────────
+
+#: 画像采样行数上限缺省值；可用环境变量 NEUROVA_SCHEMA_PROFILE_SAMPLE 覆盖
+DEFAULT_SCHEMA_PROFILE_SAMPLE = 1000
+_SCHEMA_PROFILE_ENV = "NEUROVA_SCHEMA_PROFILE_SAMPLE"
+
+#: 采样模板（每表一次取前 N 行；N 来自内部钳制整数，不接外部输入，
+#: 表名另行过 _TABLE_IDENTIFIER 白名单）。mssql 用 TOP、oracle 用 FETCH FIRST。
+_PROFILE_SAMPLE_TEMPLATES: Dict[str, str] = {
+    "sqlite": "SELECT * FROM {table} LIMIT {n}",
+    "postgresql": "SELECT * FROM {table} LIMIT {n}",
+    "mysql": "SELECT * FROM {table} LIMIT {n}",
+    "mssql": "SELECT TOP {n} * FROM {table}",
+    "oracle": "SELECT * FROM {table} FETCH FIRST {n} ROWS ONLY",
+}
+
+
+def schemaProfileSampleLimit() -> int:
+    """画像采样上限（env NEUROVA_SCHEMA_PROFILE_SAMPLE，默认 1000，下钳 1 行）。"""
+    raw = os.environ.get(_SCHEMA_PROFILE_ENV, "")
+    try:
+        return max(1, int(str(raw).strip()))
+    except ValueError:
+        return DEFAULT_SCHEMA_PROFILE_SAMPLE
+
+
+def _profileText(value: Any) -> Optional[str]:
+    """画像值文本归一（min/max/样例落 TEXT 列的唯一口径）：datetime → ISO，
+    bytes → utf-8（失败转 hex），NaN/Inf → None，其余 str()。"""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.hex()
+    if isinstance(value, float) and (value != value or value in
+                                     (float("inf"), float("-inf"))):
+        return None
+    return str(value)
+
+
+def computeColumnProfiles(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """采样行 → 每列画像（U10 纯函数，跨驱动一致）。
+
+    口径：distinct/null 率/min/max/样例（≤5 个，按首现序去重）都在**采样样本**
+    上计算，profile_sample_rows=样本行数。画像键与 ontology_catalog_columns
+    的 v59 列同名——ingestSchema 落账与 schema_suggester 消费共用此形状
+    （单一事实源，不另造第二套画像结构）。
+    """
+    total = len(rows)
+    if total <= 0:
+        return {}
+    stats: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        for name, value in row.items():
+            entry = stats.get(name)
+            if entry is None:
+                entry = stats[str(name)] = {"values": [], "nulls": 0}
+            if value is None:
+                entry["nulls"] += 1
+            else:
+                entry["values"].append(value)
+    profiles: Dict[str, Dict[str, Any]] = {}
+    for name, entry in stats.items():
+        values = entry["values"]
+        distinctKeys: set = set()
+        samples: List[str] = []
+        for value in values:
+            key = value if isinstance(value, (int, float, str, bool, bytes)) \
+                else _profileText(value)
+            if key not in distinctKeys:
+                distinctKeys.add(key)
+                if len(samples) < 5:
+                    samples.append(_profileText(value))
+        if values:
+            try:
+                minValue, maxValue = min(values), max(values)
+            except TypeError:  # 同列混型：按 repr 兜底比较，不炸画像
+                minValue, maxValue = min(values, key=repr), max(values, key=repr)
+        else:  # 全空列（或全 NULL）：min/max 如实缺省，不造 0 值
+            minValue, maxValue = None, None
+        profiles[name] = {
+            "profile_distinct": len(distinctKeys),
+            "profile_null_rate": round(entry["nulls"] / total, 6),
+            "profile_min": _profileText(minValue),
+            "profile_max": _profileText(maxValue),
+            "profile_samples_json": json.dumps(samples, ensure_ascii=False),
+            "profile_sample_rows": total,
+        }
+    return profiles
+
 
 class DriverNotInstalledError(RuntimeError):
     """可选驱动未安装：health 显式点名，fetch/describe 如实抛（不吞成空批）。"""
@@ -307,6 +403,42 @@ class SqlDirectAdapter:
     async def describeRelations(self) -> Dict[str, Any]:
         """外键/主键自省（P1-1 可选能力；协议不强制，其余源型无此方法）。"""
         return await asyncio.to_thread(self._describeRelationsSync)
+
+    async def profileColumns(self, tableNames: Sequence[str],
+                             sampleSize: Optional[int] = None
+                             ) -> Dict[str, Dict[str, Dict[str, Any]]]:
+        """列画像采样（U10 可选能力，仅 SQL 适配器实现；其余源型无此方法）。
+
+        每表采样 ≤sampleSize 行（缺省读 NEUROVA_SCHEMA_PROFILE_SAMPLE），
+        在样本上计算 distinct/null 率/min/max/样例（≤5）。单表失败逐表隔离：
+        warning 点名表名与原因，该表如实缺席（不冒充空画像）。
+        """
+        return await asyncio.to_thread(self._profileColumnsSync, tableNames, sampleSize)
+
+    def _profileColumnsSync(self, tableNames: Sequence[str],
+                            sampleSize: Optional[int] = None
+                            ) -> Dict[str, Dict[str, Dict[str, Any]]]:
+        limit = schemaProfileSampleLimit() if sampleSize is None \
+            else max(1, int(sampleSize))
+        template = _PROFILE_SAMPLE_TEMPLATES[self._driver]
+        profiles: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        for tableName in tableNames or []:
+            name = str(tableName or "")
+            if not _TABLE_IDENTIFIER.match(name):
+                logger.warning("sql[%s/%s] 列画像跳过非常规表名 %r（宁可漏不注入）",
+                               self._driver, self._sourceId, name)
+                continue
+            try:
+                with self._openCursor(template.format(table=name, n=int(limit)), ()) as cursorHandle:
+                    raw = cursorHandle.fetchall()
+                    description = cursorHandle.description
+                profiles[name] = computeColumnProfiles(
+                    self._normalizeRows(description, raw))
+            except Exception as exc:  # noqa: BLE001 - 单表画像失败不挡目录刷新
+                logger.warning("sql[%s/%s] 列画像采样失败（table=%s）：%s: %s",
+                               self._driver, self._sourceId, name,
+                               type(exc).__name__, self._redact(str(exc)))
+        return profiles
 
     async def executeReadonly(self, sql: str, limit: int = 200) -> List[Dict[str, Any]]:
         """生成式只读查询执行口（P1-4）：assertReadonlySelect 硬闸 + LIMIT 收敛。

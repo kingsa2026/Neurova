@@ -66,6 +66,19 @@ CREATE INDEX IF NOT EXISTS idx_catalog_columns_name
     ON ontology_catalog_columns(tenant_id, column_name);
 """
 
+#: v59（U10 连接器列画像，2026-11-23）：目录列表只增列，不建第二套目录。
+#: NULL / sample_rows=0 / samples='[]' ＝未采样（file/chat 等无行数据连接的
+#: 源型如实缺席，不冒充 0 值画像）。min/max 以文本归一（connectors_sql
+#: ._profileText 口径），样例值是 JSON 数组（≤5 个）。
+_SCHEMA_V59_COLUMN_PROFILE = """
+ALTER TABLE ontology_catalog_columns ADD COLUMN profile_distinct INTEGER;
+ALTER TABLE ontology_catalog_columns ADD COLUMN profile_null_rate REAL;
+ALTER TABLE ontology_catalog_columns ADD COLUMN profile_min TEXT;
+ALTER TABLE ontology_catalog_columns ADD COLUMN profile_max TEXT;
+ALTER TABLE ontology_catalog_columns ADD COLUMN profile_samples_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE ontology_catalog_columns ADD COLUMN profile_sample_rows INTEGER NOT NULL DEFAULT 0;
+"""
+
 
 def _tableId(tenantId: str, sourceId: str, tableSchema: str, tableName: str) -> str:
     raw = "|".join([tenantId, sourceId, tableSchema, tableName])
@@ -90,16 +103,23 @@ class SchemaCatalogStore:
     # ── 写入（整体替换）─────────────────────────────────────
 
     def ingestSchema(self, tenantId: str, sourceId: str, sourceType: str,
-                     schema: Any, relations: Optional[Dict[str, Any]] = None) -> Dict[str, int]:
+                     schema: Any, relations: Optional[Dict[str, Any]] = None,
+                     profiles: Optional[Dict[str, Dict[str, Dict[str, Any]]]] = None
+                     ) -> Dict[str, int]:
         """一份 SourceSchema 落目录：同 (租户, 源) 先清后插（陈旧列不残留）。
 
         relations 形状：{"foreign_keys": [{source_table, source_column,
         target_table, target_column}], "primary_keys": {table: [col, ...]}}；
         缺省（适配器无 describeRelations 能力）按无键处理，如实落 0。
+
+        profiles 形状（U10，缺省＝未采样）：{table_name: {column_name: 画像}}，
+        画像键与 ontology_catalog_columns 的 v59 列同名（computeColumnProfiles
+        的产出原样落账）；未给出的列画像列落缺省（distinct NULL、行数 0）。
         """
         tenant = str(tenantId or "default")
         source = str(sourceId or "")
         relations = relations or {}
+        profiles = profiles or {}
         foreignKeys = list(relations.get("foreign_keys") or [])
         primaryKeys = dict(relations.get("primary_keys") or {})
         stamp = _now()
@@ -156,17 +176,26 @@ class SchemaCatalogStore:
                                                   edge.get("target_column") or "")
                             fkCount += 1
                             break
+                    profile = (profiles.get(tableName) or {}).get(columnName) or {}
                     self._store._conn.execute(
                         "INSERT OR REPLACE INTO ontology_catalog_columns"
                         " (catalog_column_id, tenant_id, source_id, catalog_table_id,"
                         "  column_name, data_type, ordinal_position, is_primary_key,"
                         "  is_foreign_key, foreign_key_target, description, term_id,"
-                        "  ingested_at)"
-                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        "  ingested_at, profile_distinct, profile_null_rate,"
+                        "  profile_min, profile_max, profile_samples_json,"
+                        "  profile_sample_rows)"
+                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (_columnId(tenant, tableId, columnName), tenant, source, tableId,
                          columnName, dataType, position,
                          1 if columnName in pkColumns else 0,
-                         isFk, fkTarget, columnDescription, "", stamp),
+                         isFk, fkTarget, columnDescription, "", stamp,
+                         profile.get("profile_distinct"),
+                         profile.get("profile_null_rate"),
+                         profile.get("profile_min"),
+                         profile.get("profile_max"),
+                         profile.get("profile_samples_json") or "[]",
+                         int(profile.get("profile_sample_rows") or 0)),
                     )
                     columnCount += 1
         return {"tables": tableCount, "columns": columnCount, "foreign_keys": fkCount}

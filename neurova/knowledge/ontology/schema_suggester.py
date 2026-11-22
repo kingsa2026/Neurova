@@ -21,7 +21,7 @@ import hashlib
 import json
 import re
 import uuid
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from neurova.core.time_utils import nowIso as _now
 from neurova.core.tenant_scope import tenant_sql_where
@@ -71,6 +71,78 @@ _TOKEN_SPLIT = re.compile(r"[\W_]+", re.UNICODE)
 #: 命名规约外键列：xxx_id；本体词形归一后与既有表名比对
 _FK_COLUMN_RE = re.compile(r"^(?P<base>.+)_id$", re.IGNORECASE)
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
+
+# ── U10 画像证据权重口径（2026-11-23）────────────────────────────────
+# 画像证据只上调**命名规约推断**边（declared=False 且未被 join 探针证实）。
+# 两个子证据：
+#   高唯一性：样本内 distinct/行数 ≥ 0.9（列近乎无重复 → 键候选信号）+0.08；
+#   值域重叠：源列与目标列 min/max 数值区间相交（任一侧非数值回退样例值
+#             交集非空）+0.07。
+# 齐备 = 0.4+0.08+0.07 = 0.55。既有三类证据的相对次序不倒挂：
+#   命名规约 0.4 < 命名+画像（≤0.55）< 声明外键 0.6 < join 探针证实 0.75；
+# 声明外键边与探针证实边不叠加画像加成（DDL/数据级证据已更强，画像不越权）。
+_PROFILE_UNIQUENESS_BOOST = 0.08
+_PROFILE_RANGE_BOOST = 0.07
+_PROFILE_UNIQUENESS_RATIO = 0.9
+
+
+def _profileFloat(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _profileSamples(profile: Dict[str, Any]) -> List[str]:
+    raw = profile.get("profile_samples_json")
+    if isinstance(raw, (list, tuple)):
+        return [str(v) for v in raw]
+    try:
+        data = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    return [str(v) for v in data] if isinstance(data, list) else []
+
+
+def _profileHighlyUnique(profile: Dict[str, Any]) -> bool:
+    """样本内 distinct/行数 ≥ 0.9 判高唯一；行数 0 或未采样（None）不判。"""
+    distinct = profile.get("profile_distinct")
+    sampleRows = profile.get("profile_sample_rows")
+    if distinct is None or not sampleRows:
+        return False
+    return (float(distinct) / float(sampleRows)) >= _PROFILE_UNIQUENESS_RATIO
+
+
+def _profileRangeOverlap(source: Dict[str, Any], target: Dict[str, Any]) -> bool:
+    """值域重叠：两侧 min/max 都可数值化时按区间相交判；否则回退样例值交集。"""
+    sourceMin = _profileFloat(source.get("profile_min"))
+    sourceMax = _profileFloat(source.get("profile_max"))
+    targetMin = _profileFloat(target.get("profile_min"))
+    targetMax = _profileFloat(target.get("profile_max"))
+    if None not in (sourceMin, sourceMax, targetMin, targetMax):
+        return max(sourceMin, targetMin) <= min(sourceMax, targetMax)
+    sourceSamples = set(_profileSamples(source))
+    if not sourceSamples:
+        return False
+    return any(sample in sourceSamples for sample in _profileSamples(target))
+
+
+def _profileEvidenceBoost(sourceProfile: Optional[Dict[str, Any]],
+                          targetProfile: Optional[Dict[str, Any]]
+                          ) -> Tuple[float, List[str]]:
+    """画像证据 → (置信度加成, 理由清单)。任一画像缺席（未采样）不加成，
+    不冒充——画像缺失与「证据否定」是两回事。"""
+    if not sourceProfile or not targetProfile:
+        return 0.0, []
+    boost = 0.0
+    reasons: List[str] = []
+    if _profileHighlyUnique(sourceProfile):
+        boost += _PROFILE_UNIQUENESS_BOOST
+        reasons.append("高唯一性")
+    if _profileRangeOverlap(sourceProfile, targetProfile):
+        boost += _PROFILE_RANGE_BOOST
+        reasons.append("值域重叠")
+    return boost, reasons
 
 
 def parseLlmJson(text: str) -> Optional[Dict[str, Any]]:
@@ -184,6 +256,14 @@ class SchemaSuggester:
         for table in tables:
             detail = self._catalog.tableDetail(tenant, str(table["catalog_table_id"])) or {}
             tableViews.append({**table, "columns": list(detail.get("columns") or [])})
+        # U10：列画像索引（(表名, 列名) → 目录列行）。列行自带 v59 画像列
+        # （profile_distinct/null_rate/min/max/samples_json/sample_rows），
+        # 未采样列该值为缺省（None/0/'[]'），画像证据如实不加成。
+        columnProfiles: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for table in tableViews:
+            for column in table.get("columns") or []:
+                columnProfiles[(str(table["table_name"]),
+                                str(column.get("column_name") or ""))] = column
         termsCreated = 0
         relationsCreated = 0
         probesConfirmed = 0
@@ -207,12 +287,26 @@ class SchemaSuggester:
                 "." + str(edge["target_column"]) if edge.get("target_column") else "",
                 "声明外键" if edge.get("declared") else "命名规约推断")
             confidence = float(edge.get("confidence") or 0.4)
+            probeConfirmed = False
             if probeRunner is not None and not edge.get("declared"):
                 confirmed = self._probeEdge(probeRunner, edge)
                 if confirmed:
                     confidence = 0.75
                     probesConfirmed += 1
+                    probeConfirmed = True
                     sourceText += "；join 探针证实"
+            if not edge.get("declared") and not probeConfirmed:
+                # U10 画像证据（只上调命名规约推断边；目标列缺省按 id 惯例，
+                # 与 _probeEdge 的目标列取法一致）
+                targetColumnName = str(edge.get("target_column") or "id")
+                boost, reasons = _profileEvidenceBoost(
+                    columnProfiles.get((str(edge["source_table"]),
+                                        str(edge["source_column"]))),
+                    columnProfiles.get((str(edge["target_table"]),
+                                        targetColumnName)))
+                if boost:
+                    confidence = round(confidence + boost, 6)
+                    sourceText += "；画像证据：" + "、".join(reasons)
             candidateId = self._relations.record(
                 tenant, surface, sourceEntryId=sourceEntryId,
                 sourceText=sourceText, confidence=confidence)

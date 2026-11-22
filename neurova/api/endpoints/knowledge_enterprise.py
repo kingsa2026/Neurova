@@ -457,10 +457,21 @@ def refreshSchemaCatalog(tenantId: str, sourceId: str) -> Dict[str, int]:
     describeRelations = getattr(adapter, "describeRelations", None)
     if describeRelations is not None:
         relations = run_async_safely(describeRelations())
+    # U10 列画像：SQL 适配器的可选能力（hasattr 探测，同 describeRelations 纪律；
+    # file/chat 等无行数据连接的源型无此方法，画像列如实落未采样缺省）。
+    # 采样上限 NEUROVA_SCHEMA_PROFILE_SAMPLE（默认 1000 行）；单表失败在适配器内
+    # 逐表隔离（warning 点名），不挡目录刷新。
+    profiles = None
+    profileColumns = getattr(adapter, "profileColumns", None)
+    if profileColumns is not None:
+        tableNames = [str(t.get("name") or "")
+                      for t in (getattr(schema, "tables", None) or [])]
+        if tableNames:
+            profiles = run_async_safely(profileColumns(tableNames))
     store = SchemaCatalogStore(get_knowledge_fact_store())
     return store.ingestSchema(tenantId, sourceId,
                               str(descriptor.get("sourceType") or ""),
-                              schema, relations=relations)
+                              schema, relations=relations, profiles=profiles)
 
 
 @router.post("/enterprise/sources/{source_id}/catalog/refresh")

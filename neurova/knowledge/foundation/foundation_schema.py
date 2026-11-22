@@ -46,7 +46,7 @@ from ..ontology.change_log import _SCHEMA_V33
 from ..ontology.function_registry import _SCHEMA_V43_FUNCTIONS
 from ..community_graph import _SCHEMA_V48_COMMUNITIES
 from ..enterprise.webhook_receiver import _SCHEMA_V49_WEBHOOK_DEDUP
-from ..enterprise.schema_catalog import _SCHEMA_V51_CATALOG
+from ..enterprise.schema_catalog import _SCHEMA_V51_CATALOG, _SCHEMA_V59_COLUMN_PROFILE
 from ..enterprise.nl2sql import _SCHEMA_V53_QUERY_HISTORY
 from ..enterprise.registry import _SCHEMA_V56_SYNC_HISTORY, _SCHEMA_V57_SHARE_TENANTS
 from ..ontology.relation_candidates import _SCHEMA_V54_CANDIDATE_EVIDENCE
@@ -217,7 +217,14 @@ _STEPS: List[tuple] = [
     (57, _SCHEMA_V57_SHARE_TENANTS),
     # v58：Rete v2 求值档（U5）——ontology_rules 加 evaluation_strategy 注册档位；
     #      缺省空串＝默认语言（≤2 正原子），rete_network 档显式放宽到 ≤3（写入口声明）
-    (58, _SCHEMA_V58),]
+    (58, _SCHEMA_V58),
+    # v59：连接器列画像（U10，2026-11-23）——ontology_catalog_columns 只增列：
+    #      profile_distinct / profile_null_rate / profile_min / profile_max /
+    #      profile_samples_json / profile_sample_rows；目录刷新时按
+    #      NEUROVA_SCHEMA_PROFILE_SAMPLE（默认 1000 行）采样计算，
+    #      NULL / 0 / '[]' ＝未采样（无行数据连接的源型如实缺席）
+    (59, _SCHEMA_V59_COLUMN_PROFILE),
+]
 
 _registered = False
 
