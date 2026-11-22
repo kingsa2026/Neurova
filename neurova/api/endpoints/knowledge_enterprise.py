@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
-from neurova.core.tenant_scope import tenant_sql_where
+from neurova.core.tenant_scope import resolve_tenant, tenant_sql_where
 from neurova.api.endpoints.knowledge_common import ensureTenantExists
 
 router = APIRouter()
@@ -40,7 +40,7 @@ class EnterpriseMediaTriggerRequest(BaseModel):
 
 
 def _tenantOf(current_user: Dict[str, Any]) -> str:
-    return str(current_user.get("tenant_id") or "default")
+    return resolve_tenant(current_user)
 
 
 def _parts():

@@ -97,3 +97,70 @@ def test_semanticVariantWhitelistPointsStillPresent():
             "%s 的白名单保留点被改动（%s）——该点因语义不同构而保留，"
             "迁移动手前先核对行为差异" % (name, reason)
         )
+
+
+# ---------------------------------------------------------------------------
+# S5 收尾批（私有 resolve 辅助收口）：下列文件的 _tenantOf/_tenant_of/_userTenant
+# 一律内部委托 neurova.core.tenant_scope.resolve_tenant（对 dict 入参行为
+# 逐字节一致），文件内不得再留私有租户提取公式。路径相对 neurova/ 根
+# （含根级 mcp_ontology_server.py，不限于 api/endpoints/）。
+# ---------------------------------------------------------------------------
+
+RESOLVE_HELPER_FILES = (
+    "api/endpoints/knowledge_graph_api.py",
+    "api/endpoints/knowledge_nl2sql.py",
+    "api/endpoints/knowledge_ossie.py",
+    "api/endpoints/knowledge_enterprise.py",
+    "api/endpoints/knowledge_observability.py",
+    "api/endpoints/knowledge_ontology.py",
+    "api/endpoints/knowledge_schema_suggester.py",
+    "api/endpoints/teams_api.py",
+    "mcp_ontology_server.py",
+)
+
+# 白名单=保留点：收口后文件内仍允许存在的租户提取行（空白归一化原文）。
+# 均为内联调用点缺省回退（响应 dict 字面量/行级序列化/actor 取值），
+# 非私有 resolve 辅助，迁移归后续批次；新增/复活的其他提取点即红。
+RESOLVE_HELPER_WHITELIST = {
+    "api/endpoints/knowledge_graph_api.py": (
+        '"tenant_id": str(current_user.get("tenant_id") or "default"),',
+    ),
+    "api/endpoints/knowledge_ontology.py": (
+        'tenantId=str(actor.get("tenant_id") or "default"),',
+        'instanceTenant = str(current_user.get("tenant_id") or "default")',
+    ),
+    "api/endpoints/teams_api.py": (
+        'tenant_id=str(team.get("tenant_id") or "default"),',
+        '"tenant_id": str(current_user.get("tenant_id") or "default"),',
+    ),
+}
+
+
+def _tenantExtractionLines(text: str) -> tuple:
+    """文件内全部 ``str(<x>.get("tenant_id") or "default")`` 提取行（空白归一）。"""
+    hits = []
+    for line in text.splitlines():
+        normalized = " ".join(line.split())
+        if '.get("tenant_id")' in normalized and 'or "default"' in normalized:
+            hits.append(normalized)
+    return tuple(hits)
+
+
+def test_privateTenantResolveHelpersDelegatedToTenantScope():
+    """S5 收尾：清单文件的租户提取点须与白名单完全一致。
+
+    私有 resolve 辅助（_tenantOf/_tenant_of/_userTenant）本体一律内部委托
+    tenant_scope.resolve_tenant；白名单之外新增/复活的私有提取公式即红。
+    """
+    for rel in RESOLVE_HELPER_FILES:
+        text = (REPO_ROOT / "neurova" / rel).read_text(encoding="utf-8")
+        hits = _tenantExtractionLines(text)
+        expected = tuple(
+            " ".join(fragment.split())
+            for fragment in RESOLVE_HELPER_WHITELIST.get(rel, ())
+        )
+        assert hits == expected, (
+            "%s 的租户提取点与白名单不符：实际 %r，期望仅保留 %r"
+            "——私有 resolve 辅助须内部委托 tenant_scope.resolve_tenant"
+            % (rel, hits, expected)
+        )

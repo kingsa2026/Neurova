@@ -16,6 +16,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
+from neurova.core.tenant_scope import resolve_tenant
 
 router = APIRouter()
 
@@ -27,7 +28,7 @@ class OssieImportRequest(BaseModel):
 
 
 def _tenantOf(current_user: Dict[str, Any]) -> str:
-    return str(current_user.get("tenant_id") or "default")
+    return resolve_tenant(current_user)
 
 
 def _requireAdmin(current_user: Dict[str, Any]) -> None:

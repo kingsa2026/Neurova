@@ -27,6 +27,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant
 
 logger = get_logger(__name__)
 
@@ -137,7 +138,7 @@ def _currentUserFromContext(ctx: Any) -> Dict[str, Any]:
 
 
 def _tenantOf(user: Dict[str, Any]) -> str:
-    return str((user or {}).get("tenant_id") or "default")
+    return resolve_tenant(user)
 
 
 def _agentIdOf(user: Dict[str, Any], agentId: Optional[str]) -> str:

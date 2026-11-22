@@ -13,6 +13,7 @@ is_demo:false + 引导提示（hint），图谱 manager 是唯一数据源。
 from neurova.api.auth import get_current_user_or_default
 from neurova.core import app_settings
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant
 import typing
 from typing import Any, Dict
 
@@ -43,7 +44,7 @@ def _get_request_id(request) -> str:
 
 
 def _tenant_of(user) -> str:
-    return str((user or {}).get("tenant_id") or "default")
+    return resolve_tenant(user)
 
 
 def _get_kg_manager(agent_id: str = "default", tenant_id: str = "default"):

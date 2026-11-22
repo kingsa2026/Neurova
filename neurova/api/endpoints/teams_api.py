@@ -31,7 +31,7 @@ from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 from neurova.core.atomic_io import loadJsonStore, saveJsonStore
 from neurova.core.data_root import dataPath
-from neurova.core.tenant_scope import tenant_matches
+from neurova.core.tenant_scope import resolve_tenant, tenant_matches
 from neurova.agent.neuacp.catalog import refuseExecutorSpec
 
 logger = get_logger(__name__)
@@ -159,7 +159,7 @@ def _team_view(team: Dict[str, Any]) -> TeamInfo:
 
 
 def _userTenant(user: Dict[str, Any]) -> str:
-    return str((user or {}).get("tenant_id") or "default")
+    return resolve_tenant(user)
 
 
 def _isPlatformAdmin(user: Dict[str, Any]) -> bool:
