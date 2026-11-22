@@ -320,6 +320,14 @@ class WeChatMediaMixin:
                 logger.error("iLink 媒体 URL 为空")
                 return None
 
+            # SSRF 单源校验（url_guard）：media_url 取自 iLink API 响应体
+            # （外部内容驱动的 attachment 拉取），不合规诚实记因返回 None
+            from neurova.security.url_guard import is_public_url
+
+            if not is_public_url(media_url):
+                logger.error("iLink 媒体 URL 未通过出站安全校验: %s", media_url)
+                return None
+
             media_resp = requests.get(media_url, timeout=30, stream=True)
             media_data = media_resp.content
 

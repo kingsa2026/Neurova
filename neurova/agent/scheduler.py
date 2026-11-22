@@ -575,6 +575,13 @@ class WebhookTaskExecutor(TaskExecutor):
             if not webhook_url:
                 return {"success": False, "error": "Webhook URL is required"}
 
+            # SSRF 单源校验（url_guard）：webhook_url 由任务创建者指定，
+            # 私网/环回目标 fail-closed；ValueError 走下方 except 诚实回
+            # success=False + 原因，不吞
+            from neurova.security.url_guard import assert_public_url
+
+            assert_public_url(webhook_url)
+
             input_data = task.request.input if task.request else {}
 
             async with aiohttp.ClientSession() as session:

@@ -126,6 +126,11 @@ class SkillMarketAdapter(ABC):
         Returns:
             bytes: 响应内容
         """
+        # SSRF 单源校验（url_guard）：条目与技能包 download_url 来自市场 API
+        # 响应（外部内容驱动），私网/环回目标 fail-closed，ValueError 诚实上抛
+        from neurova.security.url_guard import assert_public_url
+
+        assert_public_url(url)
         req = urllib.request.Request(url)
         if headers:
             for key, value in headers.items():

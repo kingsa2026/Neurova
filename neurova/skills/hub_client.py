@@ -211,6 +211,12 @@ def _http_fetch(url: str, headers: Dict[str, str] = None, timeout: float = None)
                 HUB_FETCH_TOTAL_SECONDS, attempt, last_error)
             break
         try:
+            # SSRF 单源校验（url_guard）：hub API 地址与技能包 download_url
+            # （来自市场响应/拼接，外部内容驱动）出站前把关；不合规 ValueError
+            # 不在 (HTTPError, URLError) 捕获范围 → 直接上抛、不重试
+            from neurova.security.url_guard import assert_public_url
+
+            assert_public_url(url)
             request = _build_request(url, headers)
             response = urlopen(request, timeout=timeout)
             return response.read()
