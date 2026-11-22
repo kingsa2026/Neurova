@@ -150,7 +150,9 @@ def labelWindows(
                 "reason": verdict.reason,
             }
             labeled.append(entry)
-            auditPending.append((entry, window))
+            # 规则 skip 窗不送教师审计：skip 类标签由结果采矿（skip 回流）
+            # 提供，教师"active_work→actionable"式异议与既定拦截策略相悖，
+            # 且结果数据支持规则（真实 skip 样本几乎全部真跳过）。
             continue
         if verdict.reason != "default_allow":
             trivial = verdict.reason in ("no_events", "human_last")
@@ -171,18 +173,23 @@ def labelWindows(
             "window": window,
         })
 
-    # 蒸馏第一优先：灰区（规则弃权、教师定夺）
+    # 蒸馏第一优先：灰区（规则弃权、教师定夺）。教师置信度随窗口带回，
+    # 转成软标签（actionable→confidence；否则 1-confidence）供训练用。
     for item in grayPending:
         entry = {
             "conversationId": item["conversationId"],
             "features": item["features"],
         }
 
-        def _applyGray(actionable: bool, entry: Dict[str, Any] = entry) -> None:
+        def _applyGray(actionable: bool, entry: Dict[str, Any] = entry,
+                       window: Dict[str, Any] = item["window"]) -> None:
+            confidence = float(window.get("teacherConfidence") or 0.0)
             entry.update({
                 "label": 1 if actionable else 0,
                 "labeler": "llm_distill",
                 "reason": "distilled",
+                "confidence": confidence,
+                "softLabel": round(confidence if actionable else 1.0 - confidence, 4),
             })
 
         if _runDistill(item["window"], _applyGray):
@@ -200,11 +207,15 @@ def labelWindows(
             )
         )
         for entry, window in auditPending:
-            def _applyAudit(actionable: bool, entry: Dict[str, Any] = entry) -> None:
+            def _applyAudit(actionable: bool, entry: Dict[str, Any] = entry,
+                            window: Dict[str, Any] = window) -> None:
+                confidence = float(window.get("teacherConfidence") or 0.0)
                 entry.update({
                     "label": 1 if actionable else 0,
                     "labeler": "llm_distill_audit",
                     "reason": "audited",
+                    "confidence": confidence,
+                    "softLabel": round(confidence if actionable else 1.0 - confidence, 4),
                 })
 
             _runDistill(window, _applyAudit)
@@ -255,6 +266,12 @@ def realGateTriageFn(window: Dict[str, Any]) -> bool:
     _lastTeacherCallAt = time.monotonic()
     # triage_message 是协程：离线脚本无事件循环，用 asyncio.run 驱动真门
     result = asyncio.run(get_small_brain_triage_gate().triage_message(seedId))
+    # 教师置信度随窗口带回（labelWindows 据此生成软标签）；置信度是尽力而为
+    # 的遥测——取不到时按 0.0 计，不影响裁决本身。
+    try:
+        window["teacherConfidence"] = float(result.confidence)
+    except Exception:  # noqa: BLE001 - 置信度缺失/异常均按 0.0 兜底
+        window["teacherConfidence"] = 0.0
     return bool(result.actionable)
 
 

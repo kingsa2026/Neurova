@@ -331,3 +331,100 @@ class TestDistillImprovements:
         assert rc == 0
         payload = json.loads(out.read_text(encoding="utf-8"))
         assert payload["eval_metrics"]["skipFeedbackSamples"] == 2
+
+
+    def testSoftLabelWeakenSkipSignal(self, script, tmp_path):
+        """软标签（教师不自信 0.5）参与训练：指纹随之变化，产物仍可加载。"""
+        labelled = self._labelled(script, allowCount=30, skipCount=4)
+        softened = [dict(s) for s in labelled]
+        for sample in softened:
+            if sample["label"] == 0.0:
+                sample["softLabel"] = 0.5
+        hard = script._trainAndEvaluate(labelled, 0, len(labelled), 42)
+        soft = script._trainAndEvaluate(softened, 0, len(softened), 42)
+        assert hard["data_fingerprint"] != soft["data_fingerprint"]
+        weightsPath = tmp_path / "soft.json"
+        weightsPath.write_text(json.dumps(soft, ensure_ascii=False), encoding="utf-8")
+        assert NeuJudge.loadFrom(weightsPath) is not None
+
+    def testThresholdsWrittenToArtifactAndLoadable(self, script, tmp_path):
+        labelled = self._labelled(script, allowCount=20, skipCount=6)
+        payload = script._trainAndEvaluate(labelled, 0, len(labelled), 42,
+                                           thresholds={"skip_p": 0.1, "allow_p": 0.9})
+        assert payload["thresholds"] == {"skip_p": 0.1, "allow_p": 0.9}
+        weightsPath = tmp_path / "calibrated.json"
+        weightsPath.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        model = NeuJudge.loadFrom(weightsPath)
+        assert model.decide(0.05) == "skip"   # 0.05 < 0.1
+        assert model.decide(0.5) == "abstain"  # 0.1 ≤ 0.5 ≤ 0.9
+        assert model.decide(0.95) == "allow"   # 0.95 > 0.9
+
+
+class TestCalibrateScript:
+    """标定脚本：真实评估集上反推零误拦的最大 skip_p，可写回产物。"""
+
+    def _loadCalibrate(self):
+        import importlib.util
+
+        path = (Path(__file__).resolve().parents[3] / "scripts" / "training"
+                / "calibrate_neu_judge.py")
+        spec = importlib.util.spec_from_file_location("calibrate_under_test", path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def testRecommendPrefersZeroFalseAlarm(self, script):
+        cal = self._loadCalibrate()
+        rows = [
+            {"features": {k: 1.0 for k in FEATURE_KEYS}, "label": 1.0},
+            {"features": {k: 0.0 for k in FEATURE_KEYS}, "label": 0.0},
+        ]
+
+        class FakeJudge:
+            def score(self, features):
+                return 0.9 if features[FEATURE_KEYS[0]] > 0.5 else 0.05
+
+        results = [cal.simulate(rows, FakeJudge(), skipP, 0.75)
+                   for skipP in (0.1, 0.3, 0.5)]
+        chosen = cal.recommend(results, targetPrecision=0.99)
+        assert chosen is not None and chosen["falseAlarms"] == 0
+
+    def testEndToEndCalibrationWritesThresholds(self, script, tmp_path):
+        from datetime import datetime, timedelta, timezone
+
+        base = datetime(2026, 11, 22, 12, 0, 0, tzinfo=timezone.utc)
+        dataRoot = tmp_path / "data"
+
+        def writeSession(agentDir, sessionId, messages):
+            sessionsDir = dataRoot / agentDir / "sessions"
+            sessionsDir.mkdir(parents=True, exist_ok=True)
+            payload = {"agent_id": agentDir, "session_id": sessionId,
+                       "messages": [{"role": m["role"], "content": m["content"],
+                                     "timestamp": (base + timedelta(seconds=i * 5)).isoformat()}
+                                    for i, m in enumerate(messages)]}
+            (sessionsDir / f"session_{sessionId}_2026-11-22.json").write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        for i in range(6):
+            writeSession(f"agentH{i}", f"human{i}",
+                         [{"role": "user" if j % 2 == 0 else "assistant",
+                           "content": f"问题{i}_{j}，各不相同？"} for j in range(8)])
+        for i in range(6):
+            writeSession(f"agentL{i}", f"loop{i}",
+                         [{"role": "assistant", "content": f"独走{i}号第{j}句。"}
+                          for j in range(25)])
+
+        # 先训一个可分模型（同数据根），再做标定
+        trainedOut = tmp_path / "trained.json"
+        assert script.main(["--source", "real", "--data-root", str(dataRoot),
+                            "--out", str(trainedOut), "--min-messages", "6",
+                            "--max-windows", "50"]) == 0
+
+        cal = self._loadCalibrate()
+        assert cal.main(["--data-root", str(dataRoot), "--artifact", str(trainedOut),
+                         "--max-allow", "40", "--apply"]) == 0
+        calibrated = json.loads(trainedOut.read_text(encoding="utf-8"))
+        assert "thresholds" in calibrated
+        assert calibrated["thresholds"]["skip_p"] <= calibrated["thresholds"]["allow_p"]
+        assert NeuJudge.loadFrom(trainedOut) is not None

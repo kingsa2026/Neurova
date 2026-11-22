@@ -46,7 +46,7 @@ import random
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # 脚本目录形态运行（python scripts/training/train_neu_judge.py）时，sys.path[0]
 # 是本文件所在目录而非仓库根，先补上仓库根再 import neurova（与
@@ -55,7 +55,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from neurova.collaboration.neu_judge import FEATURE_KEYS, FEATURE_VERSION
+from neurova.collaboration.neu_judge import (
+    ALLOW_P,
+    FEATURE_KEYS,
+    FEATURE_VERSION,
+    SKIP_P,
+)
 from neurova.collaboration.triage_rules import evaluateTriage, extractTriageFeatures
 
 # --- 产物与训练常量 ---
@@ -286,10 +291,12 @@ def _trainLogisticRegression(
         {key: (sample["features"][key] - mean[key]) / sigma[key] for key in FEATURE_KEYS}
         for sample in trainSamples
     ]
-    labels = [sample["label"] for sample in trainSamples]
-    count = len(stdVectors)
+    labels = [float(sample["label"]) for sample in trainSamples]
     # 类平衡权重：真实流量里 skip 类稀少（多数为人类在场放行），不加权会
     # 塌缩成"全放行"（skipRecall=0）。权重 = n / (2·类数)，两类等权贡献。
+    # 类计数按硬标签；训练目标用软标签（教师置信度，缺省=硬标签）。
+    softLabels = [float(sample.get("softLabel", sample["label"])) for sample in trainSamples]
+    count = len(stdVectors)
     labelCounts: Dict[float, int] = {}
     for label in labels:
         labelCounts[label] = labelCounts.get(label, 0) + 1
@@ -302,18 +309,18 @@ def _trainLogisticRegression(
         grad = {key: 0.0 for key in FEATURE_KEYS}
         gradBias = 0.0
         loss = 0.0
-        for vector, label, sampleWeight in zip(stdVectors, labels, sampleWeights):
+        for vector, target, sampleWeight in zip(stdVectors, softLabels, sampleWeights):
             z = bias
             for key in FEATURE_KEYS:
                 z += weights[key] * vector[key]
             probability = _sigmoid(z)
-            error = probability - label
+            error = probability - target
             gradBias += sampleWeight * error
             for key in FEATURE_KEYS:
                 grad[key] += sampleWeight * error * vector[key]
             loss -= sampleWeight * (
-                label * math.log(probability + 1e-15)
-                + (1.0 - label) * math.log(1.0 - probability + 1e-15)
+                target * math.log(probability + 1e-15)
+                + (1.0 - target) * math.log(1.0 - probability + 1e-15)
             )
         loss /= weightTotal
         bias -= LEARNING_RATE * gradBias / weightTotal
@@ -390,7 +397,9 @@ def _dataFingerprint(trainSamples: List[Dict]) -> str:
     """训练样本 canonical JSON 的 sha256（sort_keys + 紧凑分隔符，确定性）。"""
     canonical = json.dumps(
         [
-            {"sessionId": sample["sessionId"], "label": sample["label"], "features": sample["features"]}
+            {"sessionId": sample["sessionId"], "label": sample["label"],
+             "softLabel": float(sample.get("softLabel", sample["label"])),
+             "features": sample["features"]}
             for sample in trainSamples
         ],
         sort_keys=True,
@@ -430,6 +439,7 @@ def _trainAndEvaluate(
     totalWindows: int,
     seed: int,
     modelVersion: str = MODEL_VERSION_TRAINED,
+    thresholds: Optional[Dict[str, float]] = None,
 ) -> Dict:
     """标注样本 → 标准化训练 → 冻结集评测 → 权重产物（合成/真实两源共用）。"""
     trainSamples, frozenSamples = _stratifiedSplit(labelled)
@@ -459,7 +469,7 @@ def _trainAndEvaluate(
         }
     )
 
-    return {
+    payload: Dict = {
         "model_version": modelVersion,
         "feature_version": FEATURE_VERSION,
         "bias": rawBias,
@@ -467,6 +477,12 @@ def _trainAndEvaluate(
         "data_fingerprint": _dataFingerprint(trainSamples),
         "eval_metrics": metrics,
     }
+    if thresholds:
+        payload["thresholds"] = {
+            "skip_p": float(thresholds.get("skip_p", SKIP_P)),
+            "allow_p": float(thresholds.get("allow_p", ALLOW_P)),
+        }
+    return payload
 
 
 def trainNeuJudge(windowCount: int = DEFAULT_WINDOWS, seed: int = DEFAULT_SEED) -> Dict:
@@ -522,6 +538,7 @@ def _ingestSkipFeedback(dataRoot: str) -> List[Dict]:
             "sessionId": f"skipfb/{record.get('sample_id') or len(rows)}",
             "features": _prepareFeatureVector(record["features"]),
             "label": 1.0 if record.get("label") == "actionable" else 0.0,
+            "softLabel": 1.0 if record.get("label") == "actionable" else 0.0,
         })
     return rows
 
@@ -533,6 +550,7 @@ def trainNeuJudgeFromRealData(
     minMessages: int = 6,
     maxWindows: int = 200,
     distillScope: str = "gray",
+    thresholds: Optional[Dict[str, float]] = None,
 ) -> Dict:
     """D-SB3/D-SB1：真实会话窗口收割 → 规则/离线蒸馏弱标注 → 训练。
 
@@ -565,6 +583,7 @@ def trainNeuJudgeFromRealData(
             "category": entry["labeler"],
             "features": _prepareFeatureVector(entry["features"]),
             "label": float(entry["label"]),
+            "softLabel": float(entry.get("softLabel", entry["label"])),
         }
         for entry in labelledRaw["labeled"]
     ]
@@ -577,7 +596,7 @@ def trainNeuJudgeFromRealData(
         )
     payload = _trainAndEvaluate(
         labelled, labelledRaw["grayUnlabeled"], len(windows), seed,
-        modelVersion="0.3.0-real",
+        modelVersion="0.3.0-real", thresholds=thresholds,
     )
     payload["eval_metrics"]["distillUsed"] = float(labelledRaw["distillUsed"])
     payload["eval_metrics"]["distillErrors"] = float(labelledRaw["distillErrors"])
@@ -593,6 +612,7 @@ def trainAxionFromRealData(
     minMessages: int = 6,
     maxWindows: int = 400,
     windowMinutes: float = 5.0,
+    thresholds: Optional[Dict[str, float]] = None,
 ) -> Dict:
     """Axion 1.0 方学金：答案先行结果采矿 + 教师质量门 + 边界扫描蒸馏。"""
     from neurova.collaboration.triage_axion import buildAxionDataset
@@ -611,6 +631,7 @@ def trainAxionFromRealData(
             "category": row.get("category") or row.get("labeler") or "rules",
             "features": _prepareFeatureVector(row["features"]),
             "label": float(row["label"]),
+            "softLabel": float(row.get("softLabel", row["label"])),
         })
     if len(labelled) < 8:
         raise RuntimeError(
@@ -618,7 +639,7 @@ def trainAxionFromRealData(
         )
     payload = _trainAndEvaluate(
         labelled, result["grayUnlabeled"], len(labelled), seed,
-        modelVersion="0.4.0-axion",
+        modelVersion="0.4.0-axion", thresholds=thresholds,
     )
     agreementValue = result["teacherAgreement"].get("agreement")
     payload["eval_metrics"].update({
@@ -668,12 +689,30 @@ def main(argv: List[str] | None = None) -> int:
         help="real 源收割窗口上限（默认 200）",
     )
     parser.add_argument(
+        "--skip-p", type=float, default=None,
+        help="把标定后的 skip 阈值写进产物 thresholds（默认不写，运行时用常量 0.25；"
+        "推荐由 calibrate_neu_judge.py 按真实评估集反推）",
+    )
+    parser.add_argument(
+        "--allow-p", type=float, default=None,
+        help="把标定后的 allow 阈值写进产物 thresholds（默认不写，运行时用常量 0.75）",
+    )
+    parser.add_argument(
         "--out",
         type=str,
         default=DEFAULT_OUT,
         help="产物输出路径，默认写到当前工作目录 neu_judge_trained.json",
     )
     args = parser.parse_args(argv)
+
+    thresholds: Optional[Dict[str, float]] = None
+    if args.skip_p is not None or args.allow_p is not None:
+        thresholds = {
+            "skip_p": float(args.skip_p if args.skip_p is not None else SKIP_P),
+            "allow_p": float(args.allow_p if args.allow_p is not None else ALLOW_P),
+        }
+        if thresholds["skip_p"] > thresholds["allow_p"]:
+            parser.error("--skip-p 不得大于 --allow-p")
 
     if args.source == "axion":
         dataRoot = args.data_root or str(Path(__file__).resolve().parents[2] / "data")
@@ -683,6 +722,7 @@ def main(argv: List[str] | None = None) -> int:
             distill=args.distill,
             minMessages=args.min_messages,
             maxWindows=args.max_windows,
+            thresholds=thresholds,
         )
     elif args.source == "real":
         dataRoot = args.data_root or str(Path(__file__).resolve().parents[2] / "data")
@@ -693,6 +733,7 @@ def main(argv: List[str] | None = None) -> int:
             minMessages=args.min_messages,
             maxWindows=args.max_windows,
             distillScope=args.distill_scope,
+            thresholds=thresholds,
         )
     else:
         payload = trainNeuJudge(args.windows, args.seed)

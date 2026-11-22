@@ -19,7 +19,7 @@
 import json
 import math
 from pathlib import Path
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 __all__ = [
     "MODEL_VERSION",
@@ -89,11 +89,17 @@ class NeuJudge:
         weights: Dict[str, float],
         modelVersion: str,
         featureVersion: str,
+        thresholds: Optional[Dict[str, float]] = None,
     ) -> None:
         self._bias = bias
         self._weights = dict(weights)
         self._modelVersion = modelVersion
         self._featureVersion = featureVersion
+        merged = {"skip_p": SKIP_P, "allow_p": ALLOW_P}
+        for key, value in (thresholds or {}).items():
+            if key in merged:
+                merged[key] = float(value)
+        self._thresholds = merged
 
     @classmethod
     def loadDefault(cls) -> "NeuJudge":
@@ -153,11 +159,32 @@ class NeuJudge:
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise NeuJudgeUnavailable(f"权重 {key} 不是数值: {source}")
             weights[key] = float(value)
+        rawThresholds = payload.get("thresholds")
+        thresholds: Optional[Dict[str, float]] = None
+        if rawThresholds is not None:
+            if not isinstance(rawThresholds, dict):
+                raise NeuJudgeUnavailable(f"thresholds 必须是 JSON 对象: {source}")
+            thresholds = {}
+            for key in ("skip_p", "allow_p"):
+                value = rawThresholds.get(key)
+                if value is None:
+                    continue
+                if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                        or not 0.0 <= float(value) <= 1.0:
+                    raise NeuJudgeUnavailable(
+                        f"thresholds.{key} 必须是 [0,1] 内数值: 实得 {value!r}: {source}"
+                    )
+                thresholds[key] = float(value)
+            if thresholds.get("skip_p", 0.0) > thresholds.get("allow_p", 1.0):
+                raise NeuJudgeUnavailable(
+                    f"thresholds 非法: skip_p 不得大于 allow_p: {rawThresholds!r}: {source}"
+                )
         return cls(
             float(bias),
             weights,
             str(payload["model_version"]),
             str(payload["feature_version"]),
+            thresholds,
         )
 
     @property
@@ -167,6 +194,10 @@ class NeuJudge:
     @property
     def featureVersion(self) -> str:
         return self._featureVersion
+
+    @property
+    def thresholds(self) -> Dict[str, float]:
+        return dict(self._thresholds)
 
     @property
     def bias(self) -> float:
@@ -191,13 +222,15 @@ class NeuJudge:
         return _sigmoid(z)
 
     def decide(self, p: float) -> str:
-        """三档裁决：p < SKIP_P → "skip"（拦截本轮响应）；p > ALLOW_P → "allow"（放行）；
+        """三档裁决：p < skip_p → "skip"（拦截本轮响应）；p > allow_p → "allow"（放行）；
         其间（含恰等）→ "abstain"（弃权，由调用方保守放行）。
 
         p 为 score 产出的「值得响应」概率，与计划 §3 的级联语义一致。
+        阈值默认取模块常量 SKIP_P/ALLOW_P，可被权重产物的 thresholds 字段覆盖
+        （标定脚本按真实评估集反推，见 calibrate_neu_judge.py）。
         """
-        if p < SKIP_P:
+        if p < self._thresholds["skip_p"]:
             return "skip"
-        if p > ALLOW_P:
+        if p > self._thresholds["allow_p"]:
             return "allow"
         return "abstain"

@@ -206,8 +206,11 @@ class TestRealGateTriageFn:
 
 
 class TestAuditDistillScope:
-    """audit 范围：教师除灰区外还复核规则已决窗口（R1 放行/R2R3 拦截），
-    教师裁决覆盖规则标签（labeler=llm_distill_audit）；R0 平凡窗不送审。"""
+    """audit 范围：教师除灰区外还复核规则**放行**窗（R1；R0 平凡窗不送审）。
+
+    规则 skip 窗（R2/R3）**不送审**：skip 类标签由结果采矿（skip 回流）提供，
+    教师"active_work→actionable"式异议与既定拦截策略相悖，且结果数据支持规则
+    （真实 skip 样本几乎全部真跳过）——教师不得把模型教成"独走环也放行"。"""
 
     def _windows(self):
         return [
@@ -222,29 +225,27 @@ class TestAuditDistillScope:
             {"conversationId": "a/gray", "events": _soloLoop(12)},
         ]
 
-    def testAuditScopeSendsDecidedWindowsToTeacher(self):
+    def testAuditScopeSendsAllowWindowsToTeacher(self):
         from neurova.collaboration.triage_dataset import labelWindows
 
         audited = []
 
         def fakeGate(window):
             audited.append(window["conversationId"])
-            # 教师复核：认为 R2 拦截其实该放行（分歧样本）
-            return window["conversationId"] == "a/loop"
+            return False  # 教师对送审窗一律判不可响应
 
         result = labelWindows(self._windows(), distillLimit=10,
                               triageFn=fakeGate, distillScope="audit")
         byId = {e["conversationId"]: e for e in result["labeled"]}
-        # R0 平凡窗（人类最后发言）不送审；单条消息窗属灰区、与 R1/R2 一样送审
-        assert "a/humanLast" not in audited
-        assert "a/empty" in audited and "a/humanInWindow" in audited \
-            and "a/loop" in audited and "a/gray" in audited
-        # 教师覆盖 R2 规则标签（规则 0 → 教师 1）
-        assert byId["a/loop"]["label"] == 1
-        assert byId["a/loop"]["labeler"] == "llm_distill_audit"
+        # 送审 = 灰区 + 规则放行（R1）；R0 平凡窗与规则 skip 窗不送审
+        assert "a/humanLast" not in audited and "a/loop" not in audited
+        assert "a/empty" in audited and "a/humanInWindow" in audited and "a/gray" in audited
+        # 规则 skip 窗保持规则标签（不被教师翻转）
+        assert byId["a/loop"]["label"] == 0
+        assert byId["a/loop"]["labeler"] == "rules"
         # 灰区照旧由教师裁决
         assert byId["a/gray"]["label"] == 0 and byId["a/gray"]["labeler"] == "llm_distill"
-        # R1 放行也被教师复核覆盖（fakeGate 对非 a/loop 一律判不可响应）
+        # R1 放行被教师复核覆盖（fakeGate 一律判不可响应）
         assert byId["a/humanInWindow"]["label"] == 0
         assert byId["a/humanInWindow"]["labeler"] == "llm_distill_audit"
 
@@ -276,7 +277,7 @@ class TestAuditDistillScope:
         assert byId["a/loop"]["labeler"] == "rules" and byId["a/loop"]["label"] == 0
         assert byId["a/humanInWindow"]["labeler"] == "rules" and byId["a/humanInWindow"]["label"] == 1
         assert "a/gray" not in byId and "a/empty" not in byId
-        assert result["grayUnlabeled"] == 2 and result["distillErrors"] == 4
+        assert result["grayUnlabeled"] == 2 and result["distillErrors"] == 3
 
 
 class TestDistillContentCap:
@@ -310,7 +311,8 @@ class TestDistillContentCap:
             assert len(event.get("content") or "") <= 400
 
     def testAuditOrderPrefersDeepestLoop(self):
-        """审计顺序按独走长度降序：最深的独走环优先复核，配额不足时浅环让位。"""
+        """审计顺序按独走长度降序：可审计（放行）窗里最深的独走环优先，
+        配额不足时浅环让位；规则 skip 窗不送审。"""
         from neurova.collaboration.triage_dataset import labelWindows
 
         audited = []
@@ -332,7 +334,7 @@ class TestDistillContentCap:
         ]
         result = labelWindows(windows, distillLimit=2, triageFn=fakeGate,
                               distillScope="audit")
-        assert audited == ["a/deep", "a/mid"]
+        assert audited == ["a/mid", "a/shallow"]
         assert result["distillUsed"] == 2
 
     def testTeacherCallsArePaced(self, monkeypatch):
