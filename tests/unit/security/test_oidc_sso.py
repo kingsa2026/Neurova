@@ -36,6 +36,7 @@ from neurova.core import db_migration  # noqa: E402
 
 ISSUER_PATH = "/.well-known/openid-configuration"
 TOKEN_PATH = "/token"
+JWKS_PATH = "/jwks"
 CLIENT_ID = "neurova-test-client"
 CLIENT_SECRET = "s7-client-secret-0123456789abcdef"
 
@@ -47,9 +48,20 @@ class FakeIdP:
     Location，不真跳）；code 由用例经 issueCode() 预置。
     """
 
-    def __init__(self):
+    def __init__(self, *, useRs256: bool = False):
         self.codes: dict = {}
         self._lock = threading.Lock()
+        # RS256 模式：生成两把 RSA 私钥——_rsaKey 进 JWKS（正卡），
+        # _altRsaKey 不进 JWKS（错签名用例里的"别人的钥匙"）。
+        self.useRs256 = useRs256
+        self.kid = "idp-rs-key-1"
+        self._rsaKey = None
+        self._altRsaKey = None
+        if useRs256:
+            from cryptography.hazmat.primitives.asymmetric import rsa
+
+            self._rsaKey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            self._altRsaKey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._makeHandler())
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self.port = self._server.server_address[1]
@@ -65,9 +77,37 @@ class FakeIdP:
     def issuer(self) -> str:
         return self.base
 
+    def jwksKeys(self) -> list:
+        """JWKS 公钥集合（n/e 走 base64url 无 padding）；HS256 模式下为空集。"""
+        if not self.useRs256:
+            return []
+        import base64
+
+        numbers = self._rsaKey.public_key().public_numbers()
+
+        def b64urlUint(value: int) -> str:
+            raw = value.to_bytes((value.bit_length() + 7) // 8, "big")
+            return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+        return [{
+            "kty": "RSA",
+            "use": "sig",
+            "alg": "RS256",
+            "kid": self.kid,
+            "n": b64urlUint(numbers.n),
+            "e": b64urlUint(numbers.e),
+        }]
+
     def issueCode(self, sub: str, email: str = "", nonce: str = "", *,
-                  tamperKey: str = "", extraClaims: dict | None = None) -> str:
-        """预置一个授权码；换 token 时以此签 id_token。tamperKey 非空时用错钥签名。"""
+                  tamperKey: str = "", extraClaims: dict | None = None,
+                  alg: str = "HS256", kid: str | None = None,
+                  wrongSigner: bool = False) -> str:
+        """预置一个授权码；换 token 时以此签 id_token。
+
+        tamperKey 非空时用错钥签名（HS256）；alg/kid/wrongSigner 控制 RS256
+        签发形态：kid=None 用本 IdP 正牌 kid、kid="" 表示 header 不带 kid、
+        wrongSigner=True 用未入 JWKS 的另一把钥签名。
+        """
         code = "code-" + uuid.uuid4().hex
         with self._lock:
             self.codes[code] = {
@@ -76,6 +116,9 @@ class FakeIdP:
                 "nonce": nonce,
                 "tamperKey": tamperKey,
                 "extraClaims": extraClaims or {},
+                "alg": alg,
+                "kid": kid,
+                "wrongSigner": wrongSigner,
             }
         return code
 
@@ -98,12 +141,16 @@ class FakeIdP:
 
             def do_GET(self):
                 if urlparse(self.path).path == ISSUER_PATH:
+                    algs = ["HS256", "RS256"] if idp.useRs256 else ["HS256"]
                     self._json({
                         "issuer": idp.issuer(),
                         "authorization_endpoint": idp.base + "/authorize",
                         "token_endpoint": idp.base + TOKEN_PATH,
-                        "id_token_signing_alg_values_supported": ["HS256"],
+                        "jwks_uri": idp.base + JWKS_PATH,
+                        "id_token_signing_alg_values_supported": algs,
                     })
+                elif urlparse(self.path).path == JWKS_PATH:
+                    self._json({"keys": idp.jwksKeys()})
                 else:
                     self._json({"error": "not_found"}, 404)
 
@@ -131,8 +178,21 @@ class FakeIdP:
                 if entry["email"]:
                     claims["email"] = entry["email"]
                 claims.update(entry["extraClaims"])
-                key = entry["tamperKey"] or CLIENT_SECRET
-                id_token = jwt.encode(claims, key, algorithm="HS256")
+                alg = entry.get("alg") or "HS256"
+                if alg == "RS256":
+                    signKey = idp._altRsaKey if entry.get("wrongSigner") else idp._rsaKey
+                    headers: dict = {}
+                    kidParam = entry.get("kid")
+                    if kidParam is None:
+                        headers["kid"] = idp.kid
+                    elif kidParam:
+                        headers["kid"] = kidParam  # "" → header 刻意不带 kid
+                    id_token = jwt.encode(claims, signKey, algorithm="RS256", headers=headers)
+                elif alg == "none":
+                    id_token = jwt.encode(claims, None, algorithm="none")
+                else:
+                    key = entry["tamperKey"] or CLIENT_SECRET
+                    id_token = jwt.encode(claims, key, algorithm="HS256")
                 self._json({
                     "access_token": "idp-access-" + uuid.uuid4().hex,
                     "token_type": "Bearer",
@@ -152,8 +212,26 @@ def idp():
 
 
 @pytest.fixture()
+def rsIdp():
+    server = FakeIdP(useRs256=True)
+    server.start()
+    yield server
+    server.stop()
+
+
+@pytest.fixture()
 def env(idp, tmp_path, monkeypatch):
-    """真 OIDC 路由 + 真 auth 路由（/me）+ tmp 真账本 + 假 IdP 环境变量。"""
+    """真 OIDC 路由 + 真 auth 路由（/me）+ tmp 真账本 + 假 IdP（HS256）环境变量。"""
+    yield from _oidcEnv(idp, tmp_path, monkeypatch)
+
+
+@pytest.fixture()
+def rsEnv(rsIdp, tmp_path, monkeypatch):
+    """同 env，但 IdP 以 RS256 签 id_token 并暴露 JWKS 端点。"""
+    yield from _oidcEnv(rsIdp, tmp_path, monkeypatch)
+
+
+def _oidcEnv(idp, tmp_path, monkeypatch):
     monkeypatch.setenv("NEUROVA_OIDC_ISSUER", idp.issuer())
     monkeypatch.setenv("NEUROVA_OIDC_CLIENT_ID", CLIENT_ID)
     monkeypatch.setenv("NEUROVA_OIDC_CLIENT_SECRET", CLIENT_SECRET)
@@ -163,8 +241,10 @@ def env(idp, tmp_path, monkeypatch):
     model = UserModel(db_path=str(tmp_path / "users.db"))
     monkeypatch.setattr(AUTH, "_user_model", model)
 
-    OIDC._stateStore.clear()
-    OIDC._discoveryCache.clear()
+    for cacheName in ("_discoveryCache", "_jwksCache"):
+        cache = getattr(OIDC, cacheName, None)
+        if cache is not None:
+            cache.clear()
 
     app = FastAPI()
     app.include_router(OIDC.router, prefix="/api/v1/auth/oidc")
@@ -185,8 +265,11 @@ def _stateAndNonceFrom(location: str):
 
 def _completeLogin(env, sub: str, email: str = "", *, tamperKey: str = "",
                    stateOverride: str = "", nonceOverride: str | None = None,
-                   codeOverride: str = ""):
-    """走完整链路：authorize → 假 IdP 发码 → callback。返回 (callback 响应, state)。"""
+                   codeOverride: str = "", codeKwargs: dict | None = None):
+    """走完整链路：authorize → 假 IdP 发码 → callback。返回 (callback 响应, state)。
+
+    codeKwargs 透传给 issueCode（RS256 用例的 alg/kid/wrongSigner 走这里）。
+    """
     client = env["client"]
     resp = _authorize(client)
     assert resp.status_code in (302, 307), resp.text
@@ -196,7 +279,7 @@ def _completeLogin(env, sub: str, email: str = "", *, tamperKey: str = "",
     if nonceOverride is not None:
         nonce = nonceOverride
     code = codeOverride or env["idp"].issueCode(sub=sub, email=email, nonce=nonce,
-                                                tamperKey=tamperKey)
+                                                tamperKey=tamperKey, **(codeKwargs or {}))
     cb = client.get(
         "/api/v1/auth/oidc/callback",
         params={"code": code, "state": state},
@@ -348,3 +431,103 @@ class TestOidcMigration:
     def test_registeredInMigrationRegistry(self):
         assert db_migration.latest_version("auth_oidc") >= 1, \
             "oidc_sub 列迁移必须登记进 db_migration 注册表（domain=auth_oidc）"
+
+
+class TestOidcSqliteState:
+    """卡 1：authorize state 落 users.db（oidc_states 表，多 worker 共享）。"""
+
+    def test_stateCrossesWorkerInstances(self, idp, tmp_path, monkeypatch):
+        """同一 users.db、两个独立 app 实例：A authorize → B callback 成功。"""
+        import hashlib
+        import sqlite3
+
+        monkeypatch.setenv("NEUROVA_OIDC_ISSUER", idp.issuer())
+        monkeypatch.setenv("NEUROVA_OIDC_CLIENT_ID", CLIENT_ID)
+        monkeypatch.setenv("NEUROVA_OIDC_CLIENT_SECRET", CLIENT_SECRET)
+        model = UserModel(db_path=str(tmp_path / "users.db"))
+        monkeypatch.setattr(AUTH, "_user_model", model)
+
+        def buildApp():
+            app = FastAPI()
+            app.include_router(OIDC.router, prefix="/api/v1/auth/oidc")
+            return app
+
+        with TestClient(buildApp(), raise_server_exceptions=False) as workerA, \
+                TestClient(buildApp(), raise_server_exceptions=False) as workerB:
+            resp = workerA.get("/api/v1/auth/oidc/authorize", follow_redirects=False)
+            assert resp.status_code in (302, 307), resp.text
+            state, nonce = _stateAndNonceFrom(resp.headers["location"])
+
+            # state 必须落 SQLite 的 oidc_states 表，且只存 sha256 摘要、不落原文
+            conn = sqlite3.connect(model.db_path)
+            try:
+                rows = conn.execute("SELECT state_hash, nonce FROM oidc_states").fetchall()
+            finally:
+                conn.close()
+            assert len(rows) == 1, "state 必须持久化进 oidc_states 表"
+            assert rows[0][0] == hashlib.sha256(state.encode()).hexdigest(), \
+                "表里必须是 sha256(state)，不是原文"
+            assert rows[0][1] == nonce
+            assert state not in str(rows), "state 原文不得落库"
+
+            code = idp.issueCode(sub="sub-worker", email="worker@example.com", nonce=nonce)
+            cb = workerB.get("/api/v1/auth/oidc/callback",
+                             params={"code": code, "state": state}, follow_redirects=False)
+            assert cb.status_code == 200, f"另一 worker 实例必须能消费同一 state：{cb.text}"
+
+    def test_expiredStateRejected(self, env):
+        """TTL 600s：created_at 拨老后的 state 必须拒绝。"""
+        import sqlite3
+
+        client, model = env["client"], env["model"]
+        resp = _authorize(client)
+        assert resp.status_code in (302, 307), resp.text
+        state, nonce = _stateAndNonceFrom(resp.headers["location"])
+        code = env["idp"].issueCode(sub="sub-expired", email="expired@example.com", nonce=nonce)
+
+        conn = sqlite3.connect(model.db_path)
+        try:
+            conn.execute("UPDATE oidc_states SET created_at = created_at - 601")
+            conn.commit()
+        finally:
+            conn.close()
+
+        cb = client.get("/api/v1/auth/oidc/callback",
+                        params={"code": code, "state": state}, follow_redirects=False)
+        assert cb.status_code in (400, 401), "过期 state 必须被拒绝"
+
+
+class TestOidcRs256Jwks:
+    """卡 2：id_token RS256/JWKS 验签（kid 匹配；错 kid/错签名/错 alg 拒绝）。"""
+
+    def test_rs256IdTokenAcceptedEndToEnd(self, rsEnv):
+        cb, _ = _completeLogin(rsEnv, sub="sub-rs-alice", email="rs-alice@example.com",
+                               codeKwargs={"alg": "RS256"})
+        assert cb.status_code == 200, cb.text
+        data = cb.json().get("data") or cb.json()
+        assert data.get("access_token") and data.get("refresh_token")
+        me = rsEnv["client"].get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {data['access_token']}"}
+        )
+        assert me.status_code == 200, me.text
+        assert me.json()["username"] == "rs-alice"
+
+    def test_rs256MissingKidRejected(self, rsEnv):
+        cb, _ = _completeLogin(rsEnv, sub="sub-rs-nokid", email="nokid@example.com",
+                               codeKwargs={"alg": "RS256", "kid": ""})
+        assert cb.status_code in (400, 401), "header 不带 kid 必须诚实拒绝"
+
+    def test_rs256WrongKidRejected(self, rsEnv):
+        cb, _ = _completeLogin(rsEnv, sub="sub-rs-badkid", email="badkid@example.com",
+                               codeKwargs={"alg": "RS256", "kid": "rotated-away-key"})
+        assert cb.status_code in (400, 401), "kid 与 JWKS 公钥不匹配必须拒绝"
+
+    def test_rs256WrongSignatureRejected(self, rsEnv):
+        cb, _ = _completeLogin(rsEnv, sub="sub-rs-badsig", email="badsig@example.com",
+                               codeKwargs={"alg": "RS256", "wrongSigner": True})
+        assert cb.status_code in (400, 401), "未入 JWKS 的私钥签名必须拒绝"
+
+    def test_unsupportedAlgRejected(self, rsEnv):
+        cb, _ = _completeLogin(rsEnv, sub="sub-rs-alg", email="badalg@example.com",
+                               codeKwargs={"alg": "none"})
+        assert cb.status_code in (400, 401), "alg=none 等未支持算法必须诚实拒绝"

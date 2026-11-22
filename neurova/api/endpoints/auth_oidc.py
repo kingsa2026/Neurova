@@ -5,7 +5,7 @@ from __future__ import annotations
 
 链路：
 1. GET /api/v1/auth/oidc/authorize  → 302 到 IdP 的 authorize 端点（带 state+nonce，
-   state 落进程内短时存储：TTL 10 分钟、一次性消费）
+   state 落 users.db 的 oidc_states 表（多 worker 共享）：TTL 10 分钟、一次性消费）
 2. IdP 认证后回跳 GET /api/v1/auth/oidc/callback?code&state
    → 用 code 换 token → 校验 id_token → 按 sub 供应用户 → 签发本仓 JWT 对
 3. GET /api/v1/auth/oidc/status     → 公开暴露 {enabled}，前端据此决定是否显示 SSO 按钮
@@ -17,17 +17,20 @@ from __future__ import annotations
 - NEUROVA_OIDC_SCOPES        默认 "openid profile email"
 - NEUROVA_OIDC_REDIRECT_URI  可选；缺省按请求基址拼 callback（反代/域名固定时建议显式配置）
 
-id_token 校验选型（任务卡二选一）：**PyJWT HS256，client_secret 即验签密钥**。
-理由：v1 走 confidential client 的 client_secret 后通道，id_token 由后端直连
-IdP token 端点（TLS）取回，不经过浏览器；HS256 免去 JWKS 拉取/缓存/轮换机器，
-且 PyJWT 已是本仓签发侧的既有依赖（api/auth.py 同一算法族）。RS256/JWKS 留作
-IdP 不支持 HS256 时的后续扩展，不在本卡展开。
+id_token 校验选型：**PyJWT，按 id_token header.alg 分派验签材料**。HS256 用
+client_secret 验签（confidential client 的 client_secret 后通道，id_token 由后端
+直连 IdP token 端点（TLS）取回，不经过浏览器）；RS256/ES256 走 discovery 文档的
+jwks_uri 公钥集合按 kid 匹配（缓存纪律同 discovery）。PyJWT 的非对称算法依赖
+cryptography，缺失时该分支 401 诚实报因，不裸崩。header.alg 只用来选材料，
+decode 的 algorithms 白名单与所选材料一一对应，不制造 alg 混淆面。
 
 用户供应规则：按 oidc_sub 找人 → 无则按 email 绑定现有号（回写 oidc_sub）→
 再无则建号（role 沿用"系统无用户时首个账号即管理员"的既有口径，见
 endpoints/auth.py register 的 is_bootstrap 分支）。
 """
 
+import hashlib
+import json
 import secrets
 import threading
 import time
@@ -39,6 +42,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from neurova.core import config
+from neurova.core.db_migration import apply_domain_steps, register_migration
+from neurova.core.database import get_short_connection, release_short_connection
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -129,41 +134,159 @@ def _fetchDiscovery(issuer: str) -> Dict[str, Any]:
     return doc
 
 
-# ── authorize state 短时存储（进程内、TTL、一次性）─────────────────────────
+# ── IdP JWKS（非对称验签公钥集合，缓存纪律同 discovery）────────────────────
 
-_stateStore: Dict[str, Dict[str, float]] = {}
-_stateLock = threading.RLock()
+_jwksCache: Dict[str, Tuple[list, float]] = {}
+_jwksLock = threading.RLock()
+
+
+def _fetchJwks(oidcConfig: Dict[str, str]) -> list:
+    """从 discovery.jwks_uri 拉取公钥集合；按 URI 缓存、TTL 同 discovery。"""
+    discovery = _fetchDiscovery(oidcConfig["issuer"])
+    jwksUri = str(discovery.get("jwks_uri") or "").strip()
+    if not jwksUri:
+        raise HTTPException(status_code=401,
+                            detail="OIDC 发现文档缺少 jwks_uri，无法验签非对称 id_token")
+    now = time.time()
+    with _jwksLock:
+        cached = _jwksCache.get(jwksUri)
+        if cached and now - cached[1] < _DISCOVERY_TTL_SECONDS:
+            return cached[0]
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(jwksUri)
+            resp.raise_for_status()
+            keys = resp.json().get("keys") or []
+    except httpx.HTTPError as e:
+        logger.warning("OIDC JWKS 拉取失败 uri=%s: %s", jwksUri, e)
+        raise HTTPException(status_code=502, detail="OIDC JWKS 端点不可达")
+    with _jwksLock:
+        _jwksCache[jwksUri] = (keys, now)
+    return keys
+
+
+# ── authorize state 短时存储（users.db oidc_states 表、TTL、一次性）─────────
+# 多 worker/多进程部署下 authorize 与 callback 可能落到不同进程，state 必须出进程；
+# 与用户账本同库（users.db），schema 走 db_migration 注册表 domain=auth_oidc v2
+# （v1 = users.oidc_sub，登记在 neurova/auth/user_model.py）。
+
+#: v2：oidc_states 表。state 只存 sha256 摘要（库被拖走也还原不出可用 state），
+#: nonce 存原文（id_token 校验要用），created_at REAL 供 TTL 判定。
+_STATE_SCHEMA_VERSION = 2
+
+
+def _migrateOidcStatesTable(conn) -> None:
+    """v2：建 oidc_states 表 + created_at 索引（幂等；TTL 清理走该列）。"""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS oidc_states (
+            state_hash TEXT PRIMARY KEY,
+            nonce TEXT NOT NULL,
+            created_at REAL NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_oidc_states_created_at ON oidc_states(created_at)"
+    )
+
+
+_stateSchemaReadyPaths: set = set()
+_stateSchemaLock = threading.RLock()
+_stateDbLock = threading.RLock()
+
+
+def _stateDbPath() -> str:
+    """state 表所在库 = 用户账本库（users.db）；路径以 UserModel 为单一事实源。"""
+    from neurova.api.endpoints.auth import _get_user_model
+
+    return _get_user_model().db_path
+
+
+def _ensureStateSchema() -> str:
+    """确保 oidc_states 表已建，返回 users.db 路径（DCL 懒初始化）。
+
+    v2 走懒注册：auth_oidc 域的 v1 在 user_model.py 模块级登记，若本模块在
+    import 期直接登记 v2，导入顺序颠倒会让 v1 登记撞"版本必须严格递增"——
+    故首次使用时先 import user_model（v1 随之入表）再幂等登记 v2、幂等应用。
+    """
+    dbPath = _stateDbPath()
+    if dbPath in _stateSchemaReadyPaths:
+        return dbPath
+    with _stateSchemaLock:
+        if dbPath in _stateSchemaReadyPaths:
+            return dbPath
+        from neurova.auth import user_model as userModelModule
+
+        register_migration(_STATE_SCHEMA_VERSION, _migrateOidcStatesTable,
+                           domain=userModelModule.USERS_OIDC_DOMAIN)
+        conn = get_short_connection(dbPath)
+        try:
+            apply_domain_steps(conn, userModelModule.USERS_OIDC_DOMAIN)
+        finally:
+            release_short_connection(conn)
+        _stateSchemaReadyPaths.add(dbPath)
+    return dbPath
+
+
+def _hashState(state: str) -> str:
+    """state 只以 sha256 摘要落库；落库后按摘要等值查询，无时序侧信道面。"""
+    return hashlib.sha256((state or "").encode("utf-8")).hexdigest()
 
 
 def _storeState(state: str, nonce: str) -> None:
+    """state 落 users.db（多 worker 共享）；写入时顺带清理过期行。"""
     now = time.time()
-    with _stateLock:
-        expired = [k for k, v in _stateStore.items() if now - v["created"] > _STATE_TTL_SECONDS]
-        for k in expired:
-            _stateStore.pop(k, None)
-        _stateStore[state] = {"nonce": nonce, "created": now}
+    dbPath = _ensureStateSchema()
+    with _stateDbLock:
+        conn = get_short_connection(dbPath)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("DELETE FROM oidc_states WHERE created_at < ?",
+                         (now - _STATE_TTL_SECONDS,))
+            conn.execute(
+                "INSERT OR REPLACE INTO oidc_states (state_hash, nonce, created_at) "
+                "VALUES (?, ?, ?)",
+                (_hashState(state), nonce, now),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            release_short_connection(conn)
 
 
 def _consumeState(state: str) -> Optional[str]:
-    """取走 state（一次性）；不存在或已过期返回 None。"""
-    import hmac as _hmac
+    """取走 state（一次性）；不存在或已过期返回 None。
 
+    BEGIN IMMEDIATE 串行化同库写者：两个 worker 同时消费同一 state 时，后到者
+    进事务后行已被删 → None，一次性语义跨进程成立。过期行同样删除（顺手清账）。
+    """
+    dbPath = _ensureStateSchema()
+    stateHash = _hashState(state)
     now = time.time()
-    with _stateLock:
-        for key, entry in list(_stateStore.items()):
-            if now - entry["created"] > _STATE_TTL_SECONDS:
-                _stateStore.pop(key, None)
-        # 常量时间比对：state 是高熵随机串，字典命中前先做一次全量常量时间匹配，
-        # 避免键比较的时序侧信道（与仓内其余凭证比对同口径）。
-        matched = None
-        for key in _stateStore:
-            if _hmac.compare_digest(key, state or ""):
-                matched = key
-                break
-        if matched is None:
-            return None
-        entry = _stateStore.pop(matched)
-        return entry["nonce"]
+    with _stateDbLock:
+        conn = get_short_connection(dbPath)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT nonce, created_at FROM oidc_states WHERE state_hash = ?",
+                (stateHash,),
+            ).fetchone()
+            if row is None:
+                conn.rollback()
+                return None
+            conn.execute("DELETE FROM oidc_states WHERE state_hash = ?", (stateHash,))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            release_short_connection(conn)
+    if now - row["created_at"] > _STATE_TTL_SECONDS:
+        return None
+    return row["nonce"]
 
 
 # ── 用户供应（按 sub → email → 建号）──────────────────────────────────────
@@ -207,20 +330,78 @@ def _provisionOidcUser(model, sub: str, email: str, preferred_username: str):
     )
 
 
-# ── id_token 校验（HS256）─────────────────────────────────────────────────
+# ── id_token 校验（header.alg 分派：HS256=client_secret；RS256/ES256=JWKS）──
+
+def _publicKeyFromJwk(jwk: Dict[str, Any], alg: str):
+    """JWK → 验签公钥。PyJWT 的非对称算法需要 cryptography，缺失时抛
+    MissingCryptographyError（调用方统一转 401 诚实报因）。"""
+    from jwt.algorithms import ECAlgorithm, RSAAlgorithm
+
+    kty = str(jwk.get("kty") or "")
+    if alg == "RS256" and kty == "RSA":
+        return RSAAlgorithm.from_jwk(json.dumps(jwk))
+    if alg == "ES256" and kty == "EC":
+        return ECAlgorithm.from_jwk(json.dumps(jwk))
+    raise ValueError(f"JWKS 公钥与算法不匹配: alg={alg} kty={kty}")
+
+
+def _jwksSigningKey(oidcConfig: Dict[str, str], header: Dict[str, Any]):
+    """按 header.kid 从 JWKS 选公钥；无 kid / kid 不匹配 / 依赖缺失 → 401 诚实。"""
+    import hmac as _hmac
+
+    kid = str(header.get("kid") or "")
+    if not kid:
+        raise HTTPException(status_code=401,
+                            detail="OIDC id_token 缺少 kid，无法匹配 JWKS 公钥")
+    alg = str(header.get("alg") or "")
+    keys = _fetchJwks(oidcConfig)
+    for jwk in keys:
+        if _hmac.compare_digest(str(jwk.get("kid") or ""), kid):
+            try:
+                return _publicKeyFromJwk(jwk, alg)
+            except (jwt.exceptions.MissingCryptographyError, ImportError):
+                raise HTTPException(
+                    status_code=401,
+                    detail="OIDC 非对称验签（RS256/ES256）需安装 cryptography 依赖",
+                )
+            except Exception as e:  # noqa: BLE001 - 公钥构建失败按验签失败处理
+                logger.warning("OIDC JWKS 公钥构建失败 kid=%s: %s", kid, e)
+                raise HTTPException(status_code=401, detail="OIDC id_token 验签公钥不可用")
+    raise HTTPException(status_code=401, detail="OIDC id_token kid 与 JWKS 公钥不匹配")
+
 
 def _verifyIdToken(idToken: str, oidcConfig: Dict[str, str], expectedNonce: str) -> Dict[str, Any]:
-    """验签 + iss/aud/exp + nonce；任一不符抛 HTTPException(401)。"""
+    """验签 + iss/aud/exp + nonce；任一不符抛 HTTPException(401)。
+
+    header.alg 只用来选验签材料：HS256 → client_secret；RS256/ES256 → JWKS
+    公钥（kid 匹配）。decode 的 algorithms 白名单与材料一一对应，不接受
+    其它算法（含 none）。
+    """
     import hmac as _hmac
 
     try:
-        claims = jwt.decode(
-            idToken,
-            oidcConfig["client_secret"],
-            algorithms=["HS256"],
-            audience=oidcConfig["client_id"],
-            issuer=oidcConfig["issuer"],
-        )
+        header = jwt.get_unverified_header(idToken)
+    except jwt.PyJWTError as e:
+        logger.warning("OIDC id_token header 解析失败: %s", e)
+        raise HTTPException(status_code=401, detail="OIDC id_token 校验失败")
+
+    alg = str(header.get("alg") or "")
+    decodeKwargs = dict(audience=oidcConfig["client_id"], issuer=oidcConfig["issuer"])
+    try:
+        if alg == "HS256":
+            claims = jwt.decode(idToken, oidcConfig["client_secret"],
+                                algorithms=["HS256"], **decodeKwargs)
+        elif alg in ("RS256", "ES256"):
+            key = _jwksSigningKey(oidcConfig, header)
+            claims = jwt.decode(idToken, key, algorithms=[alg], **decodeKwargs)
+        else:
+            raise HTTPException(status_code=401,
+                                detail=f"OIDC id_token 签名算法不受支持: {alg or '缺失'}")
+    except jwt.exceptions.MissingCryptographyError:
+        raise HTTPException(status_code=401,
+                            detail="OIDC 非对称验签（RS256/ES256）需安装 cryptography 依赖")
+    except HTTPException:
+        raise
     except jwt.PyJWTError as e:
         logger.warning("OIDC id_token 校验失败: %s", e)
         raise HTTPException(status_code=401, detail="OIDC id_token 校验失败")
