@@ -12,33 +12,22 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 from xml.sax.saxutils import escape as _xmlEscape
 
-from neurova.core.tenant_scope import tenant_sql_where
-
 _KB_NS = "https://neurova.local/knowledge/"
 
 
 def _readGraph(store: Any, tenantId: str = "default",
                agentId: str = "") -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """读 (nodes, edges)：nodes = 概念术语＋主体（去重），edges = active triple。"""
-    with store._lock:
-        termClause, termParams = tenant_sql_where(tenantId)
-        termRows = store._conn.execute(
-            "SELECT term_id, kind, label FROM ontology_terms"
-            " WHERE %s AND kind = 'concept' ORDER BY term_id" % termClause,
-            termParams).fetchall()
-        factTenantClause, factTenantParams = tenant_sql_where(tenantId, alias="f")
-        factSql = ("SELECT f.subject_key, s.canonical_label AS src,"
-                   " f.predicate_term_id, f.object_term"
-                   " FROM knowledge_facts f JOIN knowledge_subjects s"
-                   " ON s.subject_key = f.subject_key"
-                   " WHERE %s AND f.status = 'active'"
-                   " AND f.record_kind = 'triple'" % factTenantClause)
-        params: list = list(factTenantParams)
-        if agentId:
-            factSql += " AND f.agent_id = ?"
-            params.append(agentId)
-        factSql += " ORDER BY s.canonical_label, f.predicate_term_id, f.object_term"
-        factRows = store._conn.execute(factSql, params).fetchall()
+    """读 (nodes, edges)：nodes = 概念术语＋主体（去重），edges = active triple。
+
+    U8：行来源走图后端门面（`graph_backend.resolveGraphBackend`）——默认
+    sqlite 档由 `SQLiteBackend` 以同一 SQL 取行（逐行同结果，导出文本逐字节
+    不变）；`NEUROVA_ONTOLOGY_GRAPH_BACKEND=oxigraph` 时改读嵌入式 RDF 库。
+    """
+    from neurova.knowledge.ontology.graph_backend import resolveGraphBackend
+
+    backend = resolveGraphBackend(store)
+    termRows = backend.conceptTerms(tenantId)
+    factRows = backend.activeTriples(tenantId, agentId)
     nodes: List[Dict[str, Any]] = []
     seen: set = set()
     for row in termRows:
@@ -48,7 +37,7 @@ def _readGraph(store: Any, tenantId: str = "default",
             nodes.append({"id": tid, "label": str(row["label"] or tid),
                           "type": "term"})
     for row in factRows:
-        src = str(row["src"])
+        src = str(row["subject_label"])
         if src not in seen:
             seen.add(src)
             nodes.append({"id": src, "label": src, "type": "subject"})
@@ -56,7 +45,7 @@ def _readGraph(store: Any, tenantId: str = "default",
         if dst not in seen:
             seen.add(dst)
             nodes.append({"id": dst, "label": dst, "type": "object"})
-    edges = [{"source": str(r["src"]), "target": str(r["object_term"]),
+    edges = [{"source": str(r["subject_label"]), "target": str(r["object_term"]),
               "predicate": str(r["predicate_term_id"])} for r in factRows]
     return nodes, edges
 

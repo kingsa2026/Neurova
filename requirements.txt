@@ -176,3 +176,9 @@ rich>=13.0
 # pyshacl 传递依赖 rdflib，SPARQL 投影面随之获得 rdflib；代码侧仍惰性
 # import＋fail-soft（shacl_runtime.py 点名豁免，形态同 sparql_query.py）。
 pyshacl>=0.25.0
+
+# 可选：图存储门面第二实现（U8；NEUROVA_ONTOLOGY_GRAPH_BACKEND=oxigraph 时
+# 才需要——graph_backend.py 惰性 import＋显式 GraphBackendNotSupported，
+# 默认 sqlite 档零依赖）。注意 PyPI 的 oxigraph 包是 CLI，Python 绑定是
+# pyoxigraph；Windows 走官方 wheel。
+# pyoxigraph>=0.5
