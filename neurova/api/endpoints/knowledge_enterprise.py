@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
+from neurova.core.tenant_scope import tenant_sql_where
 from neurova.api.endpoints.knowledge_common import ensureTenantExists
 
 router = APIRouter()
@@ -248,12 +249,15 @@ async def getSyncHistory(
     tenant = _tenantOf(current_user)
     sourceId = str(source_id or "").strip()
     with store._lock:
+        # 租户过滤单源（S5 批一）：tenant 由 _tenantOf resolve 恒非空，参数序不变
+        tenantClause, tenantParams = tenant_sql_where(tenant)
         rows = store._conn.execute(
             "SELECT trigger_kind, status, reason, batches, admitted, rejected,"
             " rows_skipped, entries_written, truncated, cursor_before, cursor_after,"
             " duration_ms, started_at, finished_at FROM enterprise_sync_history"
-            " WHERE tenant_id = ? AND source_id = ? ORDER BY started_at DESC,"
-            " history_id LIMIT ?", (tenant, sourceId, max(1, min(int(limit), 200)))
+            " WHERE %s AND source_id = ? ORDER BY started_at DESC,"
+            " history_id LIMIT ?" % tenantClause,
+            [*tenantParams, sourceId, max(1, min(int(limit), 200))]
         ).fetchall()
     return {"code": 0, "message": "success",
             "data": {"source_id": sourceId, "items": [dict(r) for r in rows]}}

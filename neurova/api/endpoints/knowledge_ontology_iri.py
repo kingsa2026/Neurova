@@ -12,6 +12,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException
 
 from neurova.api.auth import get_current_user_or_service
+from neurova.core.tenant_scope import tenant_sql_where
 
 router = APIRouter()
 
@@ -49,15 +50,20 @@ def _resolveIri(store: Any, iri: str, tenantId: str) -> Dict[str, Any]:
 
 
 def _termRows(store: Any, tenantId: str):
+    # 租户过滤单源（S5 批一）：tenantId 由端点入口 resolve（缺省 default）恒非空
+    tenantClause, tenantParams = tenant_sql_where(tenantId)
     return store._conn.execute(
-        "SELECT term_id, external_iris_json FROM ontology_terms WHERE tenant_id = ?"
-        " ORDER BY term_id", (tenantId,)).fetchall()
+        "SELECT term_id, external_iris_json FROM ontology_terms"
+        " WHERE %s ORDER BY term_id" % tenantClause,
+        tenantParams).fetchall()
 
 
 def _termOf(store: Any, termId: str, tenantId: str):
+    # 租户过滤单源（S5 批一）：参数序与迁移前 (tenantId, termId) 逐字节一致
+    tenantClause, tenantParams = tenant_sql_where(tenantId)
     row = store._conn.execute(
-        "SELECT * FROM ontology_terms WHERE tenant_id = ? AND term_id = ?",
-        (tenantId, termId)).fetchone()
+        "SELECT * FROM ontology_terms WHERE %s AND term_id = ?" % tenantClause,
+        [*tenantParams, termId]).fetchone()
     import json as _json
 
     if row is None:

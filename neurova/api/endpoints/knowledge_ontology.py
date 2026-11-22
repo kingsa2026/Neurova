@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from neurova.api.auth import get_current_user_or_service
 from neurova.api.deps import require_admin
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import tenant_sql_where
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -1179,11 +1180,13 @@ async def list_ontology_simulations(
 
     store = get_knowledge_fact_store()
     tenant = _tenantOf(current_user)
+    # 租户过滤单源（S5 批一）：tenant 由 _tenantOf resolve 恒非空，参数序不变
+    tenantClause, tenantParams = tenant_sql_where(tenant)
     rows = store.queryReadOnly(
         "SELECT simulation_id, agent_id, scope_json, hypothesis_json,"
         " diff_summary_json, created_at FROM ontology_simulations"
-        " WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?",
-        (tenant, int(limit)))
+        " WHERE %s ORDER BY created_at DESC LIMIT ?" % tenantClause,
+        [*tenantParams, int(limit)])
     import json as _json
 
     items = []
