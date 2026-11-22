@@ -402,3 +402,120 @@ class TestAdminSkipSampleEndpoints:
         client = _makeClient("user")
         resp = client.get("/api/coordination/triage/skip-samples")
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# SB-7 误杀率统计（计划 §7 晋升判据：skip 后 5 分钟内人类发言 = 误杀）
+# ---------------------------------------------------------------------------
+
+class TestFalseRescueStats:
+    def testFalseRescueEmptyState(self, dataRoot):
+        from neurova.collaboration.triage_feedback import falseRescueStats
+
+        stats = falseRescueStats()
+        assert stats["samples"] == 0
+        assert stats["falseKills"] == 0
+        assert stats["falseRescueRate"] == 0.0
+
+    def testFalseRescueDetectsHumanWithinWindow(self, dataRoot, syncManager):
+        from neurova.collaboration.triage_feedback import falseRescueStats
+
+        assert recordSkipSample(
+            conversationId="fr-hit", source="rules", rule="agent_loop_no_human",
+            p=None, features={}, mode="shadow",
+        ) is True
+        # 样本落盘后 60 秒处人类发言（5 分钟窗口内）= 误杀
+        session = syncManager.register_or_create_session(
+            "fr-hit", user_id="seed-user", agent_id="seed-agent")
+        session.add_event(SessionEvent(
+            event_type=EventType.USER_MESSAGE,
+            payload={"content": "我在，为什么不回？"},
+            timestamp=datetime.now(timezone.utc) + timedelta(seconds=60),
+        ))
+
+        stats = falseRescueStats()
+        assert stats["samples"] == 1
+        assert stats["falseKills"] == 1
+        assert stats["falseRescueRate"] == 1.0
+
+    def testFalseRescueIgnoresHumanBeforeSample(self, dataRoot, syncManager):
+        from neurova.collaboration.triage_feedback import falseRescueStats
+
+        # 人类发言在样本之前（过去 60 秒）——不是误杀
+        session = syncManager.register_or_create_session(
+            "fr-before", user_id="seed-user", agent_id="seed-agent")
+        session.add_event(SessionEvent(
+            event_type=EventType.USER_MESSAGE,
+            payload={"content": "先说话后跳过"},
+            timestamp=datetime.now(timezone.utc) - timedelta(seconds=60),
+        ))
+        assert recordSkipSample(
+            conversationId="fr-before", source="rules", rule="agent_loop_no_human",
+            p=None, features={}, mode="shadow",
+        ) is True
+
+        stats = falseRescueStats()
+        assert stats["samples"] == 1
+        assert stats["falseKills"] == 0
+
+    def testFalseRescueOutsideWindowNotCounted(self, dataRoot, syncManager):
+        from neurova.collaboration.triage_feedback import falseRescueStats
+
+        assert recordSkipSample(
+            conversationId="fr-late", source="rules", rule="agent_loop_no_human",
+            p=None, features={}, mode="shadow",
+        ) is True
+        session = syncManager.register_or_create_session(
+            "fr-late", user_id="seed-user", agent_id="seed-agent")
+        session.add_event(SessionEvent(
+            event_type=EventType.USER_MESSAGE,
+            payload={"content": "六分钟后才回来"},
+            timestamp=datetime.now(timezone.utc) + timedelta(seconds=400),
+        ))
+
+        stats = falseRescueStats()
+        assert stats["falseKills"] == 0
+        assert stats["falseRescueRate"] == 0.0
+
+    def testFalseRescueIgnoresAssistantMessages(self, dataRoot, syncManager):
+        from neurova.collaboration.triage_feedback import falseRescueStats
+
+        assert recordSkipSample(
+            conversationId="fr-assistant", source="rules", rule="agent_loop_no_human",
+            p=None, features={}, mode="shadow",
+        ) is True
+        session = syncManager.register_or_create_session(
+            "fr-assistant", user_id="seed-user", agent_id="seed-agent")
+        session.add_event(SessionEvent(
+            event_type=EventType.AGENT_REPLY,
+            payload={"content": "assistant 后续消息不算人类救援"},
+            timestamp=datetime.now(timezone.utc) + timedelta(seconds=30),
+        ))
+
+        stats = falseRescueStats()
+        assert stats["falseKills"] == 0
+
+    def testStatsEndpointExposesFalseRescue(self, dataRoot, syncManager):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from neurova.api.auth import create_access_token
+        from neurova.api.endpoints.coordination_api import router
+
+        assert recordSkipSample(
+            conversationId="fr-endpoint", source="rules", rule="agent_loop_no_human",
+            p=None, features={}, mode="shadow",
+        ) is True
+
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app)
+        token = create_access_token({"sub": "livetest", "role": "admin", "type": "access"})
+        resp = client.get(
+            "/coordination/triage/stats",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["false_rescue"]["samples"] == 1
+        assert "falseRescueRate" in body["false_rescue"]

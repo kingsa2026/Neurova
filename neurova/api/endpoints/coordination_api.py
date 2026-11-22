@@ -208,9 +208,14 @@ async def get_triage_stats():
     """
     gate = get_small_brain_triage_gate()
     from neurova.collaboration.glance_yield_rules import get_glance_yield_checker
+    from neurova.collaboration.triage_feedback import falseRescueStats
 
     checker = await get_glance_yield_checker()
-    return {"triage_gate": gate.get_stats(), "yield_checker": checker.get_stats()}
+    return {
+        "triage_gate": gate.get_stats(),
+        "yield_checker": checker.get_stats(),
+        "false_rescue": falseRescueStats(),
+    }
 
 
 @router.post("/triage/check")

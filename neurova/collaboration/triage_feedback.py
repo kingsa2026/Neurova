@@ -182,3 +182,59 @@ def relabelSample(sampleId: str, newLabel: str, note: str = "") -> bool:
                 pass
             raise
     return True
+
+
+def _parseTimestamp(value) -> "datetime | None":
+    """解析 ISO8601 时间戳；不可解析返回 None。naive 值按 UTC 兜底（样本库
+    与 SessionSyncManager 事件都产 aware UTC，此处只为防手写数据混入 naive）。"""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def falseRescueStats(windowMinutes: float = 5.0, limit: int = 200) -> Dict[str, Any]:
+    """误杀率统计（计划 §7 晋升判据的数据来源）。
+
+    误杀定义：会话被分诊门 skip（或 shadow would-skip）后，`windowMinutes`
+    分钟内出现人类新消息——说明被静音的是人类关心的内容，阈值需要回调。
+
+    纯读：样本库（listSkipSamples）+ SessionSyncManager 现役事件窗口，
+    不写任何状态；无样本时分母为零按 rate=0.0 处理，不外抛。
+    """
+    samples = [s for s in listSkipSamples(limit=limit)
+               if s.get("mode") in ("shadow", "enforce")]
+    if not samples:
+        return {"samples": 0, "falseKills": 0, "falseRescueRate": 0.0,
+                "windowMinutes": windowMinutes}
+    from neurova.sync.session_sync_manager import get_session_sync_manager
+
+    manager = get_session_sync_manager()
+    windowSeconds = windowMinutes * 60.0
+    falseKills = 0
+    for sample in samples:
+        conversationId = str(sample.get("conversation_id") or "")
+        recordedAt = _parseTimestamp(sample.get("recorded_at"))
+        if not conversationId or recordedAt is None:
+            continue
+        for event in manager.get_messages(conversationId, 50):
+            if event.get("role") != "user":
+                continue
+            eventTs = _parseTimestamp(event.get("timestamp"))
+            if eventTs is None:
+                continue
+            deltaSeconds = (eventTs - recordedAt).total_seconds()
+            if 0.0 <= deltaSeconds <= windowSeconds:
+                falseKills += 1
+                break
+    return {
+        "samples": len(samples),
+        "falseKills": falseKills,
+        "falseRescueRate": round(falseKills / len(samples), 4),
+        "windowMinutes": windowMinutes,
+    }
