@@ -221,6 +221,10 @@ ENDPOINT_MODULES = [
     # /{agent_id}/checkpoints* 区分；恢复是敏感操作（归属门 + confirm + 审计）。
     ("neurova.api.endpoints.agent_checkpoints_api", "/v1/agents", "Checkpoints API"),
     ("neurova.api.endpoints.auth", "/v1/auth", "Auth API"),
+    # S7 通用 OIDC SSO：authorize/callback/status 挂在 auth 域下的 oidc 子前缀
+    ("neurova.api.endpoints.auth_oidc", "/v1/auth/oidc", "OIDC SSO API"),
+    # S8 TOTP 两步验证：setup/enable/disable 需登录；verify 公开（登录挑战链）
+    ("neurova.api.endpoints.auth_2fa", "/v1/auth/2fa", "Auth 2FA API"),
     ("neurova.api.endpoints.memory", "/v1/memory", "Memory API"),
     ("neurova.api.endpoints.model", "/v1/models", "Model API"),
     ("neurova.api.endpoints.provider", "/v1/providers", "Provider API"),

@@ -1,4 +1,5 @@
 import { api } from './index'
+import config from '@/config'
 import type { LoginForm, RegisterForm, AuthTokens } from '@/types/auth'
 import type { User } from '@/types/auth'
 import type { ApiResponse } from '@/types/response'
@@ -72,6 +73,28 @@ export const authAPI = {
     new_password: string
     confirm_password: string
   }) => api.post<ApiResponse<{ username: string }>>('/auth/recover-password', data),
+
+  /**
+   * OIDC SSO 可用性（公开端点）：后端是否已配置 IdP。登录页据此决定是否显示 SSO 按钮。
+   */
+  oidcStatus: () => api.get<ApiResponse<{ enabled: boolean }>>('/auth/oidc/status'),
+
+  /**
+   * 发起 OIDC SSO：浏览器级导航到后端 authorize 端点（后端 302 到 IdP，
+   * IdP 认证后回跳 callback 换取本仓 JWT）。返回目标 URL 便于断言与日志。
+   */
+  oidcAuthorize: () => {
+    const url = `${config.apiBaseUrl}/auth/oidc/authorize`
+    window.location.assign(url)
+    return url
+  },
+
+  /**
+   * S8 两步验证：凭登录返回的短时 challenge_token + 6 位 TOTP 码（或恢复码）
+   * 换正式 token 对。
+   */
+  verify2fa: (data: { challenge_token: string; code: string }) =>
+    api.post<ApiResponse<AuthTokens>>('/auth/2fa/verify', data),
 }
 
 export default authAPI

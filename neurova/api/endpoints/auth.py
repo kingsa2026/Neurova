@@ -18,7 +18,7 @@ import hmac
 import os
 import uuid
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -105,6 +105,14 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int = 3600
+
+
+class TwoFactorChallengeResponse(BaseModel):
+    """S8 两步验证挑战响应：密码通过但需第二因子；challenge_token 5 分钟、
+    scope 限 2fa（type=2fa_challenge），只能拿去 /auth/2fa/verify 换正式 token 对。"""
+
+    two_factor_required: bool = True
+    challenge_token: str
 
 
 class UserInfo(BaseModel):
@@ -277,7 +285,7 @@ def _get_token_manager():
     return None
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=Union[TokenResponse, TwoFactorChallengeResponse])
 async def login(request: Request, body: LoginRequest):
     """用户登录"""
     _get_request_id(request)
@@ -318,6 +326,18 @@ async def login(request: Request, body: LoginRequest):
             logger.warning("Login attempt for locked user: %s", body.username)
             _auditAuthLogin(str(user["id"]), request, success=False, attempted_username=body.username)
             raise HTTPException(status_code=403, detail="Account is locked due to too many failed attempts")
+
+        # S8 两步验证：密码通过且用户启用 2FA → 不发正式 token，改发短时挑战令牌
+        # （type=2fa_challenge，5 分钟，scope 限 2fa）；凭 challenge + TOTP/恢复码
+        # 到 /auth/2fa/verify 换正式 token 对。未启用用户走原路径，零影响。
+        if user.get("two_factor_enabled"):
+            from neurova.api.auth import create_2fa_challenge_token
+
+            logger.info("2FA challenge issued for user: %s", body.username)
+            return TwoFactorChallengeResponse(
+                two_factor_required=True,
+                challenge_token=create_2fa_challenge_token(user),
+            )
 
         # 生成 token
         # 审计修复 (P0-2): JWT 必须携带 neuser_id/user_id 身份声明,

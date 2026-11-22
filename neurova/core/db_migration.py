@@ -69,6 +69,35 @@ def schema_version(conn) -> int:
     return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
 
+def apply_domain_steps(conn, domain: str) -> List[int]:
+    """按注册顺序**幂等执行**某域全部已注册步骤，返回执行的版本号列表。
+
+    与 ``migrate()`` 的差别：不读不写 user_version。适用场景是**多个 feature
+    域共享同一物理库**——users.db 的 schema 演进由 auth_oidc 与 auth_2fa 两个
+    域各自登记，而 PRAGMA user_version 每库只有一枚，后到域若也走 migrate()，
+    其步骤会被先到域抬高的版本号挡成"永不应用"（或触发防降级误报）。此助手
+    只执行步骤本身；幂等性由各步骤自保证（PRAGMA table_info 判存在再 ALTER /
+    CREATE INDEX IF NOT EXISTS），每步独立提交，重复执行无副作用。
+    """
+    with _registry_lock:
+        if domain not in _DOMAIN_MIGRATIONS:
+            raise ValueError(
+                f"未注册的 schema 版本域: {domain!r}（已注册: {registered_domains()}；"
+                "接入新域须先 register_migration(version, step, domain=...))"
+            )
+        steps = list(_DOMAIN_MIGRATIONS[domain])
+    applied: List[int] = []
+    for version, step in steps:
+        if isinstance(step, str):
+            conn.executescript(step)
+        else:
+            step(conn)
+        conn.commit()
+        applied.append(version)
+        logger.info("DB migration step applied: domain=%s v%d (apply_domain_steps)", domain, version)
+    return applied
+
+
 def migrate(conn, domain: str = "memory") -> List[int]:
     """对指定版本域执行未应用的迁移，返回本次应用的版本号列表。
 

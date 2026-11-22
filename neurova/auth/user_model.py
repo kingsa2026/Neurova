@@ -18,8 +18,51 @@ import os
 import sqlite3
 from typing import Any, Dict, Optional
 from neurova.core.data_root import callerPath
+from neurova.core.db_migration import apply_domain_steps, register_migration
 
 logger = get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# users.db schema 版本域（core/db_migration.py 注册表）。
+# users 表的列演进从"散落 ALTER"收口到注册表：auth_oidc（S7 SSO）与 auth_2fa
+# （S8 两步验证）各自成域登记，由 _init_db 经 apply_domain_steps 幂等应用
+# （两域共享 users.db 的 user_version，故不走 migrate() 的版本记账，见该助手注释）。
+# ---------------------------------------------------------------------------
+
+#: S7：OIDC subject 列 + 索引（按 sub 找人是 SSO 供应规则的第一优先级）。
+USERS_OIDC_DOMAIN = "auth_oidc"
+
+
+def _migrateUsersOidcColumn(conn: sqlite3.Connection) -> None:
+    """v1（S7）：users 补 oidc_sub TEXT 列 + idx_users_oidc_sub 索引（幂等）。"""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "oidc_sub" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN oidc_sub TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_users_oidc_sub ON users(oidc_sub)"
+    )
+
+
+register_migration(1, _migrateUsersOidcColumn, domain=USERS_OIDC_DOMAIN)
+
+
+#: S8：TOTP 两步验证三列（secret 暂存、启用位、恢复码哈希 JSON）
+USERS_2FA_DOMAIN = "auth_2fa"
+
+
+def _migrateUsersTwoFactorColumns(conn: sqlite3.Connection) -> None:
+    """v1（S8）：users 补 totp_secret / two_factor_enabled / recovery_codes_hash（幂等）。"""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "totp_secret" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN totp_secret TEXT")
+    if "two_factor_enabled" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN two_factor_enabled INTEGER DEFAULT 0")
+    if "recovery_codes_hash" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN recovery_codes_hash TEXT")
+
+
+register_migration(1, _migrateUsersTwoFactorColumns, domain=USERS_2FA_DOMAIN)
 
 
 class User:
@@ -40,6 +83,10 @@ class User:
         locked_until: str = "",
         updated_at: str = "",
         reset_token: str = "",
+        oidc_sub: str = "",
+        totp_secret: str = "",
+        two_factor_enabled: int = 0,
+        recovery_codes_hash: str = "",
     ):
         self.id = id
         self.username = username
@@ -55,6 +102,12 @@ class User:
         self.locked_until = locked_until or None
         self.updated_at = updated_at
         self.reset_token = reset_token or None
+        # OIDC subject（S7）：IdP 侧唯一身份键；本地账号与 IdP 身份的绑定锚点
+        self.oidc_sub = oidc_sub or None
+        # TOTP 2FA（S8）：secret（暂存/启用后同一列）、启用位、恢复码哈希（JSON 数组）
+        self.totp_secret = totp_secret or None
+        self.two_factor_enabled = bool(two_factor_enabled)
+        self.recovery_codes_hash = recovery_codes_hash or None
 
 
 class UserModel:
@@ -144,6 +197,11 @@ class UserModel:
             if "reset_token" not in existing:
                 cursor.execute("ALTER TABLE users ADD COLUMN reset_token TEXT")
 
+            # 注册表迁移幂等应用（auth_oidc：oidc_sub；auth_2fa：TOTP 三列。
+            # 两域共享 users.db 的 user_version，故经 apply_domain_steps 幂等应用）
+            apply_domain_steps(conn, USERS_OIDC_DOMAIN)
+            apply_domain_steps(conn, USERS_2FA_DOMAIN)
+
             conn.commit()
             conn.close()
             logger.debug("Database tables initialized")
@@ -153,7 +211,8 @@ class UserModel:
             raise
 
     def create_user(
-        self, username: str, password_hash: str, email: str = None, role: str = "user", status: str = "active"
+        self, username: str, password_hash: str, email: str = None, role: str = "user", status: str = "active",
+        oidc_sub: str = None,
     ) -> User:
         """
         创建新用户
@@ -164,6 +223,7 @@ class UserModel:
             email: 邮箱（可选）
             role: 角色（默认user）
             status: 状态（默认active）
+            oidc_sub: OIDC subject（S7 SSO 供应用户时写入；本地注册留空）
 
         Returns:
             创建的用户对象
@@ -191,10 +251,10 @@ class UserModel:
             # 插入新用户
             cursor.execute(
                 """
-                INSERT INTO users (username, email, password_hash, role, status)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO users (username, email, password_hash, role, status, oidc_sub)
+                VALUES (?, ?, ?, ?, ?, ?)
             """,
-                (username, email, password_hash, role, status),
+                (username, email, password_hash, role, status, oidc_sub),
             )
 
             user_id = cursor.lastrowid
@@ -251,6 +311,10 @@ class UserModel:
                     locked_until=row["locked_until"] if "locked_until" in row.keys() else "",
                     updated_at=row["updated_at"] if "updated_at" in row.keys() else "",
                     reset_token=row["reset_token"] if "reset_token" in row.keys() else "",
+                    oidc_sub=row["oidc_sub"] if "oidc_sub" in row.keys() else "",
+                    totp_secret=row["totp_secret"] if "totp_secret" in row.keys() else "",
+                    two_factor_enabled=(row["two_factor_enabled"] or 0) if "two_factor_enabled" in row.keys() else 0,
+                    recovery_codes_hash=row["recovery_codes_hash"] if "recovery_codes_hash" in row.keys() else "",
                 )
             return None
 
@@ -291,6 +355,10 @@ class UserModel:
                     locked_until=row["locked_until"] if "locked_until" in row.keys() else "",
                     updated_at=row["updated_at"] if "updated_at" in row.keys() else "",
                     reset_token=row["reset_token"] if "reset_token" in row.keys() else "",
+                    oidc_sub=row["oidc_sub"] if "oidc_sub" in row.keys() else "",
+                    totp_secret=row["totp_secret"] if "totp_secret" in row.keys() else "",
+                    two_factor_enabled=(row["two_factor_enabled"] or 0) if "two_factor_enabled" in row.keys() else 0,
+                    recovery_codes_hash=row["recovery_codes_hash"] if "recovery_codes_hash" in row.keys() else "",
                 )
             return None
 
@@ -331,11 +399,61 @@ class UserModel:
                     locked_until=row["locked_until"] if "locked_until" in row.keys() else "",
                     updated_at=row["updated_at"] if "updated_at" in row.keys() else "",
                     reset_token=row["reset_token"] if "reset_token" in row.keys() else "",
+                    oidc_sub=row["oidc_sub"] if "oidc_sub" in row.keys() else "",
+                    totp_secret=row["totp_secret"] if "totp_secret" in row.keys() else "",
+                    two_factor_enabled=(row["two_factor_enabled"] or 0) if "two_factor_enabled" in row.keys() else 0,
+                    recovery_codes_hash=row["recovery_codes_hash"] if "recovery_codes_hash" in row.keys() else "",
                 )
             return None
 
         except Exception as e:
             logger.error("Failed to get user by email: %s", e)
+            return None
+
+    def get_user_by_oidc_sub(self, oidc_sub: str) -> Optional[User]:
+        """
+        根据 OIDC subject 获取用户（S7 SSO 供应规则第一优先级）
+
+        Args:
+            oidc_sub: IdP 侧唯一身份键
+
+        Returns:
+            用户对象，如果不存在则返回None
+        """
+        if not oidc_sub:
+            return None
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT * FROM users WHERE oidc_sub = ?", (oidc_sub,))
+            row = cursor.fetchone()
+            conn.close()
+
+            if row:
+                return User(
+                    id=row["id"],
+                    username=row["username"],
+                    email=row["email"],
+                    password_hash=row["password_hash"],
+                    role=row["role"],
+                    status=row["status"],
+                    created_at=row["created_at"],
+                    login_count=row["login_count"] if "login_count" in row.keys() else 0,
+                    failed_attempts=row["failed_attempts"] if "failed_attempts" in row.keys() else 0,
+                    last_login=row["last_login"] if "last_login" in row.keys() else "",
+                    locked_until=row["locked_until"] if "locked_until" in row.keys() else "",
+                    updated_at=row["updated_at"] if "updated_at" in row.keys() else "",
+                    reset_token=row["reset_token"] if "reset_token" in row.keys() else "",
+                    oidc_sub=row["oidc_sub"] if "oidc_sub" in row.keys() else "",
+                    totp_secret=row["totp_secret"] if "totp_secret" in row.keys() else "",
+                    two_factor_enabled=(row["two_factor_enabled"] or 0) if "two_factor_enabled" in row.keys() else 0,
+                    recovery_codes_hash=row["recovery_codes_hash"] if "recovery_codes_hash" in row.keys() else "",
+                )
+            return None
+
+        except Exception as e:
+            logger.error("Failed to get user by oidc_sub: %s", e)
             return None
 
     def list_users(self, limit: int = 100, offset: int = 0, role: str = None, status: str = None) -> list:
@@ -462,8 +580,11 @@ class UserModel:
                 conn.close()
                 return False
 
-            # 构建更新语句
-            allowed_fields = ["username", "email", "password_hash", "role", "status"]
+            # 构建更新语句（oidc_sub：S7 SSO 绑定；totp_*：S8 两步验证状态）
+            allowed_fields = [
+                "username", "email", "password_hash", "role", "status",
+                "oidc_sub", "totp_secret", "two_factor_enabled", "recovery_codes_hash",
+            ]
             update_fields = []
             params = []
 
@@ -771,7 +892,7 @@ class UserModel:
                 except Exception as e:
                     logger.warning("清除锁定状态失败: %s", e)
 
-            # 返回用户信息字典
+            # 返回用户信息字典（two_factor_enabled：S8 登录链据此决定是否发挑战）
             return {
                 "id": user.id,
                 "username": user.username,
@@ -780,6 +901,7 @@ class UserModel:
                 "status": user.status,
                 "created_at": user.created_at,
                 "password_hash": user.password_hash,
+                "two_factor_enabled": bool(user.two_factor_enabled),
             }
 
         except Exception as e:

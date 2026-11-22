@@ -44,6 +44,15 @@ PUBLIC_EXACT_PATHS: Set[str] = {
     "/api/v1/auth/register/verify-code",
     "/api/v1/auth/setup-status",
     "/api/v1/auth/recover-password",
+    # S7 通用 OIDC SSO：authorize（302 跳 IdP）、callback（IdP 回跳，凭 code 换
+    # 本仓 JWT）、status（前端 SSO 按钮可见性）——三者均为登录前链路，匿名可达；
+    # /api/v1/auth/oidc/* 其余路径不在内（本域当前无其余路径）。
+    "/api/v1/auth/oidc/authorize",
+    "/api/v1/auth/oidc/callback",
+    "/api/v1/auth/oidc/status",
+    # S8 两步验证的挑战验证端点：调用方此时只有短时 challenge_token（无正式
+    # JWT），必须匿名可达；setup/enable/disable 仍需登录（不入白名单）。
+    "/api/v1/auth/2fa/verify",
     # 前端错误自动上报（匿名写入设计）
     "/api/v1/frontend/errors",
 }

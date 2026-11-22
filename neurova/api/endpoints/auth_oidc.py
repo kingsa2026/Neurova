@@ -1,0 +1,372 @@
+from __future__ import annotations
+
+"""
+通用 OIDC SSO 端点（S7）
+
+链路：
+1. GET /api/v1/auth/oidc/authorize  → 302 到 IdP 的 authorize 端点（带 state+nonce，
+   state 落进程内短时存储：TTL 10 分钟、一次性消费）
+2. IdP 认证后回跳 GET /api/v1/auth/oidc/callback?code&state
+   → 用 code 换 token → 校验 id_token → 按 sub 供应用户 → 签发本仓 JWT 对
+3. GET /api/v1/auth/oidc/status     → 公开暴露 {enabled}，前端据此决定是否显示 SSO 按钮
+
+配置（环境变量，任一缺失即未启用；authorize/callback 诚实 503）：
+- NEUROVA_OIDC_ISSUER        IdP 签发者根 URL（如 https://idp.example.com/realms/main）
+- NEUROVA_OIDC_CLIENT_ID     客户端标识
+- NEUROVA_OIDC_CLIENT_SECRET 客户端密钥
+- NEUROVA_OIDC_SCOPES        默认 "openid profile email"
+- NEUROVA_OIDC_REDIRECT_URI  可选；缺省按请求基址拼 callback（反代/域名固定时建议显式配置）
+
+id_token 校验选型（任务卡二选一）：**PyJWT HS256，client_secret 即验签密钥**。
+理由：v1 走 confidential client 的 client_secret 后通道，id_token 由后端直连
+IdP token 端点（TLS）取回，不经过浏览器；HS256 免去 JWKS 拉取/缓存/轮换机器，
+且 PyJWT 已是本仓签发侧的既有依赖（api/auth.py 同一算法族）。RS256/JWKS 留作
+IdP 不支持 HS256 时的后续扩展，不在本卡展开。
+
+用户供应规则：按 oidc_sub 找人 → 无则按 email 绑定现有号（回写 oidc_sub）→
+再无则建号（role 沿用"系统无用户时首个账号即管理员"的既有口径，见
+endpoints/auth.py register 的 is_bootstrap 分支）。
+"""
+
+import secrets
+import threading
+import time
+from typing import Any, Dict, Optional, Tuple
+
+import httpx
+import jwt
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import RedirectResponse
+
+from neurova.core import config
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
+
+router = APIRouter()
+
+# ── 配置读取 ───────────────────────────────────────────────────────────────
+# 进程环境变量优先，回落 config（.env 已在启动期并入进程环境；两处同源，
+# 这里不造第二份配置事实源，只是保证测试 monkeypatch.setenv 即时生效）。
+
+_OIDC_ISSUER_ENV = "NEUROVA_OIDC_ISSUER"
+_OIDC_CLIENT_ID_ENV = "NEUROVA_OIDC_CLIENT_ID"
+_OIDC_CLIENT_SECRET_ENV = "NEUROVA_OIDC_CLIENT_SECRET"
+_OIDC_SCOPES_ENV = "NEUROVA_OIDC_SCOPES"
+_OIDC_REDIRECT_URI_ENV = "NEUROVA_OIDC_REDIRECT_URI"
+
+DEFAULT_SCOPES = "openid profile email"
+
+#: 发现文档缓存 TTL；id_token 时钟容差交给 PyJWT 的 exp/iat 校验 + leeway
+_DISCOVERY_TTL_SECONDS = 3600
+#: authorize state 短时存储 TTL（一次性，超时即拒）
+_STATE_TTL_SECONDS = 600
+
+
+def _setting(name: str) -> str:
+    import os
+
+    value = (os.environ.get(name) or "").strip()
+    if value:
+        return value
+    try:
+        return str(config.get(name) or "").strip()
+    except Exception:  # noqa: BLE001 - config 未初始化时按缺省处理
+        return ""
+
+
+def _oidcConfig() -> Optional[Dict[str, str]]:
+    """读取 OIDC 三要素；任一缺失返回 None（调用方诚实报缺）。"""
+    issuer = _setting(_OIDC_ISSUER_ENV)
+    client_id = _setting(_OIDC_CLIENT_ID_ENV)
+    client_secret = _setting(_OIDC_CLIENT_SECRET_ENV)
+    if not (issuer and client_id and client_secret):
+        return None
+    return {
+        "issuer": issuer.rstrip("/"),
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scopes": _setting(_OIDC_SCOPES_ENV) or DEFAULT_SCOPES,
+        "redirect_uri": _setting(_OIDC_REDIRECT_URI_ENV),
+    }
+
+
+def _missingConfigNames() -> list:
+    names = []
+    if not _setting(_OIDC_ISSUER_ENV):
+        names.append(_OIDC_ISSUER_ENV)
+    if not _setting(_OIDC_CLIENT_ID_ENV):
+        names.append(_OIDC_CLIENT_ID_ENV)
+    if not _setting(_OIDC_CLIENT_SECRET_ENV):
+        names.append(_OIDC_CLIENT_SECRET_ENV)
+    return names
+
+
+# ── IdP 发现文档（{issuer}/.well-known/openid-configuration）───────────────
+# issuer 是运维配置的基础设施地址（部署方在环境变量里指定的可信 IdP），
+# 按 S2 分类豁免 url_guard 的公网校验——它不是用户可控输入，而是与数据库、
+# SMTP 同级的部署期可信配置； url_guard 管的是"把用户/租户输入当 URL 用"的面。
+
+_discoveryCache: Dict[str, Tuple[Dict[str, Any], float]] = {}
+_discoveryLock = threading.RLock()
+
+
+def _fetchDiscovery(issuer: str) -> Dict[str, Any]:
+    now = time.time()
+    with _discoveryLock:
+        cached = _discoveryCache.get(issuer)
+        if cached and now - cached[1] < _DISCOVERY_TTL_SECONDS:
+            return cached[0]
+    url = f"{issuer}/.well-known/openid-configuration"
+    with httpx.Client(timeout=10.0) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        doc = resp.json()
+    if not doc.get("token_endpoint"):
+        raise ValueError("IdP 发现文档缺少 token_endpoint")
+    with _discoveryLock:
+        _discoveryCache[issuer] = (doc, now)
+    return doc
+
+
+# ── authorize state 短时存储（进程内、TTL、一次性）─────────────────────────
+
+_stateStore: Dict[str, Dict[str, float]] = {}
+_stateLock = threading.RLock()
+
+
+def _storeState(state: str, nonce: str) -> None:
+    now = time.time()
+    with _stateLock:
+        expired = [k for k, v in _stateStore.items() if now - v["created"] > _STATE_TTL_SECONDS]
+        for k in expired:
+            _stateStore.pop(k, None)
+        _stateStore[state] = {"nonce": nonce, "created": now}
+
+
+def _consumeState(state: str) -> Optional[str]:
+    """取走 state（一次性）；不存在或已过期返回 None。"""
+    import hmac as _hmac
+
+    now = time.time()
+    with _stateLock:
+        for key, entry in list(_stateStore.items()):
+            if now - entry["created"] > _STATE_TTL_SECONDS:
+                _stateStore.pop(key, None)
+        # 常量时间比对：state 是高熵随机串，字典命中前先做一次全量常量时间匹配，
+        # 避免键比较的时序侧信道（与仓内其余凭证比对同口径）。
+        matched = None
+        for key in _stateStore:
+            if _hmac.compare_digest(key, state or ""):
+                matched = key
+                break
+        if matched is None:
+            return None
+        entry = _stateStore.pop(matched)
+        return entry["nonce"]
+
+
+# ── 用户供应（按 sub → email → 建号）──────────────────────────────────────
+
+def _uniqueUsername(model, base: str) -> str:
+    candidate = base
+    suffix = 0
+    while model.get_user_by_username(candidate) is not None:
+        suffix += 1
+        candidate = f"{base}{suffix}"
+    return candidate
+
+
+def _provisionOidcUser(model, sub: str, email: str, preferred_username: str):
+    """按 oidc_sub → email 绑定 → 建号 的供应规则返回既有/新建 User。"""
+    existing = model.get_user_by_oidc_sub(sub)
+    if existing is not None:
+        return existing
+
+    if email:
+        byEmail = model.get_user_by_email(email)
+        if byEmail is not None:
+            # 绑定现有号：IdP 已验证该邮箱归属，回写 sub 形成绑定
+            model.update_user(byEmail.id, oidc_sub=sub)
+            return model.get_user_by_id(byEmail.id)
+
+    # 建号：用户名取邮箱前缀或 sub 派生；口令置为不可用的随机哈希（SSO 账号
+    # 不经密码登录，但 password_hash 列 NOT NULL）；首用户即管理员（沿用
+    # register 的 is_bootstrap 口径）。
+    base = (email.split("@")[0] if email else "") or f"oidc-{sub[:12]}"
+    safeBase = "".join(ch for ch in base if ch.isalnum() or ch in "._-") or f"oidc-{sub[:12]}"
+    role = "admin" if model.count_users() == 0 else "user"
+    from neurova.api.auth import hash_password
+
+    return model.create_user(
+        username=_uniqueUsername(model, safeBase),
+        password_hash=hash_password(secrets.token_urlsafe(32)),
+        email=email or None,
+        role=role,
+        oidc_sub=sub,
+    )
+
+
+# ── id_token 校验（HS256）─────────────────────────────────────────────────
+
+def _verifyIdToken(idToken: str, oidcConfig: Dict[str, str], expectedNonce: str) -> Dict[str, Any]:
+    """验签 + iss/aud/exp + nonce；任一不符抛 HTTPException(401)。"""
+    import hmac as _hmac
+
+    try:
+        claims = jwt.decode(
+            idToken,
+            oidcConfig["client_secret"],
+            algorithms=["HS256"],
+            audience=oidcConfig["client_id"],
+            issuer=oidcConfig["issuer"],
+        )
+    except jwt.PyJWTError as e:
+        logger.warning("OIDC id_token 校验失败: %s", e)
+        raise HTTPException(status_code=401, detail="OIDC id_token 校验失败")
+
+    nonce = str(claims.get("nonce") or "")
+    if not nonce or not _hmac.compare_digest(nonce, expectedNonce or ""):
+        raise HTTPException(status_code=401, detail="OIDC nonce 校验失败")
+    return claims
+
+
+def _auditOidcLogin(user_id: Optional[str], request: Request, success: bool, sub: str = "") -> None:
+    """SSO 登录成败入审计（复用 endpoints/auth 的 AUTH_LOGIN/AUTH_FAILED 单源）。"""
+    try:
+        from neurova.api.endpoints.auth import _auditAuthLogin
+
+        _auditAuthLogin(user_id, request, success=success, attempted_username=sub)
+    except Exception as e:  # noqa: BLE001 - 审计失败不阻断 SSO 主流程
+        logger.warning("OIDC 审计写入失败: %s", e)
+
+
+# ── 端点 ──────────────────────────────────────────────────────────────────
+
+@router.get("/status")
+async def oidcStatus():
+    """SSO 可用性（公开）：前端登录页据此决定是否渲染 SSO 按钮。"""
+    return {"enabled": _oidcConfig() is not None}
+
+
+@router.get("/authorize")
+async def oidcAuthorize(request: Request):
+    """302 到 IdP authorize 端点；state+nonce 由本仓生成并短时保存。"""
+    oidcConfig = _oidcConfig()
+    if oidcConfig is None:
+        missing = ", ".join(_missingConfigNames())
+        raise HTTPException(status_code=503, detail=f"OIDC SSO 未配置：缺少 {missing}")
+
+    try:
+        discovery = _fetchDiscovery(oidcConfig["issuer"])
+    except Exception as e:  # noqa: BLE001 - 发现文档不可达是上游故障，诚实上报
+        logger.error("OIDC 发现文档获取失败 issuer=%s: %s", oidcConfig["issuer"], e)
+        raise HTTPException(status_code=503, detail="OIDC IdP 不可达（发现文档获取失败）")
+
+    state = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
+    _storeState(state, nonce)
+
+    redirectUri = oidcConfig["redirect_uri"] or str(request.base_url).rstrip("/") + "/api/v1/auth/oidc/callback"
+    from urllib.parse import urlencode
+
+    params = {
+        "response_type": "code",
+        "client_id": oidcConfig["client_id"],
+        "redirect_uri": redirectUri,
+        "scope": oidcConfig["scopes"],
+        "state": state,
+        "nonce": nonce,
+    }
+    return RedirectResponse(
+        discovery["authorization_endpoint"] + "?" + urlencode(params),
+        status_code=302,
+    )
+
+
+@router.get("/callback")
+async def oidcCallback(request: Request, code: str = "", state: str = ""):
+    """code 换 token → 校验 id_token → 供应用户 → 签发本仓 JWT 对。"""
+    oidcConfig = _oidcConfig()
+    if oidcConfig is None:
+        missing = ", ".join(_missingConfigNames())
+        raise HTTPException(status_code=503, detail=f"OIDC SSO 未配置：缺少 {missing}")
+
+    nonce = _consumeState(state)
+    if nonce is None:
+        raise HTTPException(status_code=400, detail="OIDC state 无效或已过期")
+    if not code:
+        raise HTTPException(status_code=400, detail="OIDC callback 缺少 code")
+
+    discovery = _fetchDiscovery(oidcConfig["issuer"])
+    tokenEndpoint = discovery["token_endpoint"]
+    redirectUri = oidcConfig["redirect_uri"] or str(request.base_url).rstrip("/") + "/api/v1/auth/oidc/callback"
+
+    # code 换 token： confidential client 走 client_secret 后通道
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            tokenResp = await client.post(
+                tokenEndpoint,
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": redirectUri,
+                    "client_id": oidcConfig["client_id"],
+                    "client_secret": oidcConfig["client_secret"],
+                },
+                headers={"Accept": "application/json"},
+            )
+    except httpx.HTTPError as e:
+        logger.error("OIDC token 端点请求失败: %s", e)
+        raise HTTPException(status_code=502, detail="OIDC token 端点不可达")
+    if tokenResp.status_code != 200:
+        logger.warning("OIDC token 交换失败: status=%s body=%s", tokenResp.status_code, tokenResp.text[:200])
+        raise HTTPException(status_code=502, detail="OIDC 授权码交换失败")
+    tokenPayload = tokenResp.json()
+    idToken = tokenPayload.get("id_token")
+    if not idToken:
+        raise HTTPException(status_code=502, detail="OIDC token 响应缺少 id_token")
+
+    claims = _verifyIdToken(idToken, oidcConfig, nonce)
+
+    sub = str(claims.get("sub") or "").strip()
+    if not sub:
+        raise HTTPException(status_code=401, detail="OIDC id_token 缺少 sub")
+    email = str(claims.get("email") or "").strip()
+    preferred = str(claims.get("preferred_username") or "").strip()
+
+    # 供应用户（sub → email 绑定 → 建号）
+    from neurova.api.endpoints.auth import _get_user_model, buildIdentityClaims
+
+    model = _get_user_model()
+    user = _provisionOidcUser(model, sub=sub, email=email, preferred_username=preferred)
+    if user is None:
+        raise HTTPException(status_code=500, detail="OIDC 用户供应失败")
+
+    from neurova.api.auth import create_access_token, create_refresh_token
+
+    identityClaims = buildIdentityClaims({"id": user.id, "username": user.username})
+    accessToken = create_access_token(data={**identityClaims, "role": user.role})
+    refreshToken = create_refresh_token(data=identityClaims)
+
+    try:
+        model.log_login(
+            user_id=user.id,
+            username=user.username,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            success=True,
+        )
+    except Exception as e:  # noqa: BLE001 - 登录日志失败不阻断 SSO
+        logger.warning("OIDC 登录日志写入失败: %s", e)
+    _auditOidcLogin(str(user.id), request, success=True, sub=sub)
+
+    return {
+        "access_token": accessToken,
+        "refresh_token": refreshToken,
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "user_id": str(user.id),
+        "username": user.username,
+        "role": user.role,
+    }

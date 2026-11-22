@@ -104,6 +104,54 @@
           </GlassButton>
         </a-form>
 
+        <!-- S8 两步验证：密码通过且用户启用 2FA 后，进入 6 位码验证态 -->
+        <a-form
+          v-else-if="twoFactorMode"
+          layout="vertical"
+          class="nr-auth-form"
+          @submit.prevent="handleVerify2fa"
+        >
+          <div class="nr-setup-intro">
+            <h2 class="nr-auth-title">{{ t('auth.loginTitle') }}</h2>
+            <p class="nr-auth-subtitle">{{ t('auth.verifyCode') }}</p>
+          </div>
+
+          <a-form-item :label="t('auth.verifyCode')">
+            <GlassInput
+              v-model:model-value="twoFaCode"
+              :placeholder="t('auth.verifyCode')"
+              autocomplete="one-time-code"
+              @update:model-value="twoFaCode = $event"
+            />
+          </a-form-item>
+
+          <a-alert
+            v-if="error"
+            :message="error"
+            type="error"
+            show-icon
+            closable
+            style="margin-bottom: 16px"
+            @close="error = null"
+          />
+
+          <GlassButton
+            variant="primary"
+            size="lg"
+            :loading="loading"
+            style="width: 100%"
+            @click="handleVerify2fa"
+          >
+            {{ t('auth.login') }}
+          </GlassButton>
+
+          <div style="text-align: center; margin-top: 12px">
+            <a href="#" class="nr-auth-forgot" @click.prevent="backToCredentials">
+              {{ t('auth.recoverBackLogin') }}
+            </a>
+          </div>
+        </a-form>
+
         <a-form
           v-else
           :model="form"
@@ -164,6 +212,20 @@
           >
             {{ t('auth.login') }}
           </GlassButton>
+
+          <!-- S7 通用 OIDC SSO：后端配置了 IdP（oidcStatus enabled）才显示。
+               按钮文案复用既有 auth.login 键 + "SSO" 专有名，不新增 locale 键。 -->
+          <div v-if="ssoEnabled" class="nr-auth-sso" style="margin-top: 12px">
+            <GlassButton
+              variant="secondary"
+              size="lg"
+              style="width: 100%"
+              data-testid="sso-login-button"
+              @click="handleSsoLogin"
+            >
+              SSO · {{ t('auth.login') }}
+            </GlassButton>
+          </div>
         </a-form>
 
         <div v-if="!needsSetup" class="nr-auth-footer">
@@ -214,6 +276,13 @@ const setupForm = reactive({
 const loading = ref(false)
 const error = ref<string | null>(null)
 
+// S7 OIDC SSO：后端配置了 IdP 才显示 SSO 按钮（oidcStatus enabled）
+const ssoEnabled = ref(false)
+
+// S8 两步验证：登录返回挑战令牌后进入 6 位码验证态
+const twoFactorMode = ref(false)
+const twoFaCode = ref('')
+
 /** Restore remembered username on mount. */
 onMounted(async () => {
   const saved = localStorage.getItem('nr_remembered_user')
@@ -230,7 +299,21 @@ onMounted(async () => {
   } catch {
     needsSetup.value = false
   }
+
+  // SSO 可用性探测：失败（后端未升级/网络错误）一律按未启用处理，不影响密码登录
+  try {
+    const res = (await authAPI.oidcStatus()) as any
+    const data = res?.data ?? res
+    ssoEnabled.value = !!data?.enabled
+  } catch {
+    ssoEnabled.value = false
+  }
 })
+
+/** SSO 登录：浏览器级跳转后端 authorize → 302 到 IdP（后端 callback 换本仓 JWT） */
+function handleSsoLogin() {
+  authAPI.oidcAuthorize()
+}
 
 /** 首启向导提交：注册首个用户（后端赋予管理员角色）并直接登录 */
 async function handleSetup() {
@@ -303,18 +386,14 @@ async function handleLogin() {
       remember: form.remember,
     })
 
-    if (success) {
-      // Persist remembered username
-      if (form.remember) {
-        localStorage.setItem('nr_remembered_user', form.username)
-      } else {
-        localStorage.removeItem('nr_remembered_user')
-      }
+    if (!success && authStore.pending2faChallenge) {
+      // S8：密码通过、服务端要求第二因子 → 切换到 6 位码验证态
+      twoFactorMode.value = true
+      return
+    }
 
-      // Navigate to the originally requested page, or dashboard
-      // `?redirect=` 是外人能改的一段字符串：`//evil.com`、`/\evil.com`、`http://evil.com`
-      // 都会被浏览器当外站，所以只认站内路径，其余一律回落总览。
-      router.push(safeRedirectTarget(route.query.redirect) ?? '/dashboard')
+    if (success) {
+      concludeLoginSuccess()
     } else if (authStore.lastNetworkFailed) {
       // 仅网络层失败（无 HTTP 响应）才做进程诊断；401 等有响应错误如实显示
       const diag = await backendDiagnosis()
@@ -328,6 +407,47 @@ async function handleLogin() {
   } finally {
     loading.value = false
   }
+}
+
+/** 登录成功收尾：持久化记住的用户名并跳转（密码登录与 2FA 验证通过共用）。 */
+function concludeLoginSuccess() {
+  if (form.remember) {
+    localStorage.setItem('nr_remembered_user', form.username)
+  } else {
+    localStorage.removeItem('nr_remembered_user')
+  }
+  // `?redirect=` 是外人能改的一段字符串：`//evil.com`、`/\evil.com`、`http://evil.com`
+  // 都会被浏览器当外站，所以只认站内路径，其余一律回落总览。
+  router.push(safeRedirectTarget(route.query.redirect) ?? '/dashboard')
+}
+
+/** S8 两步验证第二因子提交：challenge + 6 位码 → 正式 token 对 → 进入主界面。 */
+async function handleVerify2fa() {
+  if (!twoFaCode.value.trim()) return
+
+  error.value = null
+  loading.value = true
+  try {
+    const ok = await authStore.verify2fa(twoFaCode.value.trim())
+    if (ok) {
+      concludeLoginSuccess()
+    } else {
+      error.value = authStore.error || t('auth.loginFailed')
+    }
+  } catch (err: any) {
+    const netErr = err?.response ? null : await backendDiagnosis()
+    error.value = netErr || err?.message || t('auth.loginFailed')
+  } finally {
+    loading.value = false
+  }
+}
+
+/** 放弃两步验证，回到账号密码表单（挑战态随之清除）。 */
+function backToCredentials() {
+  authStore.clear2faChallenge()
+  twoFactorMode.value = false
+  twoFaCode.value = ''
+  error.value = null
 }
 </script>
 
