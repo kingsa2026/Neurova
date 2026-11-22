@@ -21,6 +21,8 @@ import datetime
 import json
 from typing import Any, Dict, List, Optional
 
+from neurova.core.tenant_scope import resolve_tenant, tenant_sql_where
+
 _UTC = datetime.timezone.utc
 _MIN_LABEL_CHARS = 2
 
@@ -43,8 +45,9 @@ def subjectsMentionedIn(store: Any, query: str,
         where.append("agent_id = ?")
         params.append(agentId)
     if tenantId is not None:
-        where.append("tenant_id = ?")
-        params.append(str(tenantId or "default"))
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+        where.append(tenantClause)
+        params.extend(tenantParams)
     with store._lock:
         rows = store._conn.execute(
             "SELECT subject_key, canonical_label, aliases_json FROM knowledge_subjects"
@@ -121,8 +124,9 @@ class TemporalFactReader:
             clauses.insert(0, "agent_id = ?")
             params = [self._agentId] + params
         if tenantId is not None:
-            clauses.insert(0, "tenant_id = ?")
-            params = [str(tenantId or "default")] + params
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+            clauses.insert(0, tenantClause)
+            params = list(tenantParams) + params
         # 部门分类白名单（specs/2026-11-07 批 E）：时效读面与条目/走查同口径
         if allowedCategories is not None:
             catValues = [str(c) for c in allowedCategories if str(c)]
@@ -150,7 +154,7 @@ class TemporalFactReader:
             "confidence": fact["confidence"],
             "valid_from": str(fact.get("valid_from") or fact.get("recorded_at") or ""),
             "source": self._mediumOf(fact["fact_id"]),
-            "tenant_id": str(fact.get("tenant_id") or "default"),
+            "tenant_id": resolve_tenant(fact),
         }
 
     def _mediumOf(self, factId: str) -> str:

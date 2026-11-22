@@ -23,6 +23,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 #: v51：schema 目录两表。term_id 是 P1-2 审批通过后回填的本体链接；
 #: 摄取本身永远写空它（机器不替人拍板）。
@@ -107,12 +108,13 @@ class SchemaCatalogStore:
         columnCount = 0
         fkCount = 0
         with self._store._lock, self._store._conn:
+            tenantClause, tenantParams = tenant_sql_where(tenant)
             self._store._conn.execute(
-                "DELETE FROM ontology_catalog_columns WHERE tenant_id = ? AND source_id = ?",
-                (tenant, source))
+                "DELETE FROM ontology_catalog_columns WHERE %s AND source_id = ?" % tenantClause,
+                (*tenantParams, source))
             self._store._conn.execute(
-                "DELETE FROM ontology_catalog_tables WHERE tenant_id = ? AND source_id = ?",
-                (tenant, source))
+                "DELETE FROM ontology_catalog_tables WHERE %s AND source_id = ?" % tenantClause,
+                (*tenantParams, source))
             for table in tables:
                 tableName = str(table.get("name") or "").strip()
                 if not tableName:
@@ -173,10 +175,11 @@ class SchemaCatalogStore:
 
     def listTables(self, tenantId: str, sourceId: str = "", q: str = "",
                    limit: int = 200, offset: int = 0) -> List[Dict[str, Any]]:
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"), alias="t")
         sql = ("SELECT t.*, (SELECT COUNT(*) FROM ontology_catalog_columns c"
                " WHERE c.tenant_id = t.tenant_id AND c.catalog_table_id = t.catalog_table_id)"
-               " AS column_count FROM ontology_catalog_tables t WHERE t.tenant_id = ?")
-        params: List[Any] = [str(tenantId or "default")]
+               " AS column_count FROM ontology_catalog_tables t WHERE %s" % tenantClause)
+        params: List[Any] = list(tenantParams)
         if sourceId:
             sql += " AND t.source_id = ?"
             params.append(str(sourceId))
@@ -193,18 +196,19 @@ class SchemaCatalogStore:
     def tableDetail(self, tenantId: str, tableId: str) -> Optional[Dict[str, Any]]:
         tenant = str(tenantId or "default")
         with self._store._lock:
+            tenantClause, tenantParams = tenant_sql_where(tenant)
             row = self._store._conn.execute(
                 "SELECT * FROM ontology_catalog_tables"
-                " WHERE tenant_id = ? AND catalog_table_id = ?",
-                (tenant, str(tableId or ""))).fetchone()
+                " WHERE %s AND catalog_table_id = ?" % tenantClause,
+                (*tenantParams, str(tableId or ""))).fetchone()
             if row is None:
                 return None
             table = dict(row)
             table["columns"] = [dict(c) for c in self._store._conn.execute(
                 "SELECT * FROM ontology_catalog_columns"
-                " WHERE tenant_id = ? AND catalog_table_id = ?"
-                " ORDER BY COALESCE(ordinal_position, 9999), column_name",
-                (tenant, str(tableId or ""))).fetchall()]
+                " WHERE %s AND catalog_table_id = ?"
+                " ORDER BY COALESCE(ordinal_position, 9999), column_name" % tenantClause,
+                (*tenantParams, str(tableId or ""))).fetchall()]
         return table
 
     def search(self, tenantId: str, q: str, limit: int = 50) -> List[Dict[str, Any]]:
@@ -217,20 +221,22 @@ class SchemaCatalogStore:
         like = "%" + needle + "%"
         hits: List[Dict[str, Any]] = []
         with self._store._lock:
+            tenantClause, tenantParams = tenant_sql_where(tenant)
             for row in self._store._conn.execute(
                     "SELECT table_name, source_id, catalog_table_id"
-                    " FROM ontology_catalog_tables WHERE tenant_id = ?"
-                    " AND LOWER(table_name) LIKE ? ORDER BY table_name LIMIT ?",
-                    (tenant, like, int(limit))).fetchall():
+                    " FROM ontology_catalog_tables WHERE %s"
+                    " AND LOWER(table_name) LIKE ? ORDER BY table_name LIMIT ?" % tenantClause,
+                    (*tenantParams, like, int(limit))).fetchall():
                 hits.append({"kind": "table", "name": row["table_name"],
                              "source_id": row["source_id"],
                              "catalog_table_id": row["catalog_table_id"]})
+            colTenantClause, colTenantParams = tenant_sql_where(tenant, alias="c")
             for row in self._store._conn.execute(
                     "SELECT c.column_name, c.source_id, c.catalog_table_id, c.data_type"
-                    " FROM ontology_catalog_columns c WHERE c.tenant_id = ?"
+                    " FROM ontology_catalog_columns c WHERE %s"
                     " AND LOWER(c.column_name) LIKE ?"
-                    " ORDER BY c.column_name LIMIT ?",
-                    (tenant, like, int(limit))).fetchall():
+                    " ORDER BY c.column_name LIMIT ?" % colTenantClause,
+                    (*colTenantParams, like, int(limit))).fetchall():
                 hits.append({"kind": "column", "name": row["column_name"],
                              "source_id": row["source_id"],
                              "catalog_table_id": row["catalog_table_id"],
@@ -241,12 +247,13 @@ class SchemaCatalogStore:
         return hits[:max(1, int(limit))]
 
     def foreignKeyEdges(self, tenantId: str, sourceId: str = "") -> List[Dict[str, Any]]:
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"), alias="c")
         sql = ("SELECT c.source_id, t.table_name AS source_table, c.column_name AS source_column,"
                " c.foreign_key_target FROM ontology_catalog_columns c"
                " JOIN ontology_catalog_tables t ON t.tenant_id = c.tenant_id"
                " AND t.catalog_table_id = c.catalog_table_id"
-               " WHERE c.tenant_id = ? AND c.is_foreign_key = 1")
-        params: List[Any] = [str(tenantId or "default")]
+               " WHERE %s AND c.is_foreign_key = 1" % tenantClause)
+        params: List[Any] = list(tenantParams)
         if sourceId:
             sql += " AND c.source_id = ?"
             params.append(str(sourceId))
@@ -265,39 +272,43 @@ class SchemaCatalogStore:
     def counts(self, tenantId: str) -> Dict[str, int]:
         tenant = str(tenantId or "default")
         with self._store._lock:
+            tenantClause, tenantParams = tenant_sql_where(tenant)
             tables = int(self._store._conn.execute(
-                "SELECT COUNT(*) FROM ontology_catalog_tables WHERE tenant_id = ?",
-                (tenant,)).fetchone()[0])
+                "SELECT COUNT(*) FROM ontology_catalog_tables WHERE %s" % tenantClause,
+                tenantParams).fetchone()[0])
             columns = int(self._store._conn.execute(
-                "SELECT COUNT(*) FROM ontology_catalog_columns WHERE tenant_id = ?",
-                (tenant,)).fetchone()[0])
+                "SELECT COUNT(*) FROM ontology_catalog_columns WHERE %s" % tenantClause,
+                tenantParams).fetchone()[0])
             sources = int(self._store._conn.execute(
                 "SELECT COUNT(DISTINCT source_id) FROM ontology_catalog_tables"
-                " WHERE tenant_id = ?", (tenant,)).fetchone()[0])
+                " WHERE %s" % tenantClause, tenantParams).fetchone()[0])
         return {"tables": tables, "columns": columns, "sources": sources}
 
     def sourcesInCatalog(self, tenantId: str) -> List[str]:
         with self._store._lock:
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
             rows = self._store._conn.execute(
                 "SELECT DISTINCT source_id FROM ontology_catalog_tables"
-                " WHERE tenant_id = ? ORDER BY source_id",
-                (str(tenantId or "default"),)).fetchall()
+                " WHERE %s ORDER BY source_id" % tenantClause,
+                tenantParams).fetchall()
         return [str(r["source_id"]) for r in rows]
 
     # ── 术语链接（只由 P1-2 审批流调用）────────────────────
 
     def linkTableTerm(self, tenantId: str, tableId: str, termId: str) -> None:
         with self._store._lock, self._store._conn:
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
             self._store._conn.execute(
                 "UPDATE ontology_catalog_tables SET term_id = ?"
-                " WHERE tenant_id = ? AND catalog_table_id = ?",
-                (str(termId or ""), str(tenantId or "default"), str(tableId or "")))
+                " WHERE %s AND catalog_table_id = ?" % tenantClause,
+                (str(termId or ""), *tenantParams, str(tableId or "")))
 
     def linkColumnTerm(self, tenantId: str, tableId: str, columnName: str,
                        termId: str) -> None:
         with self._store._lock, self._store._conn:
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
             self._store._conn.execute(
                 "UPDATE ontology_catalog_columns SET term_id = ?"
-                " WHERE tenant_id = ? AND catalog_table_id = ? AND column_name = ?",
-                (str(termId or ""), str(tenantId or "default"), str(tableId or ""),
+                " WHERE %s AND catalog_table_id = ? AND column_name = ?" % tenantClause,
+                (str(termId or ""), *tenantParams, str(tableId or ""),
                  str(columnName or "")))

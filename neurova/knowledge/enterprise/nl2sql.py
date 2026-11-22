@@ -24,6 +24,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 #: v53：问数历史（诚实审计：成功/失败/拒答都留行）。
 _SCHEMA_V53_QUERY_HISTORY = """
@@ -375,11 +376,12 @@ class Nl2SqlService:
 
     def _approvedPatterns(self, tenant: str, source: str) -> List[Dict[str, Any]]:
         with self._store._lock:
+            tenantClause, tenantParams = tenant_sql_where(tenant)
             rows = self._store._conn.execute(
                 "SELECT payload_json FROM ontology_schema_suggestions"
-                " WHERE tenant_id = ? AND source_id = ? AND kind = 'sql_pattern'"
-                " AND status = 'approved' ORDER BY reviewed_at LIMIT 5",
-                (tenant, source)).fetchall()
+                " WHERE %s AND source_id = ? AND kind = 'sql_pattern'"
+                " AND status = 'approved' ORDER BY reviewed_at LIMIT 5" % tenantClause,
+                (*tenantParams, source)).fetchall()
         return [json.loads(r["payload_json"] or "{}") for r in rows]
 
     @staticmethod
@@ -463,11 +465,12 @@ class Nl2SqlService:
     def listHistory(self, tenantId: str, sourceId: str,
                     limit: int = 50) -> List[Dict[str, Any]]:
         with self._store._lock:
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
             rows = self._store._conn.execute(
                 "SELECT * FROM ontology_query_history"
-                " WHERE tenant_id = ? AND source_id = ?"
-                " ORDER BY created_at DESC, query_id LIMIT ?",
-                (str(tenantId or "default"), str(sourceId or ""),
+                " WHERE %s AND source_id = ?"
+                " ORDER BY created_at DESC, query_id LIMIT ?" % tenantClause,
+                (*tenantParams, str(sourceId or ""),
                  max(1, int(limit)))).fetchall()
         return [dict(r) for r in rows]
 
@@ -480,11 +483,12 @@ class Nl2SqlService:
         tenant = str(tenantId or "default")
         source = str(sourceId or "")
         with self._store._lock:
+            tenantClause, tenantParams = tenant_sql_where(tenant)
             rows = self._store._conn.execute(
                 "SELECT question, sql_text FROM ontology_query_history"
-                " WHERE tenant_id = ? AND source_id = ? AND status = 'ok'"
-                " ORDER BY created_at DESC LIMIT 200",
-                (tenant, source)).fetchall()
+                " WHERE %s AND source_id = ? AND status = 'ok'"
+                " ORDER BY created_at DESC LIMIT 200" % tenantClause,
+                (*tenantParams, source)).fetchall()
         grouped: Dict[str, Dict[str, Any]] = {}
         for row in rows:
             sql = str(row["sql_text"] or "")

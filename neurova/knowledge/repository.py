@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant, tenant_matches
 from neurova.knowledge.foundation.entry_ledger import EntryLedger
 from neurova.knowledge.foundation.knowledge_facts import (
     ADOPTION_OUTCOMES,
@@ -920,7 +921,7 @@ class KnowledgeRepository:
             with self._lock:
                 for existing in self._items.get(agent_id, []):
                     if (
-                        str(existing.get("tenant_id") or "default") == tenant
+                        resolve_tenant(existing) == tenant
                         and str(existing.get("content_fingerprint") or "") == fingerprint
                     ):
                         evidence = _sourceEvidence({
@@ -950,7 +951,7 @@ class KnowledgeRepository:
                 with self._lock:
                     for existing in self._items.get(agent_id, []):
                         if (
-                            str(existing.get("tenant_id") or "default") != tenant
+                            resolve_tenant(existing) != tenant
                             or str(existing.get("source_path") or "") != str(source_path)
                         ):
                             continue
@@ -1090,7 +1091,8 @@ class KnowledgeRepository:
 
     @staticmethod
     def _tenant(user: Optional[Dict[str, Any]]) -> str:
-        return str((user or {}).get("tenant_id") or "default")
+        # 租户过滤单源（S5 批四）：user 租户解析公式收口到 tenant_scope
+        return resolve_tenant(user)
 
     @staticmethod
     def _is_admin(user: Optional[Dict[str, Any]]) -> bool:
@@ -1119,7 +1121,7 @@ class KnowledgeRepository:
         # 租户先于角色：管理员只在自己租户内全可见，不是跨租户穿透。
         # 跨租户唯一例外＝源租户显式分享的 tenant:<id> 段（§8-E1），且仅只读
         # （写权由 can_modify 的租户守卫拦住）。
-        if str(item.get("tenant_id") or "default") != self._tenant(user):
+        if not tenant_matches(user, item):
             return tenantSegment(self._tenant(user)) in (item.get("shared_with") or [])
         if self._is_admin(user):
             return True
@@ -1137,7 +1139,7 @@ class KnowledgeRepository:
 
     def can_modify(self, user: Optional[Dict[str, Any]], item: Dict[str, Any]) -> bool:
         # 租户守卫：跨租户（含租户段只读分享与外发副本）一律不可写，admin 不例外。
-        if str(item.get("tenant_id") or "default") != self._tenant(user):
+        if not tenant_matches(user, item):
             return False
         if self._is_admin(user):
             return True
@@ -1151,7 +1153,7 @@ class KnowledgeRepository:
         私有条目（含被共享）已由可见性按用户隔离——可见即可改分类。
         部门白名单由 can_view/can_modify 原样继承，不在此重复。
         跨租户分享是只读语义（§8-E1），分类写权同样不外放。"""
-        if str(item.get("tenant_id") or "default") != self._tenant(user):
+        if not tenant_matches(user, item):
             return False
         if item.get("visibility") == VISIBILITY_PUBLIC:
             return self.can_modify(user, item)
@@ -1193,7 +1195,7 @@ class KnowledgeRepository:
             for item in items:
                 if agent_id and aid != agent_id:
                     continue
-                itemTenant = str(item.get("tenant_id") or "default")
+                itemTenant = resolve_tenant(item)
                 # §8-E1：跨租户条目仅当源租户显式分享 tenant:<id> 段时，
                 # 才放行进后续 scope 过滤；否则维持租户硬隔离。
                 sharedAcrossTenants = (
@@ -1340,7 +1342,7 @@ class KnowledgeRepository:
             raise PermissionError("仅条目属主或管理员可共享")
         if item.get("visibility") == VISIBILITY_PUBLIC:
             raise ValueError("公开条目无需共享")
-        ownTenant = str(item.get("tenant_id") or "default")
+        ownTenant = resolve_tenant(item)
         current = list(item.get("shared_with") or [])
         for tid in tenant_ids or []:
             tid = str(tid or "").strip()
@@ -1380,7 +1382,7 @@ class KnowledgeRepository:
         if not self.can_modify(user, item) or not self._is_admin(user):
             raise PermissionError("跨租户发布副本仅源租户管理员可发起")
         target = str(target_tenant or "").strip()
-        ownTenant = str(item.get("tenant_id") or "default")
+        ownTenant = resolve_tenant(item)
         if not target or target == ownTenant:
             raise ValueError("target_tenant 必须是不同于条目所属租户的目标租户")
         request = {
@@ -1441,7 +1443,7 @@ class KnowledgeRepository:
                                 "request_id": request["request_id"],
                                 "target_tenant": tenant,
                                 "source_knowledge_id": item.get("knowledge_id"),
-                                "source_tenant": str(item.get("tenant_id") or "default"),
+                                "source_tenant": resolve_tenant(item),
                                 "title": item.get("title"),
                                 "requested_by": request.get("requested_by"),
                                 "requested_at": request.get("requested_at"),
@@ -1467,7 +1469,7 @@ class KnowledgeRepository:
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
         copy["knowledge_id"] = copyId
         copy["tenant_id"] = target_tenant
-        copy["origin_tenant_id"] = str(item.get("tenant_id") or "default")
+        copy["origin_tenant_id"] = resolve_tenant(item)
         copy["origin_knowledge_id"] = str(item.get("knowledge_id") or "")
         copy["owner_user_id"] = str(ownerId or "")
         copy["visibility"] = VISIBILITY_PRIVATE
@@ -1493,7 +1495,7 @@ class KnowledgeRepository:
         不是销毁；目标租户 admin 仍可经台账/审计看到召回标记。
         """
         agent_id, item = self._find_or_raise(knowledge_id)
-        ownTenant = str(item.get("tenant_id") or "default")
+        ownTenant = resolve_tenant(item)
         if not self._is_admin(user) or self._tenant(user) != ownTenant:
             raise PermissionError("仅源租户管理员可召回外发副本")
         found = self.find_item(copy_knowledge_id)
@@ -1518,7 +1520,7 @@ class KnowledgeRepository:
         召回入口依赖它发现副本 id；返回含召回状态（recalled）与目标租户。
         """
         _agent_id, item = self._find_or_raise(knowledge_id)
-        ownTenant = str(item.get("tenant_id") or "default")
+        ownTenant = resolve_tenant(item)
         if not self._is_admin(user) or self._tenant(user) != ownTenant:
             raise PermissionError("仅源租户管理员可查看外发副本")
         copies: List[Dict[str, Any]] = []
@@ -1620,7 +1622,7 @@ class KnowledgeRepository:
         return [
             i for i in snapshot
             if (i.get("submission") or {}).get("status") == _SUBMISSION_PENDING
-            and (tenant is None or str(i.get("tenant_id") or "default") == tenant)
+            and (tenant is None or resolve_tenant(i) == tenant)
         ]
 
     def listAgents(self) -> List[str]:
@@ -1941,7 +1943,7 @@ class KnowledgeRepository:
         """按 source 找条目（入站幂等：同一消息不重复建知识；租户内幂等）。"""
         with self._lock:
             for item in self._items.get(agent_id, []):
-                if str(item.get("tenant_id") or "default") != str(tenant_id or "default"):
+                if resolve_tenant(item) != str(tenant_id or "default"):
                     continue
                 if str(item.get("source") or "") == str(source or ""):
                     return dict(item)
@@ -2213,8 +2215,8 @@ class KnowledgeRepository:
             rec = self._tombstones.get(knowledge_id)
             if rec is None:
                 return False
-            if tenantId is not None and str(
-                (rec.get("item") or {}).get("tenant_id") or "default"
+            if tenantId is not None and resolve_tenant(
+                rec.get("item") or {}
             ) != str(tenantId or "default"):
                 return False
             agent_id = rec.get("agent_id") or "default"
@@ -2236,7 +2238,7 @@ class KnowledgeRepository:
         tenant = str(tenantId or "default")
         return [
             rec for rec in recs
-            if str((rec.get("item") or {}).get("tenant_id") or "default") == tenant
+            if resolve_tenant(rec.get("item") or {}) == tenant
         ]
 
     def expireDueEntries(self, now: Optional[datetime.datetime] = None,
@@ -2251,8 +2253,8 @@ class KnowledgeRepository:
         with self._lock:
             for agent_id, items in self._items.items():
                 for item in items:
-                    if tenantId is not None and str(
-                        item.get("tenant_id") or "default"
+                    if tenantId is not None and resolve_tenant(
+                        item
                     ) != str(tenantId or "default"):
                         continue
                     try:
@@ -2287,8 +2289,8 @@ class KnowledgeRepository:
             ]
         for agent_id, items in snapshot:
             for item in items:
-                if tenantId is not None and str(
-                    item.get("tenant_id") or "default"
+                if tenantId is not None and resolve_tenant(
+                    item
                 ) != str(tenantId or "default"):
                     continue
                 try:
@@ -2409,7 +2411,7 @@ class KnowledgeRepository:
                         item[k] = old[k]
                     if "content" in changed:
                         item["content_fingerprint"] = _contentFingerprint(
-                            str(item.get("tenant_id") or "default"),
+                            resolve_tenant(item),
                             str(item.get("content") or ""))
                     item["updated_at"] = datetime.datetime.now(
                         datetime.timezone.utc).timestamp()
@@ -2560,9 +2562,7 @@ class KnowledgeRepository:
             old_id = old.get("knowledge_id")
             if not old_id or old_id == new_id:
                 continue
-            if str(old.get("tenant_id") or "default") != str(
-                new_item.get("tenant_id") or "default"
-            ):
+            if resolve_tenant(old) != resolve_tenant(new_item):
                 continue
             old_title = _norm_title(old.get("title", ""))
             if not old_title:
@@ -2603,7 +2603,7 @@ class KnowledgeRepository:
             "detected_at": datetime.datetime.now(datetime.timezone.utc).timestamp(),
             "time_context": self._conflictTimeContext(old_item, new_item),
             "status": "pending",
-            "tenant_id": str(new_item.get("tenant_id") or "default"),
+            "tenant_id": resolve_tenant(new_item),
             "resolution": None,
             "resolved_by": None,
             "resolved_at": None,
@@ -2624,7 +2624,7 @@ class KnowledgeRepository:
 
             get_ingest_bus().publish(KB_CONFLICT_NOTIFY_TOPIC, {
                 "agent_id": agent_id,
-                "tenant_id": str(new_item.get("tenant_id") or "default"),
+                "tenant_id": resolve_tenant(new_item),
                 "old_id": old_item.get("knowledge_id"),
                 "new_id": new_id,
                 "decision": decision,
@@ -2644,7 +2644,7 @@ class KnowledgeRepository:
                 if rec.get("status") == status
                 and (
                     tenantId is None
-                    or str(rec.get("tenant_id") or "default") == str(tenantId or "default")
+                    or resolve_tenant(rec) == str(tenantId or "default")
                 )
             ]
         recs.sort(key=lambda r: r.get("detected_at", 0), reverse=True)
@@ -2672,7 +2672,7 @@ class KnowledgeRepository:
             snapshot = [
                 dict(item)
                 for items in self._items.values() for item in items
-                if str(item.get("tenant_id") or "default") == tenant
+                if resolve_tenant(item) == tenant
             ]
         documents = [item for item in snapshot if item.get("document_id")]
         ocr = [item for item in documents if item.get("ocr_used")]
@@ -2703,8 +2703,8 @@ class KnowledgeRepository:
             rec = self._conflicts.get(str(conflictId or ""))
             if rec is None:
                 return None
-            if tenantId is not None and str(
-                rec.get("tenant_id") or "default"
+            if tenantId is not None and resolve_tenant(
+                rec
             ) != str(tenantId or "default"):
                 return None
             return dict(rec, conflict_id=conflictId)
@@ -2716,7 +2716,7 @@ class KnowledgeRepository:
                 dict(rec, conflict_id=cid)
                 for cid, rec in self._conflicts.items()
                 if tenantId is None
-                or str(rec.get("tenant_id") or "default") == str(tenantId or "default")
+                or resolve_tenant(rec) == str(tenantId or "default")
             ]
 
     def has_conflict(self, conflict_id: str) -> bool:
@@ -2742,8 +2742,8 @@ class KnowledgeRepository:
             rec = self._conflicts.get(conflict_id)
             if rec is None or rec.get("status") != "pending":
                 return False
-            if tenantId is not None and str(
-                rec.get("tenant_id") or "default"
+            if tenantId is not None and resolve_tenant(
+                rec
             ) != str(tenantId or "default"):
                 return False
             supersede_payload: Optional[Dict[str, Any]] = None

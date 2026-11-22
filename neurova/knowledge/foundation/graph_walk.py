@@ -25,6 +25,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from neurova.core.tenant_scope import resolve_tenant, tenant_sql_where
 from .temporal_facts import subjectsMentionedIn
 from ..derivation_citation import conditionClassRouteOn, derivationInfo
 
@@ -225,8 +226,9 @@ class GraphFactWalker:
                 sql += " AND agent_id = ?"
                 params.append(self._agentId)
             if tenantId is not None:
-                sql += " AND tenant_id = ?"
-                params.append(str(tenantId or "default"))
+                tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+                sql += " AND " + tenantClause
+                params.extend(tenantParams)
             sql += " LIMIT ?"
             params.append(_EXPANSION_ANCHOR_CAP - len(keys))
             _collect(sql, params)
@@ -297,8 +299,10 @@ class GraphFactWalker:
             anchorClauses.append("f.agent_id = ?")
             anchorValues.append(self._agentId)
         if tenantId is not None:
-            anchorClauses.append("f.tenant_id = ?")
-            anchorValues.append(str(tenantId or "default"))
+            tenantClause, tenantParams = tenant_sql_where(
+                str(tenantId or "default"), alias="f")
+            anchorClauses.append(tenantClause)
+            anchorValues.extend(tenantParams)
         # 观察态灰度（升级计划 B1 拍板项 2）落在这里，不只落在读面：递归段里
         # 一条推导行可以当**跳板**——自己不带条目，却把挂在条目上的显式事实接进
         # 排序，那是推导进对话的真实路径。只在 FactSurface 摘条目管不到这一层。
@@ -313,7 +317,9 @@ class GraphFactWalker:
                       " AND (f2.valid_until IS NULL OR f2.valid_until = ''"
                       " OR f2.valid_until > ?) AND f2.agent_id = s2.agent_id")
         if tenantId is not None:
-            headClause += " AND f2.tenant_id = ?"
+            headTenantClause, headTenantParams = tenant_sql_where(
+                str(tenantId or "default"), alias="f2")
+            headClause += " AND " + headTenantClause
         if allowedCategories is not None:
             headClause += " AND f2.%s" % catClause
         if not conditionClassRouteOn() and ledger is not None:
@@ -358,7 +364,7 @@ class GraphFactWalker:
         ) % (" AND ".join(anchorClauses), placeholders, headClause)
         params = anchorValues + anchors + [maxHops, stamp]
         if tenantId is not None:
-            params.append(str(tenantId or "default"))
+            params.extend(headTenantParams)
         if allowedCategories is not None:
             # f2 的白名单占位在 headClause 里，参数序在 tenant 之后、limit 之前
             params.extend(catValues)
@@ -385,7 +391,7 @@ class GraphFactWalker:
                 if assertions and "entry:" in str(assertions[-1].get("medium_ref", ""))
                 else ""
             ),
-            "tenant_id": str(fact.get("tenant_id") or "default"),
+            "tenant_id": resolve_tenant(fact),
             # 整条路径有没有经过推导行：跳板本身不在返回里（只回 hop>=2 的叶子），
             # 标志不随叶子走，图谱路由就不知道自己顶上来的是推导还是观察
             "via_derived": bool(fact.get("via_derived")),

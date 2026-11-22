@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant
 
 logger = get_logger(__name__)
 
@@ -47,7 +48,7 @@ class McpSourceStore:
                 (sourceId, str(spec.get("name") or ""), str(spec.get("endpoint") or ""),
                  str(spec.get("auth_token") or ""), str(spec.get("tool_name") or ""),
                  json.dumps(spec.get("tool_args") or {}, ensure_ascii=False),
-                 str(spec.get("agent_id") or "default"), str(spec.get("tenant_id") or "default"),
+                 str(spec.get("agent_id") or "default"), resolve_tenant(spec),
                  str(created_by or ""), stamp, stamp, None, "never"))
         return self.get(sourceId) or {}
 
@@ -176,7 +177,7 @@ async def pullFromSource(store: McpSourceStore, source: Dict[str, Any],
         source_type="mcp",
         author="mcp",
         owner_user_id=str(source.get("created_by") or "default"),
-        tenant_id=str(source.get("tenant_id") or "default"),
+        tenant_id=resolve_tenant(source),
         visibility="private",
         dedupe=True,
     )

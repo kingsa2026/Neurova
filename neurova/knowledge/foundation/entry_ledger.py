@@ -18,6 +18,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from neurova.core.content_identity import normalized_key
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant
 
 from .admission import AdmissionRequest, productionAdmissionGate
 from .reconcile import _assertionFor
@@ -57,7 +58,7 @@ class EntryLedger:
                 if not isRetrievable(item):
                     # 归档/过期条目不再主张事实；未被认领的旧行由收尾统一 retract。
                     continue
-                tenantId = str(item.get("tenant_id") or "default")
+                tenantId = resolve_tenant(item)
                 held = self._store.activeNarrativeFact(agentId, kid, key, tenantId=tenantId)
                 if held:
                     claims.add(held["fact_id"])
@@ -114,7 +115,7 @@ class EntryLedger:
                     continue
                 if not key:
                     continue  # 无内容身份本就不进治理层，不算分叉
-                tenantId = str(item.get("tenant_id") or "default")
+                tenantId = resolve_tenant(item)
                 if self._store.activeNarrativeFact(
                     agentId, kid, key, tenantId=tenantId
                 ) is None:

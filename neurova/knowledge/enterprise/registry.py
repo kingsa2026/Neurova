@@ -14,6 +14,7 @@ import json
 import threading
 from typing import Any, Dict, List, Optional
 
+from neurova.core.tenant_scope import tenant_sql_where
 from .protocols import ChangeBatch, EnterpriseSourceAdapter, SourceCursor, SOURCE_TYPES
 from .schema_mapping import (
     MappingError,
@@ -337,10 +338,11 @@ class EnterpriseIngestor:
         validateDescriptor(descriptor, self._registry, tenantId=tenantId)
         stamp = self._now()
         with self._store._lock, self._store._conn:
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
             existing = self._store._conn.execute(
                 "SELECT created_at, share_tenants_json FROM enterprise_source_configs"
-                " WHERE tenant_id = ? AND source_id = ?",
-                (str(tenantId or "default"), str(sourceId or ""))).fetchone()
+                " WHERE %s AND source_id = ?" % tenantClause,
+                (*tenantParams, str(sourceId or ""))).fetchone()
             self._store._conn.execute(
                 "INSERT OR REPLACE INTO enterprise_source_configs (source_id, tenant_id,"
                 " descriptor_json, cursor, enabled, created_at, updated_at,"
@@ -378,11 +380,12 @@ class EnterpriseIngestor:
             if tid not in cleaned:
                 cleaned.append(tid)
         with self._store._lock, self._store._conn:
+            tenantClause, tenantParams = tenant_sql_where(ownTenant)
             self._store._conn.execute(
                 "UPDATE enterprise_source_configs SET share_tenants_json = ?,"
-                " updated_at = ? WHERE tenant_id = ? AND source_id = ?",
+                " updated_at = ? WHERE %s AND source_id = ?" % tenantClause,
                 (json.dumps(cleaned, ensure_ascii=False), self._now(),
-                 ownTenant, str(sourceId or "")))
+                 *tenantParams, str(sourceId or "")))
         return cleaned
 
     def setSyncInterval(self, tenantId: str, sourceId: str, seconds: int) -> None:
@@ -391,20 +394,22 @@ class EnterpriseIngestor:
         D2 运行时跟随：落库后即时注册/摘除单源 job（调度器可用时），改完即生效。
         """
         with self._store._lock, self._store._conn:
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
             self._store._conn.execute(
                 "UPDATE enterprise_source_configs SET sync_interval_seconds = ?,"
-                " updated_at = ? WHERE tenant_id = ? AND source_id = ?",
+                " updated_at = ? WHERE %s AND source_id = ?" % tenantClause,
                 (max(0, int(seconds)), self._now(),
-                 str(tenantId or "default"), str(sourceId or "")))
+                 *tenantParams, str(sourceId or "")))
         _followUpSyncJob(tenantId, sourceId, store=self._store)
 
     def listConfigs(self, tenantId: str = "default") -> List[Dict[str, Any]]:
         """本租户已提交过的源配置（描述符 + 游标 + 启用态）——读面，不触发任何网络。"""
         tenant = str(tenantId or "default")
         with self._store._lock:
+            tenantClause, tenantParams = tenant_sql_where(tenant)
             ids = [str(r["source_id"]) for r in self._store._conn.execute(
-                "SELECT source_id FROM enterprise_source_configs WHERE tenant_id = ?"
-                " ORDER BY source_id", (tenant,)).fetchall()]
+                "SELECT source_id FROM enterprise_source_configs WHERE %s"
+                " ORDER BY source_id" % tenantClause, tenantParams).fetchall()]
         rows: List[Dict[str, Any]] = []
         for sourceId in ids:
             config = self.loadConfig(tenantId, sourceId) or {}
@@ -419,12 +424,13 @@ class EnterpriseIngestor:
         return rows
 
     def loadConfig(self, tenantId: str, sourceId: str) -> Optional[Dict[str, Any]]:
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
         row = self._store._conn.execute(
             "SELECT descriptor_json, cursor, enabled, created_at, updated_at,"
             " sync_interval_seconds, share_tenants_json"
             " FROM enterprise_source_configs"
-            " WHERE tenant_id = ? AND source_id = ?",
-            (str(tenantId or "default"), str(sourceId or ""))).fetchone()
+            " WHERE %s AND source_id = ?" % tenantClause,
+            (*tenantParams, str(sourceId or ""))).fetchone()
         if row is None:
             return None
         return {"descriptor": json.loads(row["descriptor_json"] or "{}"),
@@ -438,9 +444,10 @@ class EnterpriseIngestor:
         """删除连接器配置行（页面重设计配套批）：只删配置，不碰已摄取事实/断言
         ——擦除设施闭集不含 `source:` 前缀，级联清除是另一个立项；调用方如实回显。"""
         with self._store._lock, self._store._conn:
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
             cursor = self._store._conn.execute(
-                "DELETE FROM enterprise_source_configs WHERE tenant_id = ? AND source_id = ?",
-                (str(tenantId or "default"), str(sourceId or "")))
+                "DELETE FROM enterprise_source_configs WHERE %s AND source_id = ?" % tenantClause,
+                (*tenantParams, str(sourceId or "")))
             deleted = cursor.rowcount > 0
         return deleted
 
@@ -470,11 +477,12 @@ class EnterpriseIngestor:
     def saveCursor(self, tenantId: str, sourceId: str, token: str) -> None:
         """游标单列持久化（不碰描述符与 enabled；失败由调用方决定重试）。"""
         with self._store._lock, self._store._conn:
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
             self._store._conn.execute(
                 "UPDATE enterprise_source_configs SET cursor = ?, updated_at = ?"
-                " WHERE tenant_id = ? AND source_id = ?",
+                " WHERE %s AND source_id = ?" % tenantClause,
                 (str(token or ""), self._now(),
-                 str(tenantId or "default"), str(sourceId or "")),
+                 *tenantParams, str(sourceId or "")),
             )
 
     async def runOnceAsync(self, tenantId: str, sourceId: str,
@@ -779,11 +787,12 @@ def _staleWindowHours() -> float:
 def _lastSuccessStartedAt(store: Any, tenantId: str, sourceId: str) -> Optional[str]:
     """该源在 enterprise_sync_history 里最近一条成功记录的 started_at（无则 None）。"""
     with store._lock:
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
         row = store._conn.execute(
             "SELECT started_at FROM enterprise_sync_history"
-            " WHERE tenant_id = ? AND source_id = ? AND status = 'ok'"
-            " ORDER BY started_at DESC, history_id DESC LIMIT 1",
-            (str(tenantId or "default"), str(sourceId or ""))).fetchone()
+            " WHERE %s AND source_id = ? AND status = 'ok'"
+            " ORDER BY started_at DESC, history_id DESC LIMIT 1" % tenantClause,
+            (*tenantParams, str(sourceId or ""))).fetchone()
     return str(row["started_at"]) if row is not None else None
 
 

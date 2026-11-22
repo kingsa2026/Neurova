@@ -15,6 +15,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import tenant_sql_where
 
 logger = get_logger(__name__)
 
@@ -110,11 +111,12 @@ class StateEventBridge:
 
             row = None
             with self._store._lock:
+                tenantClause, tenantParams = tenant_sql_where(tenantId)
                 row = self._store._conn.execute(
                     "SELECT type_term_id FROM knowledge_subjects"
-                    " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?"
-                    " AND status = 'active'",
-                    (agentId, tenantId, normalizeLabel(subjectLabel))).fetchone()
+                    " WHERE agent_id = ? AND %s AND normalized_label = ?"
+                    " AND status = 'active'" % tenantClause,
+                    (agentId, *tenantParams, normalizeLabel(subjectLabel))).fetchone()
             typeTerm = str(row["type_term_id"] or "") if row is not None else ""
             if typeTerm != termId:
                 logger.warning(

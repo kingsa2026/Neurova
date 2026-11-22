@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant, tenant_sql_where
 from neurova.core.time_utils import nowIso as _now
 
 from .credibility import ConfidenceAggregator
@@ -607,10 +608,11 @@ class KnowledgeFactStore:
             raise ValueError("subject_label 不能为空")
         tenant = str(tenantId or "default")
         with self._lock, self._conn:
+            tenantClause, tenantParams = tenant_sql_where(tenant)
             row = self._conn.execute(
                 "SELECT subject_key, aliases_json FROM knowledge_subjects"
-                " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?",
-                (agentId, tenant, normalized),
+                " WHERE agent_id = ? AND %s AND normalized_label = ?" % tenantClause,
+                (agentId, *tenantParams, normalized),
             ).fetchone()
             stamp = _now()
             if row:
@@ -647,17 +649,18 @@ class KnowledgeFactStore:
     ) -> Optional[str]:
         normalized = normalizeLabel(labelOrAlias)
         tenant = str(tenantId or "default")
+        tenantClause, tenantParams = tenant_sql_where(tenant)
         with self._lock:
             row = self._conn.execute(
                 "SELECT subject_key FROM knowledge_subjects"
-                " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?",
-                (agentId, tenant, normalized),
+                " WHERE agent_id = ? AND %s AND normalized_label = ?" % tenantClause,
+                (agentId, *tenantParams, normalized),
             ).fetchone()
             if row is None:
                 for cand in self._conn.execute(
                     "SELECT subject_key, aliases_json FROM knowledge_subjects"
-                    " WHERE agent_id = ? AND tenant_id = ?",
-                    (agentId, tenant),
+                    " WHERE agent_id = ? AND %s" % tenantClause,
+                    (agentId, *tenantParams),
                 ).fetchall():
                     if normalized in [normalizeLabel(a) for a in json.loads(cand["aliases_json"])]:
                         row = cand
@@ -692,7 +695,7 @@ class KnowledgeFactStore:
             ).fetchone()
             if newRow is None:
                 raise LookupError("目标主体不存在: %s" % newKey)
-            if str(oldRow["tenant_id"] or "default") != str(newRow["tenant_id"] or "default"):
+            if resolve_tenant(dict(oldRow)) != resolve_tenant(dict(newRow)):
                 raise ValueError("不能跨租户合并主体")
             self._conn.execute(
                 "UPDATE knowledge_subjects SET merged_into = ?, status = 'merged', updated_at = ?"
@@ -720,8 +723,10 @@ class KnowledgeFactStore:
         self, agentId: str, includeMerged: bool = False, tenantId: str = "default"
     ) -> List[Dict[str, Any]]:
         """某 agent/租户下的主体清单——消解段要拿全量做候选，不能只看精确名。"""
-        sql = "SELECT * FROM knowledge_subjects WHERE agent_id = ? AND tenant_id = ?"
-        params: List[Any] = [agentId, str(tenantId or "default")]
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+        sql = ("SELECT * FROM knowledge_subjects"
+               " WHERE agent_id = ? AND %s" % tenantClause)
+        params: List[Any] = [agentId, *tenantParams]
         if not includeMerged:
             sql += " AND status != 'merged'"
         with self._lock:
@@ -761,11 +766,12 @@ class KnowledgeFactStore:
         hints = subjectsMentionedIn(self, raw, agentId, tenant)
         hint = str(hints[0]) if hints else None
         with self._lock, self._conn:
+            tenantClause, tenantParams = tenant_sql_where(tenant)
             row = self._conn.execute(
                 "SELECT candidate_id FROM knowledge_alias_candidates"
-                " WHERE agent_id = ? AND tenant_id = ? AND normalized_query = ?"
-                " AND status = 'pending'",
-                (agentId, tenant, normalized),
+                " WHERE agent_id = ? AND %s AND normalized_query = ?"
+                " AND status = 'pending'" % tenantClause,
+                (agentId, *tenantParams, normalized),
             ).fetchone()
             stamp = _now()
             if row:
@@ -792,8 +798,9 @@ class KnowledgeFactStore:
         self, tenantId: str = "default", status: Optional[str] = None,
         agentId: Optional[str] = None, limit: int = 50, offset: int = 0,
     ) -> List[Dict[str, Any]]:
-        sql = "SELECT * FROM knowledge_alias_candidates WHERE tenant_id = ?"
-        params: List[Any] = [str(tenantId or "default")]
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+        sql = "SELECT * FROM knowledge_alias_candidates WHERE %s" % tenantClause
+        params: List[Any] = list(tenantParams)
         if status:
             sql += " AND status = ?"
             params.append(str(status))
@@ -829,7 +836,7 @@ class KnowledgeFactStore:
                 (subjectKey,),
             ).fetchone()
             if row is None or str(row["agent_id"]) != str(agentId) \
-                    or str(row["tenant_id"] or "default") != tenant:
+                    or resolve_tenant(dict(row)) != tenant:
                 raise LookupError("目标主体不存在: %s" % subjectKey)
             if row["status"] == "merged" or row["merged_into"]:
                 raise ValueError(
@@ -863,7 +870,7 @@ class KnowledgeFactStore:
                 "SELECT * FROM knowledge_alias_candidates WHERE candidate_id = ?",
                 (candidateId,),
             ).fetchone()
-        if row is None or str(row["tenant_id"] or "default") != tenant:
+        if row is None or resolve_tenant(dict(row)) != tenant:
             raise LookupError("候选别名不存在: %s" % candidateId)
         if row["status"] != "pending":
             raise ValueError("候选已结（%s），不能重复处置" % row["status"])
@@ -927,6 +934,7 @@ class KnowledgeFactStore:
         windowFrom = _instant(validFrom)
         windowUntil = _instant(validUntil)
         tenant = str(tenantId or "default")
+        tenantClause, tenantParams = tenant_sql_where(tenant)
         if contentKey:
             existing = self.findFactByContentKey(agentId, contentKey, tenant)
             if existing:
@@ -940,10 +948,10 @@ class KnowledgeFactStore:
         ).hexdigest()[:12] if qualifier else ""
         with self._lock, self._conn:
             row = self._conn.execute(
-                "SELECT fact_id FROM knowledge_facts WHERE agent_id = ? AND tenant_id = ?"
+                "SELECT fact_id FROM knowledge_facts WHERE agent_id = ? AND %s"
                 " AND subject_key = ? AND predicate_term_id = ? AND object_term = ?"
-                " AND qualifier_hash = ?",
-                (agentId, tenant, subjectKey, predicateTermId, objectTerm, qualifierHash),
+                " AND qualifier_hash = ?" % tenantClause,
+                (agentId, *tenantParams, subjectKey, predicateTermId, objectTerm, qualifierHash),
             ).fetchone()
             if row:
                 if contentKey:
@@ -985,9 +993,9 @@ class KnowledgeFactStore:
                 if not contentKey:
                     raise
                 winner = self._conn.execute(
-                    "SELECT fact_id FROM knowledge_facts WHERE agent_id = ? AND tenant_id = ?"
-                    " AND content_key = ?",
-                    (agentId, tenant, contentKey),
+                    "SELECT fact_id FROM knowledge_facts WHERE agent_id = ? AND %s"
+                    " AND content_key = ?" % tenantClause,
+                    (agentId, *tenantParams, contentKey),
                 ).fetchone()
                 if winner is None:
                     raise
@@ -1042,24 +1050,30 @@ class KnowledgeFactStore:
         同主体同谓词多条时取 recorded_at 最大的一条——"最新的购买＝当前偏好"。
         只返回 status='active' 且 record_kind='triple' 的事实。
         """
+        # 租户过滤单源（S5 批四）：str(tenantId) 保持原参数绑定语义
+        #（None → 'None' 空集，与原 `tenant_id = NULL` 行为一致）。
+        # 子查询单表内 tenant_id 无歧义；外层 f/s 双表须限定 f. 别名。
+        innerTenantClause, innerTenantParams = tenant_sql_where(str(tenantId))
+        outerTenantClause, outerTenantParams = tenant_sql_where(str(tenantId), alias="f")
         sql = (
             "SELECT f.*, s.canonical_label FROM knowledge_facts f"
             " INNER JOIN (SELECT subject_key, MAX(recorded_at) AS max_ts"
             "   FROM knowledge_facts"
-            "   WHERE agent_id = ? AND predicate_term_id = ? AND tenant_id = ?"
+            "   WHERE agent_id = ? AND predicate_term_id = ? AND %s"
             "     AND status = 'active' AND record_kind = 'triple'"
             "   GROUP BY subject_key) latest"
             " ON f.subject_key = latest.subject_key"
             "  AND f.recorded_at = latest.max_ts"
             " LEFT JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
             "  AND s.agent_id = f.agent_id"
-            " WHERE f.agent_id = ? AND f.predicate_term_id = ? AND f.tenant_id = ?"
+            " WHERE f.agent_id = ? AND f.predicate_term_id = ? AND %s"
             "  AND f.status = 'active' AND f.record_kind = 'triple'"
             " ORDER BY f.subject_key"
-        )
+        ) % (innerTenantClause, outerTenantClause)
         # ↑ MAX 子查询也过滤 status='active'——撤最新后 MAX 自然回退到次新，
         #   无需单独处理撤销逻辑（零停机撤销的 SQL 形态）。
-        params: list = [agentId, predicate, tenantId, agentId, predicate, tenantId]
+        params: list = [agentId, predicate, *innerTenantParams,
+                        agentId, predicate, *outerTenantParams]
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
         return [self._hydrate(r) for r in rows]
@@ -1084,9 +1098,10 @@ class KnowledgeFactStore:
         # W0-1 单点校验：不可解析时间显式 ValueError——诚实形态，不静默当空轴。
         asOf = _axis(parseBitemporalStamp(asOf, "asOf"))
         knownAt = _axis(parseBitemporalStamp(knownAt, "knownAt"))
-        sql = ("SELECT * FROM knowledge_facts WHERE agent_id = ? AND tenant_id = ?"
-               " AND record_kind = 'triple'")
-        params: List[Any] = [agentId, str(tenantId or "default")]
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+        sql = ("SELECT * FROM knowledge_facts WHERE agent_id = ? AND %s"
+               " AND record_kind = 'triple'" % tenantClause)
+        params: List[Any] = [agentId, *tenantParams]
         if predicate:
             sql += " AND predicate_term_id = ?"
             params.append(predicate)
@@ -1685,8 +1700,9 @@ class KnowledgeFactStore:
                " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
                " WHERE f.status = 'active' AND s.status != 'merged'"
                " AND (f.valid_until IS NULL OR f.valid_until > ?)")
-        params: List[Any] = [_now(), str(tenantId or "default")]
-        sql += " AND f.tenant_id = ?"
+        tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"), alias="f")
+        params: List[Any] = [_now(), *tenantParams]
+        sql += " AND " + tenantClause
         if not includeNarratives:
             sql += " AND f.record_kind != 'narrative'"
         if agentId:
@@ -1710,10 +1726,11 @@ class KnowledgeFactStore:
         自动取代后，同内容会另开一行，静态预测与实跑当场对不上（实测 92 vs 102）。
         """
         with self._lock:
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
             row = self._conn.execute(
-                "SELECT * FROM knowledge_facts WHERE agent_id = ? AND tenant_id = ?"
-                " AND content_key = ? LIMIT 1",
-                (agentId, str(tenantId or "default"), contentKey),
+                "SELECT * FROM knowledge_facts WHERE agent_id = ? AND %s"
+                " AND content_key = ? LIMIT 1" % tenantClause,
+                (agentId, *tenantParams, contentKey),
             ).fetchone()
         return self._hydrate(row) if row else None
 
@@ -1749,8 +1766,9 @@ class KnowledgeFactStore:
         # 租户维度必须随行：同内容、同 agent 的两条条目分属两个租户时，
         # 不带租户会折回对方那一行（条目投影把别人的治理行认成自己的）。
         if tenantId is not None:
-            clauses.append("tenant_id = ?")
-            params.append(str(tenantId or "default"))
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+            clauses.append(tenantClause)
+            params.extend(tenantParams)
         if contentKey:
             # 给了内容键就必须按内容键认：旧说法也带着同一个条目的 source_turn_id，
             # 允许它靠溯源回退命中，投影就会把"还没改写"当成"已经对齐"。
@@ -1992,7 +2010,7 @@ class KnowledgeFactStore:
         if row is None:
             return None
         rec = self._hydrateConflict(row)
-        if tenantId is not None and str(rec.get("tenant_id") or "default") != str(
+        if tenantId is not None and resolve_tenant(rec) != str(
             tenantId or "default"
         ):
             return None
@@ -2004,8 +2022,9 @@ class KnowledgeFactStore:
         sql = "SELECT * FROM knowledge_conflicts WHERE status = ?"
         params: List[Any] = [status]
         if tenantId is not None:
-            sql += " AND tenant_id = ?"
-            params.append(str(tenantId or "default"))
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+            sql += " AND " + tenantClause
+            params.extend(tenantParams)
         sql += " ORDER BY severity DESC, detected_at DESC"
         with self._lock:
             rows = self._conn.execute(sql, tuple(params)).fetchall()
@@ -2059,8 +2078,8 @@ class KnowledgeFactStore:
             if row is None or row["status"] != "pending":
                 return False
             # 租户分区（v21）：跨租户拿 id 裁决按"不存在"处理，不泄露该 id 是否真实存在。
-            if tenantId is not None and str(
-                row["tenant_id"] or "default"
+            if tenantId is not None and resolve_tenant(
+                dict(row)
             ) != str(tenantId or "default"):
                 return False
             members = json.loads(row["member_fact_ids_json"] or "[]")
@@ -2103,15 +2122,17 @@ class KnowledgeFactStore:
         旧实现只在同 agent 桶内比对（`repository.py:1119`），跨库分歧因此永远不成账。
         """
         with self._lock:
+            tenantClause, tenantParams = tenant_sql_where(
+                str(tenantId or "default"), alias="f")
             rows = self._conn.execute(
                 "SELECT f.*, f.rowid AS _rowid, s.agent_id AS subject_agent_id, s.canonical_label,"
                 " s.normalized_label FROM knowledge_facts f"
                 " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
                 " WHERE s.normalized_label = ? AND f.predicate_term_id = ?"
-                " AND f.tenant_id = ?"
+                " AND %s"
                 " AND s.merged_into IS NULL AND f.status != 'retracted'"
-                " ORDER BY f.recorded_at, f.fact_id",
-                (normalizeLabel(subjectLabel), predicateTermId, str(tenantId or "default")),
+                " ORDER BY f.recorded_at, f.fact_id" % tenantClause,
+                (normalizeLabel(subjectLabel), predicateTermId, *tenantParams),
             ).fetchall()
         return [self._hydrate(r) for r in rows]
 
@@ -2268,8 +2289,9 @@ class KnowledgeFactStore:
                 if scopeKey:
                     sql += " AND agent_id = ?"
                     params.append(scopeKey)
-                sql += " AND tenant_id = ?"
-                params.append(tenant)
+                tenantClause, tenantParams = tenant_sql_where(tenant)
+                sql += " AND " + tenantClause
+                params.extend(tenantParams)
                 if timeFrom:
                     sql += " AND recorded_at >= ?"
                     params.append(_instant(timeFrom))
@@ -2321,8 +2343,9 @@ class KnowledgeFactStore:
             clauses.append("scope = ?")
             params.append(str(scope))
         if tenantId is not None:
-            clauses.append("tenant_id = ?")
-            params.append(str(tenantId or "default"))
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+            clauses.append(tenantClause)
+            params.extend(tenantParams)
         sql = "SELECT * FROM knowledge_baselines"
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
@@ -2416,8 +2439,9 @@ class KnowledgeFactStore:
         tenantSql = ""
         params: List[Any] = [instant]
         if tenantId is not None:
-            tenantSql = " AND tenant_id = ?"
-            params.append(str(tenantId or "default"))
+            tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
+            tenantSql = " AND " + tenantClause
+            params.extend(tenantParams)
         with self._lock, self._conn:
             due = [r["fact_id"] for r in self._conn.execute(
                 "SELECT fact_id FROM knowledge_facts"
