@@ -78,6 +78,10 @@ class _Metrics:
             "SQLite connections closed",
             ["db"],
         )
+        self.db_maintenance_last_run_unixtime = Gauge(
+            "neurova_db_maintenance_last_run_unixtime",
+            "Last successful SQLite maintenance run (unixtime)",
+        )
 
         # ── 共享线程池（P0-2：线程数/队列深度此前不可测）──
         self.thread_pool_threads = Gauge(
@@ -507,6 +511,15 @@ class _Metrics:
         except Exception:
             logger.debug("db connection closed metric failed", exc_info=True)
 
+    def record_db_maintenance_run(self) -> None:
+        """存储自治理最后一次成功运行时间（资源治理 P2-5）。"""
+        try:
+            import time
+
+            self.db_maintenance_last_run_unixtime.set(time.time())
+        except Exception:
+            logger.debug("db maintenance metric failed", exc_info=True)
+
     # ── 索引可观测（P0-3）──
 
     def record_index_snapshot(self, db_path: str, index_count: int, duration_ms: float) -> None:
@@ -770,6 +783,11 @@ def record_db_connection_created(db_path: str) -> None:
 def record_db_connection_closed(db_path: str) -> None:
     """模块级便捷入口（连接池埋点）。"""
     get_metrics().record_db_connection_closed(db_path)
+
+
+def record_db_maintenance_run(db_path: str = "") -> None:
+    """模块级便捷入口（存储自治理埋点，资源治理 P2-5）。"""
+    get_metrics().record_db_maintenance_run()
 
 
 def record_index_snapshot(db_path: str, index_count: int, duration_ms: float) -> None:
