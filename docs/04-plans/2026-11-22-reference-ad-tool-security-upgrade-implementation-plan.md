@@ -36,6 +36,9 @@
 | 批四 P0 | W2 | 复评轴7 剩余差距 | lint 升 error（shell 分段默认 strict+static-gate 双保险） |
 | 批四收尾 | W3 | 移交项扫荡 | 工具执行结构化错误信封全端点透传（console/governance/skill/computer 同根因压扁点） |
 | 批四收尾 | W4 | 移交项 | neuacp 池键属主段补全（登记行 ownerId 完整） |
+| 批五 | A | 前端适配 | 主机确认卡（后端 confirm 端点+NeurUI 渲染）+结构化失败友好提示+park 轮询 |
+| 批五 | B | 移动端适配 | 鸿蒙 relay 鉴权新形态+确认/审批卡 |
+| 批五 | C | 移动端适配 | 安卓 relay 鉴权新形态+工具事件呈现+确认/审批卡 |
 
 ## 1. 批一 P0（安全实益，四卡，无阻塞可开工）
 
@@ -153,6 +156,15 @@
 - live-verify：真后端 spawn 一个 neuacp 成员→查登记行属主。
 
 **登记不立卡（无消费场景不做表面工程）**：mcp 单例属主恒 default——MCP server 配置当前为部署级共享，per-user 作用域不存在；出现 per-user MCP 配置场景时再立卡把属主随配置传入。
+
+## 4b. 批五（前端与移动端适配，2026-11-22 三次立卡，含增强项一并实施）
+
+适配必要性核实结论：U1 主机确认卡全仓无渲染面（NeurUI 零处理、移动端零处理，且确认接口 mark_confirmed 无生产调用方）、U9/U16 中继默认拒 URL-token 旧形态（relay 模式配对移动端会连不上，direct 模式不受影响）、U6 审批移动端无入口。三卡并行：
+
+- **A（NeurUI+后端端点）**：后端 `POST /ssh-credentials/host-key/confirm`（settings.py，调 SshHostStore.mark_confirmed，鉴权对齐既有 ssh-credentials 端点）+ WS needs_host_confirmation 载荷补 agent_id；NeurUI 主机确认卡（对齐凭据卡形态）+ i18n×11。**增强项并入本卡**：E1/E3/E4 结构化失败友好提示（error_code/phase/retryable/param_errors/pending_approval→可读文案×11）+ E2 park 迟交回灌面板轮询（GET /v1/tools/park/{park_id}）。
+- **B（鸿蒙）**：relay 鉴权新形态（token 从 URL 挪到连接后首条 auth 帧；裸密钥按 protocol.signTunnelToken 口径本地签 `nv1:agent` 信封，直连模式不变）+ 聊天流确认/审批卡（needs_host_confirmation→confirm 接口；pending_approval→approvals/{id}/approve）。
+- **C（安卓）**：relay 鉴权新形态（同 B 口径）+ computer_action 工具事件呈现 + 确认/审批卡。
+- 验收：各端红→绿（vitest/JUnit/ArkTS 单测+nv1 签名与 python signTunnelToken 对拍）+ 编译门（vue-tsc 0 错/hvigor 绿/compileDebugKotlin 绿）+ 后端端点真后端 live-verify。
 
 ## 5. 拍板结果（2026-11-22 交互拍板，六项全落定）
 
