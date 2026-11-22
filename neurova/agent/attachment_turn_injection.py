@@ -211,6 +211,32 @@ async def resolveAttachmentTranscripts(
     return transcripts
 
 
+def resolveAttachmentBudgetTokens(pipeline: Any) -> Optional[int]:
+    """本轮附件注入可用的文本预算（P1-5，保守口径）。
+
+    附件注入早于 `build_context`，会话既有占用在该点不可得；故只对本轮
+    **新增附件**设上限：上限 = 模型预算 × `CONTEXT_COMPACT_TRIGGER_RATIO`
+    （压缩触发线以下的空间，预算经 `ContextPool.get_token_budget_for_model`
+    单源计算）。附件载荷自身不越过触发线 ⇒ 附件永不成为压缩的触发者。
+    拿不到模型名/预算 → None（调用方走透传计划，不造数）。
+    """
+    try:
+        model = str(pipeline._current_model_name() or "")
+    except Exception:
+        return None
+    if not model:
+        return None
+    try:
+        from neurova.context_pool import CONTEXT_COMPACT_TRIGGER_RATIO, ContextPool
+
+        budget = int(ContextPool.get_token_budget_for_model(model))
+        if budget <= 0:
+            return None
+        return max(0, int(budget * CONTEXT_COMPACT_TRIGGER_RATIO))
+    except Exception:
+        return None
+
+
 def injectAttachmentsIntoInput(
     pipeline: Any,
     userInput: str,
@@ -223,14 +249,20 @@ def injectAttachmentsIntoInput(
 
     `noticeComposer` 是「抽取不到文本」那句文案的单源构造点，由调用方传入
     （它的定义留在 `chat_pipeline`，判据按那个模块名 monkeypatch）。
+
+    P1-5 预算闸：文本段先经 `attachment_budget.planAttachmentInjection` 判据
+    ——预算内全文并入，超预算转"预览 + 句柄说明"；拿不到模型预算时透传
+    （行为与既往一致）。vision 切片不走这份文本预算（它们有自己的尺寸闸门）。
     """
     from neurova.attachment_parser import extract_attachment_text
+    from neurova.context.attachment_budget import (
+        DECISION_PREVIEW,
+        planAttachmentInjection,
+    )
 
-    parts: List[str] = []
-    if userInput:
-        parts.append(userInput)
-    vision_parts: List[Dict] = []
-
+    # 第一遍：逐附件产出"全文并入"形态（口径与既往一致），预算判据在其上裁剪。
+    # 元素 = (附件元数据, 全文段落, 可截断正文, vision 切片)。
+    rendered: List[Tuple[Dict, str, str, List[Dict]]] = []
     for att in attachments:
         filename = att.get("filename") or "附件"
         file_type = att.get("file_type") or "file"
@@ -243,16 +275,14 @@ def injectAttachmentsIntoInput(
             # 那是"模型没看到视频"被伪装成"文件读不出来"的根因处。
             frames, reason = (mediaFrames or {}).get(str(file_id)) or ([], "本轮未执行抽帧")
             if frames:
-                parts.append(
+                fullText = (
                     f"[用户上传了视频: {filename}（已抽取 {len(frames)} 帧随本轮请求附上）]"
                 )
-                vision_parts.extend(
-                    visionImagePart(frame, "image/jpeg") for frame in frames
-                )
+                segVision = [visionImagePart(frame, "image/jpeg") for frame in frames]
             else:
-                parts.append(
-                    f"[用户上传了视频: {filename}（本轮未能看到画面） 原因: {reason}]"
-                )
+                fullText = f"[用户上传了视频: {filename}（本轮未能看到画面） 原因: {reason}]"
+                segVision = []
+            rendered.append((att, fullText, "", segVision))
             continue
 
         if file_type in AUDIO_ATTACHMENT_FILE_TYPES:
@@ -261,13 +291,12 @@ def injectAttachmentsIntoInput(
                 {}, "本轮未执行转写"
             )
             if transcript:
-                parts.append(
+                fullText = (
                     f"[用户上传了音频: {filename}（已转写为文本，随本轮语音上下文附上）]"
                 )
             else:
-                parts.append(
-                    f"[用户上传了音频: {filename}（本轮未能转写） 原因: {reason}]"
-                )
+                fullText = f"[用户上传了音频: {filename}（本轮未能转写） 原因: {reason}]"
+            rendered.append((att, fullText, "", []))
             continue
 
         try:
@@ -281,12 +310,13 @@ def injectAttachmentsIntoInput(
             part, refusalReason = imagePartForLlm(data, mime, filename)
             if part is not None:
                 # 超闸门大图在 visionImagePart 内降采样重编码，防 413 request_too_large
-                vision_parts.append(part)
                 # 持久化通道只留中性标记：指令不能进历史（2026-09-09 串台事故——
                 # 图片 base64 只挂当轮请求，历史里的"请结合图片回答"对后续文本轮
                 # 是一条无图可依、无法履行的指令，弱模型被带偏去文件系统找图）；
                 # 当轮指令由 _apply_vision_attachments 挂到请求级 text part。
-                parts.append(f"[用户上传了图片: {filename}（图片已随本轮请求附上）]")
+                rendered.append(
+                    (att, f"[用户上传了图片: {filename}（图片已随本轮请求附上）]", "", [part])
+                )
             else:
                 logger.warning(
                     "[附件注入] 图片 %s（%s）拒发: %s（file_id=%s）",
@@ -295,15 +325,25 @@ def injectAttachmentsIntoInput(
                     refusalReason,
                     file_id or "缺失",
                 )
-                parts.append(
-                    f"[用户上传了图片: {filename}（本轮未能看到画面） 原因: {refusalReason}]"
+                rendered.append(
+                    (
+                        att,
+                        f"[用户上传了图片: {filename}（本轮未能看到画面） 原因: {refusalReason}]",
+                        "",
+                        [],
+                    )
                 )
             continue
 
         text, status = extract_attachment_text(data, filename, file_type)
         if text:
-            parts.append(
-                f"[用户上传了文件 {filename}，以下为该文件的完整内容（请直接使用，无需调用工具读取）]\n{text}"
+            rendered.append(
+                (
+                    att,
+                    f"[用户上传了文件 {filename}，以下为该文件的完整内容（请直接使用，无需调用工具读取）]\n{text}",
+                    text,
+                    [],
+                )
             )
         else:
             from neurova.attachment_parser import suggestExtractionPrimitive
@@ -323,15 +363,53 @@ def injectAttachmentsIntoInput(
             from neurova.agent.capability_gap import noteAttachmentSignal
 
             noteAttachmentSignal(filename, file_type, file_id, status)
-            parts.append(
-                (noticeComposer or _defaultNotice)(
-                    filename=filename,
-                    file_type=file_type,
-                    status=status,
-                    file_id=file_id,
-                    primitive=suggestExtractionPrimitive(filename, file_type),
-                )
+            notice = (noticeComposer or _defaultNotice)(
+                filename=filename,
+                file_type=file_type,
+                status=status,
+                file_id=file_id,
+                primitive=suggestExtractionPrimitive(filename, file_type),
             )
+            rendered.append((att, notice, "", []))
+
+    # 第二遍：预算判据（单源）裁剪——预算内全文并入，超预算转"预览 + 句柄说明"。
+    budget = resolveAttachmentBudgetTokens(pipeline)
+    plan = planAttachmentInjection(
+        attachments=[
+            {
+                "file_id": str(att.get("file_id") or ""),
+                "filename": str(att.get("filename") or "附件"),
+                "file_type": str(att.get("file_type") or "file"),
+                "full_text": fullText,
+                "body": body,
+            }
+            for att, fullText, body, _vision in rendered
+        ],
+        remaining_budget_tokens=budget,
+    )
+    if not plan.isValid():
+        logger.warning(
+            "[附件预算] 计划超预算（不应发生）：total=%s budget=%s",
+            plan.total_used_tokens,
+            budget,
+        )
+
+    parts: List[str] = []
+    if userInput:
+        parts.append(userInput)
+    vision_parts: List[Dict] = []
+    for (_att, _fullText, _body, segVision), decision in zip(rendered, plan.decisions):
+        if decision.decision == DECISION_PREVIEW:
+            logger.info(
+                "[附件预算] %s 超预算转预览：保留 %d/%d 字符（预算 %s token）",
+                decision.file_id or decision.filename,
+                decision.preview_chars,
+                decision.preview_chars + decision.truncated_chars,
+                budget,
+            )
+        if decision.injected_text:
+            parts.append(decision.injected_text)
+        vision_parts.extend(segVision)
 
     return "\n\n".join(parts), vision_parts
 
