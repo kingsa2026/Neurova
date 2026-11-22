@@ -2006,12 +2006,24 @@ class ContextPool:
             )
             # P1-1①（方案 §4.1）：视图出口配对完整性校验——预算/相关性选取
             # 可能产生孤儿 TOOL_CALL（其 pairs_with 目标未入选），剔除以避免
-            # LLM 看到"无上下文的工具结果"；孤儿留在池中（归档无损语义不变）
-            report = validate_pairing(selected)
-            if report.orphans:
+            # LLM 看到"无上下文的工具结果"；孤儿留在池中（归档无损语义不变）。
+            # P2-9：换两遍扫描 sweepResidues——第一遍孤儿判定单源复用
+            # validate_pairing，第二遍再剔空壳 assistant 残留（判定单源在
+            # neurova/context/pairing.py，池侧不另写判据）。search() 是主动
+            # 召回工具面，不接第二遍清扫（行为不漂移）。
+            report = sweepResidues(selected)
+            # 既有 debug 日志保留原口径：第一行只数孤儿 TOOL_CALL
+            #（不含第二遍剔出的空壳残留），空壳单列一行可观测。
+            orphanToolCalls = report.orphan_count - len(report.residues)
+            if orphanToolCalls:
                 logger.debug(
                     "ContextPool.draw 剔除 %d 个孤儿 TOOL_CALL（pairs_with 目标不在视图内）",
-                    report.orphan_count,
+                    orphanToolCalls,
+                )
+            if report.residues:
+                logger.debug(
+                    "ContextPool.draw 剔除 %d 条空壳 assistant 残留（content 空且无 tool_calls/tool_call_id）",
+                    len(report.residues),
                 )
             return report.kept
 
@@ -2042,7 +2054,7 @@ class ContextPool:
         return selected[:limit]
 
 
-from neurova.context.pairing import validate_pairing
+from neurova.context.pairing import sweepResidues
 
 # D11：台账 GC 节流——每 N 次**归档提交**触发一次 gc_stale（触发点见
 # _maybeGcLedger；改前挂在生产不可达的驱逐路径上）。与环境无关地写死，
