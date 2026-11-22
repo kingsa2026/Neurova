@@ -23,7 +23,7 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
-ureq = { version = "2", features = ["json"] }
+ureq = { version = "3", features = ["json"] }
 # 运行时归档摘要校验（P1-6）：sha2 0.10 已在锁文件内（tauri 传递依赖），
 # 这里提升为直接依赖；不新引第三方实现。
 sha2 = "0.10"
