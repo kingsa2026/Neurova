@@ -10,8 +10,8 @@ try——落账抛异常（如 deepcopy 失败）时反馈链整体跳过，与 
 """
 import os
 
-os.environ.setdefault("NEUROVA_JWT_SECRET", "test_secret_for_try_split")
-os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_for_try_split")
+os.environ.setdefault("NEUROVA_JWT_SECRET", "test_secret_for_try_split-0123456789abcdef")
+os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_for_try_split-0123456789abcdef")
 
 from unittest.mock import MagicMock
 
