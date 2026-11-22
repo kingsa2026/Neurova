@@ -176,8 +176,9 @@ export interface RelationCandidate {
 // 推导（B11 解释链）
 // ---------------------------------------------------------------------------
 
+/** 后端 premises 行（knowledge_derivation_edges：derivation_ledger.premisesOf）。 */
 export interface DerivationPremise {
-  fact_id: string
+  premise_fact_id: string
   rule_id: string
   rule_version: string
 }
@@ -229,6 +230,8 @@ export interface FactQueryBody {
   source_modified_before?: string
   asOf?: string
   knownAt?: string
+  /** 与 KnowledgeSearchRequest.limit 对齐（1–100，缺省 10）。 */
+  limit?: number
 }
 
 /** POST /ontology/validate 候选三元组（dry-run 入参）。 */

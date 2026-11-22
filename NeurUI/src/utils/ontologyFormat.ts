@@ -67,3 +67,13 @@ export function impactCount(impact: Record<string, unknown> | null, key: string)
   if (typeof value === 'number') return value
   return 0
 }
+
+/**
+ * 定长截断（超长补省略号）；图表节点/区间行标签共用同一口径——
+ * 原在 Studio 三视图各自内联同体定义，被 duplicate-function-inventory
+ * 守卫判为 A 类，按教义第 7 条收口到此单一属主。
+ */
+export function truncateText(text: string, max: number): string {
+  const s = String(text || '')
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
+}

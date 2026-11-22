@@ -170,8 +170,8 @@
             <span class="k">{{ t('ontology.derivationPremises') }}</span>
             <span class="v">{{ derivation.premise_count }}</span>
           </p>
-          <div v-for="premise in derivation.premises" :key="premise.fact_id" class="premise-row mono">
-            {{ premise.fact_id }} ← {{ premise.rule_id }}
+          <div v-for="premise in derivation.premises" :key="premise.premise_fact_id" class="premise-row mono">
+            {{ premise.premise_fact_id }} ← {{ premise.rule_id }}
           </div>
         </div>
         <div class="detail-row">

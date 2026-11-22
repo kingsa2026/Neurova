@@ -87,6 +87,7 @@
           <StudioReasoningSection v-else-if="activeSection === 'reasoning'" :schema="schema" />
           <StudioReleaseSection v-else-if="activeSection === 'release'" :is-admin="isAdmin" />
           <StudioRuntimeSection v-else-if="activeSection === 'runtime'" />
+          <StudioViewsSection v-else-if="activeSection === 'views'" />
           <StudioSettingsSection v-else-if="activeSection === 'settings'" />
         </div>
       </GlassCard>
@@ -113,9 +114,10 @@ import StudioShapesSection from './StudioShapesSection.vue'
 import StudioReasoningSection from './StudioReasoningSection.vue'
 import StudioReleaseSection from './StudioReleaseSection.vue'
 import StudioRuntimeSection from './StudioRuntimeSection.vue'
+import StudioViewsSection from './StudioViewsSection.vue'
 import StudioSettingsSection from './StudioSettingsSection.vue'
 
-type SectionKey = 'overview' | 'cq' | 'terms' | 'relations' | 'suggestions' | 'shapes' | 'reasoning' | 'release' | 'runtime' | 'settings'
+type SectionKey = 'overview' | 'cq' | 'terms' | 'relations' | 'suggestions' | 'shapes' | 'reasoning' | 'release' | 'runtime' | 'views' | 'settings'
 
 const SECTIONS: Array<{ key: SectionKey; labelKey: string }> = [
   { key: 'overview', labelKey: 'navOverview' },
@@ -127,6 +129,7 @@ const SECTIONS: Array<{ key: SectionKey; labelKey: string }> = [
   { key: 'reasoning', labelKey: 'navReasoning' },
   { key: 'release', labelKey: 'navRelease' },
   { key: 'runtime', labelKey: 'navRuntime' },
+  { key: 'views', labelKey: 'navViews' },
   { key: 'settings', labelKey: 'navSettings' },
 ]
 
