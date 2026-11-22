@@ -102,7 +102,7 @@
 
 ## 4. 可借鉴点
 
-D4 全域可借鉴点清单（21 项：P0×4/P1×8/P2×9）统一收口在《reference_ad_remote_execution_teardown_2026-11-22.md》§4——本节不另立第二份清单（教义第 6 条）。原轴级指向（SSRF 专用包收敛=轴7/沙箱补档位=轴6/动态干预审计注册表=轴9/manifest 运行元数据=轴1/HPKE 凭据信道=轴8/MCP Apps UI=轴4）均已并入该汇总。
+D4 全域可借鉴点清单（21 项：P0×4/P1×8/P2×9）统一收口在《reference_ad_remote_execution_teardown_2026-11-22.md》§4——本节不另立第二份清单（教义第 6 条）。原轴级指向（SSRF 专用包收敛=轴7/沙箱补档位=轴6/动态干预审计注册表=轴9/manifest 运行元数据=轴1/HPKE 凭据信道=轴8/MCP Apps UI=轴4）均已并入该汇总。落地实施计划见《2026-11-22-reference-ad-tool-security-upgrade-implementation-plan.md》。
 
 ## 5. 本仓守卫提示（对方没有、勿被"对齐"掉）
 
