@@ -686,6 +686,7 @@ class LLMClient:
                 f"base_url={getattr(self.config, 'base_url', '?')} model={getattr(self.config, 'model', '?')}"
             )
 
+        stream = None  # ④ 收尾：上游流句柄（finally 统一显式关闭）
         start_time = time.time()
 
         try:
@@ -797,6 +798,18 @@ class LLMClient:
 
             # 分类异常包装：限流/认证/连接/token 各自成类，供上层区分处理
             raise LLMClient._wrap_llm_error(e) from e
+        finally:
+            # ④ 收尾（live-verify 观察的 httpx2 asyncgen 收尾竞态根因）：
+            # 正常收流/异常/消费方中断（GeneratorExit）全部退出路径都必须
+            # 显式关上游流，不许依赖 GC 最终化 asyncgen（与在途迭代竞态 →
+            # "aclose(): asynchronous generator is already running"）。
+            if stream is not None:
+                _close = getattr(stream, "close", None)
+                if _close is not None:
+                    try:
+                        await _close()
+                    except Exception:  # noqa: BLE001 — 关流失败不掩盖主异常
+                        self.logger.debug("异步流式响应关闭失败", exc_info=True)
 
     @staticmethod
     def _wrap_llm_error(e: Exception) -> Exception:
