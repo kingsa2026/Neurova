@@ -343,6 +343,19 @@ class MultiModelLLMClient:
                 from neurova.llm.providers.gemini_client import GeminiNativeClient
 
                 client = GeminiNativeClient(config, provider_id=provider.id)
+            elif provider_kind == "ollama":
+                # R9：兼容优先——/v1/models 探测明确 404（兼容端点未开）才落
+                # 原生 /api/chat；探测按 base_url 缓存，其余状态/异常一律按
+                # 兼容处理（保持既有错误语义，不因探测抖动改行为）。
+                from neurova.llm.providers.ollama_native import (
+                    OllamaNativeClient,
+                    ollamaCompatAvailable,
+                )
+
+                if ollamaCompatAvailable(provider.base_url, provider.api_key):
+                    client = LLMClient(config, provider_id=provider.id)
+                else:
+                    client = OllamaNativeClient(config, provider_id=provider.id)
             else:
                 # provider_id 三家客户端同规格传入：模型级能力（T-18 的采样钉子
                 # 回执）按 `provider_id:model` 记账，缺了它就把不同提供方的
@@ -821,7 +834,14 @@ class MultiModelLLMClient:
             if not client:
                 return last_result
             attempt = ledger.start(client)
-            result = await self._chat_single_attempt(client, messages, **kwargs)
+            try:
+                result = await self._chat_single_attempt(client, messages, **kwargs)
+            except asyncio.CancelledError:
+                # R2 收尾（批一遗留清偿）：消费方取消是独立结局，不悬 failed 默认；
+                # 取消不是 provider 失败，不计 increment_request。
+                ledger.finish(attempt, AttemptOutcome.CANCELLED,
+                              error_kind="cancelled", error_summary="consumer cancelled")
+                raise
             if result.get("success"):
                 ledger.finish(attempt, AttemptOutcome.COMPLETED)
                 return result
@@ -1503,6 +1523,17 @@ class MultiModelLLMClient:
                     responseId=_stream_response_id,
                 )
                 return
+            except (GeneratorExit, asyncio.CancelledError) as _cancel:
+                # R2 收尾（批一遗留清偿）：消费方中断（aclose→GeneratorExit）与
+                # 任务取消（CancelledError 打进挂起点）标 CANCELLED——不悬在
+                # 默认 failed 态，也不把取消误记成 provider 失败（不 increment）。
+                # 原样重抛交还关闭协议（吞 GeneratorExit 会 RuntimeError）。
+                ledger.finish(
+                    attempt, AttemptOutcome.CANCELLED,
+                    error_kind="cancelled", error_summary=type(_cancel).__name__,
+                    duration_ms=int((time.time() - start_time) * 1000),
+                )
+                raise
             except Exception as e:
                 client.increment_request(success=False)
                 # 审计 P0-C2：流内 429 与 chat() 同源——分类后 report_429 暂停该模型

@@ -34,6 +34,34 @@ __all__ = ["ONNXEmbeddingEngine", "EmbeddingResult", "get_embedding_engine", "_r
 # 全局单例（懒加载）
 _embedding_engine = None
 _embedding_lock = threading.Lock()
+# R11：远程嵌入引擎单例（env 双键齐备才创建；与本地单例互斥使用）
+_remote_embedding = None
+
+
+def _remote_embedding_engine():
+    """远程嵌入通道（R11）：NEUROVA_EMBEDDING_PROVIDER+MODEL 齐备才启用。
+
+    返回 RemoteEmbeddingEngine 或 None（未配置=默认仍本地，存量行为不变）。
+    """
+    global _remote_embedding
+    from neurova.llm.embeddings_channel import getEmbeddingChannelTarget
+
+    target = getEmbeddingChannelTarget()
+    if target is None:
+        return None
+    if _remote_embedding is not None and (
+        _remote_embedding.provider_id, _remote_embedding.model) == target:
+        return _remote_embedding
+    with _embedding_lock:
+        if _remote_embedding is not None and (
+            _remote_embedding.provider_id, _remote_embedding.model) == target:
+            return _remote_embedding
+        from neurova.embedding.remote_engine import RemoteEmbeddingEngine
+
+        _remote_embedding = RemoteEmbeddingEngine(target[0], target[1])
+        _logger.info("远程嵌入通道已启用: %s/%s（默认本地向量切换为远程）",
+                     target[0], target[1])
+    return _remote_embedding
 
 
 def get_embedding_engine():
@@ -45,6 +73,10 @@ def get_embedding_engine():
         ONNXEmbeddingEngine 实例，若模型未安装或初始化失败返回 None
     """
     global _embedding_engine
+    # R11：远程通道优先（env 双键齐备才启用；未配置走本地，行为不变）
+    remote = _remote_embedding_engine()
+    if remote is not None:
+        return remote
     if _embedding_engine is not None:
         return _embedding_engine
     with _embedding_lock:
@@ -78,9 +110,11 @@ def _reset_embedding_engine():
     逐档 reset 会各留一个 session，累积顶到 runner 内存上限被 SIGKILL
     （pipeline-3 的 137）。故这里主动释放，而不是指望 GC。
     """
-    global _embedding_engine
+    global _embedding_engine, _remote_embedding
     previous = _embedding_engine
     _embedding_engine = None
+    # R11：远程引擎无原生后端，置空即可（目标变更时工厂会按 env 重建）
+    _remote_embedding = None
     if previous is None:
         return
     # 走同步的释放入口：本函数可能在**已有事件循环**里被调用（异步用例、异步服务
