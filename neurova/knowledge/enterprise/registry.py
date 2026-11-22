@@ -185,6 +185,25 @@ def buildAdapter(descriptor: Dict[str, Any], sourceId: str,
                         "snowflake": module.SnowflakeAdapter,
                         "sap_odata": module.SapOdataAdapter}[sourceType]
         return adapterClass(descriptor, sourceId, tenantId)
+    if sourceType in ("bigquery", "databricks", "salesforce", "servicenow",
+                      "looker", "airflow"):
+        # U-conn 扩展批：SaaS REST 六连接器（数据驱动闭集，ERP_VENDOR_ADAPTERS 同款）
+        import importlib
+
+        module = importlib.import_module("neurova.knowledge.enterprise.connectors_saas")
+        return module.SAAS_ADAPTERS[sourceType](descriptor, sourceId, tenantId)
+    if sourceType == "cassandra":
+        # U-conn 扩展批：NoSQL CQL（cassandra-driver 可选依赖，fail-soft）
+        import importlib
+
+        module = importlib.import_module("neurova.knowledge.enterprise.connectors_nosql")
+        return module.CassandraAdapter(descriptor, sourceId, tenantId)
+    if sourceType == "git":
+        # U-conn 扩展批：仓库文件清单（系统 git 二进制，零新增 Python 依赖）
+        import importlib
+
+        module = importlib.import_module("neurova.knowledge.enterprise.connectors_git")
+        return module.GitAdapter(descriptor, sourceId, tenantId)
     if sourceType == "event_stream":
         raise MappingError("event_stream 连接器缓办（立项方案 §2.2 候选 6 原判有效）")
     raise MappingError("sourceType %r 不在白名单" % sourceType)

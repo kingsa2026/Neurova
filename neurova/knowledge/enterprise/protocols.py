@@ -14,8 +14,30 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 #: 适配器 sourceType 白名单：注册表只收这些类型；默认不注册任何真实适配器。
 #: 变体细分走描述符字段（file.format / sql.driver / erp_api.vendor / chat.vendor），
 #: 闭集校验在 schema_mapping.VARIANT_CLOSED_SETS（2026-11-07 裁定 §2.3-1A）。
+#: U-conn 扩展批（对齐参照系连接器矩阵）新增：bigquery / databricks（湖仓 SQL
+#: REST）、cassandra（NoSQL CQL）、salesforce / servicenow / looker / airflow
+#: （SaaS REST）、git（仓库文件清单）。
 SOURCE_TYPES = ("sql", "erp_api", "event_stream", "file", "http_pull", "chat",
-                "unity_catalog", "snowflake", "sap_odata")
+                "unity_catalog", "snowflake", "sap_odata",
+                "bigquery", "databricks", "cassandra",
+                "salesforce", "servicenow", "looker", "airflow", "git")
+
+
+def resolveCredentialEnv(descriptor: Dict[str, Any], mapKey: str) -> Dict[str, str]:
+    """credentialEnv 对象指针的统一解析：{逻辑名: 环境变量名} → {逻辑名: 值}。
+
+    值只在取用时从环境读（NEUROVA_KB_SECRET 指针纪律——描述符不落明文）；
+    SaaS 族与 NoSQL 族共用这一份解析（单一事实源）。
+    """
+    import os
+
+    mapping = dict((descriptor or {}).get(mapKey) or {})
+    resolved: Dict[str, str] = {}
+    for logical, envName in mapping.items():
+        envName = str(envName or "").strip()
+        if envName:
+            resolved[str(logical)] = os.environ.get(envName, "")
+    return resolved
 
 
 @dataclass

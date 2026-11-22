@@ -106,15 +106,21 @@ class TestClosedSetDataification:
         closed = VARIANT_CLOSED_SETS["erp_api"][1]
         assert set(closed) == set(ERP_VENDOR_ADAPTERS.keys()),             "ERP vendor 闭集应从 ERP_VENDOR_ADAPTERS 单源派生"
 
-    def test_lakehouseKindsFromSingleSource(self):
-        """湖仓 kind 闭集从 connectors_lakehouse 派生。"""
+    def test_lakehouseKindsHaveNoEnumerableVariant(self):
+        """湖仓 kind 无可枚举变体——不进变体闭集（U-conn 扩展批修正）。
+
+        旧条目把 base_url 的值对 kind 名闭集做成员判定，任何可保存的真实
+        描述符（base_url=https://…）都会被拒——变体机制被误用；必填字段由
+        适配器自身 health/fetch 判缺。
+        """
         from neurova.knowledge.enterprise.connectors_lakehouse import _LAKEHOUSE_KINDS
         from neurova.knowledge.enterprise.schema_mapping import VARIANT_CLOSED_SETS
 
         for kind in _LAKEHOUSE_KINDS:
-            assert kind in VARIANT_CLOSED_SETS, f"湖仓 kind {kind} 应有闭集条目"
+            assert kind not in VARIANT_CLOSED_SETS, \
+                f"湖仓 kind {kind} 无枚举变体，不应有闭集条目"
 
-    def test_httpPullHasClosedSet(self):
+    def test_httpPullHasNoEnumerableVariant(self):
         from neurova.knowledge.enterprise.schema_mapping import VARIANT_CLOSED_SETS
 
-        assert "http_pull" in VARIANT_CLOSED_SETS
+        assert "http_pull" not in VARIANT_CLOSED_SETS

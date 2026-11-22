@@ -44,26 +44,17 @@ def _erpVendorNames() -> tuple:
         return ("kingdee", "yongyou")
 
 
-def _lakehouseKindNames() -> tuple:
-    """从 connectors_lakehouse._LAKEHOUSE_KINDS 派生湖仓 kind 闭集（dataification 单源）。"""
-    try:
-        from .connectors_lakehouse import _LAKEHOUSE_KINDS
-        return tuple(_LAKEHOUSE_KINDS)
-    except Exception:
-        return ("unity_catalog", "snowflake", "sap_odata")
-
-
 VARIANT_CLOSED_SETS: Dict[str, tuple] = {
     "file": ("format", ("csv", "tsv", "json", "jsonl")),
     # W11 dataification：driver 闭集从 connectors_sql._DRIVER_MODULES 派生（单源）
     "sql": ("driver", tuple(_sqlDriverNames())),
     # W11 dataification：vendor 闭集从 connectors_erp.ERP_VENDOR_ADAPTERS 派生（单源）
     "erp_api": ("vendor", tuple(_erpVendorNames())),
-    # W10 dataification：湖仓 kind 闭集从 connectors_lakehouse._LAKEHOUSE_KINDS 派生
-    "unity_catalog": ("base_url", tuple(_lakehouseKindNames())),
-    "snowflake": ("base_url", tuple(_lakehouseKindNames())),
-    "sap_odata": ("base_url", tuple(_lakehouseKindNames())),
-    "http_pull": ("url", ("http_pull",)),
+    # U-conn 扩展批修正：http_pull / unity_catalog / snowflake / sap_odata 的旧
+    # 条目把「url/base_url 的值」拿去对「kind 名闭集」做成员判定——任何可保存的
+    # 真实描述符（url=https://…）都会被拒（实测复现）。这四类没有可枚举变体，
+    # 必填字段由适配器自身 health/fetch 判缺，故不进变体闭集；「可枚举变体」
+    # 机制只保留给 sql.driver / erp_api.vendor / file.format / chat.vendor。
     "chat": ("vendor", ("wecom", "wechat")),
 }
 
