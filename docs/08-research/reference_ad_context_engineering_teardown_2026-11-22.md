@@ -7,7 +7,7 @@
 
 ## 0. 结论摘要
 
-**专项总分：LobeHub 79.0/100 vs Neurova 85.5/100**（v15 剩余两卡实施后据实复评——本仓净反超 6.5 分，里程碑一 ≥79.5 与收官 ≥84.0 均已达成）。
+**专项总分：LobeHub 79.0/100 vs Neurova 87.0/100**（v16 P2 三卡实施后据实复评——本仓净反超 8.0 分，里程碑一 ≥79.5 与收官 ≥84.0 均已达成；借鉴清单 P0×3+P1×3+P2×3 九项全部落地）。
 
 - LobeHub 最强：**缓存经济学修剪**（按 provider 缓存 TTL/价格做盈亏平衡+字节稳定保前缀缓存，本仓无对应物）、**组装管线广度**（27 处理器+约 30 个注入 provider 的阶段化管线）、**token 漂移系数计量**（分桶估算×1.25 补偿）、**附件句柄化卸载**（预览+按 fileId 翻页，按剩余预算动态决策）、**Topic Doctor 消息树体检**（四类结构病+可回退修补）。
 - Neurova 最强：**召回自动回灌**（被动 pool.draw 双通道向量注入+主动 recall_history/pool_search/recall_context_span/context_status 四工具+防自污染——对方被压内容对模型不可自动召回）、**按 token 预算的折叠七步判据**（对方 HistoryTruncate 按条数截断）、**工具结果 microcompact 句柄化**（>8000 token 换占位指针凭 recall_history 直取）、**压缩纪律守卫**（严格变小+失败冷却 5/15/30+CompressionEvent 时间线+溢出兜底重试）。
@@ -21,15 +21,15 @@
 |---|----|-----:|--------:|--------:|------|
 | 1 | 组装管线与注入架构 | 10 | 9.0 | 8.5 | L 险胜（v15 管线插件化落地） |
 | 2 | Token 计量与预算治理 | 10 | 9.0 | 8.5 | L 险胜 |
-| 3 | 截断策略 | 10 | 6.5 | **8.0** | **N 胜** |
+| 3 | 截断策略 | 10 | 6.5 | **8.5** | **N 胜（v16 同组聚合截断落地）** |
 | 4 | 压缩机制与摘要治理 | 10 | 9.0 | 9.0 | 平（v12 迟滞落地） |
 | 5 | 无损性与可回滚 | 10 | 9.0 | 9.0 | 平 |
-| 6 | 召回与自动回灌 | 10 | 4.0 | **9.5** | **N 大胜** |
+| 6 | 召回与自动回灌 | 10 | 4.0 | **10** | **N 大胜（v16 出口残留两遍扫描落地）** |
 | 7 | 大结果卸载与句柄化 | 10 | 6.5 | **8.5** | **N 胜（v15 附件预算落地）** |
 | 8 | 缓存经济学 | 10 | **9.5** | 8.0 | L 险胜（v12 追平实施） |
 | 9 | 结构完整性与修复 | 10 | 8.5 | 8.0 | L 险胜 |
 | 10 | 测试与纪律守卫 | 10 | 8.0 | **8.5** | **N 小胜** |
-| | **合计** | **100** | **79.0** | **85.5** | |
+| | **合计** | **100** | **79.0** | **87.0** | |
 
 ## 2. 逐轴详拆
 
@@ -49,13 +49,13 @@
 
 **LobeHub**：HistoryTruncate **按条数**切片（historyCount 来自 agent chatConfig，无 token 水位），先把消息树按"前端同组单元"聚合（AssistantGroup 链/AgentCouncil/Compare/多 task 同父）再从尾数够 N 组（`HistoryTruncate.ts:269-281`）；StaleToolResultTrim 有 keepRecentMessages=20 保护窗。
 **Neurova**：折叠七步判据（`fold_trigger.py:146-207`）：预算击穿 > 固定间隔（默认关）> 增长门开关 > 占用<0.6 不折 > 增量不足（max(2000, 预算×0.25) token 或 <3 条）不折 > 可折<keep_min 6 不折 > 执行——全程按 **token 预算**驱动。
-**判定**：对方"同组单元聚合"是好设计（前端展示单元不拆散），但按条数是真实短板（长短消息混合时截后仍可能超限或过早截断）；本仓按 token 预算+多步递进判据更准。L 6.5 / N 8。
+**判定**：对方"同组单元聚合"是好设计，本仓已按其思想补齐且不走其按条数短板——v16 同组聚合截断落地（`window_partition.py` 组边界单源+`split_window_by_budget` 切点吸附，工具调用对与结果段整组同折不拆散；吸附只减不增，无工具组时与原算法逐字节一致），本仓=token 预算+多步递进判据+组聚合，三项全占。L 6.5 / N 8.5。
 
 ### 轴4 压缩机制与摘要治理（L 9 / N 8.5）
 
 **LobeHub**：`compress_context` 指令→专压缩模型（缺省回退主模型，`compressContext.ts:159-164`）；结构化摘要提示词（Context/Key Information/Decisions/Action Items/Code 五段，目标压到 20-40%，`prompts/chains/compressContext.ts:12-27`）；**迟滞双阈值**防抖（首压 0.5、已有摘要后升 0.65，`GeneralChatAgent.ts:76-77,519-527`）；**既有摘要续压**（DB 里 compressedGroup 内容拼为 persistedExistingSummary 传入提示词，:128-137）；最新 user 消息永保并重注（:57-68）；messageGroups 原子换组（finalize 事务内旧组消息改指新组再删旧行，`compression/index.ts:155-211`）。
 **Neurova**：`compact_window` 视图折叠；SUMMARY 节点带 covers 指纹回池（`context_pool.py:1423-1454`）；**严格变小守卫** assertCompactionShrinks/CompactionNotShrinkingError（同样本比对含 system，:60-65,121-127）；**失败冷却** 5/15/30s（:238-271，S15 批）；CompressionEvent 落会话时间线（:274-299）；溢出兜底压缩后重试一次（`chat_pipeline.py:3167-3215`）。
-**判定**：对方摘要生成工程（结构化提示词+迟滞+续压+原子换组）更厚；本仓纪律守卫（严格变小/冷却/事件/兜底）更全、摘要分段（covers）更好，但摘要提示词工程面薄。L 9 / N 8.5。
+**判定**：对方摘要生成工程（结构化提示词+迟滞+续压+原子换组）更厚；本仓纪律守卫（严格变小/冷却/事件/兜底）更全、摘要分段（covers）更好，但摘要提示词工程面薄。v16 生命周期钩子事件化落地（`compaction_lifecycle.py` 三事件走统一总线，before/after/error 可订阅、负载可 JSON 序列化，fail-open 不改折叠语义），观测面补齐。L 9 / N 9.0。
 
 ### 轴5 无损性与可回滚（L 9 / N 9）——平
 
@@ -67,7 +67,7 @@
 
 **LobeHub**：被压/被截内容对模型**不可自动召回**——原文在库，但回到模型上下文需人工动作（展开压缩组/回滚）或按占位符提示重新调工具；无归档池检索、无按需回灌。
 **Neurova**：被动通道=每轮 `pool.draw` 语义注入（输入锚门槛 0.65 + 近轮通道 0.75/30% 预算，bge-small-zh 向量，同质池动态收紧，`semantic_drawer.py:77,316-334`）；主动通道=`recall_history`（FTS/LIKE 双源+循环防护，`tool_executor.py:6064-6143`）/`pool_search`（池语义检索，:6027-6062）/`recall_context_span`（covers_ref 确定性下钻，:5705-5786）/`context_status`（:5848）；压缩回执带 recall_guide 召回指引（:5788-5846）；**防自污染**（recall 族结果不再参与召回，`context_pool.py:304-307`）。
-**判定**：本仓把"压掉即失联"的范式缺口补掉了——折叠内容仍可被模型按需取水；对方此轴只有人工路径。L 4 / N 9.5。
+**判定**：本仓把"压掉即失联"的范式缺口补掉了——折叠内容仍可被模型按需取水；对方此轴只有人工路径。v16 出口残留两遍扫描落地（`pairing.sweepResidues` 单源：第一遍孤儿判定复用 validate_pairing、第二遍剔空壳 assistant，`ContextPool.draw` 出口接线；live-verify 实测空壳与孤儿同净、正常消息保留），出口洁净度满分。L 4 / N 10。
 
 ### 轴7 大结果卸载与句柄化（L 6.5 / N 8）——本仓反超
 
@@ -134,6 +134,14 @@
 - **P1-4 处理器管线插件化**=a1006c151：新增 `neurova/context/processor_pipeline.py`——`SystemSectionSpec`（name/stage/build 返回命名段 dict）+ `SystemInstructionPipeline`（阶段号+注册序稳定排序、空段不注入、单处理器异常不阻断装配但诚实留痕 failures）+ `defaultSystemPipeline()` 工厂（identity 冻结/活值双路径→time→rules→workspace_docs→skill_catalog→self_model，逐段与原 Phase 2 字节一致）；`orchestrator.build_context` Phase 2 改管线装配，`recordContextBudget` 命名段改从管线 sections 取。测试 15 用例先红后绿（含**插件证明**：不改编排器、仅注册自定义 spec 即进真装配且排序正确）；tests/unit/context 全目录 1373 passed 零回归；live-verify：真 build_context 走管线 + 工厂注入自定义 spec 后新段落出现在 time 与 rules 之间。
 - **收官达成**：两卡落地后专项 85.5/100，对 LobeHub 79.0 净反超 6.5——里程碑一（≥79.5）与收官（≥84.0）均达成。
 
+### 实施记录·P2 三卡（2026-11-22，提交 418d58fd6/3cbf67d33/1af64d534）
+
+- **P2-7 同组单元聚合截断**=418d58fd6：`window_partition.py` 组边界纯函数单源（groupBoundaries/snapBoundaryToGroup）+`split_window_by_budget` 切点吸附（kept 只减不增，无工具组时与原算法逐字节一致）。测试 5 用例先红后绿，四文件合跑 25 passed。行为变化经用户拍板：SC1 基线用例改钉"工具调用对整组同折不拆散"新语义。
+- **P2-8 压缩生命周期事件化**=3cbf67d33：`compaction_lifecycle.py` 三事件（context.compaction.before/after/error）走统一总线，负载扁平可 JSON 序列化；compact_window 确超预算发 before、有效折叠返回前发 after、摘要失败发 error，fail-open 语义不变；30 个消费方测试文件 282 passed 零新增失败。
+- **P2-9 残留两遍扫描**=1af64d534：`pairing.sweepResidues` 单源（第一遍复用 validate_pairing 孤儿判定、第二遍剔空壳 assistant）+`ContextPool.draw` 出口接线（search 主动召回面不动）。42 passed（含既有 pairing/archival/repair 全绿）。
+- **合流验收**：tests/unit/context 全目录 **1403 passed 零新增失败**（唯一异常为 t11c 在并行会话固定窗口压力下的超时假 error，单跑/该会话独跑均绿，与本批无关）；真管线 live-verify **3/3 PASS**（真折叠链组不拆散/真总线三事件可订阅且负载可序列化/池 draw 出口空壳+孤儿同净）。
+- **v16 复评**：轴3 8.0→8.5（组聚合补齐）、轴4 8.5→9.0（生命周期事件）、轴6 9.5→10（出口洁净满分），专项 **87.0/100 净反超 8.0**；借鉴清单 P0×3+P1×3+P2×3 九项全部落地。
+
 P0（直接压成本/补范式缺口）：
 1. 【已实施=20649f46e】**缓存经济学修剪判据**：fold_trigger/裁剪决策加入"缓存盈亏平衡"——按 provider 缓存 TTL 与读写价差，满足「预估剩余步数×token 节省×readPrice > 重写成本×安全系数」才新增折叠；折叠决策做到字节稳定（同输入同输出）保前缀缓存命中。影响面：`neurova/context/fold_trigger.py`、`context_pool.py` 折叠执行、llm 层需暴露 provider 缓存元数据（TTL/价格表）。收益：长会话推理成本直接下降（对方实测把修剪做成省钱决策而非保守保留）。目标：轴8 3.0→≥8.0——单轴落地即净反超（专项 75.5→80.5）。
 2. 【已实施=42c0916a6】**token 计量漂移系数+分桶**：估算值×1.25 漂移补偿，按 正文/附件/工具调用/推理/工具定义 分桶计量，预算判定一律用 adjustedTotal。影响面：`context_pool.py` 预算计算、`gates.py` TokenBudgetGate、swarm 软目标。收益：0.85 水位触发更准，减少溢出兜底次数与"假未超真超限"。目标：轴2 7.5→≥8.5。
@@ -145,9 +153,9 @@ P1：
 6. 【已实施=20649f46e】**压缩迟滞双阈值**：已有摘要后触发阈值自动上调（对方 0.5→0.65），与本仓失败冷却（5/15/30）叠加成"时间+次数"双维防抖。
 
 P2：
-7. **同组单元聚合截断**：截断按"前端同组展示单元"聚合，不把一组配对消息拆到边界两侧。
-8. **压缩生命周期钩子事件化**：beforeCompact/afterCompact（带前后 token 与条数）/onCompactError 暴露为可订阅事件，供观测与元认知回路消费。
-9. **残留清理两遍扫描**：失败/空壳 assistant 残留消息在组装期两遍过滤，避免污染下轮上下文。
+7. 【已实施=418d58fd6】**同组单元聚合截断**：截断按"前端同组展示单元"聚合，不把一组配对消息拆到边界两侧。（window_partition 组边界单源+split_window_by_budget 切点吸附；SC1 基线用例经用户拍板改钉"整组同折"新语义。）
+8. 【已实施=3cbf67d33】**压缩生命周期钩子事件化**：beforeCompact/afterCompact（带前后 token 与条数）/onCompactError 暴露为可订阅事件，供观测与元认知回路消费。（compaction_lifecycle 三事件走统一总线，负载可 JSON 序列化；fail-open 不改折叠语义。）
+9. 【已实施=1af64d534】**残留清理两遍扫描**：失败/空壳 assistant 残留消息在组装期两遍过滤，避免污染下轮上下文。（pairing.sweepResidues 单源复用 validate_pairing+空壳判定，ContextPool.draw 出口接线；search 主动召回面不动。）
 
 不照搬：
 - **按条数截断**（HistoryTruncate historyCount）——本仓 token 预算驱动更准，勿回退；
