@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 from neurova.core.logger import get_logger
 from neurova.remote_exec.registry import (
@@ -156,11 +156,17 @@ def dispatchRemoteCall(
     holdTimeoutMs: Optional[int] = None,
     sleepFn: Callable[[float], None] = time.sleep,
     onEvent: Optional[Callable[[str, dict], None]] = None,
+    transparentExceptions: Tuple[type, ...] = (),
 ) -> RemoteDispatchResult:
     """远程执行统一入口：准入 → 执行体 → 统一信封 → 离线 hold → 事件。
 
     executor(params) 由调用方注入形态执行体（ssh_runner/guest/tunnel/neuacp）；
     成功返回值原样透传进 result.output，本漏斗不改写。
+
+    transparentExceptions：executor 抛出的异常若命中其中之一，则在发出
+    remote_dispatch_result 事件后**原样重抛**（同一异常对象），交回调用方
+    保留自有处理（如 SSH 支路的 U1 主机确认卡/指纹冲突 fail-closed）；
+    命中者优先于离线 hold 判定。缺省空元组 = 既有行为逐字节不变。
     """
     startedAt = time.monotonic()
     baseEvent: Dict[str, Any] = {
@@ -211,6 +217,12 @@ def dispatchRemoteCall(
         try:
             raw = executor(params)
         except Exception as exc:  # noqa: BLE001 - 分类后按语义映射，不吞
+            if transparentExceptions and isinstance(exc, transparentExceptions):
+                # 调用方保留自有处理的异常（如 U1 主机确认卡/指纹冲突）：
+                # 发出结果事件后原样重抛（同一对象、原 traceback），不映射不吞。
+                _emit(onEvent, "remote_dispatch_result", _resultEvent(
+                    getattr(exc, "phase", _PHASE_EXEC), False))
+                raise
             if _isHoldEligible(exc):
                 lastPhase = getattr(exc, "phase", "connect")
                 lastError = str(exc)

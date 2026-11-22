@@ -8693,13 +8693,20 @@ class ToolExecutor:
                 "timeout": self._sshExecutionBudget(params),
                 "agent_id": agent_id or "",
             }
+            # W1b 注册制增量接入：已登记端点经统一分派漏斗；未登记走既有直连
+            # （下方直连代码路径与接入前逐字节一致，漏斗只在命中登记时启用）。
+            registered = self._findSshRemoteEndpoint(host, ssh_kwargs["port"])
+            if registered is not None:
+                return await self._sshExecViaFunnel(
+                    registered, host, command, params, ssh_kwargs, user_id, agent_id)
             try:
                 result = await asyncio.to_thread(run_ssh_command, host, command, **ssh_kwargs)
             except HostKeyConfirmationNeeded as hk:
                 # U1：主机公钥未经用户确认（fail-closed）——弹主机确认卡征求用户，
                 # 确认记录落库后原地重连一次。
                 return await self._handleSshHostConfirmation(
-                    host, command, hk, agent_id or "", params, run_ssh_command, ssh_kwargs)
+                    host, command, hk, agent_id or "", params, run_ssh_command,
+                    ssh_kwargs, user_id=user_id)
             except HostKeyMismatchError as hkm:
                 # U1：指纹变化 fail-closed（审计 HIGH 已在 ssh_runner 策略内落）。
                 return {
@@ -8713,6 +8720,8 @@ class ToolExecutor:
                 return self._sshNotExecutedPayload(rne, host, command)
             compact = self._sshCompactResult(result, host, command)
             await self._emitSshTerminalEvent(params, compact)
+            # W1a：首次成功即登记进统一端点注册表（fail-soft；此后同端点走漏斗）。
+            self._registerSshRemoteEndpoint(host, ssh_kwargs["port"], user_id, agent_id)
             return compact
         except Exception as e:
             logger.error("SSH 命令执行失败: %s", e)
@@ -8770,20 +8779,173 @@ class ToolExecutor:
         executed=False=确认未执行可重试；executed="unknown"=已获部分输出后中断，
         retryable=False，不可盲目重试。
         """
-        return {
+        return ToolExecutor._sshNotExecutedEnvelope(
+            phase=rne.phase, retryable=rne.retryable, executed=rne.executed,
+            error=str(rne), host=host, command=command)
+
+    @staticmethod
+    def _sshNotExecutedEnvelope(*, phase: str, retryable: bool, executed: Any,
+                                error: str, host: str, command: str,
+                                holdAttempts: int = 0, holdElapsedMs: int = 0) -> Dict:
+        """U3 结构化载荷单源构造（直连异常与漏斗信封共用同一对外形状）。
+
+        holdAttempts/holdElapsedMs 仅漏斗路径携带（离线 hold 实测重试次数与累计
+        等待毫秒）；直连异常路径不带这两个键，存量载荷逐字节不变。
+        """
+        payload: Dict[str, Any] = {
             "success": False,
             "error_code": "REMOTE_NOT_EXECUTED",
-            "phase": rne.phase,
-            "retryable": rne.retryable,
-            "executed": rne.executed,
-            "error": str(rne),
+            "phase": phase,
+            "retryable": retryable,
+            "executed": executed,
+            "error": error,
             "command": command,
             "host": host,
         }
+        if holdAttempts or holdElapsedMs:
+            payload["holdAttempts"] = holdAttempts
+            payload["holdElapsedMs"] = holdElapsedMs
+        return payload
+
+    # ── W1a/W1b：SSH 端点统一注册表登记 + 统一分派漏斗接线 ──
+
+    @staticmethod
+    def _findSshRemoteEndpoint(host: str, port: int):
+        """查已登记 SSH 端点（租户段内按自然键 kind+name 匹配）。
+
+        注册制增量接入：未登记或查询故障 → None，调用方走既有直连路径
+        （存量行为零变化）；登记后的同端点自动改经统一分派漏斗。
+        """
+        try:
+            from neurova.auth.user_group_model import currentUserTenantId
+            from neurova.remote_exec.registry import KIND_SSH, getRemoteEndpointRegistry
+
+            matches = getRemoteEndpointRegistry().findEndpoints(
+                tenantId=currentUserTenantId(), kind=KIND_SSH, name=f"ssh:{host}:{port}")
+            return matches[0] if matches else None
+        except Exception:
+            logger.warning("SSH 端点查询失败（按未登记走直连）: %s:%s", host, port,
+                           exc_info=True)
+            return None
+
+    @staticmethod
+    def _registerSshRemoteEndpoint(host: str, port: int, user_id: str, agent_id) -> None:
+        """W1a：SSH 端点登记进统一注册表（首次成功即登记；fail-soft 不阻断工具）。
+
+        不存明文凭据：connectionRef 只记凭据桶引用名（ssh-bucket:<uid>:<host>）；
+        健康度由分派漏斗的 markEndpointSeen 维护（直连首登为 unknown，漏斗成功
+        即回写 online）。
+        """
+        try:
+            from neurova.auth.user_group_model import currentUserTenantId
+            from neurova.remote_exec.registry import (
+                KIND_SSH,
+                RemoteEndpoint,
+                getRemoteEndpointRegistry,
+            )
+
+            getRemoteEndpointRegistry().registerEndpoint(RemoteEndpoint(
+                endpointId="",
+                kind=KIND_SSH,
+                name=f"ssh:{host}:{port}",
+                ownerId=str(agent_id or ""),
+                tenantId=currentUserTenantId(),
+                capabilities={"exec": True},
+                connectionRef=f"ssh-bucket:{user_id}:{host}",
+            ))
+        except Exception:
+            logger.warning("SSH 端点登记失败（不阻断工具）: %s:%s", host, port,
+                           exc_info=True)
+
+    async def _sshExecViaFunnel(
+        self, endpoint, host: str, command: str, params: Dict,
+        ssh_kwargs: Dict[str, Any], user_id: str, agent_id,
+    ) -> Dict:
+        """W1b：已登记端点经统一分派漏斗执行（准入/统一信封/离线 hold/审计事件）。
+
+        执行体与直连路径同源（run_ssh_command）；U1 主机确认卡与指纹冲突经
+        transparentExceptions 原样上抛，沿用既有弹卡/fail-closed 分支。
+        dispatch 同步阻塞（含 hold 睡眠），整体 asyncio.to_thread 包装。
+        """
+        from neurova.computer_use.ssh_runner import (
+            HostKeyConfirmationNeeded,
+            HostKeyMismatchError,
+            run_ssh_command,
+        )
+        from neurova.remote_exec.dispatch import RemoteDispatchError, dispatchRemoteCall
+
+        def _executor(_params: Dict) -> Dict:
+            return run_ssh_command(host, command, **ssh_kwargs)
+
+        def _onEvent(name: str, payload: Dict[str, Any]) -> None:
+            # 漏斗生命周期事件走结构化日志通道（轻量审计；不含凭据与输出全文）。
+            # 不推 WS：前端无该事件渲染面，日志即可审计与 live-verify 取证。
+            try:
+                logger.info("[REMOTE_DISPATCH] %s %s", name,
+                            json.dumps(payload, ensure_ascii=False,
+                                       sort_keys=True, default=str))
+            except Exception:  # noqa: BLE001 - 审计日志失败不阻断执行
+                pass
+
+        try:
+            result = await asyncio.to_thread(
+                dispatchRemoteCall,
+                toolName="computer_ssh_exec",
+                params={"command": command},
+                endpoint=endpoint,
+                executor=_executor,
+                requiredCapability="exec",
+                onEvent=_onEvent,
+                transparentExceptions=(HostKeyConfirmationNeeded, HostKeyMismatchError),
+            )
+        except HostKeyConfirmationNeeded as hk:
+            # U1：公钥未经确认——弹主机确认卡，确认后原地重连一次。
+            return await self._handleSshHostConfirmation(
+                host, command, hk, str(agent_id or ""), params,
+                run_ssh_command, ssh_kwargs, user_id=user_id)
+        except HostKeyMismatchError as hkm:
+            # U1：指纹变化 fail-closed（审计 HIGH 已在 ssh_runner 策略内落）。
+            return {
+                "success": False, "error_code": "HOST_KEY_MISMATCH",
+                "host": host, "port": hkm.port,
+                "fingerprint": hkm.fingerprint,
+                "stored_fingerprint": hkm.stored_fingerprint,
+                "error": str(hkm),
+            }
+        except RemoteDispatchError as rde:
+            # 准入拒绝（capability_missing 等）：结构化拒绝，不崩不吞（U12 风格）。
+            payload = toolUnsupportedResult(
+                f"远程端点拒绝执行: {rde}",
+                supported=sorted((endpoint.capabilities or {}).keys()),
+            )
+            payload.update({
+                "remote_dispatch_reason": rde.reason,
+                "retryable": rde.retryable,
+                "details": rde.details,
+                "host": host,
+                "command": command,
+            })
+            return payload
+        if result.ok:
+            compact = self._sshCompactResult(result.output, host, command)
+            await self._emitSshTerminalEvent(params, compact)
+            return compact
+        # ok=False：executed=False（如 hold 耗尽）→ retryable 透传；
+        # executed="unknown"（已获部分输出）→ 恒不可盲目重试。
+        return self._sshNotExecutedEnvelope(
+            phase=result.phase,
+            retryable=bool(result.retryable) if result.executed is False else False,
+            executed=result.executed,
+            error=result.error or "",
+            host=host,
+            command=command,
+            holdAttempts=result.holdAttempts,
+            holdElapsedMs=result.holdElapsedMs,
+        )
 
     async def _handleSshHostConfirmation(
         self, host: str, command: str, hk, agent_id: str, params: Dict,
-        run_ssh_command, ssh_kwargs: Dict[str, Any],
+        run_ssh_command, ssh_kwargs: Dict[str, Any], user_id: str = "",
     ) -> Dict:
         """U1 主机确认卡：与按需凭据卡同通道同形态（WS computer_action 弹卡 + 有限轮询）。
 
@@ -8815,6 +8977,9 @@ class ToolExecutor:
             return self._sshNotExecutedPayload(rne, host, command)
         compact = self._sshCompactResult(result, host, command)
         await self._emitSshTerminalEvent(params, compact)
+        # W1a：确认后重连成功也是首次成功——同样登记进统一注册表（fail-soft）。
+        self._registerSshRemoteEndpoint(
+            host, int(ssh_kwargs.get("port") or 22), user_id, agent_id)
         return compact
 
     async def _awaitSshHostConfirmation(
