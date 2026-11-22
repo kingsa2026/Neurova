@@ -115,6 +115,12 @@ READERS: Dict[str, Set[str]] = {
         "neurova/cognitive_layers/dreaming.py::DreamRuleStore._auditHeldRule",
         "neurova/computer_use/lane_mutex.py::currentLaneScope",
         "neurova/core/tool_call_journal.py::_journalScope",
+        # 2026-11-22 补登（U20 浏览器会话隔离）：browser 属主键单源读 sender——
+        # `_currentRequestUserId` 是 browser_manager 内唯一直接读口（取原始 user id
+        # 供产物账本属主列，与 serve 端比对同命名空间）；`resolveBrowserOwnerKey`
+        # 在其上派生池化键（context 池化/车道键/产物 stem 共用），无用户上下文时
+        # 退 turn 会话键，不另设 agent_id 通道。
+        "neurova/computer_use/browser_manager.py::_currentRequestUserId",
     },
 }
 

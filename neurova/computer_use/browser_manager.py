@@ -73,6 +73,48 @@ except ImportError:
     HAS_HTTPX = False
 
 
+def _currentTurnSessionId() -> str:
+    """当前轮次会话键（turn_context 既有通道；不可用时空串）。"""
+    try:
+        from neurova.core.turn_context import get_turn_session_id
+
+        return str(get_turn_session_id() or "")
+    except Exception:  # noqa: BLE001 - 会话上下文不可用按空处置，不阻断
+        return ""
+
+
+def _currentRequestUserId() -> Optional[str]:
+    """当前请求用户的**原始 id**（JWT sub；无用户上下文返回 None）。
+
+    产物账本属主列必须与 serve 端（``generation.py`` /files）比对的
+    ``current_user["user_id"]`` 同一命名空间——存池化键（``user:alice``）会让
+    属主本人都被 403。池化键（``resolveBrowserOwnerKey``）只用于键控/文件名段。
+    """
+    try:
+        from neurova.core.identity_context import get_request_user_id
+
+        return get_request_user_id()
+    except Exception:  # noqa: BLE001 - 身份上下文不可用按无用户处置
+        return None
+
+
+def resolveBrowserOwnerKey() -> str:
+    """浏览器会话属主键——context 池化、车道键、产物 stem 共用的**这一份**口径。
+
+    身份单通道纪律（AGENTS.md §3）：说话的人只读 ``neurova_request_user_id``；
+    无用户上下文（agent 自主任务）退到轮次会话键（turn_context 既有通道，与
+    tool_executor 的 ``_somSessionKey`` 同源）——不新造 agent_id 通道。两者皆缺
+    落 ``default`` 共享池（与 camofox 池化先例同款兜底）。
+    """
+    user = _currentRequestUserId()
+    if user:
+        return f"user:{user}"
+    session = _currentTurnSessionId()
+    if session:
+        return f"agent:{session}"
+    return "default"
+
+
 @dataclass
 class BrowserResult:
     """浏览器操作结果"""
@@ -678,35 +720,149 @@ class PlaywrightBackend(BrowserBackend):
     def __init__(self, config: Optional[Dict[str, Any]] = None, dialog_handler=None):
         super().__init__(config)
         self._browser = None
-        self._context = None
-        self._tabs: Dict[str, Dict[str, Any]] = {}
-        self._active_target_id: Optional[str] = None
+        # ── 按属主池化（U20 会话隔离）──
+        # 不再有全后端共享的单 BrowserContext/tab/活动指针/console 缓冲：
+        # 每属主（resolveBrowserOwnerKey）各一份，cookie/storage/tab 互不可见。
+        # 池带上限（max_user_contexts），超限按 LRU 关最久未用属主的 context。
+        from collections import OrderedDict
+
+        self._userContexts: "OrderedDict[str, Any]" = OrderedDict()
+        self._tabsByOwner: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self._activeByOwner: Dict[str, Optional[str]] = {}
+        self._consoleByOwner: Dict[str, List[Dict[str, Any]]] = {}
+        self._contextCap: int = max(
+            1, int((config or {}).get("max_user_contexts")
+                   or DEFAULT_BROWSER_CONFIG.get("max_user_contexts", 4))
+        )
         self._headless = config.get("headless", True) if config else True
         # JS 对话框的应答与留档都交给 manager 那一份 `DialogHandler`（不是自己新建一份，
         # 否则事件写进第二个口袋，`BrowserManager.dialogLog()` 永远读不到）。
         # 只有本后端拿得到这个事件：`ScraplingBackend` 走 fetcher 没有实时页面，
         # camofox／remote 是 REST／action RPC 面，词汇里没有 dialog。
         self._dialog_handler = dialog_handler
-        # console/pageerror 事件缓冲（browser_console 读数面）：会话内环形，防长会话无界
-        self._consoleLog: List[Dict[str, Any]] = []
         # 最近一次 initialize 失败的分诊（diagnoseKernelFailure 产物）；成功后清空。
         # 供 _get_backend 拒绝文案与 browser_install 的引导面读取。
         self.initFailure: Optional[Dict[str, str]] = None
 
-    def _recordConsole(self, kind: str, text: str) -> None:
-        self._consoleLog.append({"type": kind, "text": text})
-        if len(self._consoleLog) > 200:
-            del self._consoleLog[:-200]
+    # ── 旧单值字段的属主化兼容视图 ──
+    # 既有代码/测试仍按 `backend._context / ._tabs / ._active_target_id / ._consoleLog`
+    # 读写；这些名字保留，但读写都落到**当前属主**的池槽——赋值即登记进池，
+    # 读取只看得到本属主的一份，不再存在跨属主共享的单例状态。
 
-    def _attachConsoleListener(self, target) -> None:
+    @property
+    def _context(self):
+        """当前属主的 BrowserContext（创建一律走 `_contextForOwner`）。"""
+        return self._userContexts.get(resolveBrowserOwnerKey())
+
+    @_context.setter
+    def _context(self, value) -> None:
+        self._userContexts[resolveBrowserOwnerKey()] = value
+
+    @property
+    def _tabs(self) -> Dict[str, Dict[str, Any]]:
+        """当前属主的 tab 表（target_id → {page, generation, ...}）。"""
+        return self._tabsByOwner.setdefault(resolveBrowserOwnerKey(), {})
+
+    @_tabs.setter
+    def _tabs(self, value) -> None:
+        self._tabsByOwner[resolveBrowserOwnerKey()] = dict(value or {})
+
+    @property
+    def _active_target_id(self) -> Optional[str]:
+        """当前属主的活动 tab id。"""
+        return self._activeByOwner.get(resolveBrowserOwnerKey())
+
+    @_active_target_id.setter
+    def _active_target_id(self, value) -> None:
+        self._activeByOwner[resolveBrowserOwnerKey()] = value
+
+    @property
+    def _consoleLog(self) -> List[Dict[str, Any]]:
+        """当前属主的 console/pageerror 环形缓冲。"""
+        return self._consoleByOwner.setdefault(resolveBrowserOwnerKey(), [])
+
+    @_consoleLog.setter
+    def _consoleLog(self, value) -> None:
+        self._consoleByOwner[resolveBrowserOwnerKey()] = list(value or [])
+
+    # ── 属主池的建/取/驱逐 ──────────────────────────────────────────
+
+    async def _contextForOwner(self):
+        """取（或懒建）当前属主独立的 BrowserContext；池超上限按 LRU 关最久未用。
+
+        每属主一个 context ⇒ cookie/localStorage/sessionStorage 天然隔离
+        （对齐 camofox 按 user_id 池化的先例）。"""
+        owner = resolveBrowserOwnerKey()
+        ctx = self._userContexts.get(owner)
+        if ctx is not None:
+            self._userContexts.move_to_end(owner)
+            return ctx
+        if not self._browser:
+            raise RuntimeError(BROWSER_NOT_STARTED_ERROR)
+        ctx = await self._browser.new_context()
+        # 对话框/console 事件侧：建 context 时注册并**钉住属主**——事件派发是
+        # 异步的，归槽以产生者为准，不随读取时的身份上下文漂移。
+        self._attachDialogListener(ctx)
+        self._attachConsoleListener(ctx, owner)
+        self._userContexts[owner] = ctx
+        await self._evictContextOverflow(owner)
+        return ctx
+
+    async def _evictContextOverflow(self, protectedOwner: str) -> None:
+        """池超过 max_user_contexts 时，按 LRU 关闭最久未用属主的整个 context。"""
+        while len(self._userContexts) > self._contextCap:
+            evictOwner = next(iter(self._userContexts))
+            if evictOwner == protectedOwner:
+                break
+            evictCtx = self._userContexts.pop(evictOwner)
+            self._dropOwnerState(evictOwner)
+            try:
+                await evictCtx.close()
+            except Exception as e:  # noqa: BLE001 - 驱逐关闭失败不阻断新属主
+                logger.debug("关闭被驱逐属主 %s 的 context 失败（忽略）: %s", evictOwner, e)
+            logger.info("browser context 池超上限（%s），已按 LRU 关闭属主 %s 的 context",
+                        self._contextCap, evictOwner)
+
+    def _dropOwnerState(self, owner: str) -> None:
+        """属主被驱逐/整体关闭时，连带清掉它的 tab 表、活动指针与 console 缓冲。"""
+        self._tabsByOwner.pop(owner, None)
+        self._activeByOwner.pop(owner, None)
+        self._consoleByOwner.pop(owner, None)
+
+    async def ensureOwnerSession(self) -> None:
+        """确保当前属主已有独立 context 与活动页（manager `_get_backend` 统一钩子）。
+
+        新属主的首个 browser_* 动作由此拿到**自己的** context+首页，而不是落进
+        别人的 tab；已就绪的属主零开销直通。"""
+        owner = resolveBrowserOwnerKey()
+        if self._userContexts.get(owner) is not None and self._activeByOwner.get(owner):
+            self._userContexts.move_to_end(owner)
+            return
+        ctx = await self._contextForOwner()
+        if not self._activeByOwner.get(owner):
+            page = await ctx.new_page()
+            self._register_tab(page)
+
+    def _recordConsoleFor(self, ownerKey: str, kind: str, text: str) -> None:
+        """console/pageerror 按**产生事件的属主**归槽（事件异步派发，不随读取者漂移）。"""
+        buf = self._consoleByOwner.setdefault(ownerKey, [])
+        buf.append({"type": kind, "text": text})
+        if len(buf) > 200:
+            del buf[:-200]
+
+    def _recordConsole(self, kind: str, text: str) -> None:
+        self._recordConsoleFor(resolveBrowserOwnerKey(), kind, text)
+
+    def _attachConsoleListener(self, target, owner: Optional[str] = None) -> None:
         """把 console 事件收进环形缓冲，供 browser_console 读取排障。
 
         **console 是 context 级事件**（一处注册覆盖全部 tab）；`pageerror` 是
         **page 级事件**（context 上没有这个事件，挂上去静默无效）——它在
-        `_register_tab` 里逐 page 挂载。
+        `_register_tab` 里逐 page 挂载。缓冲按建 context 时的属主归槽（U20）。
         """
+        ownerKey = owner or resolveBrowserOwnerKey()
         try:
-            target.on("console", lambda msg: self._recordConsole("console", getattr(msg, "text", None) or str(msg)))
+            target.on("console", lambda msg: self._recordConsoleFor(ownerKey, "console", getattr(msg, "text", None) or str(msg)))
         except Exception as e:  # noqa: BLE001 - 监听注册失败不阻断浏览器主链，但留痕
             logger.debug("console 监听注册失败（忽略）: %s", e)
 
@@ -752,11 +908,12 @@ class PlaywrightBackend(BrowserBackend):
 
     def _register_tab(self, page) -> Dict[str, Any]:
         target_id = f"tab_{uuid.uuid4().hex[:8]}"
+        ownerKey = resolveBrowserOwnerKey()
         self._tabs[target_id] = {"page": page, "generation": 1}
         self._active_target_id = target_id
-        # pageerror 是 page 级事件：每个 tab 各挂一份，全部汇入同一缓冲
+        # pageerror 是 page 级事件：每个 tab 各挂一份，汇入**登记时属主**的缓冲
         try:
-            page.on("pageerror", lambda exc: self._recordConsole("pageerror", str(exc)))
+            page.on("pageerror", lambda exc: self._recordConsoleFor(ownerKey, "pageerror", str(exc)))
         except Exception as e:  # noqa: BLE001 - 监听注册失败不阻断浏览器主链
             logger.debug("pageerror 监听注册失败（忽略）: %s", e)
         return {"target_id": target_id, "generation": 1}
@@ -806,9 +963,8 @@ class PlaywrightBackend(BrowserBackend):
         """新开 tab 并激活；给 url 时顺带导航"""
         start_time = time.time()
         try:
-            if not self._context:
-                raise RuntimeError(BROWSER_NOT_STARTED_ERROR)
-            page = await self._context.new_page()
+            ctx = await self._contextForOwner()
+            page = await ctx.new_page()
             info = self._register_tab(page)
             if url:
                 await page.goto(url, wait_until="networkidle")
@@ -1201,17 +1357,16 @@ class PlaywrightBackend(BrowserBackend):
         path: Optional[str] = None,
         generation: Optional[int] = None,
     ) -> BrowserResult:
-        """Cookie 读/写/清（走 BrowserContext，跨 tab 生效；登录态管理基础面）"""
+        """Cookie 读/写/清（走**当前属主的** BrowserContext，跨 tab 生效；登录态管理基础面）"""
         start_time = time.time()
         stale = self._check_active_generation(generation)
         if stale:
             return stale
         try:
-            if not self._context:
-                raise RuntimeError(BROWSER_NOT_STARTED_ERROR)
+            ctx = await self._contextForOwner()
             action = str(action or "get").strip().lower()
             if action == "get":
-                data = await (self._context.cookies(url) if url else self._context.cookies())
+                data = await (ctx.cookies(url) if url else ctx.cookies())
                 return BrowserResult(
                     success=True, data=data, url=self._page.url if self._page else "",
                     duration_ms=(time.time() - start_time) * 1000, generation=self._active_generation(),
@@ -1229,13 +1384,13 @@ class PlaywrightBackend(BrowserBackend):
                     spec["domain"] = domain
                 if path:
                     spec["path"] = path
-                await self._context.add_cookies([spec])
+                await ctx.add_cookies([spec])
                 return BrowserResult(
                     success=True, data={"set": name}, url=self._page.url if self._page else "",
                     duration_ms=(time.time() - start_time) * 1000, generation=self._active_generation(),
                 )
             if action == "clear":
-                await self._context.clear_cookies()
+                await ctx.clear_cookies()
                 return BrowserResult(
                     success=True, data={"cleared": True}, url=self._page.url if self._page else "",
                     duration_ms=(time.time() - start_time) * 1000, generation=self._active_generation(),
@@ -1311,6 +1466,22 @@ class PlaywrightBackend(BrowserBackend):
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
     # ── 采集与扩展（P3 批D）：PDF 打印 / 文件下载 / 拖拽 / 上传 ──
+
+    def _artifactStem(self, base: str) -> str:
+        """产物 stem：语义前缀 + **属主段** + 唯一后缀。
+
+        改前 stem 是固定串（"browser-pdf" / "browser-download"），不同用户、
+        甚至同一用户的两次调用都落同一个文件名互相覆盖；属主段让跨属主必然
+        不同名，唯一后缀让同属主两次调用也不同名。扩展名由 persist_bytes
+        按调用方传入的 ext 追加，保持不变。
+        """
+        from neurova.llm.generators.runtime import safe_task_name
+
+        return (
+            f"{safe_task_name(base)}-"
+            f"{safe_task_name(resolveBrowserOwnerKey())}-{uuid.uuid4().hex[:8]}"
+        )
+
     async def print_pdf(self, generation: Optional[int] = None) -> BrowserResult:
         """打印当前页为 PDF，落产物目录（复用 persist_bytes 落盘单源）"""
         start_time = time.time()
@@ -1323,7 +1494,15 @@ class PlaywrightBackend(BrowserBackend):
             pdf_bytes = await self._page.pdf(format="A4")
             from neurova.llm.generators.runtime import persist_bytes
 
-            path = await persist_bytes(pdf_bytes, "pdf", "browser-pdf")
+            # 产物 stem 带属主段+唯一后缀（防跨属主/同属主覆盖），并在生成账本
+            # 登记属主（原始 user id，与 serve 端比对口径同命名空间）——他人读取
+            # 403（U20 红1 的根修）；无用户上下文不登记（保持既有行为）。
+            path = await persist_bytes(
+                pdf_bytes, "pdf", self._artifactStem("browser-pdf"),
+                owner_user_id=_currentRequestUserId(),
+                session_id=_currentTurnSessionId(),
+                kind="browser_pdf",
+            )
             from pathlib import Path
 
             return BrowserResult(
@@ -1347,9 +1526,8 @@ class PlaywrightBackend(BrowserBackend):
         if not url:
             return BrowserResult(success=False, error="缺少 url 参数", duration_ms=(time.time() - start_time) * 1000)
         try:
-            if not self._context:
-                raise RuntimeError(BROWSER_NOT_STARTED_ERROR)
-            response = await self._context.request.get(url)
+            ctx = await self._contextForOwner()
+            response = await ctx.request.get(url)
             status = int(getattr(response, "status", 0) or 0)
             if status < 200 or status >= 300:
                 return BrowserResult(
@@ -1366,7 +1544,14 @@ class PlaywrightBackend(BrowserBackend):
             tail = [s for s in urlparse(url).path.split("/") if s]
             ext = tail[-1].rsplit(".", 1)[-1] if tail and "." in tail[-1] else "bin"
             ext = ("".join(c for c in ext.lower() if c.isalnum())[:8]) or "bin"
-            path = await persist_bytes(body, ext, str(filename or "browser-download"))
+            # 产物 stem 带属主段+唯一后缀（防覆盖），账本登记属主（原始 user id，
+            # 与 serve 端比对口径同命名空间；U20 红1 根修）
+            path = await persist_bytes(
+                body, ext, self._artifactStem(str(filename or "browser-download")),
+                owner_user_id=_currentRequestUserId(),
+                session_id=_currentTurnSessionId(),
+                kind="browser_download",
+            )
             return BrowserResult(
                 success=True,
                 data={"file_path": path, "file_name": Path(path).name, "bytes": len(body), "status": status},
@@ -1462,11 +1647,11 @@ class PlaywrightBackend(BrowserBackend):
 
             self._playwright = await async_playwright().start()
             self._browser = await self._playwright.chromium.launch(headless=self._headless)
-            self._context = await self._browser.new_context()
-            # 对话框应答链的事件侧：context 一建好就注册，覆盖此后该 context 内所有页面。
-            self._attachDialogListener(self._context)
-            self._attachConsoleListener(self._context)
-            page = await self._context.new_page()
+            # 首个 BrowserContext 归**当前属主**（U20 池化；其余属主经
+            # ensureOwnerSession/_contextForOwner 懒建，各自独立不共享）。
+            # 对话框/console 事件侧在 _contextForOwner 建 context 时注册。
+            ctx = await self._contextForOwner()
+            page = await ctx.new_page()
             self._register_tab(page)
             self._initialized = True
             return True
@@ -1793,16 +1978,23 @@ class PlaywrightBackend(BrowserBackend):
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
     async def close(self) -> None:
+        """收尾：关闭**全部属主**的 tab 与 context，再关浏览器与驱动。"""
         try:
-            for tab in self._tabs.values():
+            for tabs in self._tabsByOwner.values():
+                for tab in tabs.values():
+                    try:
+                        await tab["page"].close()
+                    except Exception as e:  # noqa: BLE001 - 单 tab 关闭失败不阻碍整体收尾
+                        logger.debug("关闭 tab 失败（忽略）: %s", e)
+            self._tabsByOwner.clear()
+            self._activeByOwner.clear()
+            self._consoleByOwner.clear()
+            for ctx in list(self._userContexts.values()):
                 try:
-                    await tab["page"].close()
-                except Exception as e:  # noqa: BLE001 - 单 tab 关闭失败不阻碍整体收尾
-                    logger.debug("关闭 tab 失败（忽略）: %s", e)
-            self._tabs.clear()
-            self._active_target_id = None
-            if self._context:
-                await self._context.close()
+                    await ctx.close()
+                except Exception as e:  # noqa: BLE001 - 单 context 关闭失败不阻碍收尾
+                    logger.debug("关闭 context 失败（忽略）: %s", e)
+            self._userContexts.clear()
             if self._browser:
                 await self._browser.close()
             if hasattr(self, "_playwright"):
@@ -2250,6 +2442,9 @@ DEFAULT_BROWSER_CONFIG: Dict[str, Any] = {
         "playwright": {"type": "local", "headless": True},
         "scrapling": {"type": "local"},
     },
+    # playwright BrowserContext 按属主池化的容量上限（U20 会话隔离）：
+    # 超上限按 LRU 关最久未用属主的 context（连同其 tab/console 状态）。
+    "max_user_contexts": 4,
 }
 
 
@@ -2534,6 +2729,12 @@ class BrowserManager:
                     name,
                     "initialize() 返回失败" + (f"｜{remediation}" if remediation else ""),
                 ))
+
+        # U20 会话隔离统一钩子：playwright 后端在此确保**当前属主**已有自己的
+        # context+活动页（camofox/scrapling 无此方法，getattr 直通）。
+        ensure = getattr(backend, "ensureOwnerSession", None)
+        if ensure is not None:
+            await ensure()
 
         self._active_backend = backend
         return backend

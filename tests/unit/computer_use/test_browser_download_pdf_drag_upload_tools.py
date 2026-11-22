@@ -103,7 +103,8 @@ class TestPlaywrightBackend:
 
     @staticmethod
     def _patchPersist(monkeypatch):
-        async def fake_persist(data, ext, task_id, index=0, out_dir=None):
+        # U20 起 browser 两条链会带 owner_user_id/session_id/kind 属主登记参数
+        async def fake_persist(data, ext, task_id, index=0, out_dir=None, **kwargs):
             return f"/fake/out/{task_id}.{ext}"
 
         monkeypatch.setattr("neurova.llm.generators.runtime.persist_bytes", fake_persist)
@@ -115,7 +116,9 @@ class TestPlaywrightBackend:
         result = await b.print_pdf()
         assert result.success
         page.pdf.assert_awaited_once()
-        assert result.data["file_path"] == "/fake/out/browser-pdf.pdf"
+        # U20：stem = 前缀-属主段-唯一后缀（本测试无身份上下文 → 属主段 default）
+        assert result.data["file_path"].startswith("/fake/out/browser-pdf-default-")
+        assert result.data["file_path"].endswith(".pdf")
         assert result.data["bytes"] == len(b"%PDF-fake")
 
     @pytest.mark.asyncio
@@ -125,7 +128,9 @@ class TestPlaywrightBackend:
         result = await b.download_file("https://example.com/f/data.csv")
         assert result.success
         context.request.get.assert_awaited_once_with("https://example.com/f/data.csv")
-        assert result.data["file_path"] == "/fake/out/browser-download.csv"
+        # U20：stem = 前缀-属主段-唯一后缀，扩展名保持 .csv 不变
+        assert result.data["file_path"].startswith("/fake/out/browser-download-default-")
+        assert result.data["file_path"].endswith(".csv")
         assert result.data["bytes"] == len(b"file-bytes")
         assert result.data["status"] == 200
 

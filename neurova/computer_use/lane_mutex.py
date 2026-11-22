@@ -262,10 +262,17 @@ def reset_lane_mutex() -> None:
 
 
 def activeSessionKey(manager: Any) -> str:
-    """浏览器车道键的会话段（活动 tab id；无活动 tab 用 default）。"""
+    """浏览器车道键的属主+会话段（属主在前，活动 tab 在后）。
+
+    属主段（``user:*`` / ``agent:*`` / ``default``，单源
+    ``resolveBrowserOwnerKey``）让不同用户的浏览器动作各占各的车道，互不占锁；
+    同属主内仍按活动 tab 细分。desktop 与任一 ``browser:*`` 车道保持互斥不变。
+    """
+    from neurova.computer_use.browser_manager import resolveBrowserOwnerKey
+
     backend = getattr(manager, "_active_backend", None)
     target = getattr(backend, "_active_target_id", None)
-    return str(target or "default")
+    return f"{resolveBrowserOwnerKey()}:{target or 'default'}"
 
 
 async def runNavigation(manager: Any, url: str, backend: Any, generation: Any) -> "BrowserResult":

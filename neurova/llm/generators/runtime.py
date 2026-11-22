@@ -201,12 +201,39 @@ async def persist_bytes(
     task_id: str,
     index: int = 0,
     out_dir: Optional[str] = None,
+    owner_user_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    kind: str = "browser",
 ) -> str:
-    """原始字节直接落盘产物目录（批次4：画布 voice-over/TTS 节点等内存产物用）。"""
+    """原始字节直接落盘产物目录（批次4：画布 voice-over/TTS 节点等内存产物用）。
+
+    ``owner_user_id`` 非空时（浏览器 pdf/下载两条链）落盘后在生成任务账本登记
+    产物属主——serve 端（``generation.py`` /files）按账本反查 owner 做归属校验，
+    他人读取即 403；不传（默认 None）保持既有行为不变、不登记（存量产物仍按
+    "登录即可读"向后兼容），既有调用方零破坏。
+    """
     root = Path(out_dir) if out_dir else GENERATION_OUTPUT_DIR
     root.mkdir(parents=True, exist_ok=True)
     path = root / f"{safe_task_name(task_id)}_{index}.{_SAFE_EXT_RE.sub('', str(ext or 'bin'))}"
     path.write_bytes(data)
+    if owner_user_id is not None:
+        from neurova.llm.generators.task_ledger import (
+            TASK_SUCCEEDED,
+            TaskRecord,
+            get_generation_task_ledger,
+        )
+
+        get_generation_task_ledger().add(
+            TaskRecord(
+                task_id=f"artifact-{uuid.uuid4().hex[:16]}",
+                kind=str(kind or "browser"),
+                status=TASK_SUCCEEDED,
+                local_path=str(path),
+                owner_user_id=str(owner_user_id),
+                session_id=str(session_id or ""),
+                source="browser",
+            )
+        )
     return str(path)
 
 
