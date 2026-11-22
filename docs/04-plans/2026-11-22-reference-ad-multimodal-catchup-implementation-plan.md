@@ -145,3 +145,4 @@
 - 遗留清偿后复评：轴 7 音乐 3.5→**4.5**（前端页接通，与对方同为单 provider+完整产品面），专项总分 74.5→**75.5**，达成 75.0 目标；其余轴不变。
 - fal 契约核实（2026-11-22）：队列信封（提交/状态/取回 URL、Key 鉴权、IN_QUEUE/IN_PROGRESS/COMPLETED 状态机、error/error_type、owner/app 405 规则、request_id/response_url/status_url/cancel_url 回执）与音频产物字段（官方明示 audio_url 或 audio）已按官方 OpenAPI/文档实核，M1 实现逐项一致；musicgen duration 入参字段名/单位仍按桩锁定（模型卡动态渲染未能抓取，真 key 实测待凭据）。
 - 线B 连带发现（已登记待裁，非本批引入）：handle_webhook 全仓零生产调用者（webhook 分派缺 voice 支，test_channelVoiceFactorySeamCloses.py 因分派链无验签刻意不接）——HTTP 路由接线仍按该登记待安全批处理。
+- **三端增量（2026-11-22 同日追加实施）**：NeurUI AigcHistoryList music 联动+VideoGenPage 暴露 v2v/首尾帧可选参数=8519dd493；鸿蒙 AIGCPage 接入音乐类型+AigcApi 补 music 契约（AigcVideoSubmitResult/StatusResult 收口更名 AigcAsyncTaskSubmitResult/StatusResult）=d68d6c603；安卓原生新建 feature/aigc 生成页（图/视频/音频/音乐四类+3s 轮询+工作台悬浮入口，HttpChannel 补 getBytes 二进制开口）=85b808560。
