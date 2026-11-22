@@ -313,6 +313,47 @@ def create_token_pair(
     }
 
 
+# ── 2FA 登录挑战令牌（S8 TOTP 两步验证）───────────────────────────────────
+# 密码通过但用户启用了 2FA 时，login 不发正式 token，改发一枚短时挑战令牌；
+# 挑战令牌 type="2fa_challenge"，与 access/refresh 互不当用（verify_token 的
+# type 检查天然隔离），5 分钟过期，仅可在 /auth/2fa/verify 换正式 token 对。
+
+CHALLENGE_TOKEN_TYPE = "2fa_challenge"
+CHALLENGE_TOKEN_EXPIRE_MINUTES = 5
+
+
+def create_2fa_challenge_token(user: Dict[str, Any]) -> str:
+    """签发 2FA 登录挑战令牌（短时 JWT，scope 限 2fa）。
+
+    只装最小声明（sub/username）：挑战令牌不用于数据访问，正式身份声明在
+    /2fa/verify 换发的 token 对上按既有单源（buildIdentityClaims）补齐。
+    """
+    expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+        minutes=CHALLENGE_TOKEN_EXPIRE_MINUTES
+    )
+    payload = {
+        "sub": str(user["id"]),
+        "username": user.get("username", ""),
+        "type": CHALLENGE_TOKEN_TYPE,
+        "exp": expire,
+        "iat": datetime.datetime.now(datetime.timezone.utc),
+        "jti": str(uuid.uuid4()),
+    }
+    return jwt.encode(payload, currentJwtSecretKey(), algorithm=JWT_ALGORITHM)
+
+
+def verify_2fa_challenge_token(token: str) -> Optional[Dict[str, Any]]:
+    """校验挑战令牌：签名/过期之外还要求 type 精确等于 2fa_challenge——
+    access/refresh 令牌在此一律返回 None（防普通 token 冒充挑战）。"""
+    payload = decode_token(token)
+    if not payload:
+        return None
+    if payload.get("type") != CHALLENGE_TOKEN_TYPE:
+        logger.warning("2FA challenge token type mismatch: %s", payload.get("type"))
+        return None
+    return payload
+
+
 def decode_token(token: str) -> Optional[Dict[str, Any]]:
     """
     解码 JWT Token
