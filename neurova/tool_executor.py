@@ -16,6 +16,7 @@ ToolExecutor — 统一工具执行器
 import ast
 import asyncio
 import json
+import os
 from neurova.builtin_tools import get_builtin_tool_params
 from neurova.collaboration.canvas_ops import (
     CanvasOpError,
@@ -211,6 +212,261 @@ def retryDecisionFor(tool_name: str, error: Optional[BaseException] = None,
         "failure_class": "transport",
         "reason": classification["reason"] or "transport 级失败，可换连接/会话重试",
     }
+
+
+# ════════════════════════════════════════════════════════════════
+# U10 exec/ssh 类工具超时清算接线：kill_tree 单源优先，失败降级逐 pid terminate
+# ════════════════════════════════════════════════════════════════
+# 既有清算走逐 pid terminate 时，子进程再孵化的孙进程会成为孤儿继续占用
+# 资源（实测判据见 tests/unit/security/test_exec_reaper_wiring.py）。
+# 本文件内所有进程清算点统一收口到 reapToolProcessTree：优先走
+# security/process_reaper.kill_tree（Windows CIM BFS + 批量 taskkill +
+# 杀后复查；POSIX killpg/信号升级），清算失败才降级原逐 pid terminate
+# （行为兼容，不因新路径故障而失去清算能力）。
+
+
+def _perPidTerminate(pid: int) -> bool:
+    """原逻辑降级口：单 pid terminate（Windows taskkill /F；POSIX SIGTERM）。
+
+    只杀单个 pid、不建树、无杀后复查——这是被 kill_tree 替换的旧形态，
+    仅在 kill_tree 失败时兜底（教义第 1 条：降级是兜底不是主路）。
+    目标已退出视作达成（幂等，与 kill_tree 同一口径）。
+    """
+    import os as _os
+    import signal as _signal
+    import subprocess as _subprocess
+
+    try:
+        if sys.platform == "win32":
+            completed = _subprocess.run(
+                ["taskkill", "/F", "/PID", str(int(pid))],
+                capture_output=True, timeout=10,
+            )
+            return completed.returncode == 0
+        _os.kill(int(pid), _signal.SIGTERM)
+        return True
+    except ProcessLookupError:
+        return True  # 已退出 = 清算达成
+    except (OSError, ValueError) as e:
+        logger.warning("逐 pid terminate 降级清算失败 pid=%s: %s", pid, e)
+        return False
+
+
+def reapToolProcessTree(pid: int, grace_seconds: float = 5.0) -> Dict[str, Any]:
+    """U10：exec/ssh 类工具的超时清算单点。
+
+    优先 ``security/process_reaper.kill_tree``（按树收割，含孙进程与清算
+    窗口期新孵化的树内后代，杀后复查）；返回不全灭或调用异常时，降级原
+    逐 pid terminate（行为兼容）。诚实回报清算口径与结果，不把失败改写成
+    成功。拒绝清算自身与非法 pid（与 kill_tree 护栏一致，双保险）。
+    """
+    import os
+
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return {"reaped": False, "via": "kill_tree", "reason": f"非法 pid: {pid!r}"}
+    if pid <= 0 or pid == os.getpid():
+        return {"reaped": False, "via": "kill_tree",
+                "reason": f"拒绝清算（非法 pid 或当前进程自身）: {pid}"}
+    detail = ""
+    try:
+        from neurova.security.process_reaper import kill_tree
+
+        outcomes = kill_tree(pid, grace_seconds=grace_seconds)
+        if outcomes and all(outcome.ok for outcome in outcomes):
+            return {
+                "reaped": True,
+                "via": "kill_tree",
+                "pids": [outcome.pid for outcome in outcomes],
+            }
+        detail = "; ".join(str(outcome) for outcome in outcomes if not outcome.ok) or \
+            "kill_tree 返回空结果"
+    except Exception as exc:  # noqa: BLE001 - 清算面故障走降级，不中断工具链
+        detail = f"kill_tree 异常: {type(exc).__name__}: {exc}"
+    fallbackOk = _perPidTerminate(pid)
+    return {
+        "reaped": bool(fallbackOk),
+        "via": "per_pid_fallback",
+        "detail": detail,
+    }
+
+
+# ════════════════════════════════════════════════════════════════
+# U8 长命令 park + 迟交回灌（D-T2 已拍板：REST 轮询；WS 推送/webhook 不做）
+# ════════════════════════════════════════════════════════════════
+# ssh/exec 类命令超过 soft 阈值（默认 45s，可配）→ 不判失败，转后台继续
+# 执行并返回 park 信封 {parked, park_id, poll_after}；结果落 tool_park_results
+# （进程内 + 落盘），调用方可凭 park_id 经 GET /v1/tools/park/{park_id}
+# 幂等取回完整结果。上限对齐 800s（与 U7 超时钳制上界同源），超上限诚实失败。
+
+#: park 软阈值（秒）：可执行类命令超过它即转 park（env NEUROVA_TOOL_PARK_SOFT_S）。
+TOOL_PARK_SOFT_TIMEOUT_S = 45.0
+#: park 上限（秒）：超上限诚实失败并清算后台任务（env NEUROVA_TOOL_PARK_MAX_S，
+#: 钳制 ≤800，与工具超时钳制上界 800000ms 对齐）。
+TOOL_PARK_MAX_S = 800.0
+#: park 覆盖的 ssh/exec 类工具面。
+TOOL_PARK_TOOLS = frozenset({"computer_ssh_exec", "exec_command", "computer_shell"})
+
+# ════════════════════════════════════════════════════════════════
+# U17 不可信会话凭据隔离：分享/来宾（untrusted）会话 fail-closed 拒绝凭据面
+# ════════════════════════════════════════════════════════════════
+
+#: 稳定错误码：不可信会话（分享/来宾）请求凭据类工具。
+TOOL_UNTRUSTED_SESSION_CODE = "TOOL_UNTRUSTED_SESSION"
+
+#: 凭据类工具面（U17 拒绝面）：工具功能本身依赖用户凭据分桶，且失败路径会
+#: 弹凭据卡/主机确认卡。ssh 是当前唯一的凭据类工具（凭据注入面
+#: resolve_ssh_credentials + U1 主机确认卡 + U6 首见审批卡都在这条链上）。
+_CREDENTIAL_GATED_TOOLS = frozenset({"computer_ssh_exec"})
+
+
+def toolUntrustedSessionResult(toolName: str = "") -> Dict[str, Any]:
+    """U17 结构化拒绝（稳定形状）。
+
+    正文是**通用**拒绝语：不回显目标主机、不提及凭据是否已配置——
+    不可信会话连"这台主机有没有凭据"都无权得知。
+    """
+    reason = "当前会话为分享/来宾（不可信）上下文，凭据类工具不可用"
+    return {
+        "success": False,
+        "error_code": TOOL_UNTRUSTED_SESSION_CODE,
+        "reason": reason,
+        "error": reason + (f"（{toolName} 已被拒绝）" if toolName else ""),
+    }
+
+
+def untrustedSessionContext(user_id: Optional[str] = None) -> bool:
+    """U17 会话信任级判定（单一入口）：分享/来宾（untrusted）会话返回 True。
+
+    复用既有身份面（不新造第二套用户/角色体系），只认**正向证据**：
+    - 身份为空或字面 guest/anonymous → 不可信（无身份不给凭据面）；
+    - user_model 持久角色 role == "guest"（JWT 签发同源）→ 不可信；
+    - user_group_model 访客组（UserGroupType.GUEST）成员 → 不可信。
+    非数值合成身份（default/测试替身/渠道合成 id）与库中无记录者无正向证据，
+    按可信处置——凭据面另有治理预检/审批/主机确认等闸口，本层只加
+    "来宾会话不可用凭据"这一道。用户库查询故障时 fail-closed（宁可拒）。
+    """
+    uid = str(user_id or "").strip()
+    if not uid or uid.lower() in ("guest", "anonymous"):
+        return True
+    try:
+        numericId = int(uid)
+    except (TypeError, ValueError):
+        return False
+    try:
+        from neurova.auth.user_model import UserModel
+
+        row = UserModel().get_user_by_id(numericId)
+    except Exception as e:  # noqa: BLE001 - 身份面故障按 fail-closed（宁可拒）
+        logger.warning("会话信任级查询失败（fail-closed 拒绝凭据面）: %s", e)
+        return True
+    if row is None:
+        return False
+    role = (row.get("role") if isinstance(row, dict)
+            else getattr(row, "role", "")) or ""
+    if str(role).strip().lower() == "guest":
+        return True
+    username = (row.get("username") if isinstance(row, dict)
+                else getattr(row, "username", "")) or ""
+    try:
+        from neurova.auth.user_group_model import UserGroupType, get_user_group_manager
+
+        groups = get_user_group_manager().get_groups_for_user(str(username)) or []
+        if any(getattr(g, "group_type", None) == UserGroupType.GUEST for g in groups):
+            return True
+    except Exception as e:  # noqa: BLE001 - 组面故障不改变角色判定结论
+        logger.debug("访客组判定跳过: %s", e)
+    return False
+
+#: park 结果表（park_id → entry）。进程内为主存，落盘为迟交回灌的持久副本；
+#: 有界（淘汰最旧），防无上限堆积。
+_parkResults: Dict[str, Dict[str, Any]] = {}
+_parkLock = threading.RLock()
+_TOOL_PARK_MAX_ENTRIES = 256
+#: park 后台观察者的强引用表（A-20：事件循环对 Task 只持弱引用，
+#: 裸 ensure_future 的观察者可能被 GC 静默吞掉——迟交回灌永不发生）。
+_parkWatchers: Dict[str, "asyncio.Task"] = {}
+
+
+def parkSoftTimeoutSeconds() -> float:
+    """park 软阈值（秒）：env NEUROVA_TOOL_PARK_SOFT_S 可配，钳进 [5, park 上限]。"""
+    raw = os.environ.get("NEUROVA_TOOL_PARK_SOFT_S")
+    try:
+        value = float(raw) if raw else TOOL_PARK_SOFT_TIMEOUT_S
+    except (TypeError, ValueError):
+        value = TOOL_PARK_SOFT_TIMEOUT_S
+    return max(5.0, min(value, TOOL_PARK_MAX_S))
+
+
+def parkMaxSeconds() -> float:
+    """park 上限（秒）：对齐 800s；env NEUROVA_TOOL_PARK_MAX_S 只能调小不能调大。"""
+    raw = os.environ.get("NEUROVA_TOOL_PARK_MAX_S")
+    try:
+        value = float(raw) if raw else TOOL_PARK_MAX_S
+    except (TypeError, ValueError):
+        value = TOOL_PARK_MAX_S
+    return max(5.0, min(value, TOOL_PARK_MAX_S))
+
+
+def toolParkEnabled() -> bool:
+    """park 开关：env NEUROVA_TOOL_PARK_DISABLE=1 关闭（回退既有超时行为）。"""
+    return os.environ.get("NEUROVA_TOOL_PARK_DISABLE", "").strip().lower() not in (
+        "1", "true", "yes", "on")
+
+
+def _parkStorePath(parkId: str):
+    """park 结果落盘路径：数据根 tool_park_results/<park_id>.json。"""
+    return dataPath("tool_park_results", f"{parkId}.json")
+
+
+def _persistParkEntry(parkId: str, entry: Dict[str, Any]) -> None:
+    """park 结果落盘（进程重启前的迟交结果仍可被查询面读到）。
+
+    只落**可序列化**的结果面（不含任务/协程句柄）；写盘失败诚实记日志，
+    不改写进程内主存的成功（内存仍在，REST 查询不受影响）。
+    """
+    try:
+        path = _parkStorePath(parkId)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(_parkSerializable(entry), fh, ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001 - 落盘失败不影响进程内查询面
+        logger.warning("park 结果落盘失败 park_id=%s: %s", parkId, e)
+
+
+def _parkSerializable(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """park entry 的可序列化投影（剔除任务句柄等进程内对象）。"""
+    return {k: v for k, v in entry.items() if not k.startswith("_")}
+
+
+def recordParkResult(parkId: str, entry: Dict[str, Any]) -> None:
+    """登记/更新 park 结果（进程内有界主存 + 落盘副本）。"""
+    with _parkLock:
+        if parkId not in _parkResults and len(_parkResults) >= _TOOL_PARK_MAX_ENTRIES:
+            oldest = next(iter(_parkResults))
+            _parkResults.pop(oldest, None)
+        _parkResults[parkId] = entry
+    _persistParkEntry(parkId, entry)
+
+
+def parkResultSnapshot(parkId: str) -> Optional[Dict[str, Any]]:
+    """查询 park 结果（幂等）：进程内主存优先，未命中读落盘副本。
+
+    返回的快照不含任务句柄；同一次完成结果重复查询返回同一份（幂等）。
+    """
+    with _parkLock:
+        entry = _parkResults.get(parkId)
+    if entry is not None:
+        return _parkSerializable(entry)
+    try:
+        path = _parkStorePath(parkId)
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+    except Exception as e:  # noqa: BLE001 - 落盘副本读不到按未命中处置
+        logger.debug("park 结果落盘副本读取失败 park_id=%s: %s", parkId, e)
+    return None
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1819,6 +2075,110 @@ class ToolExecutor:
 
         return get_tool_timeout(tool_name)
 
+    # ── U8：长命令 park + 迟交回灌（ssh/exec 类，REST 轮询取回）──
+
+    async def _parkedToolExecution(self, tool_name: str, params: Dict) -> Any:
+        """parkable 工具的软阈值 park：超 soft 阈值不判失败，转后台继续执行。
+
+        返回 park 信封 dict（{"parked": True, "park_id", "poll_after", ...}）；
+        未超阈值返回与 run_with_timeout 同形的 (result, success, tool_source)
+        三元组。同一任务继续在后台跑（不重建、不重复执行副作用命令）。
+        """
+        import uuid
+
+        soft = parkSoftTimeoutSeconds()
+        task = asyncio.ensure_future(self._execute_tool_core(tool_name, params))
+        try:
+            done, _pending = await asyncio.wait({task}, timeout=soft)
+        except asyncio.CancelledError:
+            # 轮次停止：后台任务交由令牌清算，本层不吞取消
+            task.cancel()
+            raise
+        if done:
+            return task.result()
+
+        parkId = f"park_{uuid.uuid4().hex[:12]}"
+        pollAfter = max(1, int(soft))
+        recordParkResult(parkId, {
+            "park_id": parkId,
+            "tool_name": tool_name,
+            "status": "running",
+            "parked_at": datetime.now(timezone.utc).isoformat(),
+            "poll_after": pollAfter,
+            "max_wait_s": parkMaxSeconds(),
+        })
+        watcher = asyncio.ensure_future(self._parkWatcher(task, parkId, soft))
+        _parkWatchers[parkId] = watcher
+        logger.info("工具 %s 超过 park 软阈值 %.1fs，转后台 park（park_id=%s）",
+                    tool_name, soft, parkId)
+        return {
+            "parked": True,
+            "park_id": parkId,
+            "poll_after": pollAfter,
+            "status": "parked",
+            "tool_name": tool_name,
+            "max_wait_s": parkMaxSeconds(),
+            "message": (
+                f"命令执行超过 {pollAfter}s 软阈值，已转入后台继续运行；"
+                f"请稍后凭 park_id 经 GET /v1/tools/park/{parkId} 轮询取回结果"
+                f"（上限 {int(parkMaxSeconds())}s，超限诚实失败）"
+            ),
+        }
+
+    async def _parkWatcher(self, task: "asyncio.Task", parkId: str, soft: float) -> None:
+        """park 后台观察者：命令跑完回灌结果（进程内 + 落盘）；超 park 上限诚实失败。"""
+        _POLL_DUMP_S = 5.0
+        try:
+            remaining = max(1.0, parkMaxSeconds() - soft)
+            done, _pending = await asyncio.wait({task}, timeout=remaining)
+            if not done:
+                # 超上限：诚实失败 + 放弃等待（底层执行体按各自机制收尾）
+                task.cancel()
+                try:
+                    await asyncio.wait({task}, timeout=_POLL_DUMP_S)
+                except Exception:  # noqa: BLE001 - 收尸失败不改变超时事实
+                    pass
+                recordParkResult(parkId, {
+                    "park_id": parkId,
+                    "status": "failed",
+                    "error": (f"命令超过 park 上限 {int(parkMaxSeconds())}s 仍未完成，"
+                              "已终止等待（超限诚实失败）"),
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                })
+                return
+            try:
+                result, success, _source = task.result()
+            except asyncio.CancelledError:
+                recordParkResult(parkId, {
+                    "park_id": parkId, "status": "failed",
+                    "error": "会话已停止，park 任务取消",
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                })
+                return
+            except Exception as exc:  # noqa: BLE001 - 后台异常如实回灌为失败
+                recordParkResult(parkId, {
+                    "park_id": parkId, "status": "failed",
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                })
+                return
+            recordParkResult(parkId, {
+                "park_id": parkId,
+                "status": "completed",
+                "success": bool(success),
+                "result": result,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except asyncio.CancelledError:
+            recordParkResult(parkId, {
+                "park_id": parkId, "status": "failed",
+                "error": "会话已停止，park 观察者取消",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            })
+            raise
+        finally:
+            _parkWatchers.pop(parkId, None)
+
     async def _execute_single_tool(self, tool_name: str, params: Dict,
                                    skip_governance: bool = False) -> Dict:
         """单工具执行入口（P2-1：PreToolUse/PostToolUse hooks 链挂接层）。
@@ -2040,6 +2400,14 @@ class ToolExecutor:
                         }
                         return result
 
+            # U17：不可信会话（分享/来宾）凭据隔离——置于治理/审批/动态干预
+            # 之前，先于一切弹卡与凭据触碰；审批重放（skip_governance）与
+            # 持久授权同样不得绕过。
+            if tool_name in _CREDENTIAL_GATED_TOOLS and untrustedSessionContext(
+                    self._agent_identity()[0]):
+                result = toolUntrustedSessionResult(tool_name)
+                return result
+
             # 方案 P0-1.5: 统一治理预检 —— DENY 拦截、SANDBOX 隔离执行、
             # ASK 待确认；ALLOW / 无裁决内容返回 None 放行。
             # E3（P2）：MCP 工具持久授权命中 → 免审批直达（等价审批重放的
@@ -2123,13 +2491,23 @@ class ToolExecutor:
             _bypass_tok = set_gate_bypass(skip_governance)
             try:
                 with self._sandbox_scope(tool_name, skip_governance):
-                    core_out = await self.tool_coordinator.run_with_timeout(
-                        tool_name,
-                        self._execute_tool_core(tool_name, params),
-                        timeout=self._resolveToolTimeoutSeconds(tool_name),
-                    )
+                    if tool_name in TOOL_PARK_TOOLS and toolParkEnabled():
+                        # U8：ssh/exec 类长命令走 park 面——超软阈值转后台继续，
+                        # 返回 park 信封；结果经 park_id REST 轮询幂等取回。
+                        core_out = await self._parkedToolExecution(tool_name, params)
+                    else:
+                        core_out = await self.tool_coordinator.run_with_timeout(
+                            tool_name,
+                            self._execute_tool_core(tool_name, params),
+                            timeout=self._resolveToolTimeoutSeconds(tool_name),
+                        )
             finally:
                 reset_gate_bypass(_bypass_tok)
+            if isinstance(core_out, dict) and core_out.get("parked"):
+                result = core_out
+                success = False  # 未完成（park 后台继续）；结果经 park_id 轮询取回
+                tool_source = "park"
+                return result
             if isinstance(core_out, dict) and core_out.get("status") == "background":
                 result = core_out
                 success = False  # 未完成（后台继续）；结果经 pending hints 注入下一轮
@@ -7283,7 +7661,6 @@ class ToolExecutor:
             from neurova.core.cancel_token import registerKillAction
             from neurova.sandbox.exec_sandbox import (
                 KILL_GRACE_S,
-                killProcessTree,
                 spawnKwargsForKill,
             )
 
@@ -7306,11 +7683,12 @@ class ToolExecutor:
                 )
                 # 句柄在进程刚起来时就交给取消令牌：置位可能发生在注册之**前**
                 # （上层已超时），而 `onCancel` 对迟到回调立即兑现，故两种次序都安全。
-                registerKillAction(lambda: killProcessTree(proc))
+                # U10：清算走 kill_tree 单源（含孙进程），失败降级逐 pid。
+                registerKillAction(lambda: reapToolProcessTree(proc.pid))
                 try:
                     stdout, stderr = proc.communicate(timeout=timeout)
                 except subprocess.TimeoutExpired:
-                    killProcessTree(proc)
+                    reapToolProcessTree(proc.pid)
                     try:
                         stdout, stderr = proc.communicate(timeout=KILL_GRACE_S)
                     except Exception:  # noqa: BLE001 - 收尸失败不改变超时契约
@@ -7734,12 +8112,41 @@ class ToolExecutor:
 
         from pathlib import Path
 
+        from neurova.core.turn_context import get_turn_session_id
         from neurova.llm.generators.runtime import persist_bytes
 
         stem = f"{slug}-{hashlib.sha256(pdf).hexdigest()[:8]}"
-        path = await persist_bytes(pdf, "pdf", stem)
+        # U20 配套：产物属主登记（与 browser_pdf/browser_download 同批口径）。
+        # 登记用**原始 uid**（非 resolveBrowserOwnerKey 的 "user:<uid>" 池化键）——
+        # 账本属主与 serve 端 current_user["user_id"] 同命名空间，登记池化键
+        # 会导致属主本人 403（U20 实测的命名空间错位）。无用户上下文（agent
+        # 自主任务）保持既有不登记行为（登录即可读，向后兼容）。
+        path = await persist_bytes(
+            pdf, "pdf", stem,
+            owner_user_id=self._artifactOwnerUserId(),
+            session_id=get_turn_session_id(),
+            kind="write_pdf",
+        )
         name = Path(path).name
         return {**base, "file_name": name, "file_path": path, "download_url": f"/api/v1/generation/files/{name}"}
+
+    @staticmethod
+    def _artifactOwnerUserId() -> Optional[str]:
+        """U20 配套：产物属主登记用的**原始 uid**（write_pdf 链）。
+
+        取数口径与 ``browser_manager.resolveBrowserOwnerKey`` 同源（请求级
+        身份单通道 neurova_request_user_id），但登记用原始 uid 而非
+        "user:<uid>" 池化键——账本属主与 serve 端 ``current_user["user_id"]``
+        是同一命名空间，登记池化键会导致属主本人 403（U20 实测的错位）。
+        无用户上下文（agent 自主任务）返回 None → persist_bytes 保持既有
+        不登记行为（登录即可读，向后兼容）。
+        """
+        from neurova.computer_use.browser_manager import resolveBrowserOwnerKey
+
+        ownerKey = resolveBrowserOwnerKey()
+        if ownerKey.startswith("user:"):
+            return ownerKey[len("user:"):] or None
+        return None
 
     def _resolve_pdf_target_path(self, target: str):
         """`path` 落在工作区内（与 file_write 同锚定口径），越界一律拒。"""
@@ -8103,6 +8510,17 @@ class ToolExecutor:
             if not command:
                 return {"error": "缺少 command 参数"}
 
+            # U5：isolation=strong → 命令进一次性强隔离容器执行（fail-closed，
+            # docker 不可用结构化拒绝，不回退本机明文）；default 走原会话路径。
+            isolation = str(params.get("isolation") or "default").strip().lower()
+            if isolation not in ("default", "strong"):
+                return toolUnsupportedResult(
+                    f"isolation 仅支持 default/strong，得到 {isolation!r}",
+                    supported=["default", "strong"])
+            if isolation == "strong":
+                return await asyncio.to_thread(
+                    self._execCommandStrongIsolation, command, params.get("timeout"))
+
             import os as _os
 
             from neurova.execution_engine.shell_sessions import get_shell_session_manager
@@ -8112,15 +8530,45 @@ class ToolExecutor:
                 ws = str(getattr(self._agent, "workspace_path", "") or "")
                 if ws:
                     workdir = _os.path.join(ws, workdir)
-            return await get_shell_session_manager().start_session(
+            result = await get_shell_session_manager().start_session(
                 command,
                 workdir=workdir or None,
                 yield_time_ms=params.get("yield_time_ms"),
                 max_output_tokens=params.get("max_output_tokens") or 10000,
             )
+            # U10：会话进程的超时/用户停止清算走 kill_tree（含 shell 之下
+            # 孵化的孙进程），失败降级逐 pid terminate。挂在本轮取消令牌上，
+            # 与会话自身的 terminate 回调互补（按树复查清算，重复触发无害）。
+            if isinstance(result, dict) and result.get("status") == "running":
+                self._registerSessionTreeReaper(result.get("session_id"))
+            return result
         except Exception as e:
             logger.error("exec_command 执行失败: %s", e)
             return {"error": f"exec_command 执行失败: {str(e)}"}
+
+    def _registerSessionTreeReaper(self, session_id) -> None:
+        """U10：把 exec_command 会话进程树的清算挂到本轮取消令牌（kill_tree 单源）。
+
+        会话 pid 取自 ShellSessionManager 在册会话（会话进程句柄归其所有，
+        此处只读 pid 不接管句柄）；令牌置位（工具超时 KILL / 用户停止）时
+        经 reapToolProcessTree 按树清算，失败自动降级逐 pid terminate。
+        """
+        try:
+            if session_id in (None, ""):
+                return
+            from neurova.core.cancel_token import (
+                currentCancelEpoch,
+                registerKillAction,
+            )
+            from neurova.execution_engine.shell_sessions import get_shell_session_manager
+
+            session = get_shell_session_manager()._sessions.get(int(session_id))
+            pid = getattr(getattr(session, "proc", None), "pid", None)
+            if not pid:
+                return
+            registerKillAction(lambda: reapToolProcessTree(int(pid)), currentCancelEpoch())
+        except Exception as e:  # noqa: BLE001 - 注册失败只影响树清算覆盖面，不阻断会话
+            logger.debug("exec 会话树清算注册失败: %s", e)
 
     async def _execute_write_stdin(self, params: Dict) -> Dict:
         """向 exec_command 会话写输入并轮询输出（P0-3）。"""
@@ -8238,7 +8686,9 @@ class ToolExecutor:
                 "port": int(params.get("port") or creds.get("port") or 22),
                 "key_text": creds.get("key_text"),
                 "password": creds.get("password"),
-                "timeout": float(params.get("timeout") or 60),
+                # U8：park 开启时缺省执行预算放宽到 park 上限——长命令不再被
+                # 缺省 60s 掐死，而是 park 到上限；显式 timeout 仍被尊重（钳到上限内）。
+                "timeout": self._sshExecutionBudget(params),
                 "agent_id": agent_id or "",
             }
             try:
@@ -8265,6 +8715,26 @@ class ToolExecutor:
         except Exception as e:
             logger.error("SSH 命令执行失败: %s", e)
             return {"error": f"SSH 命令执行失败: {str(e)}"}
+
+    @staticmethod
+    def _sshExecutionBudget(params: Dict) -> float:
+        """U8：ssh 执行预算解析。
+
+        park 开启（缺省）：未显式给 timeout → 放宽到 park 上限（800s），
+        长命令由 park 面接管而非被缺省 60s 掐死；显式 timeout 被尊重但钳到
+        上限内。park 关闭：维持原缺省 60s（既有行为零变化）。
+        """
+        raw = params.get("timeout")
+        try:
+            explicit = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            explicit = None
+        if not toolParkEnabled():
+            return explicit if explicit is not None else 60.0
+        cap = parkMaxSeconds()
+        if explicit is None:
+            return cap
+        return min(explicit, cap)
 
     @staticmethod
     def _sshCompactResult(result: Dict, host: str, command: str) -> Dict:
@@ -9945,6 +10415,17 @@ class ToolExecutor:
         if not code:
             return {"error": "缺少 code 参数"}
 
+        # U5：isolation 档位分派——strong 走容器档（fail-closed），default 原路径不变。
+        isolation = str(params.get("isolation") or "default").strip().lower()
+        if isolation not in ("default", "strong"):
+            return toolUnsupportedResult(
+                f"isolation 仅支持 default/strong，得到 {isolation!r}",
+                supported=["default", "strong"])
+        if isolation == "strong":
+            # ContainerSandbox.run_code 是阻塞 subprocess 调用——按"阻塞调用
+            # 一律下沉线程池"的仓规下沉，不占事件循环。
+            return await asyncio.to_thread(self._runCodeStrongIsolation, code, language, timeout)
+
         start_time = time.time()
 
         try:
@@ -10057,6 +10538,134 @@ class ToolExecutor:
                 "error": f"代码执行失败: {str(e)}",
                 "duration_ms": duration_ms,
             }
+
+    # ── U5：isolation=strong 容器档分派（fail-closed，不回退明文执行）──
+
+    @staticmethod
+    def _strongIsolationSandbox():
+        """取容器档实例；不可用时返回结构化拒绝（调用方直接返回，不降级裸跑）。"""
+        from neurova.sandbox.container_sandbox import ContainerSandbox
+
+        sandbox = ContainerSandbox()
+        if not sandbox.availability():
+            return None, toolUnsupportedResult(
+                "容器档不可用（docker CLI 缺失或 docker info 探测失败），"
+                "isolation=strong 拒绝降级为明文执行",
+                supported=["isolation=default"])
+        return sandbox, None
+
+    def _runCodeStrongIsolation(self, code: str, language: str, timeout) -> Dict:
+        """U5：run_code 的 strong 档——代码在一次性强隔离容器内执行。
+
+        docker 不可用 / 语言不受容器档支持 / 镜像拉取失败，一律结构化
+        TOOL_UNSUPPORTED（诚实拒绝），绝不回退本机明文执行。
+        """
+        from neurova.sandbox.container_sandbox import (
+            SandboxImageUnavailable,
+            SandboxLanguageUnsupported,
+        )
+
+        sandbox, rejection = self._strongIsolationSandbox()
+        if rejection is not None:
+            return rejection
+        try:
+            timeout_s = max(1.0, float(timeout))
+        except (TypeError, ValueError):
+            timeout_s = 60.0
+        try:
+            sb = sandbox.run_code(code, language=str(language or "python"),
+                                  timeout_s=timeout_s)
+        except SandboxLanguageUnsupported as exc:
+            return toolUnsupportedResult(str(exc), supported=["python"])
+        except SandboxImageUnavailable as exc:
+            return toolUnsupportedResult(str(exc))
+        if not sb.enforced:
+            # enforced=False = 没有真正在隔离容器里跑过——按未支持拒绝，不冒充成功
+            return toolUnsupportedResult(sb.detail or "容器档未能提供隔离执行")
+        succeeded = sb.exit_code == 0
+        return {
+            "success": succeeded,
+            "stdout": sb.stdout,
+            "stderr": sb.stderr,
+            "exit_code": sb.exit_code,
+            "duration_ms": sb.duration_ms,
+            "runtime_type": sb.backend,
+            "isolation": "strong",
+            "enforced": True,
+            "timed_out": sb.timed_out,
+            "error": None if succeeded else (sb.stderr or f"exit_code={sb.exit_code}"),
+        }
+
+    def _execCommandStrongIsolation(self, command: str, timeout) -> Dict:
+        """U5：exec_command 的 strong 档——shell 命令在一次性强隔离容器内执行。
+
+        容器档语言面是 python：把 shell 命令包进一段受控 python wrapper
+        （容器内 ``sh -c`` 执行，stdout/stderr/exit_code 以 JSON 回传）。
+        docker 不可用 → 结构化 TOOL_UNSUPPORTED，不回退本机明文执行。
+        """
+        import json as _json
+
+        from neurova.sandbox.container_sandbox import (
+            SandboxImageUnavailable,
+            SandboxLanguageUnsupported,
+        )
+
+        sandbox, rejection = self._strongIsolationSandbox()
+        if rejection is not None:
+            return rejection
+        try:
+            inner_timeout_s = min(max(5.0, float(timeout)), parkMaxSeconds())
+        except (TypeError, ValueError):
+            inner_timeout_s = 60.0
+        snippet = (
+            "import json, subprocess\n"
+            f"cmd = {_json.dumps(command)}\n"
+            "try:\n"
+            f"    p = subprocess.run(['sh', '-c', cmd], capture_output=True, text=True,"
+            f" timeout={inner_timeout_s})\n"
+            "    print(json.dumps({'returncode': p.returncode, 'stdout': p.stdout,"
+            " 'stderr': p.stderr, 'timed_out': False}))\n"
+            "except subprocess.TimeoutExpired as e:\n"
+            "    out = e.stdout if isinstance(e.stdout, str) else (e.stdout or b'').decode('utf-8', 'replace')\n"
+            "    err = e.stderr if isinstance(e.stderr, str) else (e.stderr or b'').decode('utf-8', 'replace')\n"
+            "    print(json.dumps({'returncode': -1, 'stdout': out, 'stderr': err,"
+            " 'timed_out': True}))\n"
+        )
+        try:
+            sb = sandbox.run_code(snippet, language="python",
+                                  timeout_s=inner_timeout_s + 15.0)
+        except SandboxLanguageUnsupported as exc:  # pragma: no cover - wrapper 恒为 python
+            return toolUnsupportedResult(str(exc), supported=["python"])
+        except SandboxImageUnavailable as exc:
+            return toolUnsupportedResult(str(exc))
+        if not sb.enforced:
+            return toolUnsupportedResult(sb.detail or "容器档未能提供隔离执行")
+        payload = {}
+        try:
+            payload = json.loads((sb.stdout or "").strip() or "{}")
+        except (json.JSONDecodeError, ValueError):
+            payload = {}
+        stdout = str(payload.get("stdout") or "")
+        stderr = str(payload.get("stderr") or "")
+        exitCode = int(payload.get("returncode") if isinstance(payload.get("returncode"), int)
+                       else sb.exit_code)
+        timedOut = bool(payload.get("timed_out")) or sb.timed_out
+        return {
+            "status": "completed",
+            "exit_code": exitCode,
+            "output": (stdout + stderr) if (stdout and stderr) else (stdout or stderr),
+            "stdout": stdout,
+            "stderr": stderr,
+            "truncated": False,
+            "command": command,
+            "isolation": "strong",
+            "enforced": True,
+            "runtime_type": sb.backend,
+            "timed_out": timedOut,
+            "success": exitCode == 0 and not timedOut,
+            "error": (f"容器内命令超时（{inner_timeout_s}s）" if timedOut
+                      else (stderr or None) if exitCode != 0 else None),
+        }
 
     def on_tool_executed(
         self,

@@ -269,6 +269,9 @@ ENDPOINT_MODULES = [
     ("neurova.api.endpoints.files_api", "/v1/files", "Files API"),
     ("neurova.api.endpoints.artifacts_api", "/v1/artifacts", "Artifacts API"),
     ("neurova.api.endpoints.tool_schema", "/v1/tools", "Tool Schema API"),
+    # U8：长命令 park 迟交结果的 REST 轮询取回面（D-T2 拍板）。
+    # 与 tool_schema 同前缀 /v1/tools，路由 /park/{park_id}；鉴权同工具面。
+    ("neurova.api.endpoints.tool_park", "/v1/tools", "Tool Park API"),
     ("neurova.api.endpoints.tool_layers", "/v1/tool-layers", "Tool Layers API"),
     # B4：外部编码代理管理面（catalog / test / status，admin 门；设计文档 §4.7）
     ("neurova.api.endpoints.external_agents_api", "/v1/external-agents", "External Agents API"),

@@ -37,6 +37,14 @@ READ_EXEMPT: dict[str, set] = {
     # tz 为历史会话/旧提示词的别名，schema 单一规范名只暴露 timezone，双名进
     # schema 反而诱导模型混用（2026-09-13 裁决）
     "get_datetime": {"tz"},
+    # U5（2026-11-22，D-T1 拍板=容器档）：isolation 档位（"default"|"strong"）——
+    # run_code/exec_command 执行体合法读取（模型可经 additionalProperties 供给）；
+    # schema 声明待 builtin_tools.py 属主侧补登记，本表按"执行体合法读取但
+    # 未进 schema"登记豁免。
+    "run_code": {"isolation"},
+    # exec_command：isolation 同上；timeout 仅 isolation=strong 档用作容器内
+    # 命令预算（default 档不读超时——会话语义由 yield_time_ms 承载）。
+    "exec_command": {"isolation", "timeout"},
 }
 
 
