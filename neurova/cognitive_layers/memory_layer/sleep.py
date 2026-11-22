@@ -651,6 +651,25 @@ class SleepConsolidation(StateValuesStore):
         Returns:
             Dict[str, Any]: 整合结果（含 insights_generated 键）
         """
+        # 资源治理 P1-2：睡眠周期每日原子配额（含旧路径 phase=sleep）——
+        # 超额/配额存储不可用即拒绝本轮，返回与既有形状一致的空信封。
+        from neurova.core.background_quota import acquireDailyQuota, dailyLimitFromEnv
+
+        if not acquireDailyQuota(
+            "sleep_cycle", dailyLimitFromEnv("NEUROVA_SLEEP_CYCLE_DAILY_QUOTA", 200)
+        ):
+            return {
+                "phase": phase,
+                "total_processed": 0,
+                "merged_count": 0,
+                "archived_count": 0,
+                "active_count": 0,
+                "merged_memories": list(memories),
+                "merge_results": [],
+                "insights_generated": 0,
+                "quota_denied": True,
+            }
+
         caps = self._PHASE_CAPS.get(phase)
         if caps is None:
             # 旧路径：仅整合（写回/落盘由调用方自理，行为与历史一致）

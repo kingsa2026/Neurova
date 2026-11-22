@@ -986,6 +986,22 @@ class RSIOrchestrator:
                 - phase_verdict: 阶段晋升判据（`GateVerdict` 三态）
                 - metrics: 监控指标
         """
+        # 资源治理 P1-2：RSI 迭代每日原子配额——超额/配额存储不可用即拒绝
+        # 本轮（fail-closed：少跑一轮可恢复，失控跑批不可恢复）。
+        from neurova.core.background_quota import acquireDailyQuota, dailyLimitFromEnv
+
+        if not acquireDailyQuota(
+            "rsi_iteration", dailyLimitFromEnv("NEUROVA_RSI_DAILY_QUOTA", 500)
+        ):
+            return {
+                "quota_denied": True,
+                "reason": "rsi_iteration_daily_quota",
+                "feedback_signals": [],
+                "convergence": None,
+                "applied_count": 0,
+                "gain": 0.0,
+            }
+
         # 1. 收集反馈信号
         feedback_signals = self.collect_feedback_signals()
 

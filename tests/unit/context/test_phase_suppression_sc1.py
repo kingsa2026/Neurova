@@ -160,7 +160,13 @@ class TestPhaseSuppressionFold:
 
     @pytest.mark.asyncio
     async def test_phase_inactive_behaves_as_before(self):
-        """对照：相位未命中时行为与改前一致——工具调用对前段被折（孤儿行由既有链路处置）。"""
+        """对照：相位未命中时折叠照常；同组单元聚合（P2-7）后调用对整组同折不拆。
+
+        历史口径（2026-11-22 前）：无相位抑制时调用对前段可被折、组尾结果行
+        可残留视图（孤儿行交既有 repair 链处置）。P2-7 组边界吸附落地后，
+        截断不再把 assistant(tool_calls) 与其连续 tool 结果段拆到边界两侧——
+        本用例改为钉住新基线：整组同折、组内任一行都不残留。
+        """
         orch = _mk_orchestrator()
 
         async def fake_summarize(chunks, previous_summary=""):
@@ -177,9 +183,13 @@ class TestPhaseSuppressionFold:
         assert _summary_rows(view), "无相位抑制：增长门照常折叠"
         assert not any(
             m.get("role") == "assistant" and m.get("tool_calls") for m in view
-        ), "无相位抑制：改前行为 = 工具调用对声明行可被折（本用例钉住改前基线）"
-        assert _hasMsg(view, "工具结果13原文"), "尾保护内的结果行照旧保留"
-        assert not _hasMsg(view, "工具结果0原文"), "改前行为：调用对前段被折"
+        ), "无相位抑制：调用对声明行随组同折（组聚合基线）"
+        for j in range(14):
+            assert not _hasMsg(view, f"工具结果{j}原文"), (
+                f"工具结果行 {j} 与其调用声明同组（P2-7 组边界吸附）：组被折则整组折，"
+                "不得再出现'声明被折、组尾结果残留'的拆散形态"
+            )
+        assert not _hasMsg(view, "长消息0"), "最老增量照常被折"
 
     @pytest.mark.asyncio
     async def test_budget_breach_not_blocked_by_phase(self):
