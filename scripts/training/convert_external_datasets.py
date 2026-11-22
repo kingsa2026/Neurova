@@ -103,6 +103,12 @@ def convertTauBench(extRoot: Path, dataRoot: Path, maxPerDomain: int) -> Tuple[i
                     if names:
                         messages.append(_event("assistant",
                                                "调用工具: " + ", ".join(names), len(messages)))
+            # 只保留头部窗口：收割器取会话末尾窗口，长轨迹尾部全是工具
+            # 调用（无人类发言），会被规则判成 skip——与本数据集
+            # 「人类发起=放行」的语义相反，反而教模型过度拦截。
+            messages = messages[:40]
+            if not any(m["role"] == "user" for m in messages):
+                continue
             if len(messages) < 6:
                 continue
             if _writeSession(dataRoot, agentDir, tag.replace("/", "-"),
@@ -153,6 +159,10 @@ def convertToolTalk(extRoot: Path, dataRoot: Path, maxConversations: int) -> Tup
             if apiNames:
                 messages.append(_event("assistant",
                                        "调用工具: " + ", ".join(apiNames), len(messages)))
+        # 头部窗口：理由同 tau-bench（尾部工具调用会被人规则判 skip）
+        messages = messages[:40]
+        if not any(m["role"] == "user" for m in messages):
+            continue
         if len(messages) < 6:
             continue
         if _writeSession(dataRoot, agentDir, convId.replace("/", "-"),
