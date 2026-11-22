@@ -8,7 +8,24 @@
 //       getStatusIcon / getStatusLabel / truncatePrompt / formatDuration 的核心视图逻辑。
 // 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
 import { describe, it, expect } from '@ohos/hypium';
-import { AIGCViewHelper } from '../../../main/ets/pages/AIGCPage';
+import {
+  AIGCViewHelper,
+  aigcTaskFromServer,
+  parseMusicDurationSeconds,
+  aigcErrorMessage,
+} from '../../../main/ets/pages/AIGCPage';
+import { AigcGenerationTask } from '../../../main/ets/libs/types';
+
+/** 构造服务端账本行（M1 音乐映射用例） */
+const makeServerTask = (kind: string): AigcGenerationTask => {
+  const t: AigcGenerationTask = {
+    task_id: 'g9', kind: kind, protocol: 'fal', model: 'fal-ai/musicgen',
+    status: 'succeeded', prompt: '轻快的钢琴曲', submitted_at: 1757700000,
+    updated_at: 1757700005, local_path: 'data/generations/g9_0.mp3',
+    url: '/api/v1/generation/files/g9_0.mp3', source: 'rest', error: '',
+  };
+  return t;
+};
 
 export default function aigcPageTest() {
   describe('AIGCPage', () => {
@@ -186,6 +203,55 @@ export default function aigcPageTest() {
       const end = '2025-01-01T10:01:05.000Z';
       const result = AIGCViewHelper.formatDuration(start, end);
       expect(result).assertEqual('1:05');
+    });
+
+    // ========== M1 音乐生成：类型映射 / 时长解析 / 账本映射 / 错误归一 ==========
+
+    it('type_color_music_returns_success', 0, () => {
+      expect(AIGCViewHelper.getTypeColor('music')).assertEqual('success');
+    });
+
+    it('type_icon_music_returns_score', 0, () => {
+      expect(AIGCViewHelper.getTypeIcon('music')).assertEqual('🎼');
+    });
+
+    it('type_label_music_returns_音乐', 0, () => {
+      expect(AIGCViewHelper.getTypeLabel('music')).assertEqual('音乐');
+    });
+
+    it('parse_music_duration_empty_returns_default_30', 0, () => {
+      expect(parseMusicDurationSeconds('')).assertEqual(30);
+      expect(parseMusicDurationSeconds('   ')).assertEqual(30);
+    });
+
+    it('parse_music_duration_valid_integer', 0, () => {
+      expect(parseMusicDurationSeconds('45')).assertEqual(45);
+      expect(parseMusicDurationSeconds(' 60 ')).assertEqual(60);
+      expect(parseMusicDurationSeconds('1')).assertEqual(1);
+      expect(parseMusicDurationSeconds('600')).assertEqual(600);
+    });
+
+    it('parse_music_duration_invalid_returns_minus1', 0, () => {
+      expect(parseMusicDurationSeconds('abc')).assertEqual(-1);
+      expect(parseMusicDurationSeconds('0')).assertEqual(-1);
+      expect(parseMusicDurationSeconds('-5')).assertEqual(-1);
+      expect(parseMusicDurationSeconds('30.5')).assertEqual(-1);
+      expect(parseMusicDurationSeconds('601')).assertEqual(-1);
+    });
+
+    it('maps_music_kind_to_music_type', 0, () => {
+      const t = aigcTaskFromServer(makeServerTask('music'), '');
+      expect(t.type).assertEqual('music');
+      expect(t.status).assertEqual('succeeded');
+    });
+
+    it('aigc_error_message_detail_first_then_message_then_fallback', 0, () => {
+      const withDetail: Record<string, Object> = { 'detail': '未配置音乐服务商凭据' };
+      expect(aigcErrorMessage(withDetail, '回退')).assertEqual('未配置音乐服务商凭据');
+      const withMessage: Record<string, Object> = { 'message': '信封错误' };
+      expect(aigcErrorMessage(withMessage, '回退')).assertEqual('信封错误');
+      const empty: Record<string, Object> = {};
+      expect(aigcErrorMessage(empty, '回退')).assertEqual('回退');
     });
   });
 }

@@ -100,6 +100,21 @@ export default function aigcApiTest() {
         'https://api.example.com/v1/generation/video/status/t9');
     });
 
+    // ========== M1 音乐生成（两段式与 /video 同范式） ==========
+
+    it('submitMusic_posts_generation_music', 0, () => {
+      api.submitMusic({ prompt: '轻快的钢琴曲', duration: 20 });
+      expect(backend.requests[0].method).assertEqual('POST');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/generation/music');
+    });
+
+    it('musicStatus_gets_status_by_task_id', 0, () => {
+      api.musicStatus('m7');
+      expect(backend.requests[0].method).assertEqual('GET');
+      expect(backend.requests[0].url).assertEqual(
+        'https://api.example.com/v1/generation/music/status/m7');
+    });
+
     it('listTasks_unwraps_tasks_envelope_with_kind', 0, () => {
       const payload: AigcTasksPayload = { tasks: [makeTask({})] };
       backend.response = { code: 0, message: 'ok', data: payload };

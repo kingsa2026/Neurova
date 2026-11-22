@@ -10,7 +10,11 @@
  *     succeeded/failed）] + [加载态/空态/列表]；
  *     列表项 GlassCard：type 徽章、prompt 摘要、status 徽章、resultUrl 链接（succeeded 时）、
  *     errorMessage（failed 时）、createdAt、finishedAt、操作（查看详情/取消/重试）；
- *   - 新建 CustomDialog：type 选择（text/image/audio/video）、prompt 文本域；
+ *   - 新建 CustomDialog：type 选择（text/image/audio/video/music）、prompt 文本域、
+ *     music 类型追加时长（秒）输入（缺省 30，1-600）；
+ *   - music（M1 多模态追平）：提交 POST /generation/music 拿 task_id，落服务端账本
+ *     后由列表 5s 轮询推进状态（与 video 同范式）；succeeded 卡片展示音频播放钮
+ *     （AVPlayer）+ 产物链接；提交失败诚实透出服务端 detail（如未配置音乐服务商）。
  *   - 颜色统一走 StyleManager，路由走 Router，API 暂无 AIGC 专用模块 →
  *     aboutToAppear 经 api.aigc.listTasks 拉真实账本；processing 存在时 5s 自动刷新。
  *
@@ -27,7 +31,8 @@
  *   由 Router.push(RouteNames.AIGC) 跳转进入；
  *   aboutToAppear 经 api.aigc.listTasks() 加载真实任务列表；
  *   status 筛选 Tab 切换 → 本地按 status 过滤；
- *   新建 → 弹窗选择 type + 填 prompt → 提交 → api.aigc.generateText/Image/Audio/submitVideo；
+ *   新建 → 弹窗选择 type + 填 prompt（music 另填时长）→ 提交 →
+ *   api.aigc.generateText/Image/Audio/submitVideo/submitMusic；
  *   查看详情 → AlertDialog 展示完整 prompt + 元数据；
  *   取消（queued/processing）→ 服务端账本无取消端点，诚实提示不支持（Web 端契约同）；
  *   重试（failed）→ 以同 prompt 重新提交（新任务，服务端账本保留失败历史）。
@@ -36,6 +41,8 @@
  */
 
 import { TopNavMenu, GlassCard, GlassButton, GlassInput, GlassPanel } from '../components/glass';
+import { media } from '@kit.MediaKit';
+import { BusinessError } from '@ohos.base';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
@@ -52,6 +59,15 @@ const DEFAULT_PROMPT_MAX_LEN = 100;
 /** 秒级阈值：超过 60 秒切换为 M:SS 格式 */
 const SECONDS_THRESHOLD = 60;
 
+/** 音乐时长缺省（秒）——后端 MusicGenerationRequest.duration 缺省同值 */
+const MUSIC_DURATION_DEFAULT = 30;
+
+/** 音乐时长下限（秒） */
+const MUSIC_DURATION_MIN = 1;
+
+/** 音乐时长上限（秒）——与 Web 端 MusicGenPage 同口径 */
+const MUSIC_DURATION_MAX = 600;
+
 // ===========================================================================
 // AIGCViewHelper - AIGC 任务视图模型（纯函数，无 UI 依赖，可独立单元测试）
 // ===========================================================================
@@ -59,37 +75,40 @@ const SECONDS_THRESHOLD = 60;
 export class AIGCViewHelper {
   /**
    * 获取任务类型对应的颜色 token 名
-   * 映射：text→info，image→primary，audio→warning，video→error
+   * 映射：text→info，image→primary，audio→warning，video→error，music→success
    */
   static getTypeColor(type: AIGCTaskKind): string {
     if (type === 'text') return 'info';
     if (type === 'image') return 'primary';
     if (type === 'audio') return 'warning';
     if (type === 'video') return 'error';
+    if (type === 'music') return 'success';
     throw new Error(`getTypeColor 未实现: ${type}`);
   }
 
   /**
    * 获取任务类型对应的图标 emoji
-   * 映射：text→📝，image→🖼️，audio→🎵，video→🎬
+   * 映射：text→📝，image→🖼️，audio→🎵，video→🎬，music→🎼
    */
   static getTypeIcon(type: AIGCTaskKind): string {
     if (type === 'text') return '📝';
     if (type === 'image') return '🖼️';
     if (type === 'audio') return '🎵';
     if (type === 'video') return '🎬';
+    if (type === 'music') return '🎼';
     throw new Error(`getTypeIcon 未实现: ${type}`);
   }
 
   /**
    * 获取任务类型对应的中文标签
-   * 映射：text→文本，image→图像，audio→音频，video→视频
+   * 映射：text→文本，image→图像，audio→音频，video→视频，music→音乐
    */
   static getTypeLabel(type: AIGCTaskKind): string {
     if (type === 'text') return '文本';
     if (type === 'image') return '图像';
     if (type === 'audio') return '音频';
     if (type === 'video') return '视频';
+    if (type === 'music') return '音乐';
     throw new Error(`getTypeLabel 未实现: ${type}`);
   }
 
@@ -183,7 +202,7 @@ const STATUS_FILTERS: StatusFilterOption[] = [
 ];
 
 /** 任务类型（AIGCTask.type 的具名别名；ArkTS 不支持索引访问类型） */
-type AIGCTaskKind = 'text' | 'image' | 'audio' | 'video';
+type AIGCTaskKind = 'text' | 'image' | 'audio' | 'video' | 'music';
 
 /** 类型选择项（ForEach 选项；ArkTS 禁内联对象类型与索引访问类型） */
 interface AIGCTypeOption {
@@ -196,6 +215,45 @@ interface AIGCTypeOption {
 interface AIGCTaskFormData {
   type: AIGCTaskKind;
   prompt: string;
+  /** 音乐时长输入（秒；字符串承自输入框，提交前经 parseMusicDurationSeconds 校验） */
+  duration: string;
+}
+
+/**
+ * 解析音乐时长输入（秒）：空串→缺省 30；非正整数/越界（1-600）→ -1（调用方诚实报错）。
+ * 后端 duration 为整数秒，小数会被 pydantic 拒绝，故在提交前拦下。
+ */
+export function parseMusicDurationSeconds(raw: string): number {
+  const text = (raw || '').trim();
+  if (!text) {
+    return MUSIC_DURATION_DEFAULT;
+  }
+  const n = Number(text);
+  if (!Number.isFinite(n)) {
+    return -1;
+  }
+  const sec = Math.floor(n);
+  if (sec !== n || sec < MUSIC_DURATION_MIN || sec > MUSIC_DURATION_MAX) {
+    return -1;
+  }
+  return sec;
+}
+
+/**
+ * 服务端错误消息归一：FastAPI HTTPException 落 {detail}（如「未配置音乐服务商凭据」），
+ * 业务信封错误落 {message}——取其一诚实透出，避免失败被通用兜底文案吞掉。
+ */
+export function aigcErrorMessage(res: Object, fallback: string): string {
+  const rec = res as Record<string, Object>;
+  const detail = rec['detail'];
+  if (typeof detail === 'string' && detail) {
+    return detail;
+  }
+  const message = rec['message'];
+  if (typeof message === 'string' && message) {
+    return message;
+  }
+  return fallback;
 }
 
 /** 服务端账本行 → 本地 AIGCTask（纯函数，供 AIGCPage.test.ets 契约测试） */
@@ -208,7 +266,7 @@ export function aigcTaskFromServer(t: AigcGenerationTask, fileUrl: string): AIGC
     id: t.task_id,
     agentId: '',
     type: (t.kind === 'text' ? 'text' : t.kind === 'audio' ? 'audio'
-      : t.kind === 'video' ? 'video' : 'image') as AIGCTaskKind,
+      : t.kind === 'video' ? 'video' : t.kind === 'music' ? 'music' : 'image') as AIGCTaskKind,
     prompt: t.prompt,
     status: status,
     resultUrl: t.file_missing ? undefined : (fileUrl || undefined),
@@ -231,7 +289,13 @@ export struct AIGCPage {
   // 新建弹窗显示状态
   @State showCreateDialog: boolean = false;
   // 新建表单数据（嵌套属性变更需整体重新赋值）
-  @State formData: AIGCTaskFormData = { type: 'text', prompt: '' };
+  @State formData: AIGCTaskFormData = { type: 'text', prompt: '', duration: '30' };
+
+  // 正在播放的音乐任务 id（''=未播放）
+  @State playingTaskId: string = '';
+
+  // 音乐播放器（一次只挂一个；停止/切页即释放）
+  private avPlayer: media.AVPlayer | null = null;
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -252,6 +316,7 @@ export struct AIGCPage {
       clearInterval(this.pollTimer);
       this.pollTimer = -1;
     }
+    this.stopMusicPlayback();
   }
 
   /**
@@ -304,18 +369,27 @@ export struct AIGCPage {
 
   /** 打开新建弹窗，重置表单 */
   private openCreateDialog(): void {
-    this.formData = { type: 'text', prompt: '' };
+    this.formData = { type: 'text', prompt: '', duration: MUSIC_DURATION_DEFAULT.toString() };
     this.showCreateDialog = true;
   }
 
   /**
-   * 提交新建任务（按 type 分派真实端点；image/audio/text 同步出结果，video 异步轮询）
+   * 提交新建任务（按 type 分派真实端点；image/audio/text 同步出结果，
+   * video/music 异步落账本后由列表轮询推进）
    */
   private async submitCreate(): Promise<void> {
     const prompt = this.formData.prompt.trim();
     if (!prompt) {
       this.msg.warning('请填写 prompt');
       return;
+    }
+    let musicDuration = MUSIC_DURATION_DEFAULT;
+    if (this.formData.type === 'music') {
+      musicDuration = parseMusicDurationSeconds(this.formData.duration);
+      if (musicDuration < 0) {
+        this.msg.warning(`请填写有效时长（${MUSIC_DURATION_MIN}-${MUSIC_DURATION_MAX} 秒整数）`);
+        return;
+      }
     }
     this.msg.info('任务已提交，生成中…');
     this.showCreateDialog = false;
@@ -335,6 +409,13 @@ export struct AIGCPage {
       } else if (this.formData.type === 'audio') {
         const res = await this.api.aigc.generateAudio({ text: prompt });
         if (res.code !== 0) { this.msg.error(res.message || '语音合成失败'); }
+      } else if (this.formData.type === 'music') {
+        // 模型/服务商不随请求下发：服务端按能力路由到默认 fal 音乐模型；
+        // 未配置音乐服务商时后端 400/502，detail 原文透出（不伪造成功）
+        const res = await this.api.aigc.submitMusic({ prompt: prompt, duration: musicDuration });
+        if (res.code !== 0) {
+          this.msg.error(aigcErrorMessage(res, '音乐生成提交失败'));
+        }
       } else {
         const res = await this.api.aigc.submitVideo({ prompt: prompt });
         if (res.code !== 0) { this.msg.error(res.message || '视频提交失败'); }
@@ -343,19 +424,24 @@ export struct AIGCPage {
       this.logger.error(TAG, '创建任务失败', e as Error);
       this.msg.error('创建任务失败');
     } finally {
-      // 账本刷新：image/audio/video 成败均已落账，列表直读服务端状态
+      // 账本刷新：image/audio/video/music 成败均已落账，列表直读服务端状态
       this.loadTasks();
     }
   }
 
   /** 选择 type（嵌套属性变更：整体重新赋值） */
   private selectType(type: AIGCTaskKind): void {
-    this.formData = { type: type, prompt: this.formData.prompt };
+    this.formData = { type: type, prompt: this.formData.prompt, duration: this.formData.duration };
   }
 
   /** 输入 prompt（嵌套属性变更：整体重新赋值） */
   private inputPrompt(v: string): void {
-    this.formData = { type: this.formData.type, prompt: v };
+    this.formData = { type: this.formData.type, prompt: v, duration: this.formData.duration };
+  }
+
+  /** 输入音乐时长（嵌套属性变更：整体重新赋值） */
+  private inputDuration(v: string): void {
+    this.formData = { type: this.formData.type, prompt: this.formData.prompt, duration: v };
   }
 
   /**
@@ -421,6 +507,9 @@ export struct AIGCPage {
         await this.api.aigc.submitVideo({ prompt: task.prompt });
       } else if (task.type === 'audio') {
         await this.api.aigc.generateAudio({ text: task.prompt });
+      } else if (task.type === 'music') {
+        // 服务端账本不保留时长参数：音乐重试按缺省 30 秒重新提交（同 prompt 可追溯）
+        await this.api.aigc.submitMusic({ prompt: task.prompt, duration: MUSIC_DURATION_DEFAULT });
       } else {
         await this.api.aigc.generateText({ prompt: task.prompt });
       }
@@ -429,6 +518,75 @@ export struct AIGCPage {
     } catch (e) {
       this.logger.error(TAG, '重试任务失败', e as Error);
       this.msg.error('重试任务失败');
+    }
+  }
+
+  /**
+   * 播放/停止音乐产物（AVPlayer；一次只播一个，切页即停）。
+   * 播放源为 resultUrl（fileUrl 已拼 access_token 查询凭证的绝对地址）。
+   */
+  private async toggleMusicPlayback(task: AIGCTask): Promise<void> {
+    if (this.playingTaskId === task.id) {
+      await this.stopMusicPlayback();
+      return;
+    }
+    if (!task.resultUrl) {
+      this.msg.warning('该任务暂无可播放的音频产物');
+      return;
+    }
+    await this.stopMusicPlayback();
+    try {
+      const player = await media.createAVPlayer();
+      const playUrl = task.resultUrl;
+      this.avPlayer = player;
+      this.playingTaskId = task.id;
+      player.on('stateChange', (state: media.AVPlayerState) => {
+        if (this.avPlayer !== player) {
+          return; // 已被新的播放/停止释放：过期回调直接忽略
+        }
+        if (state === 'idle') {
+          player.url = playUrl; // idle 态设源 → initialized
+        } else if (state === 'initialized') {
+          // 失败时 'error' 事件负责诚实提示；此处 catch 仅兜住未决拒绝
+          player.prepare().catch(() => { this.stopMusicPlayback(); });
+        } else if (state === 'prepared') {
+          player.play().catch(() => { this.stopMusicPlayback(); });
+        } else if (state === 'completed' || state === 'error') {
+          this.stopMusicPlayback();
+        }
+      });
+      player.on('error', (err: BusinessError) => {
+        this.logger.error(TAG, '音频播放失败', new Error(err.message));
+        if (this.avPlayer === player) {
+          this.msg.error('音频播放失败');
+          this.stopMusicPlayback();
+        }
+      });
+    } catch (e) {
+      this.logger.error(TAG, '音频播放初始化失败', e as Error);
+      this.msg.error('音频播放初始化失败');
+      this.avPlayer = null;
+      this.playingTaskId = '';
+    }
+  }
+
+  /** 停止并释放音乐播放器（未 prepare 的 player stop 会抛错，释放即可） */
+  private async stopMusicPlayback(): Promise<void> {
+    const player = this.avPlayer;
+    this.avPlayer = null;
+    this.playingTaskId = '';
+    if (!player) {
+      return;
+    }
+    try {
+      await player.stop();
+    } catch (e) {
+      // idle/initialized 态 stop 非法：忽略，直接释放
+    }
+    try {
+      await player.release();
+    } catch (e) {
+      // 已释放：忽略
     }
   }
 
@@ -591,6 +749,25 @@ export struct AIGCPage {
             .width('100%')
         }
 
+        // 音乐产物播放钮（succeeded 且有产物；AVPlayer 播放，一次一个）
+        if (task.type === 'music' && task.status === 'succeeded' && task.resultUrl) {
+          Row() {
+            GlassButton({
+              text: this.playingTaskId === task.id ? '停止' : '播放',
+              type: 'default',
+              btnSize: 'small',
+              onTap: () => { this.toggleMusicPlayback(task); }
+            })
+            Text('音频产物')
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_disabled'))
+              .margin({ left: this.sm.getSpacing('sm') })
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
+          .margin({ top: 4 })
+        }
+
         // errorMessage（failed 时显示）
         if (task.status === 'failed' && task.errorMessage) {
           Text(`错误: ${task.errorMessage}`)
@@ -716,6 +893,26 @@ export struct AIGCPage {
           })
             .margin({ top: 4, bottom: this.sm.getSpacing('md') })
 
+          // 音乐类型追加：时长（秒）输入 + 路由口径诚实提示（无预置模型列表，不硬编码假模型）
+          if (this.formData.type === 'music') {
+            Text('时长（秒）')
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .width('100%')
+            GlassInput({
+              placeholder: `缺省 ${MUSIC_DURATION_DEFAULT} 秒（${MUSIC_DURATION_MIN}-${MUSIC_DURATION_MAX}）`,
+              value: this.formData.duration,
+              type: 'number',
+              onChange: (v: string) => { this.inputDuration(v); },
+            })
+              .margin({ top: 4, bottom: this.sm.getSpacing('xs') })
+            Text('模型由服务端按能力路由；未配置音乐服务商时提交将失败并提示原因')
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_disabled'))
+              .width('100%')
+              .margin({ bottom: this.sm.getSpacing('sm') })
+          }
+
           // 操作按钮
           Row() {
             GlassButton({
@@ -747,7 +944,7 @@ export struct AIGCPage {
 
   /** 获取任务类型选项列表 */
   private getTypeOptions(): AIGCTypeOption[] {
-    const types: AIGCTaskKind[] = ['text', 'image', 'audio', 'video'];
+    const types: AIGCTaskKind[] = ['text', 'image', 'audio', 'video', 'music'];
     return types.map((t: AIGCTaskKind): AIGCTypeOption => ({
       type: t,
       label: AIGCViewHelper.getTypeLabel(t),

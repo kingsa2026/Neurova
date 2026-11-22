@@ -1,7 +1,7 @@
 /**
  * AigcApi - AIGC 生成域 API 模块（M5a，对齐 Web generation.ts 契约）
  *
- * 职责：文本/图像/音频/视频生成 + 视频状态轮询 + 任务账本 + 音色 + 用量。
+ * 职责：文本/图像/音频/视频/音乐生成 + 视频/音乐状态轮询 + 任务账本 + 音色 + 用量。
  * 设计：通过 HttpClient 委托请求，统一返回 Promise<ApiResponse<T>>；
  *       路径与字段与 NeurUI/src/api/modules/generation.ts 单源语义一致
  *       （auto=服务端 LLMRouter 能力路由；provider_id 指定服务商凭据）。
@@ -20,10 +20,11 @@ import {
   AigcImagePayload,
   AigcAudioPayload,
   AigcVideoPayload,
+  AigcMusicPayload,
   AigcTextResult,
   AigcImageResult,
-  AigcVideoSubmitResult,
-  AigcVideoStatusResult,
+  AigcAsyncTaskSubmitResult,
+  AigcAsyncTaskStatusResult,
   AigcGenerationTask,
   AigcVoiceOption,
   AigcUsageSummary,
@@ -54,13 +55,23 @@ export class AigcApi {
   }
 
   /** 视频任务提交（异步，返回 task_id 供轮询） */
-  async submitVideo(data: AigcVideoPayload): Promise<ApiResponse<AigcVideoSubmitResult>> {
-    return this.client.post<AigcVideoSubmitResult>(`${BASE}/video`, data);
+  async submitVideo(data: AigcVideoPayload): Promise<ApiResponse<AigcAsyncTaskSubmitResult>> {
+    return this.client.post<AigcAsyncTaskSubmitResult>(`${BASE}/video`, data);
   }
 
   /** 视频任务轮询（账本 + 远程协议收口） */
-  async videoStatus(taskId: string): Promise<ApiResponse<AigcVideoStatusResult>> {
-    return this.client.get<AigcVideoStatusResult>(`${BASE}/video/status/${taskId}`);
+  async videoStatus(taskId: string): Promise<ApiResponse<AigcAsyncTaskStatusResult>> {
+    return this.client.get<AigcAsyncTaskStatusResult>(`${BASE}/video/status/${taskId}`);
+  }
+
+  /** 音乐任务提交（M1：fal Queue API 异步，两段式与 /video 同范式，返回 task_id 供轮询） */
+  async submitMusic(data: AigcMusicPayload): Promise<ApiResponse<AigcAsyncTaskSubmitResult>> {
+    return this.client.post<AigcAsyncTaskSubmitResult>(`${BASE}/music`, data);
+  }
+
+  /** 音乐任务轮询（账本 + 远程协议收口；状态四态 submitted/running/succeeded/failed） */
+  async musicStatus(taskId: string): Promise<ApiResponse<AigcAsyncTaskStatusResult>> {
+    return this.client.get<AigcAsyncTaskStatusResult>(`${BASE}/music/status/${taskId}`);
   }
 
   /** 任务账本列表（可按 kind/status 过滤；仅本人任务） */

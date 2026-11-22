@@ -839,7 +839,7 @@ export type AIGCTaskStatus = 'queued' | 'processing' | 'succeeded' | 'failed';
 export interface AIGCTask {
   id: string;
   agentId: string;
-  type: 'text' | 'image' | 'audio' | 'video';
+  type: 'text' | 'image' | 'audio' | 'video' | 'music';
   prompt: string;
   status: AIGCTaskStatus;
   resultUrl?: string;
@@ -1353,7 +1353,7 @@ export type AigcServerTaskStatus =
 /** GET /v1/generation/tasks 返回的服务端账本行 */
 export interface AigcGenerationTask {
   task_id: string;
-  kind: string;            // image | video | audio
+  kind: string;            // image | video | audio | music
   protocol: string;
   model: string;
   status: AigcServerTaskStatus;
@@ -1412,18 +1412,33 @@ export interface AigcImageResult {
   task_id?: string;
 }
 
-export interface AigcVideoSubmitResult {
+/** 异步生成任务提交结果（/video 与 /music 两段式同范式共用契约） */
+export interface AigcAsyncTaskSubmitResult {
   task_id: string;
   status: AigcServerTaskStatus;
   protocol: string;
 }
 
-export interface AigcVideoStatusResult {
+/** 异步生成任务轮询结果（/video/status 与 /music/status 共用契约） */
+export interface AigcAsyncTaskStatusResult {
   task_id: string;
   status: AigcServerTaskStatus;
   url?: string;
   error?: string;
   warning?: string;
+}
+
+/** POST /v1/generation/music 请求体（M1：fal Queue API，两段式与 /video 同范式） */
+export interface AigcMusicPayload {
+  prompt: string;
+  /** fal 模型 ID（如 fal-ai/musicgen）；缺省=服务端按能力路由到默认音乐模型 */
+  model?: string;
+  /** 时长（秒）；后端缺省 30 */
+  duration?: number;
+  /** 协议标签（fal） */
+  protocol?: string;
+  /** 使用已配置服务商的凭据 */
+  provider_id?: string;
 }
 
 export interface AigcVoiceOption {
