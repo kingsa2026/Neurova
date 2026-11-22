@@ -53,6 +53,14 @@ class OntologyValidationReport:
             out.append(self._finding("unregistered", "term",
                                      "谓词 %s 未登记，五条校验对它免检" % predicate, predicate))
         if not subjectKey:
+            # 新主体（尚无事实、subjectKey 为空）的候选同样要过用户形状——
+            # pattern/in 只看候选客体，与主体存在与否无关；在这里跳过等于
+            # 「新主体的首批写入逃过形状闸」（U3 批量装载 dry-run 实测暴露：
+            # 违规形状行在干跑被判 pass，落库才在咽喉炸出）。class/minCount/
+            # maxCount 需要主体事实面的部分由 evaluateForRequest 自行按
+            # 空 subjectKey 保守处理。
+            if self._shapes is not None:
+                out.extend(self._shapes.evaluateForRequest(request, subjectKey, registry))
             return out
 
         subjectType = registry.subjectType(subjectKey)

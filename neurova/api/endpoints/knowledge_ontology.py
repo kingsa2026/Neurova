@@ -2110,3 +2110,129 @@ async def create_graph_instance(
             "deduped_by_content": receipt.dedupedByContent,
         },
     }
+
+
+# ── 升级计划收口（U1/U3/U6/U12/U13）：新能力的 REST 读/写面 ─────────────
+# 全部薄转交既有处理函数（业务单点在各自主模块，端点不复制逻辑）；
+# 租户一律取登录态，调用方不能自报租户。
+
+@router.post("/ontology/validate/shacl")
+async def validate_ontology_shacl(
+    body: Dict[str, Any] = None,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """SHACL 运行时校验 dry-run（U1）：形状单源=注册表→exportShaclShapes，
+    数据图缺省按 subject_key 圈定主体邻域子图；mode 显式传参（off/shadow/
+    enforce），不读环境档——本端点是「想跑就跑」的体检面。"""
+    from neurova.knowledge.ontology.shacl_runtime import validateShapesRuntime
+
+    payload = body or {}
+    store, _registry, _engine = _ontologyParts()
+    subjectKey = str(payload.get("subject_key") or "") or None
+    report = validateShapesRuntime(
+        store, _tenantOf(current_user),
+        agentId=str(payload.get("agent_id") or "") or None,
+        mode=str(payload.get("mode") or "enforce"),
+        dataGraphTtl=str(payload.get("data_graph_ttl") or "") or None,
+        subjectKeys=[subjectKey] if subjectKey else None)
+    return {"code": 0, "message": "success", "data": report}
+
+
+@router.post("/ontology/facts/bulk")
+async def bulk_load_ontology_facts(
+    body: Dict[str, Any] = None,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """事实批量装载（U3）：两段式——先全量干跑校验，任一行违规整批零落盘；
+    逐行仍走准入咽喉。租户强制取登录态（行内自报 tenantId 一律覆盖）。"""
+    from neurova.knowledge.ontology.bulk_load import bulkLoadFacts
+
+    payload = body or {}
+    rows = payload.get("rows")
+    if not isinstance(rows, list):
+        raise HTTPException(status_code=400, detail="rows 必须是对象数组")
+    tenant = _tenantOf(current_user)
+    safeRows = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise HTTPException(status_code=400, detail="rows 元素必须是对象")
+        safeRows.append({**row, "tenantId": tenant,
+                         "agentId": str(row.get("agentId") or "default")})
+    store, _registry, _engine = _ontologyParts()
+    try:
+        receipt = bulkLoadFacts(
+            store, safeRows,
+            batchSize=int(payload.get("batch_size") or 500),
+            dryRun=bool(payload.get("dry_run", True)))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "message": "success", "data": receipt}
+
+
+@router.post("/ontology/quality/gate")
+async def check_ontology_quality_gate(
+    body: Dict[str, Any] = None,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """质量门阈值判定（U6）：报告仍是 ontologyQualityReport 那一份计算，
+    本端点补 thresholds 判定（min_coverage/max_findings/max_orphan_rate），
+    threshold_failures 按固定顺序回执。"""
+    from neurova.knowledge.ontology.quality import (
+        ontologyQualityReport,
+        qualityGateCheck,
+    )
+
+    payload = body or {}
+    thresholds = payload.get("thresholds")
+    if thresholds is not None and not isinstance(thresholds, dict):
+        raise HTTPException(status_code=400, detail="thresholds 必须是对象")
+    store, _registry, _engine = _ontologyParts()
+    report = ontologyQualityReport(store, tenantId=_tenantOf(current_user))
+    try:
+        gate = qualityGateCheck(report, thresholds or {})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "message": "success",
+            "data": {"report": report, "gate": gate}}
+
+
+@router.post("/ontology/prove")
+async def prove_ontology_goal(
+    body: Dict[str, Any] = None,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """反向链定理证明（U12）：从目标三元组反向搜索证明树。严格只读——
+    不写表、不产生派生事实；missing 如实记录 unproven/cycle/depth。"""
+    from neurova.knowledge.ontology.backward_chaining import proveGoal
+
+    payload = body or {}
+    subject = str(payload.get("subject") or "")
+    predicate = str(payload.get("predicate") or "")
+    obj = str(payload.get("object") or "")
+    if not (subject and predicate and obj):
+        raise HTTPException(status_code=400, detail="subject/predicate/object 均必填")
+    maxDepth = payload.get("max_depth")
+    store, _registry, _engine = _ontologyParts()
+    proof = proveGoal(
+        store, subject, predicate, obj,
+        tenantId=_tenantOf(current_user),
+        agentId=str(payload.get("agent_id") or "") or "default",
+        maxDepth=int(maxDepth) if maxDepth else None)
+    return {"code": 0, "message": "success", "data": proof}
+
+
+@router.get("/ontology/explain/{fact_id}")
+async def explain_ontology_fact(
+    fact_id: str = Path(...),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """推导解释（U13）：沿推导账本回溯已落库结论的实际来路（只读投影，
+    steps 树+中文模板文本）。"""
+    from neurova.knowledge.ontology.explanation import explainDerivation
+
+    store, _registry, _engine = _ontologyParts()
+    try:
+        explanation = explainDerivation(store, fact_id, tenantId=_tenantOf(current_user))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"code": 0, "message": "success", "data": explanation}
