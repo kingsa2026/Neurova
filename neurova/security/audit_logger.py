@@ -17,6 +17,7 @@ Neurova 安全审计日志模块
 
 import csv
 import datetime
+import hashlib
 import json
 from neurova.core.logger import get_logger
 import sqlite3
@@ -26,7 +27,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from neurova.core.db_migration import migrate as apply_migrations, register_migration
 from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
@@ -131,6 +133,117 @@ def auditDbPath() -> str:
     return str(target)
 
 
+# ---------------------------------------------------------------------------
+# S4 审计防篡改哈希链（拍板 D-S2 = 全量事件入链）
+#
+# 每行落两列：prev_hash（前一条 entry_hash；首条为全零创世串）与
+# entry_hash = sha256(prev_hash ‖ canonical_json(本条去哈希字段))。
+# 哈希覆盖 AuditLogEntry 全部业务字段（不含两列哈希本身与库端 created_at），
+# 任何字段被静默改写都会使该行 entry_hash 复算不符，校验按 id 序定位断点。
+# ---------------------------------------------------------------------------
+
+#: 哈希链版本域：audit.db 独立成库，schema 演进按域登记（core/db_migration.py）。
+AUDIT_DB_DOMAIN = "audit_log"
+
+#: 创世 prev_hash：全零 64 位（sha256 hex 长度），首条审计事件的链头。
+GENESIS_PREV_HASH = "0" * 64
+
+# v1 基线：audit_logs 原始表结构（与历史 _init_db 逐字一致）+ 索引。
+_AUDIT_SCHEMA_V1 = """
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    user_id TEXT,
+    action TEXT,
+    details TEXT,
+    timestamp REAL NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT,
+    resource_type TEXT,
+    resource_id TEXT,
+    metadata TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_event_type ON audit_logs(event_type);
+CREATE INDEX IF NOT EXISTS idx_user_id ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_timestamp ON audit_logs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_severity ON audit_logs(severity);
+"""
+
+
+def _migrateAuditLogHashColumns(conn: sqlite3.Connection) -> None:
+    """v2（S4）：给 audit_logs 补 prev_hash / entry_hash 两列。
+
+    旧库 ALTER TABLE 幂等补齐；迁移前既有行两列保持 NULL（legacy 形态），
+    链校验按 legacy 跳过——不回填、不臆造历史哈希。
+    """
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(audit_logs)").fetchall()
+    }
+    if "prev_hash" not in columns:
+        conn.execute("ALTER TABLE audit_logs ADD COLUMN prev_hash TEXT")
+    if "entry_hash" not in columns:
+        conn.execute("ALTER TABLE audit_logs ADD COLUMN entry_hash TEXT")
+
+
+# 模块级登记（与 api/auth.py、agent/swarm_event_store.py 同范式）：import 即入
+# 登记表可审计；register_migration 对同版本重复注册幂等忽略。
+register_migration(1, _AUDIT_SCHEMA_V1, domain=AUDIT_DB_DOMAIN)
+register_migration(2, _migrateAuditLogHashColumns, domain=AUDIT_DB_DOMAIN)
+
+
+def canonicalJson(obj: Any) -> str:
+    """规范化 JSON：键排序、紧凑分隔符、保留非 ASCII 原文——同内容必同串。"""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def computeEntryHash(prev_hash: str, payload: Dict[str, Any]) -> str:
+    """entry_hash = sha256(prev_hash ‖ canonical_json(payload))。"""
+    return hashlib.sha256(
+        (prev_hash + canonicalJson(payload)).encode("utf-8")
+    ).hexdigest()
+
+
+def _chainPayload(fields: Dict[str, Any]) -> Dict[str, Any]:
+    """抽取并归一化参与哈希链的字段（去哈希两列；写路与校验路共用同一份清单）。
+
+    None 归空串/空表，与落库形态（`or ""` / `{}`）一致，保证写读往返可复算。
+    """
+    return {
+        "event_type": fields.get("event_type") or "",
+        "severity": fields.get("severity") or "",
+        "user_id": fields.get("user_id") or "",
+        "action": fields.get("action") or "",
+        "details": fields.get("details") or {},
+        "timestamp": fields.get("timestamp") if fields.get("timestamp") is not None else 0.0,
+        "ip_address": fields.get("ip_address") or "",
+        "user_agent": fields.get("user_agent") or "",
+        "resource_type": fields.get("resource_type") or "",
+        "resource_id": fields.get("resource_id") or "",
+        "metadata": fields.get("metadata") or {},
+    }
+
+
+def _entryChainFields(entry: AuditLogEntry) -> Dict[str, Any]:
+    """写路径：由 AuditLogEntry 构建链哈希载荷。"""
+    return _chainPayload(
+        {
+            "event_type": entry.event_type.value,
+            "severity": entry.severity.value,
+            "user_id": entry.user_id,
+            "action": entry.action,
+            "details": entry.details,
+            "timestamp": entry.timestamp,
+            "ip_address": entry.ip_address,
+            "user_agent": entry.user_agent,
+            "resource_type": entry.resource_type,
+            "resource_id": entry.resource_id,
+            "metadata": entry.metadata,
+        }
+    )
+
+
 class AuditLogger:
     """
     审计日志管理器
@@ -212,40 +325,12 @@ class AuditLogger:
             self._close_conn(conn)
 
     def _init_db(self):
-        """初始化数据库表"""
+        """初始化数据库表（schema 唯一事实源：db_migration 注册表 domain=audit_log）。"""
         conn = None
         try:
             conn = self._get_conn()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS audit_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_type TEXT NOT NULL,
-                    severity TEXT NOT NULL,
-                    user_id TEXT,
-                    action TEXT,
-                    details TEXT,
-                    timestamp REAL NOT NULL,
-                    ip_address TEXT,
-                    user_agent TEXT,
-                    resource_type TEXT,
-                    resource_id TEXT,
-                    metadata TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-
-            # 创建索引
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_event_type ON audit_logs(event_type)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_id ON audit_logs(user_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON audit_logs(timestamp)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_severity ON audit_logs(severity)")
-
-            conn.commit()
-
+            apply_migrations(conn, domain=AUDIT_DB_DOMAIN)
             logger.info("Audit database initialized")
-
         except Exception as e:
             logger.error("Failed to initialize audit database: %s", e)
             raise
@@ -255,7 +340,8 @@ class AuditLogger:
 
     def log(self, entry: AuditLogEntry) -> bool:
         """
-        记录审计日志
+        记录审计日志（S4：同一 BEGIN IMMEDIATE 事务内取链尾 prev_hash 并落
+        entry_hash，写锁自事务开始即持有，并发写入不会各自链到同一尾节点）
 
         Args:
             entry: 审计日志条目
@@ -268,30 +354,44 @@ class AuditLogger:
             conn = self._get_conn()
             cursor = conn.cursor()
 
-            cursor.execute(
-                """
-                INSERT INTO audit_logs (
-                    event_type, severity, user_id, action, details,
-                    timestamp, ip_address, user_agent, resource_type,
-                    resource_id, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    entry.event_type.value,
-                    entry.severity.value,
-                    entry.user_id,
-                    entry.action,
-                    json.dumps(entry.details),
-                    entry.timestamp,
-                    entry.ip_address,
-                    entry.user_agent,
-                    entry.resource_type,
-                    entry.resource_id,
-                    json.dumps(entry.metadata),
-                ),
-            )
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                tail = cursor.execute(
+                    "SELECT entry_hash FROM audit_logs ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                prev_hash = GENESIS_PREV_HASH
+                if tail is not None and tail["entry_hash"]:
+                    prev_hash = tail["entry_hash"]
+                entry_hash = computeEntryHash(prev_hash, _entryChainFields(entry))
 
-            conn.commit()
+                cursor.execute(
+                    """
+                    INSERT INTO audit_logs (
+                        event_type, severity, user_id, action, details,
+                        timestamp, ip_address, user_agent, resource_type,
+                        resource_id, metadata, prev_hash, entry_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        entry.event_type.value,
+                        entry.severity.value,
+                        entry.user_id,
+                        entry.action,
+                        json.dumps(entry.details),
+                        entry.timestamp,
+                        entry.ip_address,
+                        entry.user_agent,
+                        entry.resource_type,
+                        entry.resource_id,
+                        json.dumps(entry.metadata),
+                        prev_hash,
+                        entry_hash,
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
             logger.debug("Audit log recorded: %s - %s", entry.event_type.value, entry.action)
             return True
@@ -303,24 +403,90 @@ class AuditLogger:
             if conn is not None:
                 self._close_conn(conn)
 
-    def log_auth_login(self, user_id: str, ip_address: str = "", user_agent: str = "", success: bool = True) -> bool:
-        """记录登录事件"""
+    def verifyChain(self) -> Tuple[bool, Optional[int]]:
+        """全表按 id 序校验哈希链，返回 (ok, first_broken_id)。
+
+        - 每行复算 entry_hash，并与 prev_hash 链接比对；
+        - entry_hash 为空的行按 legacy（迁移前旧行）跳过，不误报；
+        - 首个有哈希行只验自身哈希（其 prev_hash 指向的行可能已归档删除，
+          无外部锚点时链头截断本不可检，如实不误报）。
+        """
+        conn = None
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, prev_hash, entry_hash, event_type, severity, user_id,
+                       action, details, timestamp, ip_address, user_agent,
+                       resource_type, resource_id, metadata
+                FROM audit_logs ORDER BY id ASC
+                """
+            )
+            prev_expected: Optional[str] = None
+            for row in cursor.fetchall():
+                entry_hash = row["entry_hash"]
+                if not entry_hash:
+                    continue  # legacy 行：迁移前写入，无哈希可验
+                fields = _chainPayload(
+                    {
+                        "event_type": row["event_type"],
+                        "severity": row["severity"],
+                        "user_id": row["user_id"],
+                        "action": row["action"],
+                        "details": json.loads(row["details"]) if row["details"] else {},
+                        "timestamp": row["timestamp"],
+                        "ip_address": row["ip_address"],
+                        "user_agent": row["user_agent"],
+                        "resource_type": row["resource_type"],
+                        "resource_id": row["resource_id"],
+                        "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                    }
+                )
+                row_prev = row["prev_hash"] or GENESIS_PREV_HASH
+                if computeEntryHash(row_prev, fields) != entry_hash:
+                    return False, row["id"]
+                if prev_expected is not None and row_prev != prev_expected:
+                    return False, row["id"]
+                prev_expected = entry_hash
+            return True, None
+        except Exception as e:
+            logger.error("Failed to verify audit chain: %s", e)
+            return False, None
+        finally:
+            if conn is not None:
+                self._close_conn(conn)
+
+    def log_auth_login(
+        self,
+        user_id: Optional[str],
+        ip_address: str = "",
+        user_agent: str = "",
+        success: bool = True,
+        attempted_username: str = "",
+    ) -> bool:
+        """记录登录事件（登录与刷新令牌成败共用同一语义）。
+
+        user_id 允许 None——用户不存在、令牌不可解等未解析形态落库为空串，
+        不臆造身份；attempted_username 把尝试的用户名带进 details 供事后追溯。
+        """
         entry = AuditLogEntry(
             event_type=AuditEventType.AUTH_LOGIN if success else AuditEventType.AUTH_FAILED,
             severity=AuditSeverity.MEDIUM if success else AuditSeverity.HIGH,
-            user_id=user_id,
+            user_id=user_id or "",
             action="Login successful" if success else "Login failed",
+            details=({"attempted_username": attempted_username} if attempted_username else {}),
             ip_address=ip_address,
             user_agent=user_agent,
         )
         return self.log(entry)
 
-    def log_auth_logout(self, user_id: str, ip_address: str = "") -> bool:
-        """记录登出事件"""
+    def log_auth_logout(self, user_id: Optional[str], ip_address: str = "") -> bool:
+        """记录登出事件（user_id 允许 None——令牌不可解时落库为空串）。"""
         entry = AuditLogEntry(
             event_type=AuditEventType.AUTH_LOGOUT,
             severity=AuditSeverity.LOW,
-            user_id=user_id,
+            user_id=user_id or "",
             action="User logged out",
             ip_address=ip_address,
         )
@@ -775,3 +941,11 @@ def log_audit(
     logger_instance = get_audit_logger()
     entry = AuditLogEntry(event_type=event_type, severity=severity, user_id=user_id, action=action, **kwargs)
     return logger_instance.log(entry)
+
+
+def verify_audit_chain() -> Tuple[bool, Optional[int]]:
+    """便捷函数：全表按 id 序校验当前审计库哈希链，返回 (ok, first_broken_id)。
+
+    S4 防篡改判据入口：ok=False 时 first_broken_id 为首条被改写/断链的行 id。
+    """
+    return get_audit_logger().verifyChain()

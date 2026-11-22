@@ -348,6 +348,30 @@ async def get_approval_trajectory(
         )
 
 
+@router.get("/integrity")
+async def get_audit_integrity(
+    request: Request,
+    _admin: Dict[str, Any] = Depends(require_admin()),
+):
+    """审计哈希链完整性校验（S4 防篡改）。
+
+    全表按 id 序复算每行 entry_hash 并比对 prev_hash 链接；链被静默改写时
+    返回 ok=false 与首条断点行 id。鉴权与同域一致（admin）。
+    """
+    try:
+        ok, broken_id = get_audit_logger().verifyChain()
+        return {"code": 0, "message": "success", "data": {
+            "ok": ok,
+            "first_broken_id": broken_id,
+        }}
+    except Exception as e:
+        logger.exception("Failed to verify audit chain: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to verify audit chain: {str(e)}",
+        )
+
+
 @router.get("/stats", response_model=AuditStats)
 async def get_audit_stats(
     request: Request,
