@@ -343,29 +343,31 @@ class AnthropicProvider(BaseProvider):
             )
 
     async def probe_model_multimodal(self, model_id: str) -> ProbeResult:
-        """探测模型的多模态能力
+        """探测模型的多模态能力：真图探测（红图 + 主色调提问，anthropic 原生形态）。
 
-        Args:
-            model_id: 模型ID
-
-        Returns:
-            探测结果
+        M7 遗留收口（2026-11-22）：原实现仅名称启发式且恒 ``supported=True``——
+        声明与实测无从对齐。现走 `multimodal_prober.probeProviderVision` 探测
+        矩阵（HTTP 层可桩化进 CI，真 Key 手动档同入口）；探测下不了结论时如实
+        透传 inconclusive，不再拿名称启发式冒充实测。
         """
-        start_time = time.time()
+        from neurova.llm.providers.multimodal_prober import probeProviderVision
 
-        # 基于模型名称推断能力
+        probed = await probeProviderVision("anthropic", model_id, self.base_url, self.api_key)
+        if probed.metadata.get("probe_source") != "probed":
+            return probed
+
         capabilities = self._detect_capabilities(model_id)
-        latency = (time.time() - start_time) * 1000
-
+        if probed.supported:
+            if ProviderCapability.VISION not in capabilities:
+                capabilities = [*capabilities, ProviderCapability.VISION]
+        else:
+            capabilities = [c for c in capabilities if c != ProviderCapability.VISION]
         return ProbeResult(
             model_id=model_id,
-            supported=True,
+            supported=probed.supported,
             capabilities=capabilities,
-            latency_ms=latency,
-            metadata={
-                "provider": "anthropic",
-                "detection_method": "name_heuristic",
-            },
+            latency_ms=probed.latency_ms,
+            metadata={**probed.metadata, "provider": "anthropic"},
         )
 
     def _detect_capabilities(self, model_id: str) -> typing.List[ProviderCapability]:
