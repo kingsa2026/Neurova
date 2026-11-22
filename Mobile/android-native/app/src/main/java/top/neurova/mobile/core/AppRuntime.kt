@@ -11,6 +11,7 @@ import top.neurova.mobile.core.net.MobileWsChannel
 import top.neurova.mobile.core.store.SecureVaultCredentialStore
 import top.neurova.mobile.feature.admin.AdminRepository
 import top.neurova.mobile.feature.admin.EvolutionRepository
+import top.neurova.mobile.feature.aigc.AigcRepository
 import top.neurova.mobile.feature.agents.AgentsStore
 import top.neurova.mobile.feature.auth.AuthStore
 import top.neurova.mobile.feature.chat.ChatRepository
@@ -36,6 +37,9 @@ class AppRuntime(context: Context) {
     private fun activeProfile(): ServerProfile =
         servers.active ?: ServerProfile(id = "default", name = "本机开发", baseUrl = "http://10.0.2.2:9527")
 
+    /** 当前生效档案（屏内拼产物绝对地址等场景取用；默认兜底仍单源在 activeProfile） */
+    fun currentProfile(): ServerProfile = activeProfile()
+
     val http = HttpChannel(::activeProfile, credentials, scope)
     val auth = AuthStore(http, credentials, servers)
     val pairing = PairingStore(http, credentials)
@@ -53,4 +57,5 @@ class AppRuntime(context: Context) {
     val modelsRepo = ModelsRepository(http)
     val adminRepo = AdminRepository(http)
     val evolutionRepo = EvolutionRepository(http)
+    val aigcRepo = AigcRepository(http)
 }

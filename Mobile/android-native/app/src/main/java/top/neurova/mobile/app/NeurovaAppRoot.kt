@@ -43,6 +43,8 @@ import androidx.navigation.navArgument
 import top.neurova.mobile.feature.admin.AdminEvolutionScreen
 import top.neurova.mobile.feature.admin.AdminGroupsScreen
 import top.neurova.mobile.feature.admin.AdminUsersScreen
+import top.neurova.mobile.feature.aigc.AigcScreen
+import top.neurova.mobile.feature.aigc.AigcWorkbenchEntry
 import top.neurova.mobile.feature.agents.AgentsTabScreen
 import top.neurova.mobile.feature.auth.LoginScreen
 import top.neurova.mobile.feature.chat.ChatScreen
@@ -186,7 +188,11 @@ private fun NeurovaNavHost(navController: NavHostController) {
                 onBack = { navController.popBackStack() },
             )
         }
-        composable(TabDestination.WORKBENCH.route) { WorkbenchTabScreen() }
+        composable(TabDestination.WORKBENCH.route) {
+            AigcWorkbenchEntry(onOpenAigc = { navController.navigate("workbench/aigc") }) {
+                WorkbenchTabScreen()
+            }
+        }
         composable(TabDestination.AGENTS.route) {
             AgentsTabScreen(onOpenChat = { openTab(navController, TabDestination.CHAT) })
         }
@@ -202,6 +208,7 @@ private fun NeurovaNavHost(navController: NavHostController) {
         }
         composable("profile/servers") { ServerManageScreen(onBack = { navController.popBackStack() }) }
         composable("profile/models") { ModelsScreen(onBack = { navController.popBackStack() }) }
+        composable("workbench/aigc") { AigcScreen(onBack = { navController.popBackStack() }) }
         composable("admin/users") { AdminUsersScreen(onBack = { navController.popBackStack() }) }
         composable("admin/groups") { AdminGroupsScreen(onBack = { navController.popBackStack() }) }
         composable("admin/evolution") { AdminEvolutionScreen(onBack = { navController.popBackStack() }) }

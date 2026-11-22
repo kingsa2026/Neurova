@@ -53,6 +53,17 @@ class HttpChannel(
     suspend fun deleteJson(path: String): JsonElement =
         execute(buildRequest(path, emptyMap(), method = "DELETE", body = null))
 
+    /** 二进制 GET（AIGC 产物预览等）：同一条 Bearer + 401 续签链路，非 2xx 诚实抛 ChannelHttpException */
+    suspend fun getBytes(path: String): ByteArray = withContext(Dispatchers.IO) {
+        val request = buildRequest(path, emptyMap(), method = "GET", body = null)
+        sendWithAuthRetry(request).use { response ->
+            if (!response.isSuccessful) {
+                throw ChannelHttpException(response.code, request.url.encodedPath, response.body?.string().orEmpty())
+            }
+            response.body?.bytes() ?: ByteArray(0)
+        }
+    }
+
     /** 信封解包：优先取 data 字段，裸形态原样返回 */
     fun unwrapData(element: JsonElement): JsonElement = when {
         element is JsonObject && element.containsKey("data") && element["data"] is JsonObject -> element["data"]!!
