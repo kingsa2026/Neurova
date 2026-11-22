@@ -6,6 +6,21 @@
 # 不变量由 tests/unit/test_dev_path_and_runtime_dep_guards.py 与
 # tests/unit/test_lock_integrity_guard.py 常驻校验。
 
+# [project] 只承担打包元数据与 console_scripts 注册（U11：neurova-ontology CLI），
+# 依赖仍以 requirements.txt 为单一事实源（上方纪律不变）；版本 dynamic 单源
+# = neurova/__init__.__version__，不在此抄第二份。
+[project]
+name = "neurova"
+description = "Neurova - 神经感知记忆系统"
+dynamic = ["version"]
+requires-python = ">=3.10"
+
+[project.scripts]
+neurova-ontology = "neurova.knowledge.ontology.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "neurova.__version__"}
+
 [tool.black]
 line-length = 120
 target-version = ['py310']
