@@ -8,6 +8,7 @@ import top.neurova.mobile.core.model.ActiveModel
 import top.neurova.mobile.core.model.CheckConnectionResult
 import top.neurova.mobile.core.model.ModelInfo
 import top.neurova.mobile.core.model.ProviderInfo
+import top.neurova.mobile.core.model.ProviderTrafficRow
 import top.neurova.mobile.core.net.HttpChannel
 
 /**
@@ -55,23 +56,43 @@ class ModelsRepository(private val http: HttpChannel) {
         )
     }
 
-    /** 新增服务商（POST /providers，CreateProviderRequest；空值字段不下发） */
-    suspend fun createProvider(name: String, providerType: String, baseUrl: String, apiKey: String) {
+    /** 新增服务商（POST /providers，CreateProviderRequest；空值字段不下发。
+     *  weight/embeddingModel：D-R2/R11 声明位，null=不下发走后端缺省） */
+    suspend fun createProvider(
+        name: String,
+        providerType: String,
+        baseUrl: String,
+        apiKey: String,
+        weight: Double? = null,
+        embeddingModel: String? = null,
+    ) {
         val body = buildMap {
             put("name", JsonPrimitive(name))
             put("provider_type", JsonPrimitive(providerType))
             if (baseUrl.isNotBlank()) put("base_url", JsonPrimitive(baseUrl))
             if (apiKey.isNotBlank()) put("api_key", JsonPrimitive(apiKey))
+            weight?.let { put("weight", JsonPrimitive(it)) }
+            embeddingModel?.takeIf { it.isNotBlank() }?.let { put("embedding_model", JsonPrimitive(it)) }
         }
         http.postJson("/providers", JsonObject(body))
     }
 
-    /** 更新服务商（PUT /providers/{id}，UpdateProviderRequest；null=不改动该字段） */
-    suspend fun updateProvider(providerId: String, name: String?, baseUrl: String?, apiKey: String?) {
+    /** 更新服务商（PUT /providers/{id}，UpdateProviderRequest；null=不改动该字段。
+     *  embeddingModel 传空串=清除声明（后端空串语义），传非空=改声明） */
+    suspend fun updateProvider(
+        providerId: String,
+        name: String?,
+        baseUrl: String?,
+        apiKey: String?,
+        weight: Double? = null,
+        embeddingModel: String? = null,
+    ) {
         val body = buildMap {
             name?.takeIf { it.isNotBlank() }?.let { put("name", JsonPrimitive(it)) }
             baseUrl?.let { put("base_url", JsonPrimitive(it)) }
-            apiKey?.takeIf { it.isNotBlank() }?.let { put("api_key", JsonPrimitive(it)) }
+            apiKey?.takeIf { it.isNotBlank() }?.let { put("api_key", JsonPrimitive(apiKey)) }
+            weight?.let { put("weight", JsonPrimitive(it)) }
+            embeddingModel?.let { put("embedding_model", JsonPrimitive(it)) }
         }
         http.putJson("/providers/$providerId", JsonObject(body))
     }
@@ -79,5 +100,18 @@ class ModelsRepository(private val http: HttpChannel) {
     /** 删除服务商（DELETE /providers/{id}） */
     suspend fun deleteProvider(providerId: String) {
         http.deleteJson("/providers/$providerId")
+    }
+
+    /** 服务商真实流量分布（D-R2 观测项：/stats/usage-overview 的 by_provider 段；
+     *  端点/段缺失或空库 → 空列表，卡片隐藏） */
+    suspend fun providerTraffic(): List<ProviderTrafficRow> {
+        val data = http.unwrapData(http.getJson("/stats/usage-overview?days=7&trend_days=7")) as? JsonObject
+            ?: return emptyList()
+        val arr = data["by_provider"] ?: return emptyList()
+        if (arr !is kotlinx.serialization.json.JsonArray) return emptyList()
+        return json.decodeFromJsonElement(
+            ListSerializer(ProviderTrafficRow.serializer()),
+            arr,
+        )
     }
 }

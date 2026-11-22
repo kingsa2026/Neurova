@@ -15,6 +15,20 @@ data class ProviderInfo(
     @SerialName("models_count") val modelsCount: Int = 0,
     val health: String = "",
     @SerialName("api_key_configured") val apiKeyConfigured: Boolean = false,
+    /** D-R2：同优先级组内加权分流份额（0=仅兜底；缺省 1） */
+    @SerialName("weight") val weight: Double = 1.0,
+    /** R11：服务商级嵌入模型声明（null=未声明=本地嵌入） */
+    @SerialName("embedding_model") val embeddingModel: String? = null,
+)
+
+/** 服务商流量分布行（GET /stats/usage-overview 的 by_provider 段；D-R2 观测项） */
+@Serializable
+data class ProviderTrafficRow(
+    val provider: String = "",
+    val calls: Int = 0,
+    val tokens: Long = 0,
+    /** tokens 占比（百分比一位小数；总 0 → 0） */
+    @SerialName("share") val share: Double = 0.0,
 )
 
 /** 模型（GET /models 裸数组；model.py ModelInfo 投影子集；context_window/max_tokens 实测可 null） */

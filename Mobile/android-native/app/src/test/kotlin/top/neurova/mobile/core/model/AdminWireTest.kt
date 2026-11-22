@@ -34,6 +34,32 @@ class AdminWireTest {
     }
 
     @Test
+    fun providerInfoDecodesWeightAndEmbeddingModel() {
+        val payload = """
+            {"provider_id":"wa","name":"WA","provider_type":"openai",
+             "base_url":"http://127.0.0.1:1/v1","is_active":true,
+             "status":"unknown","models_count":1,"health":"unknown",
+             "api_key_configured":true,"weight":3.0,"embedding_model":"bge-m3"}
+        """.trimIndent()
+        val provider = json.decodeFromString(ProviderInfo.serializer(), payload)
+        assertEquals(3.0, provider.weight, 0.0001)
+        assertEquals("bge-m3", provider.embeddingModel)
+    }
+
+    @Test
+    fun providerInfoDefaultsWhenNewFieldsAbsent() {
+        val payload = """
+            {"provider_id":"wb","name":"WB","provider_type":"openai",
+             "base_url":"http://127.0.0.1:2/v1","is_active":true,
+             "status":"unknown","models_count":1,"health":"unknown",
+             "api_key_configured":true}
+        """.trimIndent()
+        val provider = json.decodeFromString(ProviderInfo.serializer(), payload)
+        assertEquals(1.0, provider.weight, 0.0001)
+        assertNull(provider.embeddingModel)
+    }
+
+    @Test
     fun modelInfoDecodesRealPayloadWithNullContextWindow() {
         val payload = """
             {"model_id":"DeepSeek-V4-Flash-Vision-Exp","name":"Deepseek V4 Flash Vision Exp",

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -46,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import top.neurova.mobile.core.model.ModelInfo
 import top.neurova.mobile.core.model.ProviderInfo
+import top.neurova.mobile.core.model.ProviderTrafficRow
 import top.neurova.mobile.ui.components.LocalAppRuntime
 import top.neurova.mobile.ui.theme.LocalNeurovaColors
 
@@ -70,6 +72,8 @@ fun ModelsScreen(onBack: () -> Unit) {
     var creating by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<ProviderInfo?>(null) }
     var deleting by remember { mutableStateOf<ProviderInfo?>(null) }
+    // D-R2 观测项：服务商真实流量分布（usage_history 按 provider 聚合）
+    var traffic by remember { mutableStateOf<List<ProviderTrafficRow>>(emptyList()) }
 
     LaunchedEffect(reloadTick) {
         loading = true
@@ -81,6 +85,8 @@ fun ModelsScreen(onBack: () -> Unit) {
             activeModel = active.model
             activeProvider = active.provider
         }.onFailure { errorText = it.message ?: "模型域加载失败" }
+        // 流量分布副路径：失败静默回空（卡片隐藏），不影响主看板
+        traffic = runCatching { runtime.modelsRepo.providerTraffic() }.getOrDefault(emptyList())
         loading = false
     }
 
@@ -201,6 +207,56 @@ fun ModelsScreen(onBack: () -> Unit) {
                         }
                     }
                 }
+                if (traffic.isNotEmpty()) {
+                    item(key = "traffic-title") { SectionLabel("服务商流量分布（近 7 日）") }
+                    item(key = "traffic-card") {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(palette.glass)
+                                .border(1.dp, palette.glassBorder, RoundedCornerShape(14.dp))
+                                .padding(horizontal = 13.dp, vertical = 11.dp),
+                        ) {
+                            traffic.forEach { row ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        row.provider,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = palette.textHi,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                    Text(
+                                        "${row.calls} 次 · ${row.tokens} tokens",
+                                        fontSize = 10.5.sp,
+                                        color = palette.textMid,
+                                        modifier = Modifier.padding(start = 8.dp),
+                                    )
+                                    Text(
+                                        "${row.share}%",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = palette.accent,
+                                        modifier = Modifier.padding(start = 10.dp),
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(row.share.toFloat().coerceIn(0.02f, 1f))
+                                        .height(5.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(palette.accent),
+                                )
+                            }
+                        }
+                    }
+                }
                 item(key = "models-title") { SectionLabel("模型（${models.size}）") }
                 items(models, key = { it.modelId }) { model ->
                     Row(
@@ -253,11 +309,13 @@ fun ModelsScreen(onBack: () -> Unit) {
             initialType = "openai",
             initialBaseUrl = "",
             initialApiKey = "",
+            initialWeight = 1.0,
+            initialEmbeddingModel = "",
             dismiss = { creating = false },
-            submit = { name, type, baseUrl, apiKey ->
+            submit = { name, type, baseUrl, apiKey, weight, embeddingModel ->
                 creating = false
                 runtime.scope.launch {
-                    runCatching { runtime.modelsRepo.createProvider(name, type, baseUrl, apiKey) }
+                    runCatching { runtime.modelsRepo.createProvider(name, type, baseUrl, apiKey, weight, embeddingModel) }
                     reloadTick = !reloadTick
                 }
             },
@@ -270,12 +328,14 @@ fun ModelsScreen(onBack: () -> Unit) {
             initialType = provider.providerType,
             initialBaseUrl = provider.baseUrl,
             initialApiKey = "",
+            initialWeight = provider.weight,
+            initialEmbeddingModel = provider.embeddingModel ?: "",
             dismiss = { editing = null },
-            submit = { name, _, baseUrl, apiKey ->
+            submit = { name, _, baseUrl, apiKey, weight, embeddingModel ->
                 val target = provider.providerId
                 editing = null
                 runtime.scope.launch {
-                    runCatching { runtime.modelsRepo.updateProvider(target, name, baseUrl, apiKey) }
+                    runCatching { runtime.modelsRepo.updateProvider(target, name, baseUrl, apiKey, weight, embeddingModel) }
                     reloadTick = !reloadTick
                 }
             },
@@ -314,7 +374,9 @@ private fun SectionLabel(text: String) {
     )
 }
 
-/** 新增/编辑共用表单：编辑时 apiKey 留空 = 不改动（后端 Update 语义） */
+/** 新增/编辑共用表单：编辑时 apiKey 留空 = 不改动（后端 Update 语义）。
+ *  weight/embeddingModel：D-R2/R11 声明位——weight 留空 = 不改动；
+ *  embeddingModel 编辑时清空 = 清除声明（后端空串语义），创建时留空 = 不下发。 */
 @Composable
 private fun ProviderFormDialog(
     title: String,
@@ -322,14 +384,18 @@ private fun ProviderFormDialog(
     initialType: String,
     initialBaseUrl: String,
     initialApiKey: String,
+    initialWeight: Double,
+    initialEmbeddingModel: String,
     dismiss: () -> Unit,
-    submit: (name: String, type: String, baseUrl: String, apiKey: String) -> Unit,
+    submit: (name: String, type: String, baseUrl: String, apiKey: String, weight: Double?, embeddingModel: String) -> Unit,
 ) {
     val palette = LocalNeurovaColors.current
     var name by remember { mutableStateOf(initialName) }
     var type by remember { mutableStateOf(initialType) }
     var baseUrl by remember { mutableStateOf(initialBaseUrl) }
     var apiKey by remember { mutableStateOf(initialApiKey) }
+    var weightText by remember { mutableStateOf(initialWeight.toString().removeSuffix(".0")) }
+    var embeddingModel by remember { mutableStateOf(initialEmbeddingModel) }
 
     AlertDialog(
         onDismissRequest = dismiss,
@@ -365,6 +431,18 @@ private fun ProviderFormDialog(
                     label = { Text(if (initialApiKey.isEmpty()) "API Key" else "API Key（留空=不改动）") },
                     singleLine = true,
                 )
+                OutlinedTextField(
+                    value = weightText,
+                    onValueChange = { weightText = it },
+                    label = { Text("分流权重（同优先级组内；0=仅兜底）") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = embeddingModel,
+                    onValueChange = { embeddingModel = it },
+                    label = { Text("嵌入模型（选填；留空=本地嵌入）") },
+                    singleLine = true,
+                )
             }
         },
         confirmButton = {
@@ -373,7 +451,8 @@ private fun ProviderFormDialog(
                     val trimmedName = name.trim()
                     if (trimmedName.isNotEmpty()) {
                         dismiss()
-                        submit(trimmedName, type, baseUrl.trim(), apiKey.trim())
+                        val weight = weightText.trim().toDoubleOrNull()
+                        submit(trimmedName, type, baseUrl.trim(), apiKey.trim(), weight, embeddingModel.trim())
                     }
                 },
                 enabled = name.trim().isNotEmpty(),
