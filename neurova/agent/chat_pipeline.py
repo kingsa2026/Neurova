@@ -1811,8 +1811,6 @@ class ChatPipeline:
         # （截图进上下文、RS 远程会话平面）都不会悄悄撑爆 LLM 上下文。
         self._apply_image_retention(ctx)
 
-    _IMAGE_RETENTION_KEEP_LAST = 4
-
     def _apply_image_retention(self, ctx: ChatContext):
         """对 ctx.context 应用历史图片保留策略（失败静默，不影响主流程）。"""
         context = getattr(ctx, "context", None)
@@ -1820,9 +1818,12 @@ class ChatPipeline:
             return
         try:
             from neurova.agent.image_retention import apply_image_retention
+            from neurova.llm import model_limits
 
+            # keep_last 单源：调用时读 model_limits（不 import 期绑定快照），
+            # 与 attachment_parser / files_api 的多模态预算同源同值（卡 L1 收口）。
             cleaned, stats = apply_image_retention(
-                context, keep_last=self._IMAGE_RETENTION_KEEP_LAST
+                context, keep_last=model_limits.MULTIMODAL_IMAGE_RETAIN_PER_TURN
             )
             if stats.get("images_removed"):
                 logger.info("历史图片保留策略生效: %s", stats)
