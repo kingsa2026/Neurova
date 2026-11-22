@@ -1,6 +1,6 @@
 # reference_ad：LobeHub（lobehub/lobehub）vs Neurova 全方位代码级对照评测
 
-- 日期：2026-11-21（v2：增补 D11 自我进化/RSI 维；v3：增补 D2 上下文活水池专项；v4：增补 D4 工具肌肉记忆专项；v5：多模态十轴专项细拆；v7：D4 工具与执行安全十轴专项细拆）
+- 日期：2026-11-21（v2：增补 D11 自我进化/RSI 维；v3：增补 D2 上下文活水池专项；v4：增补 D4 工具肌肉记忆专项；v5：多模态十轴专项细拆；v7：D4 工具与执行安全十轴专项细拆；v8：D9 数据/租户/认证/安全专项细拆）
 - 对象：[lobehub/lobehub](https://github.com/lobehub/lobehub)（代号 reference_ad；LobeChat 同源演进后的 agent 平台主线仓库）
 - 快照：canary 分支浅克隆，版本 2.3.4，pushed_at 2026-11-21；85.9k stars / 16.3k forks；TypeScript
 - 体量：124 个 pnpm 子包；ts/tsx 共 **3,777,641 行**；`*.test.*` 文件 **7,321** 个；18 种界面语言；32 条 GitHub workflow
@@ -120,7 +120,9 @@
 
 **LobeHub**：数据层强——242 张表、228 个 drizzle 迁移、软删+回收站+FTS outbox+autovacuum 调优（`packages/database/src/schemas/`、`migrations/`）；认证=better-auth 引擎+17 个 SSO/OAuth 提供商+Passkey/WebAuthn+magic link+Email OTP+**自建 OIDC IdP**（`apps/auth/src/libs/better-auth/define-config.ts:132-393`、`src/libs/oidc-provider/`）；API key 的工作区绑定纪律好（个人 key 禁跨工作区、签发者在职校验、RBAC 降权自动收紧，`packages/trpc/src/lambda/context.ts:281-339`）；设备链路三层纵深（deviceId 哈希+token 握手+设备端 symlink 逃逸防护，`device-identity/src/index.ts:54-79`、`device-control/src/workspaceGuard.ts:28-63`）。**硬扣分（OSS 快照）**：RBAC 系统性门禁是空壳——`business-server/src/trpc-middlewares/rbacPermission.ts:14-28` 直通 stub、`workspaceAuth.ts:18-36` 只查 workspaceId 非空，注释明言"Cloud overrides this entire module"；无数据库 RLS，行级隔离全靠应用层 WHERE；主站无实质 CSP（仅 frame-ancestors，`src/libs/next/config/define-config.ts:113-117`）；业务 API 无通用限流；Electron IPC 裸 socket 无对端鉴权（`electron-server-ipc/ipcServer.ts:35-56`）；无原生 SAML/LDAP。
 **Neurova**：JWT 身份单通道（`core/identity_context.py`）+**租户校验在 API 层真实执行**（auth.py:743-751 租户提取、global_auth.py:178-190、8+ 端点文件消费；外部代理全生命周期按租户隔离为强制红线）；RBAC 角色+审计日志（security/audit_logger.py、desktop_audit、endpoints/audit.py）+webhook 验签 8 处+沙箱族+keyring。扣分：SSO 生态（OAuth 提供商矩阵/Passkey/OIDC IdP）缺位；租户隔离为字段级而非行级策略引擎。
-**子项**：数据层工程 3.0/2.0；认证 3.0/1.5；租户与权限执行 1.5/2.5（**本仓反超**：对方 OSS 侧为 stub）；运行安全 1.5/2.0。
+**子项**（v8 据实重排，合计不变）：数据层工程 3.0/2.0；认证 2.5/2.0；租户与权限执行 1.5/2.0（**本仓反超**：对方 OSS 侧为 stub）；运行安全 2.0/2.0。
+
+> 细分拆解（十轴逐项+四判定题）见同目录《[reference_ad_data_tenant_auth_security_teardown_2026-11-22.md](reference_ad_data_tenant_auth_security_teardown_2026-11-22.md)》：专项口径 L 72.5 / N 70.0（/100），较粗评收窄（身份通道/租户执行/网络边界/秘密保护四轴本仓反超；2FA 双方均不可用、登录失败审计双方均缺位、均无 RLS）。
 
 ### D10 工程纪律（L 12.5 / N 11）
 
@@ -192,3 +194,4 @@ P2：
 - v5（2026-11-22）：应评审要求把多模态单独拆出细化——新增专项《reference_ad_multimodal_teardown_2026-11-22.md》（十轴：L 68.5 / N 69.0，两路只读深读）。首版 D8 粗评漏计本仓 AIGC 端点/语音双栈/OCR，据实重评 D8：L 6.5→6.0 / N 3.5→7.0，总分 98.5/90.5 → 98.0/94.0；追平方案另立《2026-11-22-reference-ad-multimodal-catchup-implementation-plan.md》（三批十卡，四项已拍板：fal/深化 SIP/三家视频协议全做用户可选/生成物入池）。
 - v6（2026-11-22）：多模态追平三批实施完毕（七笔：0b1a63fd3 生成域三卡/6ae012c91 Gemini 视觉/7fe18e744 opencode 钉约/0a4dbe78d 探测矩阵/49b88fcf6 SIP DTMF+转写/5282b18e9 ASR 启动初始化/2917ffadd+fe447b536 预算单源+契约棘轮），专项复评 69.0→74.5，D8 7.0→7.5，总分 94.0→95.0。
 - v7（2026-11-22）：应评审要求把工具与执行安全单独拆出细化——新增专项《reference_ad_tool_security_teardown_2026-11-22.md》（十轴等权：N 82.0 / L 78.0）。首版 D4 粗评低估本仓工具面（实测 _BUILTIN_SCHEMAS 单源 139 工具 vs 对方 44）与肌肉记忆权重，据实重评 D4 工具框架子项 L 5.0→4.5 / N 3.5→4.0，总分 98.0/95.0 → 97.5/96.0；D4 判定 L 险胜 0.5。
+- v8（2026-11-22）：应评审要求把 D9 数据/租户/认证/安全单独拆出细化——新增专项《reference_ad_data_tenant_auth_security_teardown_2026-11-22.md》（十轴：L 72.5 / N 70.0，两路只读深读）。D9 子项据实重排（认证 L 3.0→2.5、N 1.5→2.0；租户执行 N 2.5→2.0；运行安全 L 1.5→2.0），D9 合计 9.0/8.0 不变，总分不受本笔影响。
