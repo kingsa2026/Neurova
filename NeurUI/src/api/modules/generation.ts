@@ -84,7 +84,18 @@ export interface VideoGenerationPayload {
   audio?: boolean
 }
 
-export type TaskKind = 'image' | 'video' | 'audio'
+export interface MusicGenerationPayload {
+  prompt: string
+  /** fal 模型 ID（如 fal-ai/musicgen）；auto/缺省 → 后端按能力路由到默认音乐模型 */
+  model?: string
+  duration?: number
+  protocol?: string
+  provider_id?: string
+  api_key?: string
+  base_url?: string
+}
+
+export type TaskKind = 'image' | 'video' | 'audio' | 'music'
 export type TaskStatus = 'submitted' | 'running' | 'succeeded' | 'failed'
 
 export interface GenerationTask {
@@ -147,6 +158,23 @@ export function getVideoTaskStatus(taskId: string) {
     error?: string
     warning?: string
   }>>(`${BASE}/video/status/${taskId}`)
+}
+
+/** 音乐任务提交（M1：fal Queue API 异步，两段式与 /video 同范式）。 */
+export function submitMusic(data: MusicGenerationPayload) {
+  return api.post<ApiResponse<{ task_id: string; status: TaskStatus; protocol: string }>>(
+    `${BASE}/music`, data)
+}
+
+/** 音乐任务轮询（账本 + 远程协议收口；四态 submitted/running/succeeded/failed）。 */
+export function getMusicTaskStatus(taskId: string) {
+  return api.get<ApiResponse<{
+    task_id: string
+    status: TaskStatus
+    url?: string
+    error?: string
+    warning?: string
+  }>>(`${BASE}/music/status/${taskId}`)
 }
 
 /**

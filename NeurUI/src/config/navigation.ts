@@ -22,7 +22,7 @@ import {
   AlertOutlined, HistoryOutlined, ControlOutlined,
   ShopOutlined, DashboardOutlined,
   PictureOutlined, VideoCameraOutlined, PlaySquareOutlined,
-  RobotOutlined, MobileOutlined,
+  RobotOutlined, MobileOutlined, CustomerServiceOutlined,
 } from '@ant-design/icons-vue'
 
 export interface TopNavItem {
@@ -63,6 +63,7 @@ export const TOP_NAV_CATEGORIES: TopNavCategory[] = [
           { to: '/aigc/image', labelKey: 'nav.aigcImage', icon: PictureOutlined },
           { to: '/aigc/audio', labelKey: 'nav.aigcAudio', icon: AudioOutlined },
           { to: '/aigc/video', labelKey: 'nav.aigcVideo', icon: VideoCameraOutlined },
+          { to: '/aigc/music', labelKey: 'nav.aigcMusic', icon: CustomerServiceOutlined },
           { to: '/aigc/studio', labelKey: 'nav.aigcStudio', icon: PlaySquareOutlined },
         ],
       },

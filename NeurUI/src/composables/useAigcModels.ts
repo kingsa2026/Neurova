@@ -117,6 +117,11 @@ export function useAigcModels() {
   const videoModelOptions = computed(() =>
     capOptions('video_generation'),
   ) as ComputedRef<AigcModelOption[]>
+  // 音乐生成（M1/L5）：按 music_generation 能力过滤。后端能力目录暂无该标记时
+  // 仅剩 auto 一项——由页面诚实提示，不硬编码假模型列表。
+  const musicModelOptions = computed(() =>
+    capOptions('music_generation'),
+  ) as ComputedRef<AigcModelOption[]>
 
   async function loadModels() {
     try {
@@ -149,5 +154,6 @@ export function useAigcModels() {
     textModelOptions,
     imageModelOptions,
     videoModelOptions,
+    musicModelOptions,
   }
 }

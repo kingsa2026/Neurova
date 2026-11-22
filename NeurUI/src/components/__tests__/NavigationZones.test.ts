@@ -130,7 +130,7 @@ describe('顶部导航（系统配置区）', () => {
     }
   })
 
-  it('模型与工具菜单序列（AIGC 五页收拢；2026-11-16 移动配对迁入；2026-11-20 录音纪要入列）', () => {
+  it('模型与工具菜单序列（AIGC 六页收拢；2026-11-16 移动配对迁入；2026-11-20 录音纪要入列；L5 音乐生成入列）', () => {
     const modelTools = TOP_NAV_CATEGORIES.find(c => c.key === 'modelTools')!
     expect(modelTools.items.map(i => i.to ?? i.labelKey)).toEqual([
       '/models', '/tool-layers', '/sandbox', '/tools/mobile-pairing',
@@ -139,7 +139,7 @@ describe('顶部导航（系统配置区）', () => {
     const group = modelTools.items.find(i => i.labelKey === 'nav.aigcTools')!
     expect(group.to, '二级菜单组头自身不做导航').toBeUndefined()
     expect(group.children?.map(c => c.to)).toEqual([
-      '/aigc/text', '/aigc/image', '/aigc/audio', '/aigc/video', '/aigc/studio',
+      '/aigc/text', '/aigc/image', '/aigc/audio', '/aigc/video', '/aigc/music', '/aigc/studio',
     ])
   })
 

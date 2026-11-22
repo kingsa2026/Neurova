@@ -40,6 +40,7 @@ const TOP_MODULES: ModuleItem[] = [
   { key: '/aigc/image', labelKey: 'aigcImage' },
   { key: '/aigc/audio', labelKey: 'aigcAudio' },
   { key: '/aigc/video', labelKey: 'aigcVideo' },
+  { key: '/aigc/music', labelKey: 'aigcMusic' },
   { key: '/aigc/studio', labelKey: 'aigcStudio' },
   { key: '/monitor', labelKey: 'monitor' },
   { key: '/health', labelKey: 'health' },
