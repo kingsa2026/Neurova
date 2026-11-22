@@ -49,6 +49,7 @@ ALLOW_REGISTRY: dict[str, str] = {
     # ── 运维配置端点（base_url 非用户内容驱动；egress 台账 C 类豁免）──
     "neurova/agent/neuacp/registry.py": "硬编码官方 CDN 常量 REGISTRY_URL，不受用户影响",
     "neurova/asr/remote_whisper_engine.py": "自部署 whisper 服务地址，运维配置",
+    "neurova/api/endpoints/auth_oidc.py": "OIDC issuer 为部署期可信配置（S2 分类豁免 url_guard 公网校验，见文件内发现文档注释），非用户可控输入",
     "neurova/channels/dingtalk.py": "第三方平台 API 常量 + 运维配置凭据拼接",
     "neurova/channels/discord.py": "第三方平台 API 常量 + 运维配置凭据拼接",
     "neurova/channels/feishu.py": "第三方平台 API 常量 + 运维配置凭据拼接",
