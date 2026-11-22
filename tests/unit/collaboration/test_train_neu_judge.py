@@ -524,3 +524,48 @@ class TestExternalLabelIngestion:
         assert metrics["externalApplied"] == 1.0
         assert payload["model_version"] == "0.4.0-neurova"
         assert NeuJudge.loadFrom(out) is not None
+
+
+class TestExcludeAgents:
+    """--exclude-agents：按 agentDir 前缀整目录剔除会话（数据源消融）。"""
+
+    def testExcludeAgentsDropsMatchingDirectories(self, script, tmp_path):
+        dataRoot = tmp_path / "data"
+
+        def writeSession(agentDir: str, sessionId: str, messages: list) -> None:
+            sessionsDir = dataRoot / agentDir / "sessions"
+            sessionsDir.mkdir(parents=True, exist_ok=True)
+            base = datetime(2026, 11, 22, 9, 0, 0)
+            payload = {"agent_id": agentDir, "session_id": sessionId,
+                       "messages": [{"role": m["role"], "content": m["content"],
+                                     "timestamp": (base + timedelta(seconds=i * 5)).isoformat()}
+                                    for i, m in enumerate(messages)]}
+            (sessionsDir / f"session_{sessionId}_2026-11-22.json").write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        for i in range(9):
+            writeSession(f"agentH{i}", f"human{i}",
+                         [{"role": "user" if j % 2 == 0 else "assistant",
+                           "content": f"问题{i}_{j}，各不相同？"} for j in range(8)])
+        for i in range(6):
+            writeSession(f"taubench-x{i}", f"t{i}",
+                         [{"role": "assistant", "content": f"外部独走{i}号第{j}句。"}
+                          for j in range(25)])
+
+        out = tmp_path / "artifact.json"
+        assert script.main(["--source", "real", "--data-root", str(dataRoot),
+                            "--out", str(out), "--min-messages", "6",
+                            "--max-windows", "50",
+                            "--exclude-agents", "taubench"]) == 0
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        metrics = payload["eval_metrics"]
+        # 只剩 9 个人类在场会话入训；6 个外部独走会话被整目录剔除
+        assert metrics["trainWindows"] + metrics["frozenWindows"] == 9
+
+        # 不剔除时同数据根应多出 6 个 skip 训练行（15 行）
+        out2 = tmp_path / "artifact_all.json"
+        assert script.main(["--source", "real", "--data-root", str(dataRoot),
+                            "--out", str(out2), "--min-messages", "6",
+                            "--max-windows", "50"]) == 0
+        metrics2 = json.loads(out2.read_text(encoding="utf-8"))["eval_metrics"]
+        assert metrics2["trainWindows"] + metrics2["frozenWindows"] == 15

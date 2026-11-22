@@ -610,6 +610,7 @@ def trainNeuJudgeFromRealData(
     maxWindows: int = 200,
     distillScope: str = "gray",
     thresholds: Optional[Dict[str, float]] = None,
+    excludeAgents: Optional[Tuple[str, ...]] = None,
 ) -> Dict:
     """D-SB3/D-SB1：真实会话窗口收割 → 规则/离线蒸馏弱标注 → 训练。
 
@@ -619,6 +620,7 @@ def trainNeuJudgeFromRealData(
       规则已决窗口也送教师复核（不一致即最高价值标注）；
     - triage_skips.jsonl（SB-5 回流）直接并入训练行（skip 类稀缺正样本）。
     """
+    from neurova.collaboration.triage_boundary import filterExcludedAgents
     from neurova.collaboration.triage_dataset import (
         harvestSessionWindows,
         labelWindows,
@@ -626,6 +628,7 @@ def trainNeuJudgeFromRealData(
     )
 
     windows = harvestSessionWindows(dataRoot, maxWindows=maxWindows, minMessages=minMessages)
+    windows = filterExcludedAgents(windows, excludeAgents)
     if not windows:
         raise RuntimeError(
             f"真实数据源未收割到可用窗口（数据根 {dataRoot} 下无 ≥{minMessages} 条消息的会话）"
@@ -676,6 +679,7 @@ def trainNeuJudgeFromOutcomeSweep(
     maxWindows: int = 400,
     windowMinutes: float = 5.0,
     thresholds: Optional[Dict[str, float]] = None,
+    excludeAgents: Optional[Tuple[str, ...]] = None,
 ) -> Dict:
     """答案先行结果采矿 + 教师质量门 + 边界扫描蒸馏（NeuJudge 专属管线）。"""
     from neurova.collaboration.triage_boundary import buildOutcomeSweepDataset
@@ -684,7 +688,7 @@ def trainNeuJudgeFromOutcomeSweep(
     result = buildOutcomeSweepDataset(
         dataRoot, realGateTriageFn, distillLimit=distill,
         windowMinutes=windowMinutes, maxWindows=maxWindows,
-        minMessages=minMessages,
+        minMessages=minMessages, excludeAgents=excludeAgents,
     )
     labelled = []
     for row in result["labeled"]:
@@ -771,7 +775,19 @@ def main(argv: List[str] | None = None) -> int:
         default=DEFAULT_OUT,
         help="产物输出路径，默认写到当前工作目录 neu_judge_trained.json",
     )
+    parser.add_argument(
+        "--exclude-agents",
+        type=str,
+        default="",
+        help="按 agentDir 前缀剔除会话目录（逗号分隔，如 "
+        "taubench,tooltalk,agentcompany,synth-gray）——数据源消融/复现"
+        "指定数据范围时用",
+    )
     args = parser.parse_args(argv)
+
+    excludeAgents = tuple(
+        part.strip() for part in args.exclude_agents.split(",") if part.strip()
+    )
 
     thresholds: Optional[Dict[str, float]] = None
     if args.skip_p is not None or args.allow_p is not None:
@@ -791,6 +807,7 @@ def main(argv: List[str] | None = None) -> int:
             minMessages=args.min_messages,
             maxWindows=args.max_windows,
             thresholds=thresholds,
+            excludeAgents=excludeAgents,
         )
     elif args.source == "real":
         dataRoot = args.data_root or str(Path(__file__).resolve().parents[2] / "data")
@@ -802,6 +819,7 @@ def main(argv: List[str] | None = None) -> int:
             maxWindows=args.max_windows,
             distillScope=args.distill_scope,
             thresholds=thresholds,
+            excludeAgents=excludeAgents,
         )
     else:
         payload = trainNeuJudge(args.windows, args.seed)

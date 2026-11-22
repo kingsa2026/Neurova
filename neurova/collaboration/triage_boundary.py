@@ -256,6 +256,23 @@ def teacherAgreement(
     }
 
 
+def agentDirOf(window: Dict[str, Any]) -> str:
+    """窗口所属 agent 目录（conversationId 形如 <agentDir>/<sessionId>）。"""
+    return str(window.get("conversationId") or "").split("/", 1)[0]
+
+
+def filterExcludedAgents(
+    windows: List[Dict[str, Any]],
+    excludeAgents: Optional[Tuple[str, ...]],
+) -> List[Dict[str, Any]]:
+    """按 agentDir 前缀剔除窗口（数据源消融用：如排除外部数据集目录，
+    隔离「外部轨迹窗口」与「外部教师标签」对训练的各自影响）。"""
+    if not excludeAgents:
+        return windows
+    return [w for w in windows
+            if not any(agentDirOf(w).startswith(prefix) for prefix in excludeAgents)]
+
+
 def buildOutcomeSweepDataset(
     dataRoot: str,
     triageFn: Callable[[Dict[str, Any]], bool],
@@ -265,6 +282,7 @@ def buildOutcomeSweepDataset(
     maxWindows: int = 400,
     minMessages: int = 6,
     maxSweepVectors: int = DEFAULT_MAX_SWEEP_VECTORS,
+    excludeAgents: Optional[Tuple[str, ...]] = None,
 ) -> Dict[str, Any]:
     """完整管线：收割 → 规则直标 → 结果采矿 → 教师质量门 →
     边界扫描 → 教师标注（配额内，特征向量去重，已知标签免费继承）。
@@ -280,6 +298,7 @@ def buildOutcomeSweepDataset(
 
     labeled: List[Dict[str, Any]] = []
     windows = harvestSessionWindows(dataRoot, maxWindows=maxWindows, minMessages=minMessages)
+    windows = filterExcludedAgents(windows, excludeAgents)
     ruled = labelWindows(windows, distillLimit=0)
     for row in ruled["labeled"]:
         labeled.append({
