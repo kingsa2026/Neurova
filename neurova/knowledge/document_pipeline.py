@@ -373,6 +373,13 @@ def parse_document(
     """
     if not data:
         raise DocumentParseError("empty_file")
+    # 资源治理 P1-3：输入体积预算——在任何格式分支（含旧管线）之前快速失败。
+    from neurova.knowledge.parse_budget import (
+        FileParseBudgetError,
+        assertParseInputBudget,
+    )
+
+    assertParseInputBudget(data, filename)
     if str(engine_mode or "").strip().lower() == "legacy":
         return _parseLegacy(data, filename, source_path=source_path,
                             source_type=source_type)
@@ -396,6 +403,11 @@ def parse_document(
     try:
         # .xls 直读（A7）：xlrd 可用就走直读（产出与 xlsx 同形），缺席回落 LibreOffice。
         xlsSheets = extract_xls_sheets(data) if ext == ".xls" else None
+        # 资源治理 P1-3：表格预算（行数/单元格面积）在进入后续编排前快速失败。
+        if xlsSheets is not None:
+            from neurova.knowledge.parse_budget import assertSheetsBudget
+
+            assertSheetsBudget(xlsSheets, filename)
         if xlsSheets is None and ext in LEGACY_EXTENSIONS:
             # source_type 保留原始旧格式，解析按转换后的新格式走。
             data, ext = _convertLegacyOffice(data, ext)
@@ -407,6 +419,10 @@ def parse_document(
             pipelineName = "kreuzberg"
         elif ext == ".pdf":
             pagesRaw = extract_pdf_pages(data)
+            # 资源治理 P1-3：页数预算（巨型 PDF 拖垮解析线程前快速失败）。
+            from neurova.knowledge.parse_budget import assertPagesBudget
+
+            assertPagesBudget(len(pagesRaw), filename)
             if engine is None:
                 engine = selectOcrEngine()
             # 逐页：有文字层用文字层；空页/on 模式渲染 OCR
@@ -495,6 +511,10 @@ def parse_document(
             if text is None:
                 raise DocumentParseError(status or "unsupported_format")
             pagesRaw = [text]
+    except FileParseBudgetError:
+        # 资源治理 P1-3：预算异常保持原样穿透（调用方按 budget 语义处置），
+        # 不得被下方宽 except 重包成 parse_failed 丢掉判定语义。
+        raise
     except DocumentParseError:
         raise
     except Exception as exc:  # noqa: BLE001
