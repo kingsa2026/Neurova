@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -70,6 +71,9 @@ class DeviceBridgeService : Service() {
         // A5：通知白名单随授权仓同步（空 = 全量采集）
         NotificationRingHolder.ring.whitelist = runtime.deviceAuth.notificationWhitelist()
 
+        // 配对就绪即连（幂等入口，2026-11-23 批三根修）：pairing.restore() 在 UI 层
+        // 异步完成——冷启动时服务可能先于配对恢复跑到这里，空 wsUrl/空票不得把通道
+        // 钉死在 FAILED；等 paired+wsUrl 就绪再发起，重复触发由 connectIfIdle 挡住。
         jobs = listOf(
             scope.launch {
                 channel.events.collect { event ->
@@ -100,23 +104,16 @@ class DeviceBridgeService : Service() {
             },
             scope.launch {
                 channel.state.collect { state ->
-                    if (state == MobileWsChannel.State.AUTHED) {
-                        val enabled = DeviceCapabilities.CLAIMED.filter {
-                            runtime.deviceAuth.isEnabled(it)
-                        }
-                        channel.sendDeviceFrame(
-                            DeviceBridgeEvents.buildHello(
-                                platform = DeviceCapabilities.PLATFORM,
-                                protocolVersion = DeviceCapabilities.PROTOCOL_VERSION,
-                                capabilities = enabled,
-                                appState = AppStateTracker.current,
-                            ),
-                        )
-                    }
+                    // hello 构造收口 AppRuntime.sendDeviceHello（连接/授权变更同一出口）
+                    if (state == MobileWsChannel.State.AUTHED) runtime.sendDeviceHello()
                 }
             },
+            scope.launch {
+                snapshotFlow {
+                    runtime.pairing.paired && runtime.pairing.wsUrl.isNotBlank()
+                }.collect { ready -> if (ready) channel.connectIfIdle() }
+            },
         )
-        channel.connect()
     }
 
     private fun updateProgressNotification(action: String, steps: Int) {

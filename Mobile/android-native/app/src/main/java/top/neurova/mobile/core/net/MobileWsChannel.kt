@@ -177,16 +177,54 @@ class MobileWsChannel(
     }
 
     fun connect() {
+        // 幂等入口：已在连/已认证/重连/续签中不动作（防重复 socket）；
+        // 内部重连与续签路径走 connectNow()，不经此闸。
+        when (stateFlow.value) {
+            State.CONNECTING, State.AUTHED, State.RECONNECTING, State.REAUTHING -> return
+            else -> {}
+        }
+        connectNow()
+    }
+
+    /** 幂等连接入口（设备桥服务消费）：仅从静止态（IDLE/FAILED/CLOSED）发起，返回是否实际发起 */
+    fun connectIfIdle(): Boolean =
+        when (stateFlow.value) {
+            State.IDLE, State.FAILED, State.CLOSED -> {
+                connect(); true
+            }
+            else -> false
+        }
+
+    private fun connectNow() {
         // 手动关闭是终态（MobileWsClosePolicy：manual 恒终态）——挂起的重连协程
         // 不得借 connect() 复活已关闭的通道
         if (manualClosed) return
         manualClosed = false
         val url = wsUrlProvider() ?: run { stateFlow.value = State.FAILED; return }
-        val ticket = ticketProvider() ?: run { stateFlow.value = State.FAILED; return }
+        val ticket = ticketProvider()
+        if (ticket == null) {
+            // 票据自举：connect_ticket 仅内存（§5.1b 不落盘），进程重启后
+            // DeviceBridgeService.startBridge 直连时必为空票——不得就此死在
+            // FAILED（前台服务只 connect 一次、无其他重试来源）。走与 4001
+            // 同一收敛点：先续签再握手；续签被拒 = 设备已解除配对（终态）。
+            scope.launch {
+                stateFlow.value = State.REAUTHING
+                runCatching { refreshTicket() }
+                    .onSuccess { connectNow() }
+                    .onFailure { failAsDeregistered() }
+            }
+            return
+        }
         pendingRelayAuthFrame = buildRelayAuthFrame(url, relayAuthSecretProvider)
         sentRelayAuthThisConnection = false
         stateFlow.value = State.CONNECTING
         socket = client.newWebSocket(buildHandshakeRequest(url, ticket), Listener())
+    }
+
+    /** 续签被拒的统一终态：设备已解除配对，通道进 FAILED 并上抛明确事件 */
+    private fun failAsDeregistered() {
+        stateFlow.value = State.FAILED
+        eventsFlow.tryEmit(Event.Error("device_deregistered", "配对已解除，请重新扫码"))
     }
 
     /** 发送对话帧：chat:send / chat:cancel（§8.3 WS 侧语义） */
@@ -292,18 +330,15 @@ class MobileWsChannel(
                 runCatching { refreshTicket() }
                     .onSuccess {
                         reconnectCount = 0
-                        connect()
+                        connectNow()
                     }
-                    .onFailure {
-                        stateFlow.value = State.FAILED
-                        eventsFlow.tryEmit(Event.Error("device_deregistered", "配对已解除，请重新扫码"))
-                    }
+                    .onFailure { failAsDeregistered() }
             }
             MobileWsClosePolicy.Decision.RECONNECT -> scope.launch {
                 stateFlow.value = State.RECONNECTING
                 reconnectCount += 1
                 delay(backoffMs(reconnectCount))
-                connect()
+                connectNow()
             }
             null -> stateFlow.value = State.FAILED
         }

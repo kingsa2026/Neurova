@@ -84,6 +84,8 @@ fun DeviceBridgeScreen(onBack: () -> Unit) {
                 enabled = capability in enabled,
                 onToggle = { want ->
                     runtime.deviceAuth.setEnabled(capability, want)
+                    // 授权变更即时重报 hello：服务端能力目录不滞后到下次重连
+                    runtime.sendDeviceHello()
                     refreshTick += 1
                 },
             )

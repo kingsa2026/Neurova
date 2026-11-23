@@ -67,6 +67,25 @@ class AppRuntime(context: Context) {
     /** 设备桥端上能力授权（D4：默认全关；A6 授权页读写） */
     val deviceAuth = top.neurova.mobile.core.capability.DeviceAuthStore(preferences)
 
+    /**
+     * 设备桥能力快照上报（device:hello）的唯一出口：连接建立（AUTHED）与
+     * 授权变更（授权页开关）两个时机都从这里出——hello 目录与服务端登记的
+     * 能力子集保持单一事实源，不因开关时机滞后到下次重连。
+     */
+    fun sendDeviceHello() {
+        val enabled = top.neurova.mobile.core.capability.DeviceCapabilities.CLAIMED.filter {
+            deviceAuth.isEnabled(it)
+        }
+        ws.sendDeviceFrame(
+            top.neurova.mobile.core.protocol.DeviceBridgeEvents.buildHello(
+                platform = top.neurova.mobile.core.capability.DeviceCapabilities.PLATFORM,
+                protocolVersion = top.neurova.mobile.core.capability.DeviceCapabilities.PROTOCOL_VERSION,
+                capabilities = enabled,
+                appState = top.neurova.mobile.core.capability.AppStateTracker.current,
+            ),
+        )
+    }
+
     companion object {
         /**
          * 进程级单例（DCL + 双检，仓规）：设备桥前台服务（DeviceBridgeService）
