@@ -44,8 +44,9 @@ PINNED: Dict[str, str] = {
     "@askjo/camofox-browser": "1.16.0",
     # MCP 白名单目录：context7 库文档检索（neurova/tool_layers/mcp_catalog.py）
     "@upstash/context7-mcp": "4.4.4",
-    # MCP 白名单目录：dbhub 只读 SQL（同文件）
-    "@bytebase/dbhub": "1.2.5",
+    # MCP 白名单目录：dbhub 只读 SQL（同文件）；2.0.0 = Dependabot PR 升级
+    # （--dsn/stdio CLI 面不变，兼容面核验见提交说明）
+    "@bytebase/dbhub": "2.0.0",
     # 共享配置默认模板里的 filesystem MCP server（neurova/shared_config.py）
     "@modelcontextprotocol/server-filesystem": "2026.8.31",
 }
