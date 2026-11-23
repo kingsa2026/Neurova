@@ -49,23 +49,6 @@ OWNER = "owner_u"
 MEMBER = "member_u"
 
 
-class _FakeRepo:
-    """房间持久层替身（同 test_room_store 形态）。"""
-
-    def __init__(self):
-        self.saved = []
-
-    def save_message(self, agent_id, session_id, role, content, metadata=None, *, user_id=""):
-        self.saved.append({
-            "agent_id": agent_id, "session_id": session_id, "role": role,
-            "content": content, "metadata": metadata or {}, "timestamp": len(self.saved) + 1,
-        })
-        return True
-
-    def get_history(self, agent_id, session_id, max_messages=0):
-        return self.saved
-
-
 @pytest.fixture(autouse=True)
 def _cleanRoomBridge():
     """房间桥接的 pending 登记表（内存 dict + SQLite 形态）用例间必须清场。"""
@@ -77,9 +60,10 @@ def _cleanRoomBridge():
 
 
 @pytest.fixture
-def roomStore(monkeypatch):
-    repo = _FakeRepo()
-    store = RoomStore(repo=repo)
+def roomStore(monkeypatch, tmp_path):
+    """真 RoomStore + 隔离数据根（2026-11-23 起房间消息落 collaboration/rooms）。"""
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
+    store = RoomStore()
     monkeypatch.setattr("neurova.collaboration.room_store.get_room_store", lambda: store)
     return store
 
@@ -94,15 +78,35 @@ def roomBus(monkeypatch):
 
 
 @pytest.fixture
-def roomProject(monkeypatch):
-    """房间群主制度桩：owner_u 是群主，member_u 是普通成员。"""
-    project = SimpleNamespace(
-        project_id=ROOM, owner_id=OWNER, members={OWNER: {"role": "owner"}, MEMBER: {"role": "member"}},
+def roomProject(monkeypatch, tmp_path):
+    """真协作管理器 + 固定 room_id=ROOM 的项目（owner=OWNER，普通成员=MEMBER）。
+
+    用真管理器而非 MagicMock：审批回灌/升级裁决链会读项目成员与角色，桩对象
+    喂不饱；同时把桩打在消费方绑定上——collaboration_room_api 对
+    get_collaboration_manager 是 from-import，打源模块不影响 _require_project
+    的解析（那是本文件此前的顺序 flaky 根因）。
+    """
+    from neurova.api.endpoints import collaboration_room_api as roomApi
+    from neurova.collaboration.collaboration_isolation import (
+        CollaborationIsolationManager,
+        MemberRole,
     )
-    manager = MagicMock()
-    manager.get_project.return_value = project
+
+    manager = CollaborationIsolationManager(data_dir=str(tmp_path / "collab"))
+    project = manager.create_project(name="房间", owner_id=OWNER)
+    assert project is not None
+    oldId = project.project_id
+    project.project_id = ROOM
+    manager._projects.pop(oldId, None)
+    manager._projects[ROOM] = project
+    project.add_member(MEMBER, MemberRole.EDITOR)
+    # 两个消费方都要打桩：approval_chain 是函数内惰性导入（解析源模块属性），
+    # collaboration_room_api 是 from-import（绑定在自己的命名空间）——漏一边
+    # 就出现"单文件绿、合跑红"的顺序 flaky。
     monkeypatch.setattr(
         "neurova.collaboration.collaboration_isolation.get_collaboration_manager", lambda: manager)
+    monkeypatch.setattr(
+        "neurova.api.endpoints.collaboration_room_api.get_collaboration_manager", lambda: manager)
     return project
 
 

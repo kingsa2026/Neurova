@@ -41,27 +41,11 @@ MEMBERS = [
 ]
 
 
-class _FakeRepo:
-    """房间持久层替身（同 test_room_store 形态）。"""
-
-    def __init__(self):
-        self.saved = []
-
-    def save_message(self, agent_id, session_id, role, content, metadata=None, *, user_id=""):
-        self.saved.append({
-            "agent_id": agent_id, "session_id": session_id, "role": role,
-            "content": content, "metadata": metadata or {}, "timestamp": len(self.saved) + 1,
-        })
-        return True
-
-    def get_history(self, agent_id, session_id, max_messages=0):
-        return self.saved
-
-
 @pytest.fixture
-def roomStore(monkeypatch):
-    repo = _FakeRepo()
-    store = RoomStore(repo=repo)
+def roomStore(monkeypatch, tmp_path):
+    """真 RoomStore + 隔离数据根（房间消息落 collaboration/rooms 命名空间）。"""
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
+    store = RoomStore()
     monkeypatch.setattr("neurova.collaboration.room_store.get_room_store", lambda: store)
     return store
 

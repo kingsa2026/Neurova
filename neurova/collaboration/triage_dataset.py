@@ -45,18 +45,26 @@ def harvestSessionWindows(
 ) -> List[Dict[str, Any]]:
     """从数据根收割真实会话窗口（D-SB3）。
 
-    扫描 `<数据根>/<agent>/sessions/session_*.json`（仓内会话落盘格式，
-    messages 元素含 role/content/timestamp），每个会话取末尾
-    MAX_WINDOW_EVENTS 条消息作为一个窗口。短会话（<minMessages）与损坏
-    文件跳过；按路径排序保证确定性；maxWindows 封顶。
+    扫描三个来源（2026-11-23 落点收口后的完整面）：
+    - `<数据根>/<agent>/sessions/session_*.json`（真实 agent 会话）；
+    - `<数据根>/training_datasets/<source>/sessions/session_*.json`（外部数据集）；
+    - `<数据根>/collaboration/rooms/<room_id>/messages.jsonl`（协作房间群聊流水，
+      一行一条 JSON，system 行跳过）。
 
-    返回 [{"conversationId": "<agentDir>/<sessionId>", "events": [...]}]。
+    每个会话取末尾 MAX_WINDOW_EVENTS 条消息作为一个窗口。短会话（<minMessages）
+    与损坏文件跳过；按路径排序保证确定性；maxWindows 封顶。
+
+    返回 [{"conversationId": "<命名空间路径>/<会话id>", "events": [...]}]。
     """
     root = Path(dataRoot)
     windows: List[Dict[str, Any]] = []
     if not root.exists():
         return windows
-    for path in sorted(root.glob("*/sessions/session_*.json")):
+    sessionPaths = sorted(
+        set(root.glob("*/sessions/session_*.json"))
+        | set(root.glob("training_datasets/*/sessions/session_*.json"))
+    )
+    for path in sessionPaths:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001 - 损坏文件跳过（离线收割不因脏数据中断）
@@ -81,14 +89,44 @@ def harvestSessionWindows(
             })
         if len(events) < minMessages:
             continue
-        agentDir = path.parent.parent.name
         sessionId = str(payload.get("session_id") or path.stem)
+        conversationId = "/".join([*path.relative_to(root).parts[:-2], sessionId])
         windows.append({
-            "conversationId": f"{agentDir}/{sessionId}",
+            "conversationId": conversationId,
             "events": events,
         })
         if len(windows) >= maxWindows:
             break
+    for logPath in sorted(root.glob("collaboration/rooms/*/messages.jsonl")):
+        if len(windows) >= maxWindows:
+            break
+        try:
+            lines = logPath.read_text(encoding="utf-8").splitlines()
+        except Exception:  # noqa: BLE001 - 损坏文件跳过
+            continue
+        events: List[Dict[str, Any]] = []
+        for line in lines:
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(record, dict):
+                continue
+            role = record.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            content = record.get("content")
+            events.append({
+                "role": role,
+                "content": content if isinstance(content, str) else "",
+                "timestamp": record.get("timestamp"),
+            })
+        if len(events) < minMessages:
+            continue
+        windows.append({
+            "conversationId": f"collaboration/rooms/{logPath.parent.name}",
+            "events": events[-MAX_WINDOW_EVENTS:],
+        })
     return windows
 
 

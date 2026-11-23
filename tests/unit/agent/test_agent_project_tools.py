@@ -72,30 +72,15 @@ def auditDb(tmp_path, monkeypatch):
     auditModule._audit_logger = savedGlobal
 
 
-class _FakeRepo:
-    """房间消息假仓库（RoomStore 注入用，记录 save_message 形参）。"""
-
-    def __init__(self):
-        self.rows = []
-
-    def save_message(self, agent_id, session_id, role, content, metadata=None, *, user_id=""):
-        self.rows.append({
-            "agent_id": agent_id, "session_id": session_id, "role": role,
-            "content": content, "metadata": dict(metadata or {}), "user_id": user_id,
-        })
-        return True
-
-    def get_history(self, agent_id, session_id, max_messages=0):
-        return [r for r in self.rows if r["agent_id"] == agent_id and r["session_id"] == session_id]
-
-
 @pytest.fixture
-def roomStore(monkeypatch):
+def roomStore(monkeypatch, tmp_path):
+    """真 RoomStore + 隔离数据根（房间消息落 collaboration/rooms 命名空间）。"""
     from neurova.collaboration.room_store import RoomStore
 
-    fake = _FakeRepo()
-    monkeypatch.setattr("neurova.collaboration.room_store._store", RoomStore(repo=fake))
-    yield fake
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
+    store = RoomStore()
+    monkeypatch.setattr("neurova.collaboration.room_store._store", store)
+    yield store
 
 
 @pytest.fixture
@@ -261,7 +246,7 @@ class TestRoomPost:
         })
         assert out.get("success") is not True
         assert out.get("code") == "not_room_member"
-        assert roomStore.rows == [], "被拒发言不得落库"
+        assert roomStore.history(proj.project_id) == [], "被拒发言不得落库"
 
     @pytest.mark.asyncio
     async def test_member_post_lands_in_room_history(self, collab, approvals, auditDb,
@@ -274,13 +259,13 @@ class TestRoomPost:
         })
         assert out.get("success") is True, out
         assert out.get("room_id") == created["project_id"]
-        assert len(roomStore.rows) == 1
-        row = roomStore.rows[0]
-        assert row["agent_id"] == created["project_id"], "房间消息以 room_id=project_id 落库"
+        rows = roomStore.history(created["project_id"])
+        assert len(rows) == 1
+        row = rows[0]
         assert row["content"] == "第一阶段完成"
-        assert row["metadata"].get("sender_type") == "agent"
-        assert row["metadata"].get("sender_id") == "yi_ling"
-        assert row["metadata"].get("kind") == "report"
+        assert row["sender_type"] == "agent"
+        assert row["sender_id"] == "yi_ling"
+        assert row["meta"].get("kind") == "report"
 
     @pytest.mark.asyncio
     async def test_invalid_kind_rejected(self, collab, approvals, auditDb, roomStore, executor):

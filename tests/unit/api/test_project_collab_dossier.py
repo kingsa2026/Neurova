@@ -23,27 +23,6 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
-class _FakeRoomRepo:
-    """RoomStore 依赖的最小会话仓库桩（只实现 RoomStore 用到的两个方法）。"""
-
-    def __init__(self):
-        self._messages = []
-        self._clock = 0.0
-
-    def save_message(self, agent_id, session_id, role, content, metadata=None, *, user_id=""):
-        self._clock += 1.0
-        self._messages.append({
-            "role": role,
-            "content": content,
-            "metadata": dict(metadata or {}),
-            "timestamp": 1700000000.0 + self._clock,
-        })
-        return True
-
-    def get_history(self, agent_id, session_id, max_messages=0):
-        return list(self._messages)
-
-
 @pytest.fixture
 def dossierEnv(tmp_path, monkeypatch):
     """数据根/台账库整体重定向到临时目录；蜂群与台账单例逐测试重置。"""
@@ -87,9 +66,9 @@ def client(dossierEnv, auditDb, monkeypatch):
     manager = CollaborationIsolationManager(data_dir=str(tmp_path / "collab"))
     monkeypatch.setattr(projects_api, "_get_iso_manager", lambda: manager)
     monkeypatch.setattr(projects_api, "_get_scheduler", lambda: MagicMock())
-    # 房间消息读面注入假仓库（聚合契约测试不依赖 SessionManager 落盘形态）
-    fakeRoomStore = RoomStore(repo=_FakeRoomRepo())
-    monkeypatch.setattr(projects_api, "_get_room_store", lambda: fakeRoomStore, raising=False)
+    # 房间消息读面用真 RoomStore（数据根已由 dossierEnv 隔离到 tmp）
+    roomStore = RoomStore()
+    monkeypatch.setattr(projects_api, "_get_room_store", lambda: roomStore, raising=False)
 
     app = FastAPI()
     app.include_router(projects_api.router, prefix="/api/v1/projects")
@@ -103,7 +82,7 @@ def client(dossierEnv, auditDb, monkeypatch):
     project = manager.create_project(name="档案项目", owner_id="u1")
     testClient.project_id = project.project_id  # type: ignore[attr-defined]
     testClient.manager = manager  # type: ignore[attr-defined]
-    testClient.roomStore = fakeRoomStore  # type: ignore[attr-defined]
+    testClient.roomStore = roomStore  # type: ignore[attr-defined]
     return testClient
 
 

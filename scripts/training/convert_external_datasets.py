@@ -2,8 +2,9 @@
 """外部数据集 → NeuJudge 训练会话文件转换器。
 
 把外部 agent 轨迹数据集（tau-bench / TheAgentCompany / ToolTalk，本地浅克隆）
-转换成收割器兼容的会话落盘格式（`<数据根>/<agent>/sessions/session_*.json`），
-使现有 `--source real/axion/sweep` 训练管线无需改动即可吸收外部数据。
+转换成收割器兼容的会话落盘格式（`<数据根>/training_datasets/<source>/sessions/
+session_*.json`），使现有 `--source real/axion/sweep` 训练管线无需改动即可吸收
+外部数据。
 
 标签语义：这些数据集均为**人类发起**的 agent 会话（人类在场）→ 分诊策略为
 放行（label=1）。任务成败（tau-bench reward / ToolTalk 工具成败）作为元数据
@@ -35,7 +36,9 @@ def _event(role: str, content: str, index: int) -> Dict[str, Any]:
 
 def _writeSession(dataRoot: Path, agentDir: str, sessionId: str,
                   messages: List[Dict[str, Any]], metadata: Dict[str, Any]) -> int:
-    sessionsDir = dataRoot / agentDir / "sessions"
+    # 2026-11-23 落点收口：训练数据集统一落 training_datasets 命名空间，
+    # 不再在数据根顶层为每个 source 建目录（顶层目录只留给真实 agent）。
+    sessionsDir = dataRoot / "training_datasets" / agentDir / "sessions"
     sessionsDir.mkdir(parents=True, exist_ok=True)
     path = sessionsDir / f"session_{sessionId}.json"
     payload = {
