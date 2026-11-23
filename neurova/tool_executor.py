@@ -3884,6 +3884,29 @@ class ToolExecutor:
                 self._releaseForegroundLease(lease_token)
             self._record_desktop_audit(tool_name, params, result, (_t.time() - _t0) * 1000)
             return result
+        # 设备桥治理咽喉（2026-11-23 计划卡 B4/B5）：熔断 → 风险分级 → 审批扣住；
+        # 执行后落设备审计（desktop_audit + 蜂群 run 上下文时 H-4 device_action）。
+        if tool_name.startswith("device_"):
+            import time as _dt
+
+            from neurova.device_bridge.governance import auditDeviceAction
+            from neurova.device_bridge.governance import enforce_approval_gate
+
+            identityUser, identityAgent = self._agent_identity()
+            deviceSessionId = getattr(self._agent, "current_session_id", None)
+            gate = await enforce_approval_gate(
+                tool_name, params,
+                agent_id=identityAgent or "", user_id=identityUser or "",
+                session_id=deviceSessionId or "")
+            if gate is not None:
+                return gate
+            _deviceT0 = _dt.time()
+            deviceResult = await getattr(self, method_name)(params)
+            auditDeviceAction(
+                tool_name, params, deviceResult, (_dt.time() - _deviceT0) * 1000.0,
+                user_id=identityUser or "", agent_id=identityAgent or "",
+                session_id=deviceSessionId or "")
+            return deviceResult
         return await getattr(self, method_name)(params)
 
     def _record_desktop_audit(
