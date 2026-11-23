@@ -2410,6 +2410,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     # 后台不可靠一律结构化拒绝（device_offline / unsupported_method /
     # background_unavailable），不重试沉默失败。
     "device_open_url": {
+        # 并行能力声明：动作落在用户的同一台手机上（设备是批内共享执行体，
+        # 并发命令会在端上互相穿插）⇒ 与桌面动作同判，不可并行。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【设备桥】在用户已配对的手机上打开一个 http/https 网址（系统浏览器或默认打开方式）。【何时不用】要在手机上装东西、发消息等写操作不在本工具；设备离线会明确报 device_offline。",
         "parameters": {
             "type": "object",
@@ -2420,6 +2423,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "device_open_app": {
+        # 并行能力声明：动作落在用户的同一台手机上（设备是批内共享执行体，
+        # 并发命令会在端上互相穿插）⇒ 与桌面动作同判，不可并行。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【设备桥】在用户已配对的手机上打开指定应用（应用名或包名，由端上语义匹配后拉起）。【何时不用】只是打开网页用 device_open_url。",
         "parameters": {
             "type": "object",
@@ -2430,10 +2436,16 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "device_clipboard_read": {
+        # 并行能力声明：只读，但读的是同一台手机的瞬时状态（与 computer_screenshot
+        # 同判：语义只读、作用域共享）⇒ 不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【设备桥】读取用户手机剪贴板当前文本（需设备前台；后台会明确报不可用）。注意隐私：只在没有更间接的取数路径时使用。",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     "device_clipboard_write": {
+        # 并行能力声明：动作落在用户的同一台手机上（设备是批内共享执行体，
+        # 并发命令会在端上互相穿插）⇒ 与桌面动作同判，不可并行。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【设备桥】把一段文本写入用户手机剪贴板（供用户或应用粘贴）。",
         "parameters": {
             "type": "object",
@@ -2444,14 +2456,23 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "device_app_list": {
+        # 并行能力声明：只读，但读的是同一台手机的瞬时状态（与 computer_screenshot
+        # 同判：语义只读、作用域共享）⇒ 不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【设备桥】列出用户手机上可供交互的应用清单（名称/包名），用于后续 device_open_app 选目标。",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     "device_env": {
+        # 并行能力声明：只读，但读的是同一台手机的瞬时状态（与 computer_screenshot
+        # 同判：语义只读、作用域共享）⇒ 不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【设备桥】读取用户手机的环境快照：电量/充电态、屏幕尺寸、系统版本、语言区域、网络状态等。",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     "device_notification_read": {
+        # 并行能力声明：只读，但读的是同一台手机的瞬时状态（与 computer_screenshot
+        # 同判：语义只读、作用域共享）⇒ 不可并行。
+        "capability": {"readOnly": True, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【设备桥】读取用户手机最近的通知事件（按端上授权范围；默认只含应用名/标题/时间）。用于“帮我看看刚才有什么通知”类请求。",
         "parameters": {
             "type": "object",

@@ -1813,6 +1813,18 @@
               ],
               "title": "Config"
             },
+            "cost_note": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cost Note"
+            },
             "suite_id": {
               "title": "Suite Id",
               "type": "string"
@@ -4450,6 +4462,18 @@
               "title": "Config",
               "type": "object"
             },
+            "embedding_model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "服务商级嵌入模型声明",
+              "title": "Embedding Model"
+            },
             "name": {
               "description": "服务商名称",
               "title": "Name",
@@ -4459,6 +4483,18 @@
               "description": "服务商类型 (openai, anthropic, gemini, ollama, openrouter)",
               "title": "Provider Type",
               "type": "string"
+            },
+            "weight": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "同优先级组内加权分流份额",
+              "title": "Weight"
             }
           },
           "required": [
@@ -5094,6 +5130,23 @@
             "entity_type"
           ],
           "title": "EntityCreate",
+          "type": "object"
+        },
+        "EscalationResolveBody": {
+          "description": "房间升级卡处置请求（M13）。",
+          "properties": {
+            "action": {
+              "default": "steer",
+              "title": "Action",
+              "type": "string"
+            },
+            "note": {
+              "default": "",
+              "title": "Note",
+              "type": "string"
+            }
+          },
+          "title": "EscalationResolveBody",
           "type": "object"
         },
         "EvalCoresetUpdate": {
@@ -6275,6 +6328,33 @@
               ],
               "title": "Readonly Argv Autoallow Enabled"
             },
+            "rsi_canary_rollback_thresholds": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "number"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rsi Canary Rollback Thresholds"
+            },
+            "rsi_canary_window_seconds": {
+              "anyOf": [
+                {
+                  "maximum": 86400.0,
+                  "minimum": 1.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rsi Canary Window Seconds"
+            },
             "rsi_phase": {
               "anyOf": [
                 {
@@ -6287,6 +6367,20 @@
                 }
               ],
               "title": "Rsi Phase"
+            },
+            "rsi_phase_min_applied": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rsi Phase Min Applied"
             },
             "rsi_phase_overrides": {
               "anyOf": [
@@ -6843,6 +6937,18 @@
         "ImageGenerationRequest": {
           "description": "图像生成请求（B2-a：真实协议矩阵 + 按提供商凭据）",
           "properties": {
+            "agent_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "AgentID（池隔离键）",
+              "title": "Agent Id"
+            },
             "api_key": {
               "anyOf": [
                 {
@@ -6950,6 +7056,18 @@
               "description": "随机种子（ARK/DASHSCOPE 支持）",
               "title": "Seed"
             },
+            "session_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "会话ID（生成物入上下文池）",
+              "title": "Session Id"
+            },
             "strength": {
               "anyOf": [
                 {
@@ -6961,6 +7079,18 @@
               ],
               "description": "图生图变化强度（暂无实测通道，会被显式忽略并标注）",
               "title": "Strength"
+            },
+            "turn": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "轮次（入池元数据）",
+              "title": "Turn"
             },
             "width": {
               "default": 1024,
@@ -9302,6 +9432,196 @@
           "title": "MotivationWeightsUpdate",
           "type": "object"
         },
+        "MultiAgentRunRequest": {
+          "properties": {
+            "agent_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "被测 agent（缺省=当前默认 agent）",
+              "title": "Agent Id"
+            },
+            "modes": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "solo",
+                      "swarm"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "执行模式，缺省 [\"solo\"]；双模式对比传 [\"solo\",\"swarm\"]",
+              "title": "Modes"
+            },
+            "suites": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "套件子集（如 t1_sim / t3_rubric）",
+              "title": "Suites"
+            },
+            "task_ids": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "任务子集（缺省=全部注册任务；与 suites 同给时以本项优先）",
+              "title": "Task Ids"
+            },
+            "task_isolated_memory": {
+              "default": true,
+              "description": "逐任务隔离会话记忆（S1-1C，正式对比默认开）",
+              "title": "Task Isolated Memory",
+              "type": "boolean"
+            }
+          },
+          "title": "MultiAgentRunRequest",
+          "type": "object"
+        },
+        "MusicGenerationRequest": {
+          "description": "音乐生成请求（M1：fal Queue API 异步任务，两段式与 /video 同范式）",
+          "properties": {
+            "agent_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "AgentID（池隔离键）",
+              "title": "Agent Id"
+            },
+            "api_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "显式凭据（优先于服务商配置）",
+              "title": "Api Key"
+            },
+            "base_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "显式端点",
+              "title": "Base Url"
+            },
+            "duration": {
+              "default": 30,
+              "description": "时长(秒)",
+              "title": "Duration",
+              "type": "integer"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "fal 模型 ID（如 fal-ai/musicgen）",
+              "title": "Model"
+            },
+            "prompt": {
+              "description": "生成提示",
+              "title": "Prompt",
+              "type": "string"
+            },
+            "protocol": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "协议标签 fal",
+              "title": "Protocol"
+            },
+            "provider_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "使用已配置服务商的凭据",
+              "title": "Provider Id"
+            },
+            "session_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "会话ID（生成物入上下文池）",
+              "title": "Session Id"
+            },
+            "turn": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "轮次（入池元数据）",
+              "title": "Turn"
+            }
+          },
+          "required": [
+            "prompt"
+          ],
+          "title": "MusicGenerationRequest",
+          "type": "object"
+        },
         "NavigateCmd": {
           "additionalProperties": false,
           "properties": {
@@ -10344,6 +10664,19 @@
           "title": "PreflightRequest",
           "type": "object"
         },
+        "PriorityBody": {
+          "properties": {
+            "priority": {
+              "title": "Priority",
+              "type": "string"
+            }
+          },
+          "required": [
+            "priority"
+          ],
+          "title": "PriorityBody",
+          "type": "object"
+        },
         "ProactiveActionCreate": {
           "description": "触发主动行为请求",
           "properties": {
@@ -10709,6 +11042,17 @@
               "title": "Base Url",
               "type": "string"
             },
+            "embedding_model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Embedding Model"
+            },
             "health": {
               "default": "unknown",
               "title": "Health",
@@ -10741,6 +11085,11 @@
               "default": "unknown",
               "title": "Status",
               "type": "string"
+            },
+            "weight": {
+              "default": 1.0,
+              "title": "Weight",
+              "type": "number"
             }
           },
           "required": [
@@ -11849,6 +12198,61 @@
             }
           },
           "title": "ReviewRequest",
+          "type": "object"
+        },
+        "RsiApplyOptimizationsRequest": {
+          "description": "参数优化人工批准应用（R1：phase 1 手动档的应用入口）",
+          "properties": {
+            "agent_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "目标 agent；缺省取默认 agent",
+              "title": "Agent Id"
+            },
+            "approved_by": {
+              "description": "批准者（人工审批 gate 留痕）",
+              "minLength": 1,
+              "title": "Approved By",
+              "type": "string"
+            },
+            "optimization_ids": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "要应用的优化 id（须属于最近一轮提案）；缺省＝全部待批提案",
+              "title": "Optimization Ids"
+            },
+            "round": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "指定轮次；本通道只持最近一轮，指定其它轮次按 422 拒绝",
+              "title": "Round"
+            }
+          },
+          "required": [
+            "approved_by"
+          ],
+          "title": "RsiApplyOptimizationsRequest",
           "type": "object"
         },
         "RsiApproveRequest": {
@@ -13056,6 +13460,17 @@
               ],
               "title": "Rsi Ratchet Candidates"
             },
+            "rsi_rollback_persistence_enabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rsi Rollback Persistence Enabled"
+            },
             "text_evolution": {
               "anyOf": [
                 {
@@ -13430,6 +13845,18 @@
               ],
               "title": "Error"
             },
+            "error_detail": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error Detail"
+            },
             "execution_time": {
               "default": 0,
               "title": "Execution Time",
@@ -13779,6 +14206,27 @@
             }
           },
           "title": "SkillUpdate",
+          "type": "object"
+        },
+        "SkipSampleRelabelRequest": {
+          "description": "skip 样本复核改标请求体（SB-5 人工标注回流）。",
+          "properties": {
+            "label": {
+              "description": "新标签：actionable | not_actionable",
+              "title": "Label",
+              "type": "string"
+            },
+            "note": {
+              "default": "",
+              "description": "复核备注",
+              "title": "Note",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label"
+          ],
+          "title": "SkipSampleRelabelRequest",
           "type": "object"
         },
         "SleepSettings": {
@@ -14296,6 +14744,47 @@
           "title": "SshCredentialRequest",
           "type": "object"
         },
+        "SshHostKeyConfirmRequest": {
+          "description": "SSH 首连主机公钥确认（U1 TOFU：用户在主机确认卡核对指纹后提交）",
+          "properties": {
+            "agent_id": {
+              "description": "发起连接的 agent（known_hosts 按 agent 分桶）",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "fingerprint": {
+              "description": "服务器公钥 SHA256 指纹（OpenSSH 风格）",
+              "title": "Fingerprint",
+              "type": "string"
+            },
+            "host": {
+              "description": "目标主机 IP/域名",
+              "title": "Host",
+              "type": "string"
+            },
+            "key_type": {
+              "default": "",
+              "description": "公钥类型（ssh-ed25519/ssh-rsa/...）",
+              "title": "Key Type",
+              "type": "string"
+            },
+            "port": {
+              "default": 22,
+              "description": "SSH 端口",
+              "maximum": 65535.0,
+              "minimum": 1.0,
+              "title": "Port",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "agent_id",
+            "host",
+            "fingerprint"
+          ],
+          "title": "SshHostKeyConfirmRequest",
+          "type": "object"
+        },
         "StartBuildRequest": {
           "properties": {
             "agent_id": {
@@ -14801,6 +15290,19 @@
             }
           },
           "title": "SystemStatus",
+          "type": "object"
+        },
+        "TaskBody": {
+          "properties": {
+            "task": {
+              "title": "Task",
+              "type": "string"
+            }
+          },
+          "required": [
+            "task"
+          ],
+          "title": "TaskBody",
           "type": "object"
         },
         "TaskInfo": {
@@ -15903,6 +16405,61 @@
           "title": "TurnOutcomeRequest",
           "type": "object"
         },
+        "TwoFactorChallengeResponse": {
+          "description": "S8 两步验证挑战响应：密码通过但需第二因子；challenge_token 5 分钟、\nscope 限 2fa（type=2fa_challenge），只能拿去 /auth/2fa/verify 换正式 token 对。",
+          "properties": {
+            "challenge_token": {
+              "title": "Challenge Token",
+              "type": "string"
+            },
+            "two_factor_required": {
+              "default": true,
+              "title": "Two Factor Required",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "challenge_token"
+          ],
+          "title": "TwoFactorChallengeResponse",
+          "type": "object"
+        },
+        "TwoFactorCodeRequest": {
+          "description": "setup 之外的 2FA 操作请求体（enable/disable 共用）",
+          "properties": {
+            "code": {
+              "description": "TOTP 码或恢复码",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "title": "TwoFactorCodeRequest",
+          "type": "object"
+        },
+        "TwoFactorVerifyRequest": {
+          "description": "登录挑战验证请求体",
+          "properties": {
+            "challenge_token": {
+              "description": "登录返回的短时挑战令牌",
+              "title": "Challenge Token",
+              "type": "string"
+            },
+            "code": {
+              "description": "TOTP 码或恢复码",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          "required": [
+            "challenge_token",
+            "code"
+          ],
+          "title": "TwoFactorVerifyRequest",
+          "type": "object"
+        },
         "TypeRequest": {
           "properties": {
             "interval": {
@@ -16465,6 +17022,18 @@
               "title": "Config",
               "type": "object"
             },
+            "embedding_model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "服务商级嵌入模型声明",
+              "title": "Embedding Model"
+            },
             "name": {
               "anyOf": [
                 {
@@ -16488,6 +17057,18 @@
               ],
               "description": "真账单采集开关",
               "title": "Usage Collection"
+            },
+            "weight": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "同优先级组内加权分流份额",
+              "title": "Weight"
             }
           },
           "title": "UpdateProviderRequest",
@@ -17027,6 +17608,18 @@
         "VideoGenerationRequest": {
           "description": "视频生成请求（B2-a：wan/seedance2/veo 异步协议 + 任务账本）",
           "properties": {
+            "agent_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "AgentID（池隔离键）",
+              "title": "Agent Id"
+            },
             "api_key": {
               "anyOf": [
                 {
@@ -17133,6 +17726,42 @@
               "description": "分辨率",
               "title": "Resolution",
               "type": "string"
+            },
+            "session_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "会话ID（生成物入上下文池）",
+              "title": "Session Id"
+            },
+            "turn": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "轮次（入池元数据）",
+              "title": "Turn"
+            },
+            "video_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "视频生视频的源视频（URL 或本地路径）",
+              "title": "Video Url"
             }
           },
           "required": [
@@ -19457,9 +20086,118 @@
           ]
         }
       },
+      "/api/coordination/triage/skip-samples": {
+        "get": {
+          "description": "列出分诊 skip 回流样本（最新在前）— 仅管理员。\n\nSB-5 人工标注回流（计划 §5.3 第 2 级）：shadow/enforce 期每次 skip 落\n特征快照，admin 经本端点读取后复核改标，进入下一轮 NeuJudge 训练集。",
+          "operationId": "list_triage_skip_samples_coordination_triage_skip_samples_get",
+          "parameters": [
+            {
+              "description": "最多返回条数（最新在前）",
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "default": 100,
+                "description": "最多返回条数（最新在前）",
+                "maximum": 1000,
+                "minimum": 1,
+                "title": "Limit",
+                "type": "integer"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "List Triage Skip Samples",
+          "tags": [
+            "Multi-Agent Coordination API",
+            "coordination"
+          ]
+        }
+      },
+      "/api/coordination/triage/skip-samples/{sample_id}/relabel": {
+        "post": {
+          "description": "复核改标一条 skip 样本 — 仅管理员。\n\nlabel 非法 → 422；sample_id 不存在 → 404；成功 → code=0。",
+          "operationId": "relabel_triage_skip_sample_coordination_triage_skip_samples__sample_id__relabel_post",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "sample_id",
+              "required": true,
+              "schema": {
+                "title": "Sample Id",
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkipSampleRelabelRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Relabel Triage Skip Sample",
+          "tags": [
+            "Multi-Agent Coordination API",
+            "coordination"
+          ]
+        }
+      },
       "/api/coordination/triage/stats": {
         "get": {
-          "description": "获取 Triage Gate 统计信息",
+          "description": "获取 Triage Gate 统计信息（双源合并）。\n\n- `triage_gate`：旧 LLM 分诊门（SmallBrainTriageGate）自身计数；\n- `yield_checker`：Layer 6 让位闸（GlanceYieldChecker，SB-4 接线后的\n  规则/模型拦截与 shadow 计数）——live-verify 实测旧形态只透出前者，\n  Layer 6 计数器无任何端点可见，属可观测性断点，本修复合并双源。",
           "operationId": "get_triage_stats_coordination_triage_stats_get",
           "responses": {
             "200": {
@@ -22666,6 +23404,31 @@
           ]
         }
       },
+      "/api/v1/audit/integrity": {
+        "get": {
+          "description": "审计哈希链完整性校验（S4 防篡改）。\n\n全表按 id 序复算每行 entry_hash 并比对 prev_hash 链接；链被静默改写时\n返回 ok=false 与首条断点行 id。鉴权与同域一致（admin）。",
+          "operationId": "get_audit_integrity_integrity_get",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Get Audit Integrity",
+          "tags": [
+            "Audit API"
+          ]
+        }
+      },
       "/api/v1/audit/search": {
         "post": {
           "description": "搜索审计日志",
@@ -22792,6 +23555,161 @@
           ]
         }
       },
+      "/api/v1/auth/2fa/disable": {
+        "post": {
+          "description": "验码（TOTP 或恢复码）后关闭两步验证并清空相关列。",
+          "operationId": "disableTwoFactor_disable_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorCodeRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Disabletwofactor",
+          "tags": [
+            "Auth 2FA API"
+          ]
+        }
+      },
+      "/api/v1/auth/2fa/enable": {
+        "post": {
+          "description": "验 TOTP 码通过才启用；返回一次性恢复码明文（库中只存哈希）。",
+          "operationId": "enableTwoFactor_enable_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorCodeRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Enabletwofactor",
+          "tags": [
+            "Auth 2FA API"
+          ]
+        }
+      },
+      "/api/v1/auth/2fa/setup": {
+        "post": {
+          "description": "生成 TOTP secret 与 otpauth URL（暂存未启用；重复调用换新 secret）。",
+          "operationId": "setupTwoFactor_setup_post",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Setuptwofactor",
+          "tags": [
+            "Auth 2FA API"
+          ]
+        }
+      },
+      "/api/v1/auth/2fa/verify": {
+        "post": {
+          "description": "挑战验证（公开端点，白名单）：challenge_token + TOTP/恢复码 → 正式 token 对。\n\n- challenge_token 必须 type=2fa_challenge 且未过期（普通 token 一律 401）\n- challenge 一次性：验证成功即入全局黑名单，重放拒绝\n- 错码按挑战 jti 限次（窗口内 5 次），防 10^6 码空间爆破",
+          "operationId": "verifyTwoFactor_verify_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorVerifyRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Verifytwofactor",
+          "tags": [
+            "Auth 2FA API"
+          ]
+        }
+      },
       "/api/v1/auth/login": {
         "post": {
           "description": "用户登录",
@@ -22811,7 +23729,15 @@
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/TokenResponse"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/TokenResponse"
+                      },
+                      {
+                        "$ref": "#/components/schemas/TwoFactorChallengeResponse"
+                      }
+                    ],
+                    "title": "Response Login Api V1 Auth Login Post"
                   }
                 }
               },
@@ -22873,6 +23799,98 @@
           "summary": "Get Current User",
           "tags": [
             "Auth API"
+          ]
+        }
+      },
+      "/api/v1/auth/oidc/authorize": {
+        "get": {
+          "description": "302 到 IdP authorize 端点；state+nonce 由本仓生成并短时保存。",
+          "operationId": "oidcAuthorize_authorize_get",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            }
+          },
+          "summary": "Oidcauthorize",
+          "tags": [
+            "OIDC SSO API"
+          ]
+        }
+      },
+      "/api/v1/auth/oidc/callback": {
+        "get": {
+          "description": "code 换 token → 校验 id_token → 供应用户 → 签发本仓 JWT 对。",
+          "operationId": "oidcCallback_callback_get",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "code",
+              "required": false,
+              "schema": {
+                "default": "",
+                "title": "Code",
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "state",
+              "required": false,
+              "schema": {
+                "default": "",
+                "title": "State",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Oidccallback",
+          "tags": [
+            "OIDC SSO API"
+          ]
+        }
+      },
+      "/api/v1/auth/oidc/status": {
+        "get": {
+          "description": "SSO 可用性（公开）：前端登录页据此决定是否渲染 SSO 按钮。",
+          "operationId": "oidcStatus_status_get",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            }
+          },
+          "summary": "Oidcstatus",
+          "tags": [
+            "OIDC SSO API"
           ]
         }
       },
@@ -23450,6 +24468,97 @@
           ]
         }
       },
+      "/api/v1/benchmark/multi-agent/run": {
+        "post": {
+          "description": "触发 multi_agent 评测跑批（R3 生产入口，admin 门）。\n\n- body 圈定范围：task_ids / suites 子集（缺省=全部注册任务）、modes\n  （solo/swarm，缺省 solo；swarm 走真 SwarmManager 链路含治理闸）；\n- 后台线程执行 BenchRunner.runAllWithReport，POST 立即返回 run 标识与\n  running 态；GET /multi-agent/runs/{run_id} 轮询终态与报告落盘路径；\n- 无 LLM 通道不伪造：runner 逐任务如实记失败事实，报告照常落盘。",
+          "operationId": "run_multi_agent_benchmark_multi_agent_run_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultiAgentRunRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Run Multi Agent Benchmark",
+          "tags": [
+            "Benchmark API"
+          ]
+        }
+      },
+      "/api/v1/benchmark/multi-agent/runs/{run_id}": {
+        "get": {
+          "description": "查询 multi_agent 跑批执行状态与结果摘要（含报告落盘路径）。",
+          "operationId": "get_multi_agent_run_multi_agent_runs__run_id__get",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "run_id",
+              "required": true,
+              "schema": {
+                "title": "Run Id",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Get Multi Agent Run",
+          "tags": [
+            "Benchmark API"
+          ]
+        }
+      },
       "/api/v1/benchmark/rag-datasets": {
         "get": {
           "operationId": "rag_datasets_list_rag_datasets_get",
@@ -23760,6 +24869,23 @@
                 "title": "Size",
                 "type": "integer"
               }
+            },
+            {
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Limit"
+              }
             }
           ],
           "responses": {
@@ -23840,7 +24966,7 @@
       },
       "/api/v1/benchmark/runs": {
         "get": {
-          "description": "查询测试运行历史",
+          "description": "查询测试运行历史（P1-0：内存+盘合并，重启后历史仍可查）。",
           "operationId": "list_runs_runs_get",
           "parameters": [
             {
@@ -23894,6 +25020,25 @@
                 "title": "Size",
                 "type": "integer"
               }
+            },
+            {
+              "description": "只返回合并后最近 N 条（按 started_at 倒序截断）",
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "只返回合并后最近 N 条（按 started_at 倒序截断）",
+                "title": "Limit"
+              }
             }
           ],
           "responses": {
@@ -23929,7 +25074,7 @@
       },
       "/api/v1/benchmark/runs/{run_id}": {
         "get": {
-          "description": "查看某次运行详情",
+          "description": "查看某次运行详情（P1-0：内存未命中读盘，重启后历史仍可查）。",
           "operationId": "get_run_runs__run_id__get",
           "parameters": [
             {
@@ -27880,6 +29025,71 @@
           ]
         }
       },
+      "/api/v1/collaboration/rooms/{room_id}/escalations/{subagent_id}/resolve": {
+        "post": {
+          "description": "M13（拍板接提交口）：房间升级卡处置——steer（注入指示继续）/ cancel（叫停）。\n\n复用既有编排单源机制，不新造语义：steer 走 SwarmManager.updateSubagent\n（SteerQueue 注入，成员下一工具轮可见）；cancel 走 SwarmManager.cancelRun\n（幂等叫停落账）。判定权 = admin/群主（与审批裁决同口径）；处置结果以\nsystem 消息上墙（kind=swarm_escalate、status=resolved）闭环。",
+          "operationId": "resolve_room_escalation_rooms__room_id__escalations__subagent_id__resolve_post",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "room_id",
+              "required": true,
+              "schema": {
+                "title": "Room Id",
+                "type": "string"
+              }
+            },
+            {
+              "in": "path",
+              "name": "subagent_id",
+              "required": true,
+              "schema": {
+                "title": "Subagent Id",
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EscalationResolveBody"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Resolve Room Escalation",
+          "tags": [
+            "Collaboration Room API"
+          ]
+        }
+      },
       "/api/v1/collaboration/rooms/{room_id}/messages": {
         "get": {
           "operationId": "get_room_messages_rooms__room_id__messages_get",
@@ -31446,7 +32656,7 @@
       },
       "/api/v1/console/chat/subagents/{subagent_id}/events": {
         "get": {
-          "description": "子任务事件账本读面（H-4 闭环）：该 run 的全程事件 + 因果链。\n\n账本（JSONL 归档）独立于台账与内存逐出——run 被逐出后仍可查。归属判定\n与 runs 读面同一谓词（`_check_session_ownership`，教义第 6 条）：台账行在\n→ 按行内 user_id 判；台账无行（gate off/早期运行）→ 非管理员 fail-closed。",
+          "description": "子任务事件账本读面（H-4 闭环）：该 run 的全程事件 + 因果链。\n\n账本（JSONL 归档）独立于台账与内存逐出——run 被逐出后仍可查。归属判定\n与 runs 读面同一谓词（`_check_session_ownership`，教义第 6 条）：台账行在\n→ 按行内 user_id 判；台账无行（gate off/早期运行）→ 非管理员 fail-closed。\nC2 接线：事件读数经 G3 收敛面（NeuacpMemberSurface.snapshot）取数——\n同一账本单源，读面换道、响应形状不变。\n\nM5：带 ``after_seq`` 时改走全局事件库游标增量重放（A2 replayThrough 的\n生产消费点）——``mode=replay``，返回 ``high_water``/``degraded``；\n``degraded=true``（游标过旧/超预算）时调用方应回退全量（不带 after_seq）\n读法，绝不部分回放。",
           "operationId": "get_console_subagent_events_chat_subagents__subagent_id__events_get",
           "parameters": [
             {
@@ -31456,6 +32666,22 @@
               "schema": {
                 "title": "Subagent Id",
                 "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "after_seq",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "After Seq"
               }
             }
           ],
@@ -31485,6 +32711,73 @@
             }
           ],
           "summary": "Get Console Subagent Events",
+          "tags": [
+            "Console API"
+          ]
+        }
+      },
+      "/api/v1/console/chat/swarm/lineage-audit": {
+        "get": {
+          "description": "M8（修复计划 2026-11-21）：lineage 租户/房间维度审计聚合读面（admin 门）。\n\nH-4 事件的 lineage（tenant_id/room_id/agent_path/depth）此前只写不读；\n本面按租户段/项目标（room_id=project_id 等式）聚合台账 run 行与各 run 的\nH-4 事件族计数 + 谱系样本，供跨租户审计。非 admin 403；单 run 事件全量\n计数（JSONL 一手账本），run 数上限 200。",
+          "operationId": "get_console_swarm_lineage_audit_chat_swarm_lineage_audit_get",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "tenant_id",
+              "required": false,
+              "schema": {
+                "default": "",
+                "title": "Tenant Id",
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "room_id",
+              "required": false,
+              "schema": {
+                "default": "",
+                "title": "Room Id",
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "default": 50,
+                "title": "Limit",
+                "type": "integer"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "BearerOrQuery": []
+            }
+          ],
+          "summary": "Get Console Swarm Lineage Audit",
           "tags": [
             "Console API"
           ]
@@ -32153,6 +33446,80 @@
             }
           ],
           "summary": "Get Context Composition",
+          "tags": [
+            "Context API"
+          ]
+        }
+      },
+      "/api/v1/context/diagnose/structure": {
+        "get": {
+          "description": "会话上下文结构体检（P0-3 轴9，只读诊断）。\n\n对消息流、上下文池归档、会话时间线三路真实存储交叉核对，检出五类\n结构病：concurrent_fork / orphan_turn / stale_index / segment_split /\nlost_content。**只诊断不修补**——返回 issues 计数 + 明细（明细条数\n按 `detail_limit` 截断，总数不受影响）。查无此会话返回 404，不返回\n空报告冒充健康。",
+          "operationId": "diagnose_context_structure_diagnose_structure_get",
+          "parameters": [
+            {
+              "description": "Session ID",
+              "in": "query",
+              "name": "session_id",
+              "required": true,
+              "schema": {
+                "description": "Session ID",
+                "title": "Session Id",
+                "type": "string"
+              }
+            },
+            {
+              "description": "Agent ID（缺省按会话文件/时间线反查）",
+              "in": "query",
+              "name": "agent_id",
+              "required": false,
+              "schema": {
+                "default": "",
+                "description": "Agent ID（缺省按会话文件/时间线反查）",
+                "title": "Agent Id",
+                "type": "string"
+              }
+            },
+            {
+              "description": "issue 明细条数上限（防爆炸）",
+              "in": "query",
+              "name": "detail_limit",
+              "required": false,
+              "schema": {
+                "default": 50,
+                "description": "issue 明细条数上限（防爆炸）",
+                "maximum": 500,
+                "minimum": 1,
+                "title": "Detail Limit",
+                "type": "integer"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Diagnose Context Structure",
           "tags": [
             "Context API"
           ]
@@ -35135,6 +36502,31 @@
           ]
         }
       },
+      "/api/v1/external-agents/registry/refresh": {
+        "post": {
+          "description": "手动刷新 ACP registry 快照（G1，仅 admin）。\n\n- 拉取（有界超时/体积）→ 解析归一 → 换入目录合并快照；网络失败 stale\n  降级：保留上次快照、标注 stale、error 诚实回填，不以空表顶替。\n- 返回 ``{entries, fetched_at, stale, entry_count, source_url, error?}``。\n- 刷新成功后 registry 独有条目经 GET /catalog 可见（source=\"registry\"）。",
+          "operationId": "refreshExternalAgentRegistry_registry_refresh_post",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Refreshexternalagentregistry",
+          "tags": [
+            "External Agents API"
+          ]
+        }
+      },
       "/api/v1/external-agents/runs/{subagent_id}/frames": {
         "get": {
           "description": "帧账本读面：按 seq 游标回放一次 run 的原生帧（设计文档 §3.2，拍板 D-C）。\n\n- 数据源直连 ``frame_log.readFrames``（帧账本与 H-4 治理账本分工见设计\n  文档 §4，本端点只读帧流）。\n- 同租户校验（§6.4 红线）：解析到的 run 租户非空且 != 请求者租户 → 404\n  （不泄露存在性，与 teams 跨租户口径一致）；run 无任何租户线索且无帧\n  记录 → 404（run 不存在或无帧记录）；帧非空但租户线索缺失（历史存量）\n  → 放行（admin 门已过）。\n- 返回 ``{\"subagent_id\", \"count\", \"frames\"}``，frames 按 seq 升序。",
@@ -35203,7 +36595,7 @@
       },
       "/api/v1/external-agents/status": {
         "get": {
-          "description": "进程池状态：B3（process_pool）落地前为占位；落地后如实读池快照。",
+          "description": "进程池状态：读 NeuacpProcessPool 单例真实快照（M6——原 getattr 落空恒占位，\n管理面看不到池水位）。池不可用时诚实降级为 note，不 500。",
           "operationId": "externalAgentsStatus_status_get",
           "responses": {
             "200": {
@@ -36317,6 +37709,97 @@
             }
           ],
           "summary": "Generate Image",
+          "tags": [
+            "Generation API"
+          ]
+        }
+      },
+      "/api/v1/generation/music": {
+        "post": {
+          "description": "音乐生成（M1：fal Queue API 提交 + 持久任务账本，两段式与 /video 同范式）",
+          "operationId": "generate_music_music_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicGenerationRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "BearerOrQuery": []
+            }
+          ],
+          "summary": "Generate Music",
+          "tags": [
+            "Generation API"
+          ]
+        }
+      },
+      "/api/v1/generation/music/status/{task_id}": {
+        "get": {
+          "description": "轮询音乐任务（M1：收口委托 recovery.settle_music_record，与 /video/status 同口径）。",
+          "operationId": "get_generation_music_status_music_status__task_id__get",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "task_id",
+              "required": true,
+              "schema": {
+                "title": "Task Id",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "BearerOrQuery": []
+            }
+          ],
+          "summary": "Get Generation Music Status",
           "tags": [
             "Generation API"
           ]
@@ -37601,6 +39084,266 @@
           ]
         }
       },
+      "/api/v1/governance/rsi/generations": {
+        "get": {
+          "description": "世代列表（P1-5）：序号/父代/状态/裁决/晋升时间，支持 limit 与 status 过滤。\n\nlimit 截取**最近** N 代（账本自然升序的尾部）；status 非法 422；\n账本空 → 空列表（200），世代管线未装配 → 503。",
+          "operationId": "list_rsi_generations_rsi_generations_get",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "default": 50,
+                "maximum": 500,
+                "minimum": 1,
+                "title": "Limit",
+                "type": "integer"
+              }
+            },
+            {
+              "description": "按世代状态过滤，可选值: ['proposed', 'shadowTesting', 'gated', 'canary', 'deployed', 'rejected', 'rolledBack']",
+              "in": "query",
+              "name": "status",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "按世代状态过滤，可选值: ['proposed', 'shadowTesting', 'gated', 'canary', 'deployed', 'rejected', 'rolledBack']",
+                "title": "Status"
+              }
+            },
+            {
+              "in": "query",
+              "name": "agent_id",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Agent Id"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "List Rsi Generations",
+          "tags": [
+            "Governance API"
+          ]
+        }
+      },
+      "/api/v1/governance/rsi/generations/current": {
+        "get": {
+          "description": "当前生产基线代（P1-5）：序号最大的 deployed 代；尚无部署 404（不编造）。\n\n声明序刻意排在 /{generation_no} 之前：FastAPI 按声明序匹配，\n\"current\" 落到本端点，不会被路径参数吞成 422。",
+          "operationId": "get_current_baseline_generation_rsi_generations_current_get",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "agent_id",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Agent Id"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Get Current Baseline Generation",
+          "tags": [
+            "Governance API"
+          ]
+        }
+      },
+      "/api/v1/governance/rsi/generations/{generation_no}": {
+        "get": {
+          "description": "单代详情（P1-5）：signals/changes/verdicts 全量/decision/deployment。",
+          "operationId": "get_rsi_generation_rsi_generations__generation_no__get",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "generation_no",
+              "required": true,
+              "schema": {
+                "title": "Generation No",
+                "type": "integer"
+              }
+            },
+            {
+              "in": "query",
+              "name": "agent_id",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Agent Id"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Get Rsi Generation",
+          "tags": [
+            "Governance API"
+          ]
+        }
+      },
+      "/api/v1/governance/rsi/generations/{generation_no}/lineage": {
+        "get": {
+          "description": "谱系回溯链（P1-5）：从指定代起沿 parentNo 向上到根代（含自身）。",
+          "operationId": "get_rsi_generation_lineage_rsi_generations__generation_no__lineage_get",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "generation_no",
+              "required": true,
+              "schema": {
+                "title": "Generation No",
+                "type": "integer"
+              }
+            },
+            {
+              "in": "query",
+              "name": "agent_id",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Agent Id"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Get Rsi Generation Lineage",
+          "tags": [
+            "Governance API"
+          ]
+        }
+      },
       "/api/v1/governance/rsi/improver-upgrade/approve": {
         "post": {
           "description": "人工批准 I_t 换版（A5 元优化闭环的人工半，T2 生产环通道）。\n\n批准时现算：失败史派生（占多数淘汰档）＋配对探针重跑（fresh Γ）→\n换版入台账（无探针 measured 证据即 409——\"升级了但没证据\"不许入账）→\n内存策略即时换版。无候选/已在账同样 409 并点名理由。",
@@ -37659,6 +39402,69 @@
             }
           ],
           "summary": "Approve Improver Upgrade",
+          "tags": [
+            "Governance API"
+          ]
+        }
+      },
+      "/api/v1/governance/rsi/optimizations/apply": {
+        "post": {
+          "description": "人工批准并应用最近一轮 RSI 参数优化（R1 闭环咬合的合法路径）。\n\nphase 1（手动档）下 run_iteration 只产出提案不自动应用——phase 语义即\n\"生成优化建议，人工审批\"，本端点就是那道人工审批：经管理员批准后，走与\n自动档**同一份**\"应用 → 前后实测 → 棘轮保留/回滚\"实现落地，并按当前相位\n计入实做次数账。守卫：RSI 未装配 503；观察期/无待批提案/重复应用/债务闸\n409；越界 optimization_id / 轮次 / 缺署名 422；非管理员 403。",
+          "operationId": "apply_rsi_optimizations_rsi_optimizations_apply_post",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "agent_id",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Agent Id"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RsiApplyOptimizationsRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Apply Rsi Optimizations",
           "tags": [
             "Governance API"
           ]
@@ -47905,6 +49711,52 @@
           ]
         }
       },
+      "/api/v1/knowledge/ontology/explain/{fact_id}": {
+        "get": {
+          "description": "推导解释（U13）：沿推导账本回溯已落库结论的实际来路（只读投影，\nsteps 树+中文模板文本）。",
+          "operationId": "explain_ontology_fact_ontology_explain__fact_id__get",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "fact_id",
+              "required": true,
+              "schema": {
+                "title": "Fact Id",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Explain Ontology Fact",
+          "tags": [
+            "Knowledge API"
+          ]
+        }
+      },
       "/api/v1/knowledge/ontology/export.csv": {
         "get": {
           "description": "W11：CSV 节点/边导出（管理员）。",
@@ -48342,6 +50194,52 @@
             }
           ],
           "summary": "Export Ontology Turtle",
+          "tags": [
+            "Knowledge API"
+          ]
+        }
+      },
+      "/api/v1/knowledge/ontology/facts/bulk": {
+        "post": {
+          "description": "事实批量装载（U3）：两段式——先全量干跑校验，任一行违规整批零落盘；\n逐行仍走准入咽喉。租户强制取登录态（行内自报 tenantId 一律覆盖）。",
+          "operationId": "bulk_load_ontology_facts_ontology_facts_bulk_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Body",
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Bulk Load Ontology Facts",
           "tags": [
             "Knowledge API"
           ]
@@ -48910,6 +50808,52 @@
           ]
         }
       },
+      "/api/v1/knowledge/ontology/prove": {
+        "post": {
+          "description": "反向链定理证明（U12）：从目标三元组反向搜索证明树。严格只读——\n不写表、不产生派生事实；missing 如实记录 unproven/cycle/depth。",
+          "operationId": "prove_ontology_goal_ontology_prove_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Body",
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Prove Ontology Goal",
+          "tags": [
+            "Knowledge API"
+          ]
+        }
+      },
       "/api/v1/knowledge/ontology/quality": {
         "get": {
           "description": "本体质量报告（B13 L9，只读）：OOPS! 结构子集＋可计算指标。\n\n事实源是 `ontology/quality.py::ontologyQualityReport` 那一份计算，端点不自己\n数第二本账（教义第 6 条）。报告只覆盖**可计算**的形状缺陷（缺 label、孤儿类、\n逆关系单边、label 重复）；完整 OOPS!/OntoClean/OQuaRE 认证不在本仓承诺面\n（升级计划 §6 不纳入项），检索侧 NDCG/A-B 走 `/evaluation/*` 与 `/audit/*`。",
@@ -48930,6 +50874,52 @@
             }
           ],
           "summary": "Getontologyqualityreport",
+          "tags": [
+            "Knowledge API"
+          ]
+        }
+      },
+      "/api/v1/knowledge/ontology/quality/gate": {
+        "post": {
+          "description": "质量门阈值判定（U6）：报告仍是 ontologyQualityReport 那一份计算，\n本端点补 thresholds 判定（min_coverage/max_findings/max_orphan_rate），\nthreshold_failures 按固定顺序回执。",
+          "operationId": "check_ontology_quality_gate_ontology_quality_gate_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Body",
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Check Ontology Quality Gate",
           "tags": [
             "Knowledge API"
           ]
@@ -50398,6 +52388,52 @@
             }
           ],
           "summary": "Validateontologycandidates",
+          "tags": [
+            "Knowledge API"
+          ]
+        }
+      },
+      "/api/v1/knowledge/ontology/validate/shacl": {
+        "post": {
+          "description": "SHACL 运行时校验 dry-run（U1）：形状单源=注册表→exportShaclShapes，\n数据图缺省按 subject_key 圈定主体邻域子图；mode 显式传参（off/shadow/\nenforce），不读环境档——本端点是「想跑就跑」的体检面。",
+          "operationId": "validate_ontology_shacl_ontology_validate_shacl_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Body",
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Validate Ontology Shacl",
           "tags": [
             "Knowledge API"
           ]
@@ -60698,6 +62734,52 @@
           ]
         }
       },
+      "/api/v1/mobile/pairing/devices/{pairing_id}/capabilities": {
+        "get": {
+          "description": "读设备能力快照（设备桥 B1 读面；JWT + 属主）。\n\n他人设备一律 404：读面不区分「不存在」与「不是你的」，不泄露设备存在性\n（比 revoke 的 403 更严一档——读面零枚举线索）。",
+          "operationId": "get_device_capabilities_pairing_devices__pairing_id__capabilities_get",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "pairing_id",
+              "required": true,
+              "schema": {
+                "title": "Pairing Id",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Get Device Capabilities",
+          "tags": [
+            "Mobile Pairing API"
+          ]
+        }
+      },
       "/api/v1/mobile/pairing/generate": {
         "post": {
           "description": "生成配对码 + 二维码",
@@ -66286,53 +68368,6 @@
           ]
         }
       },
-      "/api/v1/phase3/classify/query": {
-        "post": {
-          "description": "分类查询\n\n- **query**: 查询文本",
-          "operationId": "classify_query_phase3_classify_query_post",
-          "parameters": [
-            {
-              "in": "query",
-              "name": "query",
-              "required": true,
-              "schema": {
-                "title": "Query",
-                "type": "string"
-              }
-            }
-          ],
-          "responses": {
-            "200": {
-              "content": {
-                "application/json": {
-                  "schema": {}
-                }
-              },
-              "description": "Successful Response"
-            },
-            "422": {
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/HTTPValidationError"
-                  }
-                }
-              },
-              "description": "Validation Error"
-            }
-          },
-          "security": [
-            {
-              "HTTPBearer": []
-            }
-          ],
-          "summary": "Classify Query",
-          "tags": [
-            "Phase 3 Intelligence API",
-            "Phase 3 Intelligence"
-          ]
-        }
-      },
       "/api/v1/phase3/cleanup-old-events": {
         "post": {
           "description": "清理旧事件（管理员）",
@@ -66828,138 +68863,6 @@
             }
           ],
           "summary": "Reset Phase3 State",
-          "tags": [
-            "Phase 3 Intelligence API",
-            "Phase 3 Intelligence"
-          ]
-        }
-      },
-      "/api/v1/phase3/route/request": {
-        "post": {
-          "description": "路由请求到最佳模型\n\n- **user_query**: 用户查询\n- **agent_id**: Agent ID\n- **model_name**: 建议的模型\n- **cost_budget**: 成本预算\n- **urgency_level**: 紧急程度 (1-10)\n- **available_models**: 可用模型列表",
-          "operationId": "route_request_phase3_route_request_post",
-          "parameters": [
-            {
-              "in": "query",
-              "name": "user_query",
-              "required": true,
-              "schema": {
-                "title": "User Query",
-                "type": "string"
-              }
-            },
-            {
-              "in": "query",
-              "name": "agent_id",
-              "required": true,
-              "schema": {
-                "title": "Agent Id",
-                "type": "string"
-              }
-            },
-            {
-              "in": "query",
-              "name": "model_name",
-              "required": false,
-              "schema": {
-                "default": "gpt-4-turbo",
-                "title": "Model Name",
-                "type": "string"
-              }
-            },
-            {
-              "in": "query",
-              "name": "cost_budget",
-              "required": false,
-              "schema": {
-                "default": 0.1,
-                "title": "Cost Budget",
-                "type": "number"
-              }
-            },
-            {
-              "in": "query",
-              "name": "urgency_level",
-              "required": false,
-              "schema": {
-                "default": 5,
-                "title": "Urgency Level",
-                "type": "integer"
-              }
-            }
-          ],
-          "requestBody": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Available Models"
-                }
-              }
-            }
-          },
-          "responses": {
-            "200": {
-              "content": {
-                "application/json": {
-                  "schema": {}
-                }
-              },
-              "description": "Successful Response"
-            },
-            "422": {
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/HTTPValidationError"
-                  }
-                }
-              },
-              "description": "Validation Error"
-            }
-          },
-          "security": [
-            {
-              "HTTPBearer": []
-            }
-          ],
-          "summary": "Route Request",
-          "tags": [
-            "Phase 3 Intelligence API",
-            "Phase 3 Intelligence"
-          ]
-        }
-      },
-      "/api/v1/phase3/router/stats": {
-        "get": {
-          "description": "获取路由器统计信息",
-          "operationId": "get_router_stats_phase3_router_stats_get",
-          "responses": {
-            "200": {
-              "content": {
-                "application/json": {
-                  "schema": {}
-                }
-              },
-              "description": "Successful Response"
-            }
-          },
-          "security": [
-            {
-              "HTTPBearer": []
-            }
-          ],
-          "summary": "Get Router Stats",
           "tags": [
             "Phase 3 Intelligence API",
             "Phase 3 Intelligence"
@@ -69791,7 +71694,7 @@
       },
       "/api/v1/quality/metrics": {
         "get": {
-          "description": "会话质量 + token 归因读数；没有分母的率返回 None，不伪造 0。",
+          "description": "会话质量 + token 归因读数；没有分母的率返回 None，不伪造 0。\n\ntenant_id 三态：不传＝全部租户；传租户串＝只算该租户；传空串＝只算\n无租户段行（历史/未接线入口）。",
           "operationId": "get_quality_metrics_metrics_get",
           "parameters": [
             {
@@ -69804,6 +71707,22 @@
                 "minimum": 60,
                 "title": "Window Seconds",
                 "type": "integer"
+              }
+            },
+            {
+              "in": "query",
+              "name": "tenant_id",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Tenant Id"
               }
             }
           ],
@@ -71935,6 +73854,51 @@
             }
           ],
           "summary": "Upsert Ssh Credential",
+          "tags": [
+            "Settings API"
+          ]
+        }
+      },
+      "/api/v1/settings/ssh-credentials/host-key/confirm": {
+        "post": {
+          "description": "确认 SSH 首连主机公钥（needs_host_confirmation 确认卡的确认动作）。\n\nU1 TOFU 信任锚：用户核对指纹后，确认记录经 SshHostStore.mark_confirmed\n按 (agent_id, host, port) 落库；工具执行侧轮询到同指纹记录后原地重连。\n鉴权与 agent 归属校验对齐同文件既有 ssh-credentials 端点的形态\n（登录用户 + requireAgentOwner 执行门：admin 全量/属主本人/无主仅 admin）。",
+          "operationId": "confirmSshHostKey_v1_settings_ssh_credentials_host_key_confirm_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SshHostKeyConfirmRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "BearerOrQuery": []
+            }
+          ],
+          "summary": "Confirmsshhostkey",
           "tags": [
             "Settings API"
           ]
@@ -77800,6 +79764,231 @@
           ]
         }
       },
+      "/api/v1/swarm-queue": {
+        "get": {
+          "description": "排队 run 有序快照：优先级降序 + 同级先来先服务，位次从 1 起。",
+          "operationId": "runQueueSnapshot_get",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": true,
+                    "title": "Response Runqueuesnapshot Api V1 Swarm Queue Get",
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Runqueuesnapshot",
+          "tags": [
+            "Swarm Queue API"
+          ]
+        }
+      },
+      "/api/v1/swarm-queue/settle": {
+        "post": {
+          "description": "A5 显式驱动：admin 显式触发一次闲置 run 结算（POST /v1/swarm-queue/settle）。\n\n不受 NEUROVA_SWARM_AUTO_SETTLE 默认关限制——admin 显式调用即执行；\n九重护栏与闲置阈值照常生效。返回结算结果三桶（settled/skipped/failed）。",
+          "operationId": "settleIdleRunsExplicit_settle_post",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": true,
+                    "title": "Response Settleidlerunsexplicit Api V1 Swarm Queue Settle Post",
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Settleidlerunsexplicit",
+          "tags": [
+            "Swarm Queue API"
+          ]
+        }
+      },
+      "/api/v1/swarm-queue/{subagent_id}": {
+        "delete": {
+          "operationId": "cancelQueued__subagent_id__delete",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "subagent_id",
+              "required": true,
+              "schema": {
+                "title": "Subagent Id",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": true,
+                    "title": "Response Cancelqueued Api V1 Swarm Queue  Subagent Id  Delete",
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Cancelqueued",
+          "tags": [
+            "Swarm Queue API"
+          ]
+        }
+      },
+      "/api/v1/swarm-queue/{subagent_id}/priority": {
+        "patch": {
+          "operationId": "setPriority__subagent_id__priority_patch",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "subagent_id",
+              "required": true,
+              "schema": {
+                "title": "Subagent Id",
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriorityBody"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": true,
+                    "title": "Response Setpriority Api V1 Swarm Queue  Subagent Id  Priority Patch",
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Setpriority",
+          "tags": [
+            "Swarm Queue API"
+          ]
+        }
+      },
+      "/api/v1/swarm-queue/{subagent_id}/task": {
+        "post": {
+          "operationId": "editTask__subagent_id__task_post",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "subagent_id",
+              "required": true,
+              "schema": {
+                "title": "Subagent Id",
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskBody"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "additionalProperties": true,
+                    "title": "Response Edittask Api V1 Swarm Queue  Subagent Id  Task Post",
+                    "type": "object"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Edittask",
+          "tags": [
+            "Swarm Queue API"
+          ]
+        }
+      },
       "/api/v1/sync/connections": {
         "get": {
           "description": "获取活跃 WebSocket 连接信息\n\nS-03 补全：原来匿名可枚举**所有在线会话的 session_id**——那既是隐私面，\n也是其余四条端点的 id 来源（拿到 id 就能打 `/sessions/{id}/history`）。\n\n过滤走 `manager.list_sessions(user_id=...)` 那一道**已有的**归属过滤，\n不在本文件写比较式：写出来就是第二份口径，而且换个变量名去比（拿局部变量\n`caller` 之类）还能绕过\"只数归属比较那一句\"的守卫——本仓加那条守卫的理由\n正是这个。\n`_ws_connections` 里有、但不在调用者会话清单里的连接**不列出**：\n宁可少给一条运维读数，不给外人一个 id。",
@@ -80298,6 +82487,52 @@
           ]
         }
       },
+      "/api/v1/tools/park/{park_id}": {
+        "get": {
+          "description": "按 park_id 幂等查询 park 中的长命令结果（U8 迟交回灌的 REST 取回面）。",
+          "operationId": "getParkedToolResult_park__park_id__get",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "park_id",
+              "required": true,
+              "schema": {
+                "title": "Park Id",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Getparkedtoolresult",
+          "tags": [
+            "Tool Park API"
+          ]
+        }
+      },
       "/api/v1/tools/parse": {
         "post": {
           "description": "解析工具调用",
@@ -81417,7 +83652,7 @@
       }
     }
   },
-  "routeCount": 106,
+  "routeCount": 110,
   "websocketPaths": [
     "/api/v1/audio/asr/stream",
     "/api/v1/console/ws/{client_id}",

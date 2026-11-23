@@ -72,6 +72,11 @@ EXPECTED_NON_REPRODUCIBLE = {
     "rollback_subagent",
     # 桌面写动作（AD 批）：拖拽/按键/粘贴重放制造新桌面副作用，同 computer_type
     "computer_drag", "computer_key", "computer_paste",
+    # 设备桥（2026-11-23 计划 B3）：动作落用户真机——写操作制造设备侧变更，
+    # 读操作是外部状态瞬时快照（与 computer_screenshot 同判），重放均不可复现
+    "device_open_url", "device_open_app", "device_clipboard_read",
+    "device_clipboard_write", "device_app_list", "device_env",
+    "device_notification_read",
 }
 
 

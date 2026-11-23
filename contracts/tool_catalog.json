@@ -2225,10 +2225,10 @@
         "type": "object"
       },
       "description": "【设备桥】列出用户手机上可供交互的应用清单（名称/包名），用于后续 device_open_app 选目标。",
-      "external_write": true,
+      "external_write": false,
       "min_role": null,
       "name": "device_app_list",
-      "read_only": false
+      "read_only": true
     },
     {
       "agent_scope": "all",
@@ -2238,10 +2238,10 @@
         "type": "object"
       },
       "description": "【设备桥】读取用户手机剪贴板当前文本（需设备前台；后台会明确报不可用）。注意隐私：只在没有更间接的取数路径时使用。",
-      "external_write": true,
+      "external_write": false,
       "min_role": null,
       "name": "device_clipboard_read",
-      "read_only": false
+      "read_only": true
     },
     {
       "agent_scope": "all",
@@ -2271,10 +2271,10 @@
         "type": "object"
       },
       "description": "【设备桥】读取用户手机的环境快照：电量/充电态、屏幕尺寸、系统版本、语言区域、网络状态等。",
-      "external_write": true,
+      "external_write": false,
       "min_role": null,
       "name": "device_env",
-      "read_only": false
+      "read_only": true
     },
     {
       "agent_scope": "all",
@@ -2290,10 +2290,10 @@
         "type": "object"
       },
       "description": "【设备桥】读取用户手机最近的通知事件（按端上授权范围；默认只含应用名/标题/时间）。用于“帮我看看刚才有什么通知”类请求。",
-      "external_write": true,
+      "external_write": false,
       "min_role": null,
       "name": "device_notification_read",
-      "read_only": false
+      "read_only": true
     },
     {
       "agent_scope": "all",
