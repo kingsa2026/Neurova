@@ -55,6 +55,7 @@ import { StyleManager, ThemeMode } from '../libs/style/StyleManager';
 import { ConfigManager } from '../libs/config/ConfigManager';
 import { ServerProfiles } from '../libs/config/ServerProfiles';
 import { PlatformAdapter } from '../libs/adapters/PlatformAdapter';
+import { WebSocketAdapter } from '../libs/adapters/WebSocketAdapter';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
 import { SettingGroup, SettingItem } from '../libs/types';
@@ -248,6 +249,15 @@ export class SettingViewHelper {
           {
             key: 'check_update', label: '检查更新', description: '检查最新版本',
             type: 'action', value: '', defaultValue: '', group: 'about',
+          },
+        ],
+      },
+      {
+        key: 'device_bridge', title: '设备桥', icon: '🔌', items: [
+          {
+            key: 'device_bridge_status', label: '设备桥状态',
+            description: '执行端连接 · 能力子集（open_url/clipboard/device_env）',
+            type: 'action', value: '', defaultValue: '', group: 'device_bridge',
           },
         ],
       },
@@ -530,6 +540,12 @@ export struct SettingPage {
     } else if (key === 'voice_minutes') {
       // 录音纪要（B4-8）：录音 → 纪要 → 问题/办事判定 → 办事落任务看板
       this.router.push(RouteNames.VOICE_MINUTES);
+    } else if (key === 'device_bridge_status') {
+      // 设备桥（H5）：连接状态与能力子集如实呈现（不做假能力宣称）
+      const connected = WebSocketAdapter.getInstance().isConnected();
+      this.msg.info(connected
+        ? '设备桥已连接（能力：open_url/clipboard/device_env）'
+        : '设备桥未连接（完成配对并进入对话页后建立）');
     } else {
       this.msg.info('功能开发中');
     }
