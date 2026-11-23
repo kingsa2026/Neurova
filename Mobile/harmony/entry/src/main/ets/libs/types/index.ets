@@ -235,7 +235,23 @@ export type WSMessageType =
   | 'error'               // 服务端 → 客户端：通用错误
   | 'sync_resume'         // 客户端 → 服务端：断线重连按游标补拉（远程驾驶可靠性）
   | 'ping'                // 心跳
-  | 'pong';               // 心跳响应
+  | 'pong'                // 心跳响应
+  | 'device:hello'        // 客户端 → 服务端：设备能力快照（设备桥，2026-11-23 计划 H2）
+  | 'device:hello_ok'     // 服务端 → 客户端：hello 受理回执
+  | 'device:execute'      // 服务端 → 客户端：单条设备命令
+  | 'device:cancel'       // 服务端 → 客户端：取消在途命令
+  | 'device:result'       // 客户端 → 服务端：命令终态回执
+  | 'device:event';       // 客户端 → 服务端：主动事件上报（P1 消费）
+
+/** 设备桥命令帧载荷（device:execute；command_id 全局幂等键） */
+export interface DeviceCommandFrame {
+  type: 'device:execute';
+  command_id: string;
+  action: string;
+  payload?: Record<string, Object>;
+  timeout_ms?: number;
+  intent?: string;
+}
 
 /** WS 通用消息信封 */
 export interface WSMessage {

@@ -507,6 +507,12 @@ export class WebSocketAdapter {
         return 'session:list';
       case 'session:created':
         return 'session:created';
+      case 'device:execute':
+      case 'device:cancel':
+      case 'device:hello_ok':
+        // 设备桥帧族（2026-11-23 计划 H2）：原样进总线，由 DeviceBridgeService
+        // 消费执行并回执；聊天页不消费这些事件。
+        return type;
       case 'error':
         return 'ws:error';
       default:

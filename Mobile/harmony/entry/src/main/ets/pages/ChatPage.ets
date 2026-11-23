@@ -354,8 +354,9 @@ export struct ChatPage {
     this.stopVoice();
     // D-5 按需订阅：离页恢复 global 全收（下次进页按目标会话重新收窄）
     this.ws.setSubscriptionScope('global', '');
-    // 断开 WS（adapter 内部会清理心跳与重连定时器）
-    this.ws.disconnect();
+    // H1（2026-11-23 计划）：不再离页断连——WS 是应用级常驻通道（设备桥与
+    // 会话恢复都挂在它上面），离开聊天页仅退订本页事件与恢复 global 订阅；
+    // adapter 的重连/心跳生命周期独立于页面栈。
     // M5.2.1 清理 chunk 缓冲，避免下次进入页面残留旧数据
     this.batcher.reset();
   }

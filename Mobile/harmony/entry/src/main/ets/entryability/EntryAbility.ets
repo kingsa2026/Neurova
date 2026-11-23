@@ -4,6 +4,7 @@ import { window } from '@kit.ArkUI';
 import { HttpAdapter } from '../libs/adapters';
 import { PendingDeepLink } from '../routing/PendingDeepLink';
 import { Router, RouteNames } from '../routing/Router';
+import { DeviceBridgeService } from '../libs/capability/DeviceBridgeService';
 
 export default class EntryAbility extends UIAbility {
   private static readonly DOMAIN: number = 0x0001;
@@ -18,6 +19,9 @@ export default class EntryAbility extends UIAbility {
     // 组合根：把平台 HTTP 适配器注入 HttpClient——不调用 install 则所有请求
     // 抛「HttpBackend 未设置」（此前该调用全仓缺失，网络层从未装配）
     HttpAdapter.getInstance().install();
+    // 设备桥（2026-11-23 计划 H1/H3）：应用级装配——命令执行、hello 上报、
+    // 与聊天页解耦的常驻连接消费方
+    DeviceBridgeService.getInstance().init(this.context);
     // C7：扫码配对深链（neurova://pair?ref=…&host=…）——冷启动先暂存，
     // Index 在档案/认证就绪完成分发后再消费（路由栈就绪时序）
     const coldUri = want?.uri ?? '';
