@@ -6289,12 +6289,7 @@ class ToolExecutor:
             text = (await asyncio.to_thread(self._blocking_fetch, url, "curl/8.5.0")).strip()
             # 兜底：极少数代理/部署环境下即使 curl UA 仍返回 HTML，则从中提取天气行
             if "<html" in text.lower() or "&lt;" in text:
-                import re
-                body = re.sub(r"<script[\s\S]*?</script>", "", text)
-                body = re.sub(r"<style[\s\S]*?</style>", "", body)
-                body = re.sub(r"<[^>]+>", "", body)
-                body = re.sub(r"\s+", " ", body).strip()
-                text = body[:200]
+                text = self._html_to_text(text)[:200]
             return {"location": location, "weather": text}
         except Exception as e:
             return {"location": location, "error": f"天气查询失败: {e}"}
@@ -6303,22 +6298,40 @@ class ToolExecutor:
 
     @staticmethod
     def _html_to_text(html: str) -> str:
-        """HTML 转纯文本：剥离 script/style/注释/标签，压缩空白"""
-        import re
+        """HTML 转纯文本：解析器级剥离 script/style/标签，压缩空白。
 
-        body = re.sub(r"<script[\s\S]*?</script>", "", html, flags=re.IGNORECASE)
-        body = re.sub(r"<style[\s\S]*?</style>", "", body, flags=re.IGNORECASE)
-        body = re.sub(r"<!--[\s\S]*?-->", "", body)
-        body = re.sub(r"<[^>]+>", " ", body)
-        body = (
-            body.replace("&nbsp;", " ")
-            .replace("&amp;", "&")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", '"')
-            .replace("&#39;", "'")
-        )
-        lines = [ln.strip() for ln in body.splitlines()]
+        CodeQL py/bad-tag-filter：正则剥 tag 可被 <<script> 畸形嵌套绕过，
+        改用标准库 HTMLParser 状态机（convert_charrefs 顺带完成全部实体解码，
+        替代原先手工的 5 个实体 replace）。
+        """
+        import re
+        from html.parser import HTMLParser
+
+        class _TextExtractor(HTMLParser):
+            _SKIP = {"script", "style"}
+
+            def __init__(self) -> None:
+                super().__init__(convert_charrefs=True)
+                self._parts = []
+                self._skip_depth = 0
+
+            def handle_starttag(self, tag, attrs) -> None:
+                if tag in self._SKIP:
+                    self._skip_depth += 1
+                self._parts.append(" ")
+
+            def handle_endtag(self, tag) -> None:
+                if tag in self._SKIP and self._skip_depth > 0:
+                    self._skip_depth -= 1
+                self._parts.append(" ")
+
+            def handle_data(self, data) -> None:
+                if self._skip_depth == 0 and data:
+                    self._parts.append(data)
+
+        parser = _TextExtractor()
+        parser.feed(html)
+        lines = [ln.strip() for ln in "".join(parser._parts).splitlines()]
         text = "\n".join(ln for ln in lines if ln)
         return re.sub(r"\n{3,}", "\n\n", text).strip()
 

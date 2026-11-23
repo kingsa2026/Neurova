@@ -415,6 +415,16 @@ class TestWebFetchTool:
         assert ".a{}" not in content, "style 必须剥离"
 
     @pytest.mark.asyncio
+    async def test_fetch_unclosed_script_does_not_leak(self):
+        """CodeQL py/bad-tag-filter：未闭合的 <script> 不得把脚本体漏进模型上下文。"""
+        html = "<p>前</p><script>alert(1)<p>后</p>"
+        with patch("neurova.http_fetch.fetch_text", return_value=html):
+            result = await _make_executor()._execute_web_fetch({"url": "https://example.com"})
+        content = result["content"]
+        assert "alert(1)" not in content, content
+        assert "前" in content
+
+    @pytest.mark.asyncio
     async def test_max_chars_truncation(self):
         body = "A" * 50000
         with patch("neurova.http_fetch.fetch_text", return_value=body):
