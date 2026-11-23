@@ -10,6 +10,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -67,9 +69,23 @@ class MobileWsChannelTicketBootstrapTest {
             received.add(text)
         }
 
+        fun sendToServer(text: String) {
+            serverSocket?.send(text)
+        }
+
         fun closeServerSide() {
             serverSocket?.close(1000, "teardown")
         }
+    }
+
+    /** 轮询取回满足条件的帧（找不到返回 null） */
+    private fun awaitFrame(spy: ServerSpy, timeoutMs: Long, predicate: (String) -> Boolean): String? {
+        val deadline = System.nanoTime() + timeoutMs * 1_000_000
+        while (System.nanoTime() < deadline) {
+            val frame = spy.received.poll(50, TimeUnit.MILLISECONDS)
+            if (frame != null && predicate(frame)) return frame
+        }
+        return null
     }
 
     /** 票据仓替身：ticket 为空模拟进程重启后的内存态；refreshTicket 模拟续签回填 */
@@ -209,6 +225,54 @@ class MobileWsChannelTicketBootstrapTest {
         assertEquals(false, channel.connectIfIdle())
         Thread.sleep(300)
         assertEquals(1, spy.connections.get())
+        channel.close()
+    }
+
+    @Test
+    fun firstConnectResumesFromPersistedCursor() {
+        val spy = ServerSpy().also { spy = it }
+        server.enqueue(MockResponse().withWebSocketUpgrade(spy))
+        val ticket = java.util.concurrent.atomic.AtomicReference<String?>("ticket-a")
+        val channel = MobileWsChannel(
+            scope = scope,
+            wsUrlProvider = { server.url("/api/v1/mobile/ws").toString() },
+            ticketProvider = { ticket.get() },
+            refreshTicket = { "ticket-b".also { ticket.set(it) } },
+            heartbeatIntervalMs = 60_000L,
+            client = client,
+            lastSeqRestore = { 5 },
+        )
+        channel.connect()
+        assertTrue(awaitConnection(spy, 1))
+        // B7：持久化游标 >0 时首连必须补拉（进程重启不漏离线入队帧）
+        val resume = awaitFrame(spy, 3000) { it.contains("sync_resume") }
+        assertNotNull("持久化游标 >0 时首连必须发 sync_resume", resume)
+        val parsed = Json.parseToJsonElement(resume!!) as JsonObject
+        assertEquals(5, parsed["last_seq"]?.toString()?.trim('"')?.toIntOrNull())
+        channel.close()
+    }
+
+    @Test
+    fun cursorAdvancesArePersisted() {
+        val spy = ServerSpy().also { spy = it }
+        server.enqueue(MockResponse().withWebSocketUpgrade(spy))
+        val persisted = java.util.concurrent.atomic.AtomicInteger(0)
+        val ticket = java.util.concurrent.atomic.AtomicReference<String?>("ticket-a")
+        val channel = MobileWsChannel(
+            scope = scope,
+            wsUrlProvider = { server.url("/api/v1/mobile/ws").toString() },
+            ticketProvider = { ticket.get() },
+            refreshTicket = { "ticket-b".also { ticket.set(it) } },
+            heartbeatIntervalMs = 60_000L,
+            client = client,
+            lastSeqPersist = { persisted.set(it) },
+        )
+        channel.connect()
+        assertTrue(awaitConnection(spy, 1))
+        spy.sendToServer("""{"type":"chat:done","session_id":"s-1","seq":9}""")
+        val deadline = System.nanoTime() + 3_000_000_000L
+        while (persisted.get() != 9 && System.nanoTime() < deadline) Thread.sleep(50)
+        assertEquals("游标推进必须落盘（B7 离线补拉依赖）", 9, persisted.get())
         channel.close()
     }
 }

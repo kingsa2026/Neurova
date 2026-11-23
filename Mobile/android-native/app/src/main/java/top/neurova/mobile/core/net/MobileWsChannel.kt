@@ -54,6 +54,13 @@ class MobileWsChannel(
     /** 心跳间隔与 pong 超时：生产用常量默认值，测试注入短周期（行为路径同一份） */
     private val heartbeatIntervalMs: Long = HEARTBEAT_MS,
     private val pongTimeoutMs: Long = PONG_TIMEOUT_MS,
+    /**
+     * D3/B7：游标持久化。进程被杀重建后 lastServerSeq 归零会让首连不发
+     * sync_resume——离线入队的遥控帧（设备桥 B7）就此漏拉。恢复/落盘回调
+     * 让游标跨进程存活；缺省不持久化（行为与改前一致）。
+     */
+    private val lastSeqRestore: () -> Int = { 0 },
+    private val lastSeqPersist: (Int) -> Unit = {},
     client: OkHttpClient = OkHttpClient(),
 ) {
     enum class State { IDLE, CONNECTING, AUTHED, REAUTHING, RECONNECTING, FAILED, CLOSED }
@@ -154,7 +161,7 @@ class MobileWsChannel(
      * 恢复，不重放旧帧。@Volatile：OkHttp 读线程写、重连协程读。
      */
     @Volatile
-    private var lastServerSeq: Long = 0L
+    private var lastServerSeq: Long = lastSeqRestore().toLong()
     /** D-5 按需订阅范围（缺省 global 全收；session/thread 须带 scopeKey） */
     @Volatile
     private var subscriptionScope: String = "global"
@@ -389,9 +396,13 @@ class MobileWsChannel(
         override fun onMessage(webSocket: WebSocket, text: String) {
             val frame = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return
             // D3 游标推进：服务端出站帧带单调 seq（先落账再发送），幂等取大
-            frame["seq"]?.toString()?.trim('"')?.toLongOrNull()?.let { seq ->
-                if (seq > lastServerSeq) lastServerSeq = seq
-            }
+                frame["seq"]?.toString()?.trim('"')?.toLongOrNull()?.let { seq ->
+                    if (seq > lastServerSeq) {
+                        lastServerSeq = seq
+                        // 游标落盘：进程重启后 sync_resume 仍能从断点补拉（B7 离线入队）
+                        runCatching { lastSeqPersist(lastServerSeq.toInt()) }
+                    }
+                }
             when (frame["type"]?.toString()?.trim('"')) {
                 // D3 快照降级：游标过旧/非法/重放预算耗尽——服务端拒绝部分重放。
                 // 弃游标并主动拆线走重连档：重连后游标为 0，按首连语义由既有
