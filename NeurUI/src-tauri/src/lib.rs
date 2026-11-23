@@ -315,13 +315,19 @@ fn download_file(
     dest: &std::path::Path,
     on_progress: &mut dyn FnMut(u8),
 ) -> Result<(), String> {
-    use std::io::Write;
+    use std::io::{Read, Write};
     let resp = ureq::get(url)
         .call()
         .map_err(|e| format!("下载失败 {}: {}", url, e))?;
-    let total = resp.header("Content-Length").and_then(|v| v.parse().ok()).unwrap_or(0);
+    // ureq 3：响应头走 http::HeaderMap，正文经 into_body().into_reader()
+    let total = resp
+        .headers()
+        .get("Content-Length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let mut file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
-    let mut reader = resp.into_reader();
+    let mut reader = resp.into_body().into_reader();
     let mut buf = [0u8; 64 * 1024];
     let mut downloaded: u64 = 0;
     loop {
@@ -834,7 +840,11 @@ fn spawn_node(layout: &RuntimeLayout) -> Option<Child> {
 /// 「解释器起来就崩」这种情况等满整个超时，首启要白等两分钟。
 fn wait_backend_ready(children: &ManagedChildren, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
-    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(2)).build();
+    // ureq 3：AgentBuilder 并入 Agent::config_builder，超时走全局配置
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(2)))
+        .build()
+        .new_agent();
     while Instant::now() < deadline {
         let exited = children
             .python
