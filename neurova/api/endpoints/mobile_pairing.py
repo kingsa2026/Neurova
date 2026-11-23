@@ -2225,7 +2225,12 @@ async def mobile_websocket(websocket: WebSocket):
         logger.error("WebSocket error: %s", e, exc_info=True)
     finally:
         # B-6: 连接断开 → 收尸在流 task（wrapper 补发 chat:cancelled）
-        if current_chat_task is not None and not current_chat_task.done():
+        # B7 例外：设备桥审批等待中的任务**不取消**——审批通过后命令经离线
+        # 入队 → 回连重投递照常执行，取消会让审批单成孤儿。
+        from neurova.device_bridge.governance import hasInFlightApproval
+
+        if (current_chat_task is not None and not current_chat_task.done()
+                and not hasInFlightApproval(user_id)):
             current_chat_task.cancel()
         # 清理连接：`_ws_connections` 弹出即"不再在线"——在线读数是叠出来的，
         # 没有第二处 `is_online` 需要回写（原实现两处写同一件事，正是漂移的温床）。

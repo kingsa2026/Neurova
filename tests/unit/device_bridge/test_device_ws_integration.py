@@ -103,6 +103,17 @@ def _hello(ws) -> Dict[str, Any]:
     return json.loads(ws.receive_text())
 
 
+def _waitFor(ws, frameType: str, maxFrames: int = 60) -> Dict[str, Any]:
+    """有界收帧：等到指定类型为止，超限即失败（防receive无限悬挂）。"""
+    seen: List[str] = []
+    for _ in range(maxFrames):
+        frame = json.loads(ws.receive_text())
+        if frame.get("type") == frameType:
+            return frame
+        seen.append(str(frame.get("type")))
+    raise AssertionError(f"等待 {frameType} 超限，实收帧序列={seen}")
+
+
 class TestDeviceHello:
     def test_hello_is_acked_and_persisted(self, wsClient):
         with wsClient.websocket_connect(f"/api/v1/mobile/ws?code={PAIRING_CODE}") as ws:
@@ -230,6 +241,92 @@ class TestOfflineQueueRedelivery:
 
         _, prior = getMobileWsLedger().beginCommand(commandId, "pair-device",
                                                     "device:execute", {})
+        assert prior is not None and prior.get("replayed") is True
+        assert prior["type"] == "device:result" and prior["status"] == "ok"
+
+
+class TestApprovalDisconnectResume:
+    """批二遗留联调：审批扣住期间设备断线，桌面侧批准后命令经 B7 入队，
+    设备回连由 hello 重投递补执行。全程走真 WS 循环与真审批单源。"""
+
+    def test_approval_held_across_disconnect_resumes_via_queue(
+        self, wsClient, monkeypatch, tmp_path):
+        from neurova.api.mobile_ws_ledger import getMobileWsLedger
+        from neurova.security.approval_manager import ApprovalManager
+
+        approvalManager = ApprovalManager(str(tmp_path / "workspace"))
+        monkeypatch.setattr(
+            "neurova.security.approval_manager.get_approval_manager",
+            lambda **kwargs: approvalManager)
+
+        # 替身 agent 走与 ToolExecutor 设备分支相同的治理→路由链
+        # （clipboard_read 按 D4 一律 require_approval）
+        class _GovernedAgent:
+            config = SimpleNamespace(agent_id=AGENT_ID, owner_user_id=OWNER,
+                                     llm_model="test-model")
+
+            async def chat(self, **kwargs):
+                from neurova.device_bridge.governance import enforce_approval_gate
+                from neurova.device_bridge.router import getDeviceBridgeRouter
+
+                gate = await enforce_approval_gate(
+                    "device_clipboard_read", {}, agent_id=AGENT_ID,
+                    user_id=OWNER, session_id="sess-approval")
+                if gate is not None:
+                    return {"text": f"拒绝：{gate.get('error')}", "success": False}
+                result = await getDeviceBridgeRouter().execute(
+                    user_id=OWNER, action="clipboard_read", payload={})
+                payload = result.get("data") or result.get("error") or {}
+                return {"text": f"剪贴板读取：{payload}", "success": True}
+
+        import neurova.api.endpoints as endpointsModule
+
+        monkeypatch.setattr(endpointsModule, "get_agent_instance",
+                            lambda agent_id="": _GovernedAgent())
+
+        pushes: List[Any] = []
+        monkeypatch.setattr("neurova.device_bridge.router._pushWakeSignal",
+                            lambda uid, cid: pushes.append((uid, cid)) or
+                            {"sent": 0, "skipped": 0, "failed": 1})
+
+        # 常驻 portal：两个 WS 会话必须共用同一事件循环——否则首个会话关闭时
+        # portal 停摆，在途审批/入队任务会被一并冻结（联调悬挂的根因）。
+        with wsClient as client:
+            with client.websocket_connect(
+                    f"/api/v1/mobile/ws?code={PAIRING_CODE}") as ws:
+                ack = _hello(ws)
+                assert ack["type"] == "device:hello_ok"
+                ws.send_json({"type": "chat:send", "content": "读剪贴板",
+                              "session_id": "sess-approval", "command_id": "cmd-appr-1"})
+                frame = _waitFor(ws, "chat:approval_required")
+                approvalId = frame["data"]["approval_id"]
+                # 设备断线（未批准）——审批单仍在服务端等待
+                ws.close()
+            assert approvalManager.approve_request(approvalId, approved_by=OWNER)
+
+            # 批准后工具放行，但设备已离线 → B7 入账待执行（轮询等 chat 任务走到入队）
+            ledger = getMobileWsLedger()
+            deadline = __import__("time").time() + 10
+            while not ledger.runningCommands("pair-device") and __import__("time").time() < deadline:
+                __import__("time").sleep(0.2)
+            queued = ledger.runningCommands("pair-device")
+            assert len(queued) == 1 and queued[0]["action"] == "clipboard_read"
+            assert pushes == [(OWNER, queued[0]["command_id"])]
+
+            # 设备回连：hello 重投递 → 收到入队命令 → 回执收敛
+            # （配对码若被首连消费则重新补登记，保持与夹件同款在册事实）
+            mobile_ep._pairing_codes[PAIRING_CODE] = {
+                "status": "confirmed", "user_id": OWNER, "pairing_id": "pair-device"}
+            with client.websocket_connect(
+                    f"/api/v1/mobile/ws?code={PAIRING_CODE}") as ws:
+                ack = _hello(ws)
+                assert ack["type"] == "device:hello_ok"
+                frame = _waitFor(ws, "device:execute")
+                assert frame["command_id"] == queued[0]["command_id"]
+                ws.send_json({"type": "device:result", "command_id": frame["command_id"],
+                              "status": "ok", "data": {"clipboard": "内容"}})
+        _, prior = ledger.beginCommand(queued[0]["command_id"], "pair-device",
+                                       "device:execute", {})
         assert prior is not None and prior.get("replayed") is True
         assert prior["type"] == "device:result" and prior["status"] == "ok"
 

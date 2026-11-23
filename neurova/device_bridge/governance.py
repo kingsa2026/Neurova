@@ -57,6 +57,10 @@ _DEFAULT_MAX_DURATION_S = 600.0
 _budgetLock = threading.Lock()
 _budget: Dict[str, Dict[str, float]] = {}
 
+#: 在途审批等待计数（B7）：user_id → 等待中的审批单数。设备断线时 WS 收尸
+#: 据此免取消聊天任务——审批通过后命令经离线入队 → 回连重投递照常执行。
+_inFlightApprovals: Dict[str, int] = {}
+
 
 def _actionOf(tool_name: str) -> str:
     """工具名 → 能力动作（单源：device_bridge.executor.TOOL_ACTIONS）。
@@ -284,7 +288,14 @@ async def enforce_approval_gate(tool_name: str, params: Dict[str, Any], *,
     await _notifyMobileApproval(user_id, session_id, request.request_id, tool_name,
                                 params, decision)
 
-    approved, reason = await _waitForDecision(manager, request.request_id)
+    # B7：登记在途审批等待——设备断线时 WS 收尸据此**不取消**聊天任务，
+    # 审批通过后命令经离线入队 → 回连重投递照常执行（否则审批单成孤儿）。
+    _inFlightApprovals[user_id or ""] = _inFlightApprovals.get(user_id or "", 0) + 1
+    try:
+        approved, reason = await _waitForDecision(manager, request.request_id)
+    finally:
+        _inFlightApprovals[user_id or ""] = max(
+            0, _inFlightApprovals.get(user_id or "", 0) - 1)
     if not approved:
         return _refusal(
             action, "permission_required",
@@ -292,6 +303,11 @@ async def enforce_approval_gate(tool_name: str, params: Dict[str, Any], *,
             escalation={"reason": reason, "approval_id": request.request_id})
     _noteCommand(budgetKey)
     return None
+
+
+def hasInFlightApproval(user_id: str) -> bool:
+    """该用户是否有**在途**的设备桥审批等待（WS 断线收尸的免取消判据，B7）。"""
+    return _inFlightApprovals.get(user_id or "", 0) > 0
 
 
 # ── 审计（B5） ───────────────────────────────────────────────────────
