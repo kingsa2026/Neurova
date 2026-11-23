@@ -293,6 +293,8 @@ Agent 决策（ToolExecutor 单一转交点 tool_executor.py:1867）
 | B6 MCP | 只读 device_status 工具（外部编码代理派发设备动作前的可达性读面）：listDevicesForUser 单源收口（REST /pairing/list 与 MCP 同一属主过滤与在线态投影） | 2315c47b5 |
 | B7 后端 | 离线唤醒闭环：无在线连接 → 命令 beginCommand 入账 + execute 帧落设备账本（currentEpoch）+ push_sender 唤醒信令（device_command_pending，信令-only）→ 新拒绝码 device_offline_queued（retry=never）；hello 重投递 running 命令；回执经 settleRunningCommand 收敛（仅 running 收敛，迟到回执不改写终态） | c04d59e5f |
 | B7 安卓 | WS 游标跨进程持久化（lastSeqRestore/lastSeqPersist 回调 + neurova.ws.last_server_seq 偏好）——进程被杀重建后 sync_resume 仍从断点补拉离线入队帧 | 839369f3d |
+| 批二遗留清偿 | 审批扣住期间设备断线：WS 收尸对在途审批等待免取消（governance.hasInFlightApproval），批准后经离线入队 → 回连 hello 重投递照常执行；TestApprovalDisconnectResume 集成用例钉住 | b1f8671f9 |
+| 批三遗留清偿 | 安卓 FCM 推送接收（NeurovaFirebaseMessagingService 只消费信令 → connectIfIdle 唤醒）+ PushTokenRegistrar 令牌注册（PUT /mobile/push/push-tokens）+ 登录态触发；Firebase 未配置时如实降级零崩溃 | ed9a5713b |
 
 **验证证据（模拟器真链路，AVD neurova-tablet + 隔离数据根真后端 9527）**：
 - 登录→六位码配对→WS 常连→hello 能力上报→能力授权页开关即时同步（免重连）全链走通；pairing/list 读得在线态与能力目录一致。
@@ -301,9 +303,11 @@ Agent 决策（ToolExecutor 单一转交点 tool_executor.py:1867）
 - B7：App force-stop（离线）→ 真 agent 调 device_env → 回复「命令已入队+唤醒信号已发」（device_offline_queued）→ App 重连 → hello 重投递 → 命令执行收敛（mobile_ws_commands running→settled，终态为设备真值）。游标跨进程持久化经 run-as 读 shared_prefs 实证。
 - 后端：device_bridge 全套 72 passed；WS 账本/订阅/远程驾驶回归 75 passed；MCP 面测试 26 passed。安卓：`:app:testDebugUnitTest` 全量通过。
 
-**批三遗留（如实登记）**：
-- B7 的安卓端 FCM 接收器未实现（无 Firebase 项目凭据）：唤醒信令的扇出通道已就绪并在无凭据时如实记 failed，当前实际唤醒依赖 App 自身重连（重连即经 hello 重投递+sync_resume 双路补拉）。FCM 接入待推送凭据到位后另批。
+**批三遗留（如实登记，2026-11-23 二次更新：两项已清偿）**：
+- ~~B7 的安卓端 FCM 接收器未实现~~ → **已实现**（ed9a5713b）：NeurovaFirebaseMessagingService 只消费信令（device_command_pending → connectIfIdle 唤醒）+ PushTokenRegistrar 令牌注册（PUT /mobile/push/push-tokens）+ 登录态触发。仓库尚无 google-services.json，运行期激活待 Firebase 凭据到位（到位即生效，无需改码）。
+- ~~审批等待期间 WS 断线重连的审批单仍可经桌面端裁决~~ → **已验证**（b1f8671f9）：WS 收尸对在途审批等待免取消（governance.hasInFlightApproval 单源判据），批准后命令经离线入队 → 回连 hello 重投递 → 执行收敛；新增 TestApprovalDisconnectResume 集成用例钉住。
 - A4 无障碍执行器的真机（非模拟器）验证仍待真机批次。
+- 鸿蒙模拟器 HAP 装机验证：本轮尝试受模拟器基础设施不稳定阻塞（AVD 反复崩溃/丢网卡，-wipe-data 后可恢复但寿命仍短），hvigor 编译绿+单测绿已覆盖；待模拟器环境稳定后补做。
 
 ### 评估结论（批三两项评估卡，2026-11-23）
 
