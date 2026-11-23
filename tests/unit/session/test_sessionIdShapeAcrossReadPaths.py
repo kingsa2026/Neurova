@@ -190,3 +190,26 @@ class TestThePremisesAndTheTeeth:
 
         assert archived and archived[0]["session_id"] == CHANNEL_ID, (
             f"存档列表给的还是文件名派生 id：{[a['session_id'] for a in archived]}")
+
+
+class TestLegacyReadPathTraversalGuard:
+    def test_unsafeRawIdNeverEscapesTheAgentDir(self, store):
+        """⑨ CodeQL py/path-injection：老库兜底读路不得被 ../ 形 id 带出 agent 目录。
+
+        `normalize_store_key` 判定「需要净化」的 id（含 / 或 ..），其原始名不
+        允许再拼进兜底路径——否则 `session_../../x_日期.json` 就是一条任意读。
+        """
+        evil = "../../secret_store"
+        path = store._get_session_file(AGENT, evil, "2026-11-23")
+        agentRoot = Path(store._get_session_dir(AGENT)).resolve()
+        assert agentRoot in Path(path).resolve().parents, (
+            f"老库兜底读路越出了 agent 目录: {path}")
+
+    def test_timelinePathAlsoStaysInsideTheAgentDir(self, store):
+        """⑩ 同根因另一拉起点：时间线文件名同样不得吃裸 id（写面更须严）。"""
+        evil = "../../../secret"
+        path = store._get_timeline_file(AGENT, evil)
+        agentRoot = Path(store._get_session_dir(AGENT)).resolve()
+        resolved = Path(path).resolve()
+        assert agentRoot in resolved.parents and resolved.parent.name == "_timeline", (
+            f"时间线路径越出了 agent 目录: {path}")

@@ -6,6 +6,7 @@
 
 from neurova.core.logger import get_logger
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -14,6 +15,27 @@ from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(get_current_user)],)
+
+
+def _exportBase() -> Path:
+    """同义词导入/导出的唯一落点目录（数据根下 synonym_exports/）。"""
+    from neurova.core.data_root import dataPath
+
+    return Path(dataPath("synonym_exports")).resolve()
+
+
+def _containedExportPath(file_path: str) -> Path:
+    """把导入/导出路径约束到导出目录内（CodeQL py/path-injection 处置）。
+
+    /save 与 /load 的 file_path 原先可指向任意路径（认证用户可覆盖数据根下
+    任意 JSON、可探测任意文件存在性）。这里 resolve 后要求落在导出目录内，
+    越界一律 400；目录内的导出/导回能力不变。
+    """
+    base = _exportBase()
+    p = Path(str(file_path or "")).resolve()
+    if p != base and base not in p.parents:
+        raise HTTPException(status_code=400, detail="file_path 必须位于同义词导出目录内")
+    return p
 
 
 # ---------------------------------------------------------------------------
@@ -189,11 +211,10 @@ async def delete_word(word: str):
 @router.post("/load")
 async def load_from_file(file_path: str = Query(..., description="文件路径")):
     """从文件加载同义词库"""
+    path = _containedExportPath(file_path)
     try:
         import json
-        from pathlib import Path
 
-        path = Path(file_path)
         if not path.exists():
             raise HTTPException(status_code=404, detail=f"File '{file_path}' not found")
 
@@ -223,13 +244,12 @@ async def load_from_file(file_path: str = Query(..., description="文件路径")
 @router.post("/save")
 async def save_to_file(file_path: str = Query(..., description="文件路径")):
     """保存同义词库到文件"""
+    path = _containedExportPath(file_path)
     try:
         import json
-        from pathlib import Path
 
         data = {word: entry.get("synonyms", []) for word, entry in _synonyms_store.items()}
 
-        path = Path(file_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)

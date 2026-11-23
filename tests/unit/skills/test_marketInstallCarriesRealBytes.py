@@ -227,6 +227,17 @@ class TestExecutionReadsThePinnedCopy:
 
 
 class TestSecondFetchPathRetired:
+    def test_traversalSkillIdIsRefusedAtImportEntry(self, tmp_path):
+        """CodeQL py/path-injection：市场来源的 skill_id 拼安装路径前必须过安全名正则。"""
+        from neurova.skills.market_importer import MarketImporter, ImportStatus
+
+        importer = MarketImporter(skills_dir=tmp_path / "skills")
+        task = importer.import_skill("../../evil")
+
+        assert task.status == ImportStatus.FAILED, task
+        assert "非法 skill_id" in (task.error_message or ""), task.error_message
+        assert not (tmp_path / "skills" / "evil").exists(), "越目录安装不得发生"
+
     def test_missingBytesInLedgerDirAreNotRefetchedFromCache(self, svc, market):
         """账本目录里没有的那份，不许回头从缓存补——否则第二条读路只是藏起来了。
 

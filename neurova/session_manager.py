@@ -307,9 +307,14 @@ class SessionManager(SessionRepository):
         key = normalize_store_key(raw)
         target = agent_dir / f"session_{key}_{date}.json"
         if key != raw:
-            legacy = agent_dir / f"session_{raw}_{date}.json"
-            if legacy.exists() and not target.exists():
-                return legacy
+            # 老库源名兜底只对「无路径分隔符、无 ..」的旧 id 开放——
+            # 未归一形态里可能带 / 或 ..（CodeQL py/path-injection），
+            # 这类 id 的旧文件一律不读，直接走归一名。
+            legacy_safe = not any(sep in raw for sep in ("/", "\\")) and ".." not in raw
+            if legacy_safe:
+                legacy = agent_dir / f"session_{raw}_{date}.json"
+                if legacy.exists() and not target.exists():
+                    return legacy
         return target
 
     def iter_session_files(self, agent_id: str) -> List[Path]:
@@ -353,8 +358,11 @@ class SessionManager(SessionRepository):
         """时间线文件路径（sessions/{agent_id}/_timeline/{sid}.jsonl）。
 
         独立子目录避免与 session_*.json 的日期 glob / 归档扫描互相干扰。
+        session_id 先归一（CodeQL py/path-injection）：裸 id 拼路径可被
+        ``../`` 带出 agent 目录，归一名恒落在 _timeline 之内。
         """
-        return self._get_session_dir(agent_id) / "_timeline" / f"{session_id}.jsonl"
+        return (self._get_session_dir(agent_id) / "_timeline"
+                / f"{normalize_store_key(session_id)}.jsonl")
 
     def append_timeline_event(self, agent_id: str, session_id: str, event: Dict[str, Any]) -> bool:
         """追加一条事件到会话时间线（append-only，逐行 JSON）。

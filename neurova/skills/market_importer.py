@@ -292,6 +292,22 @@ class MarketImporter:
         Returns:
             导入任务
         """
+        # 命令行/路径守卫（CodeQL py/path-injection）：skill_id 会拼进
+        # skills_dir 下的安装路径——外部市场来源的 id 必须先过安全名正则，
+        # 防 ../ 越目录安装。
+        from neurova.skills.hub_client import SAFE_SKILL_NAME_RE
+
+        if not SAFE_SKILL_NAME_RE.match(str(skill_id or "")):
+            task = ImportTask(
+                skill_id=str(skill_id or ""),
+                status=ImportStatus.FAILED,
+                started_at=datetime.datetime.now(datetime.timezone.utc),
+            )
+            task.error_message = (
+                f"非法 skill_id: {skill_id!r}（只允许字母/数字开头，含 . _ - 的安全名）"
+            )
+            return task
+
         with self._lock:
             # 检查是否已安装
             if not force and skill_id in self._installed:

@@ -40,7 +40,30 @@ _PARA_SPLIT = re.compile(r"\n\s*\n")
 _FENCE = re.compile(r"(`{3,})[^\n]*\n.*?\n?\1", re.S)
 # GFM 表格行与分隔行（表头再注入用）
 _TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
-_TABLE_SEP = re.compile(r"^\s*\|?[\s:|-]*-{2,}[\s:|-]*\|?\s*$")
+
+
+def _isTableSeparator(line: str) -> bool:
+    """GFM 表格分隔行判定（CodeQL py/polynomial-redos 处置）。
+
+    语义同原正则 ``^\s*\|?[\s:|-]*-{2,}[\s:|-]*\|?\s*$``：去首尾空白、可选
+    首尾管道后，其余字符只能是空格/制表/冒号/管道/连字符，且连字符连续出现
+    ≥2 个。原正则的嵌套量词在恶意行（大量管道+冒号但无连续双横线）上会
+    多项式回溯（ReDoS），这里改为单遍线性扫描，复杂度 O(n)。
+    """
+    core = line.strip()
+    core = core.lstrip("|").rstrip("|")
+    run = best = 0
+    for ch in core:
+        if ch == "-":
+            run += 1
+            if run > best:
+                best = run
+        elif ch in " \t:|":
+            run = 0
+        else:
+            return False
+    return best >= 2
+
 
 
 @dataclass
@@ -232,7 +255,7 @@ def _scan_tables(text: str) -> List[Tuple[int, int, int, str]]:
     while i + 1 < len(lines):
         s, _, l1 = lines[i]
         ns, ne, l2 = lines[i + 1]
-        if _TABLE_ROW.match(l1) and _TABLE_SEP.match(l2):
+        if _TABLE_ROW.match(l1) and _isTableSeparator(l2):
             j = i + 1
             while j < len(lines) and _TABLE_ROW.match(lines[j][2]):
                 j += 1
