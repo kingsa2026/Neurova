@@ -40,10 +40,12 @@ from typing import Dict
 # 版本取值 = 2026-09-18 各包 npm latest（登记当时的现状，不引入行为变更），
 # 之后由 Dependabot / 人工按上面的「升级流程」推进。
 PINNED: Dict[str, str] = {
-    # 反检测浏览器服务（neurova/computer_use/camofox_supervisor.py 常驻拉起）
-    "@askjo/camofox-browser": "1.16.0",
-    # MCP 白名单目录：context7 库文档检索（neurova/tool_layers/mcp_catalog.py）
-    "@upstash/context7-mcp": "4.4.4",
+    # 反检测浏览器服务（neurova/computer_use/camofox_supervisor.py 常驻拉起）；
+    # 1.19.0 = Dependabot 组升级（npx 启动面/HTTP 契约不变，兼容面核验见提交说明）
+    "@askjo/camofox-browser": "1.19.0",
+    # MCP 白名单目录：context7 库文档检索（neurova/tool_layers/mcp_catalog.py）；
+    # 4.7.3 = Dependabot 组升级（experimental 域变更本仓未启用，不触）
+    "@upstash/context7-mcp": "4.7.3",
     # MCP 白名单目录：dbhub 只读 SQL（同文件）；2.0.0 = Dependabot PR 升级
     # （--dsn/stdio CLI 面不变，兼容面核验见提交说明）
     "@bytebase/dbhub": "2.0.0",
