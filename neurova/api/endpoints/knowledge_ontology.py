@@ -2301,3 +2301,21 @@ async def ontology_graph_communities(
     return {"code": 0, "message": "success", "data": detectOntologyCommunities(
         store, agentId=(agent_id or None), tenantId=_tenantOf(current_user),
         maxCommunities=max_communities)}
+
+
+@router.get("/ontology/query/stats")
+async def ontology_query_stats(
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """查询缓存统计（P2-5，只读）：行集缓存（U2）与投影图缓存（P1-1）
+    两层的命中/未命中/重建/增量拼接计数合并读数——运维可观测面。"""
+    from neurova.knowledge.ontology.sparql_query import (
+        graphCacheFor,
+        projectionCacheFor,
+    )
+
+    store, _registry, _engine = _ontologyParts()
+    return {"code": 0, "message": "success", "data": {
+        "row_cache": projectionCacheFor(store).stats(),
+        "graph_cache": graphCacheFor(store).stats(),
+    }}

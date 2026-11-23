@@ -83,6 +83,16 @@ def _graphCacheFor(store: Any) -> GraphProjectionCache:
     return cache
 
 
+def projectionCacheFor(store: Any) -> SparqlProjectionCache:
+    """行集缓存公开取口（统计读面等外部消费方用，不摸下划线属性）。"""
+    return _projectionCacheFor(store)
+
+
+def graphCacheFor(store: Any) -> GraphProjectionCache:
+    """投影图缓存公开取口（统计读面等外部消费方用）。"""
+    return _graphCacheFor(store)
+
+
 def runSparqlQuery(store: Any, query: str, agentId: str = "default",
                    tenantId: str = "default") -> Dict[str, Any]:
     """SPARQL 只读查询：投影构图→rdflib 执行 SELECT/ASK→行集。
