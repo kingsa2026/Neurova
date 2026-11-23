@@ -34,6 +34,10 @@ FIXED_NAMESPACES = [
     "anchors",
     "constitution",
     "injection_ledgers",
+    "knowledge_ingest",
+    "quality",
+    "request_archives",
+    "shutdown",
 ]
 
 
