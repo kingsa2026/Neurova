@@ -457,7 +457,7 @@
 > 守卫 `tests/unit/api/test_authSurfaceFreshness.py` 逐字比对，漂移即红。
 > 口径：只认**路由依赖图**里的身份/角色门；在 handler 体内自验 token 的那一类**未覆盖**，要确认它只能真打请求。404/405 不算门。
 
-**汇总**：路由 1062 条（含方法展开）——需认证 **1038**、公开 **24**。
+**汇总**：路由 1065 条（含方法展开）——需认证 **1041**、公开 **24**。
 
 | 模块前缀 | 路由 | 需认证 | 公开 |
 |----------|------|--------|------|
@@ -514,7 +514,7 @@
 | `memory-share-groups` | 11 | 11 | 0 |
 | `memory-timeline` | 4 | 4 | 0 |
 | `metacognition` | 7 | 7 | 0 |
-| `mobile` | 19 | 16 | 3 |
+| `mobile` | 21 | 18 | 3 |
 | `models` | 15 | 15 | 0 |
 | `monitor` | 5 | 5 | 0 |
 | `negative-screen` | 4 | 4 | 0 |
@@ -532,7 +532,7 @@
 | `sandbox` | 8 | 8 | 0 |
 | `scheduler` | 9 | 9 | 0 |
 | `semantic-search` | 5 | 5 | 0 |
-| `settings` | 13 | 13 | 0 |
+| `settings` | 14 | 14 | 0 |
 | `shared-config` | 14 | 14 | 0 |
 | `skill-pool` | 37 | 37 | 0 |
 | `skill-versions` | 8 | 8 | 0 |
