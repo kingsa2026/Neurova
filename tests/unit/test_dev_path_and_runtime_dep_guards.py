@@ -713,14 +713,25 @@ class TestCiTestRunnerAndFixtureDepsAreReal:
     """
 
     def test_pytest_declared_at_or_above_security_floor(self):
-        """requirements-ci.txt 的 pytest 下限必须 >=9.0.3（CVE-2025-71176）。"""
+        """requirements-ci.txt 的 pytest 下限必须 >=9.0.3（CVE-2025-71176）。
+
+        语义比较（解析下界元组），不锁字面——抬到更高的下界（如 >=9.2.0）
+        是更强的安全声明，同样满足本格；字面子串匹配会在每次抬线时假红。
+        """
         text = io.open(PROJECT_ROOT / "requirements-ci.txt", encoding="utf-8").read()
         decls = [
             l.strip() for l in text.splitlines()
             if re.match(r"^\s*pytest\s*[><=!~]", l.strip())
         ]
         assert decls, "requirements-ci.txt 缺 pytest 声明"
-        assert any(">=9.0.3" in d.replace(" ", "") for d in decls), (
+        floors = [
+            tuple(int(g) for g in m.groups())
+            for d in decls
+            for m in [re.search(r">=\s*(\d+)\.(\d+)\.(\d+)", d)]
+            if m
+        ]
+        assert floors, f"requirements-ci.txt 的 pytest 声明无可解析下界：{decls}"
+        assert any(f >= (9, 0, 3) for f in floors), (
             "requirements-ci.txt 未把 pytest 下限钉在 >=9.0.3。低于 9.0.3 落在\n"
             "CVE-2025-71176 / PYSEC-2026-1845（GHSA-6w46-j5rx-g56g，扫全版本区间）\n"
             "内，dependency-audit（pip-audit）必红——2026-09-21 把 8.4.2 锁进 CI 后\n"

@@ -259,7 +259,7 @@ pyparsing==3.3.3
     # via rdflib
 pypdf==6.21.4
     # via -r requirements-ci.txt
-pytest==9.0.3
+pytest==9.2.0
     # via
     #   -r requirements-ci.txt
     #   pytest-asyncio
@@ -311,6 +311,10 @@ rpds-py==2026.6.3
     # via
     #   jsonschema
     #   referencing
+scipy==1.15.3 ; python_full_version < '3.11'
+    # via -r requirements-ci.txt
+scipy==1.16.3 ; python_full_version >= '3.11'
+    # via -r requirements-ci.txt
 segno==1.6.6
     # via -r requirements-ci.txt
 sniffio==1.3.1
