@@ -283,3 +283,38 @@ Agent 决策（ToolExecutor 单一转交点 tool_executor.py:1867）
 - 鸿蒙：hvigor assembleHap BUILD SUCCESSFUL。
 
 **批二遗留**：A4 无障碍执行器的真机验证（系统设置授权→读屏→点击→凭据防线四可见面抽测）待真机批次；审批等待期间 WS 断线重连的审批单仍可经桌面端裁决（两通道同源，待联调验证）。
+
+### 批三 P2（2026-11-23 当日实施完毕：后端+安卓全绿，模拟器真链路验证）
+
+| 卡 | 落点 | 提交 |
+| --- | --- | --- |
+| 验证期根修 | 设备桥 WS 通道进程重启无法自愈（空票即 FAILED 且无重试来源）→ 空票自举（与 4001 同一收敛点先续签再握手）+ connect 幂等入口 + connectIfIdle + 配对就绪即连（snapshotFlow）+ hello 单源出口（AppRuntime.sendDeviceHello）+ 授权开关即时重报 | df8fc1668 |
+| A8 安卓 | 深链 neurova://pair 消费：MainActivity singleTask + onCreate/onNewIntent 统一解析 → PairingStore.pendingDeepLinkRef → 配对页自动提交（扫码授权/重配对免手输） | 66715c06b |
+| B6 MCP | 只读 device_status 工具（外部编码代理派发设备动作前的可达性读面）：listDevicesForUser 单源收口（REST /pairing/list 与 MCP 同一属主过滤与在线态投影） | 2315c47b5 |
+| B7 后端 | 离线唤醒闭环：无在线连接 → 命令 beginCommand 入账 + execute 帧落设备账本（currentEpoch）+ push_sender 唤醒信令（device_command_pending，信令-only）→ 新拒绝码 device_offline_queued（retry=never）；hello 重投递 running 命令；回执经 settleRunningCommand 收敛（仅 running 收敛，迟到回执不改写终态） | c04d59e5f |
+| B7 安卓 | WS 游标跨进程持久化（lastSeqRestore/lastSeqPersist 回调 + neurova.ws.last_server_seq 偏好）——进程被杀重建后 sync_resume 仍从断点补拉离线入队帧 | 839369f3d |
+
+**验证证据（模拟器真链路，AVD neurova-tablet + 隔离数据根真后端 9527）**：
+- 登录→六位码配对→WS 常连→hello 能力上报→能力授权页开关即时同步（免重连）全链走通；pairing/list 读得在线态与能力目录一致。
+- 真 agent（nex-n2.6/moss）经 /v1/chat 调 device_env 全链：WS 账本 device:execute → App 16ms 回 device:result（电量/系统版本/屏幕/语言均为模拟器真值）→ 应答落会话归档；desktop_action_audit 落 device_env success=1。
+- 无障碍执行器系统级启用（dumpsys accessibility Enabled services 在册），授权页体检三项全 ✓。
+- B7：App force-stop（离线）→ 真 agent 调 device_env → 回复「命令已入队+唤醒信号已发」（device_offline_queued）→ App 重连 → hello 重投递 → 命令执行收敛（mobile_ws_commands running→settled，终态为设备真值）。游标跨进程持久化经 run-as 读 shared_prefs 实证。
+- 后端：device_bridge 全套 72 passed；WS 账本/订阅/远程驾驶回归 75 passed；MCP 面测试 26 passed。安卓：`:app:testDebugUnitTest` 全量通过。
+
+**批三遗留（如实登记）**：
+- B7 的安卓端 FCM 接收器未实现（无 Firebase 项目凭据）：唤醒信令的扇出通道已就绪并在无凭据时如实记 failed，当前实际唤醒依赖 App 自身重连（重连即经 hello 重投递+sync_resume 双路补拉）。FCM 接入待推送凭据到位后另批。
+- A4 无障碍执行器的真机（非模拟器）验证仍待真机批次。
+
+### 评估结论（批三两项评估卡，2026-11-23）
+
+**H6 鸿蒙 Live View Kit 任务面板：不实施。**
+- 场景白名单是硬约束：实况窗仅支持即时配送/打车出行/排队/计时/航班/高铁/共享租赁/运动锻炼/导航九类场景，且取餐/打卡/快递等明确排除。「Agent 任务执行进度」不在白名单内，套用白名单场景属违规接 入，上架审核必拒。
+- 权益约束：需先在华为开发者侧开通实况窗权益（liveview-rights），设备侧还需用户打开实况窗开关——引入一个非技术的外部审批依赖。
+- 替代已覆盖：任务进度可见性由批二 A7 的常驻通知进度（含步数更新）承担，鸿蒙端走同一通知形态，无需实况窗。
+- 后续如确要上：先过权益申请，再以白名单内场景形态（如导航式任务进度）另案评估。
+
+**日历/联系人执行能力：有产品价值，隐私敏感度高，本期不实施，建议 P3 按设备桥既有模式另案立项。**
+- 价值：agent 可答「明天有什么安排」「张三的电话」并代建日程——工作台场景的真实增量。
+- 代价：安卓需 READ/WRITE_CALENDAR、READ/WRITE_CONTACTS 危险权限（运行时授权+商店申报）；鸿蒙 CalendarKit/ContactKit 需 user_grant 权限且部分接口属受限开放范围（需 ACL 申请）。
+- 控制面：若立项，完全复用设备桥既有四层控制（总闸默认关 + 端上逐能力授权页 + 后端风险分级审批（读取类一律 require_approval）+ 审计留痕），新增成本集中在两端执行器与授权页扩项。
+- 拍板建议：安卓日历读取先行试点，联系人与写入类能力次之，鸿蒙随平台权限可得性跟进。
