@@ -15,9 +15,9 @@ LRU 自然淘汰——失效与写入路径解耦，可靠性等价于"键判等
   指纹必须盯住真正被读的那批行。
 - `factsWatermark`：knowledge_facts 中 `status='active' AND record_kind='triple'`
   且本租户（真值 agentId 再按 agent 过滤，与 `serializeAll` 同形）的行，取
-  COUNT＋MAX(rowid)＋三投影列长度和。count/max(rowid) 探得到增删，探不到就地
-  UPDATE（主体合并改 subject_key、版本回滚恢复字段），长度校验和补上这一维——
-  投影只读 subject_key/predicate_term_id/object_term 三列，校验和正好盖住它们。
+  COUNT＋**全量内容滚动哈希**（rowid 序）。count 探增删；内容哈希探一切改写
+  ——长度和探不到等长就地改写（主体合并/回滚的同长形态），水印是失效的
+  唯一判据，宁可多扫一遍不可放过脏读（P1-1 起强化）。
 
 缓存值是**投影行集快照**（variables/rows/row_count/truncated 的深拷贝），不是
 rdflib 图对象：命中原样返回快照拷贝，与未命中路径逐字节一致，且连 SPARQL 求值
@@ -85,19 +85,29 @@ def termsFingerprint(store: Any, tenantId: str) -> str:
 
 def factsWatermark(store: Any, tenantId: str, agentId: Any) -> str:
     """事实集水印：投影可见行（active＋triple、本租户，真值 agentId 再过滤）
-    的 COUNT＋MAX(rowid)＋三投影列长度和。"""
-    sql = ("SELECT COUNT(*) AS cnt, COALESCE(MAX(rowid), 0) AS mx,"
-           " COALESCE(SUM(length(subject_key) + length(predicate_term_id)"
-           " + length(object_term)), 0) AS chk"
+    的 COUNT＋**全量内容滚动哈希**（行序按 rowid）。
+
+    长度和口径探不到等长就地改写（主体合并改 subject_key、版本回滚恢复字段
+    的同长形态）——水印是缓存失效的唯一判据，宁可每次多扫一遍，不可放过
+    一次脏读，故逐行内容进滚动哈希（rowid 一并入账，增删必变）。
+    """
+    sql = ("SELECT subject_key, predicate_term_id, object_term, fact_id, rowid"
            " FROM knowledge_facts"
            " WHERE tenant_id = ? AND status = 'active' AND record_kind = 'triple'")
     params: list = [tenantId]
     if agentId:  # 与 serializeAll 的投影过滤同形：真值才按 agent 过滤
         sql += " AND agent_id = ?"
         params.append(str(agentId))
+    sql += " ORDER BY rowid"
     with store._lock:
-        row = store._conn.execute(sql, params).fetchone()
-    return "facts:%s:%s:%s" % (row["cnt"], row["mx"], row["chk"])
+        rows = store._conn.execute(sql, params).fetchall()
+    rolling = 0
+    for row in rows:
+        item = (str(row["subject_key"]), str(row["predicate_term_id"]),
+                str(row["object_term"]), str(row["fact_id"]),
+                int(row["rowid"]))
+        rolling = ((rolling * 1000003) ^ hash(item)) & 0xFFFFFFFFFFFFFFFF
+    return "facts:%d:%s" % (len(rows), "%016x" % rolling)
 
 
 def _copySnapshot(result: Dict[str, Any]) -> Dict[str, Any]:

@@ -5,6 +5,10 @@ rdflib 可选生产依赖（惰性 import＋fail-soft，DB 驱动同款形态）
 **只读、零事实写**；UPDATE/CONSTRUCT 写形不支持（投影只读）；结果行数上限
 ＋查询超时常量，超限显式拒；rdflib 未装时显式 501 not_supported（诚实形态，
 不静默降级）。rule_engine 头注边界不动。
+
+投影图经 `graph_projection_cache.py` 按 (租户, agent) 复用与增量拼接
+（C 维增强批 P1-1）：同水印复用已解析图，水印变化只对脏主体增量重投影；
+U2 行集缓存在其上继续免掉同查询的重复求值。
 """
 
 from __future__ import annotations
@@ -13,7 +17,11 @@ import threading
 from typing import Any, Dict, List
 
 from neurova.core.logger import get_logger
-from neurova.knowledge.ontology.query_cache import SparqlProjectionCache
+from neurova.knowledge.ontology.graph_projection_cache import GraphProjectionCache
+from neurova.knowledge.ontology.query_cache import (
+    PROJECTION_TENANT,
+    SparqlProjectionCache,
+)
 
 logger = get_logger(__name__)
 
@@ -62,6 +70,19 @@ def _projectionCacheFor(store: Any) -> SparqlProjectionCache:
     return cache
 
 
+def _graphCacheFor(store: Any) -> GraphProjectionCache:
+    """store 上的投影图缓存实例（DCL + Lock，同上单例纪律）。"""
+    cache = getattr(store, "_sparqlGraphCache", None)
+    if cache is not None:
+        return cache
+    with _CACHE_ATTACH_LOCK:
+        cache = getattr(store, "_sparqlGraphCache", None)
+        if cache is None:
+            cache = GraphProjectionCache()
+            store._sparqlGraphCache = cache
+    return cache
+
+
 def runSparqlQuery(store: Any, query: str, agentId: str = "default",
                    tenantId: str = "default") -> Dict[str, Any]:
     """SPARQL 只读查询：投影构图→rdflib 执行 SELECT/ASK→行集。
@@ -81,7 +102,6 @@ def runSparqlQuery(store: Any, query: str, agentId: str = "default",
     if not _rdflibAvailable():
         raise SparqlNotSupported(
             "rdflib 未安装：SPARQL 面显式 not_supported（可选生产依赖，惰性 import）")
-    import rdflib
 
     cache = _projectionCacheFor(store)
     cacheKey = None
@@ -92,20 +112,23 @@ def runSparqlQuery(store: Any, query: str, agentId: str = "default",
         if cached is not None:
             return cached
 
-    from .turtle import serializeAll
-
-    turtleText = serializeAll(store, agentId=agentId)
-    graph = rdflib.Graph()
-    graph.parse(data=turtleText, format="turtle")
-    fullQuery = query if query.upper().startswith("PREFIX") \
-        else (_SPARQL_PREFIX + "\n" + query)
-    results = graph.query(fullQuery)
-    rows: List[Dict[str, Any]] = []
-    variables = [str(v) for v in results.vars] if hasattr(results, "vars") else []
-    for row in results:
-        if len(rows) >= MAX_SPARQL_ROWS:
-            break
-        rows.append({var: _nodeText(row[var]) for var in variables})
+    graphCache = _graphCacheFor(store)
+    # 投影图在条目锁内取出/增量拼接，行集提取也在锁内完成——图不会边查边改
+    with graphCache.reading(store, tenantId=PROJECTION_TENANT,
+                            agentId=agentId) as graph:
+        fullQuery = query if query.upper().startswith("PREFIX") \
+            else (_SPARQL_PREFIX + "\n" + query)
+        results = graph.query(fullQuery)
+        rows: List[Dict[str, Any]] = []
+        variables = [str(v) for v in results.vars] if hasattr(results, "vars") else []
+        for row in results:
+            if len(rows) >= MAX_SPARQL_ROWS:
+                break
+            rows.append({var: _nodeText(row[var]) for var in variables})
+        # SPARQL 无 ORDER BY 时行序未定义（rdflib 的迭代序随图的历史而异）。
+        # 这里按变量值给出确定性行序：同库同查询两次输出一致，增量拼接与
+        # 全量重建的结果才可逐字节对拍（P1-1 等价判据的基础）。
+        rows.sort(key=lambda row: tuple(row.get(var, "") for var in variables))
     result = {"variables": variables, "rows": rows,
               "row_count": len(rows),
               "truncated": len(rows) >= MAX_SPARQL_ROWS}

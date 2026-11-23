@@ -124,21 +124,29 @@ class TestSparqlQueryCache:
         assert cache.stats()["size"] == 3, "租户键各占一条，不互相覆盖"
 
     def test_capacityOneEvictsViaEnv(self, kb, monkeypatch, projectionCalls):
-        """容量 1：第二查询挤掉第一条，再查第一条必须重算（LRU 淘汰）。"""
+        """容量 1：第二查询挤掉第一条，再查第一条必须重算（LRU 淘汰）。
+
+        P1-1 起查询面分两层：行集缓存（本卡）之下还有投影图缓存——行集被
+        挤掉重算的是「求值」，投影图仍可复用（不必重新 serializeAll）。
+        淘汰语义改用行集缓存的 misses 计数钉住。
+        """
         monkeypatch.setenv(CAPACITY_ENV, "1")
         s, _gate = kb
         sparql_query.runSparqlQuery(s, QUERY, agentId="default",
                                     tenantId="default")
         sparql_query.runSparqlQuery(s, QUERY_LIMIT5, agentId="default",
                                     tenantId="default")
-        assert projectionCalls["count"] == 2
+        assert projectionCalls["count"] == 1, "投影图与行集解耦：两条查询共用一张图"
         sparql_query.runSparqlQuery(s, QUERY, agentId="default",
                                     tenantId="default")
-        assert projectionCalls["count"] == 3, "容量 1：q1 被挤掉后重查要重投影"
+        cache = getattr(s, "_sparqlProjectionCache")
+        assert cache.stats()["misses"] == 3, "容量 1：三次查找全部未命中（LRU 淘汰）"
+        assert projectionCalls["count"] == 1, "图仍有效：重算发生在求值层，不重投影"
 
     def test_zeroDisablesCache(self, kb, monkeypatch, projectionCalls):
-        """环境变量 0=禁用缓存：两次执行都直查（行为与无缓存时一致）。"""
+        """环境变量 0=禁用缓存：两层（行集＋投影图）都关，两次执行都直查。"""
         monkeypatch.setenv(CAPACITY_ENV, "0")
+        monkeypatch.setenv("NEUROVA_ONTOLOGY_GRAPH_CACHE", "0")
         s, _gate = kb
         first = sparql_query.runSparqlQuery(s, QUERY, agentId="default",
                                             tenantId="default")
@@ -147,6 +155,7 @@ class TestSparqlQueryCache:
         assert projectionCalls["count"] == 2, "0=禁用：两次都直查"
         assert second == first
         assert getattr(s, "_sparqlProjectionCache").enabled is False
+        assert getattr(s, "_sparqlGraphCache").enabled is False
 
     def test_invalidEnvFallsBackToDefaultCapacity(self, kb, monkeypatch):
         """非法环境变量值：回退缺省容量 128，不炸查询面。"""

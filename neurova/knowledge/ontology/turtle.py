@@ -64,8 +64,17 @@ def _unescape(text: str) -> str:
     return "".join(out)
 
 
+def iriLocal(local: str) -> str:
+    """IRI 局部名的字形收口（唯一实现）：IRI 之外字符一律收下划线。
+
+    `iri()` 拼前缀用；需要"完整 URI = 命名空间 + 局部名"的调用方
+    （如图缓存的按主体摘除）也用这一份，两处字形永不分叉。
+    """
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(local or "_"))
+
+
 def iri(local: str) -> str:
-    return "kbg:%s" % re.sub(r"[^A-Za-z0-9_.-]", "_", str(local or "_"))
+    return "kbg:%s" % iriLocal(local)
 
 
 def _safePredicate(name: str) -> str:
