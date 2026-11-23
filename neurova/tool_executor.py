@@ -1174,6 +1174,16 @@ class ToolExecutor:
         "orchestrate_tools": "_execute_orchestrate_tools",
         # P2-2 车道D（蜂群只读分析档）：企业源 text2SQL 只读问数（成员可用）。
         "enterprise_data_query": "_execute_enterprise_data_query",
+        # 设备桥（2026-11-23 计划 B3）：指挥已配对手机执行动作；执行体薄委托
+        # 到 neurova/device_bridge/executor.executeDeviceTool（参数归一/身份/
+        # 能力协商/幂等派发都在那一边，这里保持单行委托）。
+        "device_open_url": "_execute_device_open_url",
+        "device_open_app": "_execute_device_open_app",
+        "device_clipboard_read": "_execute_device_clipboard_read",
+        "device_clipboard_write": "_execute_device_clipboard_write",
+        "device_app_list": "_execute_device_app_list",
+        "device_env": "_execute_device_env",
+        "device_notification_read": "_execute_device_notification_read",
     }
 
     # file_search 跳过的噪音目录（依赖/构建/版本控制）
@@ -3764,6 +3774,45 @@ class ToolExecutor:
             except Exception as e:  # noqa: BLE001 - 回灌失败不影响裁决本身
                 logger.warning("项目治理回灌失败 (%s): %s", requestId, e)
         return result
+
+    # ── 设备桥工具（2026-11-23 计划 B3）：七工具统一薄委托 ──────────────
+    # 归一/身份/能力协商/幂等派发/结果契约都在 neurova/device_bridge/executor；
+    # 这里保持单行委托，便于 _builtin_dispatch 的方法名解析与逐工具扩展。
+
+    async def _execute_device_open_url(self, params: Dict) -> Dict:
+        from neurova.device_bridge.executor import executeDeviceTool
+
+        return await executeDeviceTool("device_open_url", params)
+
+    async def _execute_device_open_app(self, params: Dict) -> Dict:
+        from neurova.device_bridge.executor import executeDeviceTool
+
+        return await executeDeviceTool("device_open_app", params)
+
+    async def _execute_device_clipboard_read(self, params: Dict) -> Dict:
+        from neurova.device_bridge.executor import executeDeviceTool
+
+        return await executeDeviceTool("device_clipboard_read", params)
+
+    async def _execute_device_clipboard_write(self, params: Dict) -> Dict:
+        from neurova.device_bridge.executor import executeDeviceTool
+
+        return await executeDeviceTool("device_clipboard_write", params)
+
+    async def _execute_device_app_list(self, params: Dict) -> Dict:
+        from neurova.device_bridge.executor import executeDeviceTool
+
+        return await executeDeviceTool("device_app_list", params)
+
+    async def _execute_device_env(self, params: Dict) -> Dict:
+        from neurova.device_bridge.executor import executeDeviceTool
+
+        return await executeDeviceTool("device_env", params)
+
+    async def _execute_device_notification_read(self, params: Dict) -> Dict:
+        from neurova.device_bridge.executor import executeDeviceTool
+
+        return await executeDeviceTool("device_notification_read", params)
 
     async def _execute_builtin_tool(self, tool_name: str, params: Dict) -> Dict:
         """执行内置工具(分派表驱动,见 _builtin_dispatch 注释)"""

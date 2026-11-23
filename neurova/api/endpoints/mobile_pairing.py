@@ -1762,6 +1762,38 @@ async def list_paired_devices(
     }
 
 
+@router.get("/pairing/devices/{pairing_id}/capabilities")
+async def get_device_capabilities(
+    pairing_id: str,
+    user_id: str = Depends(_get_current_user_id),
+):
+    """读设备能力快照（设备桥 B1 读面；JWT + 属主）。
+
+    他人设备一律 404：读面不区分「不存在」与「不是你的」，不泄露设备存在性
+    （比 revoke 的 403 更严一档——读面零枚举线索）。
+    """
+    registry = getDeviceRegistry()
+    device = registry.get(pairing_id)
+    if (not device or device.get("user_id") != user_id
+            or device.get("state") == "revoked"):
+        raise HTTPException(status_code=404, detail="Pairing not found")
+    from neurova.device_bridge.registry import getDeviceBridgeRegistry
+
+    live = getDeviceBridgeRegistry().get(pairing_id)
+    return {
+        "code": 0,
+        "data": {
+            "pairing_id": pairing_id,
+            "platform": device.get("platform") or "",
+            "protocol_version": int(device.get("protocol_version") or 0),
+            "capabilities": registry.capabilitiesOf(pairing_id),
+            "app_state": device.get("app_state") or "",
+            "last_hello_at": device.get("last_hello_at"),
+            "online": live is not None,
+        },
+    }
+
+
 @router.delete("/pairing/{pairing_id}")
 async def revoke_pairing(
     pairing_id: str,
@@ -1819,6 +1851,55 @@ def _scopeKeyAdmissible(wsLedger, pairing_id: str, scope: Any) -> bool:
     if scope.isGlobal:
         return True
     return len(wsLedger.replaySince(pairing_id, 0, scope=(scope.scope, scope.scope_key))) > 0
+
+
+async def _handle_device_hello(pairing_id: str, message: dict, ledgerWs) -> None:
+    """``device:hello``：能力快照落库（词表 fail-closed）+ 在线登记刷新 + 回执。
+
+    未知能力**整帧拒绝**（unknown_capabilities），不做静默过滤——静默过滤会让
+    端上以为能力已申报、后端目录却缺项，两端各说各话（教义第 2 条：报错要么
+    根修要么诚实暴露）。
+    """
+    from neurova.device_bridge.registry import getDeviceBridgeRegistry
+
+    requested = message.get("capabilities")
+    if not isinstance(requested, list):
+        requested = []
+    unknown = [str(c) for c in requested if str(c) not in protocol.DEVICE_CAPABILITIES]
+    if unknown:
+        await ledgerWs.send_json({
+            "type": "error",
+            "code": protocol.DEVICE_ERROR_UNKNOWN_CAPABILITY,
+            "message": "device:hello 宣称了未知能力: " + ", ".join(unknown),
+            "unknown_capabilities": unknown,
+        })
+        return
+    accepted = [str(c) for c in requested]
+    platform = str(message.get("platform") or "")
+    try:
+        protocolVersion = int(message.get("protocol_version") or 0)
+    except (TypeError, ValueError):
+        protocolVersion = 0
+    appState = str(message.get("app_state") or "")
+
+    updated = getDeviceRegistry().recordHello(
+        pairing_id, platform=platform, protocolVersion=protocolVersion,
+        capabilities=accepted, appState=appState)
+    if updated is None:
+        await ledgerWs.send_json({
+            "type": "error", "code": "device_deregistered",
+            "message": "设备已不在册，hello 被拒绝",
+        })
+        return
+    getDeviceBridgeRegistry().updateHello(
+        pairing_id, platform=platform, capabilities=accepted,
+        appState=appState, protocolVersion=protocolVersion)
+    await ledgerWs.send_json({
+        "type": protocol.FRAME_DEVICE_HELLO_OK,
+        "accepted_capabilities": accepted,
+        "app_state": appState,
+        "timestamp": time.time(),
+    })
 
 
 def _ticketFromHandshake(websocket: WebSocket) -> Optional[str]:
@@ -1908,6 +1989,12 @@ async def mobile_websocket(websocket: WebSocket):
     wsLedger = wsledger_module.getMobileWsLedger()
     connEpoch = wsLedger.nextEpoch(pairing_id)
     ledgerWs = wsledger_module.LedgerWs(websocket, wsLedger, pairing_id, connEpoch)
+
+    # 设备桥（2026-11-23 计划 B2）：在线连接登记——设备命令派发的唯一在线判定处。
+    # 断线在 finally 注销；同 pairing 重连即 newest-wins 顶替。
+    from neurova.device_bridge.registry import getDeviceBridgeRegistry
+
+    getDeviceBridgeRegistry().register(pairing_id, user_id, ledgerWs)
 
     # 在线读数由 `_ws_connections` 叠出来（唯一的活连接源），这里只写活动时间。
     # 原实现把 `is_online` 写进一份内存 dict 又从那份 dict 读——那份 dict 现已退役。
@@ -2058,6 +2145,18 @@ async def mobile_websocket(websocket: WebSocket):
                 await _handle_artifact_content(ledgerWs, message, user_id)
                 continue
 
+            # 设备桥帧族（2026-11-23 计划 B1/B2）：手机 → 后端
+            if msg_type == protocol.FRAME_DEVICE_HELLO:
+                await _handle_device_hello(pairing_id, message, ledgerWs)
+                continue
+            if msg_type == protocol.FRAME_DEVICE_RESULT:
+                # 回执唤醒等待中的工具协程；无在等命令（迟到回执）由路由器
+                # 诚实返回 False，这里不再回帧（避免与超时终态双重收敛）。
+                from neurova.device_bridge.router import getDeviceBridgeRouter
+
+                getDeviceBridgeRouter().onResult(pairing_id, message)
+                continue
+
             # 分发消息到处理函数
             await _handle_ws_message(ledgerWs, message, user_id, pairing_id)
 
@@ -2079,3 +2178,7 @@ async def mobile_websocket(websocket: WebSocket):
         # D3：订阅是连接级内存态（账本单源语义"断线重连由客户端重新订阅"）——
         # 连接关闭即注销；未登记过的设备此处是空操作，行为不变。
         wsLedger.unsubscribe(pairing_id)
+        # 设备桥：在线登记同步注销（registry 是 online 的唯一判定处）
+        from neurova.device_bridge.registry import getDeviceBridgeRegistry
+
+        getDeviceBridgeRegistry().unregister(pairing_id)

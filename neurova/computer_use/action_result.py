@@ -31,6 +31,7 @@ ROUTES = frozenset(
         "camofox_ref",       # camofox [eN] ref 定位交互
         "dom",               # DOM 层导航/求值
         "remote",            # 远程会话平面（隔离虚拟屏，RS 批次）
+        "device",            # 设备桥（用户手机执行端，经移动 WS 派发）
     }
 )
 # background=用户桌面后台投递；foreground=夺真实输入设备；
@@ -65,6 +66,9 @@ REFUSAL_CODES = frozenset(
         "sandbox_session_required",  # 运行档要求隔离会话但当前无活动会话
         "stale_frame",             # 坐标所属观测帧已过期（画面已变化），须重新观察
         "controller_busy",         # 另一会话正持有前台输入，拒绝并发操控
+        "device_offline",          # 设备桥：无在线设备可派发（重连/唤醒后可重试）
+        "device_timeout",          # 设备桥：命令在窗口内未回执（可安全重试）
+        "device_bridge_disabled",  # 设备桥总闸未开（NEUROVA_DEVICE_BRIDGE_ENABLED）
     }
 )
 
@@ -91,6 +95,9 @@ REFUSAL_RETRY_ADVICE = {
     "controller_busy": "never",
     "not_initialized": "retry",
     "backend_error": "retry",
+    "device_offline": "retry",
+    "device_timeout": "retry",
+    "device_bridge_disabled": "never",
 }
 
 

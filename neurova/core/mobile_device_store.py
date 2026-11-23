@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import sqlite3
 import threading
@@ -67,6 +68,31 @@ def _migrateToV2(conn: sqlite3.Connection) -> None:
 register_migration(2, _migrateToV2, domain=DOMAIN)
 
 
+def _migrateToV3(conn: sqlite3.Connection) -> None:
+    """v3：设备桥能力快照列（2026-11-23 移动端执行端计划卡 B1）。
+
+    存的是设备在 ``device:hello`` 里**自报**的能力快照（词表封闭集见
+    ``tunnel/protocol.DEVICE_CAPABILITIES``）：后端据此做运行前工具目录过滤
+    （能力协商）。``capabilities_json`` 存数组；``app_state`` 是端上运行态
+    （foreground/background，后台不可靠能力据此诚实降级）；``last_hello_at``
+    供读面判断快照新鲜度。空列 = 未申报 = 工具目录里没有 device_*（默认关）。
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(mobile_devices)")}
+    if "platform" not in columns:
+        conn.execute("ALTER TABLE mobile_devices ADD COLUMN platform TEXT NOT NULL DEFAULT ''")
+    if "protocol_version" not in columns:
+        conn.execute("ALTER TABLE mobile_devices ADD COLUMN protocol_version INTEGER NOT NULL DEFAULT 0")
+    if "capabilities_json" not in columns:
+        conn.execute("ALTER TABLE mobile_devices ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]'")
+    if "app_state" not in columns:
+        conn.execute("ALTER TABLE mobile_devices ADD COLUMN app_state TEXT NOT NULL DEFAULT ''")
+    if "last_hello_at" not in columns:
+        conn.execute("ALTER TABLE mobile_devices ADD COLUMN last_hello_at REAL")
+
+
+register_migration(3, _migrateToV3, domain=DOMAIN)
+
+
 def defaultDbPath() -> Path:
     """默认库落点：数据根下的绝对路径（相对路径随 CWD 漂移，本仓已收口过一轮）。"""
     return get_data_root() / "mobile_devices.db"
@@ -112,6 +138,17 @@ def _hashSecret(deviceSecret: str) -> str:
     记忆体在同一个数据根下。摘要比对不需要明文（`verifyDeviceSecret` 比的是摘要）。
     """
     return hashlib.sha256(deviceSecret.encode("utf-8")).hexdigest()
+
+
+def _parseCapabilities(row: Dict[str, Any]) -> List[str]:
+    """capabilities_json → 字符串列表（损坏/缺列一律空列表：未申报即无能力）。"""
+    try:
+        caps = json.loads(row.get("capabilities_json") or "[]")
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(caps, list):
+        return []
+    return [str(c) for c in caps if str(c)]
 
 
 class MobileDeviceStore:
@@ -194,6 +231,36 @@ class MobileDeviceStore:
                 "UPDATE mobile_devices SET last_active = ? WHERE pairing_id = ?",
                 (at if at is not None else time.time(), pairingId),
             )
+
+    def recordHello(self, pairingId: str, *, platform: str = "",
+                    protocolVersion: int = 0, capabilities: Optional[List[str]] = None,
+                    appState: str = "") -> Optional[Dict[str, Any]]:
+        """``device:hello`` 能力快照的**唯一写口**（WS 层校验词表后调用）。
+
+        只更新存在且未吊销的绑定；返回更新后的完整行，设备不在册/已吊销返回
+        None——调用方据此向端上回结构化错误，不静默吞掉。能力词表的封闭集
+        校验在 WS 层（``protocol.DEVICE_CAPABILITIES``），本层只管落库。
+        """
+        now = time.time()
+        capsJson = json.dumps([str(c) for c in (capabilities or [])], ensure_ascii=False)
+        with self._lock, self._conn:
+            cursor = self._conn.execute(
+                "UPDATE mobile_devices SET platform = ?, protocol_version = ?,"
+                " capabilities_json = ?, app_state = ?, last_hello_at = ?"
+                " WHERE pairing_id = ? AND state <> 'revoked'",
+                (platform, int(protocolVersion), capsJson, appState, now, pairingId),
+            )
+            if cursor.rowcount != 1:
+                return None
+            row = self._conn.execute(
+                "SELECT * FROM mobile_devices WHERE pairing_id = ?", (pairingId,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def capabilitiesOf(self, pairingId: str) -> List[str]:
+        """读设备自报的能力清单（未申报/损坏一律返回空列表 = 目录里没有 device_*）。"""
+        row = self.get(pairingId)
+        return _parseCapabilities(row) if row else []
 
     def revoke(self, pairingId: str) -> Optional[int]:
         """解除 = 置 revoked **＋** 递增 token_epoch（后者才是"关掉之后再也连不上"那半）。
@@ -280,4 +347,9 @@ class MobileDeviceStore:
             "state": state,
             "dormant": state == "dormant",
             "token_epoch": int(row["token_epoch"]),
+            # 设备桥能力快照（B1）：未申报 = 空串/空表，消费方据此判"无 device 能力"
+            "platform": row.get("platform") or "",
+            "protocol_version": int(row.get("protocol_version") or 0),
+            "capabilities": _parseCapabilities(row),
+            "app_state": row.get("app_state") or "",
         }

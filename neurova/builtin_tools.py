@@ -2403,6 +2403,64 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["question"],
         },
     },
+    # ── 设备桥（移动端执行端，2026-11-23 计划卡 B3）：指挥已配对手机执行动作 ──
+    # 能力词表/帧型单源见 neurova/tunnel/protocol.py；执行体在 neurova/device_bridge/。
+    # 能力协商：仅当设备经 device:hello 宣称了对应能力且总闸
+    # NEUROVA_DEVICE_BRIDGE_ENABLED 开启时可执行；无在线设备 / 能力未宣称 /
+    # 后台不可靠一律结构化拒绝（device_offline / unsupported_method /
+    # background_unavailable），不重试沉默失败。
+    "device_open_url": {
+        "description": "【设备桥】在用户已配对的手机上打开一个 http/https 网址（系统浏览器或默认打开方式）。【何时不用】要在手机上装东西、发消息等写操作不在本工具；设备离线会明确报 device_offline。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "要打开的 http/https 地址"},
+            },
+            "required": ["url"],
+        },
+    },
+    "device_open_app": {
+        "description": "【设备桥】在用户已配对的手机上打开指定应用（应用名或包名，由端上语义匹配后拉起）。【何时不用】只是打开网页用 device_open_url。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "app": {"type": "string", "description": "应用名或包名，如 weixin / com.tencent.mm"},
+            },
+            "required": ["app"],
+        },
+    },
+    "device_clipboard_read": {
+        "description": "【设备桥】读取用户手机剪贴板当前文本（需设备前台；后台会明确报不可用）。注意隐私：只在没有更间接的取数路径时使用。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    "device_clipboard_write": {
+        "description": "【设备桥】把一段文本写入用户手机剪贴板（供用户或应用粘贴）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "要写入剪贴板的文本"},
+            },
+            "required": ["text"],
+        },
+    },
+    "device_app_list": {
+        "description": "【设备桥】列出用户手机上可供交互的应用清单（名称/包名），用于后续 device_open_app 选目标。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    "device_env": {
+        "description": "【设备桥】读取用户手机的环境快照：电量/充电态、屏幕尺寸、系统版本、语言区域、网络状态等。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    "device_notification_read": {
+        "description": "【设备桥】读取用户手机最近的通知事件（按端上授权范围；默认只含应用名/标题/时间）。用于“帮我看看刚才有什么通知”类请求。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "返回条数上限（默认 10，上界 50）", "default": 10},
+            },
+            "required": [],
+        },
+    },
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -2616,6 +2674,11 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "rollback_subagent",
     # 多步编排：内层步进可能含任意写操作，重放制造新变更
     "orchestrate_tools",
+    # 设备桥（2026-11-23 计划 B3）：动作落用户真机——写操作制造设备侧变更，
+    # 读操作是外部状态瞬时快照（与 computer_screenshot 同判），重放均不可复现
+    "device_open_url", "device_open_app", "device_clipboard_read",
+    "device_clipboard_write", "device_app_list", "device_env",
+    "device_notification_read",
 })
 
 # 成员工具面剔除集（主 agent 专属工具）——**单一事实源**（教义第 6 条）。

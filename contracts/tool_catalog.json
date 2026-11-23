@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": "neurova.builtin_tools._BUILTIN_SCHEMAS",
-  "tool_count": 139,
+  "tool_count": 146,
   "tools": [
     {
       "agent_scope": "all",
@@ -2220,6 +2220,124 @@
     {
       "agent_scope": "all",
       "args_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "description": "【设备桥】列出用户手机上可供交互的应用清单（名称/包名），用于后续 device_open_app 选目标。",
+      "external_write": true,
+      "min_role": null,
+      "name": "device_app_list",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "description": "【设备桥】读取用户手机剪贴板当前文本（需设备前台；后台会明确报不可用）。注意隐私：只在没有更间接的取数路径时使用。",
+      "external_write": true,
+      "min_role": null,
+      "name": "device_clipboard_read",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "text": {
+            "description": "要写入剪贴板的文本",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "description": "【设备桥】把一段文本写入用户手机剪贴板（供用户或应用粘贴）。",
+      "external_write": true,
+      "min_role": null,
+      "name": "device_clipboard_write",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "description": "【设备桥】读取用户手机的环境快照：电量/充电态、屏幕尺寸、系统版本、语言区域、网络状态等。",
+      "external_write": true,
+      "min_role": null,
+      "name": "device_env",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "limit": {
+            "default": 10,
+            "description": "返回条数上限（默认 10，上界 50）",
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【设备桥】读取用户手机最近的通知事件（按端上授权范围；默认只含应用名/标题/时间）。用于“帮我看看刚才有什么通知”类请求。",
+      "external_write": true,
+      "min_role": null,
+      "name": "device_notification_read",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "app": {
+            "description": "应用名或包名，如 weixin / com.tencent.mm",
+            "type": "string"
+          }
+        },
+        "required": [
+          "app"
+        ],
+        "type": "object"
+      },
+      "description": "【设备桥】在用户已配对的手机上打开指定应用（应用名或包名，由端上语义匹配后拉起）。【何时不用】只是打开网页用 device_open_url。",
+      "external_write": true,
+      "min_role": null,
+      "name": "device_open_app",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "url": {
+            "description": "要打开的 http/https 地址",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "description": "【设备桥】在用户已配对的手机上打开一个 http/https 网址（系统浏览器或默认打开方式）。【何时不用】要在手机上装东西、发消息等写操作不在本工具；设备离线会明确报 device_offline。",
+      "external_write": true,
+      "min_role": null,
+      "name": "device_open_url",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
         "properties": {
           "limit": {
             "description": "最多返回条数，默认 5",
@@ -2432,8 +2550,21 @@
             "description": "要执行的 shell 命令",
             "type": "string"
           },
+          "isolation": {
+            "default": "default",
+            "description": "隔离档位：default=本机执行器；strong=Docker 强隔离容器（无网络+只读根+资源上限+非 root；docker 不可用时诚实拒绝，不回退明文执行）",
+            "enum": [
+              "default",
+              "strong"
+            ],
+            "type": "string"
+          },
           "max_output_tokens": {
             "description": "返回输出 token 上限（超出保留首尾并标注，默认 10000）",
+            "type": "integer"
+          },
+          "timeout": {
+            "description": "strong 档容器内命令预算秒数（default 档不使用——会话语义由 yield_time_ms 承载；默认 60）",
             "type": "integer"
           },
           "workdir": {
@@ -3410,6 +3541,15 @@
           "env": {
             "description": "附加环境变量字典（可选，如 {\"KEY\": \"value\"}）",
             "type": "object"
+          },
+          "isolation": {
+            "default": "default",
+            "description": "隔离档位：default=本机执行器；strong=Docker 强隔离容器（无网络+只读根+资源上限+非 root；docker 不可用时诚实拒绝，不回退明文执行）",
+            "enum": [
+              "default",
+              "strong"
+            ],
+            "type": "string"
           },
           "language": {
             "description": "代码语言：python（默认）/ shell / javascript（经 node -e 执行，node 缺席时诚实报错）",

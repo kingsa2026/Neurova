@@ -58,12 +58,13 @@ class TestRouteBehavior:
             return BrowserResult(success=False, error="后端炸了")
 
         monkeypatch.setattr(computer_api, "_dispatch_browser_command", fake_dispatch)
-        with pytest.raises(HTTPException) as exc:
-            await computer_api.browser_execute_route(
-                computer_api.NavigateCmd(url="https://x"), current_user={"user_id": "u1"}
-            )
-        assert exc.value.status_code == 502
-        assert "后端炸了" in str(exc.value.detail)
+        # 设备桥批起失败改为 502 信封返回（结构化 refusal codes 随 result 透传，
+        # 不再以 HTTPException 裸抛）——断言信封仍携带后端错误原话。
+        resp = await computer_api.browser_execute_route(
+            computer_api.NavigateCmd(url="https://x"), current_user={"user_id": "u1"}
+        )
+        assert resp.status_code == 502
+        assert "后端炸了" in resp.body.decode()
 
     @pytest.mark.asyncio
     async def test_screenshot_cmd_strips_has_screenshot(self, monkeypatch):

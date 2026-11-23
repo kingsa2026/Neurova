@@ -162,6 +162,45 @@ FRAME_AUTH_OK = "auth_ok"
 #: U9.2 newest-wins：同 routeId 新连接顶替时，旧连接收到的通知帧，随后服务端断开。
 FRAME_SUPERSEDED = "superseded"
 
+# ---------------------------------------------------------------------------
+# 设备桥帧族（移动端执行端，2026-11-23 计划 §4；单源在此，端上按字面量对齐）
+# 方向：hello/result/event 是手机 → 后端；execute/cancel 是后端 → 手机；
+# hello_ok 是后端对 hello 的确认。命令幂等键 = (pairing_id, command_id)，
+# 记账复用 mobile_ws_ledger 的 mobile_ws_commands（先登记 running，回执收敛终态）。
+# ---------------------------------------------------------------------------
+FRAME_DEVICE_HELLO = "device:hello"          # 手机 → 后端：能力快照 + 运行态
+FRAME_DEVICE_HELLO_OK = "device:hello_ok"    # 后端 → 手机：hello 受理回执
+FRAME_DEVICE_EXECUTE = "device:execute"      # 后端 → 手机：单条设备命令
+FRAME_DEVICE_CANCEL = "device:cancel"        # 后端 → 手机：取消在途命令
+FRAME_DEVICE_RESULT = "device:result"        # 手机 → 后端：命令终态回执
+FRAME_DEVICE_EVENT = "device:event"          # 手机 → 后端：主动事件上报（P1 消费）
+
+DEVICE_FRAME_TYPES = (
+    FRAME_DEVICE_HELLO, FRAME_DEVICE_HELLO_OK, FRAME_DEVICE_EXECUTE,
+    FRAME_DEVICE_CANCEL, FRAME_DEVICE_RESULT, FRAME_DEVICE_EVENT,
+)
+
+#: 设备能力词表（封闭集）：手机端在 device:hello 里宣称的子集；后端运行前
+#: 按它过滤 device_* 工具目录（能力协商）。新能力先加这里，两端再对齐。
+DEVICE_CAPABILITIES = (
+    "open_url", "open_app",
+    "clipboard_read", "clipboard_write",
+    "app_list", "device_env",
+    "notification_read",
+    "screen_observe", "screen_gesture",
+    "calendar_read", "calendar_write", "contacts_read",
+)
+
+#: 设备桥结构化错误码（诚实失败面；与 TUNNEL_ERROR_CODES 同风格的封闭集）。
+DEVICE_ERROR_OFFLINE = "device_offline"                       # 无在线设备可派发
+DEVICE_ERROR_TIMEOUT = "device_timeout"                       # 命令在窗口内未回执
+DEVICE_ERROR_BRIDGE_DISABLED = "device_bridge_disabled"       # 总闸未开（默认关）
+DEVICE_ERROR_UNKNOWN_CAPABILITY = "unknown_capabilities"      # hello 宣称了未知能力
+DEVICE_BRIDGE_ERROR_CODES = (
+    DEVICE_ERROR_OFFLINE, DEVICE_ERROR_TIMEOUT,
+    DEVICE_ERROR_BRIDGE_DISABLED, DEVICE_ERROR_UNKNOWN_CAPABILITY,
+)
+
 #: 手机侧一次请求等 agent 把数据通道开出来的窗口。到点必须显式 503，
 #: 不许静默重发或降级成 warning（教义第 2 条）。
 TUNNEL_STREAM_OPEN_TIMEOUT_SECONDS = 5.0

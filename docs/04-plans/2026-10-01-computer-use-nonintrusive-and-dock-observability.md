@@ -53,6 +53,7 @@
 | `atspi`（Linux） | **`atspi`** | 新增——`uia` 既已单列，Linux 侧对称单列 |
 | `xdotool`（X11） | **`xdotool`** | 新增 |
 | `shell`（CLI） | **`shell`** | 新增 |
+| `device_bridge`（用户手机执行端，经移动 WS 派发） | **`device`** | 新增（设备桥批：refusal codes `device_offline`/`device_timeout`/`device_bridge_disabled` 同批入词表） |
 
 `shell` 动作不涉输入设备，`delivery` 取 `not_applicable`；隔离平面取新增的 `isolated_plane`。
 
