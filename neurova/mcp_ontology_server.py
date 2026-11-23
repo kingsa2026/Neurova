@@ -929,3 +929,38 @@ def build_ontology_mcp_asgi():
 def create_ontology_mcp_server() -> MCPServer:
     """测试/工具面获取 server 实例（工具注册态同一份）。"""
     return _SERVER
+
+
+@_SERVER.tool()
+async def ontology_graph_path(
+    ctx: Context,
+    from_label: str,
+    to_label: str,
+    max_depth: int = 6,
+    agent_id: Optional[str] = None,
+) -> dict:
+    """最短路（P1-3，只读）：两实体间沿 active triple 事实边的无向最短
+    路径（BFS，深度钳位 1-6）。与 REST /ontology/graph/path 同一实现。"""
+    from neurova.knowledge.ontology.graph_analytics import shortestPath
+
+    user = _currentUserFromContext(ctx)
+    return shortestPath(
+        _store(), agentId=_agentIdOf(user, agent_id),
+        tenantId=_tenantOf(user), fromLabel=from_label, toLabel=to_label,
+        maxDepth=max_depth)
+
+
+@_SERVER.tool()
+async def ontology_graph_overview(
+    ctx: Context,
+    top_k: int = 10,
+    agent_id: Optional[str] = None,
+) -> dict:
+    """图概览（P1-3，只读）：节点/边计数、谓词分布、无向度 Top-K——
+    治理诊断读面。与 REST /ontology/graph/overview 同一实现。"""
+    from neurova.knowledge.ontology.graph_analytics import graphOverview
+
+    user = _currentUserFromContext(ctx)
+    return graphOverview(
+        _store(), agentId=_agentIdOf(user, agent_id),
+        tenantId=_tenantOf(user), topK=top_k)

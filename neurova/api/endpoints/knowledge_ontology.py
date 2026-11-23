@@ -2236,3 +2236,68 @@ async def explain_ontology_fact(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"code": 0, "message": "success", "data": explanation}
+
+
+@router.get("/ontology/graph/neighbors")
+async def ontology_graph_neighbors(
+    subject: str = Query(..., description="起点（主体规范标签或客体词）"),
+    max_hops: int = Query(default=2, ge=1, le=6),
+    limit: int = Query(default=200, ge=1, le=1000),
+    agent_id: Optional[str] = Query(default="default"),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """k 跳邻域（P1-3，只读）：从起点沿 active triple 无向走 k 跳，返回逐层
+    节点与触及边。分析面与 community_graph 同一份数据形状，零写入。"""
+    from neurova.knowledge.ontology.graph_analytics import kHopNeighbors
+
+    store, _registry, _engine = _ontologyParts()
+    return {"code": 0, "message": "success", "data": kHopNeighbors(
+        store, agentId=(agent_id or None), tenantId=_tenantOf(current_user),
+        startLabel=subject, maxHops=max_hops, limit=limit)}
+
+
+@router.get("/ontology/graph/path")
+async def ontology_graph_path(
+    from_label: str = Query(..., description="起点标签"),
+    to_label: str = Query(..., description="终点标签"),
+    max_depth: int = Query(default=6, ge=1, le=6),
+    agent_id: Optional[str] = Query(default="default"),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """最短路（P1-3，只读）：两实体间沿事实边的无向最短路径（BFS）。"""
+    from neurova.knowledge.ontology.graph_analytics import shortestPath
+
+    store, _registry, _engine = _ontologyParts()
+    return {"code": 0, "message": "success", "data": shortestPath(
+        store, agentId=(agent_id or None), tenantId=_tenantOf(current_user),
+        fromLabel=from_label, toLabel=to_label, maxDepth=max_depth)}
+
+
+@router.get("/ontology/graph/overview")
+async def ontology_graph_overview(
+    top_k: int = Query(default=10, ge=1, le=50),
+    agent_id: Optional[str] = Query(default="default"),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """图概览（P1-3，只读）：节点/边计数、谓词分布、无向度 Top-K。"""
+    from neurova.knowledge.ontology.graph_analytics import graphOverview
+
+    store, _registry, _engine = _ontologyParts()
+    return {"code": 0, "message": "success", "data": graphOverview(
+        store, agentId=(agent_id or None), tenantId=_tenantOf(current_user),
+        topK=top_k)}
+
+
+@router.get("/ontology/graph/communities")
+async def ontology_graph_communities(
+    max_communities: int = Query(default=20, ge=1, le=100),
+    agent_id: Optional[str] = Query(default="default"),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """社区检测（P1-3，只读投影）：复用既有标签传播实现，不落库。"""
+    from neurova.knowledge.ontology.graph_analytics import detectOntologyCommunities
+
+    store, _registry, _engine = _ontologyParts()
+    return {"code": 0, "message": "success", "data": detectOntologyCommunities(
+        store, agentId=(agent_id or None), tenantId=_tenantOf(current_user),
+        maxCommunities=max_communities)}
