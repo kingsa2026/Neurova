@@ -171,6 +171,32 @@ def test_testPluginUnreachableFailsHonestly(client):
     assert data.get("error")
 
 
+# ── 命令行守卫：shell 解释器头在测试面即 400 拒绝（CodeQL py/command-line-injection 处置） ──
+
+
+def test_testShellInterpreterHeadRejected(client):
+    """bash -c / cmd /c 形态在测试面即 400 拒绝（不落到 Popen）。"""
+    for argv in (["bash", "-c", "echo hi"], ["cmd", "/c", "echo hi"]):
+        resp = client.post(
+            f"{BASE}/test",
+            headers=adminHeaders(),
+            json={"kind": "plugin", "command": argv},
+        )
+        assert resp.status_code == 400, (argv, resp.status_code, resp.text)
+        assert "shell" in resp.json().get("detail", ""), resp.text
+
+
+def test_testDirectCliHeadStillProbed(client):
+    """非 shell 的直接 CLI 头不受守卫影响（本地直配能力保留，ok=false 是探测结果）。"""
+    resp = client.post(
+        f"{BASE}/test",
+        headers=adminHeaders(),
+        json={"kind": "plugin", "command": [sys.executable, "-c", "print('not json')"]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ok"] is False
+
+
 # ── status：进程池状态（B3 落地前占位） ───────────────────────────────────
 
 

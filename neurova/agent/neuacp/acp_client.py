@@ -171,6 +171,13 @@ class NeuacpClient:
         # transport=ssh：先包装成 ssh 前缀命令（§4.8，缺 remote/凭据 fail-closed），
         # ssh.exe 本身在 PATH，同样走 which 解析。
         command = list(self._command)
+        # 命令行守卫（与 /test 面同一判据）：shell 解释器头在拉起前拒绝
+        # （先于 ssh 包装——原始 argv 的头才是被配置面选中的那个）。
+        from neurova.agent.neuacp.command_guard import refuseCommandArgv
+
+        violations = refuseCommandArgv(command)
+        if violations:
+            raise NeuacpError("外部代理启动命令被守卫拒绝: " + "；".join(violations))
         if self._transport != "stdio":
             from neurova.agent.neuacp.ssh_transport import resolveSpawnCommand
 

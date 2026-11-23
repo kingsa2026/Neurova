@@ -70,6 +70,12 @@ class NeuacpPluginExecutor:
 
     async def prompt(self, task_text: str, emitter: Callable[[str, Any], None], on_permission: Callable[[str, str, str], dict]) -> NeuacpExecResult:
         command = self._command + [self._prompt_arg, task_text]
+        # 命令行守卫（与 /test 面同一判据）：shell 解释器头在拉起前拒绝。
+        from neurova.agent.neuacp.command_guard import refuseCommandArgv
+
+        violations = refuseCommandArgv(command)
+        if violations:
+            raise NeuacpError("外部代理启动命令被守卫拒绝: " + "；".join(violations))
         child_env = buildChildEnvironment(
             self._env_extra, run_credential_context=self._run_credential_context)
         # Windows：PATH 里的 CLI 可能是 .cmd/.bat，Popen 不做 PATHEXT 解析。

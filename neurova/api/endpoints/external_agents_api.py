@@ -49,6 +49,7 @@ from neurova.agent.neuacp.catalog import (
     protocolVersionFor,
 )
 from neurova.agent.neuacp.child_env import buildChildEnvironment
+from neurova.agent.neuacp.command_guard import refuseCommandArgv
 from neurova.agent.neuacp.process_governance import TIMEOUT_MATRIX
 from neurova.api.auth import get_current_user
 from neurova.core.logger import get_logger
@@ -114,6 +115,11 @@ async def testExternalAgent(
         )
     if not command:
         raise HTTPException(status_code=400, detail="executor.command 不能为空")
+    # 命令行守卫（CodeQL py/command-line-injection 处置）：shell 解释器头
+    # （bash -c / cmd /c 形态）在测试面即 400 拒绝，不落到 Popen。
+    violations = refuseCommandArgv(command)
+    if violations:
+        raise HTTPException(status_code=400, detail="；".join(violations))
 
     try:
         if kind == "plugin":
