@@ -96,7 +96,7 @@ pytest>=9.2.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.1.0
 pytest-timeout>=2.3
-pyflakes>=3.0.0
+pyflakes>=4.1.0
 prometheus_client>=0.20
 
 # 文档出件（write_pdf：中间树 → PDF）——`neurova/document_pdf.py:335` 是唯一 import 处。

@@ -19,7 +19,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from neurova.api.deps import get_current_user, require_admin
 from neurova.agent.turn_coordinator import yieldWaitPolicy

@@ -24,7 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import sys
 
