@@ -23,6 +23,7 @@ import top.neurova.mobile.core.capability.DeviceCommandDispatcher
 import top.neurova.mobile.core.net.MobileWsChannel
 import top.neurova.mobile.core.notification.NotificationRingHolder
 import top.neurova.mobile.core.protocol.DeviceBridgeEvents
+import top.neurova.mobile.core.push.PushTokenRegistrar
 
 /**
  * 设备桥前台服务（2026-11-23 计划卡 A1/A5/A7）：应用级 WS 常连的承载者。
@@ -112,6 +113,18 @@ class DeviceBridgeService : Service() {
                 snapshotFlow {
                     runtime.pairing.paired && runtime.pairing.wsUrl.isNotBlank()
                 }.collect { ready -> if (ready) channel.connectIfIdle() }
+            },
+            scope.launch {
+                // B7 遗留清偿：登录态就绪即上报 FCM 推送令牌（Firebase 未配置时
+                // 注册器如实跳过，零崩溃；凭据到位后自动生效）
+                snapshotFlow { runtime.auth.user != null }
+                    .collect { loggedIn ->
+                        if (loggedIn) {
+                            runCatching {
+                                PushTokenRegistrar.registerIfNeeded(applicationContext, runtime)
+                            }
+                        }
+                    }
             },
         )
     }

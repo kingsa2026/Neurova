@@ -52,6 +52,15 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- FCM 推送接收（B7）：只消费唤醒信令（device_command_pending），正文不过推送通道 -->
+        <service
+            android:name=".core.push.NeurovaFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <!-- 无障碍执行器（2026-11-23 计划卡 A4）：读屏 + 手势注入；
              用户须在系统设置显式开启，App 侧另有武装窗口按需生效 -->
         <service

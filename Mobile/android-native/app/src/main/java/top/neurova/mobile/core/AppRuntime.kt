@@ -32,7 +32,8 @@ class AppRuntime(context: Context) {
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val credentials = SecureVaultCredentialStore(context.applicationContext)
-    private val preferences: PreferencesStore = SharedPreferencesStore(context.applicationContext)
+    /** 非敏感偏好（档案/游标/推送设备号）；凭证一律走 credentials 加密分仓 */
+    val preferences: PreferencesStore = SharedPreferencesStore(context.applicationContext)
     val servers = ServersStore(preferences).apply { load() }
 
     private fun activeProfile(): ServerProfile =
