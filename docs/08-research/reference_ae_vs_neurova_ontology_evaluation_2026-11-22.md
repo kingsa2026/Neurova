@@ -12,6 +12,8 @@
 
 **总分：参照系 ae 89/100 vs Neurova 83/100，对方领先 6 分**（本体专项评分卡，8 维 20 子项，每子项 0–5）。
 
+> **2026-11-23 复评（§10）**：十三卡+连接器扩容+前端增强全落地后重测——**Neurova 92 vs 参照系 ae 89，本仓反超 3 分**（区间 90–93；逐子项证据见 §10）。下文首评表格与结论保留为 2026-11-22 快照，不改动。
+
 | 维 | 子项数 | Neurova | 参照系ae | 判 |
 |---|---|---|---|---|
 | A 本体建模表达力 | 3 | **14** | 13 | 本仓微胜：多语言/领域包/公理面更全；对方胜在 SHACL 运行时校验 |
@@ -247,6 +249,59 @@
 | U14 差分测试 | `65fda2e32` | 随机序列对拍——**首跑即抓出两处真引擎缺陷**（否定后到不退场、环形推导边递归爆栈）并根修 |
 | 收口 | `ee189a045` | 五条新 REST 路由 + 干跑形状闸根因修复（新主体逃过形状闸）+ 路由判据测试 |
 
-**复评（同卡同锚点）**：A3 5、B1 5、C1 4、C2 4、D1 5、D2 5、E2 5、G2 5、G3 4、H2 5（其余子项不变）——**总分 91～93（保守 91 / 全量 93） vs 参照系 ae 89，反超成立**。保守与全量的差值在 E2（冲突消解仍为只读建议+人工，未做自动改写——有意取舍）与 G2（MCP 未扩容，仅 CLI+REST）。收口后全量回归：ontology+api+enterprise+迁移守卫 **1146 passed** 零新增失败；前端 vitest **2910 passed** + vue-tsc 0 错；live-verify 真后端（create_app 工厂，启动 183s）五路由全过。
+**复评（同卡同锚点）**：A3 5、B1 5、C1 4、C2 4、D1 5、D2 5、E2 5、G2 5、G3 4、H2 5（其余子项不变）——**总分 91～93（保守 91 / 全量 93） vs 参照系 ae 89，反超成立**。保守与全量的差值在 E2（冲突消解仍为只读建议+人工，未做自动改写——有意取舍）与 G2（MCP 未扩容，仅 CLI+REST）。**第二轮落地后实测复评见 §10：92，区间 90–93。**收口后全量回归：ontology+api+enterprise+迁移守卫 **1146 passed** 零新增失败；前端 vitest **2910 passed** + vue-tsc 0 错；live-verify 真后端（create_app 工厂，启动 183s）五路由全过。
 
 **过程新增的实测教训**（已写入教程/注释）：① export/shacl 形状文档缺 rdf 前缀（rdflib 必炸）；② minCount/maxCount 导出为 NodeShape 过不了 pyshacl（ConstraintLoadError），sh:in 字符串值导出非法 Turtle——教程 5 已注明边界；③ validation.findings 对新主体跳过形状求值的干跑保真缺口（本批根修）；④ 差分测试抓出否定后到不退场与环形推导边递归爆栈两处引擎缺陷；⑤ 跨进程 live-verify 的 401 排查链：僵尸 uvicorn 顶替端口（netstat+taskkill 清场）+ 签发/验签数据根必须一致 + 签发子进程 stdout 会被导入期日志污染（取 tail -n 1）。
+
+---
+
+## 10. 复评（2026-11-23 第二轮：十三卡+连接器扩容+前端增强全落地后重测）
+
+> 应「重新测评」要求做的第二轮同卡复评。方法与锚点不变（§2：0–5 锚点、同卡同轴）；**参照系 ae 侧分数维持 2026-11-22 快照读数不动**（上游当日在途变化不在本轮范围），本仓侧 20 个子项全部按当前代码现场重验——不是对 §9 投影的抄写。自 §9 回执之后又有两批落地并入本轮重验：**连接器扩容批**（后端 `30a904dcb` + 前端 `19610fa00`：8 个新 sourceType 与变体闭集根因修复）与**前端增强四项**（`b0fec1a1d`：Studio SHACL 体检/质量阈值门/prove·explain 面板/企业源目录页重构）。
+
+### 10.1 维度汇总（首评 → 复评）
+
+| 维 | 首评（11-22） | 复评（11-23） | 参照系ae | 复评判 |
+|---|---|---|---|---|
+| A 本体建模表达力 | 14 | **15** | 13 | 胜面扩大：运行时 SHACL 补齐最大缺口 |
+| B 本体获取与起草 | 13 | **14** | 12 | 连接器矩阵+列画像补齐摄取广度 |
+| C 存储查询与规模 | 6 | **8** | 10 | 仍落后 2：门面/缓存/批量装载落地，图分析与多后端生产化未做 |
+| D 推理与一致性 | 8 | **10** | 9 | **反超**：Rete 三档+反向链+差分测试抓真缺陷 |
+| E 溯源治理与冲突 | 9 | **10** | 10 | 追平：阈值化质量门+只读建议面 |
+| F 版本化与演化 | 9 | 9 | 6 | 不变（本仓既有强项） |
+| G 消费与集成 | 11 | **13** | 14 | 仍落后 1：CLI+5 路由+Studio 五面板落地，Explorer 级探索面未做 |
+| H 工程质量与生态 | 13 | 13 | 15 | 不变：教程/示例补齐，框架适配器/IDE 分发/部署矩阵未动 |
+| **合计** | **83** | **92** | **89** | **本仓反超 3 分**（区间 90–93，见 10.3） |
+
+### 10.2 逐子项变化（9 项上调、11 项不变；ae 侧全部不动）
+
+| 子项 | 首 | 复 | 证据（2026-11-23 现场读数） |
+|---|---|---|---|
+| A3 标准形式化与公理 | 4 | **5** | `shacl_runtime.py`：形状单源 `exportShaclShapes` → pyshacl 运行时校验，off/shadow/enforce 三档（`NEUROVA_ONTOLOGY_SHACL_RUNTIME`），挂准入咽喉段 3 后半（admission.py:388-397）+ REST `/ontology/validate/shacl` + Studio SHACL 体检面板；`pyshacl>=0.25.0` 进 requirements 双清单（首启自动安装）。原「仅 JSON 五约束子集、path_json 存而未用」缺口关闭；诚实边界保留（不做 OWL DL——对方该项同样是占位桩，不构成对方加分） |
+| B1 数据源 schema 摄取与映射 | 4 | **5** | SOURCE_TYPES 17 类（protocols.py:20-23）：新增 bigquery/databricks/cassandra/salesforce/servicenow/looker/airflow/git 八类（connectors_saas/nosql/git 三模块，registry.py:194-206 分派；专测 test_saasConnectors/test_nosqlConnector/test_gitConnector/test_lakehouseConnectors）；U10 列画像采样入目录（v59 迁移）+ suggester 证据消费（test_schemaProfile）。残余差：对方 normalize/dedup 万行级清洗与来源标记冲突管线 |
+| C1 存储后端与持久化 | 3 | **4** | `graph_backend.py`：GraphBackend 最小契约 + SQLiteBackend 唯一默认实现（读行与既有 SQL 逐字节一致）+ OxigraphBackend 可选第二实现（惰性 import+fail-soft，`NEUROVA_ONTOLOGY_GRAPH_BACKEND`，未安装显式 GraphBackendNotSupported 不静默降级）。生产仍 SQLite 单后端，多后端生产化未做——不给 5 |
+| C2 查询能力与规模工程 | 3 | **4** | `query_cache.py`：投影缓存以 terms+rules+facts 水位指纹进键、写路径解耦失效（补上对方缓存都没有的失效机制，test_sparqlQueryCache）；`bulk_load.py`：两段式批量装载，逐行过准入咽喉+任一违规整批零落盘+补偿撤销+进度回调（test_bulkLoad）。图分析/GraphRAG/增量装载仍缺 |
+| D1 规则与符号推理 | 4 | **5** | `rete_network.py`：完整 Rete（AlphaNode/BetaNode/TerminalNode）为第三求值档（rule_engine.py:84 `EVALUATION_STRATEGIES = ("full_replay", "rete", "rete_network")`；默认档不变，等价性对拍钉住），档内显式放宽 3 正原子；`backward_chaining.py`：反向链证明树（环剪枝+深度上限，只读与前向分轨，对拍）；U14 差分测试首跑抓出并根修两处真引擎缺陷。对方扣分点仍在（归纳评分常量桩、`_has_type` 占位、规则语言无否定/聚合）——本子项反超 |
+| D2 真值维护与时间推理 | 4 | **5** | `temporal_algebra.py`：Allen 13 关系判定+程序化生成完整合成表（169 格对拍，test_temporalAlgebra）；temporal_reasoner 死码退役承接，结论过咽喉入推导账本；精确撤销账本由差分测试护航。与对方会话式 TMS 形态不同、完成度同档 |
+| E2 冲突检测与质量门 | 4 | **5** | quality.py 恒 1.0 静态值退役；可计算指标+阈值门（min_coverage/max_findings/max_orphan_rate 闭集按序输出 threshold_failures，quality.py:25-26，test_qualityGate）+ 只读冲突建议面五策略；校验嵌准入咽喉（写前拦截）vs 对方事后消解，自动改写有意不做。本项是保守/全量分界之一 |
+| G2 工具面（API/MCP/CLI） | 4 | **5** | neurova-ontology CLI 四命令薄壳（pyproject console_scripts 入口）+ 5 条新 REST 路由（/ontology/validate/shacl、facts/bulk、quality/gate、prove、explain/{fact_id}，knowledge_ontology.py:2119-2224，live-verify 真后端全过）；MCP 22 工具单一事实源+双鉴权 fail-closed 不变。对方双 MCP 工具数漂移+无鉴权扣分仍在 |
+| G3 可视化与探索 | 3 | **4** | Studio 三视图（StudioDecisionGraph/StudioDerivationGenealogy/StudioBitemporalTimeline，各带专测）+ SHACL 体检/质量阈值门/prove/explain 面板 + 企业源目录页重构。仍非对方 Explorer 级交互式图探索工作台（sigma 图渲染/时间线 scrubber/十工作区），不给 5 |
+
+不变子项（11 项）：A1/A2、B2/B3、E1（双满分）、F1/F2（本仓强项）、G1、H1（双满分）、H2、H3——逐项核对无状态变化。其中两点说明：H2 的「本体域缺教程/示例」缺口已关闭（docs/03-user-guide/ontology-1..5 五篇教程 + examples/ontology/ 三个离线示例，均真跑过），但部署矩阵仍单一（对方 Docker/Helm/K8s/六云），H2 维持 4；H3 连接器广度已追平（17 类 vs 对方十余种），但框架适配器（0 vs 4 家）与 IDE 分发（CLI vs 九生态插件）仍窄，维持 4。
+
+### 10.3 总分与区间
+
+**复评总分：Neurova 92 vs 参照系 ae 89——反超 3 分**（首评 83 落后 6 → 复评 92 领先 3，净摆动 9 分）。
+
+- 保守下界 **90**：E2、G2 两处判断项若各持 4（冲突消解未做自动改写、CLI 面仍薄）；
+- 本评 **92**：按「机制化+测试+治理+实证闭环」锚点逐项重验的取值；
+- 上界 **93**：若 H2/H3 按「点名缺口已关闭即满分」口径计（本评未采用——部署矩阵与框架适配器差距是真实的）；
+- 与 §9 回执的投影区间（91～93）相容，本评 92 落在区间内。
+
+**仍未追的差距（有意保留，非遗漏）**：多后端生产化与图分析/GraphRAG（C 维余 2 分）、Explorer 级交互探索（G3）、四家框架适配器与九生态 IDE 分发（H3）、六云部署矩阵（H2）、OWL DL 一致性校验（双方均无真实现，本仓诚实声明不做）。
+
+### 10.4 复评现场验证读数（2026-11-23）
+
+- 后端（本机有并行会话重载，默认 30s 档误杀建 app 用例，改 `--timeout=120` 分批串行）：**ontology + enterprise + 迁移三件套 = 1025 passed / 0 failed**（3 分 25 秒）；**api 套件 = 553 passed / 2 failed**——2 失败均为 `test_authSurfaceFreshness`（API_REFERENCE 鉴权面机器段与路由表脱节：文档 1062 条 vs 实际 1065 条，设备桥批新增移动端点后未再生机器段），按守卫自身指引运行 `scripts/generate_api_auth_surface.py --write` 再生后该文件 **7 passed** 归绿。合计 **1580 passed / 0 失败**。
+- 前端：vitest **2948 passed / 1 skipped / 16 todo**（2965 总），vue-tsc **0 错**（本机现场重跑）。
+- 关键路径 live-verify 见 §9 回执（真后端 create_app 工厂，五条新路由全过）；本轮另现场抽查：SOURCE_TYPES 17 类、8 个新模块在盘、5 条新路由在册、教程 5 篇+示例 3 个离线可跑、Studio 四组件+专测在盘、graph_backend/quality 阈值门/admission SHACL 闸逐处 file:line 命中。
