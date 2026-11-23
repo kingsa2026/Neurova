@@ -250,3 +250,20 @@ Agent 决策（ToolExecutor 单一转交点 tool_executor.py:1867）
 - **推送**：复用 push_sender 信令-only 通道与 push_store 令牌库。
 - **车道互斥/结果契约**：复用 lane_mutex（新增 DEVICE_LANE）与 action_result 词表（新增 route=device）。
 - **帧型/schema/租户**：单源仍在 tunnel/protocol.py、builtin_tools.py、core/tenant_scope.py——本计划不新增任何第二事实源。
+
+## 10. 执行记录
+
+### 批一 P0（2026-11-23 当日实施完毕，三端全绿）
+
+| 卡 | 落点 | 提交 |
+| --- | --- | --- |
+| B1/B2/B3 后端 | device_bridge 包、帧族单源、双向幂等账本、七工具、能力快照 v3 迁移、REST 读面 | 5d9da0a36（并行会话落地）+ 93f3405de（守卫收口：capability 声明/不可重现见证集/两份契约快照重生成） |
+| A1-A3 安卓 | DeviceBridgeService 前台服务、DeviceBridgeEvents 协议、DeviceCommandDispatcher、六件执行器、DCL 单例装配 | 35785f760 |
+| H1-H3 鸿蒙 | ChatPage 离页不再断连、device 帧族入总线、DeviceBridgeDispatcher、四件执行器、EntryAbility 装配 | e453b3b07 |
+
+**验证证据**：
+- 后端：device_bridge 47 用例全绿；守卫收口后 device_bridge+tools+computer_use+契约门+移动 WS 定向套件 2529 passed；live-verify 真后端全链 PASS（配对三步走→hello→账本 seq→ping/pong 契约→refresh 换票重连 sync_resume 补拉→REST 能力读面，启动日志 [ERROR] 计数 0）。
+- 安卓：新增 11 用例（4+7）全绿；`:app:testDebugUnitTest` 全量 BUILD SUCCESSFUL（既有 WS 契约/心跳/续签/中继鉴权回归零新增失败）。
+- 鸿蒙：hvigor assembleHap BUILD SUCCESSFUL（含既有 65 页全量编译）。
+
+**批一遗留**：真机端到端演示（后端+安卓真机+真 agent 调用 device_env/open_url 全链）待 P1 首卡一并验；鸿蒙端 hello 上报依赖 ws:connected 事件，连接保活策略按 D7 先不申报长时任务。
