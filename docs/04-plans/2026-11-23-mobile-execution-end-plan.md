@@ -267,3 +267,19 @@ Agent 决策（ToolExecutor 单一转交点 tool_executor.py:1867）
 - 鸿蒙：hvigor assembleHap BUILD SUCCESSFUL（含既有 65 页全量编译）。
 
 **批一遗留**：真机端到端演示（后端+安卓真机+真 agent 调用 device_env/open_url 全链）待 P1 首卡一并验；鸿蒙端 hello 上报依赖 ws:connected 事件，连接保活策略按 D7 先不申报长时任务。
+
+### 批二 P1（2026-11-23 当日实施完毕，后端+安卓全绿、鸿蒙编译绿）
+
+| 卡 | 落点 | 提交 |
+| --- | --- | --- |
+| B4/B5 后端治理 | device_bridge/governance.py（风险分级门/审批扣住/熔断）、tool_executor 设备治理分支、device_budget_exhausted 拒绝码、desktop_audit+H-4 device_action 留痕 | bb287d1e5 |
+| A5 后端半边 | device:event 按设备 JSONL 入库 + 属主 REST 读面（notification-events） | 9142fc21b |
+| A4/A5/A6/A7 安卓 | ExecutorAccessibilityService（读屏投影/手势注入/ref 寻址）、纯逻辑四件（ScreenModel/Guards/ExecutorGate/GesturePlanner）、NeurovaNotificationListener+事件环+白名单、DeviceAuthStore（默认全关）+DeviceBridgeScreen 授权体检页+Profile 入口、常驻通知进度 | 819572495 |
+| H5 鸿蒙 | SettingPage 设备桥分组（连接状态+能力子集如实呈现）；H4 审批卡复用既有 chat:approval_required 链路（批五卡面，零新增代码） | e78a676b2 |
+
+**验证证据**：
+- 后端：治理 14 用例（策略映射/审批扣住/拒绝/超时/熔断步数与会话隔离/审计两落点）+ ingest 4 用例 + WS 集成（device:event→REST 读回）——device_bridge 全套 67 passed；device_bridge+tools 回归 1501 passed。
+- 安卓：accessibility 13 用例 + notification 6 用例 + auth 4 用例全绿；`:app:testDebugUnitTest` 全量 BUILD SUCCESSFUL。
+- 鸿蒙：hvigor assembleHap BUILD SUCCESSFUL。
+
+**批二遗留**：A4 无障碍执行器的真机验证（系统设置授权→读屏→点击→凭据防线四可见面抽测）待真机批次；审批等待期间 WS 断线重连的审批单仍可经桌面端裁决（两通道同源，待联调验证）。
