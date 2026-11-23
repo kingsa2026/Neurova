@@ -348,6 +348,73 @@ class TestMemorySearch:
             assert payload.get("detail")
 
 
+class TestDeviceStatus:
+    """设备桥批三 B6：device_status 只读工具——属主过滤与 REST /pairing/list
+    同一单源（listDevicesForUser），跨属主设备不可见，在线态叠活连接。"""
+
+    @pytest.fixture()
+    def seededDevices(self, monkeypatch, tmp_path):
+        from neurova.api.endpoints import mobile_pairing
+        from neurova.core.mobile_device_store import MobileDeviceStore
+
+        store = MobileDeviceStore(str(tmp_path / "devices.db"))
+        store.register(pairingId="pair-u1", userId="u1", deviceName="U1 手机",
+                       deviceType="mobile", deviceSecret="secret-1")
+        store.recordHello("pair-u1", platform="android", protocolVersion=1,
+                          capabilities=["open_url", "device_env"],
+                          appState="foreground")
+        store.register(pairingId="pair-u9", userId="u9", deviceName="U9 手机",
+                       deviceType="mobile", deviceSecret="secret-9")
+        monkeypatch.setattr(mobile_pairing, "getDeviceRegistry", lambda: store)
+        monkeypatch.setattr(mobile_pairing, "_ws_connections", {"pair-u1": object()})
+        return store
+
+    @pytest.mark.asyncio
+    async def test_deviceStatusListedAndReadOnly(self, asgi_app, seededDevices):
+        headers = {"X-Service-Token": _SERVICE_TOKEN}
+        async with _session(asgi_app, headers) as (session, _):
+            tools = await session.list_tools()
+            byName = {t.name: t for t in tools.tools}
+            assert "device_status" in byName
+            annotations = getattr(byName["device_status"], "annotations", None)
+            assert annotations is not None and annotations.read_only_hint is True
+
+    @pytest.mark.asyncio
+    async def test_deviceStatusOwnerScoped(self, asgi_app, seededDevices, monkeypatch):
+        """u1 只见自己名下设备，能力目录与在线态随 hello/活连接如实反映。"""
+        headers = _jwtHeaders(monkeypatch, _USER_U1_IDENTITY)
+        async with _session(asgi_app, headers) as (session, _):
+            payload = await _callTool(session, "device_status", {})
+            ids = [d["pairing_id"] for d in payload["devices"]]
+            assert ids == ["pair-u1"]
+            row = payload["devices"][0]
+            assert row["is_online"] is True and row["state"] == "online"
+            assert row["capabilities"] == ["open_url", "device_env"]
+            assert row["platform"] == "android"
+
+    @pytest.mark.asyncio
+    async def test_deviceStatusPairingIdFilterNoLeak(self, asgi_app, seededDevices, monkeypatch):
+        """指名他人设备：空结果 + 诚实说明，不泄露存在性。"""
+        headers = _jwtHeaders(monkeypatch, _USER_U1_IDENTITY)
+        async with _session(asgi_app, headers) as (session, _):
+            other = await _callTool(session, "device_status", {"pairing_id": "pair-u9"})
+            assert other["devices"] == [] and other["count"] == 0
+            assert other.get("detail")
+            own = await _callTool(session, "device_status", {"pairing_id": "pair-u1"})
+            assert own["count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_deviceStatusOfflineProjected(self, asgi_app, seededDevices, monkeypatch):
+        """不在活连接里的设备如实报 offline（同一投影单源）。"""
+        u9 = dict(_USER_U1_IDENTITY, user_id="u9", username="bob", neuser_id="u9")
+        headers = _jwtHeaders(monkeypatch, u9)
+        async with _session(asgi_app, headers) as (session, _):
+            payload = await _callTool(session, "device_status", {})
+            assert [d["pairing_id"] for d in payload["devices"]] == ["pair-u9"]
+            assert payload["devices"][0]["is_online"] is False
+            assert payload["devices"][0]["state"] == "offline"
+
+
 class TestAppWiring:
     """真装配（create_app）里的挂载事实：深路径先注册、无尾斜杠归一。"""
 

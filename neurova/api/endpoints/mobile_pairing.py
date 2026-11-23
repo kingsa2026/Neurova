@@ -1737,6 +1737,13 @@ async def get_pairing_status(code: str, user_id: str = Depends(_get_current_user
     )
 
 
+def listDevicesForUser(userId: str) -> List[Dict[str, Any]]:
+    """在册设备读数单源（REST /pairing/list 与 MCP device_status 共用，批三 B6）：
+    持久注册表 + 当下活连接叠加，属主过滤只在这一处。"""
+    return getDeviceRegistry().listForUser(
+        userId, livePairingIds=set(_ws_connections), now=time.time())
+
+
 @router.get("/pairing/list")
 async def list_paired_devices(
     user_id: str = Depends(_get_current_user_id),
@@ -1750,8 +1757,7 @@ async def list_paired_devices(
     - 在线态只在挂载/确认/解除三个时刻快照一次，之后永不刷新：面板开着，
       「在线/离线」就是死的。现在每次读都叠加当下的活连接（`_ws_connections`）。
     """
-    devices = getDeviceRegistry().listForUser(
-        user_id, livePairingIds=set(_ws_connections), now=time.time())
+    devices = listDevicesForUser(user_id)
 
     return {
         "code": 0,

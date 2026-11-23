@@ -3,7 +3,7 @@
 P2-2 车道D 增只读问数，2026-11-21）。
 
 把本仓只读能力以 MCP tools 开放给 Claude Code / OpenCode 等外部编码代理
-（外部代理以 MCP client 身份调用，即"反向 MCP"）。只读四件套：
+（外部代理以 MCP client 身份调用，即"反向 MCP"）。只读五件套：
 
 - team_list：当前凭据可见团队——**转交 teams 单源** `teams_api.list_teams`
   （与 GET /v1/teams 同一租户过滤口径，本壳不复制租户比较式）；
@@ -16,7 +16,10 @@ P2-2 车道D 增只读问数，2026-11-21）。
 - data_query：企业数据只读问数（P2-2 车道D）——转交 nl2sql 可复用入口
   `runReadonlyDataQuestion`（目录 grounding → 生成 → 只读校验 → 连接器
   只读执行），数据源按发起者租户段过滤，总闸 `NEUROVA_NL2SQL_ENABLED`
-  关闭时结构化拒绝。
+  关闭时结构化拒绝；
+- device_status：已配对设备与能力目录（设备桥批三 B6）——转交
+  `mobile_pairing.listDevicesForUser` 单源（与 GET /mobile/pairing/list
+  同一属主过滤与在线态投影），供派发设备动作前判断可达性。
 
 **只读红线**：本面不注册任何写工具；四件工具全零副作用（列表/检索/读数），
 并以 ToolAnnotations(readOnlyHint=True) 向客户端声明。
@@ -47,7 +50,7 @@ logger = get_logger(__name__)
 _MCP_INSTRUCTIONS = (
     "Neurova 面向外部编码代理的只读工具面：查团队名册（team_list）、"
     "检索知识库（knowledge_search）、检索记忆（memory_search）、"
-    "企业数据只读问数（data_query）。"
+    "企业数据只读问数（data_query）、查已配对设备与能力目录（device_status）。"
     "全部工具只读无副作用；数据范围按调用凭据的租户/属主隔离。"
 )
 
@@ -307,6 +310,32 @@ async def dataQuery(ctx: Context, question: str, source_id: str = "",
         payload["reason"] = str(result.get("reason") or "")
     if result.get("error"):
         payload["error"] = str(result.get("error"))
+    return _boundedPayload(payload)
+
+
+# ── device_status（只读，设备桥批三 B6）──────────────────────────────────────
+
+@_SERVER.tool(
+    name="device_status",
+    description="查询当前凭据名下的已配对移动设备与实时能力目录（只读）。"
+                "属主过滤与 GET /mobile/pairing/list 同一单源（listDevicesForUser），"
+                "他人设备不可见；返回在线状态、hello 上报的能力子集与最近活跃时间，"
+                "供外部编码代理派发设备动作前判断可达性。可按 pairing_id 过滤。",
+    annotations=_READ_ONLY,
+)
+async def deviceStatus(ctx: Context, pairing_id: str = "") -> dict:
+    from neurova.api.endpoints.mobile_pairing import listDevicesForUser
+
+    user = _currentUserFromContext(ctx)
+    devices = listDevicesForUser(str(user.get("user_id") or ""))
+    wanted = str(pairing_id or "").strip()
+    if wanted:
+        devices = [d for d in devices if str(d.get("pairing_id")) == wanted]
+    rows = [_clipTexts(dict(d)) for d in devices]
+    payload: Dict[str, Any] = {"devices": rows, "count": len(rows)}
+    if wanted and not rows:
+        # 不区分「不存在」与「不是你的」：与 REST 读面同款不泄露存在性
+        payload["detail"] = "设备不存在或不属于当前凭据"
     return _boundedPayload(payload)
 
 
