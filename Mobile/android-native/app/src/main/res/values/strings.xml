@@ -24,4 +24,10 @@
     <string name="swarm_flow_candidates_title">Candidate board · rev %1$d</string>
     <string name="swarm_flow_candidates_unavailable">Candidate board unavailable (graph shown as-is)</string>
     <string name="swarm_flow_conflict_with">Conflicts with %1$d</string>
+
+    <!-- Device bridge (2026-11-23 plan A1/A4) -->
+    <string name="accessibility_service_description">Neurova device bridge executor. Only active while a task window is armed; reads the screen and injects taps/gestures on your phone at the agent\'s command, with credential fields always blocked.</string>
+    <string name="device_bridge_notification_title">Neurova device bridge</string>
+    <string name="device_bridge_notification_idle">Keeping the execution link alive</string>
+    <string name="device_bridge_notification_running">Executing: %1$s</string>
 </resources>

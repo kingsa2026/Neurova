@@ -30,6 +30,9 @@ object AndroidDeviceExecutors {
         ClipboardWriteExecutor(context),
         AppListExecutor(context),
         DeviceEnvExecutor(context),
+        ScreenExecutors.ScreenObserveExecutor(),
+        ScreenExecutors.ScreenGestureExecutor(),
+        top.neurova.mobile.core.notification.NotificationReadExecutor(),
     )
 
     fun text(payload: JsonObject, key: String): String =

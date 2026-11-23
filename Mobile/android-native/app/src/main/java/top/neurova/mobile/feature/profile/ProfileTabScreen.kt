@@ -47,6 +47,7 @@ fun ProfileTabScreen(
     onOpenAdminUsers: () -> Unit = {},
     onOpenAdminGroups: () -> Unit = {},
     onOpenAdminEvolution: () -> Unit = {},
+    onOpenDeviceBridge: () -> Unit = {},
 ) {
     val runtime = LocalAppRuntime.current
     val palette = LocalNeurovaColors.current
@@ -135,6 +136,12 @@ fun ProfileTabScreen(
             title = "已配对设备",
             subtitle = if (deviceCount >= 0) "$deviceCount 台在册 · 扫码配对免重连" else "读取中…",
             onClick = onOpenServers,
+        )
+        // 设备桥（2026-11-23 计划卡 A6）：能力授权 + 体检入口
+        InfoRow(
+            title = "设备桥",
+            subtitle = "能力授权 · 体检 · 执行端状态",
+            onClick = onOpenDeviceBridge,
         )
 
         if (runtime.auth.isAdmin) {

@@ -10,10 +10,11 @@ object DeviceCapabilities {
     const val PLATFORM = "android"
     const val PROTOCOL_VERSION = 1
 
-    /** P0 端上已实现并对外宣称的能力（notification_read 随 A5 监听器批宣称，screen_* 随 A4） */
+    /** P0/P1 端上已实现并对外宣称的能力 */
     val CLAIMED = listOf(
         "open_url", "open_app", "clipboard_read", "clipboard_write",
-        "app_list", "device_env",
+        "app_list", "device_env", "screen_observe", "screen_gesture",
+        "notification_read",
     )
 
     /**

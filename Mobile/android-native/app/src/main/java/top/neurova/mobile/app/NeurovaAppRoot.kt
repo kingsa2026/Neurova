@@ -49,6 +49,7 @@ import top.neurova.mobile.feature.agents.AgentsTabScreen
 import top.neurova.mobile.feature.auth.LoginScreen
 import top.neurova.mobile.feature.chat.ChatScreen
 import top.neurova.mobile.feature.chat.ChatTabScreen
+import top.neurova.mobile.feature.devicebridge.DeviceBridgeScreen
 import top.neurova.mobile.feature.knowledge.KnowledgeTabScreen
 import top.neurova.mobile.feature.models.ModelsScreen
 import top.neurova.mobile.feature.pairing.PairingScreen
@@ -204,10 +205,12 @@ private fun NeurovaNavHost(navController: NavHostController) {
                 onOpenAdminUsers = { navController.navigate("admin/users") },
                 onOpenAdminGroups = { navController.navigate("admin/groups") },
                 onOpenAdminEvolution = { navController.navigate("admin/evolution") },
+                onOpenDeviceBridge = { navController.navigate("profile/devicebridge") },
             )
         }
         composable("profile/servers") { ServerManageScreen(onBack = { navController.popBackStack() }) }
         composable("profile/models") { ModelsScreen(onBack = { navController.popBackStack() }) }
+        composable("profile/devicebridge") { DeviceBridgeScreen(onBack = { navController.popBackStack() }) }
         composable("workbench/aigc") { AigcScreen(onBack = { navController.popBackStack() }) }
         composable("admin/users") { AdminUsersScreen(onBack = { navController.popBackStack() }) }
         composable("admin/groups") { AdminGroupsScreen(onBack = { navController.popBackStack() }) }

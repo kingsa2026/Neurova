@@ -64,6 +64,9 @@ class AppRuntime(context: Context) {
     val evolutionRepo = EvolutionRepository(http)
     val aigcRepo = AigcRepository(http)
 
+    /** 设备桥端上能力授权（D4：默认全关；A6 授权页读写） */
+    val deviceAuth = top.neurova.mobile.core.capability.DeviceAuthStore(preferences)
+
     companion object {
         /**
          * 进程级单例（DCL + 双检，仓规）：设备桥前台服务（DeviceBridgeService）
