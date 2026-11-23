@@ -31,6 +31,15 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+
+def _keyFingerprint(api_key: str) -> str:
+    """密钥的可观测指纹（sha256 前 12 位十六进制）。
+
+    日志与列表用它替代密钥前缀明文（CodeQL py/clear-text-logging-sensitive-data）：
+    既能对账识别是哪把 key，又不泄露任何密钥字节。
+    """
+    return hashlib.sha256(str(api_key).encode("utf-8")).hexdigest()[:12]
+
 logger = get_logger(__name__)
 
 _TOKEN_SECRET_FILENAME = ".neurova_token_secret"
@@ -515,7 +524,7 @@ class NEUTokenManager:
         with self._lock:
             if api_key in self._api_keys:
                 self._api_keys[api_key]["is_active"] = False
-                logger.info("Revoked API key: %s...", api_key[:12])
+                logger.info("Revoked API key: %s...", _keyFingerprint(api_key))
                 return True
             return False
 
@@ -530,7 +539,7 @@ class NEUTokenManager:
         """
         with self._lock:
             return [
-                {**key_data, "key": api_key[:12] + "..."}
+                {**key_data, "key": _keyFingerprint(api_key) + "..."}
                 for api_key, key_data in self._api_keys.items()
                 if key_data["user_id"] == user_id
             ]
