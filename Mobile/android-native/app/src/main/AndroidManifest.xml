@@ -2,8 +2,20 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- 设备桥常驻连接（2026-11-23 计划卡 A1）：前台服务承载应用级 WS，退后台不断连 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!-- 设备桥 open_app/app_list 的包可见性（API 30+）：只申请主入口应用可见，不取全量安装清单 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -30,5 +42,11 @@
                 <data android:scheme="neurova" android:host="pair" />
             </intent-filter>
         </activity>
+
+        <!-- 设备桥前台服务：持有应用级 WS 常连，执行 device:execute 并回执 -->
+        <service
+            android:name=".core.service.DeviceBridgeService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>

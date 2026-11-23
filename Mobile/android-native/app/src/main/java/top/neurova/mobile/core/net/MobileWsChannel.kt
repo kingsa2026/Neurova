@@ -19,6 +19,8 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import top.neurova.mobile.core.protocol.ApprovalCard
+import top.neurova.mobile.core.protocol.DeviceBridgeEvents
+import top.neurova.mobile.core.protocol.DeviceCommand
 import top.neurova.mobile.core.protocol.HostConfirmationCard
 import top.neurova.mobile.core.protocol.MobileWsClosePolicy
 import top.neurova.mobile.core.protocol.ToolActionEvents
@@ -94,6 +96,12 @@ class MobileWsChannel(
 
     /** U6 动态干预审批卡（pending_approval / chat:approval_required）：批准/拒绝调 approvals 接口 */
     data class ApprovalRequired(val sessionId: String, val card: ApprovalCard) : Event
+
+    /**
+     * 设备桥命令（device:execute，2026-11-23 计划卡 A2）：由 DeviceBridgeService
+     * 的派发器执行并回 device:result；本通道只负责解析与收发，不做执行裁决。
+     */
+    data class DeviceCommandArrived(val command: DeviceCommand, val frame: JsonObject) : Event
 }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -194,6 +202,12 @@ class MobileWsChannel(
 
     fun cancelChat(sessionId: String): Boolean =
         sendFrame(buildJsonObject("type" to "chat:cancel", "session_id" to sessionId))
+
+    /**
+     * 设备桥出站帧（device:hello / device:result / device:event，2026-11-23 计划
+     * 卡 A1/A2）：与聊天帧走同一 socket、同一账本游标——不另起第二通道。
+     */
+    fun sendDeviceFrame(frame: JsonObject): Boolean = sendFrame(frame)
 
     fun close() {
         manualClosed = true
@@ -446,6 +460,13 @@ class MobileWsChannel(
                         ToolActionEvents.parseHostConfirmationFromToolResult(sessionId, data)?.let {
                             eventsFlow.tryEmit(Event.HostConfirmationRequired(sessionId, it))
                         }
+                    }
+                }
+                // 设备桥命令（2026-11-23 计划卡 A2）：解析成 DeviceCommand 交服务层派发，
+                // 通道自身不执行、不回执（回执由 DeviceBridgeService 经 sendDeviceFrame 走同一 socket）
+                "device:execute" -> {
+                    DeviceBridgeEvents.parseExecute(frame)?.let { command ->
+                        eventsFlow.tryEmit(Event.DeviceCommandArrived(command, frame))
                     }
                 }
             }

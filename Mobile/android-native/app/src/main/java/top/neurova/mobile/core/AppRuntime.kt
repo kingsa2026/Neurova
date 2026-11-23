@@ -63,4 +63,20 @@ class AppRuntime(context: Context) {
     val adminRepo = AdminRepository(http)
     val evolutionRepo = EvolutionRepository(http)
     val aigcRepo = AigcRepository(http)
+
+    companion object {
+        /**
+         * 进程级单例（DCL + 双检，仓规）：设备桥前台服务（DeviceBridgeService）
+         * 不经 Compose 树，也要取到同一份装配——单一装配点，不另起第二套通道。
+         */
+        @Volatile
+        private var instance: AppRuntime? = null
+
+        fun instanceOrNull(): AppRuntime? = instance
+
+        fun instance(context: Context): AppRuntime =
+            instance ?: synchronized(this) {
+                instance ?: AppRuntime(context.applicationContext).also { instance = it }
+            }
+    }
 }

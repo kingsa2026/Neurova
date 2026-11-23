@@ -1,12 +1,16 @@
 package top.neurova.mobile
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.core.content.ContextCompat
 import top.neurova.mobile.app.NeurovaAppRoot
 import top.neurova.mobile.core.AppRuntime
+import top.neurova.mobile.core.capability.AppStateTracker
+import top.neurova.mobile.core.service.DeviceBridgeService
 import top.neurova.mobile.ui.components.LocalAppRuntime
 import top.neurova.mobile.ui.theme.NeurovaTheme
 
@@ -16,11 +20,14 @@ import top.neurova.mobile.ui.theme.NeurovaTheme
  */
 class MainActivity : ComponentActivity() {
 
-    private val runtime by lazy { AppRuntime(this) }
+    // 进程级单例（DCL）：设备桥前台服务与 UI 共用同一份装配
+    private val runtime by lazy { AppRuntime.instance(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // 设备桥（2026-11-23 计划卡 A1）：前台服务承载应用级 WS 常连
+        ContextCompat.startForegroundService(this, Intent(this, DeviceBridgeService::class.java))
         setContent {
             CompositionLocalProvider(LocalAppRuntime provides runtime) {
                 NeurovaTheme {
@@ -28,5 +35,15 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        AppStateTracker.foreground()
+    }
+
+    override fun onPause() {
+        AppStateTracker.background()
+        super.onPause()
     }
 }
