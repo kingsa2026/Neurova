@@ -95,7 +95,7 @@ tokenizers>=0.13.0
 #                   缺席时 API Key 解密静默失败（provider 缓存空 key）
 APScheduler>=3.10
 feedparser>=6.0
-pycryptodome>=3.20
+pycryptodome>=4.5.0
 # MCP 工具层 SDK（neurova/tool_layers/mcp_client.py）
 # 本节三件事实不可混谈：
 #   1) mcp 的声明**四处都得在**，缺任一处就有一条守卫红：两份 txt（生产安装 /

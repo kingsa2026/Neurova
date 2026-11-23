@@ -98,6 +98,8 @@ h11==0.16.0
     #   uvicorn
 hf-xet==1.7.0 ; platform_machine == 'AMD64' or platform_machine == 'ARM64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
     # via huggingface-hub
+html5rdf==1.2.1
+    # via rdflib
 httpcore==1.0.9
     # via httpx
 httpcore2==2.13.0 ; sys_platform != 'emscripten'
@@ -117,7 +119,7 @@ httpx2==2.13.0
     #   langsmith
     #   mcp
     #   openai
-httpx2-jsfetch==1.0 ; python_full_version >= '3.12' and sys_platform == 'emscripten'
+httpx2-jsfetch==1.0 ; sys_platform == 'emscripten'
     # via httpx2
 huggingface-hub==2.3.0
     # via tokenizers
@@ -182,6 +184,7 @@ numpy==2.5.4 ; python_full_version >= '3.12'
     # via
     #   -r requirements-ci.txt
     #   onnxruntime
+    #   scipy
 ollama==0.6.3
     # via langchain-ollama
 onnxruntime==1.31.0
@@ -194,12 +197,15 @@ opentelemetry-api==1.45.1
     # via mcp
 orjson==3.13.0 ; platform_python_implementation != 'PyPy'
     # via langsmith
+owlrl==7.6.2
+    # via pyshacl
 packaging==26.3
     # via
     #   huggingface-hub
     #   langchain-core
     #   langsmith
     #   onnxruntime
+    #   pyshacl
     #   pytest
 passlib==1.7.4
     # via -r requirements-ci.txt
@@ -211,6 +217,8 @@ pluggy==1.6.0
     # via
     #   pytest
     #   pytest-cov
+prettytable==3.19.0
+    # via pyshacl
 prometheus-client==0.26.0
     # via -r requirements-ci.txt
 propcache==0.5.4
@@ -227,7 +235,7 @@ pyasn1-modules==0.4.2
     # via google-auth
 pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
     # via cffi
-pycryptodome==3.23.0
+pycryptodome==4.5.0
     # via -r requirements-ci.txt
 pydantic==2.13.5
     # via
@@ -259,6 +267,8 @@ pyparsing==3.3.3
     # via rdflib
 pypdf==6.21.4
     # via -r requirements-ci.txt
+pyshacl==0.40.2
+    # via -r requirements-ci.txt
 pytest==9.2.0
     # via
     #   -r requirements-ci.txt
@@ -287,7 +297,10 @@ pyyaml==6.0.3
     #   langchain-core
     #   uvicorn
 rdflib==7.6.0
-    # via -r requirements-ci.txt
+    # via
+    #   -r requirements-ci.txt
+    #   owlrl
+    #   pyshacl
 referencing==0.37.0
     # via
     #   jsonschema
@@ -311,9 +324,7 @@ rpds-py==2026.6.3
     # via
     #   jsonschema
     #   referencing
-scipy==1.15.3 ; python_full_version < '3.11'
-    # via -r requirements-ci.txt
-scipy==1.16.3 ; python_full_version >= '3.11'
+scipy==1.16.3
     # via -r requirements-ci.txt
 segno==1.6.6
     # via -r requirements-ci.txt
@@ -340,8 +351,6 @@ tiktoken==0.14.0
     #   langchain-openai
 tokenizers==0.23.3
     # via -r requirements-ci.txt
-tomli==2.5.0 ; python_full_version <= '3.11'
-    # via coverage
 tqdm==4.70.1
     # via huggingface-hub
 truststore==0.10.4 ; sys_platform != 'emscripten'
@@ -394,6 +403,8 @@ uvloop==0.22.1 ; platform_python_implementation != 'PyPy' and sys_platform != 'c
     # via uvicorn
 watchfiles==1.2.0
     # via uvicorn
+wcwidth==0.9.5
+    # via prettytable
 websockets==16.1.1
     # via
     #   -r requirements-ci.txt

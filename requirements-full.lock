@@ -10,6 +10,12 @@ aiohttp==3.14.5
     #   wecom-aibot-python-sdk
 aiosignal==1.4.0
     # via aiohttp
+aliyun-python-sdk-core==2.16.1
+    # via
+    #   aliyun-python-sdk-kms
+    #   oss2
+aliyun-python-sdk-kms==2.16.5
+    # via oss2
 annotated-doc==0.0.5
     # via
     #   fastapi
@@ -18,6 +24,10 @@ annotated-types==0.8.0
     # via pydantic
 anthropic==1.6.0
     # via langchain-anthropic
+antlr4-python3-runtime==4.9.3
+    # via
+    #   hydra-core
+    #   omegaconf
 anyio==4.15.1
     # via
     #   anthropic
@@ -74,9 +84,12 @@ comtypes==1.4.17
     # via
     #   -r requirements.txt
     #   uiautomation
+crcmod==1.7
+    # via oss2
 cryptography==50.0.1
     # via
     #   -r requirements.txt
+    #   aliyun-python-sdk-core
     #   google-auth
     #   modelscope-hub
     #   paramiko
@@ -90,6 +103,8 @@ cuda-toolkit==13.0.3.0 ; sys_platform == 'linux'
     # via torch
 curl-cffi==0.16.3
     # via -r requirements.txt
+decorator==5.3.2
+    # via librosa
 defusedxml==0.7.1
     # via odfpy
 dingtalk-stream==0.24.3
@@ -128,6 +143,8 @@ fsspec==2026.7.0
     # via
     #   huggingface-hub
     #   torch
+funasr==1.4.28
+    # via -r requirements.txt
 google-auth==2.61.0
     # via google-genai
 google-genai==2.29.0
@@ -143,6 +160,8 @@ hf-xet==1.6.0 ; platform_machine == 'AMD64' or platform_machine == 'aarch64' or 
     # via huggingface-hub
 hnswlib==0.8.0
     # via -r requirements.txt
+html5rdf==1.2.1
+    # via rdflib
 httpcore==1.0.9
     # via httpx
 httpcore2==2.13.0 ; sys_platform != 'emscripten'
@@ -168,9 +187,12 @@ httpx2-jsfetch==1.0 ; sys_platform == 'emscripten'
 huggingface-hub==1.32.0
     # via
     #   -r requirements.txt
+    #   funasr
     #   sentence-transformers
     #   tokenizers
     #   transformers
+hydra-core==1.3.8
+    # via funasr
 idna==3.20
     # via
     #   anyio
@@ -180,16 +202,27 @@ idna==3.20
     #   yarl
 invoke==3.0.3
     # via paramiko
+jaconv==0.5.0
+    # via funasr
+jamo==0.4.1
+    # via funasr
 jieba==0.42.1
-    # via -r requirements.txt
+    # via
+    #   -r requirements.txt
+    #   funasr
 jinja2==3.1.6
     # via torch
 jiter==0.17.0
     # via
     #   anthropic
     #   openai
+jmespath==1.1.0
+    # via aliyun-python-sdk-core
 joblib==1.6.0
-    # via scikit-learn
+    # via
+    #   librosa
+    #   pynndescent
+    #   scikit-learn
 jsonpatch==1.33
     # via langchain-core
 jsonpointer==3.2.0
@@ -200,6 +233,10 @@ jsonschema==4.26.0
     #   mcp
 jsonschema-specifications==2025.9.1
     # via jsonschema
+kaldi-native-fbank==1.23.3
+    # via -r requirements.txt
+kaldiio==2.18.1
+    # via funasr
 langchain-anthropic==1.7.5
     # via -r requirements.txt
 langchain-core==1.6.7
@@ -220,6 +257,16 @@ langsmith==0.14.4
     # via langchain-core
 lark-oapi==1.7.3
     # via -r requirements.txt
+lazy-loader==0.6
+    # via librosa
+librosa==0.11.0 ; python_full_version < '3.12'
+    # via funasr
+librosa==1.0.1 ; python_full_version >= '3.12'
+    # via funasr
+llvmlite==0.50.0
+    # via
+    #   numba
+    #   pynndescent
 lxml==6.1.3
     # via
     #   python-docx
@@ -235,13 +282,17 @@ mcp-types==2.2.0
 mdurl==0.1.2
     # via markdown-it-py
 modelscope==1.40.1
-    # via -r requirements.txt
+    # via
+    #   -r requirements.txt
+    #   funasr
 modelscope-hub==0.4.5
     # via modelscope
 mouseinfo==0.1.3
     # via pyautogui
 mpmath==1.3.0
     # via sympy
+msgpack==1.2.4
+    # via librosa
 multidict==6.9.1
     # via
     #   aiohttp
@@ -250,10 +301,27 @@ narwhals==2.26.0
     # via scikit-learn
 networkx==3.6.1
     # via torch
-numpy==2.5.3
+numba==0.68.1
+    # via
+    #   librosa
+    #   pynndescent
+    #   umap-learn
+numpy==2.4.6 ; python_full_version < '3.12'
     # via
     #   -r requirements.txt
+    #   funasr
     #   hnswlib
+    #   kaldiio
+    #   librosa
+    #   numba
+numpy==2.5.3 ; python_full_version >= '3.12'
+    # via
+    #   -r requirements.txt
+    #   funasr
+    #   hnswlib
+    #   kaldiio
+    #   librosa
+    #   numba
     #   onnxruntime
     #   opencv-python
     #   rapidocr-onnxruntime
@@ -262,7 +330,11 @@ numpy==2.5.3
     #   sentence-transformers
     #   shapely
     #   soundfile
+    #   soxr
+    #   tensorboardx
+    #   torch-complex
     #   transformers
+    #   umap-learn
 nvidia-cublas==13.1.1.3 ; sys_platform == 'linux'
     # via
     #   cuda-toolkit
@@ -308,6 +380,10 @@ odfpy==1.4.1
     # via -r requirements.txt
 ollama==0.6.3
     # via langchain-ollama
+omegaconf==2.3.1
+    # via
+    #   funasr
+    #   hydra-core
 onnxruntime==1.30.0
     # via
     #   -r requirements.txt
@@ -324,13 +400,23 @@ opentelemetry-api==1.45.1
     # via mcp
 orjson==3.13.0 ; platform_python_implementation != 'PyPy'
     # via langsmith
+oss2==2.19.1
+    # via funasr
+owlrl==7.6.2
+    # via pyshacl
 packaging==26.3
     # via
     #   huggingface-hub
+    #   hydra-core
     #   langchain-core
     #   langsmith
+    #   lazy-loader
     #   modelscope
     #   onnxruntime
+    #   pooch
+    #   pyshacl
+    #   tensorboardx
+    #   torch-complex
     #   transformers
 paramiko==5.0.0
     # via -r requirements.txt
@@ -342,8 +428,14 @@ pillow==13.0.0
     #   python-pptx
     #   rapidocr-onnxruntime
     #   reportlab
+platformdirs==4.14.8
+    # via pooch
 playwright==1.63.0
     # via -r requirements.txt
+pooch==1.9.0
+    # via librosa
+prettytable==3.19.0
+    # via pyshacl
 prometheus-client==0.26.0
     # via -r requirements.txt
 propcache==0.5.4
@@ -351,7 +443,9 @@ propcache==0.5.4
     #   aiohttp
     #   yarl
 protobuf==7.36.1
-    # via onnxruntime
+    # via
+    #   onnxruntime
+    #   tensorboardx
 psutil==7.2.2
     # via -r requirements.txt
 pyasn1==0.6.5
@@ -364,10 +458,11 @@ pyclipper==1.4.0
     # via rapidocr-onnxruntime
 pycparser==3.0 ; implementation_name != 'PyPy'
     # via cffi
-pycryptodome==3.23.0
+pycryptodome==4.6.0
     # via
     #   -r requirements.txt
     #   lark-oapi
+    #   oss2
 pydantic==2.13.5
     # via
     #   -r requirements.txt
@@ -400,6 +495,8 @@ pymsgbox==2.0.1
     # via pyautogui
 pynacl==1.6.2
     # via paramiko
+pynndescent==0.7.0
+    # via umap-learn
 pyobjc-core==12.2.2 ; sys_platform == 'darwin'
     # via
     #   pyautogui
@@ -409,6 +506,8 @@ pyobjc-framework-cocoa==12.2.2 ; sys_platform == 'darwin'
     # via pyobjc-framework-quartz
 pyobjc-framework-quartz==12.2.2 ; sys_platform == 'darwin'
     # via pyautogui
+pyparsing==3.3.3
+    # via rdflib
 pypdf==6.21.4
     # via -r requirements.txt
 pypdfium2==5.15.2
@@ -419,6 +518,8 @@ pyrect==0.2.0
     # via pygetwindow
 pyscreeze==1.0.1
     # via pyautogui
+pyshacl==0.40.2
+    # via -r requirements.txt
 python-docx==1.2.0
     # via -r requirements.txt
 python-dotenv==1.2.3
@@ -442,19 +543,28 @@ pywin32==312 ; sys_platform == 'win32'
 pyyaml==6.0.3
     # via
     #   -r requirements.txt
+    #   funasr
     #   huggingface-hub
     #   langchain-core
+    #   omegaconf
     #   rapidocr-onnxruntime
     #   transformers
     #   uvicorn
+rapidfuzz==3.14.6
+    # via funasr
 rapidocr-onnxruntime==1.4.4
     # via -r requirements.txt
+rdflib==7.6.0
+    # via
+    #   owlrl
+    #   pyshacl
 referencing==0.37.0
     # via
     #   jsonschema
     #   jsonschema-specifications
 regex==2026.9.10
     # via
+    #   funasr
     #   tiktoken
     #   transformers
 reportlab==5.0.1
@@ -463,12 +573,15 @@ requests==2.34.2
     # via
     #   -r requirements.txt
     #   dingtalk-stream
+    #   funasr
     #   google-auth
     #   google-genai
     #   langsmith
     #   lark-oapi
     #   modelscope
     #   modelscope-hub
+    #   oss2
+    #   pooch
     #   requests-toolbelt
     #   tiktoken
 requests-toolbelt==1.0.0
@@ -486,19 +599,38 @@ rpds-py==2026.6.3
 rubicon-objc==0.5.6 ; sys_platform == 'darwin'
     # via mouseinfo
 safetensors==0.8.0
-    # via transformers
-scikit-learn==1.9.1
-    # via sentence-transformers
-scipy==1.18.1
     # via
+    #   funasr
+    #   transformers
+scikit-learn==1.9.1
+    # via
+    #   librosa
+    #   pynndescent
+    #   sentence-transformers
+    #   umap-learn
+scipy==1.15.3 ; python_full_version < '3.11'
+    # via
+    #   -r requirements.txt
+    #   funasr
+    #   librosa
+    #   pynndescent
+scipy==1.16.3 ; python_full_version >= '3.11'
+    # via
+    #   -r requirements.txt
+    #   funasr
+    #   librosa
+    #   pynndescent
     #   scikit-learn
     #   sentence-transformers
+    #   umap-learn
 segno==1.6.6
     # via -r requirements.txt
 sentence-transformers==6.0.1
     # via -r requirements.txt
 sentencepiece==0.2.2
-    # via -r requirements.txt
+    # via
+    #   -r requirements.txt
+    #   funasr
 setuptools==84.2.1
     # via
     #   modelscope
@@ -508,7 +640,9 @@ shapely==2.2.0
 shellingham==1.5.4
     # via typer
 six==1.17.0
-    # via rapidocr-onnxruntime
+    # via
+    #   oss2
+    #   rapidocr-onnxruntime
 sniffio==1.3.1
     # via
     #   anthropic
@@ -516,7 +650,12 @@ sniffio==1.3.1
     #   langsmith
     #   openai
 soundfile==0.14.0
-    # via -r requirements.txt
+    # via
+    #   -r requirements.txt
+    #   funasr
+    #   librosa
+soxr==1.1.0
+    # via librosa
 sqlglot==30.33.0
     # via -r requirements.txt
 sse-starlette==3.4.11
@@ -536,11 +675,16 @@ tenacity==9.1.4
     # via
     #   google-genai
     #   langchain-core
+tensorboardx==2.6.5
+    # via funasr
 threadpoolctl==3.7.0
-    # via scikit-learn
+    # via
+    #   funasr
+    #   scikit-learn
 tiktoken==0.14.0
     # via
     #   -r requirements.txt
+    #   funasr
     #   langchain-openai
 tokenizers==0.23.2
     # via
@@ -549,17 +693,22 @@ tokenizers==0.23.2
     #   transformers
 torch==2.14.0
     # via sentence-transformers
+torch-complex==0.4.4
+    # via funasr
 tqdm==4.70.1
     # via
+    #   funasr
     #   huggingface-hub
     #   modelscope
     #   modelscope-hub
     #   rapidocr-onnxruntime
     #   sentence-transformers
     #   transformers
+    #   umap-learn
 transformers==5.17.0
     # via
     #   -r requirements.txt
+    #   funasr
     #   sentence-transformers
 triton==3.8.0 ; python_full_version < '3.15' and sys_platform == 'linux'
     # via torch
@@ -609,6 +758,8 @@ tzlocal==5.4.4
     # via apscheduler
 uiautomation==2.0.29
     # via -r requirements.txt
+umap-learn==0.6.0
+    # via funasr
 urllib3==2.8.0
     # via
     #   modelscope
@@ -626,10 +777,13 @@ uvloop==0.22.1 ; platform_python_implementation != 'PyPy' and sys_platform != 'c
     # via uvicorn
 watchfiles==1.2.0
     # via uvicorn
+wcwidth==0.9.5
+    # via prettytable
 websockets==15.0.1
     # via
     #   -r requirements.txt
     #   dingtalk-stream
+    #   funasr
     #   google-genai
     #   langsmith
     #   lark-oapi
