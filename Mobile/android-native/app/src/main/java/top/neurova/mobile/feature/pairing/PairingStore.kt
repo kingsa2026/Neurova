@@ -29,6 +29,13 @@ class PairingStore(
     private val json = pairingJson
     var paired by mutableStateOf(false)
         private set
+
+    /**
+     * 深链待消费 ref（2026-11-23 计划卡 A8）：MainActivity 从 neurova://pair?ref=
+     * （onCreate 冷启动 / onNewIntent 重扫）注入；配对页消费后置空。未登录时保留，
+     * 登录后进配对页仍会自动提交。
+     */
+    var pendingDeepLinkRef by mutableStateOf<String?>(null)
     var wsUrl by mutableStateOf("")
         private set
     var ticket by mutableStateOf("")

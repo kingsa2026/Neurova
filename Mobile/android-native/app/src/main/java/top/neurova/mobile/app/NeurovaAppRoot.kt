@@ -89,6 +89,13 @@ fun NeurovaAppRoot() {
         }
     }
 
+    // 深链 neurova://pair（A8）：登录后深链一律进配对（含已配对设备的重配对）；
+    // 未登录保持原门控，ref 由 pendingDeepLinkRef 保留到登录后的配对页消费。
+    val deepLinkRef = runtime.pairing.pendingDeepLinkRef
+    LaunchedEffect(deepLinkRef) {
+        if (deepLinkRef != null && runtime.auth.user != null) gate = Gate.PAIRING
+    }
+
     when (gate) {
         Gate.BOOTSTRAP -> BootstrapSplash()
         Gate.LOGIN -> LoginScreen(
@@ -100,6 +107,8 @@ fun NeurovaAppRoot() {
         )
         Gate.PAIRING -> PairingScreen(
             onPaired = { gate = Gate.MAIN },
+            autoRef = deepLinkRef,
+            onAutoRefConsumed = { runtime.pairing.pendingDeepLinkRef = null },
         )
         Gate.MAIN -> MainTabsShell()
     }

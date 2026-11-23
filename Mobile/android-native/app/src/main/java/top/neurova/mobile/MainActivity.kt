@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat
 import top.neurova.mobile.app.NeurovaAppRoot
 import top.neurova.mobile.core.AppRuntime
 import top.neurova.mobile.core.capability.AppStateTracker
+import top.neurova.mobile.core.protocol.PairingRefParser
 import top.neurova.mobile.core.service.DeviceBridgeService
 import top.neurova.mobile.ui.components.LocalAppRuntime
 import top.neurova.mobile.ui.theme.NeurovaTheme
@@ -28,6 +29,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         // 设备桥（2026-11-23 计划卡 A1）：前台服务承载应用级 WS 常连
         ContextCompat.startForegroundService(this, Intent(this, DeviceBridgeService::class.java))
+        handlePairingDeepLink(intent)
         setContent {
             CompositionLocalProvider(LocalAppRuntime provides runtime) {
                 NeurovaTheme {
@@ -35,6 +37,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** singleTask：重扫/授权深链落到既有实例（A8），不叠新栈 */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handlePairingDeepLink(intent)
+    }
+
+    /** 深链 neurova://pair?ref=…（A8）：解析出 ref 注入配对仓，由配对页消费 */
+    private fun handlePairingDeepLink(intent: Intent?) {
+        val uri = intent?.dataString ?: return
+        PairingRefParser.parseRef(uri)?.let { runtime.pairing.pendingDeepLinkRef = it }
     }
 
     override fun onResume() {

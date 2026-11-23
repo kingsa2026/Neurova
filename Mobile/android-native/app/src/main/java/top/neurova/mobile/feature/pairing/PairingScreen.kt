@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,7 +56,12 @@ import top.neurova.mobile.ui.theme.LocalNeurovaColors
  * 二维码不可用时手动输入配对码/ref 兜底。
  */
 @Composable
-fun PairingScreen(onPaired: () -> Unit) {
+fun PairingScreen(
+    onPaired: () -> Unit,
+    /** 深链注入的待配对 ref（A8）：非空即自动提交（扫码授权/重配对免手输） */
+    autoRef: String? = null,
+    onAutoRefConsumed: () -> Unit = {},
+) {
     val palette = LocalNeurovaColors.current
     val runtime = LocalAppRuntime.current
     val scope = rememberCoroutineScope()
@@ -76,6 +82,14 @@ fun PairingScreen(onPaired: () -> Unit) {
                     }
                 }
             working = false
+        }
+    }
+
+    // 深链 ref 自动提交（A8）：先消费再提交，避免重组重复触发
+    LaunchedEffect(autoRef) {
+        if (autoRef != null) {
+            onAutoRefConsumed()
+            pairWithInput(autoRef)
         }
     }
 
