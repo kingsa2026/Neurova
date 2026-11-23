@@ -1794,6 +1794,29 @@ async def get_device_capabilities(
     }
 
 
+@router.get("/pairing/devices/{pairing_id}/notification-events")
+async def get_device_notification_events(
+    pairing_id: str,
+    limit: int = 50,
+    user_id: str = Depends(_get_current_user_id),
+):
+    """读设备上报的通知事件（A5 推送路径读面；JWT + 属主，他人 404）。"""
+    registry = getDeviceRegistry()
+    device = registry.get(pairing_id)
+    if (not device or device.get("user_id") != user_id
+            or device.get("state") == "revoked"):
+        raise HTTPException(status_code=404, detail="Pairing not found")
+    from neurova.device_bridge import notification_ingest
+
+    return {
+        "code": 0,
+        "data": {
+            "pairing_id": pairing_id,
+            "events": notification_ingest.readDeviceEvents(pairing_id, limit=limit),
+        },
+    }
+
+
 @router.delete("/pairing/{pairing_id}")
 async def revoke_pairing(
     pairing_id: str,
@@ -2155,6 +2178,14 @@ async def mobile_websocket(websocket: WebSocket):
                 from neurova.device_bridge.router import getDeviceBridgeRouter
 
                 getDeviceBridgeRouter().onResult(pairing_id, message)
+                continue
+            if msg_type == protocol.FRAME_DEVICE_EVENT:
+                # 通知/事件上报（A5 推送路径）：按设备落 JSONL 账本（旁路数据面，
+                # 失败只告警不影响 WS 主循环）；记忆沉淀（D6）另案。
+                from neurova.device_bridge import notification_ingest
+
+                notification_ingest.recordDeviceEvents(
+                    pairing_id, user_id, message.get("items"))
                 continue
 
             # 分发消息到处理函数

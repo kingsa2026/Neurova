@@ -230,3 +230,44 @@ class TestCapabilitiesRest:
         resp = wsClient.get(
             "/api/v1/mobile/pairing/devices/pair-device/capabilities")
         assert resp.status_code in (401, 403)
+
+
+class TestNotificationEventIngest:
+    """A5 推送路径：手机 device:event → JSONL 账本 → 属主 REST 读面。"""
+
+    def test_notification_events_roundtrip(self, wsClient):
+        from neurova.api.auth import create_access_token
+
+        token = create_access_token({"sub": OWNER})
+        with wsClient.websocket_connect(f"/api/v1/mobile/ws?code={PAIRING_CODE}") as ws:
+            _hello(ws)
+            ws.send_json({
+                "type": "device:event", "event_kind": "notification_batch",
+                "items": [{"package": "com.example", "title": "验证码",
+                           "text": "123456", "posted_at": 1}],
+            })
+            # 触发一次 pong 往返确保 device:event 已被处理（同连接顺序语义）
+            ws.send_json({"type": "ping"})
+            while True:
+                frame = json.loads(ws.receive_text())
+                if frame.get("type") == "pong":
+                    break
+        resp = wsClient.get(
+            "/api/v1/mobile/pairing/devices/pair-device/notification-events?limit=10",
+            headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+        events = resp.json()["data"]["events"]
+        assert len(events) == 1
+        assert events[0]["item"]["title"] == "验证码"
+        assert events[0]["pairing_id"] == "pair-device"
+
+    def test_notification_events_other_user_404(self, wsClient):
+        from neurova.api.auth import create_access_token
+
+        token = create_access_token({"sub": "u-intruder"})
+        with wsClient.websocket_connect(f"/api/v1/mobile/ws?code={PAIRING_CODE}") as ws:
+            _hello(ws)
+        resp = wsClient.get(
+            "/api/v1/mobile/pairing/devices/pair-device/notification-events",
+            headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 404
