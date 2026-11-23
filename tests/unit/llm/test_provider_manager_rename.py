@@ -12,17 +12,14 @@ from neurova.llm.provider_manager import LLMProviderManager, ProviderConfig
 
 
 @pytest.fixture
-def manager():
+def manager(tmp_path):
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(LLMProviderManager, "__init__", lambda self, **kw: None)
         mgr = LLMProviderManager.__new__(LLMProviderManager)
         mgr._providers = {}
         mgr._default_provider_id = None
         mgr._config_lock = __import__("threading").RLock()
-        import tempfile
-        from pathlib import Path
-
-        mgr._config_path = Path(tempfile.mktemp(suffix=".json"))
+        mgr._config_path = tmp_path / "provider_config.json"
         yield mgr
 
 

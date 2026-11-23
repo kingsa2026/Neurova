@@ -4,7 +4,7 @@
 - publicKeyFingerprint：OpenSSH 风格 SHA256 指纹，同一 key 稳定复算
 - UnknownHostKeyPolicy：未确认→HostKeyConfirmationNeeded（携带指纹、不写库）；
   已确认且匹配→放行；指纹变化→HostKeyMismatchError（fail-closed）+ 审计 HIGH
-- 严格模式默认开；NEUROVA_SSH_STRICT_HOSTKEY=off 回退 AutoAddPolicy（旧行为兼容）
+- 严格模式一律生效：AutoAddPolicy 兼容旁路已退役（CodeQL #614 处置）
 """
 
 import pytest
@@ -83,35 +83,25 @@ class TestUnknownHostKeyPolicy:
             policy.missing_host_key(None, "h1", server_key)
 
 
-class TestStrictModeSwitch:
-    def test_default_is_strict(self, monkeypatch):
-        monkeypatch.delenv("NEUROVA_SSH_STRICT_HOSTKEY", raising=False)
-        assert ssh_runner.strictHostKeyEnabled() is True
-
-    def test_off_values_fall_back_to_legacy(self, monkeypatch):
-        for raw in ("0", "false", "off", "no", " OFF "):
-            monkeypatch.setenv("NEUROVA_SSH_STRICT_HOSTKEY", raw)
-            assert ssh_runner.strictHostKeyEnabled() is False, raw
-
-    def test_build_client_strict_installs_policy(self, store):
+class TestStrictModeAlways:
+    def test_build_client_always_installs_policy(self, store):
         client, policy = ssh_runner._buildClient(
-            strict=True, store=store, agent_id="a", host="h", port=22)
+            store=store, agent_id="a", host="h", port=22)
         assert isinstance(policy, UnknownHostKeyPolicy)
-        assert client._policy is policy, "严格模式必须装 UnknownHostKeyPolicy"
+        assert client._policy is policy, "必须装 UnknownHostKeyPolicy（无旁路）"
 
-    def test_build_client_non_strict_keeps_autoadd(self):
-        import paramiko
-
+    def test_build_client_without_store_still_fail_closed(self):
+        """store 为 None（极端降级）也不回落 AutoAddPolicy——策略自身 fail-closed。"""
         client, policy = ssh_runner._buildClient(
-            strict=False, store=None, agent_id="a", host="h", port=22)
-        assert policy is None
-        assert isinstance(client._policy, paramiko.AutoAddPolicy)
+            store=None, agent_id="a", host="h", port=22)
+        assert isinstance(policy, UnknownHostKeyPolicy)
+        assert client._policy is policy
 
     def test_build_client_factory_bypasses_policy(self, store):
         sentinel = object()
 
         client, policy = ssh_runner._buildClient(
-            strict=True, store=store, agent_id="a", host="h", port=22,
+            store=store, agent_id="a", host="h", port=22,
             client_factory=lambda: sentinel)
         assert client is sentinel and policy is None
 

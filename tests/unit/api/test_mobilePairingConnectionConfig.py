@@ -204,6 +204,14 @@ class TestPreflight:
         assert body["ok"] is False
         assert body["error"], "连不上必须带原因"
 
+    def test_cloud_metadata_address_refused(self, api):
+        """SSRF 防护（CodeQL py/full-ssrf）：预检不允许指向云元数据地址。"""
+        c = api["client"]
+        res = c.post(f"{PREFIX}/pairing/connection-config/preflight",
+                     json={"url": "http://169.254.169.254/latest/meta-data/"})
+        assert res.status_code == 422, res.text
+        assert "元数据" in res.json().get("detail", "")
+
     def test_reachable_url_reports_ok_with_latency(self, api):
         server = ThreadingHTTPServer(("127.0.0.1", 0), _HealthHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

@@ -1297,6 +1297,15 @@ async def put_connection_config(body: ConnectionConfigRequest,
     return await applyConnectionConfig()
 
 
+#: SSRF 防护（CodeQL py/full-ssrf）：这些主机只服务于云元数据，绝不是合法的
+#: 配对地址目标（预检功能 = 探测手机可达的配对地址）。
+_METADATA_HOSTS = frozenset({
+    "169.254.169.254",
+    "metadata.google.internal",
+    "metadata.goog",
+})
+
+
 @router.post("/pairing/connection-config/preflight")
 async def preflight_connection_config(body: PreflightRequest,
                                       request: Request,
@@ -1321,6 +1330,10 @@ async def preflight_connection_config(body: PreflightRequest,
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https") or not parts.netloc:
         raise HTTPException(status_code=422, detail="url 必须是 http/https 的完整地址")
+    # SSRF 防护（CodeQL py/full-ssrf）：预检的功能是探测「手机可达的配对地址」，
+    # 云元数据地址永远不是合法目标—— admin 门 + 本守卫双保险。
+    if (parts.hostname or "").lower() in _METADATA_HOSTS:
+        raise HTTPException(status_code=422, detail="预检不允许指向云元数据地址（SSRF 防护）")
     target = url.rstrip("/") + probePath
     started = time.monotonic()
     try:

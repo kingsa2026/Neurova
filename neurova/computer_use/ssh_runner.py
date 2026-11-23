@@ -4,12 +4,11 @@ paramiko 惰性导入（未装不影响模块 import；client_factory 注入便�
 key 与 password 两种认证都支持：优先 key_text（粘贴私钥），其次 key_path，再次 password，
 都无则走系统 agent/默认密钥。
 
-安全（U1，弃 AutoAddPolicy 的 TOFU）：host key 默认严格校验（NEUROVA_SSH_STRICT_HOSTKEY，
-默认开）——首连由 UnknownHostKeyPolicy 抛 HostKeyConfirmationNeeded（携带公钥 SHA256
+安全（U1，弃 AutoAddPolicy 的 TOFU）：host key 一律严格校验（无旁路）——首连由
+UnknownHostKeyPolicy 抛 HostKeyConfirmationNeeded（携带公钥 SHA256
 指纹），上层弹主机确认卡征求用户；用户确认后经 SshHostStore 落库
 （data/<agent_id>/ssh_known_hosts.json）并重连。已确认主机：指纹一致放行；指纹变化抛
-HostKeyMismatchError（fail-closed + 审计 HIGH）。环境变量置 0/off/false/no 回退
-AutoAddPolicy 旧行为（兼容开关，不影响默认判据）。
+HostKeyMismatchError（fail-closed + 审计 HIGH）。
 
 失败相位（U3）：连接失败/认证失败/超时且零输出 → RemoteNotExecutedError
 （executed=False、retryable=True、phase=connect|auth|timeout）；已获部分输出后中断 →
@@ -26,18 +25,6 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
-
-#: 严格主机密钥校验的环境开关（默认开；0/off/false/no = 旧行为兼容）
-STRICT_HOSTKEY_ENV = "NEUROVA_SSH_STRICT_HOSTKEY"
-
-_OFF_VALUES = {"0", "false", "off", "no"}
-
-
-def strictHostKeyEnabled() -> bool:
-    """严格主机密钥校验是否开启（默认开；显式关闭值才回退旧行为）。"""
-    raw = (os.environ.get(STRICT_HOSTKEY_ENV) or "").strip().lower()
-    return raw not in _OFF_VALUES
-
 
 class HostKeyConfirmationNeeded(Exception):
     """首连主机的公钥尚未经用户确认（fail-closed 的控制流中断，非故障）。
@@ -157,24 +144,23 @@ class UnknownHostKeyPolicy:
             logger.error("SSH 主机公钥变化审计记录失败: %s", e)
 
 
-def _buildClient(*, strict: bool, store: Any, agent_id: str, host: str, port: int,
+def _buildClient(*, store: Any, agent_id: str, host: str, port: int,
                  client_factory: Optional[Callable[[], Any]] = None) -> Tuple[Any, Any]:
     """建 SSH 客户端并装配主机密钥策略。返回 (client, policy)。
 
-    client_factory 注入（测试/部署桩）时跳过策略装配；strict=False 走
-    AutoAddPolicy 旧行为（显式兼容开关，默认不会走到）。
+    client_factory 注入（测试/部署桩）时跳过策略装配。主机密钥一律走
+    UnknownHostKeyPolicy（TOFU + 指纹确认 + 变更 fail-closed）——CodeQL
+    py/paramiko-missing-host-key-validation：AutoAddPolicy 的兼容旁路已退役，
+    不再存在「接受任意主机密钥」的代码路径。
     """
     if client_factory is not None:
         return client_factory(), None
     import paramiko
 
     client = paramiko.SSHClient()
-    if strict:
-        policy = UnknownHostKeyPolicy(store, agent_id, host, port)
-        client.set_missing_host_key_policy(policy)
-        return client, policy
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    return client, None
+    policy = UnknownHostKeyPolicy(store, agent_id, host, port)
+    client.set_missing_host_key_policy(policy)
+    return client, policy
 
 
 def _classifyConnectFailure(e: Exception, user: Optional[str], host: str) -> RemoteNotExecutedError:
@@ -222,27 +208,25 @@ def run_ssh_command(
     认证优先级：key_text（粘贴私钥）> key_path（服务端私钥文件）> password > 系统 agent。
     client_factory 注入 paramiko-like 客户端（测试用）；默认惰性建 paramiko.SSHClient。
 
-    主机密钥（U1）：默认严格校验。显式传 host_key_store 可强制指定信任锚（优先于
-    环境开关）；未传时严格模式经 get_ssh_host_store() 单例落库。连接/执行失败抛
-    RemoteNotExecutedError（相位化），主机密钥两类异常原样上抛给上层弹卡/拒连。
+    主机密钥（U1）：一律严格校验（AutoAddPolicy 兼容旁路已退役）。显式传
+    host_key_store 可强制指定信任锚（优先于单例）；未传时经 get_ssh_host_store()
+    单例落库。连接/执行失败抛 RemoteNotExecutedError（相位化），主机密钥两类
+    异常原样上抛给上层弹卡/拒连。
     """
     if not host:
         return {"returncode": -1, "stdout": "", "stderr": "缺少 host"}
     if not command:
         return {"returncode": -1, "stdout": "", "stderr": "缺少 command"}
 
-    strict = strictHostKeyEnabled() or host_key_store is not None
     if host_key_store is not None:
         store = host_key_store
-    elif strict:
+    else:
         from neurova.security.ssh_host_store import get_ssh_host_store
 
         store = get_ssh_host_store()
-    else:
-        store = None
 
     try:
-        client, _policy = _buildClient(strict=strict, store=store, agent_id=agent_id,
+        client, _policy = _buildClient(store=store, agent_id=agent_id,
                                        host=host, port=port, client_factory=client_factory)
     except Exception as e:  # noqa: BLE001
         return {"returncode": -1, "stdout": "", "stderr": f"SSH 客户端构建失败: {e}"}

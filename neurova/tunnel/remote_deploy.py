@@ -90,17 +90,15 @@ class _SshSession:
         if _sshClientFactory is not None:
             self._client = _sshClientFactory()
             return
-        from neurova.computer_use.ssh_runner import _buildClient, strictHostKeyEnabled
+        from neurova.computer_use.ssh_runner import _buildClient
         from neurova.security.ssh_host_store import get_ssh_host_store
 
         # U1：部署目标也是主机——与 computer_ssh_exec 共用同一 known_hosts 信任锚
-        # （NEUROVA_SSH_STRICT_HOSTKEY 同源开关；部署是 admin 全局操作，记 default 桶）。
+        # （部署是 admin 全局操作，记 default 桶）。
         # 首连未确认 → HostKeyConfirmationNeeded 上抛（任务失败并提示指纹）；
         # 指纹变化 → HostKeyMismatchError fail-closed（审计 HIGH 已在策略内落）。
-        strict = strictHostKeyEnabled()
-        store = get_ssh_host_store() if strict else None
         self._client, self._hostKeyPolicy = _buildClient(
-            strict=strict, store=store, agent_id="", host=self._host, port=self._port)
+            store=get_ssh_host_store(), agent_id="", host=self._host, port=self._port)
         kwargs: Dict[str, Any] = {"hostname": self._host, "port": self._port,
                                   "timeout": 30.0, "username": self._username}
         if self._key_text:
