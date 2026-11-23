@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -150,6 +150,45 @@ async def submitEnterpriseSource(
             "schema 目录自动刷新失败（source=%s）：%s", sourceId, exc)
     config = ingestor.loadConfig(tenant, sourceId) or {}
     return {"code": 0, "message": "success", "data": _view(sourceId, config, adapters)}
+
+
+class InitialLoadRequest(BaseModel):
+    """初始批量装载请求（P2-4）：dry_run 缺省 true（先预检后装载）。"""
+
+    dry_run: bool = Field(default=True)
+    batch_size: int = Field(default=500, ge=1, le=5000)
+    fetch_limit: int = Field(default=500, ge=1, le=5000)
+    max_batches: int = Field(default=20, ge=1, le=200)
+
+
+@router.post("/enterprise/sources/{source_id}/initial-load")
+async def triggerEnterpriseInitialLoad(
+    source_id: str,
+    body: InitialLoadRequest = Body(default=InitialLoadRequest()),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """初始批量装载（P2-4，仅管理员）：企业源拉取通道接 U3 bulk_load 契约
+    ——载入前全量预检＋整批原子（任一行违规零落盘）＋进度回调＋游标截断
+    续传。与 /ingest 的差异：/ingest 是持续同步的"跑一轮"（坏行只退自己）；
+    initial-load 是"首次全量装进来"（要么全进、要么零落盘）。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403,
+                            detail="企业源初始装载是治理动作，仅管理员可执行")
+    sourceId = str(source_id or "").strip()
+    if not sourceId:
+        raise HTTPException(status_code=400, detail="source_id 不能为空")
+    ingestor, adapters, _store = _parts()
+    tenant = _tenantOf(current_user)
+    try:
+        result = await ingestor.initialBulkLoad(
+            tenant, sourceId, dryRun=body.dry_run, batchSize=body.batch_size,
+            fetchLimit=body.fetch_limit, maxBatches=body.max_batches)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    config = ingestor.loadConfig(tenant, sourceId) or {}
+    return {"code": 0, "message": "success",
+            "data": {"result": result,
+                     "source": _view(sourceId, config, adapters)}}
 
 
 @router.post("/enterprise/sources/{source_id}/ingest")

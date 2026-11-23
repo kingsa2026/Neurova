@@ -298,16 +298,37 @@ class EnterpriseIngestor:
           内容键按租户分区各自幂等。
         """
         tenantId = str(tenantOverride or descriptor.get("tenantId") or "default")
+        requests, skipped = self._mapRequests(descriptor, rows, tenantId,
+                                              cursorToken, originTenant)
+        gate = self._gateFactory(self._store)
+        admitted = 0
+        rejections: List[Dict[str, Any]] = []
+        for finding in gate.admitBatch(requests):
+            if finding.get("ok"):
+                admitted += 1
+            else:
+                rejections.append({"index": finding.get("index"),
+                                   "finding": finding.get("finding")})
+        return {"admitted": admitted, "rejected": len(rejections),
+                "rejections": rejections, "skipped": skipped, "cursor": cursorToken}
+
+    def _mapRequests(self, descriptor: Dict[str, Any], rows: List[Dict[str, Any]],
+                     tenantId: str, cursorToken: str,
+                     originTenant: str = ""):
+        """行集 → AdmissionRequest 列表（ingestBatch 与 initialBulkLoad 共用的
+        唯一映射路径，P2-4 收口——不出现第二份"行→断言"映射）。
+
+        missing=skip（P2-1）：object 派生值为空的行整行跳过并如实留名，
+        不拖累同批其他行。返回 (requests, skipped)。
+        """
         sourceId = str(descriptor.get("sourceId") or "")
         from neurova.knowledge.foundation.admission import AdmissionRequest
 
-        gate = self._gateFactory(self._store)
         requests: List[AdmissionRequest] = []
-        # missing=skip（P2-1，2026-11-19）：object 派生值为空的行整行跳过并如实
-        # 留名，不拖累同批其他行（admitBatch 语义不变）。
         skipped: List[Dict[str, Any]] = []
         for index, row in enumerate(rows):
-            mapped = applyMapping(descriptor, row, self._registry, tenantId=tenantId)
+            mapped = applyMapping(descriptor, row, self._registry,
+                                  tenantId=tenantId)
             if mapped is None:
                 skipped.append({"index": index, "reason": "missing_object"})
                 continue
@@ -339,17 +360,124 @@ class EnterpriseIngestor:
                 activityBasis="enterprise.ingestBatch（source=%s cursor=%s）"
                               % (sourceId, cursorToken),
             ))
+        return requests, skipped
 
-        admitted = 0
-        rejections: List[Dict[str, Any]] = []
-        for finding in gate.admitBatch(requests):
-            if finding.get("ok"):
-                admitted += 1
-            else:
-                rejections.append({"index": finding.get("index"),
-                                   "finding": finding.get("finding")})
-        return {"admitted": admitted, "rejected": len(rejections),
-                "rejections": rejections, "skipped": skipped, "cursor": cursorToken}
+    async def initialBulkLoad(self, tenantId: str, sourceId: str, *,
+                              dryRun: bool = True, batchSize: int = 500,
+                              fetchLimit: Optional[int] = None,
+                              maxBatches: Optional[int] = None,
+                              onProgress: Optional[Any] = None) -> Dict[str, Any]:
+        """初始批量装载（P2-4）：企业源拉取通道接 U3 bulk_load 契约。
+
+        与持续同步（runOnceAsync：逐批 admitBatch、坏行只退自己）刻意不同：
+        初始装载要**要么全进、要么零落盘**（半装载数据源比没有更难排查）——
+        载入前全量预检＋任一行违规整批零落盘＋进度回调＋补偿撤销，全由
+        bulk_load 承担，本方法只做拉取、映射与游标记账。
+
+        游标语义：成功（含截断）才推进到已装载末批——max_batches 截断后
+        再次调用从游标续传余量；失败停在原处，下轮重拉（咽喉内容键幂等，
+        重放不重复）。dry-run 只预检，零写入、游标不动。
+        """
+        from dataclasses import fields as dcFields
+
+        from neurova.knowledge.foundation.admission import AdmissionRequest
+        from neurova.knowledge.ontology.bulk_load import bulkLoadFacts
+
+        tenant = str(tenantId or "default")
+        source = str(sourceId or "")
+        startedAt = self._now()
+        lock = _syncLockFor(tenant, source)
+        if not lock.acquire(blocking=False):
+            self._recordHistorySafe(tenant, source, "initial_bulk", "skipped",
+                                    startedAt, reason="already_running")
+            return {"skipped": True, "reason": "already_running"}
+        try:
+            config = self.loadConfig(tenant, source)
+            if config is None:
+                self._recordHistorySafe(tenant, source, "initial_bulk",
+                                        "skipped", startedAt,
+                                        reason="source 配置不存在")
+                return {"skipped": True, "reason": "source 配置不存在"}
+            if not config.get("enabled"):
+                self._recordHistorySafe(tenant, source, "initial_bulk",
+                                        "skipped", startedAt,
+                                        reason="source 未启用（默认关）")
+                return {"skipped": True, "reason": "source 未启用（默认关）"}
+            cursorBefore = str(config.get("cursor") or "")
+            descriptor = dict(config["descriptor"])
+            descriptor["tenantId"] = tenant
+            descriptor["sourceId"] = source
+            registry = getSourceRegistry()
+            adapter = registry.get(source)
+            if adapter is None:
+                adapter = buildAdapter(descriptor, source, tenant)
+                registry.register(source,
+                                  str(descriptor.get("sourceType") or ""),
+                                  adapter)
+            cursor = SourceCursor(cursorBefore)
+            batches = 0
+            truncated = False
+            skipped: List[Dict[str, Any]] = []
+            requestRows: List[Dict[str, Any]] = []
+            fieldNames = [f.name for f in dcFields(AdmissionRequest)]
+            fetchLimit = int(fetchLimit or _FETCH_BATCH_LIMIT)
+            maxBatches = int(maxBatches or _RUN_ONCE_MAX_BATCHES)
+            try:
+                while batches < maxBatches:
+                    change = await adapter.fetchBatch(cursor or None, fetchLimit)
+                    batches += 1
+                    requests, batchSkipped = self._mapRequests(
+                        descriptor, change.rows, tenant, str(cursor.token or ""))
+                    skipped.extend(batchSkipped)
+                    for request in requests:
+                        requestRows.append({name: getattr(request, name)
+                                            for name in fieldNames})
+                    if (change.nextCursor is not None
+                            and not change.nextCursor.isEmpty()):
+                        cursor = change.nextCursor
+                    if not change.hasMore:
+                        truncated = False
+                        break
+                else:
+                    truncated = True
+
+                def _progress(done: int, total: int) -> None:
+                    if onProgress is not None:
+                        onProgress(done, total)
+
+                receipt = bulkLoadFacts(self._store, requestRows,
+                                        batchSize=batchSize,
+                                        onProgress=_progress, dryRun=dryRun)
+                if receipt.get("failed"):
+                    # 整批零落盘：游标不推进（本轮拉取作废，下轮重拉重放）
+                    self._recordHistorySafe(
+                        tenant, source, "initial_bulk", "error", startedAt,
+                        reason=str(receipt["failed"][:2]), batches=batches,
+                        admitted=0, rowsSkipped=len(skipped),
+                        truncated=truncated, cursorBefore=cursorBefore,
+                        cursorAfter=cursorBefore)
+                    receipt.update({"batches": batches, "truncated": truncated,
+                                    "cursor": cursorBefore, "skipped": skipped})
+                    return receipt
+                if not dryRun:
+                    self.saveCursor(tenant, source, str(cursor.token or ""))
+                self._recordHistorySafe(
+                    tenant, source, "initial_bulk", "ok", startedAt,
+                    batches=batches, admitted=receipt.get("admitted", 0),
+                    rowsSkipped=len(skipped), truncated=truncated,
+                    cursorBefore=cursorBefore, cursorAfter=str(cursor.token or ""))
+                receipt.update({"batches": batches, "truncated": truncated,
+                                "cursor": str(cursor.token or ""),
+                                "skipped": skipped})
+                return receipt
+            except Exception as exc:
+                self._recordHistorySafe(
+                    tenant, source, "initial_bulk", "error", startedAt,
+                    reason=str(exc), batches=batches, truncated=truncated,
+                    cursorBefore=cursorBefore, cursorAfter=str(cursor.token or ""))
+                raise
+        finally:
+            lock.release()
 
     def saveConfig(self, tenantId: str, sourceId: str, descriptor: Dict[str, Any],
                    enabled: bool = False) -> None:
