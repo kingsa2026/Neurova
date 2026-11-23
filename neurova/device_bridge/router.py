@@ -51,6 +51,7 @@ BACKGROUND_UNSAFE_ACTIONS = frozenset({
 #: 拒绝码 → 用户可读说明（诚实失败面； refusal_code 本身是封闭契约，见 action_result）
 _REFUSAL_MESSAGES = {
     "device_offline": "当前没有在线设备可执行该动作（设备未连接或已断开）",
+    "device_offline_queued": "设备当前离线，命令已入队并已发唤醒信令；设备回连后将自动补执行",
     "device_timeout": "设备在窗口内未回执（可能已离线或动作未完成）",
     "device_bridge_disabled": "设备桥总闸未开启（NEUROVA_DEVICE_BRIDGE_ENABLED）",
     "unsupported_method": "在线设备未宣称该能力（运行前能力过滤）",
@@ -91,11 +92,9 @@ class DeviceBridgeRouter:
 
         connections = self._registryOrGlobal().onlineForUser(user_id)
         if not connections:
-            return attach(
-                {"success": False, "action": action,
-                 "error": {"code": DEVICE_ERROR_OFFLINE,
-                           "message": _REFUSAL_MESSAGES["device_offline"]}},
-                actionRefused("device", "device_offline"))
+            # B7 离线唤醒闭环：有在册设备 → 命令入账待执行 + 唤醒信令；
+            # 连在册设备都没有 → 诚实 device_offline。
+            return await self._queueOffline(user_id, action, payload, intent)
 
         capable = [c for c in connections if c.claims(action)]
         if not capable:
@@ -166,17 +165,80 @@ class DeviceBridgeRouter:
             with self._lock:
                 self._pending.pop(key, None)
 
+    # -- 离线入队（B7）-------------------------------------------------------
+
+    async def _queueOffline(self, user_id: str, action: str,
+                            payload: Optional[Dict[str, Any]], intent: str) -> Dict[str, Any]:
+        """设备离线但有在册设备：命令入账待执行 + 唤醒信令（B7）。
+
+        execute 帧直接落入该设备的 WS 账本（当前 epoch），设备回连后
+        sync_resume 按 seq 补拉到该帧 → 端上按 command_id 去重执行 → 回执在
+        :meth:`onResult` 里对入队命令收敛账本。agent 侧立即拿到
+        ``device_offline_queued``（诚实未执行，勿重复下发）。
+        """
+        from neurova.api.endpoints.mobile_pairing import listDevicesForUser
+        from neurova.api.mobile_ws_ledger import getMobileWsLedger
+        from neurova.computer_use.action_result import refused as actionRefused
+        from neurova.computer_use.action_result import attach
+
+        devices = listDevicesForUser(user_id)
+        if not devices:
+            return attach(
+                {"success": False, "action": action,
+                 "error": {"code": DEVICE_ERROR_OFFLINE,
+                           "message": _REFUSAL_MESSAGES["device_offline"]}},
+                actionRefused("device", "device_offline"))
+        target = max(devices, key=lambda d: float(d.get("last_active")
+                                                  or d.get("paired_at") or 0))
+        pairingId = str(target.get("pairing_id") or "")
+        commandId = f"dev-{uuid.uuid4().hex}"
+        frame = {
+            "type": FRAME_DEVICE_EXECUTE,
+            "command_id": commandId,
+            "action": action,
+            "payload": dict(payload or {}),
+            "timeout_ms": defaultCommandTimeoutMs(),
+            "intent": intent,
+        }
+        ledger = getMobileWsLedger()
+        _, prior = ledger.beginCommand(commandId, pairingId, FRAME_DEVICE_EXECUTE, frame)
+        if prior is not None:
+            return self._normalize(prior, action, pairingId, replayed=True)
+        # 落账到设备最近一次连接的 epoch：重连 sync_resume 按 seq 补拉即可见；
+        # 另经 hello 重投递钩子兜底（runningCommands），双路都幂等。
+        ledger.appendEvent(pairingId, ledger.currentEpoch(pairingId), frame)
+        wake = _pushWakeSignal(user_id, commandId)
+        logger.info("device offline queue: command=%s pairing=%s wake_push=%s",
+                    commandId, pairingId, wake)
+        return attach(
+            {"success": False, "action": action, "pairing_id": pairingId,
+             "queued": True, "command_id": commandId,
+             "error": {"code": "device_offline_queued",
+                       "message": _REFUSAL_MESSAGES["device_offline_queued"]}},
+            actionRefused("device", "device_offline_queued"))
+
     # -- 回执入口（WS 循环调用） ---------------------------------------------
 
     def onResult(self, pairingId: str, frame: Dict[str, Any]) -> bool:
         """``device:result`` 到达：唤醒等待中的 execute。无在等命令返回 False
-        （迟到回执——命令多半已按超时收敛），不抛不重发。"""
+        （迟到回执——命令多半已按超时收敛），不抛不重发。
+
+        B7：离线入队命令的回执没有在等 future，但**必须收敛账本**——否则
+        入队命令永远 running。收敛范围由账本单源判定（仅 running 收敛）：
+        在线超时命令的迟到回执不改写既有终态，未知命令不凭空落账。
+        """
         commandId = str(frame.get("command_id") or "")
         if not commandId:
             return False
         with self._lock:
             future = self._pending.get((pairingId, commandId))
         if future is None or future.done():
+            try:
+                from neurova.api.mobile_ws_ledger import getMobileWsLedger
+
+                getMobileWsLedger().settleRunningCommand(commandId, pairingId, frame)
+            except Exception as exc:  # noqa: BLE001 - 收敛失败留痕，不上抛
+                logger.warning("queued command settle failed: %s", exc)
             return False
         future.set_result(frame)
         return True
@@ -214,6 +276,25 @@ class DeviceBridgeRouter:
             result["replayed"] = True
         return attach(result, actionRefused("device", "backend_error",
                                             escalation={"device_code": code}))
+
+
+def _pushWakeSignal(user_id: str, commandId: str) -> Dict[str, int]:
+    """B7 离线唤醒信令：复用 push_sender 既有扇出（信令-only，正文不过推送通道）。
+
+    信令类型 ``device_command_pending``：端上收到即拉起 WS 连接，经 sync_resume
+    补拉入队帧后执行。凭据未配置/无令牌时如实记 failed，不影响入队语义。
+    """
+    try:
+        from types import SimpleNamespace
+
+        from neurova.notifications.push_sender import pushNotificationToUser
+
+        return pushNotificationToUser(user_id, SimpleNamespace(
+            notification_id=commandId, notification_type="device_command_pending"))
+    except Exception as exc:  # noqa: BLE001 - 唤醒失败不阻断入队，留痕即可
+        logger.warning("device wake push failed (user=%s command=%s): %s",
+                       user_id, commandId, exc)
+        return {"sent": 0, "skipped": 0, "failed": 0}
 
 
 # 进程级单例（DCL + RLock，仓规）

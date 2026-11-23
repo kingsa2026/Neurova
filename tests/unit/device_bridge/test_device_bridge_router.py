@@ -42,6 +42,13 @@ class FakeRawWs:
 def _envAndSingletons(tmp_path, monkeypatch):
     monkeypatch.setenv("NEUROVA_MOBILE_WS_LEDGER_DB", str(tmp_path / "ws_ledger.db"))
     monkeypatch.setenv("NEUROVA_DEVICE_BRIDGE_ENABLED", "1")
+    # 设备持久注册表默认换成 tmp 空库（离线入队读它；不得摸真实 data 目录）
+    from neurova.api.endpoints import mobile_pairing
+    from neurova.core.mobile_device_store import MobileDeviceStore
+
+    emptyStore = MobileDeviceStore(str(tmp_path / "devices-empty.db"))
+    monkeypatch.setattr(mobile_pairing, "getDeviceRegistry", lambda: emptyStore)
+    monkeypatch.setattr(mobile_pairing, "_ws_connections", {})
     wsledger.resetMobileWsLedger()
     resetDeviceBridgeRegistry()
     resetDeviceBridgeRouter()
@@ -226,6 +233,90 @@ class TestCommandRoundtrip:
         assert router.onResult(PAIRING, {"type": "device:result",
                                          "command_id": raw.sent[0]["command_id"],
                                          "status": "ok", "data": {}}) is False
+
+
+class TestOfflineQueue:
+    """B7 离线唤醒闭环：设备离线时命令入账待执行 + 唤醒信令；
+    设备回连经 sync_resume 补拉执行，回执在无在等 future 时也收敛账本。"""
+
+    def _seedStore(self, monkeypatch, tmp_path, *, pairing: str = PAIRING, user: str = OWNER):
+        from neurova.api.endpoints import mobile_pairing
+        from neurova.core.mobile_device_store import MobileDeviceStore
+
+        store = MobileDeviceStore(str(tmp_path / "devices.db"))
+        store.register(pairingId=pairing, userId=user, deviceName="测试手机",
+                       deviceType="mobile", deviceSecret="secret")
+        monkeypatch.setattr(mobile_pairing, "getDeviceRegistry", lambda: store)
+        return store
+
+    def test_offline_with_registered_device_queues_and_pushes(self, ledger, monkeypatch, tmp_path):
+        self._seedStore(monkeypatch, tmp_path)
+        pushes: List[Any] = []
+        monkeypatch.setattr("neurova.device_bridge.router._pushWakeSignal",
+                            lambda uid, cid: pushes.append((uid, cid)) or {"sent": 0, "failed": 1})
+        router = DeviceBridgeRouter(DeviceConnectionRegistry())  # 空 = 无在线连接
+        result = asyncio.run(router.execute(
+            user_id=OWNER, action="open_url", payload={"url": "https://example.com"}))
+        assert result["success"] is False
+        assert result["error"]["code"] == "device_offline_queued"
+        assert result["queued"] is True and result["pairing_id"] == PAIRING
+        assert result["command_id"]
+        # 唤醒信令已发出（凭据未配置也如实记 failed，不阻断入队）
+        assert pushes == [(OWNER, result["command_id"])]
+        # 命令已入账且 execute 帧已落账（重连 sync_resume 可补拉）
+        _, prior = ledger.beginCommand(result["command_id"], PAIRING, "device:execute", {})
+        assert prior is not None and prior.get("code") == "command_already_running"
+        replayed = [row["frame"] for row in ledger.replaySince(PAIRING, 0, scope=None)
+                    if row["frame"].get("type") == "device:execute"]
+        assert len(replayed) == 1 and replayed[0]["action"] == "open_url"
+
+    def test_offline_without_registered_device_stays_refused(self, ledger):
+        """连在册设备都没有：诚实 device_offline，不入队也不发信令。"""
+        router = DeviceBridgeRouter(DeviceConnectionRegistry())
+        result = asyncio.run(router.execute(
+            user_id="u-nobody", action="open_url", payload={"url": "https://example.com"}))
+        assert result["error"]["code"] == "device_offline"
+        assert "queued" not in result
+
+    def test_reconnect_result_settles_queued_command(self, ledger, monkeypatch, tmp_path):
+        """设备回连补执行后的回执：无在等 future 也必须收敛账本（B7 闭环）。"""
+        self._seedStore(monkeypatch, tmp_path)
+        monkeypatch.setattr("neurova.device_bridge.router._pushWakeSignal",
+                            lambda uid, cid: {"sent": 0, "failed": 1})
+        router = DeviceBridgeRouter(DeviceConnectionRegistry())
+        result = asyncio.run(router.execute(
+            user_id=OWNER, action="device_env", payload={}))
+        commandId = result["command_id"]
+        # 设备回连补执行，回执到达（此时 execute 早已返回，无在等 future）
+        delivered = router.onResult(PAIRING, {"type": "device:result",
+                                              "command_id": commandId,
+                                              "status": "ok", "data": {"battery": 1.0}})
+        assert delivered is False  # 不再唤醒同步等待，但必须收敛
+        _, prior = ledger.beginCommand(commandId, PAIRING, "device:execute", {})
+        assert prior is not None and prior.get("replayed") is True
+        assert prior["type"] == "device:result" and prior["status"] == "ok"
+
+    def test_late_result_for_online_timeout_still_dropped(self, ledger):
+        """在线路径的超时命令：迟到回执不得改写已收敛的 device_timeout 终态。"""
+        registry = DeviceConnectionRegistry()
+        raw = _registerDevice(registry, ledger, capabilities=["open_url"])
+        router = DeviceBridgeRouter(registry)
+
+        async def scenario():
+            task = asyncio.create_task(router.execute(
+                user_id=OWNER, action="open_url",
+                payload={"url": "https://example.com"}, timeout_ms=50))
+            await asyncio.sleep(0.05)
+            return await task, raw.sent[0]
+
+        result, frame = asyncio.run(scenario())
+        assert result["error"]["code"] == "device_timeout"
+        assert router.onResult(PAIRING, {"type": "device:result",
+                                         "command_id": frame["command_id"],
+                                         "status": "ok", "data": {}}) is False
+        _, prior = ledger.beginCommand(frame["command_id"], PAIRING, "device:execute", {})
+        assert prior is not None and prior.get("replayed") is True
+        assert prior.get("error", {}).get("code") == "device_timeout"
 
 
 async def _drive(router: DeviceBridgeRouter, raw: FakeRawWs, *, action: str,

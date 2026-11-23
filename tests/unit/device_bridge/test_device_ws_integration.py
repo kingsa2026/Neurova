@@ -197,6 +197,43 @@ class TestDeviceCommandOverChat:
         assert len(executed) == 1  # 两轮合计只有一次真实设备命令
 
 
+class TestOfflineQueueRedelivery:
+    """B7 离线唤醒闭环（WS 集成）：设备离线 → 命令入账 + 唤醒信令；
+    设备回连（hello）后立即补发仍在 running 的命令，回执收敛账本。"""
+
+    def test_queued_command_redelivered_on_hello(self, wsClient, monkeypatch):
+        from neurova.device_bridge.router import getDeviceBridgeRouter
+
+        pushes: List[Any] = []
+        monkeypatch.setattr("neurova.device_bridge.router._pushWakeSignal",
+                            lambda uid, cid: pushes.append((uid, cid)) or
+                            {"sent": 0, "skipped": 0, "failed": 1})
+        router = getDeviceBridgeRouter()
+        result = asyncio.run(router.execute(user_id=OWNER, action="device_env", payload={}))
+        assert result["error"]["code"] == "device_offline_queued"
+        assert result["queued"] is True and pushes == [(OWNER, result["command_id"])]
+        commandId = result["command_id"]
+
+        with wsClient.websocket_connect(f"/api/v1/mobile/ws?code={PAIRING_CODE}") as ws:
+            ack = _hello(ws)
+            assert ack["type"] == "device:hello_ok"
+            # hello 后立即补发入队命令（新 seq、同 command_id）
+            frame = json.loads(ws.receive_text())
+            assert frame["type"] == "device:execute", frame
+            assert frame["command_id"] == commandId
+            assert frame["action"] == "device_env"
+            assert isinstance(frame.get("seq"), int) and frame["seq"] > 0
+            ws.send_json({"type": "device:result", "command_id": commandId,
+                          "status": "ok", "data": {"battery": 0.9}})
+        # 命令已收敛（同 id 重放得终态，不再是 running）
+        from neurova.api.mobile_ws_ledger import getMobileWsLedger
+
+        _, prior = getMobileWsLedger().beginCommand(commandId, "pair-device",
+                                                    "device:execute", {})
+        assert prior is not None and prior.get("replayed") is True
+        assert prior["type"] == "device:result" and prior["status"] == "ok"
+
+
 class TestCapabilitiesRest:
     def test_owner_reads_hello_snapshot(self, wsClient):
         from neurova.api.auth import create_access_token

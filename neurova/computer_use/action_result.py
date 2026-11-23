@@ -67,6 +67,7 @@ REFUSAL_CODES = frozenset(
         "stale_frame",             # 坐标所属观测帧已过期（画面已变化），须重新观察
         "controller_busy",         # 另一会话正持有前台输入，拒绝并发操控
         "device_offline",          # 设备桥：无在线设备可派发（重连/唤醒后可重试）
+        "device_offline_queued",   # 设备桥：设备离线，命令已入队并发唤醒信令（勿重复下发）
         "device_timeout",          # 设备桥：命令在窗口内未回执（可安全重试）
         "device_bridge_disabled",  # 设备桥总闸未开（NEUROVA_DEVICE_BRIDGE_ENABLED）
         "device_budget_exhausted",  # 设备桥：会话步数/时长熔断触顶（重试无意义）
@@ -97,6 +98,7 @@ REFUSAL_RETRY_ADVICE = {
     "not_initialized": "retry",
     "backend_error": "retry",
     "device_offline": "retry",
+    "device_offline_queued": "never",
     "device_timeout": "retry",
     "device_bridge_disabled": "never",
     "device_budget_exhausted": "never",

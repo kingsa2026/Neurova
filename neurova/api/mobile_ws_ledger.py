@@ -57,6 +57,16 @@ _EVENTS_RETAIN_PER_DEVICE = 500
 _REPLAY_LIMIT = 500
 
 
+def _replayVisible(frame: Any, effectiveScope: Any) -> bool:
+    """补发可见性（B7 修正）：``device:*`` 帧是**设备自身账本帧**（按 pairing_id
+    寻址，离线入队的 execute/回执都走这里），不参与会话订阅过滤——否则
+    session 订阅下的设备永远补拉不到自己的遥控帧；其余帧维持订阅范围
+    fail-closed 过滤（范围外/解析失败一律不下发）。"""
+    if isinstance(frame, dict) and str(frame.get("type") or "").startswith("device:"):
+        return True
+    return effectiveScope is None or _frameInScope(frame, effectiveScope)
+
+
 @dataclass(frozen=True)
 class WsCommandEntry:
     """一条入站遥控指令的账目快照（status: running/settled）。
@@ -176,6 +186,19 @@ class MobileWsLedger:
             self._conn.close()
 
     # ── 连接 epoch ──────────────────────────────────────────────────
+
+    def currentEpoch(self, pairing_id: str) -> int:
+        """当前（最近一次连接发放的）epoch，只读**不发号**；无记录返回 0。
+
+        离线入队（设备桥 B7）用它落账：帧挂在设备最近一次连接的 epoch 上，
+        重连后 sync_resume 按 seq 补拉即可拿到，不需要预先发新 epoch。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT epoch FROM mobile_ws_epochs WHERE pairing_id = ?",
+                (pairing_id,),
+            ).fetchone()
+        return int(row["epoch"]) if row is not None else 0
 
     def nextEpoch(self, pairing_id: str) -> int:
         """按设备发号递增的连接 epoch（每条 WS 连接建立时取一次）。"""
@@ -313,7 +336,7 @@ class MobileWsLedger:
                 frame = json.loads(row["frame_json"])
             except Exception:  # noqa: BLE001 - 留档损坏的帧跳过（不阻断后续补发）
                 continue
-            if effectiveScope is not None and not _frameInScope(frame, effectiveScope):
+            if not _replayVisible(frame, effectiveScope):
                 continue
             out.append({"seq": int(row["seq"]), "frame": frame})
         return out
@@ -375,6 +398,44 @@ class MobileWsLedger:
                 (json.dumps(terminal_frame, ensure_ascii=False, default=str)[:_RESULT_JSON_MAX],
                  time.time(), pairing_id, command_id),
             )
+
+    def settleRunningCommand(self, command_id: str, pairing_id: str,
+                             terminal_frame: Dict[str, Any]) -> bool:
+        """仅当命令仍在 ``running`` 时收敛（设备桥 B7 回执闭环），返回是否收敛。
+
+        离线入队命令的回执到达时没有在等 future，靠本方法落终态；已收敛
+        （如在线超时先行终态）或未知命令不动——迟到回执不得改写既有终态。
+        """
+        with self._lock, self._conn:
+            cursor = self._conn.execute(
+                "UPDATE mobile_ws_commands SET status = 'settled', terminal_json = ?,"
+                " settled_at = ? WHERE pairing_id = ? AND command_id = ?"
+                " AND status = 'running'",
+                (json.dumps(terminal_frame, ensure_ascii=False, default=str)[:_RESULT_JSON_MAX],
+                 time.time(), pairing_id, command_id),
+            )
+            return cursor.rowcount == 1
+
+    def runningCommands(self, pairing_id: str) -> List[Dict[str, Any]]:
+        """该设备仍在 ``running`` 的遥控命令 payload，按入队时间升序（B7）。
+
+        离线入队的命令以此为准在设备回连时**重投递**（新 seq、同 command_id，
+        端上按 command_id 去重）；已收敛的命令不在 running 集里，天然不重发。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT payload_json FROM mobile_ws_commands WHERE pairing_id = ?"
+                " AND status = 'running' AND cmd_type = 'device:execute'"
+                " ORDER BY created_at ASC",
+                (pairing_id,),
+            ).fetchall()
+        out: List[Dict[str, Any]] = []
+        for row in rows:
+            try:
+                out.append(json.loads(row["payload_json"]))
+            except Exception:  # noqa: BLE001 - 留档损坏的命令跳过（不阻断其余重投递）
+                continue
+        return out
 
     def _toEntry(self, row: sqlite3.Row) -> WsCommandEntry:
         return WsCommandEntry(

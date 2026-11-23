@@ -1929,6 +1929,13 @@ async def _handle_device_hello(pairing_id: str, message: dict, ledgerWs) -> None
         "app_state": appState,
         "timestamp": time.time(),
     })
+    # B7 离线入队命令的重投递：设备回连（hello）即补发仍在 running 的遥控命令。
+    # 账本按 (pairing_id, command_id) 幂等、端上按 command_id 去重——重发只换
+    # 新 seq，不会二次执行；已收敛的命令不在 running 集，天然不重发。
+    from neurova.api.mobile_ws_ledger import getMobileWsLedger
+
+    for pendingFrame in getMobileWsLedger().runningCommands(pairing_id):
+        await ledgerWs.send_json(pendingFrame)
 
 
 def _ticketFromHandshake(websocket: WebSocket) -> Optional[str]:
