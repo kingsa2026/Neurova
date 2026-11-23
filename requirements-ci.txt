@@ -163,3 +163,10 @@ rdflib>=7.6.0
 # shacl_runtime.py 点名豁免（惰性 import＋fail-soft，形态同 sparql_query.py 的 rdflib）；
 # 测试仍以 importorskip 兜底，双清单都声明后常态必装、skip 不会再触发。
 pyshacl>=0.25.0
+
+# 本体图后端第二实现对拍（`tests/unit/knowledge/ontology/test_graphBackend.py`
+# 的 oxigraph 参数档 + test_graphBackendEquivalence.py 的同操作序列等价判据）。
+# 该档 `pytest.importorskip("pyoxigraph")`：缺席即 skip——CI 装上它，转正判据
+# 才是实跑而非"环境里没装东西"的空转。仍属可选生产依赖：requirements.txt
+# 注释态登记不变（默认档 sqlite 绝不切换），产品运行时零强制。
+pyoxigraph>=0.5
