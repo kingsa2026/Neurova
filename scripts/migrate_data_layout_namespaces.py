@@ -106,6 +106,12 @@ def main(argv: list | None = None) -> int:
         if name in RESERVED_AGENT_ROOT_NAMES or name in registry:
             continue
         if (entry / "agent_config.json").exists():
+            # 有 agent 根形态但不在登记册：除 default（系统主 agent，登记册
+            # 只收显式创建的 agent）之外，都是建目录门生效前的遗留 agent
+            # （测试/调试残留），按可逆原则一并归档。
+            if name == "default":
+                continue
+            plan.append(("unregistered-agent", entry, archiveRoot / name))
             continue
         if name.startswith("project_"):
             plan.append(("room", entry, dataRoot / "collaboration" / "rooms" / name))
@@ -125,6 +131,11 @@ def main(argv: list | None = None) -> int:
             print(f"[{kind}] {src.name} → {dst.relative_to(dataRoot)}/")
         if args.apply:
             dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.exists():
+                if not any(dst.iterdir()):
+                    dst.rmdir()  # 上次中断的空壳目标：清掉再搬，绝不让"已执行"与事实不符
+                else:
+                    print(f"[warn] {dst} 已存在且非空——{src} 本轮跳过，请人工核对")
             if not dst.exists():
                 shutil.move(str(src), str(dst))
             moved += 1
