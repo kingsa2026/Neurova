@@ -75,12 +75,20 @@ import top.neurova.mobile.ui.theme.NeurovaColors
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SwarmFlowPanel(parentSessionId: String, modifier: Modifier = Modifier) {
+fun SwarmFlowPanel(
+    parentSessionId: String,
+    modifier: Modifier = Modifier,
+    /** 展开态由页面持有：浮动图标点击展开，面板头部收起钮回调折叠 */
+    expanded: Boolean = false,
+    /** 有无协作回告：驱动页面浮动图标显隐（无协作则入口一并不出现） */
+    onHasCollabChange: (Boolean) -> Unit = {},
+    /** 折叠回调：回到浮动图标形态（对齐鸿蒙端同款交互） */
+    onCollapse: () -> Unit = {},
+) {
     val runtime = LocalAppRuntime.current
     val palette = LocalNeurovaColors.current
     val scope = rememberCoroutineScope()
 
-    var expanded by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -106,14 +114,25 @@ fun SwarmFlowPanel(parentSessionId: String, modifier: Modifier = Modifier) {
         refreshing = false
     }
 
-    // 进入面板（展开）即拉取；会话切换时重置
-    LaunchedEffect(parentSessionId, expanded) {
-        if (expanded) load(isRefresh = false)
+    // 会话进入即拉取（不再等展开）：有无协作须先行回告，浮动图标才有的放矢；
+    // 先清旧投影再拉（过期响应不写当前视图，对齐 PC 纪律）
+    LaunchedEffect(parentSessionId) {
+        graph = null
+        board = null
+        load(isRefresh = false)
     }
 
     val runCount = graph?.nodes?.count { it.nodeType == "run" } ?: 0
+    val cardCount = graph?.nodes?.count { it.nodeType != "run" } ?: 0
     val edgeCount = graph?.edges?.size ?: 0
     val revision = graph?.meta?.revision ?: board?.revision ?: 0
+    val hasCollab = swarmHasCollab(runCount, cardCount)
+    LaunchedEffect(hasCollab) { onHasCollabChange(hasCollab) }
+
+    // 无协作或折叠态：不绘制本体（浮动图标形态由页面呈现）；组件仍挂载保数据生命周期
+    if (!hasCollab || !expanded) {
+        return
+    }
 
     Column(
         modifier = modifier
@@ -126,7 +145,7 @@ fun SwarmFlowPanel(parentSessionId: String, modifier: Modifier = Modifier) {
                 .clip(RoundedCornerShape(12.dp))
                 .background(palette.glass)
                 .border(1.dp, palette.glassBorder, RoundedCornerShape(12.dp))
-                .clickable { expanded = !expanded }
+                .clickable { onCollapse() }
                 .padding(horizontal = 10.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -156,11 +175,11 @@ fun SwarmFlowPanel(parentSessionId: String, modifier: Modifier = Modifier) {
                 }
             }
             IconButton(
-                onClick = { expanded = !expanded },
+                onClick = onCollapse,
                 modifier = Modifier.size(24.dp),
             ) {
                 Icon(
-                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    imageVector = Icons.Filled.ExpandLess,
                     contentDescription = stringResource(R.string.swarm_flow_toggle),
                     tint = palette.textMid,
                 )

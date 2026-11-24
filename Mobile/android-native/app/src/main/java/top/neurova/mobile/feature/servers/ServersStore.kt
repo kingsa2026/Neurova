@@ -72,6 +72,21 @@ class ServersStore(private val persistence: PreferencesStore) {
         persistence.writeString(ACTIVE_KEY, id)
     }
 
+    /** 深链一扫配全（对齐鸿蒙端 ensureServerProfile）：按 baseUrl 复用或新建档案并激活。
+     *  返回档案 id；配对 resolve/confirm 随即落到扫码指向的后端。 */
+    fun ensureProfileForBaseUrl(baseUrl: String): String {
+        val normalized = baseUrl.trim().trimEnd('/')
+        val existing = profiles.firstOrNull { it.baseUrl.trimEnd('/') == normalized }
+        if (existing != null) {
+            activate(existing.id)
+            return existing.id
+        }
+        val profile = newProfile(name = "扫码配对", baseUrl = normalized, entryMode = ServerProfile.EntryMode.DIRECT)
+        upsert(profile)
+        activate(profile.id)
+        return profile.id
+    }
+
     /** 删除档案；删到当前档案时回退到剩余第一个（列表至少保留一个由 UI 层兜底） */
     fun remove(id: String) {
         profiles.removeAll { it.id == id }

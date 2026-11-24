@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
@@ -53,11 +54,13 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import top.neurova.mobile.R
 import top.neurova.mobile.core.model.ChatMessage
 import top.neurova.mobile.core.model.ChatSessionItem
 import top.neurova.mobile.core.net.MobileWsChannel
@@ -77,6 +80,9 @@ fun ChatScreen(sessionId: String, initialTitle: String, onBack: () -> Unit, show
     val controller = remember { runtime.chatSessions }
     var drawerOpen by remember { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
+    // 协作拓扑入口（对齐鸿蒙）：有协作才显示，默认浮动图标，点击展开面板
+    var swarmHasCollab by remember { mutableStateOf(false) }
+    var swarmExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(sessionId, initialTitle) {
         runtime.agents.load()
@@ -108,8 +114,13 @@ fun ChatScreen(sessionId: String, initialTitle: String, onBack: () -> Unit, show
                 generating = controller.isGenerating,
                 chunkCount = controller.chunkCount,
             )
-            // 车道G：蜂群协作过程视图，挂在会话进度条正下方（同一运行详情区）
-            SwarmFlowPanel(parentSessionId = sessionId)
+            // 车道G：蜂群协作过程视图——有协作才出现，默认浮动图标点击展开（对齐鸿蒙）
+            SwarmFlowPanel(
+                parentSessionId = sessionId,
+                expanded = swarmExpanded,
+                onHasCollabChange = { swarmHasCollab = it },
+                onCollapse = { swarmExpanded = false },
+            )
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                 val listState = rememberLazyListState()
                 LaunchedEffect(controller.messages.size) {
@@ -133,6 +144,26 @@ fun ChatScreen(sessionId: String, initialTitle: String, onBack: () -> Unit, show
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
+                    }
+                }
+                // 协作拓扑浮动入口：存在协作且面板折叠时悬浮消息区右下角，点击展开面板
+                if (showSwarmFloatingIcon(swarmHasCollab, swarmExpanded)) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 16.dp, bottom = 16.dp)
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(palette.glass)
+                            .border(1.dp, palette.glassBorder, CircleShape)
+                            .clickable { swarmExpanded = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AccountTree,
+                            contentDescription = stringResource(R.string.swarm_flow_title),
+                            tint = palette.textMid,
+                        )
                     }
                 }
             }

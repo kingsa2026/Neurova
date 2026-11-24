@@ -20,4 +20,22 @@ object PairingRefParser {
             ?.substring(4)
             ?.takeIf { it.isNotBlank() }
     }
+
+    /**
+     * 深链 host 参数（一扫配全，2026-11-16 用户裁定；对齐鸿蒙端
+     * PairingPayload.HOST_PATTERN）：URL 编码的对外地址，解码后返回；
+     * 缺失/空/非 neurova://pair 均返回 null（调用方保持现档案）。
+     */
+    fun parseHost(uri: String): String? {
+        val trimmed = uri.trim()
+        if (!PAIR_URI.containsMatchIn(trimmed)) return null
+        val queryIndex = trimmed.indexOf('?')
+        if (queryIndex < 0) return null
+        return trimmed.substring(queryIndex + 1)
+            .split('&')
+            .firstOrNull { it.startsWith("host=", ignoreCase = true) }
+            ?.substring(5)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+    }
 }

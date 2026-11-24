@@ -36,4 +36,30 @@ class PairingRefParserTest {
         assertNull(PairingRefParser.parseRef(""))
         assertNull(PairingRefParser.parseRef("not a uri"))
     }
+
+    // ── parseHost（一扫配全：对齐鸿蒙端 PairingPayload.HOST_PATTERN）────────
+
+    @Test
+    fun hostIsExtractedAndDecoded() {
+        assertEquals(
+            "http://10.0.2.2:9631",
+            PairingRefParser.parseHost("neurova://pair?ref=R1&host=http%3A%2F%2F10.0.2.2%3A9631"),
+        )
+    }
+
+    @Test
+    fun hostMissingReturnsNull() {
+        assertNull(PairingRefParser.parseHost("neurova://pair?ref=R1"))
+        assertNull(PairingRefParser.parseHost("neurova://pair"))
+    }
+
+    @Test
+    fun hostBlankReturnsNull() {
+        assertNull(PairingRefParser.parseHost("neurova://pair?ref=R1&host="))
+    }
+
+    @Test
+    fun hostNonPairSchemeIsRejected() {
+        assertNull(PairingRefParser.parseHost("https://example.com/pair?ref=X&host=http%3A%2F%2Fa"))
+    }
 }

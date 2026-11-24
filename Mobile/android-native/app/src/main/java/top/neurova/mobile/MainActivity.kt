@@ -45,10 +45,15 @@ class MainActivity : ComponentActivity() {
         handlePairingDeepLink(intent)
     }
 
-    /** 深链 neurova://pair?ref=…（A8）：解析出 ref 注入配对仓，由配对页消费 */
+    /** 深链 neurova://pair?ref=…&host=…（A8 + 一扫配全）：host 先建/激活服务器档案，
+     *  ref 注入配对仓由配对页消费——resolve 才会落到扫码指向的后端（对齐鸿蒙端） */
     private fun handlePairingDeepLink(intent: Intent?) {
         val uri = intent?.dataString ?: return
-        PairingRefParser.parseRef(uri)?.let { runtime.pairing.pendingDeepLinkRef = it }
+        val ref = PairingRefParser.parseRef(uri) ?: return
+        PairingRefParser.parseHost(uri)?.let { host ->
+            runtime.servers.ensureProfileForBaseUrl(host)
+        }
+        runtime.pairing.pendingDeepLinkRef = ref
     }
 
     override fun onResume() {
