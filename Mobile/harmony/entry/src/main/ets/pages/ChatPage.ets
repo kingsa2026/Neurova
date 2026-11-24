@@ -289,6 +289,7 @@ export struct ChatPage {
   private compositionHandler: EventHandler = () => {};
   private artifactContentHandler: EventHandler = () => {};
   private connectedHandler: EventHandler = () => {};
+  private foregroundHandler: EventHandler = () => {};
   // 语音输入（CoreSpeechKit 端侧识别 + AudioCapturer 采集喂入）
   @State voiceListening: boolean = false;
   private voiceEngine: speechRecognizer.SpeechRecognitionEngine | null = null;
@@ -350,6 +351,7 @@ export struct ChatPage {
     this.bus.off('context:composition_result', this.compositionHandler);
     this.bus.off('artifact:content_result', this.artifactContentHandler);
     this.bus.off('ws:connected', this.connectedHandler);
+    this.bus.off('app:foreground', this.foregroundHandler);
     // 语音资源收尾（识别引擎/采集器可能仍在运行）
     this.stopVoice();
     // D-5 按需订阅：离页恢复 global 全收（下次进页按目标会话重新收窄）
@@ -769,22 +771,25 @@ export struct ChatPage {
    * 建立 WebSocket 连接
    * 配置：从 ConfigManager 读取 ws_base_url，携带 AuthStore 中的 access_token
    */
-  private async connectWs(): Promise<void> {
+  private async connectWs(quiet: boolean = false): Promise<void> {
     // 地址与凭证都来自**配对那一次**（AuthStore 里存着 resolve 回来的 wsUrl 与
     // 一次性接入凭证）。原先这里是 `config.get('ws_base_url', 'ws://192.168.10.132:9527/...')`
     // ——一台开发机的局域网 IP 写死在源码里，换网络即全体失联，打包后也改不动；
     // 而且带的凭证是登录用的 accessToken，不是配对下发的 ticket：后端只会按 ticket 认设备，
     // 于是这条面从来连不上，而失败被一句"WS 连接失败"抹平（§6-126 那一族）。
+    // connectIfIdle 幂等：已连/重连在途/登出态跳过，重试耗尽态重置预算补连。
     const wsUrl = this.authStore.wsUrl;
     const ticket = this.authStore.wsToken;
     if (!wsUrl || !ticket) {
-      this.logger.warn(TAG, '未配对或凭证已失效，不发起连接');
-      this.msg.warning('还没有可连的终端：请先扫码配对');
+      if (!quiet) {
+        this.logger.warn(TAG, '未配对或凭证已失效，不发起连接');
+        this.msg.warning('还没有可连的终端：请先扫码配对');
+      }
       return;
     }
     try {
-      await this.ws.connect(wsUrl, ticket);
-      this.logger.info(TAG, 'WS 连接成功');
+      await this.ws.connectIfIdle(wsUrl, ticket);
+      this.logger.info(TAG, 'WS 连接流程完成');
     } catch (e) {
       this.logger.error(TAG, 'WS 连接失败', e as Error);
     }
@@ -1096,6 +1101,14 @@ export struct ChatPage {
       this.previewLoading = false;
     };
     this.bus.on('artifact:content_result', this.artifactContentHandler);
+
+    // 前台恢复补连（2026-11-24 真机验证发现的断线不自愈缺口）：EntryAbility
+    // onForeground 广播，幂等入口在适配器（已连/重连在途/登出态跳过）。
+    // 未配对静默跳过——回前台不该弹「请先扫码配对」。
+    this.foregroundHandler = () => {
+      this.connectWs(true);
+    };
+    this.bus.on('app:foreground', this.foregroundHandler);
   }
 
   /**

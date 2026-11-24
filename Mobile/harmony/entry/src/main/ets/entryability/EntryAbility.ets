@@ -2,6 +2,7 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { HttpAdapter } from '../libs/adapters';
+import { EventBus } from '../libs/bus/EventBus';
 import { PendingDeepLink } from '../routing/PendingDeepLink';
 import { Router, RouteNames } from '../routing/Router';
 import { DeviceBridgeService } from '../libs/capability/DeviceBridgeService';
@@ -111,6 +112,9 @@ export default class EntryAbility extends UIAbility {
 
   onForeground(): void {
     hilog.info(EntryAbility.DOMAIN, EntryAbility.TAG, '进入前台');
+    // 前台恢复广播：聊天页据此补连 WS（重连预算耗尽/退后台定时器挂起后，
+    // 不再依赖页面重建才恢复——2026-11-24 真机验证发现的断线不自愈缺口）
+    EventBus.getInstance().emit('app:foreground', Date.now() as Object);
   }
 
   onBackground(): void {

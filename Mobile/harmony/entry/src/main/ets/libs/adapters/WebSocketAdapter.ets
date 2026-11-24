@@ -35,6 +35,7 @@ import { ApiFacade } from '../api/ApiFacade';
 import { ErrorManager, ErrorCategory } from '../error/ErrorManager';
 import { WSMessage, WsConnectionRuntimeContract } from '../types';
 import { resolveTunnelAuthFrame, randomNonceHex } from '../protocol/TunnelTokenCrypto';
+import { shouldAttemptIdleConnect } from './WsReconnectGate';
 
 /** 日志标签 */
 const TAG = 'WebSocketAdapter';
@@ -280,6 +281,27 @@ export class WebSocketAdapter {
   /** 返回当前是否处于连接状态 */
   isConnected(): boolean {
     return this.connected;
+  }
+
+  /**
+   * 前台恢复补连（幂等入口，对齐安卓 connectIfIdle）：已连接、用户主动关闭
+   * （登出语义）或重连定时器在途时不动；否则**重置重连预算**后补一次连接。
+   *
+   * 根因（2026-11-24 真机/模拟器验证发现）：自动重连 maxReconnect 耗尽后本适配器
+   * 永久停摆，而退后台时 JS 定时器挂起、回前台没有任何重连触发点——设备断线后
+   * 不再自愈，只能重建页面（aboutToAppear）才恢复。判定单一源在
+   * WsReconnectGate.shouldAttemptIdleConnect（Node 直跑可测）。
+   */
+  async connectIfIdle(url: string, token?: string): Promise<void> {
+    const proceed = shouldAttemptIdleConnect(
+      this.connected, this.manualClose, this.reconnectTimerId !== -1);
+    if (!proceed) {
+      this.logger.info(TAG, 'connectIfIdle：连接仍可用或重连进行中，跳过');
+      return;
+    }
+    // 前台恢复 = 新一轮重连预算（重试耗尽后不再永久停摆）
+    this.reconnectCount = 0;
+    await this.connect(url, token);
   }
 
   /**
