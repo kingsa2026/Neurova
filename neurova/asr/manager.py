@@ -41,6 +41,10 @@ class ASRConfig(BaseModel):
     # 本地 Whisper 下载安装同意门（补课：管理员 opt-in）——False 时本地
     # whisper 引擎在链中跳过（模型 ~140MB+torch），同意后置 True 才参与
     local_whisper_consent: bool = False
+    # 惰性加载（2026-11-24）：True 时启动只标记待加载，首次转写/理解/描述
+    # 请求才初始化引擎——funasr/torch 大模型加载（~19s，内存压力下
+    # torch.load 原生段错误）移出启动路径。
+    lazy: bool = True
 
 
 class ASRManager:
@@ -56,12 +60,15 @@ class ASRManager:
         self._engine: Optional[ASRBase] = None
         self._engine_name: Optional[str] = None
         self._initialized = False
+        self._lazy_pending = False
         self._fallback_index = 0
         self._available_engines: Dict[str, bool] = {}
 
     @property
     def is_initialized(self) -> bool:
-        return self._initialized and self._engine is not None and self._engine.is_initialized
+        # 惰性待载（lazy_pending）视为可用：读面 503 门放行，首次使用时才真加载
+        return (self._initialized and self._engine is not None and self._engine.is_initialized) \
+            or self._lazy_pending
 
     @property
     def engine_name(self) -> Optional[str]:
@@ -73,6 +80,7 @@ class ASRManager:
         result = {
             "engine": self._engine_name,
             "initialized": self._initialized,
+            "lazy_pending": self._lazy_pending,
             "mock_active": self._engine_name == "mock",
             "available_engines": self._available_engines.copy(),
         }
@@ -99,8 +107,17 @@ class ASRManager:
             # api 回归两次实崩），ASR 端点拿 mock 占位转写，判据不依赖真模型。
             # 判定除 NEUROVA_ENV=test 外兼认 pytest 在场：套件里个别用例会临时
             # 改写/清除 NEUROVA_ENV，单靠 env 会在套件后段漏判、重新坠回 funasr。
+            # 2026-11-24 惰性加载：lazy=True（默认）时启动只标记待加载，引擎
+            # 链推迟到首次转写/理解/描述请求才走（funasr/torch 加载 ~19s 移出
+            # 启动路径）。
             test_env = (os.environ.get("NEUROVA_ENV") == "test"
                         or "pytest" in sys.modules)
+            if getattr(self._config, "lazy", True):
+                self._lazy_pending = True
+                self._initialized = False
+                self._engine = None
+                self._engine_name = None
+                return True
             return await self._initialize_with_fallback(
                 append_mock=test_env, mock_first=test_env
             )
@@ -272,13 +289,30 @@ class ASRManager:
             logger.error("ASR 引擎初始化异常: %s - %s", engine_name, e)
             return False
 
+    async def _ensure_engine_loaded(self) -> bool:
+        """惰性加载：首次使用（转写/理解/描述）时才走 fallback 链初始化引擎。
+
+        Returns:
+            引擎是否可用（链全失败返回 False，调用方诚实报错）。
+        """
+        if self._engine is not None or not self._lazy_pending:
+            return self.is_initialized
+        test_env = (os.environ.get("NEUROVA_ENV") == "test"
+                    or "pytest" in sys.modules)
+        loaded = await self._initialize_with_fallback(
+            append_mock=test_env, mock_first=test_env
+        )
+        self._lazy_pending = not loaded
+        return loaded
+
     async def transcribe(self, audio_bytes: bytes, **kwargs) -> dict:
         """
         语音识别
 
         如果当前引擎失败且 fallback 启用，自动切换到下一个引擎。
         """
-        if not self.is_initialized:
+        await self._ensure_engine_loaded()
+        if self._engine is None or not self.is_initialized:
             logger.error("ASRManager 未初始化")
             return {"text": "", "error": "ASRManager 未初始化"}
 
@@ -308,14 +342,16 @@ class ASRManager:
 
     async def understand(self, audio_bytes: bytes, query: str = "这段音频说了什么？") -> dict:
         """音频理解"""
-        if not self.is_initialized:
+        await self._ensure_engine_loaded()
+        if self._engine is None or not self.is_initialized:
             return {"answer": "", "error": "ASRManager 未初始化"}
 
         return await self._engine.understand(audio_bytes, query)
 
     async def caption(self, audio_bytes: bytes) -> dict:
         """音频描述"""
-        if not self.is_initialized:
+        await self._ensure_engine_loaded()
+        if self._engine is None or not self.is_initialized:
             return {"caption": "", "error": "ASRManager 未初始化"}
 
         return await self._engine.caption(audio_bytes)
@@ -326,6 +362,7 @@ class ASRManager:
             await self._engine.shutdown()
 
         self._initialized = False
+        self._lazy_pending = False
         self._engine = None
         self._engine_name = None
         logger.info("ASRManager 已关闭")

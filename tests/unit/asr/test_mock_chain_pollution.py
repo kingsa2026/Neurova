@@ -30,13 +30,13 @@ def test_test_env_mock_stays_local_to_the_instance_chain(monkeypatch):
     _stub_all_real_engines_fail(monkeypatch)
     original = list(FALLBACK_CHAIN)
     try:
-        m1 = ASRManager(ASRConfig(engine="auto"))
+        m1 = ASRManager(ASRConfig(engine="auto", lazy=False))
         assert asyncio.run(m1.initialize()) is True
         assert m1.engine_name == "mock", "测试态仍应能落到 mock（本地链副本）"
         # 全局链不被改写：mock 只存在于本次初始化的本地链副本
         assert "mock" not in FALLBACK_CHAIN, "测试态把 mock 写进了全局链且不恢复"
         # 同进程后续实例：链同样干净
-        m2 = ASRManager(ASRConfig(engine="auto"))
+        m2 = ASRManager(ASRConfig(engine="auto", lazy=False))
         assert asyncio.run(m2.initialize()) is True
         assert "mock" not in FALLBACK_CHAIN
     finally:
@@ -47,7 +47,7 @@ def test_test_env_mock_stays_local_to_the_instance_chain(monkeypatch):
 def test_mock_landing_warns_and_marks_stats(monkeypatch, caplog):
     monkeypatch.setenv("NEUROVA_ENV", "test")
     _stub_all_real_engines_fail(monkeypatch)
-    m1 = ASRManager(ASRConfig(engine="auto"))
+    m1 = ASRManager(ASRConfig(engine="auto", lazy=False))
     assert asyncio.run(m1.initialize()) is True
     assert m1.engine_name == "mock"
     assert m1.stats.get("mock_active") is True, "落到 mock 必须在 stats 里如实标注"
