@@ -648,6 +648,13 @@ class RecallResult:
 # ────── Main Engine ──────
 
 
+# D8：温度通道的相关性门限——候选热记忆与查询的嵌入相似度须达到此值
+# 才注入融合（热而无关的记忆不得借温度分挤掉相关命中）。与文本通道
+# 稠密兜底同尺；0.6 为 D7 语料扫描的最优档（0.5/0.6/0.7/0.8 对照，
+# 0.6 时 MRR 最高且冷门强相关类不劣化）。
+TEMP_CHANNEL_RELEVANCE_FLOOR: float = 0.6
+
+
 class NeurovaRecallEngine:
     """
     Neurova 统一记忆检索引擎
@@ -1200,13 +1207,21 @@ class NeurovaRecallEngine:
         return deduplicated[:limit]
 
     def _channel_temperature(self, query: str, limit: int) -> List[RecalledMemory]:
-        """温度通道（热记忆优先）"""
+        """温度通道（热记忆优先；D8：按查询相关性门控）
+
+        D7 三态基准实测：本通道原样注入 Top-30 最热记忆（score=温度/100，
+        与查询无关），把相关但低温的记忆顶掉——C 态 MRR 0.751（去温度通道）
+        → 0.459（含）。现按查询相关性门控：只有与查询相似度 ≥
+        TEMP_CHANNEL_RELEVANCE_FLOOR 的热记忆才作为候选，温度分保留通道
+        语义（越热越高）；无相关热记忆时本通道弃权（返回空），融合退回
+        文本/向量等通道。
+        """
         results = []
-        
+
         # 从记忆管理器获取所有记忆
         if not self.memory_manager:
             return results
-        
+
         try:
             # 审计 P1-D7：SQL ORDER BY temperature DESC LIMIT n（索引直取），
             # 替代全量 get_all_memories 深拷贝 + O(N log N) 排序。直调管理器
@@ -1214,6 +1229,24 @@ class NeurovaRecallEngine:
             top_memories = (
                 self.memory_manager.get_top_memories_by_temperature(limit) or []
             )
+
+            # D8 相关性门：热但与查询无关的记忆不得借温度分挤掉相关命中。
+            # 相似度与文本通道同尺（嵌入余弦）；门失效时退回不过滤（旧行为）。
+            if query and top_memories:
+                try:
+                    from neurova.cognitive_layers.memory_layer.semantic_search import (
+                        get_semantic_search,
+                    )
+
+                    _search = get_semantic_search()
+                    top_memories = [
+                        mem for mem in top_memories
+                        if _search.compute_similarity(
+                            query, mem.get("content", "")
+                        ) >= TEMP_CHANNEL_RELEVANCE_FLOOR
+                    ]
+                except Exception as e:
+                    logger.warning("温度通道相关性门失效，退回不过滤: %s", e)
 
             # 转换为RecalledMemory
             for mem in top_memories:

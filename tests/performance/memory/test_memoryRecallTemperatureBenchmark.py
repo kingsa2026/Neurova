@@ -265,3 +265,8 @@ def test_recall_quality_three_temperature_states(tmp_path):
     assert cold_c >= cold_a * 0.9, (
         f"冷门强相关类退化超限：C={cold_c:.3f} vs A={cold_a:.3f}"
     )
+    # D8 判定：温度通道不得拖累召回（实测它曾把 MRR 0.751 拖到 0.459）
+    assert extra["with_temp_mrr"] >= extra["mrr"], (
+        f"温度通道拖累召回：含温度通道 {extra['with_temp_mrr']:.3f}"
+        f" < 去温度通道 {extra['mrr']:.3f}"
+    )
