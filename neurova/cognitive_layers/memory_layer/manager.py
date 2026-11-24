@@ -55,6 +55,18 @@ from neurova.cognitive_layers.memory_layer.temperature import apply_recall_gain
 logger = get_logger(__name__)
 
 
+def _memory_hot_limit() -> int:
+    """热层装载上限（批二温度分层）：env `NEUROVA_MEMORY_HOT_LIMIT`，
+    默认 500；0 = 关闭分层（全量同步装载，行为同旧）。钳制 [0, 10_000_000]。
+    """
+    raw = (os.environ.get("NEUROVA_MEMORY_HOT_LIMIT") or "").strip()
+    try:
+        n = int(raw) if raw else 500
+    except ValueError:
+        n = 500
+    return max(0, min(n, 10_000_000))
+
+
 def _row_origin(row) -> "MemoryOrigin":
     """从 SQLite 行安全读取 origin（P1-9）：列缺失（未迁移旧库快照）→ AGENT，
     值非法 → UNTRUSTED（fail-safe，绝不升权）。"""
@@ -979,12 +991,17 @@ class MemoryManager:
             if row["band"] in bands:
                 bands[row["band"]] = row["c"]
         total = agg["n"] or 0
-        return {
+        result = {
             "total": total,
             "bands": bands,
             "avg": round(agg["a"], 2) if agg["a"] is not None else None,
             "frozen": agg["frozen"] or 0,
         }
+        # 批二：冷层补载状态（分层装载的可观测面）
+        ev = getattr(self, "_cold_load_done", None)
+        result["cold_load_done"] = bool(ev.is_set()) if ev is not None else True
+        result["cold_load_ok"] = bool(getattr(self, "_cold_load_ok", True))
+        return result
 
     def iterBodyMemories(self, limit: int = 500) -> List[Memory]:
         """按 `updated_at` 升序只读列举本 agent 的正文行，**不做访问记账**。
@@ -1073,11 +1090,16 @@ class MemoryManager:
             logger.debug("Seed counter from persist DB failed: %s", e)
 
     def _load_from_db(self):
-        """从 SQLite 加载记忆到内存
+        """从 SQLite 加载记忆到内存（D5 后批二：温度分层装载）。
 
         快照口径 = agent 全量(WHERE 仅 agent_id 一层): 视图层(_scoped_memories
         三层隔离 / agent_wide 浏览口径)再按调用语义过滤。早期按三元组加载会
         把其他用户域的记忆挡在快照外, 管理页永远看不全。
+
+        分层（启动规模化批二）：热层（温度 Top-N，forgotten 不占名额）构造期
+        **同步**装载保证召回即就绪；冷层由后台线程补载——启动关键路径不再随
+        记忆总量线性变长。`NEUROVA_MEMORY_HOT_LIMIT=0` 关闭分层（全量同步，
+        行为同旧）。冷层补齐后快照仍 = agent 全量（无静默失忆）。
 
         只在**构造期**跑一次。此后另一个进程写入的行要进门，走 `reload_memories()`
         （F-05：可见性条件是重启或显式 reload，二者不能各写一套装配）。
@@ -1096,52 +1118,152 @@ class MemoryManager:
                 conn = get_short_connection(self._persist_db_path)
                 released = True
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM memories WHERE agent_id = ? "
-                "ORDER BY created_at DESC",
-                (self._agent_id,),
-            ).fetchall()
 
-            from neurova.cognitive_layers.memory_layer.security import MemoryDecryptError
-
-            for row in rows:
-                try:
-                    mem = self._row_to_memory(row)
-                    self._merge_loaded_memory(mem)
-                    # 存量迁移（2026-09-08 结晶闭环）：历史实现把 is_crystallized
-                    # 只落 metadata、stage 停在 active，读取端永远查不到。
-                    # 装载时按 metadata 标记收敛 stage 并回写。
-                    if (
-                        mem.lifecycle_stage == LifecycleStage.ACTIVE
-                        and (mem.metadata or {}).get("is_crystallized") is True
-                    ):
-                        mem.lifecycle_stage = LifecycleStage.CRYSTALLIZED
-                        self._persist_memory(mem)
-                    self._counter = max(
-                        self._counter, int(mem.id.replace("mem_", "")) if mem.id.startswith("mem_") else 0
+            self._cold_load_done = threading.Event()
+            self._cold_load_ok = True
+            hot_limit = _memory_hot_limit()
+            if hot_limit > 0:
+                rows = conn.execute(
+                    "SELECT * FROM memories WHERE agent_id = ?"
+                    " AND lifecycle_stage != 'forgotten'"
+                    " ORDER BY temperature DESC, last_accessed_at DESC,"
+                    " access_count DESC LIMIT ?",
+                    (self._agent_id, hot_limit),
+                ).fetchall()
+                self._absorb_loaded_rows(rows)
+                self._seed_counter_from_db(conn)
+                # 全量行数（含 forgotten）> 热层数 → 还有冷层余量，才起后台
+                # 补载线程；小库一次装完即无线程——也避免线程持连接与 agent
+                # 导入回滚的 rmtree 竞争（Windows 文件锁会卡住目录删除）。
+                total_rows = conn.execute(
+                    "SELECT COUNT(*) FROM memories WHERE agent_id = ?",
+                    (self._agent_id,),
+                ).fetchone()[0]
+                if total_rows > len(rows):
+                    threading.Thread(
+                        target=self._load_cold_tier,
+                        daemon=True,
+                        name="memory-cold-load",
+                    ).start()
+                    logger.info(
+                        "Memory snapshot: hot=%s (cold loading in background,"
+                        " total=%s, hot_limit=%s)", len(self._memories),
+                        total_rows, hot_limit,
                     )
-                except MemoryDecryptError as e:
-                    # U2：解密失败必须 ERROR 点名（教义第 2 条）——这条记忆还在盘上，
-                    # 只是密文读不回；吞成 debug 跳行等于「记忆消失」再现。
-                    logger.error(
-                        "记忆行解密失败，跳过 id=%s（行仍在盘上，需恢复加密密钥后重载）: %s",
-                        row["id"],
-                        e,
+                else:
+                    self._cold_load_done.set()
+                    logger.info(
+                        "Memory snapshot: hot=%s (all rows, no cold tier)",
+                        len(self._memories),
                     )
-                except Exception as e:
-                    logger.debug("Skip invalid memory row %s: %s", row['id'], e)
-
-            self._seed_counter_from_db(conn)
-
-            # P1-D1：常驻连接不关；兜底池连接在 finally 统一归还（ADR 0014）
-            logger.info("Loaded %s memories from persistence DB", len(self._memories))
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM memories WHERE agent_id = ? "
+                    "ORDER BY created_at DESC",
+                    (self._agent_id,),
+                ).fetchall()
+                self._absorb_loaded_rows(rows)
+                self._seed_counter_from_db(conn)
+                self._cold_load_done.set()
+                logger.info("Loaded %s memories from persistence DB", len(self._memories))
         except Exception as e:
             logger.warning("Failed to load memories from DB: %s", e)
+            ev = getattr(self, "_cold_load_done", None)
+            if ev is not None:
+                ev.set()
         finally:
             if released and conn is not None:
                 from neurova.core.database import release_short_connection
 
                 release_short_connection(conn)
+
+    def _load_cold_tier(self) -> None:
+        """冷层后台补载（批二）：把热层之外的行分批并入内存快照。
+
+        在**独立短连接**上分批读取（构造线程的常驻连接受 sqlite
+        check_same_thread 约束不可跨线程用）；解析（解密）在锁外逐行做，
+        合并持 `_persist_db_lock`。完成后置 `_cold_load_done`/`_cold_load_ok`；
+        失败 ERROR 点名并可经 `reload_memories()` 手动补齐——不许静默半量。
+        """
+        import time as _time
+
+        from neurova.core.database import get_short_connection, release_short_connection
+
+        self._cold_load_ok = False
+        try:
+            conn = get_short_connection(self._persist_db_path)
+            try:
+                conn.row_factory = sqlite3.Row
+                stubs = conn.execute(
+                    "SELECT id, temperature FROM memories WHERE agent_id = ?"
+                    " ORDER BY temperature ASC",
+                    (self._agent_id,),
+                ).fetchall()
+                ids = [s["id"] for s in stubs]
+                total = 0
+                for chunk_start in range(0, len(ids), 500):
+                    chunk = ids[chunk_start:chunk_start + 500]
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows = conn.execute(
+                        f"SELECT * FROM memories WHERE id IN ({placeholders})",
+                        chunk,
+                    ).fetchall()
+                    with self._persist_db_lock:
+                        self._absorb_loaded_rows(rows, seed_counter=False, skip_loaded=True)
+                    total += len(rows)
+                    _time.sleep(0.05)  # 让路：给服务中的读请求留出迭代窗口
+                self._cold_load_ok = True
+                logger.info(
+                    "Memory snapshot: cold load done (%s rows merged,"
+                    " total=%s)", total, len(self._memories),
+                )
+            finally:
+                release_short_connection(conn)
+        except Exception as e:
+            logger.error(
+                "冷层补载失败（快照暂时只有热层；可调 reload_memories() 手动补齐）: %s",
+                e, exc_info=True,
+            )
+        finally:
+            self._cold_load_done.set()
+
+    def _absorb_loaded_rows(self, rows, seed_counter: bool = True, skip_loaded: bool = False) -> None:
+        """把持久行并入内存快照（热/冷两层共用的单一吸收口径）。
+
+        skip_loaded=True（冷层用）：已在快照里的行跳过，免重复解密与
+        结晶收敛回写。
+        """
+        from neurova.cognitive_layers.memory_layer.security import MemoryDecryptError
+
+        for row in rows:
+            try:
+                mem = self._row_to_memory(row)
+                if skip_loaded and self._already_loaded(mem):
+                    continue
+                self._merge_loaded_memory(mem)
+                # 存量迁移（2026-09-08 结晶闭环）：历史实现把 is_crystallized
+                # 只落 metadata、stage 停在 active，读取端永远查不到。
+                # 装载时按 metadata 标记收敛 stage 并回写。
+                if (
+                    mem.lifecycle_stage == LifecycleStage.ACTIVE
+                    and (mem.metadata or {}).get("is_crystallized") is True
+                ):
+                    mem.lifecycle_stage = LifecycleStage.CRYSTALLIZED
+                    self._persist_memory(mem)
+                if seed_counter:
+                    self._counter = max(
+                        self._counter, int(mem.id.replace("mem_", "")) if mem.id.startswith("mem_") else 0
+                    )
+            except MemoryDecryptError as e:
+                # U2：解密失败必须 ERROR 点名（教义第 2 条）——这条记忆还在盘上，
+                # 只是密文读不回；吞成 debug 跳行等于「记忆消失」再现。
+                logger.error(
+                    "记忆行解密失败，跳过 id=%s（行仍在盘上，需恢复加密密钥后重载）: %s",
+                    row["id"],
+                    e,
+                )
+            except Exception as e:
+                logger.debug("Skip invalid memory row %s: %s", row['id'], e)
 
     def reload_memories(self) -> Dict[str, int]:
         """与盘对账：并入盘上新增的行，回收盘上已消失的行（F-05 可见性补齐 + 断点①）。

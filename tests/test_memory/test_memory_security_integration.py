@@ -6,6 +6,7 @@
 """
 import tempfile
 import shutil
+import time
 
 import pytest
 
@@ -77,8 +78,12 @@ class TestMemoryStorageContract:
         assert storage.get(mid)["content"] == "密码是 password123"
 
     def test_get_recent_memories_and_count(self, storage):
+        # 三次保存间留出时钟粒度间隔：nowIso 为微秒级 ISO 串，连发可能落进
+        # 同一刻度 → created_at 全等 → 稳定排序退回插入序，用例随机翻车
+        #（净 HEAD 6 跑 2 红实证）。用例意图是"最新的排最前"，间隔使其确定。
         for i in range(3):
             storage.save(f"记忆 {i}", memory_type="general")
+            time.sleep(0.02)
 
         assert storage.count() == 3
         recent = storage.get_recent_memories(limit=2)
