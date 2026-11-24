@@ -73,13 +73,51 @@ env 置 `NEUROVA_AGENT_LOAD_WORKERS=1` 即回串行，不改代码。
 
 ## 4. 批二（P1）：记忆温度分层装载（C1 冷层后台补载）
 
+### 4.0 前置卡（D5，2026-11-24 排查新增）：记忆温度语义修复
+
+**排查结论（kai 真库实测 + 代码链）**：温度对绝大多数记忆永久失效——kai 1658 条中
+1531 条恒为 100°、1222 条从未被访问（access_count=0）。根因是三件套互相抵消：
+
+1. 记忆出生温度 = 100（storage.py:603 `DEFAULT 100.0`）；
+2. 衰减引擎对 ≥80° 硬门直接跳过（temperature.py:280，"高温记忆视为固化"）；
+3. 全系统不存在任何把记忆从 ≥80 降到 <80 的路径（访问只 +10 且封顶 100，合并取平均）。
+
+衰减触发面本身在正常跑（每轮聊天后管线 post_chat_pipeline.py:905 →
+agent_core.py:1828 `run_decay_cycle`，5 分钟节流 + 单轮 500 条游标；关停整理
+agent_shutdown.py:83；管理端点 crud.py:305），但全部被第 2 条挡住——"跑了也白跑"。
+次要缺陷：关停整理调 `on_decay` 时把 `created_at` 误当 `last_accessed` 传参
+（sleep.py:472），即使降到 <80，闲置天数也按创建时间算而非真实最后访问时间。
+
+**修复内容（五件，同批落地）**：
+
+- **D5-R1** 出生温度 100 → 60（列默认值与模型侧默认单源修改；存量行不动，仅新记忆生效）。
+- **D5-R2** 命中回温改比例式 `T += (100 − T) × k`，k 默认 0.25（env
+  `NEUROVA_MEMORY_HIT_GAIN`）；模拟召回 k=0.1。判据：20° 首命中 → 40；95° 命中 →
+  96.25；连续命中序列单调、有界、不越 100；高频/每周/每月/从不访问的记忆平衡点自然分层。
+- **D5-R3** 取消 ≥80 冻结门：衰减已有饱和因子与重要性/情绪保护，高温记忆由幂律长尾
+  自然缓慢冷却；"固化"语义由 `lifecycle_stage=crystallized` 承担（引擎本就豁免
+  crystallized 行——kai 的 1004 条结晶记忆不受影响），不再由温度门槛代管。存量非结晶
+  100° 行将随衰减周期逐步冷却（每轮 500 条游标 + 长尾慢衰减，平滑过渡，非一次性跳变）。
+- **D5-R4** sleep.py 传参修正：`last_accessed` 传真实 `last_accessed_at`，NULL 回退
+  `created_at`。
+- **D5-R5 同轮去重（用户拍板）**：同一轮会话内，同一条记忆无论被多少个通道/多少次命中，
+  只记**一次**命中——轮级聚合，轮末统一 `creditRecallHits` 一次；跨轮各记各的。
+
+**红绿判据**：五件各一条单测；另做 kai 真库抽样回放——修后跑一轮衰减，100° 非结晶行
+必须开始下降、60° 新记忆闲置 30 天落到约 30~40 区间、同轮重复命中只 +1 次。
+
+**排序关系**：本卡落地前温度无区分度，批二热层 `ORDER BY temperature DESC` 会从
+100° 平票里随机切——**批二排在 D5 之后实施**。
+
 ### B1 热层同步装载
 - `_load` 拆为 `_load_rows(where_sql, params)` 复用主体；热层：
   `SELECT * FROM memories WHERE agent_id=? AND lifecycle_stage != 'forgotten'
   ORDER BY temperature DESC LIMIT ?`（排除 forgotten：它们本就不进召回，不占
   热层名额；冷层补载仍会含它们，管理面最终一致）。
 - 热层 N：env `NEUROVA_MEMORY_HOT_LIMIT`，默认 500，**0 = 关闭分层**（全量同步，
-  行为同今日，兼容开关）。N 按每 agent 生效。
+  行为同今日，兼容开关）。N 按每 agent 生效。排序用复合键
+  `temperature DESC, last_accessed_at DESC NULLS LAST, access_count DESC`——
+  同温平票时按新近度/访问次数决出，避免任意切分。
 - 行数 ≤ N 时退化为全量同步（无后台线程，行为同今日）。
 - 可选优化：补复合索引 `idx_mem_agent_temperature(agent_id, temperature)`。
 
@@ -130,6 +168,8 @@ env 置 `NEUROVA_AGENT_LOAD_WORKERS=1` 即回串行，不改代码。
 - D2 env 名确认：`NEUROVA_AGENT_LOAD_WORKERS` / `NEUROVA_MEMORY_HOT_LIMIT`。
 - D3 管理页"数秒后一致"窗口是否可接受：建议可接受。
 - D4 C2（召回时按温度下探 DB）本批不做：先 C1 验证，留作冷层失败的加固选项。
+- D5 温度语义修复（2026-11-24 排查后新增，见 §4.0）：五件修复已按用户意见纳入
+  （含同轮命中去重）；k=0.25 / 出生 60° 为建议默认值，待最终确认数值。
 
 ## 7. 提交拆分
 
