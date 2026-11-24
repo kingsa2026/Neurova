@@ -193,9 +193,7 @@ stats 分带输出与真实分布一致；R9 另验：三常量单源、改一�
   （同轮命中去重、存量全量初始化 60°、冻结门 80→95 均已拍板；命中记账扫荡/
   可观测面/常量语义化 2026-11-24 并入）；k=0.25 / 出生 60° 为建议默认值，随批
   实施、env 可后续调整。
-- D6 运行期周期衰减兜底（独立待拍板）：每日低峰经 TaskScheduler 对全 agent 跑
-  衰减扫——补齐"从不聊天的 agent 温度永不动"的缺口（现有触发面=聊天后管线/
-  关停/手动端点）。建议做，待拍板排期。
+- D6 运行期周期衰减兜底：**撤回（2026-11-24 讨论后）**。原判断"休眠 agent 温度永不动"有误——每个 Agent 构造时都装配 IdleTimeTracker + SleepConsolidation 并启动常驻监控线程（agent_core.py:1408 → agent_shutdown.bind_and_start_sleep_loop），空闲 90/120 分钟进入 deep_sleep/hibernate 即跑 run_sleep_cycle（含温度衰减）+ 写回（idle_tracker.py:300/309，memory_consolidation_enabled 默认开）。休眠 agent 的温度由这条既有链路维护，无需新建调度任务。
 - D7 召回质量前后评测（独立待拍板）：D5 实施前后用既有 EvalCase 基建跑记忆召回
   对照，确认排序质量上升而非劣化。建议做，待拍板成本口径。
 
