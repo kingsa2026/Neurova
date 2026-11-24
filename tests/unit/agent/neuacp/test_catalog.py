@@ -31,6 +31,23 @@ def test_p0ToolsPresentWithCommands():
     assert "--disallowed-tools" in CATALOG["zcode"]["command"]
 
 
+def test_qoderCnPreset():
+    """Qoder CN（中国版）预设：命令名 qodercn，官方 ACP 文档在 docs.qoder.cn。"""
+    entry = CATALOG["qodercn"]
+    assert entry["command"] == ["qodercn", "--acp"]
+    assert entry["origin"] == "native"
+    assert entry["kind"] == "acp"
+    assert not entry.get("requires_node"), "qodercn 原生二进制，不需 Node"
+    assert "docs.qoder.cn" in str(entry["install_hint"]), "install_hint 须指向 CN 文档"
+
+
+def test_qoderIntlPresetStaysInternational():
+    """回归锁：qoder 预设保持国际版口径，不得被 CN 版挤占或改名。"""
+    entry = CATALOG["qoder"]
+    assert entry["command"] == ["qoder", "--acp"]
+    assert "docs.qoder.com" in str(entry["install_hint"]), "install_hint 须指向国际版文档"
+
+
 def test_traeIsDisabledButArchived():
     assert CATALOG["trae"]["disabled"] is True
     assert defaultCommand("trae") is None
@@ -50,7 +67,7 @@ def test_defaultCommandUnknownToolReturnsNone():
 def test_listCatalogProbesEachEntry():
     items = listCatalog()
     names = {item["tool"] for item in items}
-    assert {"opencode", "qoder", "codebuddy", "zcode", "gemini-cli", "claude-code", "codex", "trae"} <= names
+    assert {"opencode", "qoder", "qodercn", "codebuddy", "zcode", "gemini-cli", "claude-code", "codex", "trae"} <= names
     for item in items:
         assert "installed" in item and "install_hint" in item
 
@@ -127,7 +144,7 @@ def test_executorKindsIsSingleSource():
 
 
 def test_everyPresetDeclaresCapabilities():
-    assert len(CATALOG) == 8, "八家预设（含 trae 留档）都须声明 capabilities"
+    assert len(CATALOG) == 9, "九家预设（含 trae 留档）都须声明 capabilities"
     for tool, entry in CATALOG.items():
         caps = entry.get("capabilities")
         assert isinstance(caps, dict), f"{tool} 缺 capabilities 声明"
@@ -236,3 +253,8 @@ def test_claudeCodeHandshakeWhenInstalled():
 
 def test_codexHandshakeWhenInstalled():
     _handshake("codex")
+
+
+def test_qoderCnHandshakeWhenInstalled():
+    """Qoder CN CLI（qodercn）真握手：未装 skip（不伪造通过），装了才真跑。"""
+    _handshake("qodercn")

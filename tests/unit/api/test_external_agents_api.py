@@ -65,7 +65,7 @@ def test_catalogListsPresetsWithInstallProbe(client):
     assert resp.status_code == 200, resp.text
     items = resp.json()
     names = {item["tool"] for item in items}
-    assert {"opencode", "qoder", "codebuddy", "zcode", "gemini-cli", "claude-code", "codex"} <= names
+    assert {"opencode", "qoder", "qodercn", "codebuddy", "zcode", "gemini-cli", "claude-code", "codex"} <= names
     for item in items:
         assert "installed" in item, "每项必须带本机安装探测结果"
         assert "install_hint" in item, "未装时前端靠 install_hint 展示安装指引"

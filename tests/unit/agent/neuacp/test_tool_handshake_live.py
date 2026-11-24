@@ -42,5 +42,10 @@ def test_qoderHandshakeWhenInstalled():
     _handshake("qoder")
 
 
+def test_qoderCnHandshakeWhenInstalled():
+    """Qoder CN CLI（qodercn）真握手：未装 skip（不伪造通过），装了才真跑。"""
+    _handshake("qodercn")
+
+
 def test_codebuddyHandshakeWhenInstalled():
     _handshake("codebuddy")

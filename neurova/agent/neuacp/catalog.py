@@ -122,6 +122,7 @@ CATALOG: Dict[str, Dict[str, Any]] = {
         "capabilities": dict(_ACP_CAPABILITIES),
         "install_hint": "https://opencode.ai/docs/",
     },
+    # qoder = Qoder 国际版 CLI（docs.qoder.com/cli/acp）；中国版见 qodercn。
     "qoder": {
         "kind": "acp",
         "transport": "stdio",
@@ -129,6 +130,19 @@ CATALOG: Dict[str, Dict[str, Any]] = {
         "origin": "native",
         "capabilities": dict(_ACP_CAPABILITIES),
         "install_hint": "https://docs.qoder.com/cli/acp",
+    },
+    # qodercn = Qoder CN（中国版）CLI：命令名带 CN 后缀（docs.qoder.cn/cli/acp，
+    # `qodercn --acp` 起 stdio ACP server）；凭据环境变量为
+    # QODERCN_PERSONAL_ACCESS_TOKEN（区别于国际版 QODER_ 前缀），经成员
+    # env_keys → 凭据面注入。能力按 ACP 家档：stdio/ssh、chain/auto、流式、
+    # 会话复用；无官方续跑口径，resume 保守 False。
+    "qodercn": {
+        "kind": "acp",
+        "transport": "stdio",
+        "command": ["qodercn", "--acp"],
+        "origin": "native",
+        "capabilities": dict(_ACP_CAPABILITIES),
+        "install_hint": "https://docs.qoder.cn/cli/acp",
     },
     "codebuddy": {
         "kind": "acp",
