@@ -51,14 +51,29 @@ def click_screenshot_point(manager: Any, x: Any, y: Any, button: str = "left") -
     """截图像素坐标点击（R0-2 坐标链：内部换算 DPI/多屏后落 pyautogui）"""
     if x is None or y is None:
         return {"error": "缺少必要的坐标参数 x, y"}
+    from neurova.computer_use import evidence_frames as _ef
+
+    evidenceOn = _ef.evidenceFramesEnabled()
+    beforeBytes: Optional[bytes] = None
     try:
         with _holdDesktopLane("computer_click"):
+            # T5 证据帧：开启档下在车道窗口内取动作前/后帧（拒绝路径无帧）
+            beforeBytes = screenshot_bytes(manager) if evidenceOn else None
             success = manager.click_screenshot_point(x, y, button)
+            afterBytes = screenshot_bytes(manager) if evidenceOn else None
     except LaneRefusal as refusal:
         return _laneRefusalResult(refusal)
+    result: Dict = {}
     if success:
-        return {"success": True, "x": x, "y": y, "button": button}
-    return {"error": "点击操作失败", "x": x, "y": y}
+        result = {"success": True, "x": x, "y": y, "button": button}
+    else:
+        result = {"error": "点击操作失败", "x": x, "y": y}
+    if evidenceOn:
+        pair = _ef.buildEvidencePair(beforeBytes, afterBytes, (x, y))
+        if pair is not None:
+            _ef.storeEvidence(pair)
+            _ef.attachToResult(result, pair)
+    return result
 
 
 def type_text(manager: Any, text: Any, interval: float = 0.05) -> Dict:
@@ -159,17 +174,31 @@ def drag(
         duration_f = max(0.05, float(duration or 0.5))
     except (TypeError, ValueError):
         duration_f = 0.5
+    from neurova.computer_use import evidence_frames as _ef
+
+    evidenceOn = _ef.evidenceFramesEnabled()
+    beforeBytes: Optional[bytes] = None
     try:
         with _holdDesktopLane("computer_drag"):
+            # T5 证据帧：以拖拽终点为取证中心（落点才是结果位置）
+            beforeBytes = screenshot_bytes(manager) if evidenceOn else None
             success = manager.drag(start_x, start_y, end_x, end_y, duration_f, button or "left")
+            afterBytes = screenshot_bytes(manager) if evidenceOn else None
     except LaneRefusal as refusal:
         return _laneRefusalResult(refusal)
     if success:
-        return {
+        result = {
             "success": True,
             "start": [start_x, start_y],
             "end": [end_x, end_y],
             "button": button or "left",
         }
-    return {"error": "拖拽操作失败"}
+    else:
+        result = {"error": "拖拽操作失败"}
+    if evidenceOn:
+        pair = _ef.buildEvidencePair(beforeBytes, afterBytes, (end_x, end_y))
+        if pair is not None:
+            _ef.storeEvidence(pair)
+            _ef.attachToResult(result, pair)
+    return result
 
