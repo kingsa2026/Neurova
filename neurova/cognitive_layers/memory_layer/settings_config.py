@@ -182,6 +182,17 @@ PARAM_SCHEMAS: List[ParamSchema] = [
     ParamSchema("proactive_recall.emotion_min_intensity", 0.5, "float", 0.0, 1.0,
                 "情感触发回忆的最低当前情感强度（低于此值不触发情感共鸣召回）",
                 desc_key="memorySettings.paramproactiveRecallEmotionMinIntensity"),
+    # ---- recall: 召回通道与温度梯度（D7/D8 评测调优域）----
+    ParamSchema("recall.temp_channel_relevance_floor", 0.6, "float", 0.0, 1.0,
+                "温度通道相关性门限——候选热记忆与查询的嵌入相似度须≥此值才注入融合"
+                "（D8：热而无关的记忆不得挤掉相关命中）",
+                desc_key="memorySettings.paramrecallTempChannelRelevanceFloor"),
+    ParamSchema("recall.hit_gain", 0.25, "float", 0.0, 1.0,
+                "召回命中比例回温系数（T += (100−T)×k，D5-R2）",
+                desc_key="memorySettings.paramrecallHitGain"),
+    ParamSchema("recall.hot_limit", 500, "int", 0, 1000000,
+                "启动热层装载上限（0=关闭分层全量装载，批二）",
+                desc_key="memorySettings.paramrecallHotLimit"),
 ]
 
 

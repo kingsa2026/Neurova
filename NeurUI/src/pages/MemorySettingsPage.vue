@@ -162,6 +162,29 @@
       <a-empty v-if="!loading && schema.length === 0" :description="t('memorySettings.noSchema')" />
     </a-spin>
 
+    <!-- 召回自动调参（D7）：管理员在合成语料上扫描温度通道门限，择优写入设置 -->
+    <GlassCard v-if="isAdmin" class="tuning-card" :title="t('memorySettings.tuningTitle')">
+      <p class="tuning-desc">{{ t('memorySettings.tuningDesc') }}</p>
+      <GlassButton
+        variant="secondary"
+        size="sm"
+        :loading="tuningRunning"
+        @click="runTuning"
+      >
+        {{ tuningRunning ? t('memorySettings.tuningRunning') : t('memorySettings.tuningRun') }}
+      </GlassButton>
+      <div v-if="lastTuning" class="tuning-result">
+        <div class="tuning-row">
+          {{ t('memorySettings.tuningLastBest') }}:
+          <code>{{ lastTuning.best?.floor }}</code>
+          · MRR {{ lastTuning.best?.mrr }}
+        </div>
+        <div class="tuning-row">
+          {{ t('memorySettings.tuningBaseline') }}: {{ lastTuning.baseline_without_temp }}
+        </div>
+      </div>
+    </GlassCard>
+
     <!-- Save bar：管理员常驻操作条，重置紧挨保存按钮（重置选中项依赖行首勾选框） -->
     <div v-if="isAdmin" class="save-bar">
       <div v-if="hasChanges" class="save-info">
@@ -252,6 +275,7 @@ const sectionLabelMap: Record<string, string> = {
   vector_search: 'memorySettings.sectionVectorSearch',
   manager: 'memorySettings.sectionManager',
   llm: 'memorySettings.sectionLlm',
+  recall: 'memorySettings.sectionRecall',
 }
 
 const sectionDescMap: Record<string, string> = {
@@ -264,6 +288,7 @@ const sectionDescMap: Record<string, string> = {
   vector_search: 'memorySettings.sectionVectorSearchDesc',
   manager: 'memorySettings.sectionManagerDesc',
   llm: 'memorySettings.sectionLlmDesc',
+  recall: 'memorySettings.sectionRecallDesc',
 }
 
 const sectionLabel = (sec: string) => {
@@ -465,8 +490,38 @@ const handleImport = (file: File) => {
   return false // prevent auto upload
 }
 
+// --- 召回自动调参（D7）---
+
+const tuningRunning = ref(false)
+const lastTuning = ref<memSettingsApi.TuningReport | null>(null)
+
+const fetchLastTuning = async () => {
+  try {
+    const res: any = await memSettingsApi.getLastTuningReport()
+    lastTuning.value = res?.data ?? res ?? null
+  } catch {
+    /* 无报告/权限不足时静默 */
+  }
+}
+
+const runTuning = async () => {
+  tuningRunning.value = true
+  try {
+    const res: any = await memSettingsApi.runRecallAutoTune()
+    lastTuning.value = res?.data ?? res ?? null
+    message.success(t('memorySettings.tuningDone'))
+    // 调参会改写 recall.temp_channel_relevance_floor 的当前值，刷新展示
+    await fetchSchema()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  } finally {
+    tuningRunning.value = false
+  }
+}
+
 onMounted(() => {
   fetchSchema()
+  fetchLastTuning()
 })
 </script>
 
@@ -675,5 +730,27 @@ onMounted(() => {
   font-size: 13px;
   color: var(--nr-text-secondary);
   margin-right: auto;
+}
+
+/* 召回自动调参（D7） */
+.tuning-desc {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--nr-text-secondary);
+}
+
+.tuning-result {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--nr-text-primary, #eaeaf0);
+}
+
+.tuning-row code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--nr-glass-border, rgba(255, 255, 255, 0.1));
 }
 </style>

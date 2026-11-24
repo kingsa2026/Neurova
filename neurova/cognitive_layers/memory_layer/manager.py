@@ -56,15 +56,27 @@ logger = get_logger(__name__)
 
 
 def _memory_hot_limit() -> int:
-    """热层装载上限（批二温度分层）：env `NEUROVA_MEMORY_HOT_LIMIT`，
-    默认 500；0 = 关闭分层（全量同步装载，行为同旧）。钳制 [0, 10_000_000]。
+    """热层装载上限（批二温度分层）：env `NEUROVA_MEMORY_HOT_LIMIT` 优先，
+    其次记忆设置 `recall.hot_limit`（D7 自动调参可写），缺省 500；
+    0 = 关闭分层（全量同步装载）。钳制 [0, 10_000_000]。
     """
     raw = (os.environ.get("NEUROVA_MEMORY_HOT_LIMIT") or "").strip()
+    n: Optional[int] = None
     try:
-        n = int(raw) if raw else 500
+        if raw:
+            n = int(raw)
     except ValueError:
-        n = 500
-    return max(0, min(n, 10_000_000))
+        n = None
+    if n is None:
+        try:
+            from neurova.cognitive_layers.memory_layer.settings_config import (
+                get_memory_settings,
+            )
+
+            n = int(get_memory_settings().get("recall.hot_limit", 500))
+        except Exception:
+            n = 500
+    return max(0, min(int(n), 10_000_000))
 
 
 def _row_origin(row) -> "MemoryOrigin":

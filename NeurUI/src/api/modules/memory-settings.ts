@@ -64,3 +64,35 @@ export function exportSettings() {
 export function importSettings(settings: Record<string, any>) {
   return api.put<{ imported: string[] }>(`${BASE}/settings/import`, { settings })
 }
+
+// ---------------------------------------------------------------------------
+// 召回自动调参（D7）
+// ---------------------------------------------------------------------------
+
+export interface TuningCandidate {
+  floor: number
+  mrr: number
+  hit5: number
+}
+
+export interface TuningReport {
+  baseline_without_temp: number
+  candidates: TuningCandidate[]
+  best: { floor: number; mrr: number }
+  applied: boolean
+}
+
+/** 运行召回自动调参（合成语料扫描，择优写入记忆设置；仅管理员） */
+export function runRecallAutoTune(floors?: number[], apply = true) {
+  return api.post<TuningReport>(`${BASE}/settings/tuning/auto`, {
+    floors: floors ?? null,
+    apply,
+  })
+}
+
+/** 最近一次自动调参报告（仅管理员） */
+export function getLastTuningReport() {
+  return api.get<TuningReport | Record<string, never>>(
+    `${BASE}/settings/tuning/last`
+  )
+}

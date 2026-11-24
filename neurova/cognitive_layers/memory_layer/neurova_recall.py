@@ -655,6 +655,24 @@ class RecallResult:
 TEMP_CHANNEL_RELEVANCE_FLOOR: float = 0.6
 
 
+def _temp_channel_floor() -> float:
+    """D8 门限解析：记忆设置 recall.temp_channel_relevance_floor 优先，
+    缺省/非法回退常量 0.6。自动调参工具（recall_auto_tune）把最优档写进
+    记忆设置，运行期由此读取。
+    """
+    try:
+        from neurova.cognitive_layers.memory_layer.settings_config import (
+            get_memory_settings,
+        )
+
+        v = get_memory_settings().get("recall.temp_channel_relevance_floor")
+        if isinstance(v, (int, float)) and 0.0 <= float(v) <= 1.0:
+            return float(v)
+    except Exception:
+        pass
+    return TEMP_CHANNEL_RELEVANCE_FLOOR
+
+
 class NeurovaRecallEngine:
     """
     Neurova 统一记忆检索引擎
@@ -1230,8 +1248,13 @@ class NeurovaRecallEngine:
                 self.memory_manager.get_top_memories_by_temperature(limit) or []
             )
 
-            # D8 相关性门：热但与查询无关的记忆不得借温度分挤掉相关命中。
-            # 相似度与文本通道同尺（嵌入余弦）；门失效时退回不过滤（旧行为）。
+            # D8 相关性门 + 评分：热但与查询无关的记忆不得借温度分挤掉相关
+            # 命中。候选须与查询相似度 ≥ 门限（记忆设置 recall.
+            # temp_channel_relevance_floor，缺省 0.6）；通道分 = 温度/100 ×
+            # 相似度（越热越相关越高，且有界不越文本通道量级）。门失效时
+            # 退回不过滤（旧行为）。
+            floor = _temp_channel_floor()
+            kept: List[tuple] = []
             if query and top_memories:
                 try:
                     from neurova.cognitive_layers.memory_layer.semantic_search import (
@@ -1239,21 +1262,26 @@ class NeurovaRecallEngine:
                     )
 
                     _search = get_semantic_search()
-                    top_memories = [
-                        mem for mem in top_memories
-                        if _search.compute_similarity(
+                    for mem in top_memories:
+                        sim = _search.compute_similarity(
                             query, mem.get("content", "")
-                        ) >= TEMP_CHANNEL_RELEVANCE_FLOOR
-                    ]
+                        )
+                        if sim >= floor:
+                            kept.append((mem, sim))
                 except Exception as e:
                     logger.warning("温度通道相关性门失效，退回不过滤: %s", e)
+                    kept = [(mem, None) for mem in top_memories]
+            else:
+                kept = [(mem, None) for mem in top_memories]
 
-            # 转换为RecalledMemory
-            for mem in top_memories:
+            # 转换为RecalledMemory（温度分 × 相关相似度；无相似度时退回纯温度分）
+            for mem, sim in kept:
+                temp_score = mem.get("temperature", 50) / 100.0
+                score = temp_score * sim if sim is not None else temp_score
                 results.append(RecalledMemory(
                     memory_id=mem.get("id", ""),
                     content=mem.get("content", ""),
-                    score=mem.get("temperature", 50) / 100.0,
+                    score=score,
                     channel=RecallChannel.TEMPERATURE,
                     metadata={"temperature": mem.get("temperature", 50)},
                 ))

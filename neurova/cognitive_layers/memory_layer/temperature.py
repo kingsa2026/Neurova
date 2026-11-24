@@ -46,15 +46,29 @@ def apply_recall_gain(temp: float, k: Optional[float] = None) -> float:
 
     取代旧"固定 +10 封顶 100"——旧式在 100 封顶下对高频记忆是空操作，
     100° 大平票毁掉排序区分度。比例式边际递减、天然有界 [temp, 100]，
-    访问频率越高平衡温度越高，形成连续谱。env `NEUROVA_MEMORY_HIT_GAIN`
-    可覆盖 k；k 钳制 [0, 1]。
+    访问频率越高平衡温度越高，形成连续谱。
+
+    k 的解析顺序：显式实参 > env `NEUROVA_MEMORY_HIT_GAIN` > 记忆设置
+    `recall.hit_gain`（D7 自动调参回写处）> 默认 0.25；k 钳制 [0, 1]。
     """
     try:
-        gain = (
-            float(k)
-            if k is not None
-            else float(os.environ.get("NEUROVA_MEMORY_HIT_GAIN") or 0.25)
-        )
+        if k is not None:
+            gain = float(k)
+        else:
+            env_raw = os.environ.get("NEUROVA_MEMORY_HIT_GAIN")
+            if env_raw:
+                gain = float(env_raw)
+            else:
+                try:
+                    from neurova.cognitive_layers.memory_layer.settings_config import (
+                        get_memory_settings,
+                    )
+
+                    gain = float(
+                        get_memory_settings().get("recall.hit_gain", 0.25)
+                    )
+                except Exception:
+                    gain = 0.25
     except (TypeError, ValueError):
         gain = 0.25
     gain = min(max(gain, 0.0), 1.0)

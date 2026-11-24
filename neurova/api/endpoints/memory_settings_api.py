@@ -97,6 +97,42 @@ async def export_memory_settings(
     }
 
 
+class TuningRunRequest(BaseModel):
+    """自动调参请求"""
+    floors: Optional[List[float]] = Field(
+        default=None,
+        description="候选门限列表（缺省 0.4~0.8 五档）"
+    )
+    apply: bool = Field(default=True, description="是否把最优门限写入记忆设置")
+
+
+@router.post("/settings/tuning/auto")
+async def run_recall_tuning(
+    body: TuningRunRequest = TuningRunRequest(),
+    admin: Dict[str, Any] = Depends(require_admin()),
+):
+    """运行召回自动调参（合成语料扫描，择优写入记忆设置）— 仅管理员。
+
+    同步执行（合成语料秒级）；调参期间会短暂改写进程内温度门限。
+    """
+    import asyncio
+
+    from neurova.benchmark.recall_auto_tune import run_recall_auto_tune
+
+    report = await asyncio.to_thread(run_recall_auto_tune, body.floors, body.apply)
+    return {"code": 0, "message": "success", "data": report}
+
+
+@router.get("/settings/tuning/last")
+async def get_last_tuning_report(
+    admin: Dict[str, Any] = Depends(require_admin()),
+):
+    """最近一次自动调参报告 — 仅管理员"""
+    from neurova.benchmark.recall_auto_tune import load_last_report
+
+    return {"code": 0, "message": "success", "data": load_last_report() or {}}
+
+
 @router.get("/settings/{section}")
 async def get_settings_section(
     section: str,
