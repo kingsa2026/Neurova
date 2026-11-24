@@ -497,21 +497,31 @@ class TestImageTieredTrimming:
         assert isinstance(history, list)
 
     @pytest.mark.asyncio
-    async def test_longContextModel_onlyOldImagesTrimmed_widerWindow(self, isolatedSessions):
-        """长上下文模型：保留窗分档放宽——8 条含图消息全在 keep 窗内 → 零摘图。"""
-        pipe, agent = _mk_pipeline()
-        agent.config.llm_config.model = "gemini-1.5-pro"  # 1M 窗 → 超长档 keep=16
-        pipe._agent.session_manager = isolatedSessions
-        pipe._resolveContextBudget = lambda: 5000
-        ctx = ChatContext(user_input="继续")
-        ctx.session_id = "sess-img-2"
-        ctx.context = self._imgContext()
+    async def test_imageTierContrast_baseStrips_longContextSpares(self, isolatedSessions):
+        """同窗形双模型对照（判别性红→绿）：基础档摘旧图、长上下文档零摘图。
 
-        compacted = await pipe._autoCompactContextIfNeeded(ctx)
+        判别性来源：旧代码（无裁图档）下两个模型都不摘图，对照断言必红；
+        新代码下基础档（keep=4）摘 keep 窗外旧图、gemini（1M 窗→keep=16）
+        零摘图——图像保留窗口分档的判别性证据由此用例承担。
+        """
+        results = {}
+        for model, sess in (("test-model", "sess-img-contrast-base"),
+                            ("gemini-1.5-pro", "sess-img-contrast-long")):
+            pipe, agent = _mk_pipeline()
+            agent.config.llm_config.model = model
+            pipe._agent.session_manager = isolatedSessions
+            pipe._resolveContextBudget = lambda: 5000
+            ctx = ChatContext(user_input="继续")
+            ctx.session_id = sess
+            ctx.context = self._imgContext()
 
-        assert compacted is True, "超触发线仍会压缩，但裁图档在宽窗下无旧图可摘"
-        assert _countPlaceholders(ctx.context) == 0, "长上下文模型不得摘近期图（只裁旧图）"
-        assert _countImages(ctx.context) >= 4, "宽窗内图像部件不得被裁图档触碰"
+            assert await pipe._autoCompactContextIfNeeded(ctx) is True
+            results[model] = _countPlaceholders(ctx.context)
+
+        assert results["test-model"] >= 1, \
+            "基础档必须摘 keep 窗外旧图（对照锚；旧代码此值为 0 → 红）"
+        assert results["gemini-1.5-pro"] == 0, \
+            "长上下文模型同窗形零摘图（只裁旧图：8 条含图消息全在宽窗内）"
 
     def test_imageRetention_windowTiersByModel(self):
         """请求装配防线同享分档：长上下文模型保留窗更宽，只裁更旧的图。"""
