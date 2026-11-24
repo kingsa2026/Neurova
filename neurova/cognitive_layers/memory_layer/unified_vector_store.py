@@ -30,6 +30,24 @@ from neurova.core.data_root import get_data_root
 logger = get_logger(__name__)
 
 # ═══════════════════════════════════════════════════════════════
+# 进程级共享编码器（启动性能根修 2026-11-24）
+#
+# 每个 agent 的 init_moe_router 各建一个 UnifiedVectorStore，原先各自
+# 构造编码器并各自加载同一份 bge-small-zh-v1.5 模型（首载实测 ~0.9s/
+# agent）。推理会话（onnxruntime InferenceSession / sentence-transformers /
+# fastembed）无状态且线程安全，进程内按后端共享一份即可——首个使用方
+# 付费加载，其余直接复用；编码器初始化自身有锁且幂等（initialize_sync），
+# 并发首载安全。
+_SHARED_ENCODERS: Dict[str, Any] = {}
+_SHARED_ENCODER_LOCK = threading.Lock()
+
+
+def _reset_shared_encoders_for_tests() -> None:
+    """清空进程级编码器缓存（仅测试隔离用，生产勿调）。"""
+    with _SHARED_ENCODER_LOCK:
+        _SHARED_ENCODERS.clear()
+
+# ═══════════════════════════════════════════════════════════════
 # 进程级嵌入缓存（启动性能 2026-09-09）
 #
 # init_moe_router 初始索引每次启动对全量记忆逐条 encode（199 条实测 10.7s），
@@ -269,7 +287,22 @@ class UnifiedVectorStore:
         return "tfidf"
 
     def _create_encoder(self):
-        """创建编码器"""
+        """创建编码器（进程级共享：同后端复用同一实例，见 _SHARED_ENCODERS）。
+
+        创建失败（返回 None）不进缓存——下次构造仍重试，不把 None 钉死。
+        """
+        with _SHARED_ENCODER_LOCK:
+            if self.backend in _SHARED_ENCODERS:
+                return _SHARED_ENCODERS[self.backend]
+        encoder = self._create_encoder_fresh()
+        if encoder is not None:
+            with _SHARED_ENCODER_LOCK:
+                _SHARED_ENCODERS.setdefault(self.backend, encoder)
+                return _SHARED_ENCODERS[self.backend]
+        return None
+
+    def _create_encoder_fresh(self):
+        """构造全新编码器实例（共享缓存的回源，见 _create_encoder）"""
         if self.backend == "faiss":
             try:
                 from sentence_transformers import SentenceTransformer
