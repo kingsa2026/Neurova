@@ -121,7 +121,7 @@ class SemanticSearch:
         # 策略2: 提取所有中文词（2-4个汉字）
         all_cn_words = re.findall(r'[\u4e00-\u9fa5]{2,4}', text)
         keywords.extend(all_cn_words)
-        
+
         # 策略3: 尝试按常见后缀分割（挂了、故障、错误等）
         suffixes = ['挂了', '故障', '错误', '失败', '成功', '超时', '慢了', '满了']
         for suffix in suffixes:

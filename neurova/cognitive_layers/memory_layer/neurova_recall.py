@@ -1280,6 +1280,28 @@ class NeurovaRecallEngine:
                         metadata={"match_type": "semantic" if search._use_embedding else "keyword"},
                     ))
             
+            # D7 评测暴露：词法候选为空时的稠密相似度兜底。关键词倒排用
+            # 不重叠 2~4 字窗口，查询与正文差一个虚词（的/是）即窗口错位、
+            # 零候选——此时按真实相似度（嵌入余弦）对全量快照兜底打分，
+            # 相似度 ≥0.5 才入选，防止垃圾查询注入半随机结果。
+            if not results and query:
+                scored: List[RecalledMemory] = []
+                for mem in memory_dicts:
+                    mem_content = mem.get("content", "")
+                    if not mem_content:
+                        continue
+                    score = search.compute_similarity(query, mem_content)
+                    if score >= 0.5:
+                        scored.append(RecalledMemory(
+                            memory_id=mem.get("id", ""),
+                            content=mem_content,
+                            score=score,
+                            channel=RecallChannel.TEXT,
+                            metadata={"match_type": "dense_fallback"},
+                        ))
+                scored.sort(key=lambda m: m.score, reverse=True)
+                results.extend(scored[:limit])
+
             logger.debug("文本通道检索: %s, 返回 %d 条", query, len(results))
 
         except (TypeError, AttributeError, NameError, ImportError) as e:
@@ -1850,6 +1872,27 @@ class NeurovaRecallEngine:
 
         return channel_mapping.get(intent, list(RecallChannel))
 
+    @staticmethod
+    def _merge_drill_results(
+        seed_memories: List[RecalledMemory],
+        expansions: List[RecalledMemory],
+        limit: int,
+    ) -> List[RecalledMemory]:
+        """钻取结果合并（D7 评测暴露的修复）：种子在前、扩芒补后、按 id 去重。
+
+        此前五个钻取方法都 `return results[:limit]`——扩芒为空时把 Phase 1
+        的相关命中整个丢掉；有扩芒时相关种子也会被新类别记忆顶掉。
+        "X是什么"类高频问句全走 EXPLORE，召回曾因此恒空。
+        """
+        merged: List[RecalledMemory] = []
+        seen: set = set()
+        for mem in list(seed_memories) + list(expansions):
+            if mem.memory_id in seen:
+                continue
+            seen.add(mem.memory_id)
+            merged.append(mem)
+        return merged[:limit]
+
     def _drill_explore(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
         """探索钻取 - 查找与种子记忆相关但不同类别的记忆"""
         results = []
@@ -1891,7 +1934,7 @@ class NeurovaRecallEngine:
         except Exception as e:
             logger.warning("探索钻取失败: %s", e)
         
-        return results[:limit]
+        return self._merge_drill_results(seed_memories, results, limit)
 
     def _drill_deepen(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
         """深化钻取 - 查找与种子记忆更深层相关的记忆"""
@@ -1938,7 +1981,7 @@ class NeurovaRecallEngine:
         except Exception as e:
             logger.warning("深化钻取失败: %s", e)
         
-        return results[:limit]
+        return self._merge_drill_results(seed_memories, results, limit)
 
     def _drill_connect(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
         """连接钻取 - 查找连接两个种子记忆的中间记忆"""
@@ -1986,7 +2029,7 @@ class NeurovaRecallEngine:
         except Exception as e:
             logger.warning("连接钻取失败: %s", e)
         
-        return results[:limit]
+        return self._merge_drill_results(seed_memories, results, limit)
 
     def _drill_contrast(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
         """对比钻取 - 查找与种子记忆矛盾或对比的记忆"""
@@ -2027,7 +2070,7 @@ class NeurovaRecallEngine:
         except Exception as e:
             logger.warning("对比钻取失败: %s", e)
         
-        return results[:limit]
+        return self._merge_drill_results(seed_memories, results, limit)
 
     def _drill_validate(self, query: str, seed_memories: List[RecalledMemory], limit: int) -> List[RecalledMemory]:
         """验证钻取 - 查找验证种子记忆正确性的记忆"""
@@ -2068,4 +2111,4 @@ class NeurovaRecallEngine:
         except Exception as e:
             logger.warning("验证钻取失败: %s", e)
         
-        return results[:limit]
+        return self._merge_drill_results(seed_memories, results, limit)
