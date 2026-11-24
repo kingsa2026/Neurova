@@ -419,22 +419,19 @@ def _initialize_components(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("NEUTokenManager init failed: %s", e)
 
-    # 旧扁平落点 → data/<agent_id>/ 统一布局（启动期一次性、幂等）。
+    # agent 布局 v3 切换（2026-11-24 拍板）：仅哨兵缺失时一次性执行
+    # （v1 遗留 → v2 → v3 分区 data/agent/<属主桶>/<agent_id>/），完成后写
+    # 哨兵——启动不再做任何周期性/重复的迁移扫描；后续迁移由管理员在
+    # agent 管理页手动触发（可全量或按属主定向）。
     # 必须在任何 agent 加载/默认 agent 初始化之前执行，否则旧数据读不到。
     try:
-        from neurova.core.agent_layout_migration import auto_migrate_legacy_agent_layout
+        from neurova.core.agent_layout_migration import ensure_agent_layout_v3
 
-        migration = auto_migrate_legacy_agent_layout()
-        if migration.get("moved_count") or migration.get("conflict_count") or migration.get("error_count"):
-            logger.info(
-                "agent 布局迁移：moved=%s conflicts=%s errors=%s report=%s",
-                migration.get("moved_count"),
-                migration.get("conflict_count"),
-                migration.get("error_count"),
-                migration.get("report_path", ""),
-            )
-    except Exception as e:  # noqa: BLE001 - 迁移失败不得阻断服务启动
-        logger.error("agent 布局迁移失败：%s", e, exc_info=True)
+        v3result = ensure_agent_layout_v3()
+        if not v3result.get("skipped"):
+            logger.info("agent 布局 v3 切换完成：%s", v3result.get("counts", {}))
+    except Exception as e:  # noqa: BLE001 - 切换失败按 v2 兼容运行，不阻断启动
+        logger.error("agent 布局 v3 切换失败（按 v2 兼容运行）：%s", e, exc_info=True)
 
     # 默认 Agent 工作区（根由 neurova.core.agent_workspaces 单源给出）
     from neurova.core.agent_workspaces import (

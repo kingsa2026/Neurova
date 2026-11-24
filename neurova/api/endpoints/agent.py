@@ -34,9 +34,12 @@ from neurova.api.auth import get_current_user
 from neurova.api.agent_access import can_access_agent, resolve_agent_owner
 from neurova.core.agent_workspaces import (
     RESERVED_AGENT_ROOT_NAMES,
+    clear_agent_owner,
+    discover_agent_ids,
     get_agent_config_path,
     get_agent_root_dir,
     get_agent_workspace_dir,
+    set_agent_owner,
 )
 
 logger = get_logger(__name__)
@@ -514,6 +517,12 @@ async def create_agent(
     try:
         from neurova.agent_core import Agent, AgentConfig
 
+        # 新建 agent 必须有属主（2026-11-24 拍板）：属主决定 v3 分区桶
+        # （data/agent/<属主>/<agent_id>/），无属主无法归位。
+        owner_user_id = str(current_user.get("user_id") or "").strip()
+        if not owner_user_id:
+            raise HTTPException(status_code=400, detail="新建 agent 必须有属主（current_user 无 user_id）")
+
         # 支持用户指定 agent_id，否则自动生成
         agent_id = body.agent_id.strip() if body.agent_id else str(uuid.uuid4())[:8]
         # 校验 agent_id 格式（只允许字母、数字、下划线、连字符）
@@ -584,6 +593,12 @@ async def create_agent(
             )
         except Exception as e:
             logger.error("AgentConfigManager.create_agent 失败: %s", e, exc_info=True)
+
+        # v3 分区索引：agent_id → 属主桶（data/agent/<桶>/<agent_id>/ 的判据单源）
+        try:
+            set_agent_owner(agent_id, owner_user_id)
+        except Exception as e:
+            logger.error("set_agent_owner 失败: %s", e, exc_info=True)
 
         # 执行档位派发（R6）：表单选择 lite/standard/heavy；缺省不设（跟随部署档位）
         if body.exec_profile:
@@ -796,6 +811,12 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...), curre
     except Exception as e:
         logger.warning("AgentConfigManager.delete_agent 失败: %s", e)
 
+    # v3 分区索引同步摘除（agent_id→桶）
+    try:
+        clear_agent_owner(agent_id)
+    except Exception as e:
+        logger.warning("clear_agent_owner 失败(忽略): %s", e)
+
     # 清理持久化文件：v2 布局下 agent 的全部私有面都在 `data/<id>/` 一个根里。
     # 旧布局的分散面一并清理，避免重启后幽灵 agent 复活。
     cleanup_report = {
@@ -869,6 +890,90 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...), curre
         "message": f"Agent '{agent_id}' deleted",
         "data": cleanup_report,
     }
+
+
+class AgentSharedBody(BaseModel):
+    """共享标记请求体：true = 迁入 share 桶；false = 迁回属主桶。"""
+
+    shared: bool
+
+
+@router.post("/layout/migration/scan")
+async def run_layout_migration_scan(
+    request: Request,
+    body: Optional[Dict[str, Any]] = Body(None),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """触发 agent 布局迁移扫描（管理员）：v2 平铺 → v3 分区（只搬不删）。
+
+    - body 缺省/不带 owner → 全量扫描（所有登记/发现的 agent），完成后写哨兵；
+    - body {"owner": "<user_id>"} → 仅扫描该属主的 agent（按用户隔离），
+      不写哨兵；
+    - 运行中（已加载实例）的 agent 跳过并进 pending 报告——目录搬移会让其
+      sqlite/工作区句柄悬空；如需迁它们，先停止对应 agent 或重启后端再扫。
+    """
+    _get_request_id(request)
+    if str(current_user.get("role") or "user") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可触发布局迁移扫描")
+    owner = str((body or {}).get("owner") or "").strip()
+    agent_ids = None
+    if owner:
+        from neurova.core.agent_layout_migration import agent_owner_of
+
+        agent_ids = [a for a in discover_agent_ids() if agent_owner_of(a) == owner]
+    from neurova.core.agent_layout_migration import migrate_agent_layout_v3
+
+    report = migrate_agent_layout_v3(agent_ids=agent_ids)
+    logger.info("布局迁移扫描完成（owner=%s）：%s", owner or "全量", report.get("counts", {}))
+    return {"code": 0, "message": "success", "data": report}
+
+
+@router.get("/layout/migration/status")
+async def layout_migration_status(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """迁移扫描状态读面（管理员）：哨兵 + 属主索引。"""
+    if str(current_user.get("role") or "user") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可查看迁移状态")
+    from neurova.core.agent_layout_migration import v3_migration_done
+    from neurova.core.agent_workspaces import load_agent_owner_index
+
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"v3_done": v3_migration_done(), "index": load_agent_owner_index()},
+    }
+
+
+@router.post("/{agent_id}/shared")
+async def set_agent_shared(
+    request: Request,
+    agent_id: str = FastAPIPath(...),
+    body: AgentSharedBody = ...,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """管理员把 agent 标记为共享/取消共享（物理目录随之迁入/迁出 share 桶）。"""
+    _get_request_id(request)
+    if str(current_user.get("role") or "user") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可设置共享")
+    from neurova.core.agent_layout_migration import move_agent_to_bucket
+    from neurova.core.agent_workspaces import agent_exists
+
+    if not agent_exists(agent_id):
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    if body.shared:
+        bucket = "share"
+    else:
+        from neurova.core.agent_layout_migration import agent_owner_of
+
+        bucket = agent_owner_of(agent_id) or "share"
+    report = move_agent_to_bucket(agent_id, bucket)
+    if report.get("pending"):
+        raise HTTPException(
+            status_code=409,
+            detail="agent 运行中，目录无法迁移动；请先停止该 agent 或重启后端后重试",
+        )
+    return {"code": 0, "message": "success", "data": report}
 
 
 @router.get("/{agent_id}/stats")

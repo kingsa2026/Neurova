@@ -40,6 +40,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from neurova.core.agent_workspaces import (
     _resolve_agent_id,
+    _safe_path_segment,
+    discover_agent_ids,
     get_agent_evolution_dir,
     get_agent_root,
     get_agent_root_dir,
@@ -609,3 +611,219 @@ def migrate_legacy_agent_layout(
             for conflict in report.conflicts[:10]:
                 logger.warning("agent 布局迁移冲突：%s", conflict)
         return result
+
+
+V3_SENTINEL_NAME = ".v3migration.done"
+
+
+def _ownerFromAgentConfig(agent_dir: Path) -> str:
+    """从 v2 目录的 agent_config.json 读属主（无主返回空串）。"""
+    try:
+        raw = json.loads((agent_dir / "agent_config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return ""
+    return str((raw or {}).get("owner_user_id") or "").strip()
+
+
+def _agentIsLoaded(agent_id: str) -> bool:
+    """agent 实例是否在运行池里（加载中的 agent 目录被句柄锁住，不可搬）。"""
+    try:
+        from neurova.api.endpoints import get_agent_instance
+
+        return get_agent_instance(agent_id) is not None
+    except Exception:  # noqa: BLE001 - 实例池不可读（脚本态）按未加载处理
+        return False
+
+
+def agent_owner_of(agent_id: str) -> str:
+    """agent 的属主（审计/按属主定向扫描用）：v2 目录 config > 索引 > 空串。"""
+    aid = str(agent_id or "").strip()
+    if not aid or is_reserved_agent_id(aid):
+        return ""
+    owner = _ownerFromAgentConfig(get_agent_root() / aid)
+    if owner:
+        return owner
+    entry = load_agent_owner_index().get(aid) or {}
+    return str(entry.get("owner") or "").strip()
+
+
+def migrate_agent_layout_v3(
+    agent_ids: Optional[List[str]] = None, dry_run: bool = False
+) -> Dict[str, Any]:
+    """v2 平铺（data/<agent_id>/）→ v3 分区（data/agent/<桶>/<agent_id>/）。
+
+    只搬不删；逐 agent 汇报。桶取属主：v2 目录 agent_config.json 的
+    owner_user_id，空 → share 桶（2026-11-24 拍板）。同步写 agent_id→桶
+    索引（路径解析单源）。已加载运行的 agent 跳过（pending 报告）——目录
+    搬走会让运行实例的 workspace_path 与打开的 sqlite 句柄悬空，需停机后
+    重扫。全量扫描（不指定 agent_ids）完成后写哨兵
+    data/agent/.v3migration.done；定向扫描（按属主）不写哨兵。
+    """
+    from neurova.core.agent_workspaces import (
+        AGENT_PARTITION_DIR,
+        SHARE_BUCKET,
+        agent_owner_index_path,
+        agentRootIsIsolated,
+        load_agent_owner_index,
+        save_agent_owner_index,
+    )
+
+    if agentRootIsIsolated():
+        return {"skipped": "isolated_root"}
+
+    agent_root = get_agent_root()
+    partition = agent_root / AGENT_PARTITION_DIR
+    index = load_agent_owner_index()
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    report: Dict[str, Any] = {
+        "dry_run": dry_run, "full": agent_ids is None,
+        "moved": [], "pending": [], "skipped": [], "conflicts": [], "errors": [],
+    }
+
+    ids = list(agent_ids) if agent_ids else discover_agent_ids()
+    for aid in ids:
+        try:
+            aid = _resolve_agent_id(aid)
+        except ValueError:
+            continue
+        legacy = agent_root / aid
+        entry = index.get(aid) or {}
+        owner = str(entry.get("owner") or "") or _ownerFromAgentConfig(legacy)
+        bucket = str(entry.get("bucket") or "") or (owner or SHARE_BUCKET)
+        record = {"agent_id": aid, "bucket": bucket, "owner": owner}
+        target = partition / _safe_path_segment(bucket) / aid
+
+        if not legacy.exists():
+            # 无 v2 数据（已迁 v3 或纯登记）：仅补索引
+            if not target.exists():
+                report["skipped"].append({**record, "reason": "no legacy data"})
+            if not dry_run:
+                index[aid] = {"bucket": bucket, "owner": owner, "updated_at": stamp}
+            continue
+
+        if _agentIsLoaded(aid):
+            report["pending"].append({**record, "reason": "agent instance is loaded/running"})
+            continue
+
+        if target.exists():
+            report["conflicts"].append({**record, "target": str(target),
+                                        "reason": "target already exists"})
+            continue
+
+        if dry_run:
+            report["moved"].append({**record, "from": str(legacy), "to": str(target)})
+            continue
+
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(legacy), str(target))
+            index[aid] = {"bucket": bucket, "owner": owner, "updated_at": stamp}
+            report["moved"].append({**record, "from": str(legacy), "to": str(target)})
+        except OSError as e:
+            report["errors"].append({**record, "error": f"{type(e).__name__}: {e}"})
+
+    if not dry_run:
+        save_agent_owner_index(index)
+        if agent_ids is None:
+            partition.mkdir(parents=True, exist_ok=True)
+            (partition / V3_SENTINEL_NAME).write_text(stamp, encoding="utf-8")
+    report["counts"] = {k: len(v) for k, v in report.items() if isinstance(v, list)}
+    return report
+
+
+def move_agent_to_bucket(agent_id: str, bucket: str, dry_run: bool = False) -> Dict[str, Any]:
+    """把单个 agent 目录搬到指定桶（共享标记/属主转移）。只搬不删。
+
+    - 现行落点（v3 或 v2 兼容位）与目标一致 → no-op；
+    - agent 实例在运行池（loaded）→ pending（目录搬移会让其句柄悬空）；
+    - 目标已存在 → conflict（不覆盖）；
+    - 搬移后同步属主索引，并尽力改写目标 agent_config.json 的 workspace_path。
+    """
+    from neurova.core.agent_workspaces import (
+        AGENT_PARTITION_DIR,
+        agentRootIsIsolated,
+        get_agent_workspace_dir,
+        load_agent_owner_index,
+        save_agent_owner_index,
+    )
+
+    aid = _resolve_agent_id(agent_id)
+    bucket_segment = _safe_path_segment(bucket)
+    if agentRootIsIsolated():
+        return {"agent_id": aid, "skipped": "isolated_root"}
+
+    agent_root = get_agent_root()
+    current = get_agent_root_dir(aid)
+    target = agent_root / AGENT_PARTITION_DIR / bucket_segment / aid
+    index = load_agent_owner_index()
+    entry = index.get(aid) or {}
+    owner = str(entry.get("owner") or "") or _ownerFromAgentConfig(current)
+    report: Dict[str, Any] = {
+        "agent_id": aid, "bucket": bucket_segment, "owner": owner,
+        "from": str(current), "to": str(target), "moved": False,
+    }
+    if current == target:
+        report["reason"] = "already in bucket"
+        return report
+    if _agentIsLoaded(aid):
+        report["pending"] = True
+        report["reason"] = "agent instance is loaded/running"
+        return report
+    if current.exists():
+        if target.exists():
+            report["conflict"] = True
+            report["reason"] = "target already exists"
+            return report
+        if dry_run:
+            report["dry_run"] = True
+            return report
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(current), str(target))
+            report["moved"] = True
+        except OSError as e:
+            report["error"] = f"{type(e).__name__}: {e}"
+            return report
+        # 尽力改写随迁 agent_config.json 的 workspace_path（信息性字段，
+        # 路径解析以 agent_workspaces 单源为准）
+        try:
+            cfg_path = target / "agent_config.json"
+            if cfg_path.exists():
+                cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+                if isinstance(cfg, dict) and cfg.get("workspace_path"):
+                    cfg["workspace_path"] = str(get_agent_workspace_dir(aid))
+                    cfg_path.write_text(
+                        json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
+    if not dry_run:
+        with _MIGRATION_LOCK:
+            fresh = load_agent_owner_index()
+            fresh[aid] = {"bucket": bucket_segment, "owner": owner,
+                          "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+            save_agent_owner_index(fresh)
+    return report
+
+
+def v3_migration_done() -> bool:
+    """哨兵：v2→v3 全量切换是否已完成（完成则启动期不再做任何扫描/搬移）。"""
+    from neurova.core.agent_workspaces import AGENT_PARTITION_DIR
+
+    return (get_agent_root() / AGENT_PARTITION_DIR / V3_SENTINEL_NAME).exists()
+
+
+def ensure_agent_layout_v3() -> Dict[str, Any]:
+    """启动期一次性 v2→v3 切换（哨兵把关：完成过就不再做任何扫描/搬移）。
+
+    v1 遗留（agent_workspaces/<id>）若仍在，先走既有 v1→v2 迁移再切 v3。
+    """
+    if v3_migration_done():
+        return {"skipped": "sentinel"}
+    legacy_result: Dict[str, Any] = {}
+    try:
+        legacy_result = auto_migrate_legacy_agent_layout()
+    except Exception as e:  # noqa: BLE001 - v1 遗留失败不阻断 v3 切换
+        logger.error("v1→v2 遗留迁移失败（继续 v3 切换）: %s", e, exc_info=True)
+    result = migrate_agent_layout_v3()
+    result["legacy"] = legacy_result
+    return result
