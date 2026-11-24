@@ -9,10 +9,11 @@ ASR Manager - ASR引擎管理器
 
 import asyncio
 import os
+import sys
 
 from neurova.core.logger import get_logger
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -93,8 +94,15 @@ class ASRManager:
             # 追加只发生在本次初始化的**本地链副本**，不改写模块级 FALLBACK_CHAIN
             #（原实现原地 append 全局列表且永不恢复，同进程后续实例全被污染
             # ——fullrepo 审计 2026-11-18 D 组，动态探针实证）。
+            # 2026-11-24：测试态进一步把 mock 提到**链首**——单测起真 app 不再
+            # 加载 funasr/torch 大模型（torch.load 在内存压力下原生段错误，
+            # api 回归两次实崩），ASR 端点拿 mock 占位转写，判据不依赖真模型。
+            # 判定除 NEUROVA_ENV=test 外兼认 pytest 在场：套件里个别用例会临时
+            # 改写/清除 NEUROVA_ENV，单靠 env 会在套件后段漏判、重新坠回 funasr。
+            test_env = (os.environ.get("NEUROVA_ENV") == "test"
+                        or "pytest" in sys.modules)
             return await self._initialize_with_fallback(
-                append_mock=os.environ.get("NEUROVA_ENV") == "test"
+                append_mock=test_env, mock_first=test_env
             )
         else:
             # 显式指定本地 whisper 同样过同意门（拒绝优于静默下载）
@@ -106,19 +114,40 @@ class ASRManager:
                 return False
             return await self._initialize_engine(self._config.engine)
 
-    async def _initialize_with_fallback(self, append_mock: bool = False) -> bool:
+    @staticmethod
+    def _build_fallback_chain(append_mock: bool = False, mock_first: bool = False,
+                              whisper_consent: bool = False) -> List[str]:
+        """构造 ASR 引擎 fallback 链（纯函数，判据可单测）。
+
+        - mock_first（测试态）：mock 放链首——单测起真 app 不再加载
+          funasr/torch 大模型（torch.load 在内存压力下原生段错误，
+          2026-11-24 api 回归两次实崩），ASR 端点拿 mock 占位转写。
+        - append_mock：mock 追加链尾（显式指定形态）。
+        - whisper 是管理员 opt-in：未同意（whisper_consent=False）时跳过。
+        """
+        chain = list(FALLBACK_CHAIN)
+        if mock_first:
+            chain.insert(0, "mock")
+        if append_mock:
+            chain.append("mock")
+        if not whisper_consent and "whisper" in chain:
+            chain.remove("whisper")
+        return chain
+
+    async def _initialize_with_fallback(self, append_mock: bool = False, mock_first: bool = False) -> bool:
         """按 fallback 链初始化。
 
         本地 whisper 是管理员 opt-in（local_whisper_consent）：未同意时
         链中跳过（模型 ~140MB+torch 下载需用户知情同意），同意后自动参与。
-        mock 仅在 append_mock（测试态/显式指定）时追加到**本地链副本**尾，
-        不改写模块级 FALLBACK_CHAIN。
+        mock 仅在 append_mock（测试态/显式指定）时参与**本地链副本**，
+        不改写模块级 FALLBACK_CHAIN；mock_first（测试态）把 mock 提到链首。
         """
-        chain = list(FALLBACK_CHAIN)
-        if append_mock:
-            chain.append("mock")
-        if not self._config.local_whisper_consent and "whisper" in chain:
-            chain.remove("whisper")
+        chain = self._build_fallback_chain(
+            append_mock=append_mock,
+            mock_first=mock_first,
+            whisper_consent=self._config.local_whisper_consent,
+        )
+        if not self._config.local_whisper_consent:
             logger.info("本地 whisper 未获用户同意，链中跳过（funasr→remote_whisper）")
         for engine_name in chain:
             logger.info("尝试初始化 ASR 引擎: %s", engine_name)
