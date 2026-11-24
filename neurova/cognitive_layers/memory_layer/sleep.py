@@ -65,6 +65,10 @@ class MemoryRecord:
     emotion_score: float = 0.0
     recall_count: int = 0
     created_at: datetime = field(default_factory=datetime.now)
+    # D5-R4：真实最后访问时间——衰减的闲置天数必须按它算，不能按 created_at
+    # （"昨天刚访问但创建于一年前"的记忆会被按一年闲置重罚，方向完全相反）。
+    # None = 从未访问，衰减时回退 created_at。
+    last_accessed_at: Optional[datetime] = None
     categories: List[str] = field(default_factory=list)
     is_archived: bool = False
     merged_from: List[str] = field(default_factory=list)
@@ -87,6 +91,16 @@ class MemoryRecord:
         elif not isinstance(created_at, datetime):
             created_at = datetime.now()
 
+        # D5-R4：真实最后访问时间（缺失/非法 → None，衰减侧回退 created_at）
+        last_accessed_at = data.get("last_accessed_at")
+        if isinstance(last_accessed_at, str):
+            try:
+                last_accessed_at = datetime.fromisoformat(last_accessed_at)
+            except ValueError:
+                last_accessed_at = None
+        elif not isinstance(last_accessed_at, datetime):
+            last_accessed_at = None
+
         categories = data.get("categories") or []
         if not categories and data.get("category"):
             # `Memory.to_dict()` 只有单数 `category`：不接住它，分类就跨不过这道跨界口，
@@ -103,6 +117,7 @@ class MemoryRecord:
             emotion_score=data.get("emotion_score", 0.0),
             recall_count=data.get("recall_count", data.get("access_count", 0)),
             created_at=created_at,
+            last_accessed_at=last_accessed_at,
             categories=categories,
             # 退役与否的唯一出处是 `lifecycle_stage`——`Memory.to_dict()` 里**没有** `is_archived`
             # 这个键。此前只读 `is_archived`，于是 soft-forget/归档过的行在进入固化时被当成活跃
@@ -465,9 +480,13 @@ class SleepConsolidation(StateValuesStore):
             # on_decay(current_temp: float, ...) → {"new_temp": ...}
             for memory in memories:
                 try:
+                    # D5-R4：闲置天数按真实最后访问时间算（NULL 回退 created_at），
+                    # 不能传 created_at——"昨天刚访问但创建于一年前"会被按一年
+                    # 闲置重罚，方向完全相反。
+                    effective_last = memory.last_accessed_at or memory.created_at
                     outcome = engine.on_decay(
                         memory.temperature,
-                        last_accessed=memory.created_at.isoformat() if hasattr(memory.created_at, "isoformat") else str(memory.created_at),
+                        last_accessed=effective_last.isoformat() if hasattr(effective_last, "isoformat") else str(effective_last),
                         importance=memory.importance,
                         emotion_score=memory.emotion_score,
                         recall_count=memory.recall_count,

@@ -11,10 +11,54 @@
 
 from neurova.core.logger import get_logger
 import math
+import os
 import threading
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# 温度阈值常量（D5-R9，2026-11-24 语义化：原先三处 80.0 字面量各司其职，
+# 改一处漏两处的角色混淆在此收口为具名单源）
+# ---------------------------------------------------------------------------
+
+# 衰减冻结门：≥ 该温度的记忆视为固化、不参与衰减（用户拍板 80→95：
+# 配合出生 60° + 比例回温 k=0.25，连续命中约 8 次才跨 95，固化成为
+# "持续使用挣来的"状态而非出生即得）
+DECAY_FREEZE_TEMP: float = 95.0
+# 重要升级判据：温度达到即满足升级为重要记忆的温度分量
+IMPORTANT_UPGRADE_TEMP: float = 80.0
+# 结晶判定温度分量：important + 情绪≥0.5 时需温度达到才结晶
+CRYSTALLIZE_TEMP: float = 80.0
+
+
+def _freeze_threshold() -> float:
+    """衰减冻结门阈值：env `NEUROVA_MEMORY_FREEZE_TEMP` 可覆盖（D5-R3）。"""
+    raw = (os.environ.get("NEUROVA_MEMORY_FREEZE_TEMP") or "").strip()
+    try:
+        return float(raw) if raw else DECAY_FREEZE_TEMP
+    except ValueError:
+        return DECAY_FREEZE_TEMP
+
+
+def apply_recall_gain(temp: float, k: Optional[float] = None) -> float:
+    """命中回温（D5-R2 比例式）：`T += (100 − T) × k`，k 默认 0.25。
+
+    取代旧"固定 +10 封顶 100"——旧式在 100 封顶下对高频记忆是空操作，
+    100° 大平票毁掉排序区分度。比例式边际递减、天然有界 [temp, 100]，
+    访问频率越高平衡温度越高，形成连续谱。env `NEUROVA_MEMORY_HIT_GAIN`
+    可覆盖 k；k 钳制 [0, 1]。
+    """
+    try:
+        gain = (
+            float(k)
+            if k is not None
+            else float(os.environ.get("NEUROVA_MEMORY_HIT_GAIN") or 0.25)
+        )
+    except (TypeError, ValueError):
+        gain = 0.25
+    gain = min(max(gain, 0.0), 1.0)
+    return temp + (100.0 - temp) * gain
 
 
 def _validate_temp(value: float, name: str = "temperature") -> float:
@@ -289,8 +333,8 @@ class TemperatureEngine:
                 'decay_amount': 0.0,
             }
 
-        # 高温记忆(>=80)不衰减(视为固化)
-        if current_temp >= 80.0:
+        # 高温记忆(>=冻结门)不衰减(视为固化)——门限 95（D5-R3，原 80）
+        if current_temp >= _freeze_threshold():
             return {
                 'new_temp': current_temp,
                 'lifecycle_stage': self._determine_stage(current_temp, days_idle, is_important),
@@ -385,7 +429,7 @@ class TemperatureEngine:
     @staticmethod
     def should_upgrade_to_important(temperature: float, access_count: int = 0, emotion_score: float = 0.0, relation_count: int = 0) -> bool:
         """判断是否应升级为重要记忆"""
-        if temperature >= 80.0:
+        if temperature >= IMPORTANT_UPGRADE_TEMP:
             return True
         if access_count >= 10:
             return True
@@ -413,7 +457,7 @@ class TemperatureEngine:
             return True
         if meta.get("agent_marked_important") or agent_marked_important:
             return True
-        if is_important and temperature >= 80.0 and emotion_score >= 0.5:
+        if is_important and temperature >= CRYSTALLIZE_TEMP and emotion_score >= 0.5:
             return True
 
         # 从 metadata.content 或 content 参数检查关键词

@@ -260,6 +260,13 @@ class MetaTrace:
         }
 
 
+# 出生温度（D5-R1，2026-11-24）：新记忆的初始温度。原 100° 与衰减冻结门
+# （原 80°）组合使记忆"出生即固化"、衰减永久失效；降到 60° 后新记忆有冷却
+# 空间，温度由真实使用（比例回温）与衰减重新塑形。存量行由 D5-R6 离线脚本
+# 一次性重置到同值。
+BIRTH_TEMPERATURE: float = 60.0
+
+
 @dataclass
 class Memory:
     """核心记忆模型"""
@@ -277,7 +284,7 @@ class Memory:
     perspective: MemoryPerspective = MemoryPerspective.FIRST_PERSON
     origin: MemoryOrigin = MemoryOrigin.AGENT
     emotion: EmotionType = EmotionType.NEUTRAL
-    temperature: float = 100.0
+    temperature: float = BIRTH_TEMPERATURE
     importance: float = 50.0
     access_count: int = 0
     embedding: Optional[List[float]] = None
@@ -500,7 +507,7 @@ class Memory:
             perspective=_parse_enum(MemoryPerspective, data.get("perspective"), MemoryPerspective.FIRST_PERSON),
             origin=_parse_enum(MemoryOrigin, data.get("origin"), MemoryOrigin.AGENT),
             emotion=_parse_enum(EmotionType, data.get("emotion"), EmotionType.NEUTRAL),
-            temperature=data.get("temperature", 100.0),
+            temperature=data.get("temperature", BIRTH_TEMPERATURE),
             importance=data.get("importance", 50.0),
             access_count=data.get("access_count", 0),
             # M-16: embedding 与 last_accessed_at 原先不回填, round-trip 即丢

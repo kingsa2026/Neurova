@@ -54,7 +54,7 @@ class MemoryRecord:
 
         Tier 4A.3：量纲映射
         - importance: 0+ → 0-100（乘 100，clamp 到 [0, 100]）
-        - temperature: MemoryRecord 无此字段 → 默认 100.0
+        - temperature: MemoryRecord 无此字段 → 默认 BIRTH_TEMPERATURE（60，D5-R1）
         - created_at/updated_at: ISO 字符串 → datetime
         """
         from datetime import datetime, timezone

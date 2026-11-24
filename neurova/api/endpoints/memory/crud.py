@@ -142,6 +142,12 @@ async def get_memory_stats(
     try:
         manager = get_memory_manager(agent_id, user)
         stats = manager.get_stats(agent_wide=True)
+        # D5-R8：温度分布只读面（分带/均值/固化数）——验证 R6 重置后梯度
+        # 重新拉开的过程，为召回排序质量提供运行期证据；失败不阻断 stats。
+        try:
+            stats["temperature_distribution"] = manager.temperature_distribution()
+        except Exception as e:
+            logger.warning("温度分布统计失败（不阻断 stats）: %s", e)
         return success_response(data=stats, message="获取成功", request_id=_get_request_id(None))
     except APIError:
         raise

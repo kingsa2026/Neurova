@@ -209,4 +209,5 @@ stats 分带输出与真实分布一致；R9 另验：三常量单源、改一�
 
 ## 8. 执行记录
 
-（待实施后回填：逐卡 commit、实测数据、偏离点。）
+- **2026-11-24 D5 九件全部落地**（同批提交）：R1 出生 60°（models.BIRTH_TEMPERATURE 单源 + DDL 同步 + 存储注释）；R2 比例回温 `apply_recall_gain`（k=0.25，模拟召回 k=boost/50=0.1）；R3 冻结门 95（env `NEUROVA_MEMORY_FREEZE_TEMP` 可覆写）；R4 MemoryRecord 增 `last_accessed_at` + sleep.py 传参修正；R5 轮级去重（复用取消令牌 ContextVar 作轮键，`id(token)` 换轮即新账）；R6 离线脚本 `scripts/reset_memory_temperature_60.py`（dry-run/只动 temperature 一列）；R7 融合召回（recall/recall_flat）统一经 `creditRecallHits` 记账（排查修正：FTS 通道本就经 retrieve:491 记账，真正缺口是融合召回不记账）；R8 `temperature_distribution()` + /memory/stats 只读面；R9 三常量具名。红→绿：新增 29 判据用例（含 R6 dry-run/列不变、R7 记账、R8 分带）；test_proactive_recall 两用例按新语义更新（99°+boost5→99.1、优先级用例 45→46）。回归：memory+cognitive 783 passed，仅剩 10 处 HEAD 预存失败（A/B 实证）。live-verify：R6 对真库执行（10 库 3280 行全部 → 60.0，独立 SQL 复核），9527 重启后 /memory/stats?agent_id=kai 实测 `{"total":1658,"bands":{"50-79":1658},"avg":60.0,"frozen":0}`。偏离点：R7 排查推翻原设想（FTS 通道本已记账），实际补的是融合召回记账；R2 的模拟召回保留 `boost` 参数映射为 k=boost/50，设置项 `proactive_recall.temperature_boost` 继续有效。
+- 批一（并行装载）与批二（温度分层）记录见各自提交与上文。

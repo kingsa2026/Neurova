@@ -76,14 +76,15 @@ class TestMarkSimulatedRecall:
         assert row.last_accessed_at > before
 
     def test_markSimulatedRecall_capsAtMax(self, tmp_path):
-        """RED: 温度封顶 100，不溢出"""
+        """RED: 比例回温天然有界——99° 命中只微升（k=boost/50=0.1 → 99.1），恒不溢出 100"""
         manager = _makeManager(tmp_path)
         memory_id = _rememberQuiet(manager, content="接近沸点的记忆", temperature=99.0)
 
         manager.markSimulatedRecall(memory_id, boost=5.0)
 
         row = _bodyById(manager, memory_id)
-        assert row.temperature == pytest.approx(100.0)
+        assert row.temperature == pytest.approx(99.1)
+        assert row.temperature < 100.0
 
     def test_markSimulatedRecall_missingIdReturnsFalse(self, tmp_path):
         """RED: 不存在的 id 返回 False，不抛错不插行"""
@@ -149,7 +150,8 @@ class TestScheduledRecallCycle:
         stats = runScheduledRecallCycle(manager, max_memories=1)
 
         assert stats["recalled_ids"] == [colder_id]
-        assert _bodyById(manager, colder_id).temperature == pytest.approx(45.0)
+        # D5-R2 比例回温：k=boost/50=0.1 → 40 + (100-40)*0.1 = 46
+        assert _bodyById(manager, colder_id).temperature == pytest.approx(46.0)
         assert _bodyById(manager, warmer_id).temperature == pytest.approx(80.0)
 
     def test_skipsCrystallizedAndForgotten(self, tmp_path):

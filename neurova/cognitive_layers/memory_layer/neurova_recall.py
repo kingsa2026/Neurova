@@ -851,6 +851,7 @@ class NeurovaRecallEngine:
         # 计算总分
         total_score = sum(m.score for m in phase2_results)
         self._recordRecallAttribution(session_id, query_intent, phase2_results)
+        self._creditRecalledMemories(phase2_results)
 
         return RecallResult(
             query=query,
@@ -906,7 +907,23 @@ class NeurovaRecallEngine:
         results.sort(key=lambda m: m.score, reverse=True)
         selected = results[:effective_limit]
         self._recordRecallAttribution(session_id, query_intent, selected)
+        self._creditRecalledMemories(selected)
         return selected
+
+    def _creditRecalledMemories(self, results: List[Any]) -> None:
+        """D5-R7：召回命中统一记账——真回给调用方的记忆按比例回温。
+
+        融合召回此前不记账（全仓只有 storage_engine.retrieve 一条通道记），
+        同一条记忆走不同召回路径温度增长不一致。经 `creditRecallHits` 单点
+        落盘（R5 同轮去重在其内生效）；记账失败不阻断召回（只留痕）。
+        """
+        ids = [m.memory_id for m in results if getattr(m, "memory_id", "")]
+        if not ids or not getattr(self, "memory_manager", None):
+            return
+        try:
+            self.memory_manager.creditRecallHits(ids)
+        except Exception as e:
+            logger.warning("召回命中记账失败（不阻断召回）: %s", e)
 
     def _recordRecallAttribution(
         self, session_id: Optional[str], intent: QueryIntent, results: List[Any]

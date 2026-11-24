@@ -50,6 +50,7 @@ from neurova.cognitive_layers.memory_layer.models import (
     MemoryPerspective,
     MemoryType,
 )
+from neurova.cognitive_layers.memory_layer.temperature import apply_recall_gain
 
 logger = get_logger(__name__)
 
@@ -600,7 +601,10 @@ class MemoryManager:
                     perspective TEXT NOT NULL DEFAULT 'first_person',
                     origin TEXT NOT NULL DEFAULT 'agent',
                     emotion TEXT NOT NULL DEFAULT 'neutral',
-                    temperature REAL NOT NULL DEFAULT 100.0,
+                    -- 出生温度 60（D5-R1）：与 models.BIRTH_TEMPERATURE 同源，
+                    -- DDL 无法引用 Python 常量，改值须两处同步（判据
+                    -- test_schema_default_is_60 双向钉住）
+                    temperature REAL NOT NULL DEFAULT 60.0,
                     importance REAL NOT NULL DEFAULT 50.0,
                     access_count INTEGER NOT NULL DEFAULT 0,
                     metadata TEXT NOT NULL DEFAULT '{}',
@@ -821,53 +825,91 @@ class MemoryManager:
         return None
 
     def creditRecallHits(self, memoryIds: List[str]) -> int:
-        """对本轮**真正回给调用方**的记忆记账：`access_count + 1`、温度 +10 封顶 100、
+        """对本轮**真正回给调用方**的记忆记账：`access_count + 1`、比例回温、
         刷新 `updated_at`/`last_accessed_at`；返回被记了账的行数。
 
-        记账只此一处实现，且由读方**过滤之后**调用——先记账再过滤，被排除的行也已经
-        挨过一次 +10，冷档就被自己这次命中复活（工单 017 的淘汰因此永不成立）。
+        D5-R2：回温改比例式 `T += (100−T)×k`（k 默认 0.25，env
+        `NEUROVA_MEMORY_HIT_GAIN`）——旧"固定 +10 封顶 100"对已≥90° 的记忆是
+        空操作，100° 大平票毁掉温度通道的排序区分度。
 
-        计数走 DB 侧自增而非读回来再写：读-改-写会把并发 increment 覆盖掉。
-        更新按**行自带 id**（M-25 后作用域限定行带 `\x1f` 前缀，按业务 id 更新会插出
-        重复行）。未 flush 的 L0 节点在库里没有行，不计入返回值，其内存值由调用方
-        自己 touch 并随 flush 落盘（契约 006 第 3 条）。
+        D5-R5 同轮去重：同一轮会话内同一条记忆只记一次命中。轮身份复用取消
+        令牌 ContextVar（turn_context 轮首换新对象，`id(token)` 即轮键）；
+        无轮次上下文（管理端/巡检等）保持直接记账。
+
+        记账只此一处实现，且由读方**过滤之后**调用——先记账再过滤，被排除的行也已经
+        挨过一次回温，冷档就被自己这次命中复活（工单 017 的淘汰因此永不成立）。
+
+        计数走 DB 侧读出后按比例回写：更新按**行自带 id**（M-25 后作用域限定行带
+        `\x1f` 前缀，按业务 id 更新会插出重复行）。未 flush 的 L0 节点在库里没有行，
+        不计入返回值，其内存值由调用方自己 touch 并随 flush 落盘（契约 006 第 3 条）。
         """
         conn = getattr(self, "_persist_conn", None)
         if conn is None or not memoryIds:
             return 0
         from datetime import datetime, timezone
 
+        from neurova.core.cancel_token import getTurnCancelToken
+
         now = datetime.now(timezone.utc).isoformat()
+        token = getTurnCancelToken()
+        turn_key = id(token) if token is not None else None
+        seen_map = getattr(self, "_turn_credit_seen", None)
+        if seen_map is None:
+            seen_map = {}
+            self._turn_credit_seen = seen_map
         credited = 0
+        credited_business: List[str] = []
         with self._persist_db_lock:
+            seen: Optional[set] = None
+            if turn_key is not None:
+                seen = seen_map.get(turn_key)
+                if seen is None:
+                    seen = set()
+                    seen_map[turn_key] = seen
+                # 只保留最近 8 轮的台账，防长会话进程内无限累积
+                while len(seen_map) > 8:
+                    oldest = next(iter(seen_map))
+                    if oldest == turn_key:
+                        break
+                    seen_map.pop(oldest)
             for memoryId in memoryIds:
                 row = self._findBodyRow(memoryId)
                 if row is None:
                     continue
+                if seen is not None:
+                    if row["id"] in seen:
+                        continue
+                    seen.add(row["id"])
+                current = conn.execute(
+                    "SELECT temperature FROM memories WHERE id = ?", (row["id"],)
+                ).fetchone()
+                if current is None:
+                    continue
                 conn.execute(
                     "UPDATE memories SET access_count = access_count + 1,"
-                    " temperature = MIN(100.0, temperature + 10.0),"
+                    " temperature = ?,"
                     " updated_at = ?, last_accessed_at = ? WHERE id = ?",
-                    (now, now, row["id"]),
+                    (apply_recall_gain(float(current[0])), now, now, row["id"]),
                 )
                 credited += 1
+                credited_business.append(memoryId)
             conn.commit()
-        for memoryId in memoryIds:
+        for memoryId in credited_business:
             cached = self._memories.get(memoryId)
             if cached is not None:
                 cached.access_count += 1
-                cached.temperature = min(100.0, cached.temperature + 10.0)
+                cached.temperature = apply_recall_gain(cached.temperature)
         return credited
 
     def markSimulatedRecall(self, memoryId: str, boost: float = 5.0) -> bool:
-        """定时回忆巩固的「模拟回忆」记账：温度 +boost（封顶 100）、
+        """定时回忆巩固的「模拟回忆」记账：比例回温、
         `last_accessed_at`/`updated_at` 刷新、`access_count + 1`。
 
-        与 `creditRecallHits`（真实召回记账，固定 +10）语义不同：本方法是
-        睡眠期定时巩固对久未访问记忆的"再次想起"，升温量由
-        `proactive_recall.temperature_boost` 配置（默认 5.0，弱于真实访问）。
-        必须刷新 `last_accessed_at`——否则下轮扫描重复命中同一批，
-        定时巩固退化成把全部记忆轮流顶满。
+        与 `creditRecallHits`（真实召回记账，k=0.25）语义不同：本方法是
+        睡眠期定时巩固对久未访问记忆的"再次想起"，升温弱于真实访问——
+        比例增益 k = boost/50（`proactive_recall.temperature_boost` 默认
+        5.0 → k=0.1）。必须刷新 `last_accessed_at`——否则下轮扫描重复命中
+        同一批，定时巩固退化成把全部记忆轮流顶满。
         """
         conn = getattr(self, "_persist_conn", None)
         if conn is None:
@@ -876,24 +918,73 @@ class MemoryManager:
 
         now_dt = datetime.now(timezone.utc)
         now = now_dt.isoformat()
+        sim_gain = max(0.0, min(float(boost) / 50.0, 0.9))
         with self._persist_db_lock:
             row = self._findBodyRow(memoryId)
             if row is None:
                 return False
+            current = conn.execute(
+                "SELECT temperature FROM memories WHERE id = ?", (row["id"],)
+            ).fetchone()
+            if current is None:
+                return False
             conn.execute(
                 "UPDATE memories SET access_count = access_count + 1,"
-                " temperature = MIN(100.0, temperature + ?),"
+                " temperature = ?,"
                 " updated_at = ?, last_accessed_at = ? WHERE id = ?",
-                (float(boost), now, now, row["id"]),
+                (apply_recall_gain(float(current[0]), sim_gain), now, now, row["id"]),
             )
             conn.commit()
         cached = self._memories.get(memoryId)
         if cached is not None:
             cached.access_count += 1
-            cached.temperature = min(100.0, cached.temperature + float(boost))
+            cached.temperature = apply_recall_gain(cached.temperature, sim_gain)
             cached.last_accessed_at = now_dt
             cached.updated_at = now_dt
         return True
+
+    def temperature_distribution(self) -> Dict[str, Any]:
+        """记忆温度分布统计（D5-R8，管理端只读面）。
+
+        分带与冻结门对齐：<20（近归档）/ 20-49 / 50-79 / 80-94 / ≥95（冻结门，
+        DECAY_FREEZE_TEMP）。直接查 persist 库——不依赖内存快照，未装载/冷层
+        行同样计入。返回 {"total", "bands", "avg", "frozen"}；无 persist 库时
+        返回空统计（total=0, avg=None）。
+        """
+        conn = getattr(self, "_persist_conn", None)
+        bands = {"<20": 0, "20-49": 0, "50-79": 0, "80-94": 0, ">=95": 0}
+        if conn is None:
+            return {"total": 0, "bands": bands, "avg": None, "frozen": 0}
+        from neurova.cognitive_layers.memory_layer.temperature import _freeze_threshold
+
+        freeze = _freeze_threshold()
+        with self._persist_db_lock:
+            rows = conn.execute(
+                "SELECT CASE"
+                " WHEN temperature < 20 THEN '<20'"
+                " WHEN temperature < 50 THEN '20-49'"
+                " WHEN temperature < 80 THEN '50-79'"
+                " WHEN temperature < ? THEN '80-94'"
+                " ELSE '>=95' END AS band, COUNT(*) AS c"
+                " FROM memories GROUP BY band",
+                (freeze,),
+            ).fetchall()
+            agg = conn.execute(
+                "SELECT COUNT(*) AS n, AVG(temperature) AS a,"
+                " SUM(CASE WHEN temperature >= ? THEN 1 ELSE 0 END) AS frozen"
+                " FROM memories",
+                (freeze,),
+            ).fetchone()
+        for row in rows:
+            if row["band"] in bands:
+                bands[row["band"]] = row["c"]
+        total = agg["n"] or 0
+        return {
+            "total": total,
+            "bands": bands,
+            "avg": round(agg["a"], 2) if agg["a"] is not None else None,
+            "frozen": agg["frozen"] or 0,
+        }
 
     def iterBodyMemories(self, limit: int = 500) -> List[Memory]:
         """按 `updated_at` 升序只读列举本 agent 的正文行，**不做访问记账**。
