@@ -420,3 +420,112 @@ class TestToolResultProjection:
         assert len(out) < len(huge)
         assert "call-9" in out, "投影必须带寻址句柄（call_id 指向可取回的原文）"
         assert "省略" in out or "截断" in out, "中段省略必须显式标注，不静默消失"
+
+
+# ── 7. 压缩纪律·图像分档裁剪（reference_af 借鉴项 P1-6）──────────
+
+def _imgTurn(i: int) -> dict:
+    """一条含图历史消息（文本说明 + 1 张图）。"""
+    return {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": f"早期图片轮{i}"},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,I{i}"}},
+        ],
+    }
+
+
+def _countPlaceholders(msgs) -> int:
+    n = 0
+    for m in msgs:
+        content = m.get("content") if isinstance(m, dict) else None
+        if isinstance(content, list):
+            n += sum(
+                1 for p in content
+                if isinstance(p, dict) and p.get("type") == "text" and "已省略" in str(p.get("text"))
+            )
+    return n
+
+
+def _countImages(msgs) -> int:
+    n = 0
+    for m in msgs:
+        content = m.get("content") if isinstance(m, dict) else None
+        if isinstance(content, list):
+            n += sum(1 for p in content if isinstance(p, dict) and p.get("type") == "image_url")
+    return n
+
+
+class TestImageTieredTrimming:
+    """图像先于文本丢弃 + 长上下文模型只裁旧图（分档）。
+
+    场景标定（估算口径 = estimateContextTokens）：每条含图消息 ≈ 800（图固定
+    计价）+ 少量文本 + 开销；预算 5000 → 触发线 4250。8 条含图消息总量 ≈ 6500
+    越线；基础档 keep=4 摘最旧 4 张即回到触发线内（≈3450）→ 零文本折叠。
+    """
+
+    def _imgContext(self, n=8):
+        return [_imgTurn(i) for i in range(n)] + [
+            {"role": "assistant", "content": "文字回复" * 150},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_images_shed_before_text_fold(self, isolatedSessions):
+        """基础档：超预算先摘 keep 窗外旧图，文本轮与近期图零折叠。"""
+        pipe, _ = _mk_pipeline()
+        pipe._agent.session_manager = isolatedSessions
+        pipe._resolveContextBudget = lambda: 5000
+        ctx = ChatContext(user_input="继续")
+        ctx.session_id = "sess-img-1"
+        ctx.context = self._imgContext()
+
+        from neurova.context_pool import estimateContextTokens
+
+        assert estimateContextTokens(ctx.context) >= int(5000 * 0.85), "测试前置：必须越过触发线"
+
+        compacted = await pipe._autoCompactContextIfNeeded(ctx)
+
+        assert compacted is True
+        assert _countPlaceholders(ctx.context) == 4, "keep 窗外最旧 4 张图必须被摘成占位文本"
+        assert _countImages(ctx.context) == 4, "keep 窗内 4 张近期图必须原样保留"
+        textMsgs = [m for m in ctx.context if isinstance(m.get("content"), str)]
+        assert any("文字回复" in m["content"] for m in textMsgs), "文本轮必须保留（图像先于文本丢弃）"
+        assert len(ctx.context) == 9, "裁图档只换部件不折消息：消息条数不变"
+        assert (ctx.metadata or {}).get("context_auto_compacted") is True
+        # 原始消息永不删除（S6 既有锚点）：会话盘历史原样
+        history = isolatedSessions.get_recent_context("a1", "sess-img-1", max_messages=None)
+        assert isinstance(history, list)
+
+    @pytest.mark.asyncio
+    async def test_longContextModel_onlyOldImagesTrimmed_widerWindow(self, isolatedSessions):
+        """长上下文模型：保留窗分档放宽——8 条含图消息全在 keep 窗内 → 零摘图。"""
+        pipe, agent = _mk_pipeline()
+        agent.config.llm_config.model = "gemini-1.5-pro"  # 1M 窗 → 超长档 keep=16
+        pipe._agent.session_manager = isolatedSessions
+        pipe._resolveContextBudget = lambda: 5000
+        ctx = ChatContext(user_input="继续")
+        ctx.session_id = "sess-img-2"
+        ctx.context = self._imgContext()
+
+        compacted = await pipe._autoCompactContextIfNeeded(ctx)
+
+        assert compacted is True, "超触发线仍会压缩，但裁图档在宽窗下无旧图可摘"
+        assert _countPlaceholders(ctx.context) == 0, "长上下文模型不得摘近期图（只裁旧图）"
+        assert _countImages(ctx.context) >= 4, "宽窗内图像部件不得被裁图档触碰"
+
+    def test_imageRetention_windowTiersByModel(self):
+        """请求装配防线同享分档：长上下文模型保留窗更宽，只裁更旧的图。"""
+        pipe, agent = _mk_pipeline()
+        agent.config.llm_config.model = "gemini-1.5-pro"
+        ctx = ChatContext(user_input="x")
+        ctx.context = [_imgTurn(i) for i in range(6)]
+        pipe._apply_image_retention(ctx)
+        assert _countPlaceholders(ctx.context) == 0, "6 条 ≤ 超长档 keep=16 → 零摘除"
+        assert _countImages(ctx.context) == 6
+
+        pipe2, agent2 = _mk_pipeline()  # test-model → 基础档 keep=4
+        ctx2 = ChatContext(user_input="x")
+        ctx2.context = [_imgTurn(i) for i in range(6)]
+        pipe2._apply_image_retention(ctx2)
+        assert _countImages(ctx2.context) == 4, "基础档照旧只留最近 4 条"
+        assert _countPlaceholders(ctx2.context) == 2, "窗口外旧图置占位文本"

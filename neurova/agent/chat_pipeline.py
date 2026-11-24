@@ -1819,18 +1819,36 @@ class ChatPipeline:
             return
         try:
             from neurova.agent.image_retention import apply_image_retention
-            from neurova.llm import model_limits
 
-            # keep_last 单源：调用时读 model_limits（不 import 期绑定快照），
-            # 与 attachment_parser / files_api 的多模态预算同源同值（卡 L1 收口）。
+            # keep_last 分档单源：基础档调用时读 model_limits（不 import 期绑定
+            # 快照），与 attachment_parser / files_api 的多模态预算同源同值
+            # （卡 L1 收口）；长上下文模型按窗口分档放宽——只裁更旧的图
+            # （reference_af P1-6，档位单源在 context/image_trim_policy）。
             cleaned, stats = apply_image_retention(
-                context, keep_last=model_limits.MULTIMODAL_IMAGE_RETAIN_PER_TURN
+                context, keep_last=self._resolveImageKeepWindow()
             )
             if stats.get("images_removed"):
                 logger.info("历史图片保留策略生效: %s", stats)
             ctx.context = cleaned
         except Exception:  # noqa: BLE001 - 防线失败不影响主流程
             logger.debug("历史图片保留策略执行失败（跳过）", exc_info=True)
+
+    def _resolveImageKeepWindow(self) -> int:
+        """图像保留窗口分档（reference_af P1-6「长上下文模型只裁旧图」）。
+
+        按当前模型上下文窗口分档解析 keep 窗（基础档/长上下文档/超长上下文档，
+        档位单源在 `context/image_trim_policy`）；解析失败回落基础档单源
+        （调用时读 model_limits，不 import 期绑定快照）。
+        """
+        try:
+            from neurova.context.image_trim_policy import resolveImageKeepWindow
+
+            return int(resolveImageKeepWindow(self._current_model_name()))
+        except Exception:  # noqa: BLE001 - 分档失败回落基础档，不影响主流程
+            logger.debug("图像保留窗口分档解析失败（回落基础档）", exc_info=True)
+            from neurova.llm import model_limits
+
+            return int(model_limits.MULTIMODAL_IMAGE_RETAIN_PER_TURN)
 
     def _current_model_name(self) -> str:
         """当前 agent 配置的模型名（测试/异常安全）。"""
@@ -3077,6 +3095,9 @@ class ChatPipeline:
             summarize=summarizer,
             summary_max_retries=0,
             summary_call_budget=1,
+            # 压缩纪律·图像分档裁剪（reference_af P1-6）：先摘 keep 窗外旧图，
+            # 能靠裁图放下就不折叠文本；keep 窗按当前模型上下文窗口分档。
+            image_keep_window=self._resolveImageKeepWindow(),
         )
         if compaction is None:
             return False
@@ -3103,8 +3124,10 @@ class ChatPipeline:
         self._resetCompactionCooldown(ctx)
         self._emitCompressionNotice(ctx, event)
         logger.info(
-            "[CTX_COMPACT] %s: session=%s 折叠 %d 条，token %d → %d",
-            reason, ctx.session_id, event.foldedCount, tokensBefore, tokensAfter,
+            "[CTX_COMPACT] %s: session=%s 折叠 %d 条 摘图 %d 张，token %d → %d",
+            reason, ctx.session_id, event.foldedCount,
+            int(getattr(compaction, "images_stripped", 0) or 0),
+            tokensBefore, tokensAfter,
         )
         return True
 

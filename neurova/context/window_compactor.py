@@ -354,6 +354,9 @@ class WindowCompaction:
     # 就是把新增消息谎报为已被摘要覆盖。判据取"与上一轮摘要不同"这一可观察事实，
     # 因此对任何 summarize 实现（含调用方自注入的桥）都成立。
     summary_is_fresh: bool = False
+    # 压缩纪律·第一档（图像先于文本丢弃，reference_af P1-6）：本轮摘除的
+    # 图像部件数。`image_keep_window` 未启用时恒 0。
+    images_stripped: int = 0
 
 
 async def compact_window(
@@ -368,6 +371,7 @@ async def compact_window(
     summary_max_retries: typing.Optional[int] = None,
     summary_call_budget: typing.Optional[int] = None,
     sessionKey: str = "",
+    image_keep_window: typing.Optional[int] = None,
 ) -> typing.Optional[WindowCompaction]:
     """超预算时折叠窗口老消息；未超预算返回 None（零行为变化）。
 
@@ -391,6 +395,13 @@ async def compact_window(
     为不限。递进折叠（下面的 ratio 循环）每一轮都会对更大的折叠区重新摘要，
     于是"重试上限"单独并不足以给出成本上界。
 
+    image_keep_window: 压缩纪律·第一档（图像先于文本丢弃，reference_af
+    P1-6）的图像保留窗口（最近 N 条含图消息的图像永不裁，只裁窗外旧图）。
+    `None`（缺省）不启用裁图档，行为与未引入本参数前逐字节一致；启用时
+    超预算先摘窗外旧图，能靠裁图放下就不折叠文本（摘要调用零发起）。裁图
+    单独成压时也返回 `WindowCompaction`（summary=None、compacted_count=0、
+    images_stripped>0），调用方照常落账/发事件，不静默吞掉。
+
     工单 §12.7 判据 6 要求"每轮新增摘要 LLM 调用 ≤ 1 次（rollup 走后台）"，
     **放进关键路径的调用方应同时给 `summary_max_retries=0` 与
     `summary_call_budget=1`**：重试与递进重摘要都是压缩器级的收敛保证（对直接
@@ -409,12 +420,28 @@ async def compact_window(
     # 单源计量：整段折叠（含递进各轮）共用同一个 meter，同一条消息只算一次。
     meter = meter or WindowTokenMeter()
 
+    # tokens_before 取**原始窗口**口径（裁图档若启用，其收益记进本账）；
+    # before 事件判据不变：确超预算、即将进入压缩才发（未超预算零事件）。
+    tokensBefore = meter.total(msgs)
+
     # P2-8 生命周期钩子：窗口确超预算、即将进入折叠时发 before（未超预算
     # 零事件，不空转）。before/after 在本次调用内各只发一次，不随递进轮数重复。
-    if meter.total(msgs) > budget_tokens:
+    if tokensBefore > budget_tokens:
         emitCompactionBefore(
             sessionKey, len(msgs), budget_tokens, source=_COMPACT_EVENT_SOURCE
         )
+
+    # 压缩纪律·第一档（图像先于文本丢弃，reference_af P1-6）：超预算先摘
+    # keep 窗外旧图（近期图像永不裁），能靠裁图放下就不折叠文本。
+    # image_keep_window=None（缺省）不启用本档，零行为变化。
+    imageTrimStats: typing.Optional[typing.Dict[str, int]] = None
+    if image_keep_window is not None:
+        from neurova.context.image_trim_policy import stripImagesOverBudget
+
+        msgs, imageTrimStats = stripImagesOverBudget(
+            msgs, budget_tokens, int(image_keep_window), meter=meter
+        )
+    imagesStripped = int((imageTrimStats or {}).get("images_stripped", 0))
 
     summary = None
     ratio = target_ratio
@@ -433,8 +460,9 @@ async def compact_window(
                     window=list(msgs),
                     summary=None,
                     compacted_count=0,
-                    tokens_before=meter.total(msgs),
+                    tokens_before=tokensBefore,
                     tokens_after=meter.total(msgs),
+                    images_stripped=imagesStripped,
                 )
             break
 
@@ -486,10 +514,11 @@ async def compact_window(
             window=window,
             summary=round_summary,
             compacted_count=len(dropped),
-            tokens_before=meter.total(msgs),
+            tokens_before=tokensBefore,
             tokens_after=meter.total(window),
             summary_is_fresh=bool(round_summary)
             and (not previous_summary or round_summary != previous_summary),
+            images_stripped=imagesStripped,
         )
         summary = round_summary or summary
 
@@ -500,7 +529,19 @@ async def compact_window(
         if ratio >= 1.0:
             break
 
-    # P2-8：返回前对有效折叠结果发 after（best 为 None 即未折叠，不发）。
+    # 裁图档单独成压：文本未折叠但旧图已摘——如实返回压缩产物（summary=None、
+    # compacted_count=0、images_stripped>0），调用方照常落账/发事件，不静默吞掉。
+    if best is None and imagesStripped:
+        best = WindowCompaction(
+            window=list(msgs),
+            summary=None,
+            compacted_count=0,
+            tokens_before=tokensBefore,
+            tokens_after=meter.total(msgs),
+            images_stripped=imagesStripped,
+        )
+
+    # P2-8：返回前对有效压缩结果发 after（best 为 None 即未压缩，不发）。
     if best is not None:
         emitCompactionAfter(sessionKey, best, source=_COMPACT_EVENT_SOURCE)
     return best
