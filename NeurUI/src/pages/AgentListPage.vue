@@ -6,6 +6,9 @@
         <p class="page-subtitle">{{ t('agent.description') }}</p>
       </div>
       <div class="header-actions">
+        <GlassButton v-if="isAdmin" variant="ghost" :loading="layoutScanRunning" @click="runLayoutScan">
+          {{ t('agent.layoutScan') }}
+        </GlassButton>
         <GlassButton variant="ghost" :loading="migrationImporting" @click="triggerMigrationImport">
           {{ t('agent.migrationImport') }}
         </GlassButton>
@@ -158,6 +161,34 @@
     </a-spin>
 
     <a-modal
+      v-model:open="layoutScanModalOpen"
+      :title="t('agent.layoutScanReport')"
+      :footer="null"
+      width="640px"
+    >
+      <div class="layout-scan-report">
+        <p v-if="layoutScanEmpty" class="scan-line">{{ t('agent.layoutScanEmpty') }}</p>
+        <template v-else>
+          <p v-for="m in layoutReport?.moved ?? []" :key="`m-${m.agent_id}`" class="scan-line scan-moved">
+            {{ t('agent.layoutScanMoved') }}：{{ m.agent_id }} → {{ m.bucket }}
+          </p>
+          <p v-for="p in layoutReport?.pending ?? []" :key="`p-${p.agent_id}`" class="scan-line scan-pending">
+            {{ t('agent.layoutScanPending') }}：{{ p.agent_id }}
+          </p>
+          <p v-for="c in layoutReport?.conflicts ?? []" :key="`c-${c.agent_id}`" class="scan-line scan-conflict">
+            {{ t('agent.layoutScanConflict') }}：{{ c.agent_id }}
+          </p>
+          <p v-for="s in layoutReport?.skipped ?? []" :key="`s-${s.agent_id}`" class="scan-line">
+            {{ t('agent.layoutScanSkipped') }}：{{ s.agent_id }}
+          </p>
+          <p v-for="e in layoutReport?.errors ?? []" :key="`e-${e.agent_id}`" class="scan-line scan-conflict">
+            {{ t('agent.layoutScanError') }}：{{ e.agent_id }}
+          </p>
+        </template>
+      </div>
+    </a-modal>
+
+    <a-modal
       v-model:open="migrationModalOpen"
       :title="t('agent.migrationImport')"
       :confirm-loading="migrationImporting"
@@ -200,6 +231,7 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import { useAgentStore } from '@/stores/agents'
+import { useAuthStore } from '@/stores/auth'
 import {
   exportAgentPackage,
   importAgentPackage,
@@ -212,9 +244,46 @@ import {
   downloadMigrationZip,
   type AgentMigrationImportResult,
 } from '@/api/modules/agent-migration'
+import {
+  scanAgentLayoutMigration,
+  type AgentLayoutMigrationReport,
+} from '@/api/modules/agents'
 
 const { t } = useI18n()
 const agentStore = useAgentStore()
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.user?.role === 'admin')
+
+// ── Agent 布局迁移扫描（v3 分区，管理员） ──
+const layoutScanRunning = ref(false)
+const layoutScanModalOpen = ref(false)
+const layoutReport = ref<AgentLayoutMigrationReport | null>(null)
+const layoutScanEmpty = computed(() => {
+  const r = layoutReport.value
+  if (!r) return true
+  return !(
+    r.moved?.length ||
+    r.pending?.length ||
+    r.conflicts?.length ||
+    r.skipped?.length ||
+    r.errors?.length
+  )
+})
+
+const runLayoutScan = async () => {
+  layoutScanRunning.value = true
+  try {
+    const res: any = await scanAgentLayoutMigration()
+    layoutReport.value = (res?.data ?? res) as AgentLayoutMigrationReport
+    layoutScanModalOpen.value = true
+    await agentStore.loadAgents()
+  } catch (err: any) {
+    console.error('[AgentListPage] layout scan failed:', err)
+    message.error(err?.response?.data?.detail || t('agent.layoutScanFailed'))
+  } finally {
+    layoutScanRunning.value = false
+  }
+}
 
 const searchQuery = ref('')
 const viewMode = ref<'card' | 'table'>('card')
@@ -562,5 +631,32 @@ onMounted(() => {
   font-size: 12px;
   line-height: 1.5;
   color: var(--nr-text-tertiary);
+}
+.layout-scan-report {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.scan-line {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--nr-text-secondary);
+  word-break: break-all;
+}
+
+.scan-moved {
+  color: var(--nr-success, #52c41a);
+}
+
+.scan-pending {
+  color: var(--nr-warning, #faad14);
+}
+
+.scan-conflict {
+  color: var(--nr-danger, #ff4d4f);
 }
 </style>
