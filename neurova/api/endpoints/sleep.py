@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel
 
 from neurova.api.auth import get_current_user
+from neurova.cognitive_layers.memory_layer.sleep import DEFAULT_SLEEP_MODE
 
 logger = get_logger(__name__)
 
@@ -57,7 +58,7 @@ class SleepSettings(BaseModel):
     memory_consolidation_enabled: bool = True
     conflict_resolution_enabled: bool = True
     # ── 阶段推进参数（链序：浅睡→REM→深睡→休眠；默认=引擎, 行为零漂移）──
-    sleep_mode: str = "temperature"
+    sleep_mode: str = DEFAULT_SLEEP_MODE
     temp_threshold_light_sleep: float = 30.0
     temp_threshold_rem: float = 25.0
     temp_threshold_deep_sleep: float = 20.0

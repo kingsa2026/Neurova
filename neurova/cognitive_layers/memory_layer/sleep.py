@@ -27,6 +27,14 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+#: 系统默认睡眠触发模式（D5 后续拍板 2026-11-24：temperature → either）。
+#: temperature 模式下"从未使用的 agent 均温恒 60°，够不到 ≤30/25/20/15 的
+#: 入睡线"，睡眠门从内侧锁死、休眠 agent 永不整理；either（温度或空闲时长
+#: 任一满足）让休眠 agent 也能按空闲时长走进睡眠整理，对活跃 agent 行为
+#: 不变。三处默认（本设置字典 / IdleTimeTracker 预置 / SleepSettings API
+#: 模型）必须同源引用此常量。
+DEFAULT_SLEEP_MODE: str = "either"
+
 
 #: 对本轮固化而言"已退役"的两个阶段。`soft forget` 与归档都**不删行**（可恢复），
 #: 所以退役只存在于 `lifecycle_stage` 这一个键上。`crystallized`/`consolidated` 不在
@@ -269,7 +277,7 @@ class SleepConsolidation(StateValuesStore):
             "memory_consolidation_enabled": True,
             "conflict_resolution_enabled": True,
             # ── 阶段推进参数（链序：浅睡→REM→深睡→休眠，越深阈值越严）──
-            "sleep_mode": "temperature",  # temperature | time | either
+            "sleep_mode": DEFAULT_SLEEP_MODE,  # either | temperature | time
             "temp_threshold_light_sleep": 30.0,
             "temp_threshold_rem": 25.0,
             "temp_threshold_deep_sleep": 20.0,

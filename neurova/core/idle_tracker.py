@@ -15,7 +15,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from neurova.cognitive_layers.memory_layer.sleep import SleepConsolidation
+from neurova.cognitive_layers.memory_layer.sleep import (
+    DEFAULT_SLEEP_MODE,
+    SleepConsolidation,
+)
 from neurova.core.base_module import BaseModule
 
 
@@ -126,7 +129,7 @@ class IdleTimeTracker(BaseModule):
         self._current_phase = "active"
         self._phase_start_time = time.time()
         self._sleep_consolidation: Optional[SleepConsolidation] = None
-        self._sleep_mode = "temperature"
+        self._sleep_mode = DEFAULT_SLEEP_MODE
         self._idle_thresholds = SleepPhaseThresholds()
         self._phase_durations = PhaseDuration()
         self._wake_conditions = WakeCondition()
