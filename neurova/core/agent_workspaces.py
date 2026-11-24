@@ -31,19 +31,30 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
+from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 
 AGENT_WORKSPACES_ENV = "NEUROVA_AGENT_WORKSPACES_DIR"
 
 _DEFAULT_AGENT_ID = "default"
 _SAFE_AGENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
+# v3 分区布局（2026-11-24 拍板）：agent 私有数据收进 `data/agent/<属主桶>/<agent_id>/`。
+# 桶 = 属主用户 id；管理员指定的共享 agent 与无主 agent 落 `data/agent/share/`。
+# agent_id→桶 的持久化索引（index.json）是文件系统分区的判据单源。
+AGENT_PARTITION_DIR = "agent"
+SHARE_BUCKET = "share"
+OWNER_INDEX_FILE = "index.json"
+_OWNER_INDEX_LOCK = threading.RLock()
+
 # data/ 下由其他子系统共享、绝不能当成 agent 根目录的名字。
 # 新增全局数据根时同步补这里；发现侧与写入侧共用同一份拒绝名单。
 RESERVED_AGENT_ROOT_NAMES = frozenset(
     {
         "admin",
+        "agent",
         "agents",
         "anchors",
         "annotations",
@@ -202,6 +213,72 @@ def agentRootIsIsolated() -> bool:
     return bool((os.environ.get(AGENT_WORKSPACES_ENV) or "").strip())
 
 
+def agent_owner_index_path() -> Path:
+    """agent_id→桶 索引落点：`data/agent/index.json`（隔离根下同形）。"""
+    return get_agent_root() / AGENT_PARTITION_DIR / OWNER_INDEX_FILE
+
+
+def load_agent_owner_index() -> Dict[str, Dict[str, str]]:
+    path = agent_owner_index_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+    agents = raw.get("agents") if isinstance(raw, dict) else None
+    return agents if isinstance(agents, dict) else {}
+
+
+def save_agent_owner_index(agents: Dict[str, Dict[str, str]]) -> None:
+    path = agent_owner_index_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "agents": agents,
+    }
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def set_agent_owner(agent_id: str, owner: str) -> str:
+    """登记 agent 的属主桶（owner 用户 id；空 = 共享桶）。返回桶段名。"""
+    aid = _resolve_agent_id(agent_id)
+    owner_value = str(owner or "").strip()
+    bucket = _safe_path_segment(owner_value) if owner_value else SHARE_BUCKET
+    with _OWNER_INDEX_LOCK:
+        agents = load_agent_owner_index()
+        agents[aid] = {
+            "bucket": bucket,
+            "owner": owner_value,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        save_agent_owner_index(agents)
+    return bucket
+
+
+def clear_agent_owner(agent_id: str) -> None:
+    """从索引摘除 agent（删除/出桶时同步）。"""
+    aid = str(agent_id or "").strip()
+    if not aid:
+        return
+    with _OWNER_INDEX_LOCK:
+        agents = load_agent_owner_index()
+        if aid in agents:
+            agents.pop(aid)
+            save_agent_owner_index(agents)
+
+
+def agent_owner_bucket(agent_id: str) -> Optional[str]:
+    """索引里的桶段；未登记（含尚未迁移的 default）返回 None——
+    解析器随之走 v2 兼容位，直到迁移扫描写入索引。"""
+    aid = str(agent_id or "").strip() or _DEFAULT_AGENT_ID
+    entry = load_agent_owner_index().get(aid)
+    if entry and str(entry.get("bucket") or "").strip():
+        return str(entry["bucket"])
+    return None
+
+
 def get_agent_root() -> Path:
     """agent 根目录的父目录（生产＝数据根；`NEUROVA_AGENT_WORKSPACES_DIR` 可注入）。"""
     injected = (os.environ.get(AGENT_WORKSPACES_ENV) or "").strip()
@@ -218,8 +295,26 @@ def get_agent_workspaces_root() -> Path:
 
 
 def get_agent_root_dir(agent_id: str = "") -> Path:
-    """单个 agent 的根目录 `data/<agent_id>/`（agent_id 空值回落 default）。"""
-    return get_agent_root() / _resolve_agent_id(agent_id)
+    """单个 agent 的根目录。
+
+    v3（2026-11-24 拍板）：`data/agent/<属主桶>/<agent_id>/`，桶取自
+    agent_id→属主索引（共享/无主 → share 桶）。未迁移的 v2 平铺目录
+    （`data/<agent_id>/`）继续可解析（兼容），直到被迁移扫描搬走。
+    隔离根（测试/多实例注入）保持平铺——隔离边界即注入本身。
+    未知 id 返回旧候选路径，写路径由各层的建目录门拒绝。
+    """
+    aid = _resolve_agent_id(agent_id)
+    if agentRootIsIsolated():
+        return get_agent_root() / aid
+    bucket = agent_owner_bucket(aid)
+    if bucket:
+        return get_agent_root() / AGENT_PARTITION_DIR / _safe_path_segment(bucket) / aid
+    legacy = get_agent_root() / aid
+    if legacy.exists():
+        return legacy
+    if is_registered_agent_id(aid):
+        return get_agent_root() / AGENT_PARTITION_DIR / SHARE_BUCKET / aid
+    return legacy
 
 
 def get_agent_workspace_dir(agent_id: str = "") -> Path:
