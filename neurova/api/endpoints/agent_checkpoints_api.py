@@ -55,6 +55,10 @@ def _service_for(agent_id: str):
     """解析该 agent 的 CheckpointService：优先复用运行实例上缓存的那个
     （与 _auto_checkpoint 同一实例、同一防抖状态），实例不在运行（仅配置态）
     时按同一落点现建——落点是数据根的确定性函数，两法指向同一 git 仓。"""
+    from neurova.core.agent_workspaces import agent_exists
+
+    if not agent_exists(agent_id):
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' 不存在")
     from neurova.api.endpoints import get_agent_instance
 
     agent = get_agent_instance(agent_id)

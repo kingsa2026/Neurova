@@ -69,7 +69,14 @@ class CheckpointService:
             from neurova.core.agent_workspaces import get_agent_checkpoints_dir
 
             repo_path = get_agent_checkpoints_dir(agent_id)
-        repo_path.parent.mkdir(parents=True, exist_ok=True)
+        # 建目录门（2026-11-24 审计 RISK 7）：生产数据根下未知 agent 不长
+        # checkpoints.git/（admin 面的 404 路径此前也会把目录建出来）；
+        # 显式 base_dir 注入与隔离根（测试/多实例）不设限。
+        from neurova.core.agent_workspaces import agentRootIsIsolated, is_registered_agent_id
+
+        if (repo_path.parent.exists() or base_dir or is_registered_agent_id(agent_id)
+                or agentRootIsIsolated()):
+            repo_path.parent.mkdir(parents=True, exist_ok=True)
         self.repo = CheckpointRepository(str(repo_path))
         self._last_auto_at: Dict[str, float] = {}
 

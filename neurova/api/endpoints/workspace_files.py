@@ -70,6 +70,12 @@ def _ensure_workspace_owner(root: Path, agent_id: str, current_user: Dict[str, A
 def _workspace_root(agent_id: str, current_user: Dict[str, Any]) -> Path:
     if not _AGENT_ID_PATTERN.match(agent_id or ""):
         raise HTTPException(status_code=400, detail=f"Invalid agent_id: '{agent_id}'")
+    # 建目录门（2026-11-24 审计 RISK 1）：未知 agent 一律 404，且**先校验后
+    # mkdir**——旧序即使最终 403 也已把 data/<id>/workspaces/ 建出来了。
+    from neurova.core.agent_workspaces import agent_exists
+
+    if not agent_exists(agent_id):
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' 不存在")
     root = get_agent_workspace_dir(agent_id)
     root.mkdir(parents=True, exist_ok=True)
     root = root.resolve()

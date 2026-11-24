@@ -139,6 +139,69 @@ def is_reserved_agent_id(agent_id: str) -> bool:
     return str(agent_id or "").strip() in RESERVED_AGENT_ROOT_NAMES
 
 
+class UnknownAgentError(ValueError):
+    """试图为未登记 agent 建私有目录（会话/技能/检查点等）——顶层目录防蔓延门。"""
+
+
+def is_registered_agent_id(agent_id: str) -> bool:
+    """该 id 是否对应一个真实存在的 agent（default 恒真；其余以 agents.json 登记册为准）。
+
+    会话/技能/检查点等 agent 私有面的**建目录**只应为登记在册的 agent 发生——
+    这是 data/ 顶层"只长 agent 根与保留名"的判据单源（2026-11-24 拍板）。
+    """
+    value = str(agent_id or "").strip() or _DEFAULT_AGENT_ID
+    if value == _DEFAULT_AGENT_ID:
+        return True
+    if value in RESERVED_AGENT_ROOT_NAMES or not _SAFE_AGENT_ID_RE.fullmatch(value):
+        return False
+    root = get_agent_root()
+    try:
+        raw = json.loads((root / "agents" / "agents.json").read_text(encoding="utf-8"))
+        return isinstance(raw, dict) and value in raw
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def agent_exists(agent_id: str) -> bool:
+    """**真实 agent** 判定（比登记册宽一档）：登记在册、运行实例在池、
+    或蜂群台账里有其 run——三者其一即真。
+
+    建目录门与 404 门共用本判据：run 的 agent 是真实 agent（蜂群成员的
+    会话/检查点回滚都为它落盘），而纯捏造的 id 三处都查不到，一律拒绝。
+    """
+    if is_registered_agent_id(agent_id):
+        return True
+    aid = str(agent_id or "").strip()
+    if not aid:
+        return False
+    try:
+        from neurova.api.endpoints import get_agent_instance
+
+        if get_agent_instance(aid) is not None:
+            return True
+    except Exception:  # noqa: BLE001 - 实例池不可读时退回台账判定
+        pass
+    try:
+        from neurova.agent.swarm import get_swarm_manager
+
+        swarm = get_swarm_manager()
+        for run in getattr(swarm, "_runs", {}).values():
+            if getattr(run, "agent_id", "") == aid:
+                return True
+    except Exception:  # noqa: BLE001 - 蜂群不可读时按未知处理
+        pass
+    return False
+
+
+def agentRootIsIsolated() -> bool:
+    """agent 根是否被注入到数据根之外（测试/多实例隔离根）。
+
+    隔离边界即注入本身：隔离根内建目录不受登记册门限制（conftest 对每条
+    用例注入 tmp 根，注册表未必随行）。
+    """
+    return bool((os.environ.get(AGENT_WORKSPACES_ENV) or "").strip())
+
+
 def get_agent_root() -> Path:
     """agent 根目录的父目录（生产＝数据根；`NEUROVA_AGENT_WORKSPACES_DIR` 可注入）。"""
     injected = (os.environ.get(AGENT_WORKSPACES_ENV) or "").strip()

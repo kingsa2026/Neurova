@@ -270,8 +270,13 @@ class SkillService:
         self.creation_evidence = EvidenceStore(self.skills_dir, agent_id)
         self._lock = self.creation_evidence.lock
 
-        # 确保目录存在
-        self.skills_dir.mkdir(parents=True, exist_ok=True)
+        # 确保目录存在（2026-11-24 建目录门：生产数据根下未知 agent 不长目录；
+        # 隔离根（测试/多实例注入）内不设限——隔离边界即注入本身）
+        from neurova.core.agent_workspaces import agentRootIsIsolated, is_registered_agent_id
+
+        if (self.skills_dir.exists() or is_registered_agent_id(agent_id)
+                or agentRootIsIsolated()):
+            self.skills_dir.mkdir(parents=True, exist_ok=True)
 
         # 加载已安装的技能
         self._load_skills()

@@ -861,6 +861,15 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
     agent_id = data.get("agent_id", "default")
     session_id = (data.get("session_id") or "").strip()
 
+    # 建目录门（2026-11-24 审计 RISK 4）：未知 agent 先报错，不在 data/ 顶层
+    # 为客户端随手给的 id 长目录（旧序是先落库后校验 agent 是否存在）。
+    from neurova.core.agent_workspaces import agent_exists
+
+    if agent_id and not agent_exists(agent_id):
+        await ws.send_json({"type": "error", "code": "agent_not_found",
+                             "message": f"Agent '{agent_id}' 不存在"})
+        return
+
     # 会话记录落库走仓内单点 create_session（与 console SSE 面 chat.py 同一入口）：
     # 移动端此前自铸 `session-<ts>` id 且本路径从不见仓——控制台会话列表
     # （GET /console/chat/sessions）对移动端聊天恒空，「会话历史与 PC 同源」

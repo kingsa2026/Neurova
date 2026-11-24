@@ -766,6 +766,11 @@ async def post_console_chat(
 
     setCurrentBuildSessionId(getattr(body, "build_session_id", None))
 
+    from neurova.core.agent_workspaces import agent_exists
+
+    if agent_id and not agent_exists(agent_id):
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' 不存在")
+
     # 会话 ID：客户端传入或新建
     if body.session_id:
         session_id = body.session_id
@@ -2061,6 +2066,10 @@ async def post_console_chat_new(
     if isinstance(body, dict):
         agent_id = body.get("agent_id") or ""
         title = body.get("title") or "新对话"
+    from neurova.core.agent_workspaces import agent_exists
+
+    if agent_id and not agent_exists(agent_id):
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' 不存在")
     session_id = repo.create_session(agent_id=agent_id, user_id=user_id, title=title)
     return {"code": 0, "message": "Session created", "data": {"session_id": session_id}}
 

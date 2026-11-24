@@ -255,11 +255,16 @@ class SessionManager(SessionRepository):
                 self._file_locks[key] = lock
             return lock
 
-    def _get_session_dir(self, agent_id: str) -> Path:
+    def _get_session_dir(self, agent_id: str, create: bool = False) -> Path:
         """获取agent的session目录（agent_id 为空时归入 "default"）。
 
         #1 改造：console 接入后允许 agent_id="" 创建会话，但根目录不能放 session
         文件（会被 list_sessions 漏扫），统一归入 default/。
+
+        create（2026-11-24 建目录门）：只有写路径显式 `create=True` 才允许建
+        目录，且未知 agent（不在 agents.json 登记册、非 default）抛
+        UnknownAgentError——读路径永不建目录。这是 data/ 顶层"只长 agent 根
+        与保留名"的单点闸（审计 2026-11-24 RISK 2-6 的根修）。
         """
         effective_agent_id = agent_id or "default"
         if self._sessions_dir is not None:
@@ -268,8 +273,26 @@ class SessionManager(SessionRepository):
             from neurova.core.agent_workspaces import get_agent_sessions_dir
 
             agent_dir = get_agent_sessions_dir(effective_agent_id)
-        agent_dir.mkdir(parents=True, exist_ok=True)
+        if create:
+            self._ensure_agent_dir_writable(effective_agent_id, agent_dir)
         return agent_dir
+
+    def _ensure_agent_dir_writable(self, effective_agent_id: str, agent_dir: Path) -> None:
+        """写路径建目录门：已存在放行；注入隔离根（测试/多实例）放行；
+        未登记 agent fail-fast（拒绝在 data/ 顶层为其长目录）。"""
+        if agent_dir.exists():
+            return
+        from neurova.core.agent_workspaces import UnknownAgentError, agent_exists
+
+        if self._sessions_dir is not None:
+            # 隔离边界即注入本身（测试/多实例部署），不设登记册门
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            return
+        if not agent_exists(effective_agent_id):
+            raise UnknownAgentError(
+                f"agent '{effective_agent_id}' 未登记（agents.json），拒绝为其创建会话目录"
+            )
+        agent_dir.mkdir(parents=True, exist_ok=True)
 
     def _all_session_dirs(self) -> List[Path]:
         """全部 agent 的会话目录（发现式，不创建缺失目录）。"""
@@ -347,30 +370,34 @@ class SessionManager(SessionRepository):
         存档 = 会话文件整体移入该子目录：现有 list/get/delete/rename 均基于
         agent_dir 的 session_*.json glob（不递归），移入即从所有现有查询消失，
         恢复即移回，无需改动任何既有方法。
+        未知 agent（目录不存在）不建 archived/——存档/恢复对其是诚实 no-op。
         """
-        archived_dir = self._get_session_dir(agent_id) / "archived"
-        archived_dir.mkdir(exist_ok=True)
+        agent_dir = self._get_session_dir(agent_id)
+        archived_dir = agent_dir / "archived"
+        if agent_dir.exists():
+            archived_dir.mkdir(exist_ok=True)
         return archived_dir
 
     # ── P1-2 会话时间线 ──────
 
-    def _get_timeline_file(self, agent_id: str, session_id: str) -> Path:
+    def _get_timeline_file(self, agent_id: str, session_id: str, create: bool = False) -> Path:
         """时间线文件路径（sessions/{agent_id}/_timeline/{sid}.jsonl）。
 
         独立子目录避免与 session_*.json 的日期 glob / 归档扫描互相干扰。
         session_id 先归一（CodeQL py/path-injection）：裸 id 拼路径可被
         ``../`` 带出 agent 目录，归一名恒落在 _timeline 之内。
         """
-        return (self._get_session_dir(agent_id) / "_timeline"
+        return (self._get_session_dir(agent_id, create=create) / "_timeline"
                 / f"{normalize_store_key(session_id)}.jsonl")
 
     def append_timeline_event(self, agent_id: str, session_id: str, event: Dict[str, Any]) -> bool:
         """追加一条事件到会话时间线（append-only，逐行 JSON）。
 
-        fail-open：写失败只记日志返回 False，绝不影响对话主链路。
+        fail-open：写失败只记日志返回 False，绝不影响对话主链路
+        （未知 agent 的 UnknownAgentError 也在此被吞成 False——时间线是增强面）。
         """
         try:
-            path = self._get_timeline_file(agent_id, session_id)
+            path = self._get_timeline_file(agent_id, session_id, create=True)
             file_lock = self._get_file_lock(path)
             with file_lock:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -820,6 +847,7 @@ class SessionManager(SessionRepository):
         if self._fenceRefusesWrite(agent_id, session_id, writer_claim):
             return ""
 
+        self._get_session_dir(agent_id, create=True)
         file_path = self._get_session_file(agent_id, session_id, date)
         file_lock = self._get_file_lock(file_path)
 
@@ -1189,6 +1217,7 @@ class SessionManager(SessionRepository):
         session_id = str(uuid.uuid4())[:8]
         date = datetime.now().strftime("%Y-%m-%d")
         now = datetime.now().isoformat()
+        self._get_session_dir(agent_id, create=True)
         file_path = self._get_session_file(agent_id, session_id, date)
         session_data = {
             "agent_id": agent_id,
@@ -1547,6 +1576,7 @@ class SessionManager(SessionRepository):
         if self._fenceRefusesWrite(agent_id, session_id, writer_claim):
             return False
         date = datetime.now().strftime("%Y-%m-%d")
+        self._get_session_dir(agent_id, create=True)
         file_path = self._get_session_file(agent_id, session_id, date)
         # 2026-09-07 根因修复（audit SUB-P1-7）：read-modify-write 全程持
         # file_lock——原锁外读陈旧快照写回，并发 add_message 会静默回滚最后一轮
