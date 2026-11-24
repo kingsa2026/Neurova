@@ -63,6 +63,8 @@ PINNED_DECISIONS = {
     "computer_ssh_exec": ("proceed", "proceed", "require_approval", "proceed"),
     # P2-6：窗口枚举是只读动作，任何档直接放行（与截图/快照同档）
     "computer_list_windows": ("proceed", "proceed", "proceed", "proceed"),
+    # T2：语义指向只取截图解析坐标（只读），任何档直接放行（与截图/快照同档）
+    "computer_point_at": ("proceed", "proceed", "proceed", "proceed"),
     # P2-7：key/paste/drag 是全局输入注入，与 click/type 同档
     "computer_key": ("proceed", "require_sandbox", "require_approval", "require_sandbox"),
     "computer_paste": ("proceed", "require_sandbox", "require_approval", "require_sandbox"),
@@ -184,6 +186,8 @@ class TestMembersMatchDeclarationSurface:
             "computer_dom_snapshot",
             "computer_som_snapshot",
             "computer_list_windows",
+            # T2 语义指向：取截图解析坐标，只读不落任何桌面变更（与截图同档）
+            "computer_point_at",
         }
         assert rp.desktopHighRiskTools() == {"computer_shell", "computer_ssh_exec"}
         assert rp.desktopRemoteExecutionTools() == {"computer_ssh_exec"}

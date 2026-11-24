@@ -2509,6 +2509,20 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["tool_name"],
         },
     },
+    # T2 语义指向（reference_af 拆解卡）：自然语言目标 → 屏幕坐标。UIA 树优先，
+    # VLM 档灰度（NEUROVA_CU_VLM_POINTING，默认关）。瞬时快照族（每次取新截图）。
+    "computer_point_at": {
+        "capability": {"readOnly": True, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【语义指向】把自然语言目标描述解析成屏幕坐标（UIA 控件树优先；未命中且开启 VLM 档时用视觉模型指向）。拿到坐标后用 computer_click 点击。【何时不用】能用 computer_dom_snapshot 拿到控件树时优先走 UIA。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_description": {"type": "string", "description": "目标的一句话描述（如：右上角的设置齿轮图标）"},
+                "window_title": {"type": "string", "description": "可选。UIA 档的目标窗口标题（缺省前台窗口）"},
+            },
+            "required": ["target_description"],
+        },
+    },
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -2681,6 +2695,7 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     # 与 computer_click/computer_type 同面同判
     "computer_drag", "computer_key", "computer_paste",
     "computer_screenshot", "computer_som_snapshot", "computer_dom_snapshot",
+    "computer_point_at",
     "browser_click", "browser_click_role", "browser_fill_role",
     # ref 寻址族与 role 族同轴：都是对同一页面的突变，重放制造新变更
     "browser_click_ref", "browser_fill_ref",

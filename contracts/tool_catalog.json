@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": "neurova.builtin_tools._BUILTIN_SCHEMAS",
-  "tool_count": 148,
+  "tool_count": 149,
   "tools": [
     {
       "agent_scope": "all",
@@ -1771,6 +1771,30 @@
       "min_role": null,
       "name": "computer_paste",
       "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "target_description": {
+            "description": "目标的一句话描述（如：右上角的设置齿轮图标）",
+            "type": "string"
+          },
+          "window_title": {
+            "description": "可选。UIA 档的目标窗口标题（缺省前台窗口）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_description"
+        ],
+        "type": "object"
+      },
+      "description": "【语义指向】把自然语言目标描述解析成屏幕坐标（UIA 控件树优先；未命中且开启 VLM 档时用视觉模型指向）。拿到坐标后用 computer_click 点击。【何时不用】能用 computer_dom_snapshot 拿到控件树时优先走 UIA。",
+      "external_write": false,
+      "min_role": null,
+      "name": "computer_point_at",
+      "read_only": true
     },
     {
       "agent_scope": "all",

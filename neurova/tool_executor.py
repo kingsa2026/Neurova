@@ -681,6 +681,7 @@ COMPUTER_USE_TOOLS = frozenset(
         "computer_set_value",
         "computer_som_snapshot",
         "computer_click_mark",
+        "computer_point_at",
         "computer_ssh_exec",
         "computer_list_windows",
         "computer_key",
@@ -784,6 +785,7 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "computer_set_value": frozenset({"value", "index", "runtime_id", "window_title", "generation"}),
     "computer_som_snapshot": frozenset(),
     "computer_click_mark": frozenset({"index", "button", "frame_id"}),
+    "computer_point_at": frozenset({"target_description", "window_title"}),
     "computer_list_windows": frozenset(),
     "computer_key": frozenset({"key", "repeat", "interval"}),
     "computer_paste": frozenset({"text"}),
@@ -1050,6 +1052,7 @@ class ToolExecutor:
         "computer_set_value": "_execute_computer_set_value",
         "computer_som_snapshot": "_execute_computer_som_snapshot",
         "computer_click_mark": "_execute_computer_click_mark",
+        "computer_point_at": "_execute_computer_point_at",
         "computer_ssh_exec": "_execute_computer_ssh_exec",
         "computer_list_windows": "_execute_computer_list_windows",
         "computer_key": "_execute_computer_key",
@@ -8797,6 +8800,79 @@ class ToolExecutor:
             str(params.get("explanation") or "")[:80],
         )
         return {"success": True, "plan": normalized, "explanation": str(params.get("explanation") or "")}
+
+    async def _execute_computer_point_at(self, params: Dict) -> Dict:
+        """T2 语义指向：自然语言目标 → 屏幕坐标（UIA 树优先，VLM 档灰度）。
+
+        只产出坐标读数，不执行点击——点击仍走 computer_click 既有链（护栏/
+        审计/补拍照旧）。UIA 档=前台（或指定标题）窗口控件树按名称包含匹配；
+        VLM 档=既有 LLM 视觉通道（默认关，NEUROVA_CU_VLM_POINTING 开）。
+        """
+        from neurova.computer_use import get_computer_use_manager
+        from neurova.computer_use import vlm_pointing
+
+        target = str(params.get("target_description") or "").strip()
+        if not target:
+            return {"error": "缺少 target_description"}
+        window_title = str(params.get("window_title") or "").strip() or None
+
+        def _uiaLookup(description: str) -> Optional[Tuple[int, int]]:
+            # UIA 档：控件树按名称包含匹配（快照序=树序，取首个命中确定性）；
+            # 器械故障上抛由 resolveTargetPoint 按未命中降级。
+            manager = self._desktop_uia()
+            snap = manager.snapshot(window_title, None, None, None, None, False)
+            needle = description.strip().lower()
+            for el in snap.get("elements") or []:
+                name = str(el.get("name") or "").strip().lower()
+                if not name or needle not in name:
+                    continue
+                rect = el.get("rect") or {}
+                rx, ry, rw, rh = rect.get("x"), rect.get("y"), rect.get("w"), rect.get("h")
+                if None in (rx, ry, rw, rh):
+                    continue
+                return (int(rx) + int(rw) // 2, int(ry) + int(rh) // 2)
+            return None
+
+        llm_client = getattr(self._agent, "llm_client", None)
+
+        def _vlmFn(prompt: str, image: bytes) -> str:
+            # 生产 VLM 通道：agent 既有 llm_client（视觉输入走多模态消息）。
+            import base64
+
+            from neurova.mem_core import run_async_safely
+
+            b64 = base64.b64encode(image).decode("utf-8")
+            resp = run_async_safely(
+                llm_client.chat([{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url",
+                         "image_url": {"url": f"data:image/png;base64,{b64}",
+                                       "detail": "high"}},
+                    ],
+                }])
+            )
+            return str(getattr(resp, "content", "") or "")
+
+        manager = get_computer_use_manager()
+        screenshot_data = await asyncio.to_thread(manager.screenshot)
+        if not screenshot_data:
+            return {"error": "截图不可用（无桌面后端）"}
+
+        res = vlm_pointing.resolveTargetPoint(
+            screenshot_data,
+            target,
+            uiaLookup=_uiaLookup,
+            vlmFn=_vlmFn if llm_client is not None else None,
+        )
+        try:
+            await self._emit_computer_event("computer_point_at", params, res)
+        except Exception:  # noqa: BLE001 - 事件广播失败不影响结果
+            logger.debug("computer_point_at 事件广播失败", exc_info=True)
+        if res.get("state") == "measured":
+            return {"success": True, **res, "note": "拿到坐标后用 computer_click 点击"}
+        return {"success": False, **res}
 
     async def _execute_computer_ssh_exec(self, params: Dict) -> Dict:
         """SSH 远程命令执行（Linux/macOS 远程 = SSH，无 GUI）。
