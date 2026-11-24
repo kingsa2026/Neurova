@@ -101,18 +101,30 @@ def test_console_chat_rejects_foreign_agent(agent_state):
     assert exc.value.status_code == 403
 
 
-def test_console_chat_nonexistent_agent_is_503(agent_state):
-    """实例未装配 → 503（审计 §3.1-17 收口：原 200+"Echo" 是假成功）。
-
-    S1 时期此处钉的是"不扩大拒绝面、维持 Echo 回退"；R4 依审计 §3.1-17
-    把未装配从"200 假成功"改为显式 503，本用例随之改钉新契约。
+def test_console_chat_agent_gate_contracts(agent_state):
+    """agent 门两段契约（2026-11-24 建目录门落地后）：
+    - 未登记 agent → 404（建目录门：不再为捏造 id 长目录，也不假 Echo）；
+    - 登记在册但实例未装配 → 仍 503（审计 §3.1-17 收口：原 200+"Echo" 是假成功，
+      R4 改钉 503 的契约保持，只是"在册"现在以 agents.json 登记册为准）。
     """
+    import json as _json
+
     from neurova.api.endpoints import console as console_mod
+    from neurova.core.agent_workspaces import get_agent_root
+
+    reg = get_agent_root() / "agents" / "agents.json"
+    reg.parent.mkdir(parents=True, exist_ok=True)
+    reg.write_text(_json.dumps({"ghost": {"name": "ghost"}}), encoding="utf-8")
 
     body = console_mod.ChatRequest(message="hi", agent_id="ghost", stream=True)
     with pytest.raises(HTTPException) as exc:
         asyncio.run(console_mod.post_console_chat(body=body, request=_Req(), current_user=_U1))
     assert exc.value.status_code == 503
+
+    body2 = console_mod.ChatRequest(message="hi", agent_id="never-registered", stream=True)
+    with pytest.raises(HTTPException) as exc2:
+        asyncio.run(console_mod.post_console_chat(body=body2, request=_Req(), current_user=_U1))
+    assert exc2.value.status_code == 404
 
 
 def test_console_ws_default_agent_gate_semantics(agent_state):

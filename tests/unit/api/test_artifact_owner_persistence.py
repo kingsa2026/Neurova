@@ -50,6 +50,12 @@ def workspace(tmp_path, monkeypatch):
     monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "workspaces"))
     # 元数据库落点也要隔离：不隔离就写进仓库 data/，跨用例互相看见彼此的条目
     monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
+    # 建目录门（2026-11-24）：本档的 agent_id 需在隔离登记册在册才算"真实 agent"
+    from neurova.core.agent_workspaces import get_agent_root
+
+    reg = get_agent_root() / "agents" / "agents.json"
+    reg.parent.mkdir(parents=True, exist_ok=True)
+    reg.write_text(json.dumps({"media-agent": {"name": "media-agent"}}), encoding="utf-8")
     artifacts_api._artifacts_store.clear()
     yield tmp_path / "workspaces"
     artifacts_api._artifacts_store.clear()

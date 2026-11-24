@@ -109,7 +109,11 @@ def makeClient(request, monkeypatch):
     from neurova.api.endpoints import console as console_mod
 
     def _make(agent: _RecordingAgent, identity: Optional[Dict[str, Any]]) -> TestClient:
+        # 建目录门（2026-11-24）双点位打桩：console 模块与 api.endpoints 各有一份
+        # get_agent_instance 绑定，agent_exists 走后者——漏一边门就误 404。
         monkeypatch.setattr(console_mod, "get_agent_instance", lambda agent_id=None: agent)
+        monkeypatch.setattr(
+            "neurova.api.endpoints.get_agent_instance", lambda agent_id=None: agent)
         app = create_app(enable_memory=False, enable_channels=False)
         previous = app.dependency_overrides.get(get_current_user, _MISSING_OVERRIDE)
         if identity is None:

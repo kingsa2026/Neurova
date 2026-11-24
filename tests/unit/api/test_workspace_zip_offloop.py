@@ -28,6 +28,10 @@ def ws_env(tmp_path, monkeypatch):
     root = tmp_path / "agent_workspaces"
     root.mkdir()
     monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(root))
+    # 建目录门（2026-11-24）：w1 需在隔离登记册在册，_workspace_root 才放行
+    reg = root / "agents" / "agents.json"
+    reg.parent.mkdir(parents=True, exist_ok=True)
+    reg.write_text('{"w1": {"name": "w1"}}', encoding="utf-8")
     return root
 
 

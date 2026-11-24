@@ -985,6 +985,7 @@ class SessionManager(SessionRepository):
         if not messages:
             return 0, 0
 
+        self._get_session_dir(agent_id, create=True)
         file_path = self._get_session_file(agent_id, store_key, date)
         with self._get_file_lock(file_path):
             session_data = self._read_session_file(file_path)

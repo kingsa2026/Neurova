@@ -154,6 +154,8 @@ class TestFeedbackCounts:
     def test_aggregates_across_date_files(self, repo):
         """跨日期文件聚合（旧→新），计数与明细都合并。"""
         agent, sid = "a4", "s4"
+        # 建目录门（2026-11-24）：写路径需显式确保目录（读路径不再顺带 mkdir）
+        repo._get_session_dir(agent, create=True)
         for date, fb, ts in (
             ("2026-01-01", "like", "2026-01-01T00:00:00"),
             ("2026-01-02", "dislike", "2026-01-02T00:00:00"),
