@@ -123,13 +123,51 @@
 
 与总评卡的校准：总评卡"感知与接地 7.5 vs 8.5、工具与接口 9.0 vs 8.0"是十维粗粒度；本细拆下钻后——观测通道（A1）本仓实际更宽（UIA 树+SOM+补拍+分页读此前被低估），接地单轴（A2）对方仍领先；工具域把"接口体系"拆开后对方的发现机制（B3）与可进化范式（B8/A9）是真亮点，但治理/纪律/生态差距被细拆放大。两处读数不矛盾：粗卡看的是"域综合",细拆看的是"轴分布"。
 
-## 5. 聚焦两域的新借鉴点（不与总评卡 P0 重复）
+## 5. 聚焦两域的借鉴实施卡（细化版，不与总评卡 P0 重复）
 
-1. **工具运行时自发现（B3，P1）**：本仓工具面大，可给 agent 增加只读"工具目录"自描述通道（按能力/关键字检索工具 docstring 与参数 schema），降低长尾工具的发现成本——对方的 capabilities/doc 是现成范式。
-2. **VLM 指向接地通道（A2，P1）**：som.py 的 detector 协议已留位，接一个指向模型（或复用现有 VLM 通道）补齐"无树无标记"像素面定位，与 UIA/SOM 形成三档互补。
-3. **公共 CUA 基准接入（A8，P1）**：把 computer_use 动作面接 OSWorld 类判据做一次诚实实测，建立第三方可复现锚点（对方判分纪律：严格二值+基建失败≠零分，与本仓 P0-② 同向）。
-4. **表格/文档结构化直写（A3，P2）**：对方的 set_cell_values（UNO 直连）思路可迁移为"office 文档结构化读写工具"，绕开逐格 GUI 点击。
-5. **动作后补拍确认标准化（A1，已有，保持）**：本仓 ACTION_REFRESH 已做，对方的"操作前后帧+局部放大"（BBoN narrator 的 zoomed view，`behavior_narrator.py:106-168`）可增强确认读数，供审批/回放复用。
+> 每卡五要素：对方证据（file:line）→ 本仓落点（file:line）→ 方案要点 → 验收敛据（先红后绿）→ 优先级与边界。
+
+### 卡 T1 · 工具运行时自发现目录（来自 B3，P1）
+
+- **对方证据**：S4 任务 agent 用 `python -m shadow_interface capabilities`（列全部工具+签名）与 `doc <name>`（单工具文档）自发现工具（`osworld_setup/s4/seeds/combined/cli.py:48-110`，`_discover_modules/_public_fns` 自动枚举）；Builder 提示词把"可发现性"定为纪律——无 docstring 的工具会被 agent 略过（`prompts/combined.md` Discoverability 节）。
+- **本仓落点**：`neurova/builtin_tools.py`（`_BUILTIN_SCHEMAS` 单源注册表，实测 146 个）+ `neurova/tool_executor.py`（`ToolExecutor.execute` 分派）。新增只读工具 `tool_catalog_search(keyword="", tag="", limit=20)` 与 `tool_doc(tool_name)`：从注册表按名称/描述/能力标记（readOnly/writeScopes/interactive_desktop 等）检索，返回名称、描述、参数 schema 摘要；`tool_doc` 返回单工具全量 schema+docstring。
+- **方案要点**：① 只读、无副作用、不进变异类重试抑制；② 按 agent 租户/权限过滤可见面（与既有工具可见性同源，不新增第二套权限判定）；③ 输出有界（limit 上限+描述截断），防目录刷爆上下文；④ 与 A6 工具搜索互补：A6 管"控制与记账"，本卡管"agent 主动检索"。
+- **验收判据**：红灯——用例调用 `tool_catalog_search` 时工具不存在（TypeError/unknown tool）；绿灯——`tool_catalog_search(keyword="screenshot")` 命中 computer_screenshot 等并含参数 schema；`tool_doc("computer_click")` 返回白名单键说明；未注册名返回结构化 not_found（不抛裸异常）；无权限工具不出现在目录。
+- **优先级/边界**：P1。不做工具自动执行推荐（那是肌肉记忆的职责），目录只做"发现"。
+
+### 卡 T2 · VLM 指向接地通道（来自 A2，P1）
+
+- **对方证据**：`grounding.py:230-246` `generate_coords`——"Query+截图→指向模型→坐标"，配 `resize_coordinates`（:337-344）做坐标系换算；OCR 词表+LLM 选词兜文本定位（:286-327）。弱点也明确：正则取前两数、`assert len>=2` 无重试。
+- **本仓落点**：`neurova/computer_use/som.py` 的 `SomDetector` 协议与 `SOM_DETECTOR_ENV` 选型位（P3-10 已留）——新增 `vlm_pointing.py`：实现 `callable(png_bytes, target_description) -> (x, y)` 指向器，走既有 LLM/VLM 通道（`llm_client`，视觉输入同 `image_pipeline` 现有装配），输出经界内 clamp 与置信不足诚实降级。
+- **方案要点**：① 定位为 **第三档接地**：UIA 树（有结构化元素）→ SOM（无树可标注）→ VLM 指向（无树无标记的像素面）；② 解析容错比照对方弱点反向做：多格式解析（纯数字对/JSON/markdown）+ 1 次重问 + 失败返回结构化 `grounding_failed`（不编坐标）；③ 每次指向记审计（耗时/模型/命中与否），成本手动档口径。
+- **验收判据**：红灯——`vlm_pointing` 模块不存在的导入失败；绿灯——桩 VLM 返回坐标 → 指向器输出界内坐标；桩返回乱码 → 结构化失败而非异常上抛；fallback 链单测：UIA 可用时不调 VLM。
+- **优先级/边界**：P1。仅作定位兜底档，不替代 UIA/SOM 主路径（确定性优先）；默认关（env 灰度），防评测/生产成本意外。
+
+### 卡 T3 · 公共 CUA 基准接入（来自 A8，P1，与总评 P0-① 同向）
+
+- **对方证据**：`agent_s4/eval/osworld.py`（共享评测 worker：备 VM→跑 episode→`env.evaluate()`，`persist_evaluation_result` 归一 [0,1]）；判分纪律=严格二值+**基建失败≠零分**（`tournament.py:67-77`）。
+- **本仓落点**：`neurova/benchmark/` 新增 `cua_eval.py`：任务=「指令+初始状态准备+判据 check(终态观测)」；执行=computer_use 动作循环（复用 `ToolExecutor.execute` 管线，含护栏/审计）+ 终态取证（UIA 快照/截图/文件读回）；判分沿用 `suite_eval` 口径（judged/infra 分类，P0-② 已铺）。评测对象先做**本机桌面受控任务**（记事本/文件管理器/浏览器），OSWorld 全量接入另批。
+- **方案要点**：① 判据注入式（与 suite_eval 同构，执行器只产事实）；② **评测手动跑+成本标注**（D-H 纪律，CI 不接真桌面跑）；③ 每任务失败分类：task_failed vs infra_failure（评测器/驱动崩溃不计任务失败）；④ 产出直接可作 P0-① 的外部适应度源（进化适应度锚定的数据接口对齐 `evolution/eval/fitness.py`）。
+- **验收判据**：红灯——`cua_eval` 模块不存在；绿灯——桩 agent+临时桌面任务（如"在记事本写入 X"）跑通一题，报告含 tasks_judged/tasks_infra_failed/failure_class；驱动异常记 infra 不记任务失败；无 desktop 权限时诚实 skip。
+- **优先级/边界**：P1。先本机受控任务建立判据与口径，公共基准（OSWorld VM 供给）依赖外部环境，另批立项。
+
+### 卡 T4 · Office/文档结构化直写（来自 A3，P2）
+
+- **对方证据**：`grounding.py:51-176` `SET_CELL_VALUES_CMD`——经 LibreOffice UNO 接口直写单元格（值/公式/类型分派），绕开逐格 GUI 点击；配套"code agent 改完必须 GUI 复核"纪律（`procedural_memory.py:51-54`）。
+- **本仓落点**：`neurova/computer_use/` 新增 `structured_edit.py` + 注册 `computer_doc_edit` 工具：对**沙箱工作区内**的 xlsx/docx/csv 用 openpyxl/python-docx 直写（单元格区间/段落替换），返回改前/改后摘要；GUI 侧再以 UIA 读回核验（两段式：直写+复核）。
+- **方案要点**：① 路径白名单（仅沙箱工作区，复用既有沙箱 provider 纪律）；② 写后必须回读校验（写→读→比对→结果带 diff 摘要），失败如实报；③ 与 GUI 动作互斥（取得 desktop 车道后再动文件，防同时改）。
+- **验收判据**：红灯——工具不存在；绿灯——临时 xlsx 设 A1:C3 值 → 回读一致、结果含 diff 摘要；路径越界 → 结构化拒绝；文件被占用 → 诚实失败不半写。
+- **优先级/边界**：P2。先 xlsx/csv（openpyxl 成熟），docx 次之；不做 UNO/进程注入（维护面大），走文件直写+GUI 复核两段式。
+
+### 卡 T5 · 动作前后帧+局部放大确认读数（来自 A1/A5，P2）
+
+- **对方证据**：`bbon/behavior_narrator.py:36-168`——动作前帧画标记（红圈 Click/蓝圈 MoveTo/绿圈 DragTo）、动作点 300×300 裁剪 + 4× Lanczos 放大 + 原图红框，喂给 VLM 产出"事实变化清单"；这是 BBoN 裁决与调试的读数基础。
+- **本仓落点**：`neurova/computer_use/frame_registry.py`（帧登记）+ `actions.py` 执行段：前台动作执行**前取帧、后补拍**（既有 ACTION_REFRESH 机制）基础上，增加**动作点局部裁剪**（以 (x,y) 为中心 300×300，可配）作为 `action_result` 的附带证据帧（有界尺寸、可关）。
+- **方案要点**：① 证据帧进 ActionResult 的 `evidence` 段（截断/压缩，防上下文膨胀）；② 供三处消费：操作面板人工复核、审批证据、失败归因（配合 T3 判据的终态取证）；③ 隐私边界：证据帧留存遵循既有会话归档纪律，不新增第二套留存策略。
+- **验收判据**：红灯——ActionResult 无 evidence 帧；绿灯——click 后结果含 before/after 引用与 crop 元数据（坐标+尺寸）；guardrail 拒绝的动作不产帧；关闭开关时零变化。
+- **优先级/边界**：P2。仅前台输入族动作启用（点击/拖拽/按键），滚动/截图类不产帧。
+
+**优先级汇总**：T1/T2/T3 = P1（T3 与总评 P0-① 同向，建议合并立项）；T4/T5 = P2。五卡均为增量工具/证据面，不动既有动作语义；默认关或按灰度接入的项（T2/T5）须带开关测试。
 
 **不学清单（两域）**：`eval()` 裸执行模型输出；DONE/FAIL 子串终止判定；坐标正则取数无重试；sudo 口令进提示词；为基准分数牺牲多会话治理。
 
