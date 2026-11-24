@@ -419,19 +419,12 @@ def _initialize_components(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("NEUTokenManager init failed: %s", e)
 
-    # agent 布局 v3 切换（2026-11-24 拍板）：仅哨兵缺失时一次性执行
-    # （v1 遗留 → v2 → v3 分区 data/agent/<属主桶>/<agent_id>/），完成后写
-    # 哨兵——启动不再做任何周期性/重复的迁移扫描；后续迁移由管理员在
-    # agent 管理页手动触发（可全量或按属主定向）。
-    # 必须在任何 agent 加载/默认 agent 初始化之前执行，否则旧数据读不到。
-    try:
-        from neurova.core.agent_layout_migration import ensure_agent_layout_v3
-
-        v3result = ensure_agent_layout_v3()
-        if not v3result.get("skipped"):
-            logger.info("agent 布局 v3 切换完成：%s", v3result.get("counts", {}))
-    except Exception as e:  # noqa: BLE001 - 切换失败按 v2 兼容运行，不阻断启动
-        logger.error("agent 布局 v3 切换失败（按 v2 兼容运行）：%s", e, exc_info=True)
+    # agent 布局迁移（2026-11-24 拍板）：启动**不做**任何自动扫描/迁移。
+    # v2→v3 分区切换由管理员在 agent 管理页手动触发（POST /v1/agents/
+    # layout/migration/scan），或停机后跑 scripts/migrate_agent_layout_v3.py；
+    # 未迁移的 agent 由 get_agent_root_dir 的 v2 兼容位继续服务（零停机）。
+    # 必须在任何 agent 加载/默认 agent 初始化之前执行的旧逻辑已随迁移器
+    # 移除——v3 解析器对未迁移目录的兼容读取替代了它。
 
     # 默认 Agent 工作区（根由 neurova.core.agent_workspaces 单源给出）
     from neurova.core.agent_workspaces import (
