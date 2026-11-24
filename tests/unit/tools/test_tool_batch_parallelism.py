@@ -686,6 +686,9 @@ class TestFullDeclarationCoverage:
             "recall_context_span", "recall_history", "rss_read", "subagent_status",
             # 子代理结构化结果提交：同 escalate 的通知面（依据行在声明位）。
             "submit_result",
+            # T1 工具自发现目录（reference_af 拆解卡）：纯只读目录/文档查询，
+            # 无共享态写入（依据行在 builtin_tools.py 各自声明位）。
+            "tool_catalog_search", "tool_doc",
             "update_plan", "v2ex_hot", "voice_memory_search", "weather", "web_fetch",
             "web_search",
         ], f"可并行集合发生变化，须逐条给出依据：{eligible}"

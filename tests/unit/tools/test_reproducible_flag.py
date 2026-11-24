@@ -40,6 +40,9 @@ EXPECTED_NON_REPRODUCIBLE = {
     "computer_click", "computer_click_element", "computer_click_mark",
     "computer_type", "computer_scroll", "computer_set_value",
     "computer_shell", "computer_ssh_exec", "computer_screenshot",
+    # T2/T4（reference_af 拆解卡）：point_at 每次取新截图（瞬时快照族）；
+    # doc_edit 直写工作区文件（重放制造新写入）。
+    "computer_point_at", "computer_doc_edit",
     "browser_click", "browser_click_role", "browser_fill_role",
     "browser_click_ref", "browser_fill_ref",
     "browser_type", "browser_navigate", "browser_screenshot", "browser_dom_snapshot",

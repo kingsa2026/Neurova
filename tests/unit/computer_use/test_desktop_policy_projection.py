@@ -65,6 +65,8 @@ PINNED_DECISIONS = {
     "computer_list_windows": ("proceed", "proceed", "proceed", "proceed"),
     # T2：语义指向只取截图解析坐标（只读），任何档直接放行（与截图/快照同档）
     "computer_point_at": ("proceed", "proceed", "proceed", "proceed"),
+    # T4：结构化直写是工作区文件突变（与 type/click 同档：full 直行、沙箱/审批收口）
+    "computer_doc_edit": ("proceed", "require_sandbox", "require_approval", "require_sandbox"),
     # P2-7：key/paste/drag 是全局输入注入，与 click/type 同档
     "computer_key": ("proceed", "require_sandbox", "require_approval", "require_sandbox"),
     "computer_paste": ("proceed", "require_sandbox", "require_approval", "require_sandbox"),

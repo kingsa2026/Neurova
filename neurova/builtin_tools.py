@@ -2484,7 +2484,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     },
     # T1 工具运行时自发现目录（reference_af 拆解卡）：工具面大（146+），长尾工具
     # 靠猜名不可行——agent 先查目录再调用。数据单源=tools/catalog 投影层（builtin
-    # 声明位推导），本处只声明面。只读、并发安全、无写作用域。
+    # 声明位推导），本处只声明面。
+    # 并行能力声明：纯只读目录检索（内存投影过滤），无共享态写入，并发安全。
     "tool_catalog_search": {
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ["none"]},
         "description": "【工具目录】按关键字/标记检索当前可用的内置工具清单（名称/描述/只读性/使用范围/参数个数）。选工具前先查目录，避免猜工具名。",
@@ -2499,6 +2500,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "tool_doc": {
+        # 并行能力声明：纯只读单工具档案查询，无共享态写入，并发安全。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ["none"]},
         "description": "【工具文档】返回单个内置工具的全量档案：描述、参数 JSON Schema、只读性、外部写判定、使用范围（all/main_only）。配合 tool_catalog_search 使用。",
         "parameters": {
@@ -2511,6 +2513,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     },
     # T2 语义指向（reference_af 拆解卡）：自然语言目标 → 屏幕坐标。UIA 树优先，
     # VLM 档灰度（NEUROVA_CU_VLM_POINTING，默认关）。瞬时快照族（每次取新截图）。
+    # 并行能力声明：语义只读但取同一台桌面截图（与 computer_screenshot 同判：
+    # 作用域共享）⇒ 不可并行。
     "computer_point_at": {
         "capability": {"readOnly": True, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【语义指向】把自然语言目标描述解析成屏幕坐标（UIA 控件树优先；未命中且开启 VLM 档时用视觉模型指向）。拿到坐标后用 computer_click 点击。【何时不用】能用 computer_dom_snapshot 拿到控件树时优先走 UIA。",
@@ -2524,7 +2528,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     # T4 结构化直写（reference_af 拆解卡）：xlsx/csv 文件级直写单元格+写后回读
-    # 校验，绕开逐格 GUI 点击。写副作用（工作区共享态），不可重现族。
+    # 校验，绕开逐格 GUI 点击。
+    # 并行能力声明：写工作区共享文件（与 file_write 同判：并发写同路径互相覆盖）
+    # ⇒ 不可并行。
     "computer_doc_edit": {
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【结构化直写】对工作区内的 xlsx/xlsm/csv 文件按单元格引用（如 A1）直接批量写入值（数值/公式/文本自动推断），写后逐格回读校验并返回回读明细。绕开逐格 GUI 点击，适合表格批量修改。【何时不用】目标文件不在工作区时不可用；纯文本文件用 file_edit。",
