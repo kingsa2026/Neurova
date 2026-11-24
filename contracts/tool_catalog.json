@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": "neurova.builtin_tools._BUILTIN_SCHEMAS",
-  "tool_count": 149,
+  "tool_count": 150,
   "tools": [
     {
       "agent_scope": "all",
@@ -1623,6 +1623,35 @@
       "external_write": true,
       "min_role": null,
       "name": "computer_click_mark",
+      "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "cell_values": {
+            "description": "单元格写入表，如 {\"A1\": \"品名\", \"B2\": \"42\", \"C3\": \"=SUM(A1:B2)\"}",
+            "type": "object"
+          },
+          "file_path": {
+            "description": "文件路径（相对工作区或绝对路径，须在工作区内）",
+            "type": "string"
+          },
+          "sheet_name": {
+            "description": "可选。xlsx 工作表名（缺省活动表）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_path",
+          "cell_values"
+        ],
+        "type": "object"
+      },
+      "description": "【结构化直写】对工作区内的 xlsx/xlsm/csv 文件按单元格引用（如 A1）直接批量写入值（数值/公式/文本自动推断），写后逐格回读校验并返回回读明细。绕开逐格 GUI 点击，适合表格批量修改。【何时不用】目标文件不在工作区时不可用；纯文本文件用 file_edit。",
+      "external_write": true,
+      "min_role": null,
+      "name": "computer_doc_edit",
       "read_only": false
     },
     {

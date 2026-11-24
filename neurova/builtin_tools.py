@@ -2523,6 +2523,21 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["target_description"],
         },
     },
+    # T4 结构化直写（reference_af 拆解卡）：xlsx/csv 文件级直写单元格+写后回读
+    # 校验，绕开逐格 GUI 点击。写副作用（工作区共享态），不可重现族。
+    "computer_doc_edit": {
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【结构化直写】对工作区内的 xlsx/xlsm/csv 文件按单元格引用（如 A1）直接批量写入值（数值/公式/文本自动推断），写后逐格回读校验并返回回读明细。绕开逐格 GUI 点击，适合表格批量修改。【何时不用】目标文件不在工作区时不可用；纯文本文件用 file_edit。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "文件路径（相对工作区或绝对路径，须在工作区内）"},
+                "cell_values": {"type": "object", "description": "单元格写入表，如 {\"A1\": \"品名\", \"B2\": \"42\", \"C3\": \"=SUM(A1:B2)\"}"},
+                "sheet_name": {"type": "string", "description": "可选。xlsx 工作表名（缺省活动表）"},
+            },
+            "required": ["file_path", "cell_values"],
+        },
+    },
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -2694,6 +2709,7 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     # 桌面写动作（AD 批补齐）：拖拽/按键/粘贴改共享桌面状态，重放制造新副作用，
     # 与 computer_click/computer_type 同面同判
     "computer_drag", "computer_key", "computer_paste",
+    "computer_doc_edit",
     "computer_screenshot", "computer_som_snapshot", "computer_dom_snapshot",
     "computer_point_at",
     "browser_click", "browser_click_role", "browser_fill_role",

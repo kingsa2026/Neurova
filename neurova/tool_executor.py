@@ -1053,6 +1053,7 @@ class ToolExecutor:
         "computer_som_snapshot": "_execute_computer_som_snapshot",
         "computer_click_mark": "_execute_computer_click_mark",
         "computer_point_at": "_execute_computer_point_at",
+        "computer_doc_edit": "_execute_computer_doc_edit",
         "computer_ssh_exec": "_execute_computer_ssh_exec",
         "computer_list_windows": "_execute_computer_list_windows",
         "computer_key": "_execute_computer_key",
@@ -8873,6 +8874,70 @@ class ToolExecutor:
         if res.get("state") == "measured":
             return {"success": True, **res, "note": "拿到坐标后用 computer_click 点击"}
         return {"success": False, **res}
+
+    async def _execute_computer_doc_edit(self, params: Dict) -> Dict:
+        """T4 结构化直写：工作区内 xlsx/xlsm/csv 按单元格引用批量直写+回读校验。
+
+        - 路径经 _resolve_agent_path 工作区白名单（拒绝工作区外）；
+        - 执行期持 desktop 车道（与 GUI 动作互斥，防边直写边被 GUI 改）；
+        - 阻塞写放线程池；写后逐格回读比对，不一致如实报 mismatch。
+        """
+        from neurova.computer_use import structured_edit
+        from neurova.computer_use.lane_mutex import (
+            DESKTOP_LANE,
+            LaneRefusal,
+            currentLaneScope,
+            get_lane_mutex,
+        )
+
+        file_path, err = self._resolve_agent_path(params.get("file_path", ""))
+        if err:
+            return {"error": err}
+        # T4 工作区白名单：结构化直写仅限 agent 工作区（绝对路径也不放行——
+        # _resolve_agent_path 对绝对路径是直通语义，这里按卡面收口）。
+        from pathlib import Path as _Path
+
+        workspace = getattr(self._agent, "workspace_path", None)
+        if workspace:
+            base = _Path(str(workspace)).resolve()
+            resolved = _Path(str(file_path)).resolve()
+            if resolved != base and base not in resolved.parents:
+                return {
+                    "error": (
+                        f"路径越界: '{params.get('file_path')}' 不在 agent 工作区 "
+                        f"{base} 内（结构化直写仅限工作区文件）"
+                    )
+                }
+        cell_values = params.get("cell_values")
+        if not isinstance(cell_values, dict) or not cell_values:
+            return {"error": 'cell_values 必须是非空对象（如 {"A1": "值"}）'}
+        sheet_name = params.get("sheet_name")
+
+        try:
+            with get_lane_mutex().hold(
+                DESKTOP_LANE, scope=currentLaneScope(), owner="computer_doc_edit"
+            ):
+                result = await asyncio.to_thread(
+                    structured_edit.editWorkbookCells,
+                    file_path,
+                    cell_values,
+                    sheet_name,
+                )
+        except LaneRefusal as refusal:
+            # 与 GUI 动作同一拒绝契约（面板/模型同形可判读）
+            return {
+                "success": False,
+                "error": refusal.message,
+                "guardrail": {"code": refusal.code, "lane": refusal.lane},
+            }
+        except Exception as e:  # noqa: BLE001 - 结构化直写失败如实回
+            logger.error("computer_doc_edit 直写失败: %s", e)
+            return {"error": str(e)}
+        if not result.get("success"):
+            logger.warning(
+                "computer_doc_edit 回读不一致/被拒: %s", str(result)[:200]
+            )
+        return result
 
     async def _execute_computer_ssh_exec(self, params: Dict) -> Dict:
         """SSH 远程命令执行（Linux/macOS 远程 = SSH，无 GUI）。
