@@ -313,11 +313,11 @@ Agent 决策（ToolExecutor 单一转交点 tool_executor.py:1867）
 - **鸿蒙真机（HUAWEI SGT-AL10，5MT0226408057400）已走通**：HAP 构建+签名+安装+深链配对全链成功（hilog 实证「冷启动携带配对深链→直达配对页→消费配对深链→resolve 成功→配对成功」），App 登录 admin 后落在对话页；ledger 中两条 harmony 配对（pair-fea2967596fd / pair-c4665d0abaa5）均上报 caps=[open_url, clipboard_read, clipboard_write, device_env]。
 - **验证环境事故已处置（非产品缺陷）**：隔离验证数据根（nv-e2e-root）的 `llm/providers.json` 被并行会话的后端进程改写，moss 服务商条目丢失（24→16 个），新拉起的后端读到无键服务商集，agent 对话即失败「[LLM Error] No client available」。处置：从真数据根回填 moss 条目（`enc:v2:` 密文自包含，`decrypt_api_key` 缺省空 master key 可解，无需迁移密钥文件）并重启后端；复验 `/v1/providers` moss `api_key_configured=true`，真 LLM 对话返回正常（LLM-OK 冒烟通过）。教训：跨会话共享的隔离数据根要么每会话独立复制，要么对 `llm/providers.json` 这类可变配置做写保护。
 - **验证环境**：隔离根 admin 口令失忆，已在 users.db 重置 bcrypt 哈希恢复登录（测试夹具，非用户资产）。B6 MCP `device_status` 在重启后的后端复验通过（`/v1/mcp/agent-tools/` 注意尾斜杠，307 重定向）。
-- **鸿蒙端真机发现的产品缺口（待修）**：WS 断线重连依赖 `WebSocketAdapter.reauthAndReconnect`（maxReconnect=10 指数退避），但 (a) App 退后台时 JS 定时器挂起，重连暂停；(b) 重试耗尽后适配器永久停摆，仅 `ChatPage.aboutToAppear` 重建页面才会重连——对比安卓端已有 snapshotFlow 就绪即连 + connectIfIdle 幂等入口，鸿蒙端缺前台恢复触发（候选：EntryAbility.onForeground → 适配器重连入口）。真机实测：App 退后台后 WS 断开，设备 offline 不再自愈。待真机在手时红绿修复。
+- ~~**鸿蒙端真机发现的产品缺口（待修）**~~ → **已修复（f52591a37，模拟器活体验证）**：WS 断线重连依赖 `WebSocketAdapter.reauthAndReconnect`（maxReconnect=10 指数退避），但 (a) App 退后台时 JS 定时器挂起，重连暂停；(b) 重试耗尽后适配器永久停摆，仅 `ChatPage.aboutToAppear` 重建页面才会重连。修复=新增 `WsReconnectGate` 纯判定门（node 直跑 6 判定先红后绿）+ `WebSocketAdapter.connectIfIdle` 幂等入口（耗尽态重置预算）+ `EntryAbility.onForeground` 广播 `app:foreground` + 聊天页静默补连；模拟器活体：杀后端→10 次退避全败耗尽→重启→退后台→回前台→23ms 重连成功→设备 online→device_env 回归 settled 真值。
 - **当前阻塞**：真机 USB 连接掉线（hdc list targets=[Empty]，PnP 无 Huawei/Android 设备），device_env 真机执行待手机重新插线/亮屏。后端侧已全部就绪（LLM/登录/MCP/配对账本）。
 - **鸿蒙模拟器真链路验证已完成（2026-11-24，用户指引用模拟器续做）**：Mate 90 Pro 实例（HarmonyOS 7.0.0.107，QEMU NAT，宿主经 10.0.2.2 可达）→ 签名 HAP 装机 → 深链配对（`neurova://pair?ref=…&host=http%3A%2F%2F10.0.2.2%3A9631`，hilog 实证「消费配对深链→终端档案就绪→resolve 成功→配对成功」）→ App 登录 admin 进对话页 → 进入会话视图触发 connectWs → 设备 online 且 hello 上报 caps=[open_url, clipboard_read, clipboard_write, device_env] → 真 agent（moss）chat 调 device_env → device:execute → 模拟器 3ms 回 device:result（os_version=OpenHarmony-7.0.0.105 / model=emulator / battery=1 / network_online=true）→ 账本 settled 终态 + desktop_action_audit success=1。**批三遗留「鸿蒙模拟器 HAP 装机验证」就此清偿**。
 - **签名坑（值金）**：hap-sign-tool 参数为**全小写 `-keystoreFile/-keystorePwd`**；写 `-keystorePasswd`（大写 S/多写 ss）即报 `11011005 Param is not trusted`——连 `-h` 都会因参数校验次序先炸，须以无参调用看 `Check param num failed` 区分。已回写 `docs/10-configuration/MOBILE_APP_SIGNING.md` 同款命令。
-- **待办移交**：鸿蒙端前台重连缺口（上述产品缺口）待真机在手时红绿修复；真机 device_env 待手机回插 USB 后补验（预期与模拟器同链路）。
+- **待办移交**：真机 device_env 待手机回插 USB 后补验（预期与模拟器同链路；前台重连缺口已在 f52591a37 修复，真机回插后一并复核）。
 
 ### 评估结论（批三两项评估卡，2026-11-23）
 
