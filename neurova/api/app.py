@@ -265,75 +265,138 @@ def _agent_config_from_saved(cfg: dict, agent_id: str, workspace_path: str):
     )
 
 
-def _load_saved_agents(app_state: AppState) -> None:
-    """从 agent 根目录加载已持久化的 agent 配置（`data/<id>/agent_config.json`）。"""
+def _agent_load_workers() -> int:
+    """启动期 agent 并行装载线程数（2026-11-24 启动性能批）。
+
+    env `NEUROVA_AGENT_LOAD_WORKERS`，默认 4，钳制 [1, 16]；非法值回退默认；
+    显式 "1" = 串行（A/B 对照与逃生口）。
+    """
+    raw = (os.environ.get("NEUROVA_AGENT_LOAD_WORKERS") or "").strip()
+    try:
+        workers = int(raw) if raw else 4
+    except ValueError:
+        workers = 4
+    return max(1, min(workers, 16))
+
+
+def _construct_saved_agent(agent_id: str) -> tuple[str, Any]:
+    """构造单个已存盘 agent（并行装载的工作单元）。
+
+    返回 (agent_id, agent)；agent 为 None 表示无可装载（无数据静默跳过 /
+    配置损坏告警跳过），与原串行逐个 try/except 的语义一致。异常就地记录
+    不外抛——失败隔离，单个 agent 失败不拖累其余。
+    """
     import json as _json
 
     from neurova.core.agent_workspaces import (
-        discover_agent_ids,
         get_agent_config_path,
         get_agent_memory_dir,
         get_agent_workspace_dir,
     )
 
-    loaded = 0
-    for agent_id in discover_agent_ids():
-        if agent_id in ("default", "test"):
-            continue
-        config_path = get_agent_config_path(agent_id)
-        if not config_path.exists():
-            has_data = (
-                get_agent_memory_dir(agent_id).is_dir()
-                or get_agent_workspace_dir(agent_id).is_dir()
-            )
-            if has_data:
-                # 自动重建 agent_config.json，恢复有记忆/工作区数据的 agent
-                logger.info(
-                    "Agent '%s' 存在数据但缺少配置，自动重建 agent_config.json", agent_id
-                )
-                provider, model = _get_default_llm()
-                restored_cfg = {
-                    "name": agent_id,
-                    "model": model,
-                    "provider": provider,
-                    "description": "（自动恢复）",
-                    "enable_memory": True,
-                }
-                try:
-                    config_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(config_path, "w", encoding="utf-8") as f:
-                        _json.dump(restored_cfg, f, ensure_ascii=False, indent=2)
-                    logger.info("已自动为 agent '%s' 重建配置文件", agent_id)
-                except Exception as e:
-                    logger.warning("自动重建 agent '%s' 配置失败: %s", agent_id, e)
-                    continue
-            else:
-                continue
+    config_path = get_agent_config_path(agent_id)
+    if not config_path.exists():
+        has_data = (
+            get_agent_memory_dir(agent_id).is_dir()
+            or get_agent_workspace_dir(agent_id).is_dir()
+        )
+        if not has_data:
+            return agent_id, None
+        # 自动重建 agent_config.json，恢复有记忆/工作区数据的 agent
+        logger.info(
+            "Agent '%s' 存在数据但缺少配置，自动重建 agent_config.json", agent_id
+        )
+        provider, model = _get_default_llm()
+        restored_cfg = {
+            "name": agent_id,
+            "model": model,
+            "provider": provider,
+            "description": "（自动恢复）",
+            "enable_memory": True,
+        }
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                cfg = _json.load(f)
-            name = cfg.get("name", "")
-            if not name:
-                continue
-
-            from neurova.agent_core import Agent, AgentConfig
-
-            workspace = str(get_agent_workspace_dir(agent_id))
-            model = cfg.get("model", "gpt-4")
-            provider = cfg.get("provider", "")
-
-            agent_config = _agent_config_from_saved(cfg, agent_id, workspace)
-            agent = Agent(config=agent_config)
-            app_state.add_agent(agent_id, agent)
-            loaded += 1
-            logger.info("Loaded saved agent: %s (%s/%s)", name, provider, model)
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as f:
+                _json.dump(restored_cfg, f, ensure_ascii=False, indent=2)
+            logger.info("已自动为 agent '%s' 重建配置文件", agent_id)
         except Exception as e:
-            logger.warning(
-                "Failed to load agent from %s: %s", config_path, e, exc_info=True
-            )
+            logger.warning("自动重建 agent '%s' 配置失败: %s", agent_id, e)
+            return agent_id, None
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = _json.load(f)
+        name = cfg.get("name", "")
+        if not name:
+            return agent_id, None
 
-    if loaded:
-        logger.info("Loaded %d saved agents from agent roots", loaded)
+        from neurova.agent_core import Agent
+
+        workspace = str(get_agent_workspace_dir(agent_id))
+        model = cfg.get("model", "gpt-4")
+        provider = cfg.get("provider", "")
+
+        agent_config = _agent_config_from_saved(cfg, agent_id, workspace)
+        agent = Agent(config=agent_config)
+        logger.info("Loaded saved agent: %s (%s/%s)", name, provider, model)
+        return agent_id, agent
+    except Exception as e:
+        logger.warning(
+            "Failed to load agent from %s: %s", config_path, e, exc_info=True
+        )
+        return agent_id, None
+
+
+def _load_saved_agents(app_state: AppState) -> None:
+    """从 agent 根目录并行装载已持久化的 agent（2026-11-24 启动性能批）。
+
+    每 agent 的数据与 sqlite 句柄按 v3 布局天然隔离，进程级共享资源
+    （嵌入编码器/单例/import 锁）均有锁且幂等，故构造可安全并行：
+    装载耗时从 Σ(单 agent) 降为 ≈max(单 agent)。结果按发现顺序注册，
+    注册顺序确定（并发完成序不扰动 UI/测试）。
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from neurova.core.agent_workspaces import discover_agent_ids
+
+    agent_ids = [a for a in discover_agent_ids() if a not in ("default", "test")]
+    workers = _agent_load_workers()
+    results: Dict[str, Any] = {}
+    started = time.perf_counter()
+
+    def _run_one(aid: str) -> tuple[str, Any]:
+        try:
+            return _construct_saved_agent(aid)
+        except Exception as e:  # 双保险：工作单元异常不拖垮整体装载
+            logger.warning("Failed to load agent %s: %s", aid, e, exc_info=True)
+            return aid, None
+
+    if workers <= 1 or len(agent_ids) <= 1:
+        for aid in agent_ids:
+            _, agent = _run_one(aid)
+            if agent is not None:
+                results[aid] = agent
+    else:
+        with ThreadPoolExecutor(
+            max_workers=min(workers, len(agent_ids)),
+            thread_name_prefix="agent-load",
+        ) as pool:
+            futures = {pool.submit(_run_one, aid): aid for aid in agent_ids}
+            for fut in as_completed(futures):
+                rid, agent = fut.result()
+                if agent is not None:
+                    results[rid] = agent
+
+    # 按发现顺序注册（确定序）
+    for aid in agent_ids:
+        agent = results.get(aid)
+        if agent is not None:
+            app_state.add_agent(aid, agent)
+
+    if results:
+        logger.info(
+            "Loaded %d saved agents from agent roots in %.2fs (workers=%d)",
+            len(results), time.perf_counter() - started, workers,
+        )
 
 
 def _resolve_tts_lazy_release(env_value: str, config_value) -> bool:
