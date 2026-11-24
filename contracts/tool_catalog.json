@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": "neurova.builtin_tools._BUILTIN_SCHEMAS",
-  "tool_count": 146,
+  "tool_count": 148,
   "tools": [
     {
       "agent_scope": "all",
@@ -3878,6 +3878,52 @@
       "min_role": null,
       "name": "sync_nodes",
       "read_only": false
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "keyword": {
+            "description": "关键字（大小写不敏感，匹配工具名与描述；空=列全部）",
+            "type": "string"
+          },
+          "limit": {
+            "description": "最多返回条数（默认 20，上限 100）",
+            "type": "integer"
+          },
+          "tag": {
+            "description": "过滤标记：read_only / external_write / main_only",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "description": "【工具目录】按关键字/标记检索当前可用的内置工具清单（名称/描述/只读性/使用范围/参数个数）。选工具前先查目录，避免猜工具名。",
+      "external_write": false,
+      "min_role": null,
+      "name": "tool_catalog_search",
+      "read_only": true
+    },
+    {
+      "agent_scope": "all",
+      "args_schema": {
+        "properties": {
+          "tool_name": {
+            "description": "工具注册名（来自 tool_catalog_search 的 name）",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_name"
+        ],
+        "type": "object"
+      },
+      "description": "【工具文档】返回单个内置工具的全量档案：描述、参数 JSON Schema、只读性、外部写判定、使用范围（all/main_only）。配合 tool_catalog_search 使用。",
+      "external_write": false,
+      "min_role": null,
+      "name": "tool_doc",
+      "read_only": true
     },
     {
       "agent_scope": "all",

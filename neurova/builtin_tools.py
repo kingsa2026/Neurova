@@ -2482,6 +2482,33 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": [],
         },
     },
+    # T1 工具运行时自发现目录（reference_af 拆解卡）：工具面大（146+），长尾工具
+    # 靠猜名不可行——agent 先查目录再调用。数据单源=tools/catalog 投影层（builtin
+    # 声明位推导），本处只声明面。只读、并发安全、无写作用域。
+    "tool_catalog_search": {
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ["none"]},
+        "description": "【工具目录】按关键字/标记检索当前可用的内置工具清单（名称/描述/只读性/使用范围/参数个数）。选工具前先查目录，避免猜工具名。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keyword": {"type": "string", "description": "关键字（大小写不敏感，匹配工具名与描述；空=列全部）"},
+                "tag": {"type": "string", "description": "过滤标记：read_only / external_write / main_only"},
+                "limit": {"type": "integer", "description": "最多返回条数（默认 20，上限 100）"},
+            },
+            "required": [],
+        },
+    },
+    "tool_doc": {
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ["none"]},
+        "description": "【工具文档】返回单个内置工具的全量档案：描述、参数 JSON Schema、只读性、外部写判定、使用范围（all/main_only）。配合 tool_catalog_search 使用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tool_name": {"type": "string", "description": "工具注册名（来自 tool_catalog_search 的 name）"},
+            },
+            "required": ["tool_name"],
+        },
+    },
 }
 
 # ═══════════════════════════════════════════════════════════════
