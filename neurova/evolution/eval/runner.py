@@ -617,12 +617,19 @@ class SkillEvolutionRunner:
 
     async def _collect_failures_sorted(self, skill_text: str, examples: list[EvalExample],
                                        artifact_type: str) -> list[JudgeFailure]:
-        """全量失败用例按得分升序（P1-7a 分片采样的数据源）。"""
+        """全量失败用例按得分升序（P1-7a 分片采样的数据源）。
+
+        器械故障（单例执行/判分异常，failed=True）**不进失败证据feed**——
+        它们没有该技能的质量证据，且按 0.0 排序必然霸榜，会把"评测崩了"喂成
+        "去修这个任务"的定向变异依据（P0-②：基础设施失败≠零分）。可见性由
+        `eval_errors` 计数与例级三态门（unevidenced）承担，此处只筛证据。
+        """
         _, details = await self._evaluate(skill_text, examples, artifact_type, arm="probe")
         return [
             JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score,
                          environments=list(env))
-            for ex, score, output, feedback, _failed, env in sorted(details, key=lambda d: d[1])
+            for ex, score, output, feedback, failed, env in sorted(details, key=lambda d: d[1])
+            if not failed
         ]
 
     async def _multi_variant_round(
@@ -886,7 +893,9 @@ class SkillEvolutionRunner:
                 slot["sample_count"] += 1
                 if failed:
                     slot["failed_samples"] += 1
-                if slot["min_score"] is None or score < slot["min_score"]:
+                # 最严重档只在**量出来**的采样里取：器械故障（failed）没有质量
+                # 证据，其 0.0 不得冒充该用例的最低分进失败证据feed（P0-②）。
+                if not failed and (slot["min_score"] is None or score < slot["min_score"]):
                     slot["min_score"] = score
                     slot["output"] = output
                     slot["feedback"] = feedback
@@ -894,6 +903,10 @@ class SkillEvolutionRunner:
                     slot["env"] = list(env)
         merged: list[JudgeFailure] = []
         for task, slot in agg.items():
+            if slot["min_score"] is None:
+                # 全部采样都是器械故障：该用例没有质量证据，不进feed（可见性
+                # 由 eval_errors / failed_samples 承担）。
+                continue
             note = (f" [采样失败 {slot['failed_samples']}/{slot['sample_count']}]"
                     if rollouts > 1 and slot["failed_samples"] else "")
             merged.append(JudgeFailure(

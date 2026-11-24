@@ -152,6 +152,10 @@ def _executeBenchmarkRun(runId: str, suiteId: str, answerFn, limit: typing.Optio
             "score": report["score"],
             "tasks_total": report["tasks_total"],
             "tasks_correct": report["tasks_correct"],
+            # P0-② 器械故障分类计数（infra_answer/infra_checker 不进任务失败集合）
+            "tasks_judged": report["tasks_judged"],
+            "tasks_failed": report["tasks_failed"],
+            "tasks_infra_failed": report["tasks_infra_failed"],
             "avg_latency_ms": report["avg_latency_ms"],
             "per_task": report["per_task"],
             "executed_at": report["executed_at"],
@@ -681,7 +685,10 @@ def _rag_llm_fn(agent_id: str):
             if content.startswith("[LLM Error]"):
                 continue
             return content
-        return ""
+        # P0-②（基础设施失败≠零分）：全部候选都失败＝评测器械故障，必须显式
+        # 抛错让上层分类（suite_eval → infra_answer，不进任务失败集合/均分母）；
+        # 吞成空答案会把"没量到"伪装成"该任务答错"。
+        raise RuntimeError("LLM 通道不可用：所有候选客户端均失败")
 
     return _call
 

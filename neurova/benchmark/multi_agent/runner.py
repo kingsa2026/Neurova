@@ -168,6 +168,10 @@ class BenchRunner:
         started = time.time()
         report, error, tokens, subagent_id = "", None, None, ""
         rejected, rejection_code = False, ""
+        # P0-② 器械故障分类：派发异常=infra_answer、判据异常=infra_checker、
+        # 量出来=""。agent 返回体里的 error / 治理拒绝是被测系统的实测结局，
+        # 不算器械故障。聚合面（metrics.aggregate）据此把它们剔出分母。
+        failureClass = ""
         usageFacts = {"calls": 0, "promptTokens": 0, "completionTokens": 0, "totalTokens": 0}
         toolCalls, toolsUsed, trajectorySource = 0, [], ""
         try:
@@ -208,6 +212,7 @@ class BenchRunner:
                 raise ValueError(f"未知评测模式: {mode}")
         except Exception as exc:  # noqa: BLE001 - 单任务故障隔离，事实进 error
             error = f"{type(exc).__name__}: {exc}"
+            failureClass = "infra_answer"
             logger.warning("[bench] 任务执行异常 task=%s mode=%s: %s", task.task_id, mode, exc)
 
         elapsed = round(time.time() - started, 3)
@@ -240,6 +245,7 @@ class BenchRunner:
             passed, score, details = task.check(outcome)
         except Exception as exc:  # noqa: BLE001 - 判据故障不掩盖执行事实
             passed, score, details = False, 0.0, {"checker_error": str(exc)}
+            failureClass = "infra_checker"
 
         return {
             "task_id": task.task_id,
@@ -248,6 +254,7 @@ class BenchRunner:
             "unsolvable": task.unsolvable,
             "passed": bool(passed) and not rejected and not error,
             "score": float(score),
+            "failure_class": failureClass,
             "details": details,
             "error": error,
             "rejected": rejected,

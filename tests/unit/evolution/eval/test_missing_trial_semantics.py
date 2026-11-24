@@ -68,7 +68,21 @@ class TestMissingTrialSemantics:
 
     @pytest.mark.asyncio
     async def test_eval_error_text_redacted(self):
-        """异常文本进 feedback 前必须脱敏（凭据原文不得外泄到变异器 prompt 面）。"""
+        """异常文本进 feedback 前必须脱敏（凭据原文不得外泄到审计/prompt 面）。
+
+        P0-② 后器械故障不再作为失败证据进变异器feed——脱敏守卫改在证据
+        源头验证：`_score_example` 对崩溃用例返回的 feedback 必须是脱敏
+        截断的 eval_error 形态；run 级双保险是凭据原文任何情况下不外泄。
+        """
+        runner = SkillEvolutionRunner(EvolutionConfig(), judge=_judge_by_marker(),
+                                      agent=_AgentBoomOnOneTask())
+        boom = EvalExample(task_input="v-boom", expected_behavior="输出要点")
+        score, _output, feedback, failed, _env = await runner._score_example(
+            BASELINE, boom, "skill", arm="probe")
+        assert failed is True and score == 0.0
+        assert feedback.startswith("eval_error:")
+        assert SECRET not in feedback
+
         captured: list[str] = []
 
         async def mutate(*, artifact_text, artifact_type, failures):
@@ -79,7 +93,6 @@ class TestMissingTrialSemantics:
                                       mutate=mutate, agent=_AgentBoomOnOneTask())
         await runner.run(baseline_text=BASELINE, artifact_type="skill",
                          dataset=_ds(), iterations=1)
-        assert any(f.startswith("eval_error:") for f in captured)
         assert all(SECRET not in f for f in captured)
 
     @pytest.mark.asyncio

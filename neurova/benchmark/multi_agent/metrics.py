@@ -14,8 +14,12 @@ def aggregate(results: List[dict]) -> Dict[str, dict]:
     out: Dict[str, dict] = {}
     for mode, items in by_mode.items():
         total = len(items)
-        passed = sum(1 for r in items if r.get("passed"))
-        scores = [float(r.get("score") or 0.0) for r in items]
+        # P0-② 器械故障≠任务失败：failure_class 标记的行（派发/判据异常）没有
+        # 质量证据，不进成功率与均分的分母；单列 infra_failed 计数保持可见。
+        # agent 返回体 error / 治理拒绝是实测结局，仍算量出来的行。
+        judged = [r for r in items if not r.get("failure_class")]
+        passed = sum(1 for r in judged if r.get("passed"))
+        scores = [float(r.get("score") or 0.0) for r in judged]
         unsolvable = [r for r in items if r.get("unsolvable")]
         unsolvable_ok = sum(1 for r in unsolvable if r.get("passed"))
         elapsed = [float(r["elapsed_seconds"]) for r in items if r.get("elapsed_seconds") is not None]
@@ -34,8 +38,9 @@ def aggregate(results: List[dict]) -> Dict[str, dict]:
             for r in items
         ]
         # P3-3：按思考档位（effort_inference）分档聚合——同任务集在不同档位下的表现变量
+        # （只聚合量出来的行，器械故障不冒充某档位的 0 分）
         byEffort: Dict[str, dict] = {}
-        for r in items:
+        for r in judged:
             bucket = byEffort.setdefault(str(r.get("effort") or "unknown"),
                                          {"task_count": 0, "passed_count": 0, "_scores": []})
             bucket["task_count"] += 1
@@ -54,8 +59,9 @@ def aggregate(results: List[dict]) -> Dict[str, dict]:
         out[mode] = {
             "task_count": total,
             "passed_count": passed,
-            "success_rate": round(passed / total, 4) if total else 0.0,
+            "success_rate": round(passed / len(judged), 4) if judged else 0.0,
             "mean_score": round(sum(scores) / len(scores), 2) if scores else 0.0,
+            "infra_failed": total - len(judged),
             "unsolvable_total": len(unsolvable),
             "unsolvable_identified": unsolvable_ok,
             "unsolvable_identified_rate": round(unsolvable_ok / len(unsolvable), 4) if unsolvable else None,

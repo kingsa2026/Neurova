@@ -120,6 +120,7 @@ class TestRunPersistenceThroughApi:
         fakeReport = {
             "status": "completed", "score": 1.0, "tasks_total": 2, "tasks_correct": 2,
             "avg_latency_ms": 12.5, "per_task": [],
+            "tasks_judged": 2, "tasks_failed": 0, "tasks_infra_failed": 0,
             "executed_at": "2026-11-21T10:00:00+00:00",
         }
         monkeypatch.setattr(

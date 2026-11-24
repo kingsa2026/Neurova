@@ -124,10 +124,15 @@ def testLlmErrorTaskFailsRunStillCompletes(monkeypatch):
 
     total = len(gold)
     assert run["status"] == "completed"  # run 本身完成，失败事实如实记录
+    # P0-②：通道崩溃＝器械故障（infra_answer），不折算任务失败——不进均分母
+    assert run["tasks_judged"] == total - 1
+    assert run["tasks_infra_failed"] == 1
+    assert run["tasks_failed"] == 0
     assert run["tasks_correct"] == total - 1
-    assert run["score"] == pytest.approx((total - 1) / total)
+    assert run["score"] == pytest.approx(1.0)
     badRows = [r for r in run["per_task"] if r["error"]]
     assert len(badRows) == 1 and "RuntimeError" in badRows[0]["error"] and "channel down" in badRows[0]["error"]
+    assert badRows[0]["failure_class"] == "infra_answer"
 
 
 def testNoLlmChannelHonest503(monkeypatch):
@@ -208,3 +213,50 @@ def testAggregationReflectsRealScores(monkeypatch):
     assert comparison["agent-good"]["runs"] == 1
     assert comparison["agent-sim"]["avg_score"] is None  # simulated 不编造
     assert comparison["agent-sim"]["runs"] == 1
+
+
+# ── P0-②：LLM 通道器械故障显式抛错（不吞成空答案冒充答错） ──────────
+
+class _DeadClient:
+    async def chat(self, messages):
+        raise RuntimeError("provider 429")
+
+
+class _AgentWithClient:
+    llm_client = _DeadClient()
+
+
+def testRagLlmFnRaisesWhenAllCandidatesFail(monkeypatch):
+    """全部候选通道失败＝评测器械故障：必须显式抛错，让 suite_eval 分类为
+    infra_answer（P0-② 基础设施失败≠零分）；吞成空答案会把"没量到"伪装成
+    "该任务答错"。"""
+    import neurova.api.endpoints as endpoints_pkg
+
+    monkeypatch.setattr(endpoints_pkg, "get_agent_instance", lambda agent_id=None: _AgentWithClient())
+    monkeypatch.setattr(endpoints_pkg, "defaultAgentId", lambda: "default")
+    fn = benchmark_module._rag_llm_fn("agent-x")
+    with pytest.raises(RuntimeError):
+        fn("题目")
+
+
+def testRagLlmFnEmptyContentFromHealthyClientIsNotInfra(monkeypatch):
+    """健康通道返回空内容＝真实的空回答（任务失败事实），不是器械故障——
+    不得误抛。"""
+
+    class _EmptyClient:
+        async def chat(self, messages):
+            class _Resp:
+                content = ""
+            return _Resp()
+
+    import neurova.api.endpoints as endpoints_pkg
+
+    monkeypatch.setattr(endpoints_pkg, "get_agent_instance", lambda agent_id=None: _AgentWith(_EmptyClient()))
+    monkeypatch.setattr(endpoints_pkg, "defaultAgentId", lambda: "default")
+    fn = benchmark_module._rag_llm_fn("agent-x")
+    assert fn("题目") == ""
+
+
+class _AgentWith:
+    def __init__(self, client):
+        self.llm_client = client

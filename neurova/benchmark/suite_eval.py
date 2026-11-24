@@ -16,8 +16,9 @@
   **multimodal-v1 不接任务库**（文本 LLM 通道无法诚实考多模态）——对该 suite
   的运行请求走端点既有 simulated 路径，不硬考；
 - `runSuite` 逐任务调 `answerFn(prompt)` 取回答、计量时延、按判据给分；
-  answerFn 抛异常＝该任务失败事实（计 0 分、记 error、计入 tasks_total），
-  不中断整个 run、不悄悄剔除、不谎报；
+  answerFn 抛异常＝**评测器械故障**（failure_class=infra_answer，行级记 0 分
+  与 error 事实、计入 tasks_total，但不进任务失败集合、不进均分母，见
+  `runSuite` docstring），不中断整个 run、不悄悄剔除、不谎报；
 - coding 套件种子题采用「读代码答输出值」形式（判分确定性精确匹配）；
   「让 LLM 写代码并在服务端执行」的判分面涉及任意代码执行安全，不在本批落地。
 
@@ -277,10 +278,14 @@ def runSuite(
 ) -> dict:
     """逐任务执行：answerFn(prompt)→回答→判据给分，产出真实聚合指标。
 
-    - 单任务异常（LLM 或判据）＝该任务失败事实，计 0 分、记 error、计入
-      tasks_total，不中断 run（与 multi_agent.BenchRunner 同款故障隔离）；
+    - 单任务异常（LLM 或判据）＝**评测器械故障**，不是"该任务答错"：行级
+      如实记 0 分 + error 事实、计入 tasks_total、不中断 run（与
+      multi_agent.BenchRunner 同款故障隔离），但按 `failure_class` 显式分类
+      （infra_answer / infra_checker），**不计入任务失败集合、不进均分母**
+      （reference_af 对照批 P0-②：基础设施失败≠零分）；
+    - `score` 只对量出来的任务（judged = answered 且判据未崩）求均值；
+      全量器械故障 ⇒ score=None（与空任务库同口径：没量到 ≠ 量出为零）；
     - 时延只计取答段（clockFn 注入，测试可断言）；
-    - 空任务库如实返回 score=None，不编造 0 分或 1 分；
     - `costNote`：选填，手动跑评测的成本标注（如
       `{"model": ..., "est_tokens": ..., "run_by": "manual"}`），原样透传进
       运行记录 `cost_note` 字段落事实（D-H 口径：评测手动跑 + 成本标注，
@@ -306,18 +311,22 @@ def runSuite(
         finally:
             elapsedMs = (clockFn() - started) * 1000.0
 
+        # 器械故障分类（P0-②）：取答通道崩 = infra_answer，判据崩 = infra_checker。
+        failureClass = "infra_answer" if error is not None else ""
         passed, score, details = False, 0.0, {}
         if error is None:
             try:
                 passed, score, details = task.check(answer)
             except Exception as exc:  # noqa: BLE001 - 判据故障不掩盖执行事实
                 details = {"checker_error": str(exc)}
+                failureClass = "infra_checker"
                 logger.warning("[suite_eval] 判据异常 task=%s: %s", task.task_id, exc)
 
         perTask.append({
             "task_id": task.task_id,
             "passed": bool(passed) and error is None,
             "score": round(float(score), _SCORE_DIGITS),
+            "failure_class": failureClass,
             "error": error,
             "details": details,
             "latency_ms": round(elapsedMs, 2),
@@ -325,12 +334,17 @@ def runSuite(
         })
 
     tasksTotal = len(perTask)
-    scores = [row["score"] for row in perTask]
+    # 聚合只吃量出来的任务：器械故障不冒充 0 分任务失败（P0-②）。
+    judgedRows = [row for row in perTask if row["failure_class"] == ""]
+    scores = [row["score"] for row in judgedRows]
     latencies = [row["latency_ms"] for row in perTask]
     report = {
         "status": "completed",
         "tasks_total": tasksTotal,
-        "tasks_correct": sum(1 for row in perTask if row["passed"]),
+        "tasks_judged": len(judgedRows),
+        "tasks_correct": sum(1 for row in judgedRows if row["passed"]),
+        "tasks_failed": sum(1 for row in judgedRows if not row["passed"]),
+        "tasks_infra_failed": tasksTotal - len(judgedRows),
         "score": round(sum(scores) / len(scores), _SCORE_DIGITS) if scores else None,
         "avg_latency_ms": round(sum(latencies) / len(latencies), 2) if latencies else None,
         "per_task": perTask,

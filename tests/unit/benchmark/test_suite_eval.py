@@ -4,7 +4,9 @@
 红灯先行：`neurova.benchmark.suite_eval` 尚不存在，本档先钉行为契约——
 - 全对 → score=1.0、tasks_correct==tasks_total；
 - 部分对 → 比例分；
-- LLM 异常 → 该任务失败如实计 0 分并记 error，不中断整个 run、不谎报；
+- LLM 异常 → 器械故障如实分类（failure_class=infra_answer）：行级记 0 分与
+  error、计入 tasks_total、不中断 run；不进任务失败集合、不进均分母
+  （P0-② 基础设施失败≠零分）；
 - 判分口径：exactAnswer 精确匹配（归一化）、markersPresent 多标记比例给分；
 - 时延用注入时钟可 deterministically 断言。
 与 rag_eval / multi_agent 同构：判据注入、事实记录、不伪造分数。
@@ -95,10 +97,17 @@ def testLlmExceptionFailsTaskHonestlyNotSkipped():
     report = runSuite(_bank("a"), answerFn=flaky)
     assert report["status"] == "completed"  # run 本身完成，失败事实如实记录
     assert report["tasks_total"] == 3  # 异常任务计入总数，不悄悄剔除
+    # P0-②（reference_af 对照批）：取答通道崩溃＝评测器械故障（infra_answer），
+    # 不折算任务失败——不进均分母，score 只算量出来的两题（都答对 ⇒ 1.0）。
+    assert report["tasks_judged"] == 2
+    assert report["tasks_infra_failed"] == 1
+    assert report["tasks_failed"] == 0
     assert report["tasks_correct"] == 2
-    assert report["score"] == pytest.approx(2 / 3)
+    assert report["score"] == pytest.approx(1.0)
     failed = report["per_task"][1]
     assert failed["passed"] is False
+    assert failed["failure_class"] == "infra_answer"
+    assert failed["score"] == 0.0  # 行级事实保留：该任务没有有效作答
     assert "RuntimeError" in failed["error"]
     assert "provider down" in failed["error"]
     assert report["per_task"][0]["error"] is None

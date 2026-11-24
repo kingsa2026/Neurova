@@ -118,7 +118,12 @@ class TestEvaluateDetailsCarryFailedFlag:
 
     @pytest.mark.asyncio
     async def testExistingUnpackSitesStillWork(self):
-        """`_collect_failures_sorted` 是明细的消费方之一：改形状不得让它漏判失败例。"""
+        """`_collect_failures_sorted` 是明细的消费方之一：改形状不得漏判失败例。
+
+        P0-② 收紧证据口径：器械故障（agent 对 b 崩溃，failed=True）没有该技能
+        的质量证据，不进失败feed；真实低分用例（a=0.2）必须照进——"漏判失败例"
+        由「有质量证据的失败必在feed」这一侧守住。
+        """
         runner = _runner(
             {"a": 0.2, "b": 0.9},
             EvolutionConfig(),
@@ -126,7 +131,7 @@ class TestEvaluateDetailsCarryFailedFlag:
         )
         failures = await runner._collect_failures_sorted(
             BASELINE, _examples(["a", "b"]), "skill")
-        assert [f.task_input for f in failures] == ["b", "a"]
+        assert [f.task_input for f in failures] == ["a"]
 
 
 class TestHoldoutSideYieldsPerCaseReadouts:
