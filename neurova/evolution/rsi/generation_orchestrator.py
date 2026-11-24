@@ -46,6 +46,7 @@ from __future__ import annotations
 import copy
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -92,6 +93,10 @@ from neurova.evolution.rsi.target_registry import (
 logger = get_logger(__name__)
 
 __all__ = ["GenerationOrchestrator", "gitHeadShort"]
+
+#: 本进程启动时刻（wall clock）——孤儿影子根清扫的年龄判据基准：
+#: 只回收 mtime 早于它的 neurovaShadow-* 目录（属上代进程的遗留）。
+_PROCESS_STARTED_AT = time.time()
 
 #: RSI 参数族候选的注册表 targetId（首批 approval 档，单一事实源在 target_registry）。
 RSI_PARAMETER_FAMILY_TARGET = "rsi.parameterFamily"
@@ -272,6 +277,7 @@ class GenerationOrchestrator:
             signals=signals,
             changes=changes,
             basisCommit=gitHeadShort(),
+            roundNo=int(roundNo),
         )
         self._roundGenerations[roundNo] = gen
         self._roundChanges[roundNo] = shadowChanges
@@ -474,7 +480,14 @@ class GenerationOrchestrator:
             "parentNo": gen.parentNo,
         }
         try:
-            self._ledger.annotateCanaryWindow(gen.generationNo, startedAtIso)
+            # P0-③：窗长与应用前参数快照一并落盘——重启后观测窗据此重挂、
+            # 自动回滚据此恢复安全态（快照不落盘＝重启后回不去）。
+            self._ledger.annotateCanaryWindow(
+                gen.generationNo,
+                startedAtIso,
+                windowSeconds=windowSeconds,
+                snapshot=snapshot,
+            )
         except Exception as exc:  # noqa: BLE001 - 注记失败不阻断观测，但必须留痕
             self.lastPipelineError = (
                 f"generation {gen.generationNo} canary annotate: "
@@ -564,6 +577,108 @@ class GenerationOrchestrator:
                     }
                 )
             return {"openWindows": windows, "count": len(windows)}
+
+    # ── P0-③ 断点续跑协议（对照 Agent-S4 driver 的 dispatch 重放） ──
+
+    def resumeInterrupted(self) -> Dict[str, Any]:
+        """从世代账本幂等重放在途状态——中断的派发被续跑，而非卡死或绕过。
+
+        1. **canary 观测窗重挂**：账本中 canary 态且带观测窗起点的世代，其
+           窗长/应用前参数快照/起点从账本恢复（``_openCanaryWindow`` 落盘的
+           运行态），按 wall-clock 折算已观测时长后重新在观测。后续检查点
+           照常结算（窗满晋升 / 越界自动回滚——回滚恢复源即账本快照）。
+        2. **轮次→世代映射恢复**：所有带 roundNo 的未决世代重新对本轮可见
+           （``gateManualApproval`` / ``autoApplyAllowed`` 的门禁在重启后
+           依旧咬合，不被打穿）。
+        3. **孤儿影子根清扫**：回收上代进程遗留的 ``neurovaShadow-*`` 隔离
+           数据根（只认前缀 + 只清早于本进程启动的，本进程在途的不动）。
+
+        幂等：已在本轮映射中的世代不重复恢复；已结算（非 canary）的窗口
+        关窗防漏。可在装配时与运行中安全地多次调用。
+        """
+        resumedCanaries: List[int] = []
+        restoredRounds: List[int] = []
+        with self._lock:
+            for gen in self._ledger.listAll():
+                if gen.roundNo is None:
+                    continue  # 旧档案（无轮次）：只能靠内存态，无法重放
+                roundNo = int(gen.roundNo)
+                if roundNo in self._roundGenerations:
+                    continue  # 幂等：本轮映射已在（本进程刚开代或已重放）
+                self._roundGenerations[roundNo] = gen
+                restoredRounds.append(roundNo)
+                if (
+                    gen.status == GenerationStatus.CANARY.value
+                    and gen.deployment is not None
+                    and str(gen.deployment.canaryStartedAt or "")
+                    and roundNo not in self._canaryWindows
+                ):
+                    startedIso = gen.deployment.canaryStartedAt
+                    windowSeconds = (
+                        float(gen.deployment.canaryWindowSeconds or 0.0)
+                        or self._resolveCanaryWindowSeconds()
+                    )
+                    self._canaryWindows[roundNo] = {
+                        "generationNo": gen.generationNo,
+                        "startedMonotonic": time.monotonic()
+                        - self._elapsedSince(startedIso),
+                        "startedAtIso": startedIso,
+                        "windowSeconds": windowSeconds,
+                        "snapshot": dict(gen.deployment.canarySnapshot or {}),
+                        "parentNo": gen.parentNo,
+                    }
+                    resumedCanaries.append(roundNo)
+            # 重挂后对账：窗口对应世代已不在观测态（外部处置/账本回放）→ 关窗防漏
+            for roundNo in list(self._canaryWindows):
+                window = self._canaryWindows[roundNo]
+                gen = self._ledger.get(window["generationNo"])
+                if gen is None or gen.status != GenerationStatus.CANARY.value:
+                    self._canaryWindows.pop(roundNo, None)
+        swept = self._sweepOrphanShadowRoots()
+        if resumedCanaries or restoredRounds or swept:
+            logger.info(
+                "世代管线断点续跑: 重挂观测窗 %s, 恢复轮次映射 %s, 清扫孤儿影子根 %d 个",
+                sorted(resumedCanaries), sorted(restoredRounds), swept,
+            )
+        return {
+            "resumedCanaries": sorted(resumedCanaries),
+            "restoredRounds": sorted(restoredRounds),
+            "sweptShadowRoots": swept,
+        }
+
+    @staticmethod
+    def _elapsedSince(startedAtIso: str) -> float:
+        """从 ISO 起点折算已流逝秒数（wall clock；解析失败按 0 起算不虚报）。"""
+        try:
+            started = datetime.fromisoformat(str(startedAtIso or ""))
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            return max(0.0, (datetime.now(timezone.utc) - started).total_seconds())
+        except (ValueError, TypeError):
+            return 0.0
+
+    def _sweepOrphanShadowRoots(self) -> int:
+        """清扫上代进程遗留的影子隔离数据根（``neurovaShadow-`` 前缀）。
+
+        只删 mtime 早于本进程启动时刻的目录——本进程在途的影子根不动；
+        非目录/无权限的条目跳过不抛（清扫是恢复面，不是关键路径）。
+        """
+        swept = 0
+        try:
+            candidates = list(Path(tempfile.gettempdir()).glob(f"{_SHADOW_ROOT_PREFIX}*"))
+        except OSError:
+            return 0
+        for path in candidates:
+            try:
+                if not path.is_dir():
+                    continue
+                if path.stat().st_mtime >= _PROCESS_STARTED_AT:
+                    continue  # 本进程（或更晚）新起的：不是孤儿
+                shutil.rmtree(path, ignore_errors=True)
+                swept += 1
+            except OSError:
+                continue
+        return swept
 
     def _canaryRollbackReason(
         self, readings: Optional[Dict[str, Any]]

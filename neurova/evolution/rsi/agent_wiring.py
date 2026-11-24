@@ -81,9 +81,18 @@ def wireAgentRsi(agent) -> None:
                 GenerationOrchestrator,
             )
 
-            agent.rsi_orchestrator.generationOrchestrator = GenerationOrchestrator(
+            generationOrchestrator = GenerationOrchestrator(
                 rsiOrchestrator=agent.rsi_orchestrator
             )
+            agent.rsi_orchestrator.generationOrchestrator = generationOrchestrator
+            # P0-③ 断点续跑：装配即从世代账本重放在途状态（canary 观测窗重挂、
+            # 轮次→世代门禁可见性恢复、上代进程孤儿影子根清扫）。失败不阻断装配。
+            try:
+                generationOrchestrator.resumeInterrupted()
+            except Exception as e:  # noqa: BLE001 - 续跑失败按无在途运行
+                logger.warning(
+                    "Agent %s: 世代管线断点续跑失败（按无在途运行）: %s", label, e
+                )
         except Exception as e:  # noqa: BLE001 - 世代管线缺席不阻断 RSI
             logger.warning(
                 "Agent %s: 世代编排器装配失败（RSI 无世代管线运行）: %s", label, e

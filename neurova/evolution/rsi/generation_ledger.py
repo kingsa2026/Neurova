@@ -234,6 +234,10 @@ class DeploymentRef:
     # P1-4：金丝雀观测窗起点（ISO 时刻）。观测窗内参数已应用（受限发布），
     # 起点随世代落盘，晋升/回滚结论据此可对账。
     canaryStartedAt: str = ""
+    # P0-③ 断点续跑：观测窗运行态随世代落盘——窗长与**应用前参数快照**。
+    # 快照是重启后自动回滚的恢复源（不落盘＝重启后安全态回不去）。
+    canaryWindowSeconds: float = 0.0
+    canarySnapshot: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -241,16 +245,21 @@ class DeploymentRef:
             "canaryConclusion": self.canaryConclusion,
             "rolledBackTo": self.rolledBackTo,
             "canaryStartedAt": self.canaryStartedAt,
+            "canaryWindowSeconds": self.canaryWindowSeconds,
+            "canarySnapshot": self.canarySnapshot,
         }
 
     @classmethod
     def from_dict(cls, raw: Dict[str, Any]) -> "DeploymentRef":
         rolled_back_to = raw.get("rolledBackTo")
+        snapshot = raw.get("canarySnapshot")
         return cls(
             promotedAt=str(raw.get("promotedAt", "")),
             canaryConclusion=str(raw.get("canaryConclusion", "")),
             rolledBackTo=None if rolled_back_to is None else int(rolled_back_to),
             canaryStartedAt=str(raw.get("canaryStartedAt", "")),
+            canaryWindowSeconds=float(raw.get("canaryWindowSeconds") or 0.0),
+            canarySnapshot=dict(snapshot) if isinstance(snapshot, dict) else {},
         )
 
 
@@ -268,6 +277,9 @@ class EvolutionGeneration:
     decision: Optional[DecisionRef] = None
     deployment: Optional[DeploymentRef] = None
     status: str = GenerationStatus.PROPOSED.value
+    # P0-③ 断点续跑：产生本代的 RSI 迭代轮次（随世代落盘）。重启后轮次→世代
+    # 映射与观测窗据此从账本重放，不依赖进程内存。
+    roundNo: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -281,6 +293,7 @@ class EvolutionGeneration:
             "decision": self.decision.to_dict() if self.decision is not None else None,
             "deployment": self.deployment.to_dict() if self.deployment is not None else None,
             "status": self.status,
+            "roundNo": self.roundNo,
         }
 
     @classmethod
@@ -301,6 +314,7 @@ class EvolutionGeneration:
                 None if deployment_raw is None else _coerceDeployment(deployment_raw)
             ),
             status=str(raw.get("status", GenerationStatus.PROPOSED.value)),
+            roundNo=None if raw.get("roundNo") is None else int(raw["roundNo"]),
         )
 
 
@@ -371,8 +385,13 @@ class GenerationLedger:
         signals: Optional[Iterable[Any]],
         changes: Optional[Iterable[Any]],
         basisCommit: str,
+        roundNo: Optional[int] = None,
     ) -> EvolutionGeneration:
-        """开启新一代：status=proposed，世代序号自增；parentNo 必须可解析。"""
+        """开启新一代：status=proposed，世代序号自增；parentNo 必须可解析。
+
+        ``roundNo``（P0-③）：产生本代的 RSI 迭代轮次，随世代落盘——断点续跑
+        据此从账本重建「轮次→世代」映射，不依赖进程内存。
+        """
         with self._lock:
             if parentNo is not None and int(parentNo) not in self._generations:
                 raise ValueError(f"父代 {parentNo} 不存在于账本，谱系引用必须可解析")
@@ -383,6 +402,7 @@ class GenerationLedger:
                 createdAt=_utcNowIso(),
                 signals=[_coerceSignal(s) for s in (signals or [])],
                 changes=[_coerceChange(c) for c in (changes or [])],
+                roundNo=None if roundNo is None else int(roundNo),
             )
             self._generations[gen.generationNo] = gen
             self._persist()
@@ -509,11 +529,19 @@ class GenerationLedger:
             gen.status = target
             self._persist()
 
-    def annotateCanaryWindow(self, generationNo: int, startedAtIso: str) -> None:
+    def annotateCanaryWindow(
+        self,
+        generationNo: int,
+        startedAtIso: str,
+        windowSeconds: Optional[float] = None,
+        snapshot: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """记录金丝雀观测窗起点（canary 态内的部署注记，不改状态机落定态）。
 
         窗口起点随世代落盘：观测中的代在晋升/回滚结算时能对出"观测了多久"。
-        非 canary 态调用即点名拒绝——窗口起点只属于"参数已应用、观测中"的代。
+        P0-③ 断点续跑：窗长与**应用前参数快照**一并落盘——重启后观测窗据此
+        重挂，自动回滚据此恢复安全态。非 canary 态调用即点名拒绝——窗口起点
+        只属于"参数已应用、观测中"的代。
         """
         with self._lock:
             gen = self._require(generationNo)
@@ -522,7 +550,18 @@ class GenerationLedger:
                     f"观测窗起点只能在 canary 态记录，当前状态 {gen.status}"
                 )
             base = gen.deployment if gen.deployment is not None else DeploymentRef()
-            gen.deployment = replace(base, canaryStartedAt=str(startedAtIso or ""))
+            gen.deployment = replace(
+                base,
+                canaryStartedAt=str(startedAtIso or ""),
+                canaryWindowSeconds=(
+                    float(windowSeconds)
+                    if windowSeconds is not None
+                    else base.canaryWindowSeconds
+                ),
+                canarySnapshot=(
+                    dict(snapshot) if snapshot is not None else base.canarySnapshot
+                ),
+            )
             self._persist()
 
     # ── 内部 ──────────────────────────────────────────────────

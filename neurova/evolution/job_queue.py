@@ -240,6 +240,41 @@ class EvolutionJobQueue:
             logger.info("进化作业租约恢复 %d 条 → failed_retryable", n)
         return n
 
+    def staleRunningJobs(self, lease_seconds: Optional[int] = None) -> List[Dict[str, Any]]:
+        """卡死作业只读面：running 且租约已超时的作业（worker 崩溃遗留）。
+
+        S4 driver dispatch_log 的可见性对应物：``recover_stale`` 负责修复，
+        本读面负责让"有作业卡在 running"先被看见（age/attempts/locked_by
+        随行）——看不见的卡死等于没有卡死。只读，不改任何状态。
+        """
+        lease = lease_seconds or self.lease_seconds
+        cutoff = time.time() - lease
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, kind, locked_by, locked_at, attempts FROM evolution_jobs"
+                " WHERE status='running' AND (locked_at IS NULL OR locked_at < ?)"
+                " ORDER BY created_at ASC",
+                (cutoff,),
+            ).fetchall()
+        now = time.time()
+        out: List[Dict[str, Any]] = []
+        for row in rows:
+            lockedAt = row["locked_at"]
+            out.append(
+                {
+                    "id": row["id"],
+                    "kind": row["kind"],
+                    "lockedBy": row["locked_by"] or "",
+                    "attempts": int(row["attempts"]),
+                    "ageSeconds": (
+                        round(max(0.0, now - float(lockedAt)), 3)
+                        if lockedAt is not None
+                        else None
+                    ),
+                }
+            )
+        return out
+
     def pending_count(self) -> int:
         with self._lock:
             row = self._conn.execute(
