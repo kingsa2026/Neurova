@@ -46,6 +46,7 @@ import { SimpleDataSource } from '../libs/perf/SimpleDataSource';
 import { ChatSession, ChatHistoryMessage } from '../libs/api/modules/SessionsApi';
 import { MarkdownText } from '../components/chat/MarkdownText';
 import { SwarmFlowPanel } from '../components/chat/SwarmFlowPanel';
+import { showSwarmFloatingIcon } from '../components/chat/SwarmFlowGate';
 import { speechRecognizer } from '@kit.CoreSpeechKit';
 import { audio } from '@kit.AudioKit';
 import { abilityAccessCtrl, Permissions } from '@kit.AbilityKit';
@@ -193,6 +194,10 @@ export struct ChatPage {
   // 蜂群协作图增量信号（车道F）：chat:done（回合终结）自增，触发 SwarmFlowPanel 静默重拉。
   // 移动端 WS 帧型不含 subagent_started/completed（那是 PC /sync 通道词汇），故借道回合终态。
   @State swarmRefreshTick: number = 0;
+  // 当前会话是否存在协作（SwarmFlowPanel 拉到投影后回告）：无协作则入口一并不出现
+  @State swarmHasCollab: boolean = false;
+  // 协作拓扑展开态：默认折叠为浮动图标，点击图标展开面板
+  @State swarmExpanded: boolean = false;
   // 会话是否来自列表（可置顶/归档；新会话未落库，操作会 404）。
   // adoptServerSession 采纳服务端铸真的会话 id 后同样置位——语义即「会话已落库」
   private fromList: boolean = false;
@@ -1781,46 +1786,78 @@ export struct ChatPage {
         // Agent 切换器已按产品要求移出对话页顶部：会话列表走右缘抽屉，
         // 切 Agent 走智能体列表页发起会话（顶部只留标题 + 状态 + 抽屉入口）
 
-        // 消息列表区
-        if (this.messages.length === 0) {
-          // 空状态：居中欢迎语
-          Column() {
-            Text('开始新对话')
-              .fontSize(this.sm.getFontSize('subtitle'))
-              .fontColor(this.sm.getColor('text_secondary'))
+        // 消息列表区（含协作拓扑浮动入口覆盖层）
+        Stack({ alignContent: Alignment.BottomEnd }) {
+          if (this.messages.length === 0) {
+            // 空状态：居中欢迎语
+            Column() {
+              Text('开始新对话')
+                .fontSize(this.sm.getFontSize('subtitle'))
+                .fontColor(this.sm.getColor('text_secondary'))
+            }
+            .width('100%')
+            .height('100%')
+            .justifyContent(FlexAlign.Center)
+            .alignItems(HorizontalAlign.Center)
+          } else {
+            // 消息列表：纵向滚动，关闭滚动条
+            // M5.2.2 改用 LazyForEach 惰性渲染，仅渲染可见区域 + 缓存项
+            // key 必须带上内容长度：流式回复是**原地改写同一对象**（content 追加），
+            // id 不变时 LazyForEach 按键复用组件、不重渲染该条目——这正是
+            // 「流式回复只显示光标、文本永不出现」（空回复）的根因
+            List({ space: this.sm.getSpacing('sm'), scroller: this.scroller }) {
+              LazyForEach(this.messagesDs, (msg: ChatMessageView) => {
+                ListItem() {
+                  this.buildMessage(msg)
+                }
+              }, (msg: ChatMessageView) => msg.id + '#' + msg.content.length.toString())
+            }
+            .width('100%')
+            .height('100%')
+            .scrollBar(BarState.Off)
+            .padding({
+              left: this.sm.getSpacing('md'),
+              right: this.sm.getSpacing('md'),
+              top: this.sm.getSpacing('sm'),
+              bottom: this.sm.getSpacing('sm'),
+            })
           }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center)
-        } else {
-          // 消息列表：纵向滚动，关闭滚动条
-          // M5.2.2 改用 LazyForEach 惰性渲染，仅渲染可见区域 + 缓存项
-          // key 必须带上内容长度：流式回复是**原地改写同一对象**（content 追加），
-          // id 不变时 LazyForEach 按键复用组件、不重渲染该条目——这正是
-          // 「流式回复只显示光标、文本永不出现」（空回复）的根因
-          List({ space: this.sm.getSpacing('sm'), scroller: this.scroller }) {
-            LazyForEach(this.messagesDs, (msg: ChatMessageView) => {
-              ListItem() {
-                this.buildMessage(msg)
-              }
-            }, (msg: ChatMessageView) => msg.id + '#' + msg.content.length.toString())
+
+          // 协作拓扑浮动入口（产品裁定 2026-11-24）：存在协作且面板折叠时，
+          // 悬浮于消息区右下角；点击展开面板。无协作则入口一并不出现。
+          if (showSwarmFloatingIcon(this.swarmHasCollab, this.swarmExpanded)) {
+            Column() {
+              AppIcon({ name: 'graph', iconSize: 20, color: this.sm.getColor('text_primary') })
+            }
+            .width(44)
+            .height(44)
+            .borderRadius(22)
+            .backgroundColor(this.sm.getColor('glass'))
+            .border({ width: 1, color: this.sm.getColor('border') })
+            .justifyContent(FlexAlign.Center)
+            .alignItems(HorizontalAlign.Center)
+            .margin({ right: 14, bottom: 14 })
+            .onClick(() => { this.swarmExpanded = true; })
           }
-          .layoutWeight(1)
-          .width('100%')
-          .scrollBar(BarState.Off)
-          .padding({
-            left: this.sm.getSpacing('md'),
-            right: this.sm.getSpacing('md'),
-            top: this.sm.getSpacing('sm'),
-            bottom: this.sm.getSpacing('sm'),
-          })
         }
+        .layoutWeight(1)
+        .width('100%')
 
         // 蜂群协作过程视图（车道F，对齐 PC ChatPage 消息区底部的 SwarmFlowPanel 位）：
-        // 本会话子任务 run 的委派/依赖分层拓扑 + 审批/候选徽标卡；无协作运行显示诚实
-        // 空态；读面失败 fail-soft（错误态 + 重试），不崩聊天页。
-        SwarmFlowPanel({ sessionId: this.sessionId, refreshTick: this.swarmRefreshTick })
+        // 本会话子任务 run 的委派/依赖分层拓扑 + 审批/候选徽标卡。产品裁定：仅存在
+        // 协作时经浮动图标入口展开本面板，折叠态零占位（组件常驻挂载，数据生命周期
+        // 照常）；读面失败 fail-soft（错误态 + 重试），不崩聊天页。
+        SwarmFlowPanel({
+          sessionId: this.sessionId,
+          refreshTick: this.swarmRefreshTick,
+          onHasCollabChange: (has: boolean) => {
+            this.swarmHasCollab = has;
+          },
+          onCollapse: () => {
+            this.swarmExpanded = false;
+          },
+        })
+        .visibility(this.swarmExpanded ? Visibility.Visible : Visibility.None)
 
         // 会话进度卡（设计 F5 .prog：流式生成中展示；步骤数后端未下发，不做假进度）
         if (this.isGenerating) {

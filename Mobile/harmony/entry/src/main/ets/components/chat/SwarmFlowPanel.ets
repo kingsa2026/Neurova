@@ -27,6 +27,8 @@ import { ApiFacade } from '../../libs/api/ApiFacade';
 import { StyleManager } from '../../libs/style/StyleManager';
 import { I18nManager } from '../../libs/i18n/I18nManager';
 import { Logger } from '../../libs/logger/Logger';
+import { AppIcon } from '../common/AppIcon';
+import { swarmHasCollab } from './SwarmFlowGate';
 import {
   SwarmGraphResult,
   SwarmGraphNode,
@@ -233,6 +235,10 @@ export struct SwarmFlowPanel {
   @Prop @Watch('onSessionIdChanged') sessionId: string = '';
   /** 结构性刷新信号（ChatPage 在 chat:done 时自增；移动端 WS 无 subagent_* 帧的替代增量） */
   @Prop @Watch('onTickChanged') refreshTick: number = 0;
+  /** 有无协作变化回调：驱动 ChatPage 浮动图标显隐（无协作则入口一并不出现） */
+  onHasCollabChange: (has: boolean) => void = (_has: boolean) => {};
+  /** 折叠回调：面板展开后由头部收起钮触发（回到浮动图标形态） */
+  onCollapse: () => void = () => {};
 
   @State loading: boolean = false;
   @State failed: boolean = false;
@@ -251,6 +257,8 @@ export struct SwarmFlowPanel {
   private sm = StyleManager.getInstance();
   private i18n = I18nManager.getInstance();
   private logger = Logger.getInstance();
+  /** 上次外发的有无协作值（去重，避免父级 @State 被同值反复置位） */
+  private lastEmittedHas: boolean = false;
 
   aboutToAppear(): void {
     this.refresh(false);
@@ -263,6 +271,7 @@ export struct SwarmFlowPanel {
     this.layers = [];
     this.cardNodes = [];
     this.fetchSeq++;
+    this.syncHasCollab();
     this.refresh(false);
   }
 
@@ -279,6 +288,7 @@ export struct SwarmFlowPanel {
       this.candidates = null;
       this.layers = [];
       this.cardNodes = [];
+      this.syncHasCollab();
       return;
     }
     if (!silent) {
@@ -343,6 +353,16 @@ export struct SwarmFlowPanel {
     this.cardNodes = cards;
     this.contentW = SwarmFlowLayout.contentWidth(this.layers);
     this.fetchSeq++;
+    this.syncHasCollab();
+  }
+
+  /** 有无协作外发（去重）：run 节点或审批/候选卡任一存在即有协作 */
+  private syncHasCollab(): void {
+    const has = swarmHasCollab(this.runCount(), this.cardNodes.length);
+    if (has !== this.lastEmittedHas) {
+      this.lastEmittedHas = has;
+      this.onHasCollabChange(has);
+    }
   }
 
   private retry(): void {
@@ -415,6 +435,20 @@ export struct SwarmFlowPanel {
         }
         .fontSize(this.sm.getFontSize('caption'))
         .fontColor(this.sm.getColor('text_secondary'))
+
+        // 收起钮：面板由浮动图标展开而来，此处回到图标形态（面板仅展开态可见）
+        Row() {
+          AppIcon({ name: 'back', iconSize: 12, color: this.sm.getColor('text_secondary') })
+            .rotate({ angle: 90 })
+        }
+        .width(24)
+        .height(24)
+        .borderRadius(12)
+        .border({ width: 1, color: this.sm.getColor('border') })
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .margin({ left: 8 })
+        .onClick(() => { this.onCollapse(); })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
