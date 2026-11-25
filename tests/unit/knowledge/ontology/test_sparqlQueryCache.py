@@ -28,12 +28,12 @@ QUERY_LIMIT5 = ("PREFIX kbg: <https://neurova.local/knowledge/>"
                 " SELECT ?s ?o WHERE { ?s kbg:linked ?o } LIMIT 5")
 
 
-def _admit(gate, subject, predicate, obj, agentId="default"):
+def _admit(gate, subject, predicate, obj, agentId="default", tenantId="default"):
     """经生产咽喉写入一条事实（真装配，不走旁路）。"""
     content = "%s %s %s" % (subject, predicate, obj)
     gate.admit(AdmissionRequest(
         agentId=agentId, subjectLabel=subject, predicateTermId=predicate,
-        objectTerm=obj, content=content,
+        objectTerm=obj, content=content, tenantId=tenantId,
         assertions=[{"actorType": "pipeline", "actorId": "unit",
                      "mediumRef": "unit:test", "statementText": content}]))
 
@@ -106,9 +106,14 @@ class TestSparqlQueryCache:
         assert projectionCalls["count"] == 2, "术语指纹变化后必须重投影"
 
     def test_agentAndTenantKeysIsolated(self, kb):
-        """不同 agentId / tenantId 键隔离：各查各的，结果互不串。"""
+        """不同 agentId / tenantId 键隔离：各查各的，结果互不串。
+
+        KNOW-01（2026-11-25 审计）起投影跟随请求租户：tenant-b 查询读
+        tenant-b 自己的图，不再回落 default 的投影。
+        """
         s, gate = kb
         _admit(gate, "设备C", "linked", "设备D", agentId="agent-2")
+        _admit(gate, "机甲A", "linked", "机甲B", tenantId="tenant-b")
         mine = sparql_query.runSparqlQuery(s, QUERY, agentId="default",
                                            tenantId="default")
         other = sparql_query.runSparqlQuery(s, QUERY, agentId="agent-2",
@@ -120,7 +125,8 @@ class TestSparqlQueryCache:
         assert cache.stats()["size"] == 2, "两个 agent 键各占一条"
         tenantB = sparql_query.runSparqlQuery(s, QUERY, agentId="default",
                                               tenantId="tenant-b")
-        assert tenantB == mine, "租户在键里隔离；现行投影语义下读面不变"
+        assert {row["o"] for row in tenantB["rows"]} == {"机甲B"}, \
+            "KNOW-01：租户查询读本租户投影，与 default 互不串"
         assert cache.stats()["size"] == 3, "租户键各占一条，不互相覆盖"
 
     def test_capacityOneEvictsViaEnv(self, kb, monkeypatch, projectionCalls):

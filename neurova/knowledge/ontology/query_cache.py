@@ -10,9 +10,8 @@ LRU 自然淘汰——失效与写入路径解耦，可靠性等价于"键判等
 
 - `termsFingerprint`：ontology_terms + ontology_rules 各取 COUNT＋MAX(updated_at)。
   规则行也进 Turtle 投影（ruleId/headPredicate/body 都是图里的三元组），规则变更
-  必须同样击穿缓存，故与术语同段指纹。范围用 `PROJECTION_TENANT`——查询面现行
-  语义固定按 default 租户投影（`serializeAll` 的 tenantId 形参未由查询面传入），
-  指纹必须盯住真正被读的那批行。
+  必须同样击穿缓存，故与术语同段指纹。范围用请求租户——投影按请求租户读行，
+  指纹必须盯住真正被读的那批行（KNOW-01）。
 - `factsWatermark`：knowledge_facts 中 `status='active' AND record_kind='triple'`
   且本租户（真值 agentId 再按 agent 过滤，与 `serializeAll` 同形）的行，取
   COUNT＋**全量内容滚动哈希**（rowid 序）。count 探增删；内容哈希探一切改写
@@ -40,12 +39,6 @@ logger = get_logger(__name__)
 SPARQL_CACHE_CAPACITY_ENV = "NEUROVA_ONTOLOGY_SPARQL_CACHE"
 #: 缺省容量
 DEFAULT_SPARQL_CACHE_CAPACITY = 128
-
-#: 投影读面的实际租户范围——`runSparqlQuery` 现行语义固定以 default 租户投影
-#: （`serializeAll` 的 tenantId 形参未由查询面传入，本卡不改查询语义）。
-#: 指纹与水印必须对齐这个实际读取范围，失效才可靠；查询语义若改，这里是
-#: 唯一对齐点。
-PROJECTION_TENANT = "default"
 
 # 哨兵：区分"键不存在"与"缓存了合法值"（复用 core.cache 的哨兵语义）
 _MISS = object()
@@ -145,12 +138,17 @@ class SparqlProjectionCache:
 
     def buildKey(self, store: Any, tenantId: str, agentId: Any,
                  query: str) -> Tuple[str, str, str, str, str]:
-        """缓存键：调用方维度（tenant/agent/查询）＋库内容维度（指纹/水印）。"""
-        return (str(tenantId or "default"),
+        """缓存键：调用方维度（tenant/agent/查询）＋库内容维度（指纹/水印）。
+
+        指纹与水印盯住请求租户（KNOW-01）：投影按请求租户读行，失效判据
+        必须对齐同一批行——跨租户指纹会让他租户写入击不穿本租户缓存。
+        """
+        tenant = str(tenantId or "default")
+        return (tenant,
                 str(agentId) if agentId else "",
                 str(query or "").strip(),
-                termsFingerprint(store, PROJECTION_TENANT),
-                factsWatermark(store, PROJECTION_TENANT, agentId))
+                termsFingerprint(store, tenant),
+                factsWatermark(store, tenant, agentId))
 
     def lookup(self, key: Tuple[str, ...]) -> Optional[Dict[str, Any]]:
         """命中返回快照拷贝；未命中/禁用返回 None（结果恒为 dict，None 无歧义）。"""

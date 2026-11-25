@@ -18,10 +18,7 @@ from typing import Any, Dict, List
 
 from neurova.core.logger import get_logger
 from neurova.knowledge.ontology.graph_projection_cache import GraphProjectionCache
-from neurova.knowledge.ontology.query_cache import (
-    PROJECTION_TENANT,
-    SparqlProjectionCache,
-)
+from neurova.knowledge.ontology.query_cache import SparqlProjectionCache
 
 logger = get_logger(__name__)
 
@@ -123,8 +120,9 @@ def runSparqlQuery(store: Any, query: str, agentId: str = "default",
             return cached
 
     graphCache = _graphCacheFor(store)
-    # 投影图在条目锁内取出/增量拼接，行集提取也在锁内完成——图不会边查边改
-    with graphCache.reading(store, tenantId=PROJECTION_TENANT,
+    # 投影图在条目锁内取出/增量拼接，行集提取也在锁内完成——图不会边查边改。
+    # 投影租户＝请求租户（KNOW-01）：非 default 租户读自己的知识图。
+    with graphCache.reading(store, tenantId=tenantId,
                             agentId=agentId) as graph:
         fullQuery = query if query.upper().startswith("PREFIX") \
             else (_SPARQL_PREFIX + "\n" + query)
