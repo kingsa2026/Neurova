@@ -199,12 +199,18 @@ class ChannelAdapter(ABC):
         }
 
     async def _emit_event(self, event_type: ChannelEventType, message: ChannelMessage):
-        """触发事件回调"""
+        """触发事件回调——回调失败如实上抛，不吞成一行日志（CHAN-06）。
+
+        此前这里 catch-all 后只记日志：分发失败在适配器侧看起来"事件已处理"。
+        入站队列的 nack 仍在 manager 内部完成；这里保住的是失败的可观测性与
+        调用方可处置性（webhook 可返回非 2xx 让平台重投）。
+        """
         if self._event_callback:
             try:
                 await self._event_callback(event_type, message)
             except Exception as e:
                 logger.exception("Event callback error for %s: %s", self.channel_type, e)
+                raise
 
     def get_channel_config(self) -> Dict[str, Any]:
         """获取渠道配置"""

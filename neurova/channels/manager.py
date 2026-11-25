@@ -71,6 +71,10 @@ OUTBOUND_CHUNK_RETRIES = 1
 FALLBACK_ERROR_TEXT = "抱歉，处理消息时出现错误，请稍后重试。"
 
 
+class ChannelDispatchError(RuntimeError):
+    """入站分发失败（CHAN-06）：队列据此 nack，有界重试后进死信，不得 ack。"""
+
+
 class ChannelManager:
     """
     渠道管理器
@@ -775,6 +779,10 @@ class ChannelManager:
         同会话的自动/提醒消息（当前唯一自动渠道出口是审批通知）由出口预算压住，
         关窗时补发最新一条。窗口挂在**这一层**而不是 handler 内部：只有这里同时包住
         「handler 执行」与「回复发送」，早退点也覆盖得到。
+
+        CHAN-06：处理器全部失败时抛 ChannelDispatchError，由队列 nack（有界重试→
+        死信）。此前 catch-all 后照常返回，外层随即 ack——失败消息终态 done，
+        不重试、不进死信，失败被伪装成"本轮无回复"。
         """
         from neurova.channels.attention_budget import getAttentionBudget
 
@@ -785,9 +793,12 @@ class ChannelManager:
             # 优先使用多处理器链
             # C-24: 快照遍历——处理器在回调中增删列表时不再被并发修改影响
             if self._message_handlers:
+                succeeded = 0
+                failures: list = []
                 for priority, handler_id, handler in list(self._message_handlers):
                     try:
                         reply = await handler(message)
+                        succeeded += 1
                         if reply:
                             # 2026-09-14 契约扩展：handler 可返回多条消息（思考/工具/
                             # 正文拆分）；2026-10-12 起项可为文本或 VoiceReply（语音）。
@@ -795,6 +806,12 @@ class ChannelManager:
                             break  # 第一个返回回复的处理器获胜
                     except Exception as e:
                         logger.exception("Message handler %s error: %s", handler_id, e)
+                        failures.append(e)
+                if not succeeded and failures:
+                    raise ChannelDispatchError(
+                        f"渠道 {message.channel_type} 入站分发失败：{len(failures)} 个处理器全部异常"
+                        f"（末次原因: {failures[-1]}）"
+                    ) from failures[-1]
             # 回退到单处理器模式
             elif self._message_handler:
                 try:
@@ -816,6 +833,9 @@ class ChannelManager:
                     except Exception as send_exc:
                         logger.warning("兜底错误文案回发失败（chat=%s）: %s",
                                        str(message.chat_id)[:20], send_exc)
+                    raise ChannelDispatchError(
+                        f"渠道 {message.channel_type} 入站分发失败（单处理器异常: {e}）"
+                    ) from e
         finally:
             try:
                 await budget.release(holdKey)

@@ -382,11 +382,15 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
 
             try:
                 resp = await agent.chat(user_input=content, session_id=session_id, metadata=meta)
-            except Exception:
+            except Exception as exc:
                 logger.exception("ChannelRouter: agent.chat 失败（channel=%s agent=%s）", message.channel_type, agent_id)
                 ledger.settleResult({"error": "chat_error"})
                 await _reportAdmission(admission)
-                return None
+                # CHAN-06：不得把回合失败改写成 None（外层当"本轮无回复"ack 掉）。
+                # 上抛给分发链 → 入站队列 nack 有界重试/进死信。
+                raise RuntimeError(
+                    f"ChannelRouter: agent.chat 失败（channel={message.channel_type} agent={agent_id}）"
+                ) from exc
             ledger.settleResult(resp if isinstance(resp, dict) else {})
             await _reportAdmission(admission)
         finally:

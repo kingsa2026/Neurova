@@ -121,14 +121,19 @@ class TestFallbackCopyBehavior:
             ChannelManager._instance = None
 
     def test_handlerFailureSendsTheNamedConstantCopy(self, manager):
-        """处理器炸了 → 用户收到的兜底话就是常量那一句话（行为面咬合）。"""
+        """处理器炸了 → 用户收到的兜底话就是常量那一句话（行为面咬合）。
+
+        CHAN-06 起失败还必须上抛给入站队列 nack（有界重试→死信）；兜底文案
+        照发，两者不互斥——"用户看到兜底"不等于"消息已被成功处理"。
+        """
         from neurova.channels.base import ChannelEventType, ChannelMessage
         from neurova.channels.manager import FALLBACK_ERROR_TEXT
 
         mgr, sent = manager
         msg = ChannelMessage(channel_type="feishu", message_id="om_g", sender_id="ou_g",
                              sender_name="ou_g", content="触发处理器异常", chat_id="oc_g")
-        asyncio.run(mgr._dispatch_message(msg))
+        with pytest.raises(RuntimeError):
+            asyncio.run(mgr._dispatch_message(msg))
 
         assert FALLBACK_ERROR_TEXT in sent, (
             f"兜底文案没有按常量发出（实得 {sent}）"
