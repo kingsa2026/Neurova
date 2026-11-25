@@ -69,6 +69,26 @@ register_migration(
     domain="channel_ingress",
 )
 
+
+def _migrateIngressV3AgentTenant(conn) -> None:
+    """v3（KNOW-12）：来源实例边界两列——共享捕获库（缺省单文件）里多
+    agent/租户并存，行必须带归属，消费面才可能按实例精确过滤。
+
+    存量行归空串（=未归因；企业源消费面对空串行保持既有可读，迁移容忍）。
+    写侧：`enqueue(agent_id=..., tenant_id=...)`；通道分发面的落戳接线归
+    channels/manager.py（本批禁碰的在途文件），接线前存量行保持空串语义。"""
+    columns = {row[1] for row in
+               conn.execute("PRAGMA table_info(channel_ingress_events)").fetchall()}
+    for column in ("agent_id", "tenant_id"):
+        if column not in columns:
+            conn.execute("ALTER TABLE channel_ingress_events"
+                         " ADD COLUMN %s TEXT NOT NULL DEFAULT ''" % column)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ingress_channel_agent"
+                 " ON channel_ingress_events(channel_type, agent_id, id)")
+
+
+register_migration(3, _migrateIngressV3AgentTenant, domain="channel_ingress")
+
 # payload ↔ ChannelMessage 的往返由 dataclasses.asdict/from_dict 承担
 # （timestamp ISO 往返，raw_event/metadata JSON 内嵌）
 
@@ -151,11 +171,14 @@ class ChannelIngressQueue:
     # 生产侧
     # ------------------------------------------------------------------
 
-    def enqueue(self, message: ChannelMessage, priority: Optional[int] = None) -> bool:
+    def enqueue(self, message: ChannelMessage, priority: Optional[int] = None,
+                agent_id: str = "", tenant_id: str = "") -> bool:
         """消息持久化。tombstone 去重：同 (channel_type, message_id) 幂等。
 
         已 done 的重复投递（平台消息重发）重开为 pending 再投一次。
         priority：显式参数优先；缺省取消息 metadata.priority，再缺省 0（FIFO）。
+        agent_id/tenant_id（KNOW-12）：来源实例边界——共享捕获库里多实例并存，
+        行带归属后企业源消费面才能按实例精确过滤；缺省空串=未归因（存量语义）。
 
         Returns:
             True=新入队/重开；False=重复消息（去重忽略）
@@ -177,7 +200,8 @@ class ChannelIngressQueue:
                     cur = self._conn.execute(
                         "INSERT OR IGNORE INTO channel_ingress_events"
                         " (channel_type, message_id, chat_id, payload, status, dedupe_key,"
-                        "  created_at, updated_at, priority) VALUES (?,?,?,?,?,?,?,?,?)",
+                        "  created_at, updated_at, priority, agent_id, tenant_id)"
+                        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             message.channel_type,
                             message.message_id,
@@ -188,6 +212,8 @@ class ChannelIngressQueue:
                             _now_iso(),
                             _now_iso(),
                             priority,
+                            str(agent_id or ""),
+                            str(tenant_id or ""),
                         ),
                     )
                     if cur.rowcount > 0:

@@ -321,6 +321,16 @@ SEND_ROWS_SQL = (
     " ORDER BY seq LIMIT ?"
 )
 
+#: KNOW-12：按来源实例（agent）圈域的消费查询——声明了 agentId 的聊天源
+#: 只拉本实例的存档行；未打戳的存量行（agent_id=''）保持可读（迁移容忍——
+#: 与捕获面同规，落戳全量覆盖后边界即完整生效）。
+SEND_ROWS_SQL_FOR_AGENT = (
+    "SELECT seq, msgid, action, msgtype, from_id, tolist, roomid, msgtime_ms,"
+    " text, media_ref FROM channel_archive_messages"
+    " WHERE seq > ? AND (agent_id = ? OR agent_id = '')"
+    " ORDER BY seq LIMIT ?"
+)
+
 register_migration(1, _ARCHIVE_SCHEMA, domain="channel_archive")
 
 
@@ -336,6 +346,23 @@ def _migrateArchiveV2MediaColumns(conn) -> None:
 
 
 register_migration(2, _migrateArchiveV2MediaColumns, domain="channel_archive")
+
+
+def _migrateArchiveV3AgentColumn(conn) -> None:
+    """v3（KNOW-12）：来源实例边界列——存档行落谁的 agent_id，消费面按它圈域。
+
+    共享投影库（缺省单文件）里多实例并存；没有这列，某租户的聊天源会复制
+    其他实例的消息。存量行归空串（=未归因，行为与改前一致）。"""
+    existing = [row[1] for row in
+                conn.execute("PRAGMA table_info(channel_archive_messages)").fetchall()]
+    if "agent_id" not in existing:
+        conn.execute("ALTER TABLE channel_archive_messages"
+                     " ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_archive_agent_seq"
+                 " ON channel_archive_messages(agent_id, seq)")
+
+
+register_migration(3, _migrateArchiveV3AgentColumn, domain="channel_archive")
 
 
 class ArchiveSdkError(RuntimeError):
@@ -670,9 +697,13 @@ class ArchiveProjectionStore:
         applyMigrations(self._conn, domain="channel_archive")
 
     def appendBatch(self, rows: List[Dict[str, Any]], nextSeq: int,
-                    fetchedAt: Optional[str] = None) -> int:
-        """单事务落一批＋推水印；返回实际新写入行数（重放幂等时为 0）。"""
+                    fetchedAt: Optional[str] = None, agentId: str = "") -> int:
+        """单事务落一批＋推水印；返回实际新写入行数（重放幂等时为 0）。
+
+        agentId：来源实例边界（KNOW-12）——共享投影库里多实例并存，行必须
+        带归属，消费面才可能按实例精确过滤。"""
         stamped = fetchedAt or _nowIso()
+        agent = str(agentId or "")
         with self._lock:
             cur = self._conn.cursor()
             try:
@@ -682,8 +713,8 @@ class ArchiveProjectionStore:
                         "INSERT OR IGNORE INTO channel_archive_messages ("
                         " seq, msgid, publickey_ver, action, msgtype, from_id,"
                         " tolist, roomid, msgtime_ms, text, media_ref, fetched_at,"
-                        " media_name, media_staged_path"
-                        ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        " media_name, media_staged_path, agent_id"
+                        ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (int(row["seq"]), str(row.get("msgid") or ""),
                          str(row.get("publickey_ver") or ""),
                          str(row.get("action") or "send"),
@@ -694,7 +725,7 @@ class ArchiveProjectionStore:
                          int(row.get("msgtime_ms") or 0),
                          str(row.get("text") or ""),
                          str(row.get("media_ref") or ""), stamped,
-                         str(row.get("media_name") or ""), ""))
+                         str(row.get("media_name") or ""), "", agent))
                     written += max(0, cur.rowcount)
                 cur.execute(
                     "INSERT INTO channel_archive_state (key, value, updated_at)"
@@ -886,7 +917,7 @@ def runArchiveWorkerCycle(agentId: str = "default", *,
             filteredTotal += filtered
             for name, value in result.counts.items():
                 counts[name] = counts.get(name, 0) + value
-            store.appendBatch(kept, result.nextSeq)
+            store.appendBatch(kept, result.nextSeq, agentId=str(agentId or "default"))
             writtenTotal += len(kept)
             watermark = result.nextSeq
             if not result.hasMore:

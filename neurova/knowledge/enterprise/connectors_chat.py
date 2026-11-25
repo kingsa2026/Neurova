@@ -77,6 +77,10 @@ class ChatChannelAdapter:
                            else self._resolveIngressDb())
         self._archiveDb = (self._resolveArchiveDb()
                            if self._sourceFace == ARCHIVE_FACE else None)
+        # 边界列存在性缓存（KNOW-12）：共享库可能先于迁移（测试夹具直建 v1 形状、
+        # 存量库未升级）——列不存在时不施加 agent 过滤（行为与改前一致）。
+        self._captureAgentColumn: Optional[bool] = None
+        self._archiveAgentColumn: Optional[bool] = None
 
     # ── Protocol 四动词 ──────────────────────────────────────
 
@@ -172,21 +176,44 @@ class ChatChannelAdapter:
     def _roUri(self) -> str:
         return "file:%s?mode=ro" % self._ingressDb.as_posix()
 
+    def _captureHasAgentColumn(self) -> bool:
+        """捕获面库是否已带 agent_id 边界列（KNOW-12，一次性探测后缓存）。"""
+        if self._captureAgentColumn is None:
+            conn = sqlite3.connect(self._roUri(), uri=True,
+                                   timeout=_RO_TIMEOUT_SECONDS)
+            try:
+                cols = {row[1] for row in conn.execute(
+                    "PRAGMA table_info(channel_ingress_events)").fetchall()}
+            finally:
+                conn.close()
+            self._captureAgentColumn = "agent_id" in cols
+        return self._captureAgentColumn
+
     def _readRows(self, since: int, limit: int) -> Tuple[List[Dict[str, Any]], int, bool]:
         """只读拉一批已捕获消息：按 id 升序取 limit+1 行探测 hasMore。
 
         - 只按 channel_type 过滤本 vendor（wecom/wechat），不按排水 status 过滤——
           pending/processing/done/dead 都是「已捕获」的真实消息（tombstone 去重保证
           无重复行）；
+        - 来源实例边界（KNOW-12）：描述符声明 agentId 且共享库已带边界列时，
+          已打戳的行按 agent 圈域（他实例消息不进本源）；未打戳的存量行
+          （agent_id=''）保持可读——迁移容忍，通道分发面落戳后边界即全量生效；
         - 坏 payload 行跳过但游标推进过它（不卡水位、不重复消费）；
         - 独立 mode=ro 短连接：不写通道库、不留常驻连接。
         """
+        agentFilter = ""
+        params: List[Any] = [self._channelType, since]
+        declaredAgent = str(self._descriptor.get("agentId") or "").strip()
+        if declaredAgent and self._captureHasAgentColumn():
+            agentFilter = " AND (agent_id = ? OR agent_id = '')"
+            params.append(declaredAgent)
+        params.append(limit + 1)
         conn = sqlite3.connect(self._roUri(), uri=True, timeout=_RO_TIMEOUT_SECONDS)
         try:
             fetched = conn.execute(
                 "SELECT id, payload FROM channel_ingress_events"
-                " WHERE channel_type = ? AND id > ? ORDER BY id LIMIT ?",
-                (self._channelType, since, limit + 1),
+                " WHERE channel_type = ? AND id > ?%s ORDER BY id LIMIT ?" % agentFilter,
+                params,
             ).fetchall()
         finally:
             conn.close()
@@ -251,17 +278,33 @@ class ChatChannelAdapter:
         """只读拉一批存档投影行：按 seq 扫描、send 过滤在 Python 侧（recall/switch
         留档不入账但**游标推进过它们**——否则水位卡死、扫描窗无限增长，§5 同规）。
 
+        来源实例边界（KNOW-12）：描述符声明 agentId 且投影库已带边界列时按
+        agent 圈域——共享投影库里他实例的行不进本源（存档行由通道层 worker
+        落 agent_id 戳）。
         投影库尚未落盘（worker 未拉过）→ 空批诚实返回，不炸、不冒充有数；
         mode=ro 短连接，不写通道库、不留常驻连接。"""
-        from neurova.channels.wecom_archive import SEND_ROWS_SQL
+        from neurova.channels.wecom_archive import SEND_ROWS_SQL, SEND_ROWS_SQL_FOR_AGENT
 
         if not self._archiveDb.exists():
             return [], int(since), False
+        declaredAgent = str(self._descriptor.get("agentId") or "").strip()
+        if self._archiveAgentColumn is None:
+            conn = sqlite3.connect(self._roUriFor(self._archiveDb), uri=True,
+                                   timeout=_RO_TIMEOUT_SECONDS)
+            try:
+                cols = {row[1] for row in conn.execute(
+                    "PRAGMA table_info(channel_archive_messages)").fetchall()}
+            finally:
+                conn.close()
+            self._archiveAgentColumn = "agent_id" in cols
+        useAgentFilter = bool(declaredAgent) and bool(self._archiveAgentColumn)
+        sql = SEND_ROWS_SQL_FOR_AGENT if useAgentFilter else SEND_ROWS_SQL
+        params: Tuple[int, ...] = ((int(since), declaredAgent, int(limit) + 1)
+                                   if useAgentFilter else (int(since), int(limit) + 1))
         conn = sqlite3.connect(self._roUriFor(self._archiveDb), uri=True,
                                timeout=_RO_TIMEOUT_SECONDS)
         try:
-            fetched = conn.execute(SEND_ROWS_SQL,
-                                   (int(since), int(limit) + 1)).fetchall()
+            fetched = conn.execute(sql, params).fetchall()
         finally:
             conn.close()
         hasMore = len(fetched) > limit
