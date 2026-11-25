@@ -669,6 +669,89 @@
     "default": "<empty>"
    },
    {
+    "name": "after_seq",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "typing.Optional[int]",
+    "default": null
+   },
+   {
+    "name": "current_user",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "typing.Dict[str, typing.Any]",
+    "default": {
+     "dependency": {
+      "name": "neurova.api.auth.get_current_userWithQueryToken",
+      "closure": []
+     },
+     "use_cache": true
+    }
+   }
+  ],
+  "return": "<empty>",
+  "dependencies": {
+   "call": null,
+   "name": null,
+   "use_cache": true,
+   "children": [
+    {
+     "call": {
+      "name": "neurova.api.auth.get_current_userWithQueryToken",
+      "closure": []
+     },
+     "name": "current_user",
+     "use_cache": true,
+     "children": [
+      {
+       "call": {
+        "name": "neurova.api.auth.BearerOrQuery",
+        "closure": []
+       },
+       "name": "credentials",
+       "use_cache": true,
+       "children": []
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "kind": "APIRoute",
+  "path": "/chat/swarm/lineage-audit",
+  "methods": [
+   "GET"
+  ],
+  "name": "get_console_swarm_lineage_audit",
+  "unique_id": "get_console_swarm_lineage_audit_chat_swarm_lineage_audit_get",
+  "operation_id": null,
+  "response_model": null,
+  "status_code": null,
+  "parameters": [
+   {
+    "name": "request",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "starlette.requests.Request",
+    "default": "<empty>"
+   },
+   {
+    "name": "tenant_id",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "builtins.str",
+    "default": ""
+   },
+   {
+    "name": "room_id",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "builtins.str",
+    "default": ""
+   },
+   {
+    "name": "limit",
+    "kind": "POSITIONAL_OR_KEYWORD",
+    "annotation": "builtins.int",
+    "default": 50
+   },
+   {
     "name": "current_user",
     "kind": "POSITIONAL_OR_KEYWORD",
     "annotation": "typing.Dict[str, typing.Any]",

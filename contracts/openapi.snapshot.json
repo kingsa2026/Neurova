@@ -1037,6 +1037,20 @@
           "title": "AgentProfileUpdate",
           "type": "object"
         },
+        "AgentSharedBody": {
+          "description": "共享标记请求体：true = 迁入 share 桶；false = 迁回属主桶。",
+          "properties": {
+            "shared": {
+              "title": "Shared",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "shared"
+          ],
+          "title": "AgentSharedBody",
+          "type": "object"
+        },
         "AgentStatus": {
           "description": "Agent状态",
           "properties": {
@@ -3352,128 +3366,6 @@
           "title": "CompressTurnRequest",
           "type": "object"
         },
-        "Computer": {
-          "description": "Computer: 计算资源抽象\n\n- kind: 'cloud' | 'local' | 'vps'\n- engine: managed or specific CLI tool\n- status tracking for heartbeat",
-          "properties": {
-            "agents": {
-              "additionalProperties": true,
-              "title": "Agents",
-              "type": "object"
-            },
-            "company_id": {
-              "default": "",
-              "title": "Company Id",
-              "type": "string"
-            },
-            "computer_id": {
-              "title": "Computer Id",
-              "type": "string"
-            },
-            "created_at": {
-              "title": "Created At",
-              "type": "number"
-            },
-            "credential_hash": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Credential Hash"
-            },
-            "daemon_token": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Daemon Token"
-            },
-            "daemon_version": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Daemon Version"
-            },
-            "engine": {
-              "$ref": "#/components/schemas/ComputerEngine",
-              "default": "managed"
-            },
-            "kind": {
-              "$ref": "#/components/schemas/ComputerKind",
-              "default": "cloud"
-            },
-            "last_seen_at": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Last Seen At"
-            },
-            "metadata": {
-              "additionalProperties": true,
-              "title": "Metadata",
-              "type": "object"
-            },
-            "name": {
-              "default": "",
-              "title": "Name",
-              "type": "string"
-            },
-            "owner_user_id": {
-              "default": "",
-              "title": "Owner User Id",
-              "type": "string"
-            },
-            "paired_at": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Paired At"
-            },
-            "revoked_at": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Revoked At"
-            },
-            "status": {
-              "$ref": "#/components/schemas/ComputerStatus",
-              "default": "offline"
-            },
-            "updated_at": {
-              "title": "Updated At",
-              "type": "number"
-            }
-          },
-          "title": "Computer",
-          "type": "object"
-        },
         "ComputerEngine": {
           "description": "Computer 引擎类型",
           "enum": [
@@ -3502,12 +3394,183 @@
           "title": "ComputerKind",
           "type": "string"
         },
+        "ComputerPairRequest": {
+          "properties": {
+            "available_engines": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Available Engines",
+              "type": "array"
+            },
+            "daemon_version": {
+              "title": "Daemon Version",
+              "type": "string"
+            },
+            "host_name": {
+              "title": "Host Name",
+              "type": "string"
+            },
+            "pair_token": {
+              "minLength": 1,
+              "title": "Pair Token",
+              "type": "string"
+            },
+            "supervised": {
+              "default": false,
+              "title": "Supervised",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "pair_token",
+            "host_name",
+            "available_engines",
+            "daemon_version"
+          ],
+          "title": "ComputerPairRequest",
+          "type": "object"
+        },
+        "ComputerPairResponse": {
+          "properties": {
+            "computer": {
+              "$ref": "#/components/schemas/ComputerPublic"
+            },
+            "daemon_token": {
+              "title": "Daemon Token",
+              "type": "string"
+            }
+          },
+          "required": [
+            "computer",
+            "daemon_token"
+          ],
+          "title": "ComputerPairResponse",
+          "type": "object"
+        },
+        "ComputerPublic": {
+          "description": "Computer 公开投影；任何凭据字段都不得进入。",
+          "properties": {
+            "agents": {
+              "additionalProperties": true,
+              "title": "Agents",
+              "type": "object"
+            },
+            "company_id": {
+              "title": "Company Id",
+              "type": "string"
+            },
+            "computer_id": {
+              "title": "Computer Id",
+              "type": "string"
+            },
+            "created_at": {
+              "title": "Created At",
+              "type": "number"
+            },
+            "daemon_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Daemon Version"
+            },
+            "deleted_at": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Deleted At"
+            },
+            "engine": {
+              "$ref": "#/components/schemas/ComputerEngine"
+            },
+            "kind": {
+              "$ref": "#/components/schemas/ComputerKind"
+            },
+            "last_seen_at": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last Seen At"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_user_id": {
+              "title": "Owner User Id",
+              "type": "string"
+            },
+            "paired_at": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Paired At"
+            },
+            "revoked_at": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Revoked At"
+            },
+            "status": {
+              "$ref": "#/components/schemas/ComputerStatus"
+            },
+            "updated_at": {
+              "title": "Updated At",
+              "type": "number"
+            }
+          },
+          "required": [
+            "computer_id",
+            "name",
+            "kind",
+            "engine",
+            "status",
+            "owner_user_id",
+            "company_id",
+            "created_at",
+            "updated_at"
+          ],
+          "title": "ComputerPublic",
+          "type": "object"
+        },
         "ComputerStatus": {
           "description": "Computer 状态",
           "enum": [
             "online",
             "offline",
-            "busy"
+            "busy",
+            "deleted"
           ],
           "title": "ComputerStatus",
           "type": "string"
@@ -7242,6 +7305,39 @@
           "title": "InductionLogItem",
           "type": "object"
         },
+        "InitialLoadRequest": {
+          "description": "初始批量装载请求（P2-4）：dry_run 缺省 true（先预检后装载）。",
+          "properties": {
+            "batch_size": {
+              "default": 500,
+              "maximum": 5000.0,
+              "minimum": 1.0,
+              "title": "Batch Size",
+              "type": "integer"
+            },
+            "dry_run": {
+              "default": true,
+              "title": "Dry Run",
+              "type": "boolean"
+            },
+            "fetch_limit": {
+              "default": 500,
+              "maximum": 5000.0,
+              "minimum": 1.0,
+              "title": "Fetch Limit",
+              "type": "integer"
+            },
+            "max_batches": {
+              "default": 20,
+              "maximum": 200.0,
+              "minimum": 1.0,
+              "title": "Max Batches",
+              "type": "integer"
+            }
+          },
+          "title": "InitialLoadRequest",
+          "type": "object"
+        },
         "InstallPluginRequest": {
           "properties": {
             "config": {
@@ -9919,6 +10015,24 @@
             "translations"
           ],
           "title": "OverlayUpdate",
+          "type": "object"
+        },
+        "PairTicketResponse": {
+          "properties": {
+            "expires_in": {
+              "title": "Expires In",
+              "type": "integer"
+            },
+            "pair_token": {
+              "title": "Pair Token",
+              "type": "string"
+            }
+          },
+          "required": [
+            "pair_token",
+            "expires_in"
+          ],
+          "title": "PairTicketResponse",
           "type": "object"
         },
         "PairingStatusResponse": {
@@ -14303,7 +14417,7 @@
               "type": "integer"
             },
             "sleep_mode": {
-              "default": "temperature",
+              "default": "either",
               "title": "Sleep Mode",
               "type": "string"
             },
@@ -16344,6 +16458,34 @@
             "type"
           ],
           "title": "TriggerCreateRequest",
+          "type": "object"
+        },
+        "TuningRunRequest": {
+          "description": "自动调参请求",
+          "properties": {
+            "apply": {
+              "default": true,
+              "description": "是否把最优门限写入记忆设置",
+              "title": "Apply",
+              "type": "boolean"
+            },
+            "floors": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "候选门限列表（缺省 0.4~0.8 五档）",
+              "title": "Floors"
+            }
+          },
+          "title": "TuningRunRequest",
           "type": "object"
         },
         "TurnOutcomeRequest": {
@@ -21872,6 +22014,84 @@
           ]
         }
       },
+      "/api/v1/agents/layout/migration/scan": {
+        "post": {
+          "description": "触发 agent 布局迁移扫描（管理员）：v2 平铺 → v3 分区（只搬不删）。\n\n- body 缺省/不带 owner → 全量扫描（所有登记/发现的 agent），完成后写哨兵；\n- body {\"owner\": \"<user_id>\"} → 仅扫描该属主的 agent（按用户隔离），\n  不写哨兵；\n- 运行中（已加载实例）的 agent 跳过并进 pending 报告——目录搬移会让其\n  sqlite/工作区句柄悬空；如需迁它们，先停止对应 agent 或重启后端再扫。",
+          "operationId": "run_layout_migration_scan_layout_migration_scan_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Body"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Run Layout Migration Scan",
+          "tags": [
+            "Agent API"
+          ]
+        }
+      },
+      "/api/v1/agents/layout/migration/status": {
+        "get": {
+          "description": "迁移扫描状态读面（管理员）：哨兵 + 属主索引。",
+          "operationId": "layout_migration_status_layout_migration_status_get",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Layout Migration Status",
+          "tags": [
+            "Agent API"
+          ]
+        }
+      },
       "/api/v1/agents/{agent_id}": {
         "delete": {
           "description": "删除 Agent",
@@ -22352,6 +22572,62 @@
             }
           ],
           "summary": "Rebuild Loop",
+          "tags": [
+            "Agent API"
+          ]
+        }
+      },
+      "/api/v1/agents/{agent_id}/shared": {
+        "post": {
+          "description": "管理员把 agent 标记为共享/取消共享（物理目录随之迁入/迁出 share 桶）。",
+          "operationId": "set_agent_shared__agent_id__shared_post",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "agent_id",
+              "required": true,
+              "schema": {
+                "title": "Agent Id",
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSharedBody"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Set Agent Shared",
           "tags": [
             "Agent API"
           ]
@@ -30758,7 +31034,7 @@
       },
       "/api/v1/computers": {
         "get": {
-          "description": "列出当前用户的所有 Computers\n\n- **user_id**: 当前用户 ID (从认证上下文获取)\n\nReturns all computers owned by the current user.",
+          "description": "列出当前用户的所有 Computers。",
           "operationId": "list_user_computers_computers_get",
           "responses": {
             "200": {
@@ -30766,7 +31042,7 @@
                 "application/json": {
                   "schema": {
                     "items": {
-                      "$ref": "#/components/schemas/Computer"
+                      "$ref": "#/components/schemas/ComputerPublic"
                     },
                     "title": "Response List User Computers Api V1 Computers Get",
                     "type": "array"
@@ -30788,7 +31064,7 @@
           ]
         },
         "post": {
-          "description": "创建新 Computer\n\n- **name**: Computer 名称\n- **kind**: 类型 (cloud/local/vps)\n- **engine**: 引擎类型 (managed/claude/etc)\n- **company_id**: 所属公司 ID (可选)",
+          "description": "创建新 Computer。",
           "operationId": "create_computer_computers_post",
           "parameters": [
             {
@@ -30840,7 +31116,7 @@
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/Computer"
+                    "$ref": "#/components/schemas/ComputerPublic"
                   }
                 }
               },
@@ -30871,7 +31147,7 @@
       },
       "/api/v1/computers/admin/all": {
         "get": {
-          "description": "管理员列出所有 Computers\n\n- **include_deleted**: 是否包含已删除",
+          "description": "管理员列出所有 Computers。",
           "operationId": "admin_list_all_computers_computers_admin_all_get",
           "parameters": [
             {
@@ -30891,7 +31167,7 @@
                 "application/json": {
                   "schema": {
                     "items": {
-                      "$ref": "#/components/schemas/Computer"
+                      "$ref": "#/components/schemas/ComputerPublic"
                     },
                     "title": "Response Admin List All Computers Api V1 Computers Admin All Get",
                     "type": "array"
@@ -30925,7 +31201,7 @@
       },
       "/api/v1/computers/cleanup-offline": {
         "post": {
-          "description": "清理离线超过超时时间的 Computers（仅管理员）\n\n- **timeout_minutes**: 超时时间 (分钟)",
+          "description": "清理离线超过超时时间的 Computers（仅管理员）。",
           "operationId": "cleanup_offline_computers_computers_cleanup_offline_post",
           "parameters": [
             {
@@ -30973,7 +31249,7 @@
       },
       "/api/v1/computers/cloud": {
         "get": {
-          "description": "获取 Cloud Computer 实例\n\n- **company_id**: 公司 ID (可选，用于过滤)",
+          "description": "获取 Cloud Computer 实例。",
           "operationId": "get_cloud_computer_computers_cloud_get",
           "parameters": [
             {
@@ -30998,7 +31274,7 @@
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/Computer"
+                    "$ref": "#/components/schemas/ComputerPublic"
                   }
                 }
               },
@@ -31029,7 +31305,7 @@
       },
       "/api/v1/computers/{computer_id}": {
         "delete": {
-          "description": "删除 Computer\n\n- **computer_id**: Computer ID\n- **hard**: 硬删除 vs 软删除",
+          "description": "删除 Computer。",
           "operationId": "delete_computer_computers__computer_id__delete",
           "parameters": [
             {
@@ -31088,7 +31364,7 @@
           ]
         },
         "get": {
-          "description": "获取指定 Computer\n\n- **computer_id**: Computer ID",
+          "description": "获取指定 Computer。",
           "operationId": "get_computer_computers__computer_id__get",
           "parameters": [
             {
@@ -31106,7 +31382,7 @@
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/Computer"
+                    "$ref": "#/components/schemas/ComputerPublic"
                   }
                 }
               },
@@ -31137,7 +31413,7 @@
       },
       "/api/v1/computers/{computer_id}/agents": {
         "get": {
-          "description": "列出 Computer 上的所有 Agents\n\n- **computer_id**: Computer ID",
+          "description": "列出 Computer 上的所有 Agents。",
           "operationId": "list_agents_on_computer_computers__computer_id__agents_get",
           "parameters": [
             {
@@ -31190,7 +31466,7 @@
       },
       "/api/v1/computers/{computer_id}/heartbeat": {
         "post": {
-          "description": "接收 Computer heartbeat（daemon 上报，须携带配对共享令牌）\n\n- **computer_id**: Computer ID\n- **version**: daemon 版本\n- 凭证：`Authorization: Bearer <token>` 优先，回退 `?token=`",
+          "description": "接收 Computer heartbeat（daemon 上报，须携带配对共享令牌）。",
           "operationId": "heartbeat_computers__computer_id__heartbeat_post",
           "parameters": [
             {
@@ -31248,7 +31524,7 @@
       },
       "/api/v1/computers/{computer_id}/pair": {
         "post": {
-          "description": "BYOA Computer 配对\n\n- **computer_id**: Computer ID\n- **pair_token**: 配对 token (device credential)\n- **host_name**: 主机名\n- **available_engines**: 可用引擎列表\n- **daemon_version**: daemon 版本\n- **supervised**: 是否作为服务运行",
+          "description": "消费服务端签发的配对票据；daemon 凭据仅在本响应返回一次。",
           "operationId": "pair_byoa_computer_computers__computer_id__pair_post",
           "parameters": [
             {
@@ -31259,54 +31535,13 @@
                 "title": "Computer Id",
                 "type": "string"
               }
-            },
-            {
-              "in": "query",
-              "name": "pair_token",
-              "required": true,
-              "schema": {
-                "title": "Pair Token",
-                "type": "string"
-              }
-            },
-            {
-              "in": "query",
-              "name": "host_name",
-              "required": true,
-              "schema": {
-                "title": "Host Name",
-                "type": "string"
-              }
-            },
-            {
-              "in": "query",
-              "name": "daemon_version",
-              "required": true,
-              "schema": {
-                "title": "Daemon Version",
-                "type": "string"
-              }
-            },
-            {
-              "in": "query",
-              "name": "supervised",
-              "required": false,
-              "schema": {
-                "default": false,
-                "title": "Supervised",
-                "type": "boolean"
-              }
             }
           ],
           "requestBody": {
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "title": "Available Engines",
-                  "type": "array"
+                  "$ref": "#/components/schemas/ComputerPairRequest"
                 }
               }
             },
@@ -31317,7 +31552,7 @@
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/Computer"
+                    "$ref": "#/components/schemas/ComputerPairResponse"
                   }
                 }
               },
@@ -31346,9 +31581,58 @@
           ]
         }
       },
+      "/api/v1/computers/{computer_id}/pair-token": {
+        "post": {
+          "description": "属主签发短期一次性配对票据。",
+          "operationId": "issue_pair_token_computers__computer_id__pair_token_post",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "computer_id",
+              "required": true,
+              "schema": {
+                "title": "Computer Id",
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/PairTicketResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Issue Pair Token",
+          "tags": [
+            "Computer API",
+            "Computers"
+          ]
+        }
+      },
       "/api/v1/computers/{computer_id}/revoke": {
         "post": {
-          "description": "撤销 Computer 访问权限\n\n- **computer_id**: Computer ID",
+          "description": "撤销 Computer 访问权限。",
           "operationId": "revoke_computer_computers__computer_id__revoke_post",
           "parameters": [
             {
@@ -31366,7 +31650,7 @@
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/Computer"
+                    "$ref": "#/components/schemas/ComputerPublic"
                   }
                 }
               },
@@ -46437,6 +46721,67 @@
           ]
         }
       },
+      "/api/v1/knowledge/enterprise/sources/{source_id}/initial-load": {
+        "post": {
+          "description": "初始批量装载（P2-4，仅管理员）：企业源拉取通道接 U3 bulk_load 契约\n——载入前全量预检＋整批原子（任一行违规零落盘）＋进度回调＋游标截断\n续传。与 /ingest 的差异：/ingest 是持续同步的\"跑一轮\"（坏行只退自己）；\ninitial-load 是\"首次全量装进来\"（要么全进、要么零落盘）。",
+          "operationId": "triggerEnterpriseInitialLoad_enterprise_sources__source_id__initial_load_post",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "source_id",
+              "required": true,
+              "schema": {
+                "title": "Source Id",
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InitialLoadRequest",
+                  "default": {
+                    "batch_size": 500,
+                    "dry_run": true,
+                    "fetch_limit": 500,
+                    "max_batches": 20
+                  }
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Triggerenterpriseinitialload",
+          "tags": [
+            "Knowledge API"
+          ]
+        }
+      },
       "/api/v1/knowledge/enterprise/sources/{source_id}/media": {
         "post": {
           "description": "手动触发单条附件取回（批 C7c 第三块，方案 §10-甲裁定，仅管理员）。\n\n语义＝「取回这一条」：存档面源＋消息体携带 sdkfileid → 通道层\nGetMediaData 分片续传取字节 → 暂存 dataLanding(tmp, archive-media) →\n投影回写 media_staged_path（「已采集」机器可判，与「有引用」不互冒充）。\n\n- 非存档源 400（媒体触发面仅 chatSource=archive）；\n- 凭据未就绪 409（配置面/原生库/Secret/私钥哪档缺点名）；\n- 无记录或无附件引用 404（诚实读数，不假装有附件）；\n- 引用过期/取回失败 502 原话（ArchiveMediaUnavailable 与一般失败分开读数，\n  方案 §10 附带约束：引用有效期与存档窗口同族，「有引用」≠「可检索」）。",
@@ -50418,6 +50763,315 @@
           ]
         }
       },
+      "/api/v1/knowledge/ontology/graph/communities": {
+        "get": {
+          "description": "社区检测（P1-3，只读投影）：复用既有标签传播实现，不落库。",
+          "operationId": "ontology_graph_communities_ontology_graph_communities_get",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "max_communities",
+              "required": false,
+              "schema": {
+                "default": 20,
+                "maximum": 100,
+                "minimum": 1,
+                "title": "Max Communities",
+                "type": "integer"
+              }
+            },
+            {
+              "in": "query",
+              "name": "agent_id",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": "default",
+                "title": "Agent Id"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Ontology Graph Communities",
+          "tags": [
+            "Knowledge API"
+          ]
+        }
+      },
+      "/api/v1/knowledge/ontology/graph/neighbors": {
+        "get": {
+          "description": "k 跳邻域（P1-3，只读）：从起点沿 active triple 无向走 k 跳，返回逐层\n节点与触及边。分析面与 community_graph 同一份数据形状，零写入。",
+          "operationId": "ontology_graph_neighbors_ontology_graph_neighbors_get",
+          "parameters": [
+            {
+              "description": "起点（主体规范标签或客体词）",
+              "in": "query",
+              "name": "subject",
+              "required": true,
+              "schema": {
+                "description": "起点（主体规范标签或客体词）",
+                "title": "Subject",
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "max_hops",
+              "required": false,
+              "schema": {
+                "default": 2,
+                "maximum": 6,
+                "minimum": 1,
+                "title": "Max Hops",
+                "type": "integer"
+              }
+            },
+            {
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "default": 200,
+                "maximum": 1000,
+                "minimum": 1,
+                "title": "Limit",
+                "type": "integer"
+              }
+            },
+            {
+              "in": "query",
+              "name": "agent_id",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": "default",
+                "title": "Agent Id"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Ontology Graph Neighbors",
+          "tags": [
+            "Knowledge API"
+          ]
+        }
+      },
+      "/api/v1/knowledge/ontology/graph/overview": {
+        "get": {
+          "description": "图概览（P1-3，只读）：节点/边计数、谓词分布、无向度 Top-K。",
+          "operationId": "ontology_graph_overview_ontology_graph_overview_get",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "top_k",
+              "required": false,
+              "schema": {
+                "default": 10,
+                "maximum": 50,
+                "minimum": 1,
+                "title": "Top K",
+                "type": "integer"
+              }
+            },
+            {
+              "in": "query",
+              "name": "agent_id",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": "default",
+                "title": "Agent Id"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Ontology Graph Overview",
+          "tags": [
+            "Knowledge API"
+          ]
+        }
+      },
+      "/api/v1/knowledge/ontology/graph/path": {
+        "get": {
+          "description": "最短路（P1-3，只读）：两实体间沿事实边的无向最短路径（BFS）。",
+          "operationId": "ontology_graph_path_ontology_graph_path_get",
+          "parameters": [
+            {
+              "description": "起点标签",
+              "in": "query",
+              "name": "from_label",
+              "required": true,
+              "schema": {
+                "description": "起点标签",
+                "title": "From Label",
+                "type": "string"
+              }
+            },
+            {
+              "description": "终点标签",
+              "in": "query",
+              "name": "to_label",
+              "required": true,
+              "schema": {
+                "description": "终点标签",
+                "title": "To Label",
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "max_depth",
+              "required": false,
+              "schema": {
+                "default": 6,
+                "maximum": 6,
+                "minimum": 1,
+                "title": "Max Depth",
+                "type": "integer"
+              }
+            },
+            {
+              "in": "query",
+              "name": "agent_id",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": "default",
+                "title": "Agent Id"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Ontology Graph Path",
+          "tags": [
+            "Knowledge API"
+          ]
+        }
+      },
       "/api/v1/knowledge/ontology/impact": {
         "get": {
           "description": "术语影响面（S2）：谓词事实、主体类型断言、子术语、引用规则四路读数。\n删除前决策依据；读面不改动任何数据。",
@@ -50920,6 +51574,31 @@
             }
           ],
           "summary": "Check Ontology Quality Gate",
+          "tags": [
+            "Knowledge API"
+          ]
+        }
+      },
+      "/api/v1/knowledge/ontology/query/stats": {
+        "get": {
+          "description": "查询缓存统计（P2-5，只读）：行集缓存（U2）与投影图缓存（P1-1）\n两层的命中/未命中/重建/增量拼接计数合并读数——运维可观测面。",
+          "operationId": "ontology_query_stats_ontology_query_stats_get",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Ontology Query Stats",
           "tags": [
             "Knowledge API"
           ]
@@ -56772,6 +57451,78 @@
             }
           ],
           "summary": "Get Settings Schema",
+          "tags": [
+            "Memory Settings API"
+          ]
+        }
+      },
+      "/api/v1/memory-settings/settings/tuning/auto": {
+        "post": {
+          "description": "运行召回自动调参（合成语料扫描，择优写入记忆设置）— 仅管理员。\n\n同步执行（合成语料秒级）；调参期间会短暂改写进程内温度门限。",
+          "operationId": "run_recall_tuning_settings_tuning_auto_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TuningRunRequest",
+                  "default": {
+                    "apply": true
+                  }
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Run Recall Tuning",
+          "tags": [
+            "Memory Settings API"
+          ]
+        }
+      },
+      "/api/v1/memory-settings/settings/tuning/last": {
+        "get": {
+          "description": "最近一次自动调参报告 — 仅管理员",
+          "operationId": "get_last_tuning_report_settings_tuning_last_get",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Get Last Tuning Report",
           "tags": [
             "Memory Settings API"
           ]
@@ -62775,6 +63526,62 @@
             }
           ],
           "summary": "Get Device Capabilities",
+          "tags": [
+            "Mobile Pairing API"
+          ]
+        }
+      },
+      "/api/v1/mobile/pairing/devices/{pairing_id}/notification-events": {
+        "get": {
+          "description": "读设备上报的通知事件（A5 推送路径读面；JWT + 属主，他人 404）。",
+          "operationId": "get_device_notification_events_pairing_devices__pairing_id__notification_events_get",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "pairing_id",
+              "required": true,
+              "schema": {
+                "title": "Pairing Id",
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "default": 50,
+                "title": "Limit",
+                "type": "integer"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "Get Device Notification Events",
           "tags": [
             "Mobile Pairing API"
           ]
@@ -81854,7 +82661,7 @@
       },
       "/api/v1/tool-layers/mcp-catalog/{entry_id}/install": {
         "post": {
-          "description": "一键安装白名单 MCP server（P0-2）。\n\n目录条目 → build_server_config → 与 connect 端点同一注册入口\n（_register_mcp_server）：stdio 需 admin、schema/私网门、持久化、连接。",
+          "description": "一键安装白名单 MCP server（P0-2）。\n\n目录条目 → build_server_config → 与 connect 端点同一注册入口\n（_register_mcp_server）：仅 admin、schema 校验、全局 ID 唯一、属主隔离接入。",
           "operationId": "install_mcp_catalog_server_mcp_catalog__entry_id__install_post",
           "parameters": [
             {
@@ -81941,7 +82748,7 @@
           ]
         },
         "post": {
-          "description": "注册（持久化）并连接 MCP Server；失败原因可经 GET /mcp-servers 查询。\n\n安全门与 catalog 安装共用 _register_mcp_server（P0-2 抽取，防两条注册路径\n漂移）：stdio 需 admin / schema+shell 校验 / 非 admin 私网 URL 拒绝。",
+          "description": "注册（持久化）并连接 MCP Server；失败原因可经 GET /mcp-servers 查询。\n\n安全门与 catalog 安装共用 _register_mcp_server（防两条注册路径漂移）：\n所有传输仅 admin、schema+shell 校验、全局 ID 唯一、按注册者属主接入。",
           "operationId": "connect_mcp_server_mcp_servers_post",
           "requestBody": {
             "content": {

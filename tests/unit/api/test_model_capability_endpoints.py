@@ -153,7 +153,12 @@ class TestByCapabilityEndpoint:
         resp = client.get("/api/v1/models/by-capability", params={"cap": "vision"})
         assert resp.status_code == 200
         ids = [m["model_id"] for m in resp.json()]
-        assert ids == ["qwen-vl-max"]
+        # 本目录的 vision 模型必在列（模板扩容后目录不止 TestVision 一家，
+        # 不再钉"恰等于"清单——那会随模板扩容反复漂移）
+        assert "qwen-vl-max" in ids
+        # 纯文本/生成类模型不得混入 vision 能力清单
+        for stray in ("deepseek-chat", "deepseek-r1", "flux.1-dev", "wan2.2-t2v-a14b"):
+            assert stray not in ids, f"{stray} 混入 vision 清单"
 
     def test_filter_image_generation(self, client):
         resp = client.get("/api/v1/models/by-capability", params={"cap": "image_generation"})
