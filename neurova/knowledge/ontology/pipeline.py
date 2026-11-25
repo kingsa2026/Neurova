@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.knowledge.foundation.admission import AdmissionRequest
 from neurova.core.time_utils import nowIso as _now
-from neurova.core.tenant_scope import tenant_sql_where
+from neurova.core.tenant_scope import resolve_tenant, tenant_sql_where
 
 from .rule_engine import ForwardChainingEngine
 from .shapes import ShapeRegistry
@@ -369,6 +369,12 @@ class OntologyPipeline:
             raise LookupError("基线不存在: %s" % toBaselineId)
         snapshot = row.get("snapshot") or {}
         tenant = str(tenantId or "default")
+        # KNOW-05：任何写入前校验快照租户与目标租户一致——他租户本体快照
+        # 不得经回滚写进本租户（与 diff 的跨租户拒绝同一口径）。
+        if resolve_tenant(row) != tenant:
+            raise ValueError(
+                "跨租户回滚拒绝：基线 %s 属于租户 %r，目标租户 %r"
+                % (toBaselineId, resolve_tenant(row), tenant))
         shapesRegistry = ShapeRegistry(self._store)
         log = ChangeLog(self._store)
         restored = {"terms": 0, "rules": 0, "shapes": 0}
