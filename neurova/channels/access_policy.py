@@ -25,6 +25,21 @@ CHAT_STRATEGIES = (OPEN_STRATEGY, CLOSED_STRATEGY, WHITELIST_STRATEGY)
 _GROUP_CHAT_TYPES = ("group", "guild", "channel", "group_chat")
 
 
+def truthySetting(value: Any, default: bool = False) -> bool:
+    """配置面布尔归一（单源）：JSON 布尔 / 字符串 / 数字同一口径。
+
+    渠道 extra 由 UI 表单落库，toggle 是 JSON 布尔；Gen2 适配器此前一律
+    `config.get(key, "true").lower() == "true"`，把布尔配置传进工厂即
+    AttributeError。空串按 False（与既有 `_flag` 的 "" 语义一致），
+    None 才取 default。
+    """
+    if isinstance(value, str):
+        return value.strip().lower() not in ("false", "0", "no", "off", "")
+    if value is None:
+        return default
+    return bool(value)
+
+
 def normalizeWhitelist(value: Any) -> Set[str]:
     """配置面两种形态归一：逗号串（UI 输入）与列表/集合（JSON 配置）。"""
     if value is None:

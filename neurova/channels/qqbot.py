@@ -40,7 +40,7 @@ except ImportError:
     logging.warning("httpx 库未安装，部分AI生成功能可能不可用")
 
 from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
-from neurova.channels.access_policy import chatAccessDecision
+from neurova.channels.access_policy import chatAccessDecision, normalizeWhitelist, truthySetting
 from neurova.channels.base import ChannelConfig
 
 logger = logging.getLogger(__name__)
@@ -120,23 +120,19 @@ class QQBotAdapter(ChannelAdapter):
 
         # 配置选项
         self.bot_prefix = config.get("bot_prefix", "kingsa")
-        self.show_tool_messages = config.get("show_tool_messages", "true").lower() == "true"
-        self.show_thinking = config.get("show_thinking", "true").lower() == "true"
+        self.show_tool_messages = truthySetting(config.get("show_tool_messages"), True)
+        self.show_thinking = truthySetting(config.get("show_thinking"), True)
         self.media_directory = config.get("media_directory", "")
 
         # 消息策略
         self.private_chat_strategy = config.get("private_chat_strategy", "open")
         self.group_chat_strategy = config.get("group_chat_strategy", "open")
-        self.require_mention = config.get("require_mention", "false").lower() == "true"
+        self.require_mention = truthySetting(config.get("require_mention"), False)
 
-        whitelist_str = config.get("whitelist_users", "")
-        if whitelist_str:
-            self.whitelist_users = [uid.strip() for uid in whitelist_str.split(",") if uid.strip()]
-        else:
-            self.whitelist_users = []
+        self.whitelist_users = sorted(normalizeWhitelist(config.get("whitelist_users")))
 
-        self.message_merge = config.get("message_merge", "false").lower() == "true"
-        self.group_share_session = config.get("group_share_session", "true").lower() == "true"
+        self.message_merge = truthySetting(config.get("message_merge"), False)
+        self.group_share_session = truthySetting(config.get("group_share_session"), True)
         self.welcome_message = config.get("welcome_message", "")
 
         if not self.access_token:
@@ -824,12 +820,21 @@ class QQBotAdapter(ChannelAdapter):
         return True
 
 
-def create_qqbot_adapter(access_token: str = "", http_url: str = "http://127.0.0.1:3000") -> QQBotAdapter:
-    """创建QQ Bot适配器"""
+def create_qqbot_adapter(
+    access_token: str = "",
+    http_url: str = "http://127.0.0.1:3000",
+    extra: Optional[Dict[str, Any]] = None,
+) -> QQBotAdapter:
+    """创建QQ Bot适配器
+
+    extra（CHAN-03）：公共渠道配置随凭据同路进 authenticate；此前只收
+    access_token/http_url，UI 配置的 closed/whitelist/mention 在创建时被丢弃。
+    """
     adapter = QQBotAdapter()
     if access_token:
         adapter.authenticate(
             {
+                **(extra or {}),
                 "access_token": access_token,
                 "http_api_url": http_url,
             }

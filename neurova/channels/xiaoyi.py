@@ -390,16 +390,25 @@ class XiaoYiAdapter(ChannelAdapter):
             return False
 
 
-def create_xiaoyi_adapter(access_key: str, secret_key: str, agent_id: str) -> XiaoYiAdapter:
+def create_xiaoyi_adapter(
+    access_key: str,
+    secret_key: str,
+    agent_id: str,
+    extra: Optional[Dict[str, Any]] = None,
+) -> XiaoYiAdapter:
     """创建小艺适配器
 
     审计 §3.4-3：原工厂传 `channel=`/`config=` 非法 kwargs，ChannelConfig
     （dataclass）实例化即 TypeError——小艺渠道每次配置都失败。改用真实
     字段 `channel_type=` + `extra=`。
+
+    CHAN-03：extra 必须整份保留（ws_url/bot_prefix/私聊群聊策略等公共配置），
+    此前只重建三个凭据键，UI 配的其他字段在创建时被静默丢掉。
     """
     adapter = XiaoYiAdapter()
-    adapter.config = ChannelConfig(
-        channel_type="xiaoyi",
-        extra={"access_key": access_key, "secret_key": secret_key, "agent_id": agent_id},
+    mergedExtra = dict(extra or {})
+    mergedExtra.update(
+        {"access_key": access_key, "secret_key": secret_key, "agent_id": agent_id}
     )
+    adapter.config = ChannelConfig(channel_type="xiaoyi", extra=mergedExtra)
     return adapter

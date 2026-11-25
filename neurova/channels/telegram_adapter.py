@@ -7,7 +7,7 @@ from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
 from neurova.channels import ChannelAdapter, ChannelConfig, MessageChannel
-from neurova.channels.access_policy import chatAccessDecision
+from neurova.channels.access_policy import chatAccessDecision, normalizeWhitelist, truthySetting
 from neurova.channels.base import ChannelEventType, ChannelMessage
 from neurova.channels.voice_ingress import AUDIO_BYTES_KEY, INBOUND_VOICE_PLACEHOLDER
 
@@ -98,22 +98,20 @@ class TelegramAdapter(
 
         self.bot_prefix = config.get("bot_prefix", "kingsa")
         # B4-b（#7208/#7001 对齐）：群聊会话共享开关（manager 消费）
-        self.share_session_in_group = str(
-            config.get("share_session_in_group", config.get("group_share_session", "true"))
-        ).lower() == "true"
-        self.show_tool_messages = config.get("show_tool_messages", "true").lower() == "true"
-        self.show_thinking = config.get("show_thinking", "true").lower() == "true"
+        self.share_session_in_group = truthySetting(
+            config.get("share_session_in_group", config.get("group_share_session")), True
+        )
+        self.show_tool_messages = truthySetting(config.get("show_tool_messages"), True)
+        self.show_thinking = truthySetting(config.get("show_thinking"), True)
         self.http_proxy = config.get("http_proxy", "")
         self.http_proxy_auth = config.get("http_proxy_auth", "")
-        self.show_typing = config.get("show_typing", "false").lower() == "true"
+        self.show_typing = truthySetting(config.get("show_typing"), False)
         self.parse_mode = config.get("parse_mode", self.parse_mode)
         self.private_chat_strategy = config.get("private_chat_strategy", "open")
         self.group_chat_strategy = config.get("group_chat_strategy", "open")
-        self.require_mention = config.get("require_mention", "false").lower() == "true"
+        self.require_mention = truthySetting(config.get("require_mention"), False)
 
-        whitelist = config.get("whitelist_users", "")
-        if whitelist:
-            self.whitelist_users = [u.strip() for u in whitelist.split(",") if u.strip()]
+        self.whitelist_users = sorted(normalizeWhitelist(config.get("whitelist_users")))
 
         self._setup_proxy()
         return self._verify_token()

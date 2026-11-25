@@ -20,7 +20,7 @@ except ImportError:
     REQUESTS_AVAILABLE = False
 
 from neurova.channels import ChannelAdapter, ChannelConfig, ContentType, MessageChannel, UnifiedMessage
-from neurova.channels.access_policy import chatAccessDecision
+from neurova.channels.access_policy import chatAccessDecision, normalizeWhitelist, truthySetting
 
 
 class DiscordAdapter(ChannelAdapter):
@@ -120,8 +120,8 @@ class DiscordAdapter(ChannelAdapter):
 
         # 配置选项
         self.bot_prefix = config.get("bot_prefix", "kingsa")
-        self.show_tool_messages = config.get("show_tool_messages", "true").lower() == "true"
-        self.show_thinking = config.get("show_thinking", "true").lower() == "true"
+        self.show_tool_messages = truthySetting(config.get("show_tool_messages"), True)
+        self.show_thinking = truthySetting(config.get("show_thinking"), True)
 
         # 代理配置
         self.http_proxy = config.get("http_proxy", "")
@@ -129,16 +129,12 @@ class DiscordAdapter(ChannelAdapter):
         self._setup_proxy()
 
         # 消息策略
-        self.receive_bot_messages = config.get("receive_bot_messages", "false").lower() == "true"
+        self.receive_bot_messages = truthySetting(config.get("receive_bot_messages"), False)
         self.private_chat_strategy = config.get("private_chat_strategy", "open")
         self.group_chat_strategy = config.get("group_chat_strategy", "open")
-        self.require_mention = config.get("require_mention", "false").lower() == "true"
+        self.require_mention = truthySetting(config.get("require_mention"), False)
 
-        whitelist_str = config.get("whitelist_users", "")
-        if whitelist_str:
-            self.whitelist_users = [uid.strip() for uid in whitelist_str.split(",") if uid.strip()]
-        else:
-            self.whitelist_users = []
+        self.whitelist_users = sorted(normalizeWhitelist(config.get("whitelist_users")))
 
         # 创建会话
         if REQUESTS_AVAILABLE:
@@ -465,9 +461,14 @@ class DiscordAdapter(ChannelAdapter):
         return True
 
 
-def create_discord_adapter(bot_token: str = "") -> DiscordAdapter:
-    """创建Discord适配器"""
+def create_discord_adapter(bot_token: str = "", extra: Optional[Dict[str, Any]] = None) -> DiscordAdapter:
+    """创建Discord适配器
+
+    extra（CHAN-03）：公共渠道配置（私聊/群聊策略、require_mention、白名单等）
+    与凭据同路进 authenticate；此前工厂只收 bot_token，UI 写入的策略在创建时
+    被丢弃，路由层按默认 open 放行。
+    """
     adapter = DiscordAdapter()
     if bot_token:
-        adapter.authenticate({"bot_token": bot_token})
+        adapter.authenticate({**(extra or {}), "bot_token": bot_token})
     return adapter

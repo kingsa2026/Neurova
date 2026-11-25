@@ -24,7 +24,7 @@ import logging
 from typing import Any, Callable, Dict, Optional
 
 from neurova.channels.base import ChannelMessage
-from neurova.channels.access_policy import chatAccessDecision
+from neurova.channels.access_policy import chatAccessDecision, truthySetting
 from neurova.channels.voice_egress import turnAudioCandidate
 from neurova.channels.mediaIngress import hasInboundMedia, landInboundMedia
 from neurova.voice_context_module import VOICE_CONTEXT_KEY
@@ -120,11 +120,8 @@ def _channel_cfg(manager, channel_type: str, agent_id: str) -> Dict[str, Any]:
 
 
 def _flag(value: Any, default: bool = False) -> bool:
-    if isinstance(value, str):
-        return value.strip().lower() not in ("false", "0", "no", "off", "")
-    if value is None:
-        return default
-    return bool(value)
+    # 布尔归一单源在 access_policy.truthySetting（适配器创建与路由读同一口径）
+    return truthySetting(value, default)
 
 
 async def _reportAdmission(admission) -> None:

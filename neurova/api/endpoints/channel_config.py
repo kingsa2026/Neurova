@@ -994,6 +994,7 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
                 access_key=extra.get("access_key", ""),
                 secret_key=extra.get("secret_key", ""),
                 agent_id=extra.get("agent_id", ""),
+                extra=extra,
             )
         except Exception as e:
             logger.warning("Failed to create xiaoyi adapter: %s", e)
@@ -1001,14 +1002,16 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
 
     elif channel_type == "discord":
         try:
-            return create_discord_adapter(bot_token=extra.get("bot_token", ""))
+            return create_discord_adapter(bot_token=extra.get("bot_token", ""), extra=extra)
         except Exception as e:
             logger.warning("Failed to create discord adapter: %s", e)
             raise HTTPException(status_code=400, detail=str(e))
 
     elif channel_type == "telegram":
         try:
-            return create_telegram_adapter(bot_token=extra.get("bot_token", ""))
+            # extra 里的 bot_token 已作为显式参数传入，剔除避免重复关键字
+            common = {k: v for k, v in extra.items() if k != "bot_token"}
+            return create_telegram_adapter(bot_token=extra.get("bot_token", ""), **common)
         except Exception as e:
             logger.warning("Failed to create telegram adapter: %s", e)
             raise HTTPException(status_code=400, detail=str(e))
@@ -1029,6 +1032,7 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
             return create_qqbot_adapter(
                 access_token=extra.get("access_token", ""),
                 http_url=extra.get("http_api_url", "http://127.0.0.1:3000"),
+                extra=extra,
             )
         except Exception as e:
             logger.warning("Failed to create qqbot adapter: %s", e)
@@ -1095,6 +1099,8 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
             return create_qclaw_adapter(
                 app_id=config.app_id,
                 app_secret=config.app_secret,
+                use_stream=config.use_stream,
+                extra=extra,
             )
         except Exception as e:
             logger.warning("Failed to create qclaw adapter: %s", e)
