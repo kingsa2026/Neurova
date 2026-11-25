@@ -14,9 +14,14 @@
 2. 生产池净增 LOC > 0 时，正文必须含池口径的 `+N/−M` 声明**且**写明「去向」——数字与
    numstat 的逐池相等由 `test_commitLocClaimMatchesOwnNumstat.py` 在推送窗口复算，本门
    只挡"没写"（分工：钩子管准入，既有守卫管对账，不重复造第二份复算）。
-3. 豁免面：`Merge `/`Revert ` 开头全豁免；docs/chore/test/style/refactor/perf/ci/build
-   豁免红绿（它们不新增生产行为），**不豁免** LOC 去向（教义第 2 条不分类型）。
-4. 反空转：全合规样例必须放行——判据只红"缺证据"，不红"守规矩"。
+3. `live-verify：`字面量：除 Merge/Revert 外**所有**面向人的提交正文必须含
+   「live-verify：」证据段（真后端/端点/管线验证命令+输出原文；确不适用写
+   「live-verify：不适用（理由）」）——AGENTS.md §5 提交硬门明文要求，本门补上提交期
+   强制（2026-11-25 批次B实测：子代理提交红绿/净LOC/去向俱全却漏 live-verify 段，
+   旧门放行）。正文其他位置的无冒号 "live-verify" 字样（引述/比喻）不算证据段。
+4. 豁免面：`Merge `/`Revert ` 开头全豁免；docs/chore/test/style/refactor/perf/ci/build
+   豁免红绿（它们不新增生产行为），**不豁免** LOC 去向与 live-verify 字面量。
+5. 反空转：全合规样例必须放行——判据只红"缺证据"，不红"守规矩"。
 
 词汇唯一出处：池名与 `+N/−M` 形态沿用 numstat 复算守卫的既有口径，本档不另写一份。
 """
@@ -76,7 +81,8 @@ class TestRedGreenEvidenceGate:
             "fix(x): 标题\n\n"
             "动机：不许\"写完实现补个绿灯测试充数\"。\n\n"
             "红灯：tests/unit/ci/test_x.py 实测红（AssertionError: …）\n"
-            "绿灯：最小实现后 1 passed\n") == [], (
+            "绿灯：最小实现后 1 passed\n"
+            "live-verify：真端点回归 5 passed\n") == [], (
             "引述里的「绿灯」被当成证据段定位——顺序判据误伤合规提交")
 
     def testEmptyBodyFeatIsRejected(self):
@@ -88,14 +94,58 @@ class TestRedGreenEvidenceGate:
             "fix(core): 修一处断链\n\n"
             "红灯：tests/unit/ci/test_x.py::test_y 实测红（AssertionError: expects 1 got 2）\n"
             "绿灯：最小实现后同格转绿（1 passed）\n"
+            "live-verify：TestClient 打真端点，403/200 断言全过（5/5）\n"
             "净 LOC：生产池 +4/−6，去向：收口重复取数口，删除平行实现\n",
             productionNet=-2) == [], "全合规样例被拒＝判据误伤守规矩的提交"
 
     def testNegativeNetNeedsNoLocSection(self):
         assert _check(
             "fix(core): 修一处断链\n\n"
-            "红灯：实测红\n绿灯：转绿（1 passed）\n",
+            "红灯：实测红\n绿灯：转绿（1 passed）\n"
+            "live-verify：真管线复跑 1 passed\n",
             productionNet=-5) == [], "净增≤0 本就满足第 2 条默认值，不该再要去向段"
+
+
+class TestLiveVerifyGate:
+    """live-verify 字面量判据：AGENTS.md §5 提交硬门明文，除 Merge/Revert 外一律必备。
+
+    真实漏判（2026-11-25 批次B实测）：子代理提交红绿、净 LOC、去向俱全，却漏了
+    live-verify 证据段，旧门放行——本组判据把这一段钉进提交期，堵住同类漏报。
+    """
+
+    def testFeatWithoutLiveVerifyIsRejected(self):
+        violations = _check(
+            "fix(core): 修一处断链\n\n"
+            "红灯：tests/unit/ci/test_x.py::test_y 实测红（AssertionError: …）\n"
+            "绿灯：最小实现后 1 passed\n")
+        assert any("live-verify" in v for v in violations), (
+            "feat/fix 红绿俱全但缺 live-verify 证据段竟被放行——§5 硬门空转")
+
+    def testDocsTypeAlsoNeedsLiveVerifyLiteral(self):
+        assert _check("docs: 补一篇指南\n\nlive-verify：不适用（纯文档与索引登记）\n") == [], (
+            "docs 写明不适用理由应放行")
+        violations = _check("docs: 补一篇指南\n")
+        assert any("live-verify" in v for v in violations), (
+            "docs 不豁免 live-verify 字面量（豁免面只有 Merge/Revert）")
+
+    def testNotApplicableDeclarationSatisfiesDocs(self):
+        assert _check(
+            "docs(discipline): 条目编号化\n\n"
+            "红灯：咬合守卫旧文本下失败\n绿灯：同步后转绿\n"
+            "live-verify：不适用（纪律文档与索引登记；咬合守卫即活体判据）\n") == [], (
+            "「live-verify：不适用（理由）」是合规形态，不得误伤")
+
+    def testProseMentionWithoutColonDoesNotSatisfy(self):
+        violations = _check(
+            "fix(x): 标题\n\n"
+            "红灯：实测红\n绿灯：转绿\n"
+            "按 live-verify 要求还应附真链路证据（此处只是引述，不是证据段）\n")
+        assert any("live-verify" in v for v in violations), (
+            "无冒号的 live-verify 字样是引述不是证据段，不得据此放行")
+
+    def testMergeAndRevertExemptFromLiveVerify(self):
+        assert _check("Merge branch 'feature/x'\n") == []
+        assert _check('Revert "fix(core): x"\n\nThis reverts commit abc.\n') == []
 
 
 class TestProductionNetLocGate:
@@ -113,6 +163,7 @@ class TestProductionNetLocGate:
         assert _check(
             "feat(core): 新功能\n\n"
             "红灯：先红\n绿灯：后绿\n"
+            "live-verify：真端点 200/403 矩阵全过\n"
             "生产池 +12/−0（去向：新增 scripts/githooks/ 两道守卫）\n",
             productionNet=12) == []
 

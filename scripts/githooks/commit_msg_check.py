@@ -7,8 +7,11 @@
 2. 生产池净增 LOC > 0 时，正文必须含池口径的 `+N/−M` 声明**且**写明「去向」。
    数字与 numstat 的逐池相等由 tests/unit/ci/test_commitLocClaimMatchesOwnNumstat.py
    在推送窗口复算——本门只挡"没写"，不重复造第二份复算（教义第 6 条：两道判据各守一段）。
-3. Merge/Revert 全豁免；docs/chore/test/style/refactor/perf/ci/build 豁免红绿
-   （不新增生产行为），**不豁免** LOC 去向（教义第 2 条不分提交类型）。
+3. 除 Merge/Revert 外，正文必须含「live-verify：」证据段（真后端/端点/管线验证命令
+   与输出原文；确不适用写「live-verify：不适用（理由）」）——AGENTS.md §5 提交硬门
+   明文要求；正文其他位置的无冒号 live-verify 字样（引述/比喻）不算证据段。
+4. Merge/Revert 全豁免；docs/chore/test/style/refactor/perf/ci/build 豁免红绿
+   （不新增生产行为），**不豁免** LOC 去向与 live-verify 字面量（§5 硬门无豁免）。
 
 用法（由 .git/hooks/commit-msg 壳调起）：commit_msg_check.py <commit-msg 文件>
 退出码：0 放行；1 拒绝（stderr 点名缺什么）。
@@ -29,6 +32,9 @@ EXEMPT_RE = re.compile(r"^(Merge |Revert )")
 #: 教义自己的提交说明都拒了（见 testEvidenceKeywordMentionInMotivationDoesNotDecideOrder）。
 RED_EVIDENCE_RE = re.compile(r"红灯[：:]")
 GREEN_EVIDENCE_RE = re.compile(r"绿灯[：:]")
+#: live-verify 证据段（AGENTS.md §5 提交硬门）：真后端/端点/管线验证命令与输出原文；
+#: 确不适用写「live-verify：不适用（理由）」。除 Merge/Revert 外一律必备。
+LIVE_VERIFY_RE = re.compile(r"live-verify[：:]")
 #: 池口径的 LOC 声明行（词汇与 numstat 复算守卫同源：生产池/本笔/本格/净 LOC + `+N/−M`）。
 LOC_CLAIM_RE = re.compile(r"(净 LOC|生产池|本笔|本格)[^\n]*\+\d+\s*/\s*[−-]\s*\d+")
 #: 生产池口径与 numstat 复算守卫（test_commitLocClaimMatchesOwnNumstat._poolTotals）同源：
@@ -61,6 +67,11 @@ def check(message: str, productionNet: int) -> list:
     violations = []
     if EXEMPT_RE.match(subject):
         return violations
+    if not LIVE_VERIFY_RE.search(body):
+        violations.append(
+            "缺「live-verify：」证据段：真后端/端点/管线验证的命令与输出原文须进正文，"
+            "没有真链路证据＝未完成；确不适用写「live-verify：不适用（理由）」"
+            "（AGENTS.md §5 提交硬门）")
     if FEAT_FIX_RE.match(subject):
         red, green = RED_EVIDENCE_RE.search(body), GREEN_EVIDENCE_RE.search(body)
         if not red:
