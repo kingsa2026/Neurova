@@ -14,9 +14,9 @@ import re
 - GET  /api/v1/channel-adapters/ingress/bypass-stats           - 入站旁路直发读数（批 D）
 - GET  /api/v1/channel-adapters/conflicts/check                  - 跨 agent 机器人身份冲突检测
 - GET  /api/v1/channel-adapters/{channel_type}                   - 指定实例健康状态
-- POST /api/v1/channel-adapters/{channel_type}/connect           - 连接该实例
-- POST /api/v1/channel-adapters/{channel_type}/disconnect        - 断开该实例
-- POST /api/v1/channel-adapters/{channel_type}/send              - 经该实例发送消息
+- POST /api/v1/channel-adapters/{channel_type}/connect           - 连接该实例（admin/属主）
+- POST /api/v1/channel-adapters/{channel_type}/disconnect        - 断开该实例（admin/属主）
+- POST /api/v1/channel-adapters/{channel_type}/send              - 经该实例发送消息（admin/属主）
 - POST /api/v1/channel-adapters/{channel_type}/webhook           - 平台回调入口（飞书/钉钉/企微/微信客服/Telegram）
 - POST /api/v1/channel-adapters/{channel_type}/webhook/set       - 设置 Telegram Webhook（admin/属主）
 - DELETE /api/v1/channel-adapters/{channel_type}/webhook         - 删除 Telegram Webhook（admin/属主）
@@ -152,7 +152,12 @@ async def connect_channel(
     request: ConnectRequest,
     agent_id: str = Query(default="default", description="Agent ID（实例表主键的一半）"),
     current_user: Any = Depends(get_current_user),):
-    """连接指定渠道适配器"""
+    """连接指定渠道适配器
+
+    归属门与 restart/clear-queue 同源（审计 CHAN-01）：connect 会**覆盖该实例的
+    运行凭据**（app_id/app_secret/extra）再重连，非属主不得改他人渠道的身份。
+    """
+    requireAgentOwner(_norm_agent(agent_id), current_user, action="连接渠道")
     manager = get_channel_manager()
     adapter = manager.get_adapter(channel_type, agent_id=agent_id)
     if adapter is None:
@@ -177,7 +182,12 @@ async def disconnect_channel(
     channel_type: str,
     agent_id: str = Query(default="default", description="Agent ID（实例表主键的一半）"),
     current_user: Any = Depends(get_current_user),):
-    """断开指定渠道适配器"""
+    """断开指定渠道适配器
+
+    归属门与 restart 同源（审计 CHAN-01）：disconnect 拆掉该 agent 的 bot
+    长连接，只验登录等于任何登录用户都能让别人的机器人掉线。
+    """
+    requireAgentOwner(_norm_agent(agent_id), current_user, action="断开渠道")
     manager = get_channel_manager()
     adapter = manager.get_adapter(channel_type, agent_id=agent_id)
     if adapter is None:
@@ -194,7 +204,12 @@ async def send_message(
     request: SendMessageRequest,
     agent_id: str = Query(default="default", description="Agent ID（实例表主键的一半）"),
     current_user: Any = Depends(get_current_user),):
-    """通过指定渠道发送消息"""
+    """通过指定渠道发送消息
+
+    归属门与 restart 同源（审计 CHAN-01）：这条口是以该 agent 的 bot 身份对外
+    发声，非属主不得借他人的渠道代发消息。
+    """
+    requireAgentOwner(_norm_agent(agent_id), current_user, action="发送消息")
     manager = get_channel_manager()
     # `agent_id` 由查询参数定，不让请求体 extra 里的同名字段越权决定发给哪个 bot
     msg_id = await manager.send_message(
