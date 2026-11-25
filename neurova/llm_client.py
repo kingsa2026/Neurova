@@ -556,6 +556,26 @@ class LLMClient:
 
         stream = None  # ④ 收尾对称：上游流句柄（finally 统一显式关闭）
         start_time = time.time()
+        # 流式计费累加器：OpenAI 兼容协议 usage 多在末 chunk（choices 为空）到达，
+        # 部分网关放在带 choices 的 chunk；两处都捕获，循环结束后一次性记账。
+        # 放在 try 之前：异常/取消/消费方提前 break 时 finally 仍要按已收 usage
+        # 结算（CORE-06），accumulator 不能被异常路径留在作用域外。
+        billed_usage: Dict[str, int] = {}
+        stream_model = getattr(self.config, "model", "") or "openai-compatible"
+        cost_recorded = False
+
+        def _capture(u):
+            nonlocal billed_usage
+            if u:
+                billed_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
+                    "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
+                    "total_tokens": getattr(u, "total_tokens", 0) or 0,
+                }
+                # R5：聚合商上报成本透传（OpenRouter usage.cost 等）
+                _pc = _providerReportedCost(u)
+                if _pc is not None:
+                    billed_usage["provider_reported_cost_usd"] = _pc
 
         try:
             # 构建请求参数（公共组装：stream/tools/reasoning_effort/stream_options 等）
@@ -563,24 +583,6 @@ class LLMClient:
 
             # 调用流式 API（T-18：与 chat() 同一回执摘键面）
             stream = self._createCompletion(self.client, params)
-
-            # 流式计费累加器：OpenAI 兼容协议 usage 多在末 chunk（choices 为空）到达，
-            # 部分网关放在带 choices 的 chunk；两处都捕获，循环结束后一次性记账。
-            billed_usage: Dict[str, int] = {}
-            stream_model = getattr(self.config, "model", "") or "openai-compatible"
-
-            def _capture(u):
-                if u:
-                    nonlocal billed_usage
-                    billed_usage = {
-                        "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
-                        "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
-                        "total_tokens": getattr(u, "total_tokens", 0) or 0,
-                    }
-                    # R5：聚合商上报成本透传（OpenRouter usage.cost 等）
-                    _pc = _providerReportedCost(u)
-                    if _pc is not None:
-                        billed_usage["provider_reported_cost_usd"] = _pc
 
             # 处理流式响应
             for chunk in stream:
@@ -657,6 +659,7 @@ class LLMClient:
                 usage=billed_usage,
                 direction=LLMDirection.OUTPUT,
             )
+            cost_recorded = True
 
         except Exception as e:
             self._stats["total_calls"] += 1
@@ -668,6 +671,15 @@ class LLMClient:
             # 分类异常包装：限流/认证/连接/token 各自成类，供上层区分处理
             raise LLMClient._wrap_llm_error(e) from e
         finally:
+            # 异常/取消/消费方中断（GeneratorExit）路径：已收到的 usage 必须结算，
+            # 否则已消耗 token 不入账（CORE-06）。成功路径已记过，一次且仅一次。
+            if not cost_recorded and billed_usage:
+                record_llm_cost(
+                    provider=LLMProvider.OPENAI if LLMProvider else None,
+                    model=stream_model,
+                    usage=billed_usage,
+                    direction=LLMDirection.OUTPUT,
+                )
             # ④ 收尾对称：与 chat_stream_async 同规——正常/异常/消费方中断
             # （GeneratorExit）全部退出路径显式关上游流，不依赖 GC 最终化。
             if stream is not None:
@@ -699,6 +711,24 @@ class LLMClient:
 
         stream = None  # ④ 收尾：上游流句柄（finally 统一显式关闭）
         start_time = time.time()
+        # 流式计费累加器（与同步流式同策略：末 chunk 一次性记账；异常/取消路径
+        # 在 finally 按已收 usage 结算，见 CORE-06）。
+        billed_usage: Dict[str, int] = {}
+        stream_model = getattr(self.config, "model", "") or "openai-compatible"
+        cost_recorded = False
+
+        def _capture(u):
+            nonlocal billed_usage
+            if u:
+                billed_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
+                    "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
+                    "total_tokens": getattr(u, "total_tokens", 0) or 0,
+                }
+                # R5：聚合商上报成本透传（OpenRouter usage.cost 等）
+                _pc = _providerReportedCost(u)
+                if _pc is not None:
+                    billed_usage["provider_reported_cost_usd"] = _pc
 
         try:
             # 构建请求参数（公共组装：stream/tools/reasoning_effort/stream_options 等）
@@ -708,23 +738,6 @@ class LLMClient:
             # P1 修复: 原实现误用同步 self.client，返回的同步 Stream 无法 `async for`，
             # 导致每次异步流式调用都 TypeError；必须用 async_client 并 await。
             stream = await self._createCompletionAsync(self.async_client, params)
-
-            # 流式计费累加器（与同步流式同策略：末 chunk 一次性记账）
-            billed_usage: Dict[str, int] = {}
-            stream_model = getattr(self.config, "model", "") or "openai-compatible"
-
-            def _capture(u):
-                if u:
-                    nonlocal billed_usage
-                    billed_usage = {
-                        "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
-                        "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
-                        "total_tokens": getattr(u, "total_tokens", 0) or 0,
-                    }
-                    # R5：聚合商上报成本透传（OpenRouter usage.cost 等）
-                    _pc = _providerReportedCost(u)
-                    if _pc is not None:
-                        billed_usage["provider_reported_cost_usd"] = _pc
 
             # 处理流式响应
             async for chunk in stream:
@@ -799,6 +812,7 @@ class LLMClient:
                 usage=billed_usage,
                 direction=LLMDirection.OUTPUT,
             )
+            cost_recorded = True
 
         except Exception as e:
             self._stats["total_calls"] += 1
@@ -810,6 +824,14 @@ class LLMClient:
             # 分类异常包装：限流/认证/连接/token 各自成类，供上层区分处理
             raise LLMClient._wrap_llm_error(e) from e
         finally:
+            # 异常/取消/消费方中断路径：已收到的 usage 必须结算，一次且仅一次（CORE-06）。
+            if not cost_recorded and billed_usage:
+                record_llm_cost(
+                    provider=LLMProvider.OPENAI if LLMProvider else None,
+                    model=stream_model,
+                    usage=billed_usage,
+                    direction=LLMDirection.OUTPUT,
+                )
             # ④ 收尾（live-verify 观察的 httpx2 asyncgen 收尾竞态根因）：
             # 正常收流/异常/消费方中断（GeneratorExit）全部退出路径都必须
             # 显式关上游流，不许依赖 GC 最终化 asyncgen（与在途迭代竞态 →
