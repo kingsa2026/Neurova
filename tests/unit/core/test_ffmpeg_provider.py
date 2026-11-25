@@ -116,7 +116,13 @@ class TestEnsureDownload:
         out = await ff.ensure_ffmpeg()
         assert out and ff.managed_path().is_file()
         assert out == str(ff.managed_path())
-        assert runs and runs[0][0] == str(tmp_path) + __import__("os").sep + ff.BINARY_NAME
+        # CORE-08：校验执行的是私有临时件（唯一名 .ffmpeg-*.part），不是托管可执行路径；
+        # 校验通过后才原子换名到 managed_path。
+        assert runs
+        verified = __import__("pathlib").Path(runs[0][0])
+        assert verified != ff.managed_path()
+        assert verified.name.startswith(".ffmpeg-") and verified.name.endswith(".part")
+        assert not verified.exists(), "校验通过后临时件应已原子换名"
         # POSIX 可执行位
         if __import__("sys").platform != "win32":
             assert ff.managed_path().stat().st_mode & stat.S_IXUSR

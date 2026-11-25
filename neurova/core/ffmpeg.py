@@ -23,6 +23,7 @@ import platform
 import shutil
 import stat
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -87,10 +88,15 @@ def resolve_ffmpeg_path(preferred: str = "") -> str:
 
 
 async def _download_to(url: str, dest: Path) -> bool:
-    """流式下载单文件到 dest；HTTP 异常/中断返回 False（不留半截文件）。"""
+    """流式下载单文件到调用方给定的**私有临时路径**；失败返回 False 并清残件。
+
+    不在本函数发布到托管可执行路径：校验通过后的原子换名由 `ensure_ffmpeg`
+    负责（CORE-08——原实现在下载结束时直接 `tmp.replace(托管路径)`，等于先
+    给出可执行落点再校验）。`dest` 由调用方以唯一临时名创建，并发下载不再
+    共用固定 `.part` 互相覆盖。
+    """
     import aiohttp
 
-    tmp = dest.with_suffix(dest.suffix + ".part")
     try:
         timeout = aiohttp.ClientTimeout(total=900, sock_read=60)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -98,14 +104,13 @@ async def _download_to(url: str, dest: Path) -> bool:
                 if resp.status >= 400:
                     logger.warning("FFmpeg 下载源 HTTP %s: %s", resp.status, url)
                     return False
-                with open(tmp, "wb") as f:
+                with open(dest, "wb") as f:
                     async for chunk in resp.content.iter_chunked(1 << 20):
                         f.write(chunk)
-        tmp.replace(dest)
         return True
     except Exception as e:  # noqa: BLE001 — 单源失败换下一候选
         logger.warning("FFmpeg 下载失败(%s): %s", url, e)
-        tmp.unlink(missing_ok=True)
+        dest.unlink(missing_ok=True)
         return False
 
 
@@ -150,18 +155,31 @@ async def ensure_ffmpeg() -> str:
         for url in download_url_candidates():
             logger.info("FFmpeg 不在本机，开始下载（%s）…", url)
             target = managed_path()
-            if not await _download_to(url, target):
+            # 下载到私有唯一临时件 → 校验 → 原子发布；校验通过前托管路径不出现（CORE-08）。
+            fd, tmpName = tempfile.mkstemp(
+                dir=str(MANAGED_DIR), prefix=".ffmpeg-", suffix=".part"
+            )
+            os.close(fd)
+            tmp = Path(tmpName)
+            if not await _download_to(url, tmp):
+                tmp.unlink(missing_ok=True)
                 continue
             try:
-                target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                tmp.chmod(tmp.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
             except OSError:
                 pass
-            if await asyncio.to_thread(_verify_binary, target):
+            if await asyncio.to_thread(_verify_binary, tmp):
+                try:
+                    os.replace(tmp, target)
+                except OSError as e:
+                    logger.warning("FFmpeg 校验通过但发布失败: %s", e)
+                    tmp.unlink(missing_ok=True)
+                    continue
                 size_mb = target.stat().st_size / (1 << 20)
                 logger.info("FFmpeg 下载完成并通过校验：%s（%.1f MB）", target, size_mb)
                 return str(target)
             logger.warning("FFmpeg 下载文件未通过 -version 校验，丢弃：%s", url)
-            target.unlink(missing_ok=True)
+            tmp.unlink(missing_ok=True)
         logger.warning("FFmpeg 自动下载失败（全部候选源），成片合成将降级为连播清单")
         return ""
 
