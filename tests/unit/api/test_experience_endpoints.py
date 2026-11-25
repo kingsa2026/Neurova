@@ -13,6 +13,9 @@ import pytest
 from neurova.api.endpoints import experience_knowledge_api as exp_api
 from neurova.skills.experience_knowledge_base import ExperienceKnowledgeBase
 
+# PLUG-06 起端点带 ACL：直调统一以管理员身份过门（agent 未登记=无主，仅 admin）
+ADMIN = {"user_id": "9", "username": "root", "role": "admin"}
+
 
 @pytest.fixture
 def ekb(tmp_path):
@@ -46,7 +49,7 @@ class TestExperienceRecordsReal:
 
     @pytest.mark.asyncio
     async def test_create_and_list_contract(self):
-        res = await exp_api.add_experience_record(_req())
+        res = await exp_api.add_experience_record(_req(), current_user=ADMIN)
 
         assert res["code"] == 0
         record = res["data"]
@@ -55,7 +58,7 @@ class TestExperienceRecordsReal:
         assert record["outcome"] == "success"
         assert record["agent_id"] == "a1"
 
-        listing = await exp_api.get_experience_ranking(agent_id="a1", page=1, size=20, task_type=None)
+        listing = await exp_api.get_experience_ranking(agent_id="a1", page=1, size=20, task_type=None, current_user=ADMIN)
         data = listing["data"]
         assert data["total"] == 1
         assert len(data["items"]) == 1
@@ -68,11 +71,11 @@ class TestExperienceRecordsReal:
 
     @pytest.mark.asyncio
     async def test_agent_scope_isolation(self):
-        await exp_api.add_experience_record(_req(agent="a1"))
-        await exp_api.add_experience_record(_req(agent="a2", task="code", outcome="failure"))
+        await exp_api.add_experience_record(_req(agent="a1"), current_user=ADMIN)
+        await exp_api.add_experience_record(_req(agent="a2", task="code", outcome="failure"), current_user=ADMIN)
 
-        a1 = await exp_api.get_experience_ranking(agent_id="a1", page=1, size=20, task_type=None)
-        a2 = await exp_api.get_experience_ranking(agent_id="a2", page=1, size=20, task_type=None)
+        a1 = await exp_api.get_experience_ranking(agent_id="a1", page=1, size=20, task_type=None, current_user=ADMIN)
+        a2 = await exp_api.get_experience_ranking(agent_id="a2", page=1, size=20, task_type=None, current_user=ADMIN)
         assert a1["data"]["total"] == 1
         assert a2["data"]["total"] == 1
         assert a1["data"]["items"][0]["skill_name"] == "web_search"
@@ -81,8 +84,8 @@ class TestExperienceRecordsReal:
     @pytest.mark.asyncio
     async def test_pagination(self):
         for i in range(5):
-            await exp_api.add_experience_record(_req(agent="a1", task=f"task{i}"))
-        listing = await exp_api.get_experience_ranking(agent_id="a1", page=1, size=2, task_type=None)
+            await exp_api.add_experience_record(_req(agent="a1", task=f"task{i}"), current_user=ADMIN)
+        listing = await exp_api.get_experience_ranking(agent_id="a1", page=1, size=2, task_type=None, current_user=ADMIN)
         assert listing["data"]["total"] == 5
         assert len(listing["data"]["items"]) == 2
 
@@ -92,10 +95,10 @@ class TestExperienceStatsReal:
 
     @pytest.mark.asyncio
     async def test_stats_contract(self):
-        await exp_api.add_experience_record(_req(agent="a1", outcome="success"))
-        await exp_api.add_experience_record(_req(agent="a1", outcome="failure"))
+        await exp_api.add_experience_record(_req(agent="a1", outcome="success"), current_user=ADMIN)
+        await exp_api.add_experience_record(_req(agent="a1", outcome="failure"), current_user=ADMIN)
 
-        res = await exp_api.get_experience_stats(agent_id="a1")
+        res = await exp_api.get_experience_stats(agent_id="a1", current_user=ADMIN)
         data = res["data"]
         assert data["total_experiences"] == 2
         assert 0 < data["success_rate"] < 1
@@ -108,11 +111,11 @@ class TestExperienceDeleteReal:
 
     @pytest.mark.asyncio
     async def test_delete_record(self):
-        created = await exp_api.add_experience_record(_req())
+        created = await exp_api.add_experience_record(_req(), current_user=ADMIN)
         rid = created["data"]["id"]
 
-        res = await exp_api.delete_experience(rid)
+        res = await exp_api.delete_experience(rid, current_user=ADMIN)
         assert res["code"] == 0
 
-        listing = await exp_api.get_experience_ranking(agent_id="a1", page=1, size=20, task_type=None)
+        listing = await exp_api.get_experience_ranking(agent_id="a1", page=1, size=20, task_type=None, current_user=ADMIN)
         assert listing["data"]["total"] == 0

@@ -48,6 +48,9 @@ from fastapi import HTTPException
 from neurova.api import endpoints as endpoints_pkg
 from neurova.api.endpoints import experience_knowledge_api as exp_api
 from neurova.skills.experience_knowledge_base import ExperienceKnowledgeBase
+
+# PLUG-06 起端点带 ACL：直调统一以管理员身份过门（agent 未登记=无主，仅 admin）
+ADMIN = {"user_id": "9", "username": "root", "role": "admin"}
 from neurova.skills.models import OUTCOME_STATES, outcomeStateFromWord
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -98,7 +101,7 @@ class TestKnownWordsLandOnTheirOwnState:
         [("success", 1), ("failure", 0), ("unevidenced", None)],
     )
     async def test_eachWordLandsOnItsOwnState(self, ekb, word, expectedColumn):
-        await exp_api.add_experience_record(request(word, task=f"k-{word}"))
+        await exp_api.add_experience_record(request(word, task=f"k-{word}"), current_user=ADMIN)
         row = rowOf(ekb, f"k-{word}")
         assert row["success"] == expectedColumn, (
             f"契约词 {word!r} 落库应该是 {expectedColumn!r}，实际 {row['success']!r}"
@@ -112,7 +115,7 @@ class TestUnknownWordsAreRejectedNotFolded:
     @pytest.mark.parametrize("word", ["partial", "bogus", "", "SUCCESS", "success "])
     async def test_unknownWordIsNotFoldedIntoASuccess(self, ekb, word):
         with pytest.raises(HTTPException) as excinfo:
-            await exp_api.add_experience_record(request(word, task=f"u-{word!r}"))
+            await exp_api.add_experience_record(request(word, task=f"u-{word!r}"), current_user=ADMIN)
         assert excinfo.value.status_code == 422, (
             f"未知词 {word!r} 应以 422 诚实拒绝，实际 {excinfo.value.status_code}"
         )
@@ -123,7 +126,7 @@ class TestUnknownWordsAreRejectedNotFolded:
     @pytest.mark.asyncio
     async def test_rejectionNamesTheLegalVocabulary(self, ekb):
         with pytest.raises(HTTPException) as excinfo:
-            await exp_api.add_experience_record(request("partial"))
+            await exp_api.add_experience_record(request("partial"), current_user=ADMIN)
         detail = str(excinfo.value.detail)
         for word in ("success", "failure", "unevidenced"):
             assert word in detail, f"拒绝理由没点名合法词域（缺 {word!r}）：{detail!r}"

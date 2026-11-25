@@ -23,6 +23,9 @@ from neurova.skills.experience_knowledge_base import (
     ExperienceRecord,
 )
 
+# PLUG-06 起端点带 ACL：直调统一以管理员身份过门（agent 未登记=无主，仅 admin）
+ADMIN = {"user_id": "9", "username": "root", "role": "admin"}
+
 pytestmark = pytest.mark.asyncio
 
 AGENT = "a1"
@@ -72,7 +75,7 @@ class TestExperienceCountIsRealAggregation:
             _add(ekb, tail=f"变体{i}")
         _add(ekb, skill="file_write", tail="写一份报告")
 
-        listing = await exp_api.get_experience_ranking(agent_id=AGENT, page=1, size=20, task_type=None)
+        listing = await exp_api.get_experience_ranking(agent_id=AGENT, page=1, size=20, task_type=None, current_user=ADMIN)
         by_skill = {i["skill_name"]: i["experience_count"] for i in listing["data"]["items"]}
         assert by_skill == {"web_search": 3, "file_write": 1}
 
@@ -82,16 +85,16 @@ class TestExperienceCountIsRealAggregation:
             _add(ekb, tail=f"变体{i}")
         _add(ekb, agent="a2", tail="别人的")
 
-        a1 = await exp_api.get_experience_ranking(agent_id=AGENT, page=1, size=20, task_type=None)
+        a1 = await exp_api.get_experience_ranking(agent_id=AGENT, page=1, size=20, task_type=None, current_user=ADMIN)
         assert {i["experience_count"] for i in a1["data"]["items"]} == {3}
-        a2 = await exp_api.get_experience_ranking(agent_id="a2", page=1, size=20, task_type=None)
+        a2 = await exp_api.get_experience_ranking(agent_id="a2", page=1, size=20, task_type=None, current_user=ADMIN)
         assert {i["experience_count"] for i in a2["data"]["items"]} == {1}
 
     async def test_single_record_shares_the_same_count(self, ekb):
         rid = _add(ekb, tail="唯一")
         _add(ekb, tail="另外的")
         _add(ekb, tail="再一个")
-        one = await exp_api.get_experience(record_id=str(rid))
+        one = await exp_api.get_experience(record_id=str(rid), current_user=ADMIN)
         assert one["data"]["experience_count"] == 3
 
 
@@ -99,14 +102,14 @@ class TestConfidenceIsNotFakedFromBinary:
     async def test_missing_confidence_surfaces_as_none_not_a_full_rating(self, ekb):
         """None 置信度不得被兜成 1.0 —— 那是把"没测到"演成"满分"。"""
         rid = _add(ekb, tail="缺置信", confidence=None)
-        data = (await exp_api.get_experience(record_id=str(rid)))["data"]
+        data = (await exp_api.get_experience(record_id=str(rid), current_user=ADMIN))["data"]
         assert data["success_rate"] is None
         assert data["proficiency"] is None
 
     async def test_real_confidence_still_passes_through(self, ekb):
         """反向锁：有值时照常给数，不得为了"看着像缺数据"一律抹成 None。"""
         rid = _add(ekb, tail="有置信", confidence=0.72)
-        data = (await exp_api.get_experience(record_id=str(rid)))["data"]
+        data = (await exp_api.get_experience(record_id=str(rid), current_user=ADMIN))["data"]
         assert data["success_rate"] == pytest.approx(0.72)
         assert data["proficiency"] == pytest.approx(0.72)
 
@@ -115,7 +118,7 @@ class TestDispositionEndpoint:
     async def test_put_writes_through_to_the_row(self, ekb):
         rid = _add(ekb, tail="甲")
         resp = await exp_api.set_experience_disposition(
-            record_id=str(rid), body=_disposition("demoted")
+            record_id=str(rid), body=_disposition("demoted"), current_user=ADMIN
         )
         assert resp["code"] == 0
         assert resp["data"]["operator_disposition"] == "demoted"
@@ -124,17 +127,17 @@ class TestDispositionEndpoint:
     async def test_endorsed_state_is_readable_back_from_the_api(self, ekb):
         """审核态同样要落到行上（它是"看过"的登记，不是删除的前戏）。"""
         rid = _add(ekb, tail="乙")
-        await exp_api.set_experience_disposition(record_id=str(rid), body=_disposition("endorsed"))
+        await exp_api.set_experience_disposition(record_id=str(rid), body=_disposition("endorsed"), current_user=ADMIN)
         assert ekb.get_record_by_id(rid)["operator_disposition"] == "endorsed"
-        data = (await exp_api.get_experience(record_id=str(rid)))["data"]
+        data = (await exp_api.get_experience(record_id=str(rid), current_user=ADMIN))["data"]
         assert data["operator_disposition"] == "endorsed"
 
     async def test_restore_is_expressed_as_null_not_a_magic_string(self, ekb):
         rid = _add(ekb, tail="丙")
-        await exp_api.set_experience_disposition(record_id=str(rid), body=_disposition("suppressed"))
-        await exp_api.set_experience_disposition(record_id=str(rid), body=_disposition(None))
+        await exp_api.set_experience_disposition(record_id=str(rid), body=_disposition("suppressed"), current_user=ADMIN)
+        await exp_api.set_experience_disposition(record_id=str(rid), body=_disposition(None), current_user=ADMIN)
         assert ekb.get_record_by_id(rid)["operator_disposition"] is None
-        data = (await exp_api.get_experience(record_id=str(rid)))["data"]
+        data = (await exp_api.get_experience(record_id=str(rid), current_user=ADMIN))["data"]
         assert data["operator_disposition"] is None
 
     async def test_suppressed_record_is_invisible_to_similarity_search(self, ekb):
@@ -142,16 +145,17 @@ class TestDispositionEndpoint:
         hidden = _add(ekb, tail="丁")
         kept = _add(ekb, tail="戊")
         await exp_api.set_experience_disposition(
-            record_id=str(hidden), body=_disposition("suppressed")
+            record_id=str(hidden), body=_disposition("suppressed"), current_user=ADMIN
         )
 
         similar = await exp_api.find_similar_experiences(
             exp_api.FindSimilarExperiencesRequest(
                 agent_id=AGENT, query=f"{BASE_INPUT} 丁", limit=5
-            )
+            ),
+            current_user=ADMIN,
         )
         assert [r["id"] for r in similar["data"]["results"]] == [str(kept)]
-        assert (await exp_api.get_experience(record_id=str(hidden)))["code"] == 0
+        assert (await exp_api.get_experience(record_id=str(hidden), current_user=ADMIN))["code"] == 0
 
     async def test_unknown_disposition_is_a_validation_error(self, ekb):
         rid = _add(ekb, tail="己")
@@ -163,14 +167,14 @@ class TestDispositionEndpoint:
         from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc:
-            await exp_api.set_experience_disposition(record_id="424242", body=_disposition("demoted"))
+            await exp_api.set_experience_disposition(record_id="424242", body=_disposition("demoted"), current_user=ADMIN)
         assert exc.value.status_code == 404
 
     async def test_disposition_never_deletes_the_record(self, ekb):
         """处置面与删除是两件事：走完全部处置态后行数不变。"""
         rid = _add(ekb, tail="庚")
         for state in ("demoted", "suppressed", "endorsed", None):
-            await exp_api.set_experience_disposition(record_id=str(rid), body=_disposition(state))
+            await exp_api.set_experience_disposition(record_id=str(rid), body=_disposition(state), current_user=ADMIN)
         assert len(ekb.get_experience_records(agent_id=AGENT)) == 1
 
 
@@ -179,7 +183,7 @@ class TestContractCarriesTheEvidenceColumns:
         """运营页要能按新列重建视图（008 口径），所以契约里必须带得上。"""
         rid = _add(ekb, tail="辛")
         ekb.record_injection_adoption([rid], False)
-        item = (await exp_api.get_experience(record_id=str(rid)))["data"]
+        item = (await exp_api.get_experience(record_id=str(rid), current_user=ADMIN))["data"]
         assert item["adoption_outcome"] == "failure"
         assert item["evidence_state"] == "evidenced"
         assert item["injected_count"] == 1

@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from neurova.api.auth import get_current_user, Depends
+from neurova.api.agent_access import requireAgentOwner
 from pydantic import BaseModel, Field
 
 from neurova.core.logger import get_logger
@@ -31,6 +32,29 @@ from neurova.core.logger import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Depends(get_current_user)],)
+
+
+def _requireExperienceAgentAccess(agent_id: str, current_user: Any, action: str) -> None:
+    """经验库 ACL（PLUG-06）：与自动写入 scope 一致。
+
+    经验记录由 post_chat_pipeline 反思沉淀时挂在**产生该经验的 agent** 名下
+    （含 user_input/reply_excerpt 会话片段），所以读/写/处置/删除的访问权
+    就是 agent 访问权。判据转交全仓单源 `agent_access.requireAgentOwner`
+    （admin 全量；非 admin 仅属主；无主/未指定仅 admin），不另造第二份口径。
+    """
+    requireAgentOwner(str(agent_id or ""), current_user, action=action)
+
+
+def _requireExperienceRecordAccess(record: Dict[str, Any], current_user: Any) -> None:
+    """记录 id 寻址面的同解校验（防 IDOR：非属主与不存在同形 404）。
+
+    判据仍是单源 `requireAgentOwner`（按记录的 agent 归属），只是把 403
+    转写成 404——与 media/API-08 先例同形，不向探测者泄露记录存在性。
+    """
+    try:
+        requireAgentOwner(str((record or {}).get("agent_id") or ""), current_user, action="管理经验记录")
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="experience record not found")
 
 
 class AddExperienceRecordRequest(BaseModel):
@@ -174,8 +198,14 @@ def _to_contracts(kb, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 @router.post("/records")
-async def add_experience_record(body: AddExperienceRecordRequest):
+async def add_experience_record(
+    body: AddExperienceRecordRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """添加经验记录（手动结晶：写入真实 SQLite 库，供后续检索/统计）"""
+    # PLUG-06：写入他人 agent 的经验库属越权，先验 agent 访问权
+    _requireExperienceAgentAccess(body.agent_id, current_user, "写入经验记录")
+
     from neurova.skills.models import ExperienceRecord, outcomeStateFromWord
 
     # 词 → 三态的反向映射取单源 `skills.models.outcomeStateFromWord`（教义第 6 条）。
@@ -227,8 +257,11 @@ async def get_experience_ranking(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     task_type: Optional[str] = Query(default=None),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """经验记录分页列表（skill_name 侧按 task_type 过滤）"""
+    # PLUG-06：列表按 agent 归属设门；空 agent_id = 全库扫读，仅 admin
+    _requireExperienceAgentAccess(agent_id, current_user, "查看经验列表")
     try:
         kb = get_experience_kb()
         records = kb.get_experience_records(
@@ -249,8 +282,13 @@ async def get_experience_ranking(
 
 
 @router.get("/stats")
-async def get_experience_stats(agent_id: str = Query(default="")):
+async def get_experience_stats(
+    agent_id: str = Query(default=""),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """经验库统计（前端 ExperienceStats 契约）"""
+    # PLUG-06：统计同列表一道按 agent 归属设门
+    _requireExperienceAgentAccess(agent_id, current_user, "查看经验统计")
     try:
         kb = get_experience_kb()
         records = kb.get_experience_records(agent_id=agent_id or None)
@@ -291,8 +329,13 @@ async def get_experience_stats(agent_id: str = Query(default="")):
 
 
 @router.post("/similar")
-async def find_similar_experiences(body: FindSimilarExperiencesRequest):
+async def find_similar_experiences(
+    body: FindSimilarExperiencesRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """查找与查询文本相似的经验记录（EKB 关键词/话题/成功加权算法）"""
+    # PLUG-06：相似检索同样按 agent 归属设门
+    _requireExperienceAgentAccess(body.agent_id or "", current_user, "检索相似经验")
     try:
         kb = get_experience_kb()
         results = kb.find_similar_experiences(
@@ -311,7 +354,10 @@ async def find_similar_experiences(body: FindSimilarExperiencesRequest):
 
 
 @router.get("/{record_id}")
-async def get_experience(record_id: str):
+async def get_experience(
+    record_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """单条经验记录"""
     kb = get_experience_kb()
     try:
@@ -323,11 +369,17 @@ async def get_experience(record_id: str):
         raise HTTPException(status_code=500, detail=f"get experience failed: {e}")
     if record is None:
         raise HTTPException(status_code=404, detail="experience record not found")
+    # PLUG-06：单条读取按记录归属设门（非属主与不存在同形 404）
+    _requireExperienceRecordAccess(record, current_user)
     return {"code": 0, "message": "success", "data": _to_contracts(kb, [record])[0]}
 
 
 @router.put("/{record_id}/disposition")
-async def set_experience_disposition(record_id: str, body: ExperienceDispositionRequest):
+async def set_experience_disposition(
+    record_id: str,
+    body: ExperienceDispositionRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """人工处置单条经验（工单 015）：审核通过 / 降权 / 隐藏 / 恢复未处置。
 
     处置走 EKB 的 `operator_disposition` 列，与检索排序、注入优先级同一条链
@@ -342,6 +394,8 @@ async def set_experience_disposition(record_id: str, body: ExperienceDisposition
     record = kb.get_record_by_id(rid)
     if record is None:
         raise HTTPException(status_code=404, detail="experience record not found")
+    # PLUG-06：处置是写操作，同样按记录归属设门（非属主与不存在同形 404）
+    _requireExperienceRecordAccess(record, current_user)
     try:
         kb.set_operator_disposition([rid], body.disposition)
     except Exception as e:
@@ -355,12 +409,23 @@ async def set_experience_disposition(record_id: str, body: ExperienceDisposition
 
 
 @router.delete("/{record_id}")
-async def delete_experience(record_id: str):
+async def delete_experience(
+    record_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """删除经验记录"""
+    # PLUG-06：删除前先取行验归属（非属主与不存在同形 404），不泄露可删性
+    kb = get_experience_kb()
     try:
-        deleted = get_experience_kb().delete_record(int(record_id))
+        rid = int(record_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid record id")
+    record = kb.get_record_by_id(rid)
+    if record is None:
+        raise HTTPException(status_code=404, detail="experience record not found")
+    _requireExperienceRecordAccess(record, current_user)
+    try:
+        deleted = kb.delete_record(rid)
     except Exception as e:
         logger.exception("delete experience failed: %s", e)
         raise HTTPException(status_code=500, detail=f"delete experience failed: {e}")
