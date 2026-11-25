@@ -364,7 +364,7 @@ class TestFeedbackStatsEndpoint:
 
     def test_response_contract_unchanged(self, repo):
         """响应契约字段与 v1 完全一致。"""
-        sid = repo.create_session("ep", user_id="")
+        sid = repo.create_session("ep", user_id="u1")
         repo.save_message("ep", sid, "assistant", "回答甲", metadata={"feedback": "like"})
         repo.save_message("ep", sid, "assistant", "回答乙", metadata={"feedback": "dislike"})
 
@@ -383,7 +383,7 @@ class TestFeedbackStatsEndpoint:
 
     def test_endpoint_never_pulls_full_history(self, repo, monkeypatch):
         """stats 端点不得触发 get_history 全量（B-9 核心诉求）。"""
-        sid = repo.create_session("ep2", user_id="")
+        sid = repo.create_session("ep2", user_id="u1")
         repo.save_message("ep2", sid, "assistant", "r", metadata={"feedback": "like"})
 
         def _boom(*a, **k):
@@ -395,7 +395,7 @@ class TestFeedbackStatsEndpoint:
 
     def test_endpoint_second_call_zero_session_parse(self, repo, monkeypatch):
         """端点幂等调用零会话文件解析（O(索引)）。"""
-        sid = repo.create_session("ep3", user_id="")
+        sid = repo.create_session("ep3", user_id="u1")
         repo.save_message("ep3", sid, "assistant", "r", metadata={"feedback": "dislike"})
 
         calls = _count_session_parses(repo, monkeypatch)
@@ -407,7 +407,7 @@ class TestFeedbackStatsEndpoint:
 
     def test_endpoint_limit_respected(self, repo):
         for i in range(3):
-            sid = repo.create_session("epl", user_id="")
+            sid = repo.create_session("epl", user_id="u1")
             repo.save_message("epl", sid, "assistant", f"r{i}", metadata={"feedback": "like"})
         data = self._call(agent_id="epl", limit=2)["data"]
         assert data["sessions_scanned"] == 2

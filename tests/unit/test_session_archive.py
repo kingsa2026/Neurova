@@ -103,7 +103,7 @@ class TestArchiveSession:
         assert [s["session_id"] for s in sm.list_sessions(agent_id="kai")] == []
         assert [s["session_id"] for s in sm.list_sessions(agent_id="default")] == ["shared-sid"]
 
-    def test_list_archived_sessions_scans_all_agents_without_filter(self, sm):
+    def test_list_archived_sessions_scans_all_agents_without_filter(self, sm, monkeypatch):
         _seed_session(sm, "kai", "sess-k", ["2026-08-29"], user_id="alice")
         _seed_session(sm, "default", "sess-d2", ["2026-08-29"], user_id="")
         _seed_session(sm, "default", "sess-bob", ["2026-08-29"], user_id="bob")
@@ -111,13 +111,18 @@ class TestArchiveSession:
         sm.archive_session(agent_id="default", session_id="sess-d2")
         sm.archive_session(agent_id="default", session_id="sess-bob")
 
+        from neurova import post_chat_pipeline
+
+        monkeypatch.setattr(post_chat_pipeline, "_adminOwnerId", lambda: "root")
         all_archived = {s["session_id"] for s in sm.list_archived_sessions()}
         assert {"sess-k", "sess-d2", "sess-bob"} <= all_archived
 
         alice_only = {s["session_id"] for s in sm.list_archived_sessions(user_id="alice")}
         assert "sess-k" in alice_only, "自己的会话必须可见"
-        assert "sess-d2" in alice_only, "空 user_id 视为共享，对所有人可见（与 list_sessions 一致）"
+        assert "sess-d2" not in alice_only, "历史无主会话不得对普通用户放行"
         assert "sess-bob" not in alice_only, "他人的非空 user_id 会话必须被过滤"
+        root_only = {s["session_id"] for s in sm.list_archived_sessions(user_id="root")}
+        assert "sess-d2" in root_only, "历史无主会话只归主管理员"
 
     def test_unarchive_overwrites_stale_main_dir_file(self, sm, tmp_path):
         """恢复时若主目录已有同名残留（存档后在途写入），archived 版本为准覆盖。"""

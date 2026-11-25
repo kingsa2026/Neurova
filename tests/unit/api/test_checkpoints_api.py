@@ -103,7 +103,9 @@ def _auto_checkpoint(agent, session_id: str, user_input: str, reply: str) -> Non
 
 def _turn(agent, user_input: str, reply: str) -> None:
     agent.turn_count += 1
-    agent.session_manager.add_message(AGENT_ID, SESSION_ID, user_input, reply)
+    # P0-08：会话写侧显式声明属主（无主会话恢复会被 fail-closed 拒绝）
+    agent.session_manager.add_message(
+        AGENT_ID, SESSION_ID, user_input, reply, user_id="owner-1")
     _auto_checkpoint(agent, SESSION_ID, user_input, reply)
 
 
@@ -228,6 +230,62 @@ def test_restore_writes_audit_event(client, env):
     entry = restore_events[0]
     assert entry.resource_type == "checkpoint"
     assert SESSION_ID in json.dumps(entry.details, ensure_ascii=False, default=str)
+
+
+def test_restore_preserves_explicit_session_owner(env):
+    from neurova.api.endpoints.agent_checkpoints_api import _apply_restore
+
+    env.sm.create_session(AGENT_ID, user_id="owner-1", title="原会话")
+    env.sm.save_message(AGENT_ID, SESSION_ID, "user", "未来消息", user_id="owner-1")
+    apply = _apply_restore(AGENT_ID, SESSION_ID)
+    apply({"session_json": json.dumps({"messages": [
+        {"role": "user", "content": "恢复消息"},
+    ]}, ensure_ascii=False)})
+
+    record = env.sm.get_session(AGENT_ID, SESSION_ID)
+    assert record.user_id == "owner-1"
+    assert record.title == "新对话"
+
+
+def test_restore_assigns_emptyOwnerToPrimaryAdmin(env, monkeypatch):
+    import neurova.post_chat_pipeline as pcp
+    from neurova.api.endpoints.agent_checkpoints_api import _apply_restore
+
+    monkeypatch.setattr(pcp, "_adminOwnerId", lambda: "3")
+    env.sm.create_session(AGENT_ID, user_id="", title="历史无主会话")
+    apply = _apply_restore(AGENT_ID, SESSION_ID)
+    apply({"session_json": json.dumps({"messages": [
+        {"role": "user", "content": "恢复消息"},
+    ]}, ensure_ascii=False)})
+
+    assert env.sm.get_session(AGENT_ID, SESSION_ID).user_id == "3"
+
+
+def test_restore_aborts_before_delete_when_owner_read_fails(env, monkeypatch):
+    from neurova.api.endpoints.agent_checkpoints_api import _apply_restore
+
+    env.sm.create_session(AGENT_ID, user_id="owner-1")
+    env.sm.save_message(AGENT_ID, SESSION_ID, "user", "必须保留", user_id="owner-1")
+
+    def unreadable(*args, **kwargs):
+        raise OSError("磁盘读取失败")
+
+    monkeypatch.setattr(env.sm, "get_session", unreadable)
+    with pytest.raises(RuntimeError, match="属主"):
+        _apply_restore(AGENT_ID, SESSION_ID)({"session_json": json.dumps({"messages": []})})
+    assert [m["content"] for m in env.sm.get_history(AGENT_ID, SESSION_ID)] == ["必须保留"]
+
+
+def test_restore_aborts_when_emptyOwnerCannotResolveAdmin(env, monkeypatch):
+    import neurova.post_chat_pipeline as pcp
+    from neurova.api.endpoints.agent_checkpoints_api import _apply_restore
+
+    monkeypatch.setattr(pcp, "_adminOwnerId", lambda: "")
+    env.sm.create_session(AGENT_ID, user_id="")
+    env.sm.save_message(AGENT_ID, SESSION_ID, "user", "必须保留", user_id="")
+    with pytest.raises(RuntimeError, match="属主"):
+        _apply_restore(AGENT_ID, SESSION_ID)({"session_json": json.dumps({"messages": []})})
+    assert [m["content"] for m in env.sm.get_history(AGENT_ID, SESSION_ID)] == ["必须保留"]
 
 
 def test_list_ungrouped_lists_all_sessions(client, env):

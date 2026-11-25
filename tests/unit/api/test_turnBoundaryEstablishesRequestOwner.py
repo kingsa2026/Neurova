@@ -172,20 +172,25 @@ class TestStreamTurnCarriesTheAuthenticatedOwner:
             f"以 {BOB} 身份列出了别人的流式会话：{others}"
         )
 
-    def testReverseControlEmptyOwnerIsVisibleToEveryone(self, ownerClient):
-        """上一格的牙来自"这次真写了属主"：空属主必须仍然对任何人可见，否则它是恒真。"""
+    def testReverseControlEmptyOwnerIsAdminOnly(self, ownerClient, monkeypatch):
+        """反向对照：真写属主才让 alice 可见；历史无主会话只归主管理员。"""
+        from neurova import post_chat_pipeline
+
         _client, agent = ownerClient
         manager = agent.session_manager
+        monkeypatch.setattr(post_chat_pipeline, "_adminOwnerId", lambda: "u-admin")
         manager.add_message(agent_id=AGENT_ID, session_id="sess-legacy-empty",
                             user_content="旧数据", assistant_content="…", user_id="")
 
         for viewer in (ALICE, BOB):
             visible = [s["session_id"] for s in manager.list_sessions(agent_id=AGENT_ID,
                                                                      user_id=viewer)]
-            assert "sess-legacy-empty" in visible, (
-                f"空属主会话对 {viewer} 不可见 ⇒ `:1650` 的口径已改，"
-                "上一格不再由「写了属主」这一件事决定（判据失去意义，须连同口径一起重写）"
+            assert "sess-legacy-empty" not in visible, (
+                f"历史无主会话对普通用户 {viewer} 可见 ⇒ 空属主仍被当成共享放行"
             )
+        admin_visible = [s["session_id"] for s in manager.list_sessions(
+            agent_id=AGENT_ID, user_id="u-admin")]
+        assert "sess-legacy-empty" in admin_visible
 
 
 class TestTheWriteSitsWhereTheTaskCanSeeIt:

@@ -128,12 +128,12 @@ class TestThePremisesAndTheTeeth:
         被自己下一格违反）。
         """
         from neurova.channels.base import ChannelMessage
-        from neurova.channels.manager import ChannelManager
+        from neurova.channels.manager import get_channel_manager
 
         message = ChannelMessage(channel_type="feishu", message_id="m1", sender_id="ou_1",
                                  sender_name="群成员", content="你好", chat_id="oc_1",
                                  chat_type="p2p", metadata={"agent_id": AGENT})
-        scopeId = ChannelManager().resolve_session_scope_id(message)
+        scopeId = get_channel_manager().resolve_session_scope_id(message)
         assert scopeId, "resolve_session_scope_id 没产出会话号——渠道面今天不落的判断要重来"
         assert normalize_store_key(scopeId) != scopeId, (
             f"渠道会话号 {scopeId!r} 竟然不需要净化 ⇒ 本档①②的靶已换，须连同修复一起重判")

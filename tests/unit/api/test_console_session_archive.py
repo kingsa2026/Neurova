@@ -5,7 +5,7 @@
 - POST /api/v1/console/chat/sessions/{sid}/unarchive  恢复
 - GET  /api/v1/console/chat/sessions/archived         存档会话列表
 
-user_id 校验与 delete_chat_session 一致（空 user_id 视为共享）。
+user_id 校验与 delete_chat_session 一致（历史空属主只归主管理员）。
 """
 
 from unittest.mock import MagicMock, patch
@@ -51,7 +51,7 @@ def mock_repo():
         yield mock
 
 
-def _seed_normal_session(mock_repo, session_id="sess-1", agent_id="kai", user_id=""):
+def _seed_normal_session(mock_repo, session_id="sess-1", agent_id="kai", user_id="u1"):
     mock_repo.list_sessions.return_value = [
         {
             "session_id": session_id,
@@ -100,7 +100,7 @@ class TestUnarchiveEndpoint:
                 "id": "sess-1",
                 "agent_id": "kai",
                 "title": "已存档",
-                "user_id": "",
+                "user_id": "u1",
                 "created_at": "2026-08-29T10:00:00",
             }
         ]
@@ -123,7 +123,7 @@ class TestArchivedListEndpoint:
                 "id": "sess-a",
                 "agent_id": "kai",
                 "title": "存档一",
-                "user_id": "",
+                "user_id": "u1",
                 "created_at": "2026-08-29T09:00:00",
             }
         ]

@@ -1,19 +1,16 @@
 # -*- coding: utf-8 -*-
-"""会话写入口必须能声明属主（"共享"要是显式决定，不是默认产物）
+"""会话写入口必须能声明属主（无属主历史统一归主管理员）
 
 缺陷：`SessionManager.save_message()` 建新记录时把 `"user_id": ""` 写死，
-签名里根本没有属主入参（`session_manager.py:1289-1299`）。它的两个生产调用方因此
-都无法声明归属：
+签名里根本没有属主入参。它的生产调用方因此都无法声明归属：
 
-- `console.py:1781` 的 fork —— 侥幸保住：前一行 `create_session(user_id=…)` 已建好带属主
-  的文件，`save_message` 走"更新既有记录"分支。这份侥幸没有任何东西守着，
-  哪天 fork 改成不先 create 就会静默产出无属主会话。
-- `collaboration/room_store.py:44` 的房间消息 —— 直接产出**永远共享**的会话。
-  房间按设计是多人可见，所以"共享"本身没错，**错的是它来自默认值而不是声明**。
+- `console.py` 的 fork 依靠前一行 `create_session(user_id=…)` 已建好带属主
+  的文件，`save_message` 走"更新既有记录"分支；这份顺序必须由源码判据守住。
+- `collaboration/room_store.py` 的房间消息显式写空属主；按当前安全口径，
+  这类历史无主会话只归主管理员，不再对任意认证用户放行。
 
-同一问题的导入侧版本已被修过并写下判据（`import_session_messages` docstring：
-"读侧『空属主=任何人可见』是正确的规则，错的是写入口生产了『没有属主』这份状态——
-所以修在产生它的那一侧，不去读侧加兜底"）。本批把同一条口径补到 `save_message`。
+同一问题的导入侧版本已能声明 `owner_user_id`。本批同时钉住 `save_message`
+的显式属主契约，避免新记录静默产出无属主状态。
 
 装配：真 SessionManager（`NEUROVA_SESSIONS_DIR` 隔离）+ 真 ABC，不起 app
 ——判据在写入口这一层，端点面的分桶行为已由
@@ -73,17 +70,23 @@ def test_productionCallSitesDeclareOwnerExplicitly():
                 lineNo = src[:m.start()].count("\n") + 1
                 offenders.append("%s:%d" % (path, lineNo))
     assert not offenders, (
-        "生产侧 save_message 调用未声明属主，会静默产出共享会话（fork 的属主目前只靠"
+        "生产侧 save_message 调用未声明属主，会静默产出无主会话（fork 的属主目前只靠"
         "“先 create 再 save” 的顺序侥幸）：" + ", ".join(offenders)
     )
 
 
-def test_sharedRoomMessageStaysShared(repo):
-    """显式共享（房间）必须仍对所有人可见——收紧不许把共享语义顺手关掉。"""
+def test_ownerlessRoomMessageResolvesPrimaryAdmin(repo, monkeypatch):
+    """显式空属主不是共享通行证：只归主管理员，普通用户不可见。"""
+    from neurova import post_chat_pipeline
+
+    monkeypatch.setattr(post_chat_pipeline, "_adminOwnerId", lambda: "room-admin")
     repo.save_message(agent_id="room-1", session_id="room-1", role="user",
                       content="房间广播", user_id="")
-    both = [s for s in repo.list_sessions(user_id="dave") if s.get("session_id") == "room-1"]
-    assert len(both) == 1, "显式共享的会话对 dave 不可见了"
+    assert repo.list_sessions(user_id="dave") == []
+    admin_rows = [s for s in repo.list_sessions(user_id="room-admin")
+                  if s.get("session_id") == "room-1"]
+    assert len(admin_rows) == 1
+    assert admin_rows[0]["user_id"] == "room-admin"
 
 
 def test_forkKeepsForkerAsOwner(repo):

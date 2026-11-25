@@ -203,11 +203,7 @@ def test_empty_session_id_is_rejected(sessions):
 
 
 def test_imported_session_is_visible_only_to_its_owner(sessions):
-    """不写属主的导入会话对任意 user_id 都可见，且可被任意用户改名/删除。
-
-    读侧（list_sessions / delete / rename）的过滤规则是"空属主=共享"，本来正确；
-    错在导入侧生产了"没有属主"这份状态——修在产生它的这一侧。
-    """
+    """导入侧显式属主必须落盘，读侧按该属主隔离。"""
     sessions.import_session_messages("default", "sA", "2026-05-01", _messages(),
                                      ingest_run_id=_RUN, owner_user_id="u_alice")
 
@@ -222,14 +218,21 @@ def test_imported_session_summary_reports_the_owner(sessions):
     assert sessions.list_sessions("default")[0]["user_id"] == "u_alice"
 
 
-def test_import_leaves_the_session_shared_when_no_owner_is_given(sessions):
-    """缺省仍是"共享"：单用户桌面下这是一条合法语义，不是缺陷。"""
+def test_ownerless_import_resolves_primary_admin_without_rewriting_disk(sessions, monkeypatch):
+    """未声明属主的导入保留磁盘空值；对外读取统一归主管理员。"""
+    from neurova import post_chat_pipeline
+
+    monkeypatch.setattr(post_chat_pipeline, "_adminOwnerId", lambda: "u_admin")
     sessions.import_session_messages("default", "sA", "2026-05-01", _messages(),
                                      ingest_run_id=_RUN)
 
     summary = sessions.list_sessions("default")[0]
-    assert summary["user_id"] == ""
-    assert [s["session_id"] for s in sessions.list_sessions("default", user_id="u_bob")] == ["sA"]
+    assert summary["user_id"] == "u_admin"
+    assert sessions.list_sessions("default", user_id="u_bob") == []
+    assert [s["session_id"] for s in sessions.list_sessions("default", user_id="u_admin")] == ["sA"]
+    stored = sessions._read_session_file(
+        sessions._get_session_file("default", "sA", "2026-05-01"))
+    assert (stored or {}).get("user_id", "") == ""
 
 
 def test_import_refuses_to_rewrite_an_existing_owner(sessions):
@@ -248,8 +251,8 @@ def test_import_refuses_to_rewrite_an_existing_owner(sessions):
     assert sessions.list_sessions("default")[0]["user_id"] == "u_alice"
 
 
-def test_shared_import_cannot_widen_an_owned_session(sessions):
-    """往已有属主的会话里导"共享"批次 = 把私有历史的可见范围放宽，必须拒。"""
+def test_ownerless_import_cannot_widen_an_owned_session(sessions):
+    """往已有属主的会话里导无主批次不得改写归属，必须拒。"""
     sessions.import_session_messages("default", "sA", "2026-05-01", _messages()[:1],
                                      ingest_run_id=_RUN, owner_user_id="u_alice")
 
@@ -258,8 +261,8 @@ def test_shared_import_cannot_widen_an_owned_session(sessions):
                                          ingest_run_id="nvimp-sess-3")
 
 
-def test_import_backfills_the_owner_on_a_shared_session(sessions):
-    """存量共享会话被指定属主导入时回填（与 add_message 的 DATA-P1-1 同一口径）。"""
+def test_import_backfills_the_owner_on_an_ownerless_session(sessions):
+    """存量无主会话被指定属主导入时回填（与 add_message 的 DATA-P1-1 同一口径）。"""
     sessions.add_message("default", "sA", "运行期提问", "运行期回答", date="2026-05-01")
 
     sessions.import_session_messages("default", "sA", "2026-05-01", _messages(),

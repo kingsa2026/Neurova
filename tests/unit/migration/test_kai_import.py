@@ -400,11 +400,10 @@ class TestChatImport:
         assert s2["messages_written"] == 0
 
     def test_imported_sessions_have_no_user_id_field(self, kai_src):
-        """防回归：导入会话不得写 user_id 字段。
+        """防回归：导入会话保留磁盘无主事实，不伪造属主字段。
 
-        _collect_summaries 过滤契约 = 空 user_id 不过滤；写死 "anonymous" 会被
-        登录用户（user_id="1"）的 list_sessions 全部过滤，聊天页看不到历史会话。
-        pipeline 原生落盘（mem_core.save_to_session → add_message）不写该字段。
+        对外读取时，空属主由统一解析器归 `role=admin` 中 id 最小者；普通用户
+        不得据此看到历史会话。pipeline 原生落盘同样不伪造属主字段。
         """
         from scripts.import_kai_to_neurova import import_chats
 

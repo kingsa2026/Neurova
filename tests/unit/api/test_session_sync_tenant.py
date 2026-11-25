@@ -2,8 +2,8 @@
 """A9c 红灯：WS 订阅腿归属校验前置（§6.4）。
 
 存量会话不得因「已在册」放行任意认证用户——外部编码代理的流式内容
-（含代码片段）只归会话属主/共享口径可见（复用 console 的
-_check_session_ownership 单源判据：空属主=共享）。
+（含代码片段）只归会话属主可见；历史空属主统一归主管理员（复用 console 的
+_check_session_ownership 单源判据，不再按共享放行）。
 """
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -45,9 +45,19 @@ def test_ownerSubscribeAllowed(client):
         assert hello.get("type") == "sync_hello"
 
 
-def test_sharedSessionWithoutOwnerOpenToAnyAuthenticatedUser(client):
+def test_ownerlessSessionRequiresPrimaryAdmin(client, monkeypatch):
+    from neurova import post_chat_pipeline
+
     manager = get_session_sync_manager()
-    manager.register_or_create_session("sess-shared", user_id="", agent_id="default")
-    with client.websocket_connect(f"/ws/sess-shared?token={tokenFor('u2')}") as ws:
+    manager.register_or_create_session("sess-ownerless", user_id="", agent_id="default")
+    monkeypatch.setattr(post_chat_pipeline, "_adminOwnerId", lambda: "u2")
+
+    with pytest.raises(Exception) as exc:
+        with client.websocket_connect(f"/ws/sess-ownerless?token={tokenFor('u3')}") as ws:
+            ws.receive_json()
+    code = getattr(exc.value, "code", None)
+    assert code == 4403 or "4403" in str(exc.value) or "403" in str(exc.value)
+
+    with client.websocket_connect(f"/ws/sess-ownerless?token={tokenFor('u2')}") as ws:
         hello = ws.receive_json()
         assert hello.get("type") == "sync_hello"

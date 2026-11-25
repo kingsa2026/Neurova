@@ -2208,9 +2208,23 @@ async def auto_title_chat_session(session_id: str, request: Request,
 # ── 会话存档（删除 → 存档：历史列表隐藏，可随时恢复） ──────────────────
 
 def _check_session_ownership(target: Dict[str, Any], user_id: str) -> None:
-    """user_id 校验与 delete_chat_session 一致：空 user_id 视为共享。"""
-    target_user_id = target.get("user_id") or ""
-    if target_user_id and user_id and target_user_id != user_id:
+    """会话属主校验（P0-08）：空属主归主管理员，其余一律显式匹配。
+
+    - 属主为空：归 `_adminOwnerId()`（role=admin 中 id 最小者，2026-11-18
+      用户拍板，废止旧「空即共享」）；解析不出主管理员 → fail-closed 拒绝。
+    - 请求者为空：无法归属身份，一律拒绝，不泄露会话内容。
+    - 其余：属主与请求者显式相等才放行（下方唯一一处归属比较式是全仓
+      唯一落点，test_session_ownership_single_source 钉形态）。
+    """
+    from neurova.post_chat_pipeline import _adminOwnerId
+
+    target_user_id = str(target.get("user_id") or "").strip()
+    user_id = str(user_id or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not target_user_id:
+        target_user_id = str(_adminOwnerId() or "").strip()
+    if not target_user_id or target_user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 

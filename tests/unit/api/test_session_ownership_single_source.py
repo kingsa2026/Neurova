@@ -13,7 +13,7 @@
 
 判据写成矩阵：bob 用自己的身份，从每一条会话面端点去碰 alice 的会话，
 都必须 403；alice 自己必须照常 200（收紧不许把归属者挡在门外）。
-空属主的共享会话必须对两人都可达——那是既有语义，不在本批改动范围。
+空属主按 AGENTS.md §3 归主管理员（role=admin 中 id 最小者），普通用户不得读取。
 """
 
 import typing
@@ -33,7 +33,7 @@ BOB = {"user_id": "bob", "username": "bob", "role": "user", "neuser_id": "ne-bob
 
 @pytest.fixture
 def sessions(tmp_path, monkeypatch):
-    """真 SessionManager（隔离目录）：alice 的会话 + 一条空属主共享会话。"""
+    """真 SessionManager（隔离目录）：alice 的会话 + 一条历史空属主会话。"""
     monkeypatch.setenv("NEUROVA_SESSIONS_DIR", str(tmp_path / "sessions"))
     from neurova.session_manager import SessionManager
 
@@ -43,7 +43,7 @@ def sessions(tmp_path, monkeypatch):
     reset_session_repository()
     repo = get_session_repository()
     aliceSid = repo.create_session(agent_id="agent_x", user_id="alice", title="alice 的会话")
-    sharedSid = repo.create_session(agent_id="agent_x", user_id="", title="共享会话")
+    sharedSid = repo.create_session(agent_id="agent_x", user_id="", title="历史空属主会话")
     repo.add_message(agent_id="agent_x", session_id=aliceSid,
                      user_content="alice 的私密问题", assistant_content="r", user_id="alice")
     return repo, aliceSid, sharedSid
@@ -92,11 +92,14 @@ def test_bobCannotTouchAlicesSessionViaAnyEndpoint(client, verb, path, body):
     )
 
 
-def test_bobCanReadSharedSession(client):
-    """反证另一半：空属主的共享会话必须仍对 bob 可达（既有语义，不许顺手关掉）。"""
+def test_bobCannotReadOwnerlessSession(client, monkeypatch):
+    """历史空属主会话只归主管理员，普通用户不得读取。"""
+    import neurova.post_chat_pipeline as pcp
+
+    monkeypatch.setattr(pcp, "_adminOwnerId", lambda: "3")
     client.as_user(BOB)
     resp = client.get(f"/api/v1/console/chat/history?session_id={client.sharedSid}")
-    assert resp.status_code == 200, f"共享会话被误收紧：{resp.status_code} {resp.text[:120]}"
+    assert resp.status_code == 403, f"空属主会话被普通用户读取：{resp.status_code} {resp.text[:120]}"
 
 
 def test_ownerStillManagesOwnSession(client):

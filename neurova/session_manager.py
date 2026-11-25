@@ -8,7 +8,7 @@ import hashlib
 import re
 from collections import OrderedDict
 from neurova.core.logger import get_logger
-from neurova.session_repository import SessionRepository
+from neurova.session_repository import SessionRepository, resolveStoredSessionOwner
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -251,7 +251,7 @@ class SessionManager(SessionRepository):
         with self._file_locks_lock:
             lock = self._file_locks.get(key)
             if lock is None:
-                lock = Lock()
+                lock = RLock()
                 self._file_locks[key] = lock
             return lock
 
@@ -1152,6 +1152,8 @@ class SessionManager(SessionRepository):
             created_at=session_data.get("created_at", ""),
             updated_at=session_data.get("updated_at", ""),
             total_messages=session_data.get("total_messages", 0),
+            title=session_data.get("title", ""),
+            user_id=resolveStoredSessionOwner(session_data.get("user_id")),
         )
 
     def get_sessions_by_agent(self, agent_id: str) -> List[Dict[str, Any]]:
@@ -1760,7 +1762,7 @@ class SessionManager(SessionRepository):
                     "agent_id": data.get("agent_id", "")
                     or self._agent_id_for_session_dir(agent_dir),
                     "title": data.get("title", "新对话"),
-                    "user_id": data.get("user_id", ""),
+                    "user_id": resolveStoredSessionOwner(data.get("user_id")),
                     "created_at": data.get("created_at", ""),
                     "updated_at": data.get("updated_at", ""),
                     "total_messages": data.get("total_messages", 0),
@@ -1962,8 +1964,10 @@ class SessionManager(SessionRepository):
 
                 sid = summary["session_id"]
 
-                # user_id 过滤（空 user_id 不过滤）
-                if user_id and summary["user_id"] and summary["user_id"] != user_id:
+                # 磁盘空属主在对外读边界统一归主管理员；解析失败或请求者为空
+                # 都不能继续按共享放行。
+                summary["user_id"] = resolveStoredSessionOwner(summary.get("user_id"))
+                if user_id and summary["user_id"] != user_id:
                     continue
 
                 # 同一 session_id 多日期文件，取最新日期作为代表
@@ -2169,7 +2173,7 @@ class SessionManager(SessionRepository):
             "session_id": realId,
             "agent_id": entry.get("agent_id", ""),
             "title": entry.get("title", "新对话"),
-            "user_id": entry.get("user_id", ""),
+            "user_id": resolveStoredSessionOwner(entry.get("user_id")),
             "created_at": entry.get("created_at", ""),
             "updated_at": entry.get("updated_at", ""),
             "total_messages": entry.get("total_messages", 0),
@@ -2202,10 +2206,9 @@ class SessionManager(SessionRepository):
             for sid, entry in sessions.items():
                 if not isinstance(entry, dict) or entry.get("fp") != disk_fps[sid]:
                     return None
-                entry_user = str(entry.get("user_id", "") or "")
-                if user_id and entry_user and entry_user != user_id:
-                    continue
                 summary = self._summary_from_entry(sid, entry)
+                if user_id and summary["user_id"] != user_id:
+                    continue
                 existing = seen.get(sid)
                 if existing is None or summary["created_at"] > existing.get("created_at", ""):
                     seen[sid] = summary

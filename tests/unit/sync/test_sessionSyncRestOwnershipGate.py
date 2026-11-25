@@ -23,8 +23,8 @@
 `UnifiedSession`，所以它不是"只在内部自嗨的另一套会话"，拿到 chat 的 session_id
 就能打这里。
 
-归属比较**不新造第二份**：复用 `console.py:1511 _check_session_ownership`
-（空属主=共享那条既有语义一并跟过来）。
+归属比较**不新造第二份**：复用 `console.py` 的 `_check_session_ownership`
+（历史空属主统一归主管理员，解析失败不得放行）。
 """
 
 from __future__ import annotations
@@ -186,7 +186,7 @@ class TestNoSecondOwnershipPredicate:
         形态是两层，缺一不可：
         ① 四个会话面 handler 各自都要走那一道门（少一个就是一个洞）；
         ② 本文件里那句比较必须**转交** `console.py` 的唯一实现，而不是自己写
-           `session.user_id != caller`——后者会让"空属主=共享"这条语义在两份实现里
+           `session.user_id != caller`——后者会让"空属主归主管理员"这条语义在两份实现里
            各自漂移（`test_ownershipPredicateHasOneImplementation` 只数 console.py 内部，
            单靠它拦不住"在别的文件复制一份"）。
         """

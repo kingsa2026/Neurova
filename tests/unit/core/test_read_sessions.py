@@ -8,17 +8,21 @@
 - 线程安全冒烟（并发续读不越界不重复）
 """
 
+import re
 import threading
 
 import pytest
 
+from neurova.core.identity_context import clear_request_user_id, set_request_user_id
 from neurova.core.read_sessions import ReadSessionStore, get_read_session_store, reset_read_session_store
 
 
 @pytest.fixture(autouse=True)
 def _isolate_store():
     reset_read_session_store()
+    set_request_user_id("owner-1")
     yield
+    clear_request_user_id()
     reset_read_session_store()
 
 
@@ -149,6 +153,58 @@ class TestExpiryAndEviction:
         assert chunk["can_continue"] is False
 
 
+class TestOwnerIsolation:
+    def test_session_id_is_unguessable_even_at_fixed_time(self, monkeypatch):
+        import neurova.core.read_sessions as rs_mod
+
+        monkeypatch.setattr(rs_mod.time, "time", lambda: 1_800_000_000.0)
+        store = ReadSessionStore()
+        ids = [
+            store.create(domain="browser_read", url="https://e.com", title="t", text="abc", chunk_size=1).session_id
+            for _ in range(20)
+        ]
+        assert len(set(ids)) == len(ids)
+        assert all(re.fullmatch(r"rs_[0-9a-f]{32}", session_id) for session_id in ids)
+
+    def test_create_binds_request_owner_and_get_checks_it(self):
+        store = ReadSessionStore()
+        sess = store.create(domain="browser_read", url="https://e.com", title="t", text="abc", chunk_size=1)
+        assert sess.owner_id == "owner-1"
+        assert store.get(sess.session_id) is not None
+
+        set_request_user_id("bob")
+        assert store.get(sess.session_id) is None
+        assert store.read(sess.session_id) is None
+
+    def test_explicit_owner_is_checked_on_get_and_read(self):
+        store = ReadSessionStore()
+        sess = store.create(
+            domain="browser_read", url="https://e.com", title="t", text="abc", chunk_size=1,
+            owner_id="alice",
+        )
+        assert store.get(sess.session_id, owner_id="alice") is not None
+        assert store.read(sess.session_id, owner_id="alice")["text"] == "a"
+        assert store.get(sess.session_id, owner_id="bob") is None
+        assert store.read(sess.session_id, owner_id="bob") is None
+
+    def test_missing_identity_cannot_read_cached_page(self):
+        store = ReadSessionStore()
+        sess = store.create(domain="browser_read", url="https://e.com", title="t", text="abc", chunk_size=1)
+        clear_request_user_id()
+        assert store.get(sess.session_id) is None
+        assert store.read(sess.session_id) is None
+        with pytest.raises(ValueError, match="属主"):
+            store.create(domain="browser_read", url="https://e.com", title="t", text="abc", chunk_size=1)
+
+    def test_cross_owner_denial_does_not_advance_cursor(self):
+        store = ReadSessionStore()
+        sess = store.create(domain="browser_read", url="https://e.com", title="t", text="abc", chunk_size=1)
+        set_request_user_id("bob")
+        assert store.read(sess.session_id) is None
+        set_request_user_id("owner-1")
+        assert store.read(sess.session_id)["offset"] == 0
+
+
 class TestSingletonAndConcurrency:
     def test_singleton_roundtrip(self):
         reset_read_session_store()
@@ -165,6 +221,8 @@ class TestSingletonAndConcurrency:
         results, lock = [], threading.Lock()
 
         def worker():
+            # P0-08/CORE-11：续读按属主强校验——工作线程需先声明同一属主身份
+            set_request_user_id("owner-1")
             while True:
                 with lock:
                     pass

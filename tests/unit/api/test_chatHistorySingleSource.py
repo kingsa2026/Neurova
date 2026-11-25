@@ -36,7 +36,7 @@ BOB = {"user_id": "bob", "username": "bob", "role": "user", "neuser_id": "ne-bob
 
 @pytest.fixture
 def sessions(tmp_path, monkeypatch):
-    """真 SessionManager（隔离落点）：alice 的会话 + 一条空属主共享会话。"""
+    """真 SessionManager（隔离落点）：alice 的会话 + 一条历史空属主会话。"""
     monkeypatch.setenv("NEUROVA_SESSIONS_DIR", str(tmp_path / "sessions"))
     from neurova.session_manager import SessionManager
 
@@ -46,7 +46,7 @@ def sessions(tmp_path, monkeypatch):
     reset_session_repository()
     repo = get_session_repository()
     aliceSid = repo.create_session(agent_id="agent_x", user_id="alice", title="alice 的会话")
-    sharedSid = repo.create_session(agent_id="agent_x", user_id="", title="共享会话")
+    sharedSid = repo.create_session(agent_id="agent_x", user_id="", title="历史空属主会话")
     repo.add_message(
         agent_id="agent_x", session_id=aliceSid,
         user_content="alice 的私密问题", assistant_content="回答", user_id="alice",
@@ -122,13 +122,16 @@ class TestOwnershipSameResolution:
             "（应 403，与 console 面同解）"
         )
 
-    def test_sharedSessionStillReadableByAnyone(self, client):
-        """反证另一半：空属主=共享是既有语义，不许顺手关掉。"""
+    def test_ownerlessSessionIsNotReadableByOrdinaryUser(self, client, monkeypatch):
+        """空属主归主管理员，chat 与 console 两处都不得放行普通用户。"""
+        import neurova.post_chat_pipeline as pcp
+
+        monkeypatch.setattr(pcp, "_adminOwnerId", lambda: "3")
         client.as_user(BOB)
         resp = client.get(
             "/api/v1/chat/history", params={"session_id": client.sharedSid}
         )
-        assert resp.status_code == 200, f"共享会话被误收紧：{resp.status_code} {resp.text[:120]}"
+        assert resp.status_code == 403, f"空属主会话被普通用户读取：{resp.status_code} {resp.text[:120]}"
 
 
 class TestClearNeverClaimsSuccessItCannotDeliver:

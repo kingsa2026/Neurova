@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from neurova.computer_use.browser_manager import BrowserManager, BrowserResult
+from neurova.core.identity_context import clear_request_user_id, set_request_user_id
 from neurova.core.read_sessions import get_read_session_store, reset_read_session_store
 
 
@@ -34,7 +35,9 @@ def _seed_manager(snapshot_tree="- button \"x\"\n- textbox \"q\"", generation=3,
 @pytest.fixture(autouse=True)
 def _isolate():
     reset_read_session_store()
+    set_request_user_id("browser-owner")
     yield
+    clear_request_user_id()
     reset_read_session_store()
 
 

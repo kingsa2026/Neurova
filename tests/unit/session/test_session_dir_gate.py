@@ -99,9 +99,12 @@ def test_default_agent_always_allowed(sm):
 def test_injected_sessions_dir_skips_gate(tmp_path):
     """测试隔离根（构造参数注入 sessions_dir）不设登记册门——隔离边界即注入本身。
     注入形态的会话文件直接落在 <root>/<agent_id>/ 下（无 sessions 子目录）。"""
+    import datetime
+
     manager = SessionManager(sessions_dir=str(tmp_path / "injected"))
     assert manager.save_message("ghost", "s1", "user", "hi", user_id="u1") is True
-    assert (tmp_path / "injected" / "ghost" / "session_s1_2026-11-24.json").exists()
+    today = datetime.date.today().isoformat()
+    assert (tmp_path / "injected" / "ghost" / f"session_s1_{today}.json").exists()
 
 
 def test_reserved_name_cannot_get_session_dirs(sm):

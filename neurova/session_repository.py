@@ -16,7 +16,19 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from threading import Lock
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
+
+
+def resolveStoredSessionOwner(rawOwner: Any) -> str:
+    """把磁盘属主归一为当前可见性事实。
+
+    显式携带 `session_owner_id` 键，避免空值回落到当前请求身份；空属主直达
+    `post_chat_pipeline` 的主管理员解析。管理员查询失败时诚实返回空串，由
+    各读侧 fail-closed，绝不把空串继续解释成共享。
+    """
+    from neurova.post_chat_pipeline import resolveSessionOwner
+
+    return resolveSessionOwner({"session_owner_id": str(rawOwner or "")})
 
 
 class SessionRepository(ABC):
@@ -32,7 +44,7 @@ class SessionRepository(ABC):
     - list_sessions 返回会话摘要列表，按 created_at 倒序
     - delete_session 删除该 session_id 的所有日期文件
     - rename_session 修改 title 字段（写入所有日期文件）
-    - get_session 返回单会话 dict（含 messages 字段）
+    - get_session 返回单会话记录（文件 adapter 为 SessionRecord，含 messages 字段）
     """
 
     @abstractmethod
@@ -52,10 +64,11 @@ class SessionRepository(ABC):
     ) -> bool:
         """保存单条消息到会话。
 
-        `user_id` 是关键字参数，缺省 `""` = 共享会话。默认值只为兼容既有测试夹具
-        （它们不建模归属）而存在；**生产代码必须显式声明**，这条由
-        `tests/unit/session/test_session_writer_declares_owner.py` 的源码守卫钉住
-        ——判据落在"谁可能写出无属主会话"上，而不是给全部调用点强加噪声。
+        `user_id` 是关键字参数。生产代码必须显式声明；显式空串只表示磁盘
+        无属主历史，读侧会统一归主管理员，不再按共享会话放行。默认值只为
+        兼容既有测试夹具而存在，由
+        `tests/unit/session/test_session_writer_declares_owner.py` 的源码守卫
+        钉住生产调用点。
         """
 
     @abstractmethod
@@ -79,8 +92,8 @@ class SessionRepository(ABC):
         """重命名会话标题。"""
 
     @abstractmethod
-    def get_session(self, agent_id: str, session_id: str) -> Optional[Dict]:
-        """获取单个会话记录（含 messages 字段）。"""
+    def get_session(self, agent_id: str, session_id: str) -> Optional[Any]:
+        """获取单个会话记录（文件 adapter 返回 SessionRecord，含 messages 字段）。"""
 
     @abstractmethod
     def archive_session(self, agent_id: str, session_id: str) -> bool:

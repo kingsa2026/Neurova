@@ -5,7 +5,7 @@
   请求身份 > 管理员。第三档替代旧「空串＝共享」——空属主会话对全员可见，
   历史上因此积累大量无主测试会话（682 个 user_id 为空的 session 文件）。
 - _adminOwnerId 从用户库取 role=admin 中 id 最小者（主管理员）；库故障
-  诚实回落空串（= 旧共享语义），不让一次查库故障改写可见性口径。
+  诚实回落空串。消费端必须 fail-closed，不得把解析失败继续当成共享放行。
 """
 from __future__ import annotations
 

@@ -165,9 +165,9 @@ def test_generate_semantic_title_llm_raise_falls_back(monkeypatch):
 
 @pytest.fixture()
 def repo():
-    # user_id 留空 = 共享语义（与 delete 端点测试口径一致），匿名请求可命中
+    # 历史空属主只归主管理员；本端点调用者为 u1，夹具显式声明同属主。
     return _FakeRepo(
-        sessions=[{"session_id": "s1", "agent_id": "a1", "user_id": "", "title": "新对话"}],
+        sessions=[{"session_id": "s1", "agent_id": "a1", "user_id": "u1", "title": "新对话"}],
         messages=[_message("user", "汽车是什么？"), _message("assistant", "汽车是一种交通工具。")],
     )
 
@@ -227,10 +227,10 @@ def test_auto_title_404_when_session_missing(client, monkeypatch, repo):
 def test_auto_title_400_when_no_user_message(client, monkeypatch):
     from neurova.api.endpoints import console as console_api
 
-    console_api.get_session_repository = lambda: _FakeRepo(
-        sessions=[{"session_id": "s1", "agent_id": "a1", "user_id": "", "title": "新对话"}],
+    monkeypatch.setattr(console_api, "get_session_repository", lambda: _FakeRepo(
+        sessions=[{"session_id": "s1", "agent_id": "a1", "user_id": "u1", "title": "新对话"}],
         messages=[],
-    )
+    ))
     resp = client.post("/api/v1/console/chat/sessions/s1/auto-title")
     assert resp.status_code == 400
 

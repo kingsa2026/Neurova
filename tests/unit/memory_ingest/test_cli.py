@@ -321,14 +321,18 @@ def test_apply_owner_parameter_lands_on_the_session(tmp_path: Path, manager, ses
     assert sessions.list_sessions("kai-import", user_id="u_bob") == []
 
 
-def test_apply_without_owner_keeps_the_session_shared(tmp_path: Path, manager, sessions):
+def test_apply_without_owner_resolves_primary_admin(tmp_path: Path, manager, sessions, monkeypatch):
+    from neurova import post_chat_pipeline
+
+    monkeypatch.setattr(post_chat_pipeline, "_adminOwnerId", lambda: "u_admin")
     db = _db(tmp_path / "history.db")
 
     main(["apply", str(db), "--agent-id", "kai-import", "--yes", "--run-id", "run-owner-2"],
          manager=manager, sessions=sessions)
 
-    assert sessions.list_sessions("kai-import")[0]["user_id"] == ""
-    assert sessions.list_sessions("kai-import", user_id="u_bob")
+    assert sessions.list_sessions("kai-import")[0]["user_id"] == "u_admin"
+    assert sessions.list_sessions("kai-import", user_id="u_bob") == []
+    assert sessions.list_sessions("kai-import", user_id="u_admin")
 
 
 def test_apply_refuses_to_take_over_an_owned_session(tmp_path: Path, manager, sessions, capsys):

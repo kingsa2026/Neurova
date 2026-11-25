@@ -174,5 +174,36 @@ class TestS4AddMessageAtomicRMW:
         )
 
 
+class TestCorruptJsonQuarantineReentrancy:
+    def test_file_lock_is_rlock(self, fresh_manager):
+        lock = fresh_manager._get_file_lock(fresh_manager._sessions_dir / "session.json")
+        assert isinstance(lock, type(threading.RLock()))
+
+    @pytest.mark.parametrize("jsonlEnabled", [False, True])
+    def test_quarantine_while_holding_file_lock_finishes(self, fresh_manager, monkeypatch, jsonlEnabled):
+        """坏 JSON 在持锁读路径内隔离，不得等待同一把不可重入锁。"""
+        monkeypatch.setenv("NEUROVA_SESSION_JSONL", "1" if jsonlEnabled else "0")
+        target = fresh_manager._sessions_dir / "session_broken_2026-11-25.json"
+        target.write_text('{"messages": [', encoding="utf-8")
+        finished = threading.Event()
+
+        def worker():
+            try:
+                with fresh_manager._get_file_lock(target):
+                    if jsonlEnabled:
+                        fresh_manager._loadSessionState(target)
+                    else:
+                        fresh_manager._read_session_file(target)
+            finally:
+                finished.set()
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        thread.join(timeout=1.0)
+        assert finished.is_set(), "损坏 JSON 隔离在普通 Lock 内重入，worker 仍被卡住"
+        assert not target.exists()
+        assert list(target.parent.glob("*.corrupt-*.bak"))
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

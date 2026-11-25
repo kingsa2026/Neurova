@@ -81,15 +81,18 @@ def _session_key_of(ref: str) -> str:
 
 
 def _current_session_owner(agent_id: str, session_key: str) -> str:
-    """恢复前读出会话属主——恢复不得改写可见性归属（删了重建时随行）。"""
+    """恢复前读出会话属主——恢复不得改写可见性归属（删了重建时随行）。
+
+    P0-08 fail-closed：属主读取失败直接抛错中止恢复（在 delete 之前），
+    不再回落「按共享会话处理」的旧语义。
+    """
     from neurova.session_manager import get_session_manager
 
     try:
         record = get_session_manager().get_session(agent_id, session_key)
-        return str(getattr(record, "user_id", "") or "")
-    except Exception as exc:  # noqa: BLE001 - 属主读取失败按共享会话处理
-        logger.debug("恢复前读取会话属主失败（按空属主处理）: %s", exc)
-        return ""
+    except Exception as exc:
+        raise RuntimeError(f"恢复前读取会话属主失败（agent={agent_id} session={session_key}）: {exc}") from exc
+    return str(getattr(record, "user_id", "") or "")
 
 
 def _sync_agent_memory_mirror(agent_id: str, messages: List[Dict[str, Any]]) -> None:
@@ -134,6 +137,18 @@ def _apply_restore(agent_id: str, session_key: str):
         messages = data.get("messages") or []
 
         owner = _current_session_owner(agent_id, session_key)
+        if not owner:
+            # P0-08：空属主（含无历史会话的新建语义）归主管理员
+            # （2026-11-18 用户拍板，废止旧「空即共享」）。
+            from neurova.post_chat_pipeline import _adminOwnerId
+
+            owner = str(_adminOwnerId() or "").strip()
+        if not owner:
+            # 解析不出主管理员 → fail-closed。恢复会删掉原会话再重建，
+            # 绝不允许在归属未知时动手。
+            raise RuntimeError(
+                f"会话 {session_key} 的属主无法解析（空属主且无主管理员），已中止恢复"
+            )
         # 先清后写：会话文件按日期分片，get_history 聚合全部日期——
         # 只追加不清理会把"未来"轮次留在恢复点之后。
         sm.delete_session(agent_id, session_key)

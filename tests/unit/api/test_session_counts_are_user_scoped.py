@@ -14,9 +14,8 @@
    调用者身份——这正是本仓身份批反复踩过的"门在、值没接过来"。所以修法必须把
    依赖的**返回值**接进端点，再往下透传到计数函数。
 
-读侧规则按既有口径保留：`_collect_summaries` 里"空属主 = 任何人可见"不动
-（房间消息与后台落盘的会话依赖它）。因此期望值是"自己的 + 空属主的"，
-不是"只有自己的"——这条判据写死在这里，免得日后把共享语义误当成漏洞修掉。
+读侧规则按 AGENTS.md §3：空属主归主管理员（role=admin 中 id 最小者），
+不得对普通用户或匿名调用方可见。期望值只含调用者自己的会话。
 
 装配口径与 `tests/integration/test_memory_route_authorization.py` 一致：真 router、
 真依赖、真 SessionManager（`NEUROVA_SESSIONS_DIR` 隔离），只 override 依赖的返回身份。
@@ -40,9 +39,10 @@ ALICE = {"user_id": "alice", "username": "alice", "role": "user", "neuser_id": "
 BOB = {"user_id": "bob", "username": "bob", "role": "user", "neuser_id": "ne-bob"}
 ANON = {"user_id": "default", "username": "default", "role": "user", "neuser_id": "default"}
 
-# alice 2 条 + bob 1 条 + 空属主 1 条 = 全体 4；按人分桶后每人可见 3
+# alice 2 条 + bob 1 条 + 空属主 1 条（只归主管理员 3）= 全体 4
 TOTAL_ALL = 4
-PER_USER = 3
+PER_USER = 2
+PRIMARY_ADMIN = "3"
 
 
 @pytest.fixture
@@ -55,12 +55,14 @@ def seededRepo(tmp_path, monkeypatch):
     from neurova.session_repository import get_session_repository, reset_session_repository
 
     reset_session_repository()
+    import neurova.post_chat_pipeline as pcp
+    monkeypatch.setattr(pcp, "_adminOwnerId", lambda: PRIMARY_ADMIN)
     repo = get_session_repository()
     for owner, title in (
         ("alice", "alice 的会话一"),
         ("alice", "alice 的会话二"),
         ("bob", "bob 的会话"),
-        ("", "无属主的共享会话"),
+        ("", "历史无主会话"),
     ):
         repo.create_session(agent_id="agent_x", user_id=owner, title=title)
     assert repo.count_sessions() == TOTAL_ALL, "播种失败：隔离目录里条数不对"
@@ -93,7 +95,7 @@ def _agentConversationTotal(payload: typing.Any) -> int:
 
 
 def test_homeConversationCountExcludesOtherUsers(client):
-    """/home/data 的 total_conversations 只该含"自己的 + 空属主的"= 3，不是全体 4。"""
+    """/home/data 的 total_conversations 只含 alice 自己的 2 条，不含历史无主会话。"""
     client.as_user(ALICE)
     resp = client.get("/api/v1/home/data")
     assert resp.status_code == 200, resp.text
@@ -116,39 +118,45 @@ def test_twoUsersSeeDifferentCounts(client):
     aliceCount = client.get("/api/v1/home/data").json()["quick_stats"]["total_conversations"]
     client.as_user(BOB)
     bobCount = client.get("/api/v1/home/data").json()["quick_stats"]["total_conversations"]
-    assert (aliceCount, bobCount) == (PER_USER, 2), f"alice={aliceCount} bob={bobCount}"
+    assert (aliceCount, bobCount) == (PER_USER, 1), f"alice={aliceCount} bob={bobCount}"
+
+
+def test_primaryAdminSeesOwnerlessSession(client):
+    """历史无主会话只归主管理员，不向普通用户或匿名调用方泄露。"""
+    client.as_user({"user_id": PRIMARY_ADMIN, "username": "admin", "role": "admin", "neuser_id": "3"})
+    resp = client.get("/api/v1/home/data")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["quick_stats"]["total_conversations"] == 1
 
 
 def test_agentsStatsAreUserScoped(client):
-    """`/stats/agents` 原先无门且不分桶——补 or_default 门后 bob 只看到 1+1 条。"""
+    """`/stats/agents` 按调用者分桶，bob 只看到自己的 1 条。"""
     client.as_user(BOB)
     resp = client.get("/api/v1/stats/agents")
     assert resp.status_code == 200, resp.text
     total = _agentConversationTotal(resp.json())
-    assert total == 2, f"/stats/agents 未按调用者分桶（bob 应 2 = 自己 1 + 空属主 1）：{total}"
+    assert total == 1, f"/stats/agents 未按调用者分桶（bob 应 1）：{total}"
 
 
 def test_agentsStatsAllowAnonymousCaller(client):
-    """匿名回落 default 桶是既有行为（政策已确认保留），不得改成硬拒。"""
+    """匿名回落 default 桶是既有行为，但历史无主会话不属于 default。"""
     client.as_user(None)
     resp = client.get("/api/v1/stats/agents")
     assert resp.status_code == 200, f"匿名不该被硬拒：{resp.status_code} {resp.text[:120]}"
-    assert _agentConversationTotal(resp.json()) == 1, "匿名只该看到空属主那一条"
+    assert _agentConversationTotal(resp.json()) == 0, "匿名不得看到历史无主会话"
 
 
 def test_countFunctionsThemselvesTakeUserId(seededRepo):
-    """判据落在收口处而不是只钉端点：计数函数必须接受并应用 user_id。
-
-    期望值含"空属主 = 对所有人可见"那一条（本文件顶部保留的既有规则），
-    所以 alice = 自己 2 + 共享 1，bob = 自己 1 + 共享 1——与端点面 PER_USER 同源，
-    两处若不一致就是判据漂移。
-    """
-    assert seededRepo.count_sessions(user_id="alice") == 3
-    assert seededRepo.count_sessions(user_id="bob") == 2
-    assert seededRepo.count_sessions() == TOTAL_ALL, "不带 user_id 时仍该是全体（旧口径未被偷偷改掉）"
-    owned = [s for s in seededRepo.list_sessions(user_id="alice") if s.get("user_id")]
-    shared = [s for s in seededRepo.list_sessions(user_id="alice") if not s.get("user_id")]
-    assert (len(owned), len(shared)) == (2, 1), f"分桶规则走样：owned={owned} shared={shared}"
+    """计数函数自身也按同一属主口径分桶，空属主只计入主管理员。"""
+    assert seededRepo.count_sessions(user_id="alice") == PER_USER
+    assert seededRepo.count_sessions(user_id="bob") == 1
+    assert seededRepo.count_sessions(user_id=PRIMARY_ADMIN) == 1
+    assert seededRepo.count_sessions() == TOTAL_ALL, "不带 user_id 时仍该是全体"
+    aliceRows = seededRepo.list_sessions(user_id="alice")
+    adminRows = seededRepo.list_sessions(user_id=PRIMARY_ADMIN)
+    assert len(aliceRows) == PER_USER
+    assert all(row["user_id"] == "alice" for row in aliceRows)
+    assert len(adminRows) == 1 and adminRows[0]["user_id"] == PRIMARY_ADMIN
 
     assert "user_id" in inspect.signature(homeMod._real_conversation_count).parameters, (
         "_real_conversation_count 仍无条件统计全体会话"

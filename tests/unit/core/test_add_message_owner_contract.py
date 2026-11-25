@@ -2,7 +2,7 @@
 """DATA-P1-1（审计 2026-09-11）回归：add_message 会话属主契约。
 
 - 新建会话分支必须写入 user_id/title（与 create_session 对齐），
-  否则 _collect_summaries 对空属主放行 → 会话跨用户可见。
+  否则会话只剩历史无主归属，普通用户无法按本人筛选读取。
 - 存量会话缺 user_id 时随下次写入回填。
 
 SessionManager 是 __new__ 单例：目录覆盖走 NEUROVA_SESSIONS_DIR env，

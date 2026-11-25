@@ -18,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from neurova.core.identity_context import clear_request_user_id, set_request_user_id  # noqa: E402
 from neurova.core.read_sessions import get_read_session_store, reset_read_session_store  # noqa: E402
 
 
@@ -50,8 +51,10 @@ _LONG_TEXT = ("甲" * 40_000) + ("乙" * 25_000)  # 65_000 > 60_000
 class TestBrowserReadFreshSession(unittest.TestCase):
     def setUp(self):
         reset_read_session_store()
+        set_request_user_id("browser-owner")
 
     def tearDown(self):
+        clear_request_user_id()
         reset_read_session_store()
 
     def test_long_page_creates_session_with_cursor(self):
@@ -120,6 +123,7 @@ class TestBrowserReadFreshSession(unittest.TestCase):
 class TestBrowserReadContinuation(unittest.TestCase):
     def setUp(self):
         reset_read_session_store()
+        set_request_user_id("browser-owner")
         # 预置一个 65k 会话（served=60k：模拟首读已直接吐出首片）
         self.store = get_read_session_store()
         self.session_id = self.store.create(
@@ -128,6 +132,7 @@ class TestBrowserReadContinuation(unittest.TestCase):
         ).session_id
 
     def tearDown(self):
+        clear_request_user_id()
         reset_read_session_store()
 
     def test_continuation_without_browser(self):
