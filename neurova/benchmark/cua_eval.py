@@ -35,12 +35,36 @@ __all__ = [
     "CuaInfraError",
     "CuaTask",
     "ToolExecutorEpisodeAdapter",
+    "cuaActionWhitelist",
     "runCuaTasks",
 ]
 
 CheckFn = Callable[[Dict[str, Any]], Tuple[bool, float, dict]]
 EpisodeFn = Callable[[Any], Dict[str, Any]]
 _SCORE_DIGITS = 6
+
+# 观察面取证工具（只读，不注入输入）：动作脚本里允许出现，但它们不是"操作"。
+_CUA_OBSERVATION_TOOLS = frozenset({"computer_screenshot", "computer_list_windows"})
+_actionWhitelistCache: Optional[frozenset] = None
+
+
+def cuaActionWhitelist() -> frozenset:
+    """CUA 动作步骤合法工具名单（C1 动作空间纪律）。
+
+    单一事实源（R6）：前台注入族直接取 :data:`neurova.computer_use.FOREGROUND_DESKTOP_TOOLS`
+    名册，另加观察面取证工具（只读，不注入输入）。名单外的动作形态（LibreOffice
+    Basic 宏 / 裸 python / bash 等——OSWorld M1 失败模式）在脚本化 episode 里
+    一律记 ``invalid`` 且不送执行管线，不冒充已执行。
+    """
+    global _actionWhitelistCache
+    if _actionWhitelistCache is None:
+        # 惰性 import：computer_use 顶层可能携带可选重依赖（仓规：可选依赖惰性加载）
+        from neurova.computer_use import FOREGROUND_DESKTOP_TOOLS
+
+        _actionWhitelistCache = (
+            frozenset(FOREGROUND_DESKTOP_TOOLS) | _CUA_OBSERVATION_TOOLS
+        )
+    return _actionWhitelistCache
 
 
 class CuaInfraError(RuntimeError):
@@ -91,10 +115,27 @@ class ToolExecutorEpisodeAdapter:
 
     async def __call__(self, task: Any) -> Dict[str, Any]:
         script = list(self._actions.get(task.task_id) or [])
+        whitelist = cuaActionWhitelist()
         results: List[Dict[str, Any]] = []
+        invalidCount = 0
         for step in script:
             tool = str(step.get("tool") or "")
             params = dict(step.get("params") or {})
+            if tool not in whitelist:
+                # C1 动作空间纪律：名单外动作（宏/裸代码）显式记 invalid 且不执行——
+                # 脚本错误≠器械故障（不抛 CuaInfraError），计数进行级与聚合。
+                invalidCount += 1
+                results.append(
+                    {
+                        "tool": tool,
+                        "invalid": True,
+                        "reason": "not_in_action_whitelist",
+                    }
+                )
+                logger.warning(
+                    "[cua_eval] 非法动作步已跳过 tool=%r task=%s", tool, task.task_id
+                )
+                continue
             result = await self._executor.execute(tool, params)
             results.append({"tool": tool, "result": result})
             if _looksBlocked(result):
@@ -108,6 +149,7 @@ class ToolExecutorEpisodeAdapter:
             "task_id": task.task_id,
             "instruction": task.instruction,
             "action_results": results,
+            "action_invalid": invalidCount,
             "terminal": terminal,
         }
 
@@ -163,6 +205,7 @@ def runCuaTasks(
                 "error": error,
                 "details": details,
                 "latency_ms": round(elapsedMs, 2),
+                "action_invalid": int(evidence.get("action_invalid") or 0),
             }
         )
 
@@ -177,6 +220,7 @@ def runCuaTasks(
         "tasks_correct": sum(1 for row in judgedRows if row["passed"]),
         "tasks_failed": sum(1 for row in judgedRows if not row["passed"]),
         "tasks_infra_failed": tasksTotal - len(judgedRows),
+        "action_invalid_total": sum(row["action_invalid"] for row in perTask),
         "score": round(sum(scores) / len(scores), _SCORE_DIGITS) if scores else None,
         "avg_latency_ms": round(sum(latencies) / len(latencies), 2) if latencies else None,
         "per_task": perTask,

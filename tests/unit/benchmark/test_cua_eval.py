@@ -38,6 +38,21 @@ def _taskCheckerRaises(taskId: str):
     return CuaTask(task_id=taskId, instruction="任务", check=_check, description="样例")
 
 
+def _executorStub():
+    """桩执行器：computer_screenshot 返回真截图证据，其余动作回声成功。"""
+    executor = MagicMock()
+    executor.execute = MagicMock()
+
+    async def _execute(tool_name, params):
+        if tool_name == "computer_screenshot":
+            return {"success": True, "format": "png", "size_bytes": 100,
+                    "frame_id": "f1"}
+        return {"success": True, "tool_name": tool_name}
+
+    executor.execute.side_effect = _execute
+    return executor
+
+
 class TestRunCuaTasks:
     def test_judged_scoring_over_measured_only(self):
         tasks = [_task("t1", passed=True), _task("t2", passed=False)]
@@ -114,17 +129,7 @@ class TestRunCuaTasks:
 
 class TestToolExecutorEpisodeAdapter:
     def _executor(self):
-        executor = MagicMock()
-        executor.execute = MagicMock()
-
-        async def _execute(tool_name, params):
-            if tool_name == "computer_screenshot":
-                return {"success": True, "format": "png", "size_bytes": 100,
-                        "frame_id": "f1"}
-            return {"success": True, "tool_name": tool_name}
-
-        executor.execute.side_effect = _execute
-        return executor
+        return _executorStub()
 
     def test_adapter_runs_scripted_actions_through_executor(self):
         executor = self._executor()
@@ -171,3 +176,83 @@ class TestToolExecutorEpisodeAdapter:
         evidence = asyncio.run(adapter(_task("t1", passed=True)))
         executor.execute.assert_called_once_with("computer_screenshot", {})
         assert evidence["terminal"]["success"] is True
+
+
+class TestActionDiscipline:
+    """C1 动作空间纪律（OSWorld 失败驱动改进卡）：非白名单动作显式记
+    invalid_action 且不执行——M1 教训（宏/裸代码被静默 no-op 冒充已执行）。
+
+    - 白名单单源：computer_use 前台注入族 + 观察面取证工具（判据钉住对账）；
+    - 非法步不产生 CuaInfraError（它是脚本错误，不是器械故障）；
+    - 行级 action_invalid 计数 + 聚合 action_invalid_total。
+    """
+
+    def test_actionWhitelistCoversForegroundRosterAndObservation(self):
+        from neurova.benchmark.cua_eval import cuaActionWhitelist
+        from neurova.computer_use import FOREGROUND_DESKTOP_TOOLS
+
+        whitelist = cuaActionWhitelist()
+        assert FOREGROUND_DESKTOP_TOOLS <= whitelist, "白名单必须覆盖前台注入族（单源对账）"
+        assert "computer_screenshot" in whitelist, "终态取证工具必须在白名单"
+        assert all(name.startswith("computer_") for name in whitelist), \
+            "白名单只收 computer_* 工具，宏/裸代码形态一律非法"
+
+    def test_nonWhitelistedToolMarkedInvalidNotExecuted(self):
+        executor = _executorStub()
+        actions = {
+            "t1": [
+                {"tool": "computer_click", "params": {"x": 10, "y": 20}},
+                {"tool": "basic_macro", "params": {"code": "Sub x End Sub"}},
+                {"tool": "bash", "params": {"command": "code --add /x"}},
+                {"tool": "", "params": {}},
+            ]
+        }
+        adapter = ToolExecutorEpisodeAdapter(executor, actions)
+
+        import asyncio
+        evidence = asyncio.run(adapter(_task("t1", passed=True)))
+        executedTools = [c.args[0] for c in executor.execute.call_args_list]
+        assert "basic_macro" not in executedTools, "非法动作不得送执行管线"
+        assert "bash" not in executedTools, "非法动作不得送执行管线"
+        assert executedTools == ["computer_click", "computer_screenshot"], \
+            "合法步照常执行 + 终态取证"
+        assert evidence["action_invalid"] == 3, "行级 invalid 计数=非法步数"
+        invalidRows = [r for r in evidence["action_results"] if r.get("invalid")]
+        assert len(invalidRows) == 3
+        assert all(r.get("reason") for r in invalidRows), "每条非法步带原因"
+
+    def test_invalidActionIsNotInfraFailure(self):
+        executor = _executorStub()
+        actions = {"t1": [{"tool": "python_code", "params": {"code": "import os"}}]}
+        adapter = ToolExecutorEpisodeAdapter(executor, actions)
+
+        import asyncio
+        evidence = asyncio.run(adapter(_task("t1", passed=False)))
+        assert evidence["action_invalid"] == 1, "脚本错误≠器械故障，不得抛 CuaInfraError"
+
+    def test_runCuaTasksAggregatesInvalidActionCounts(self):
+        executor = _executorStub()
+        actions = {
+            "t_ok": [{"tool": "computer_click", "params": {"x": 1, "y": 2}}],
+            "t_bad": [
+                {"tool": "basic_macro", "params": {"code": "Sub x"}},
+                {"tool": "computer_click", "params": {"x": 3, "y": 4}},
+                {"tool": "python_code", "params": {"code": "print(1)"}},
+            ],
+        }
+        adapter = ToolExecutorEpisodeAdapter(executor, actions)
+        tasks = [_task("t_ok", passed=True), _task("t_bad", passed=False)]
+
+        report = runCuaTasks(tasks, adapter)
+        assert report["tasks_judged"] == 2, "非法动作不改变 judged 口径"
+        assert report["tasks_infra_failed"] == 0, "脚本错误不得记成器械故障"
+        assert report["action_invalid_total"] == 2, "聚合 invalid 计数"
+        byId = {row["task_id"]: row for row in report["per_task"]}
+        assert byId["t_ok"]["action_invalid"] == 0
+        assert byId["t_bad"]["action_invalid"] == 2
+
+    def test_injectedEpisodeWithoutInvalidFieldDefaultsZero(self):
+        report = runCuaTasks([_task("t1", passed=True)],
+                             lambda task: {"evidence": {}})
+        assert report["action_invalid_total"] == 0
+        assert report["per_task"][0]["action_invalid"] == 0
