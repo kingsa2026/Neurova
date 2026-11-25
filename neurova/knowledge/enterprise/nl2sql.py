@@ -231,8 +231,50 @@ def planJoinPaths(edges: List[Dict[str, Any]],
     return paths
 
 
+def _parseSqlTables(sql: str) -> Optional[List[str]]:
+    """sqlglot 方言解析收集**全部**表引用（KNOW-07）：逗号表、双引号、反引号、
+    方括号、子查询、模式限定名全收；CTE 别名不是目录表，剔除。逐个尝试闭集
+    方言（通用/MySQL 反引号/T-SQL 方括号），全部解析失败返回 None——安全闸
+    调用方必须据此拒绝，不许拿粗提结果放行。"""
+    try:
+        import sqlglot
+        from sqlglot import exp
+    except ImportError:  # pragma: no cover - 依赖缺失按无法解析处置（诚实拒绝）
+        return None
+    text = str(sql or "")
+    statements: List[Any] = []
+    for dialect in (None, "mysql", "tsql"):
+        try:
+            parsed = sqlglot.parse(text, read=dialect)
+        except Exception:  # noqa: BLE001 - 换下一个方言；全失败即拒绝
+            continue
+        statements = [s for s in (parsed or []) if s is not None]
+        if statements:
+            break
+    if not statements:
+        return None
+    cteNames = {cte.alias_or_name for statement in statements
+                for cte in statement.find_all(exp.CTE)}
+    tables: List[str] = []
+    for statement in statements:
+        for table in statement.find_all(exp.Table):
+            ref = ".".join(p for p in (table.catalog, table.db, table.name) if p)
+            if not ref or ref in cteNames:
+                continue
+            if ref not in tables:
+                tables.append(ref)
+    return tables
+
+
 def tablesInSql(sql: str) -> List[str]:
-    """粗提 FROM/JOIN 目标表名（白名单校验用；列级校验靠执行期诚实报错）。"""
+    """SQL 引用的全部表名（sqlglot 方言解析，KNOW-07）。
+
+    解析失败时回退旧 FROM/JOIN 正则粗提——仅服务评估/引用/建议等读侧启发；
+    安全闸（_validateSql）不走回退：解析不完整即拒绝。
+    """
+    parsed = _parseSqlTables(sql)
+    if parsed is not None:
+        return parsed
     return [m.group(1) for m in _FROM_TABLE_RE.finditer(str(sql or ""))]
 
 
@@ -436,7 +478,12 @@ class Nl2SqlService:
         from .connectors_sql import assertReadonlySelect
 
         checked = assertReadonlySelect(sql)  # 只读硬闸（写意图/多语句/注释）
-        referenced = tablesInSql(checked)
+        # KNOW-07：表名审计走方言解析全量收集；解析不完整即拒绝——
+        # 逗号表/引号名/子查询里的外表都进白名单比对，没有粗提兜底过闸。
+        referenced = _parseSqlTables(checked)
+        if referenced is None:
+            raise ValueError(
+                "SQL 无法完整解析，表名审计不通过——拒绝执行（只允许单条普通 SELECT）")
         unknown = [t for t in referenced if t not in tables]
         if unknown:
             raise ValueError("SQL 引用了目录外表: %s" % ", ".join(sorted(set(unknown))))
