@@ -105,12 +105,21 @@ async def update_store(
 
 @router.delete("/stores/{store_id}")
 async def delete_store(store_id: str, current_user: Dict[str, Any] = Depends(get_current_user_or_default)):
-    """删除店铺（含 SecretStore 密钥清理；仅限归属用户）"""
+    """删除店铺（含 SecretStore 密钥清理；仅限归属用户）。
+
+    EVO-13：结果分层如实——凭据清理失败显式 503 可重试，不假成功。
+    """
     from neurova.api.endpoints import neurflow_api as api
 
     manager = api._get_store_manager()
     user_id = str(current_user.get("user_id") or "")
-    if not manager.delete_store(store_id, user_id=user_id):
+    result = manager.delete_store(store_id, user_id=user_id)
+    if not result.rowDeleted:
+        if result.credentialErrors:
+            raise HTTPException(
+                status_code=503,
+                detail=f"店铺凭据清理失败，可重试: {', '.join(result.credentialErrors)}",
+            )
         raise HTTPException(status_code=404, detail=f"店铺不存在: {store_id}")
     return {"message": "店铺已删除"}
 

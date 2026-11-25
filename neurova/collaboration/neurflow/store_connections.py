@@ -15,6 +15,7 @@ import json
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -57,6 +58,26 @@ class StoreCredentials:
             f"access_token={_mask(self.access_token)}, refresh_token={_mask(self.refresh_token)}, "
             f"extra_keys={list(self.extra.keys())})"
         )
+
+
+@dataclass
+class StoreDeletionResult:
+    """店铺删除的分层结果（EVO-13）：行删除与凭据清理各自如实报告。
+
+    凭据清理失败时 `credentialErrors` 逐槽点名，行保持不动——调用方可原样
+    重试，绝不留下"无登记记录的孤儿凭据"。`ok` / `__bool__` 供只关心
+    "是否整体成功"的调用方使用。
+    """
+
+    rowDeleted: bool
+    credentialErrors: List[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return self.rowDeleted and not self.credentialErrors
+
+    def __bool__(self) -> bool:
+        return self.ok
 
 
 def _mask(value: str) -> str:
@@ -142,7 +163,10 @@ class StoreConnectionManager:
         user_id: str = "",
         **fields: Any,
     ) -> StoreConnection:
-        """连接店铺：写注册表行 + 凭据进 SecretStore（user_id 为归属用户）"""
+        """连接店铺：写注册表行 + 凭据进 SecretStore（user_id 为归属用户）。
+
+        EVO-14：先写凭据再落行；任一侧失败回滚已写侧，库与凭据不分叉。
+        """
         store_id = fields.pop("store_id", None) or f"{_STORE_ID_PREFIX}{uuid.uuid4().hex[:12]}"
         now = time.time()
         conn = StoreConnection(
@@ -161,9 +185,8 @@ class StoreConnectionManager:
             updated_at=now,
             last_used_at=float(fields.pop("last_used_at", 0) or 0),
         )
-        self._db.save_store_connection(conn)
-        if credentials:
-            self._save_credentials(store_id, credentials)
+        with self._credential_write(store_id, credentials):
+            self._db.save_store_connection(conn)
         return conn
 
     def update_store(
@@ -173,7 +196,11 @@ class StoreConnectionManager:
         user_id: str = "",
         **fields: Any,
     ) -> Optional[StoreConnection]:
-        """更新店铺字段；credentials 传入则覆盖对应密钥槽位（仅限归属用户）"""
+        """更新店铺字段；credentials 传入则覆盖对应密钥槽位（仅限归属用户）。
+
+        EVO-14：先写凭据（记写前快照）再落行；行写入失败按快照恢复旧凭据，
+        不留"行已更新、凭据半途"的分叉。
+        """
         existing = self._db.get_store_connection(store_id, user_id)
         if existing is None:
             return None
@@ -183,25 +210,26 @@ class StoreConnectionManager:
                 data[key] = value
         data["updated_at"] = time.time()
         conn = StoreConnection(**data)
-        self._db.save_store_connection(conn)
-        if credentials:
-            self._save_credentials(store_id, credentials)
+        with self._credential_write(store_id, credentials):
+            self._db.save_store_connection(conn)
         return conn
 
-    def delete_store(self, store_id: str, user_id: str = "") -> bool:
+    def delete_store(self, store_id: str, user_id: str = "") -> StoreDeletionResult:
         """删除店铺：行 + SecretStore 四个命名空间 key 一并清理（仅限归属用户）。
 
-        行未命中（非归属/不存在）时不清理任何密钥，避免跨用户删除误伤他人凭据。
+        EVO-13：先清凭据再删行，结果分层如实返回。凭据清理失败时行保持不动
+        （`rowDeleted=False` + `credentialErrors` 逐槽点名），调用方可原样重试；
+        若先删行，凭据清理失败就会留下无登记记录的孤儿凭据——store_id 复用后
+        旧凭据会重新附着。行未命中（非归属/不存在）时不清理任何密钥，
+        避免跨用户删除误伤他人凭据。
         """
-        removed = self._db.delete_store_connection(store_id, user_id)
-        if not removed:
-            return False
-        for suffix in _SLOTS:
-            try:
-                self._secrets.delete(_store_key(store_id, suffix))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("清理店铺 %s 的 %s 密钥失败: %s", store_id, suffix, exc)
-        return True
+        existing = self._db.get_store_connection(store_id, user_id)
+        if existing is None:
+            return StoreDeletionResult(rowDeleted=False)
+        credential_errors = self._delete_credentials(store_id)
+        if credential_errors:
+            return StoreDeletionResult(rowDeleted=False, credentialErrors=credential_errors)
+        return StoreDeletionResult(rowDeleted=self._db.delete_store_connection(store_id, user_id))
 
     def get_store(self, store_id: str, user_id: str = "") -> Optional[StoreConnection]:
         return self._db.get_store_connection(store_id, user_id)
@@ -275,13 +303,81 @@ class StoreConnectionManager:
             refresh_token=refresh_token,
         )
 
-    def _save_credentials(self, store_id: str, credentials: Dict[str, str]) -> None:
+    def _save_credentials(
+        self, store_id: str, credentials: Dict[str, str],
+        written_out: Optional[List[str]] = None,
+    ) -> List[str]:
+        """写入凭据槽位；返回成功写入的槽位名（传入 `written_out` 时同步填充）。
+
+        只负责写，不负责回滚——回滚由 `_credential_write` 按写前快照统一做
+        （对更新场景，"删掉半途新值"会连旧值一起丢，必须按快照还原）。
+        """
+        written = written_out if written_out is not None else []
         slot_by_field = _cred_field_to_slot()
-        for field_name, value in credentials.items():
+        for field_name, value in (credentials or {}).items():
             suffix = slot_by_field.get(field_name)
             if not suffix or value is None or str(value) == "":
                 continue
             self._secrets.set(_store_key(store_id, suffix), str(value))
+            written.append(suffix)
+        return written
+
+    @contextmanager
+    def _credential_write(self, store_id: str, credentials: Optional[Dict[str, str]]):
+        """EVO-14 凭据写入补偿边界：块内任何一步失败（含后续行写入），
+        按写前快照恢复已写槽位——原本无值的删除、原本有值的还原——再原样抛出。
+
+        恢复本身失败逐槽告警：此时凭据面可能仍有残留，但操作已按失败上报，
+        调用方可重试；不吞掉原始异常。
+        """
+        slot_by_field = _cred_field_to_slot()
+        snapshot: Dict[str, Optional[str]] = {}
+        if credentials:
+            for field_name in credentials:
+                suffix = slot_by_field.get(field_name)
+                if suffix:
+                    try:
+                        snapshot[suffix] = self._secrets.get(_store_key(store_id, suffix))
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "读取店铺 %s 的 %s 旧凭据失败（按无旧值处理）: %s",
+                            store_id, suffix, exc,
+                        )
+                        snapshot[suffix] = None
+        written: List[str] = []
+        try:
+            if credentials:
+                self._save_credentials(store_id, credentials, written)
+            yield written
+        except Exception:
+            self._restore_credential_slots(store_id, snapshot, written)
+            raise
+
+    def _restore_credential_slots(
+        self, store_id: str, snapshot: Dict[str, Optional[str]], written: List[str],
+    ) -> None:
+        for suffix in written:
+            try:
+                old_value = snapshot.get(suffix)
+                if old_value is None:
+                    self._secrets.delete(_store_key(store_id, suffix))
+                else:
+                    self._secrets.set(_store_key(store_id, suffix), old_value)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("回滚店铺 %s 的 %s 凭据失败: %s", store_id, suffix, exc)
+
+    def _delete_credentials(
+        self, store_id: str, suffixes: Optional[List[str]] = None,
+    ) -> List[str]:
+        """删除凭据槽位；返回删除失败的槽位名（空列表 = 全部清干净）。"""
+        failures: List[str] = []
+        for suffix in (suffixes if suffixes is not None else list(_SLOTS)):
+            try:
+                self._secrets.delete(_store_key(store_id, suffix))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("清理店铺 %s 的 %s 密钥失败: %s", store_id, suffix, exc)
+                failures.append(suffix)
+        return failures
 
     # ---- 连接测试 / 令牌刷新 ----
 

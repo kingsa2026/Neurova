@@ -167,11 +167,11 @@ class TestMultiUserIsolation:
             user_id="user_a",
             credentials={"app_key": _AK_VAL, "app_secret": _SK_VAL},
         )
-        assert manager.delete_store(conn.store_id, user_id="user_b") is False
+        assert manager.delete_store(conn.store_id, user_id="user_b").rowDeleted is False
         assert manager.get_store(conn.store_id, user_id="user_a") is not None
         # 密钥不该被跨用户清理
         assert secret_store.get(_store_key(conn.store_id, ("APP", "KEY"))) == _AK_VAL
-        assert manager.delete_store(conn.store_id, user_id="user_a") is True
+        assert manager.delete_store(conn.store_id, user_id="user_a").ok is True
         assert secret_store.get(_store_key(conn.store_id, ("APP", "KEY"))) is None
 
 
@@ -204,7 +204,7 @@ class TestUpdateStore:
 class TestDeleteStore:
     def test_delete_removes_row_and_secrets(self, manager, storage, secret_store):
         conn = manager.create_store(platform="douyin-ecom", store_name="抖店小店", credentials=_fake_credentials())
-        assert manager.delete_store(conn.store_id) is True
+        assert manager.delete_store(conn.store_id).ok is True
         assert manager.get_store(conn.store_id) is None
         assert storage.get_store_connection(conn.store_id) is None
         # 四个命名空间 key 全部清空
@@ -212,7 +212,7 @@ class TestDeleteStore:
             assert secret_store.get(_store_key(conn.store_id, suff)) is None
 
     def test_delete_missing_returns_false(self, manager):
-        assert manager.delete_store("store_ghost") is False
+        assert manager.delete_store("store_ghost").rowDeleted is False
 
 
 class TestMask:
@@ -253,6 +253,147 @@ class TestStoreCredentials:
         assert _SK_VAL not in s
         assert _AT_VAL not in s
         assert _RT_VAL not in s
+
+
+class _FailingSecretStore:
+    """EVO-13/14 故障注入：set/delete 抛后端故障，get/list_keys 透传真密钥库。
+
+    业务对象（StoreConnectionManager、NeurflowStorage 真库、真 SecretStore 内容）
+    一律不打桩——只在注入点制造一次真实的密钥库后端故障，验证库与凭据
+    不分叉、删除结果分层如实。"""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def get(self, key):
+        return self._inner.get(key)
+
+    def set(self, key, value):
+        raise RuntimeError("密钥库后端不可用（注入故障）")
+
+    def delete(self, key):
+        raise RuntimeError("密钥库后端不可用（注入故障）")
+
+    def list_keys(self):
+        return self._inner.list_keys()
+
+
+class TestStoreCredentialConsistency:
+    """EVO-13/EVO-14：店铺行（真 SQLite）与凭据（真 SecretStore）不分叉。"""
+
+    def _manager(self, storage, secret_store):
+        from neurova.collaboration.neurflow.store_connections import StoreConnectionManager
+
+        return StoreConnectionManager(storage=storage, secret_store=secret_store)
+
+    # ---- EVO-14：凭据写失败时行不得先行落库 ----
+
+    def test_create_credential_failure_leaves_no_row(self, storage, secret_store):
+        manager = self._manager(storage, secret_store)
+        failing = self._manager(storage, _FailingSecretStore(secret_store))
+
+        with pytest.raises(Exception):
+            failing.create_store(
+                platform="jd", store_name="分叉店", credentials=_fake_credentials()
+            )
+
+        assert storage.list_store_connections() == [], \
+            "凭据写入失败时注册表行不得先行落库（库与凭据分叉）"
+        assert [k for k in secret_store.list_keys() if k.startswith("store_")] == []
+
+    def test_update_credential_failure_leaves_row_and_credentials_untouched(
+        self, storage, secret_store
+    ):
+        manager = self._manager(storage, secret_store)
+        conn = manager.create_store(
+            platform="jd", store_name="旧名", credentials=_fake_credentials()
+        )
+        failing = self._manager(storage, _FailingSecretStore(secret_store))
+
+        with pytest.raises(Exception):
+            failing.update_store(
+                conn.store_id, store_name="新名",
+                credentials={"app_key": "eeee" + "5555"},
+            )
+
+        assert storage.get_store_connection(conn.store_id).store_name == "旧名", \
+            "凭据写入失败时行更新不得先行生效"
+        assert secret_store.get(_store_key(conn.store_id, ("APP", "KEY"))) == _AK_VAL, \
+            "旧凭据不得被半途覆盖"
+
+    # ---- EVO-14 补偿面：行写失败时已写凭据必须回滚 ----
+
+    def test_create_row_failure_rolls_back_written_credentials(
+        self, storage, secret_store, tmp_path
+    ):
+        manager = self._manager(storage, secret_store)
+        storage.close()  # 真实故障：行库不可写
+
+        with pytest.raises(Exception):
+            manager.create_store(
+                platform="jd", store_name="分叉店", credentials=_fake_credentials()
+            )
+
+        reopened = NeurflowStorage(str(tmp_path / "test_neurflow.db"))
+        try:
+            assert reopened.list_store_connections() == [], "行未落库"
+        finally:
+            reopened.close()
+        assert [k for k in secret_store.list_keys() if k.startswith("store_")] == [], \
+            "已写凭据必须回滚，不留无登记记录的孤儿凭据"
+
+    def test_update_row_failure_restores_previous_credentials(
+        self, storage, secret_store, tmp_path
+    ):
+        manager = self._manager(storage, secret_store)
+        conn = manager.create_store(
+            platform="jd", store_name="旧名", credentials=_fake_credentials()
+        )
+
+        storage.close()  # 真实故障：行库不可写
+        with pytest.raises(Exception):
+            manager.update_store(
+                conn.store_id, store_name="新名",
+                credentials={"app_key": "eeee" + "5555"},
+            )
+
+        reopened = NeurflowStorage(str(tmp_path / "test_neurflow.db"))
+        try:
+            row = reopened.get_store_connection(conn.store_id)
+            assert row is not None and row.store_name == "旧名", "行更新失败不得留下新值"
+        finally:
+            reopened.close()
+        assert secret_store.get(_store_key(conn.store_id, ("APP", "KEY"))) == _AK_VAL, \
+            "凭据必须回滚为写前快照"
+        assert secret_store.get(_store_key(conn.store_id, ("APP", "SECRET"))) == _SK_VAL
+        assert secret_store.get(_store_key(conn.store_id, ("ACCESS", "TOKEN"))) == _AT_VAL
+        assert secret_store.get(_store_key(conn.store_id, ("REFRESH", "TOKEN"))) == _RT_VAL
+
+    # ---- EVO-13：删除结果分层如实，凭据清不干净不假成功 ----
+
+    def test_delete_credential_failure_keeps_row_and_reports_retryable(
+        self, storage, secret_store
+    ):
+        manager = self._manager(storage, secret_store)
+        conn = manager.create_store(
+            platform="taobao", store_name="待删店", credentials=_fake_credentials()
+        )
+        failing = self._manager(storage, _FailingSecretStore(secret_store))
+
+        result = failing.delete_store(conn.store_id)
+
+        assert result.rowDeleted is False, "凭据没清干净不许删行——行还在才能重试"
+        assert result.credentialErrors, "凭据清理失败必须显式点名，不假成功"
+        assert storage.get_store_connection(conn.store_id) is not None, "行保留，可原样重试"
+        assert secret_store.get(_store_key(conn.store_id, ("APP", "KEY"))) == _AK_VAL, \
+            "失败删除不得留下无登记记录的孤儿凭据，也不得误清仍存活店铺的凭据"
+
+        # 密钥库恢复后原样重试 → 完整删除
+        retried = self._manager(storage, secret_store).delete_store(conn.store_id)
+        assert retried.ok is True
+        assert storage.get_store_connection(conn.store_id) is None
+        for suff in SECRET_SUFFIXES:
+            assert secret_store.get(_store_key(conn.store_id, suff)) is None
 
 
 class TestSingleton:
