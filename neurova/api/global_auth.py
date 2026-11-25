@@ -19,9 +19,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from typing import Dict, List, Optional, Set
+
+from fastapi import HTTPException
 
 from neurova.core.logger import get_logger
 
@@ -131,7 +134,15 @@ class GlobalAuthMiddleware:
             return
 
         headers = _headers_dict(scope)
-        identity = authenticateRequest(headers)
+        try:
+            identity = authenticateRequest(headers)
+        except HTTPException as exc:
+            # API-03：黑名单判据面故障 fail-closed——verify_access_token 经
+            # blacklistStateOr503 转成显式 503。本中间件位于 ExceptionMiddleware
+            # 外侧，HTTPException 不会自动变成响应，这里按同形信封诚实回出
+            #（不吞异常、不按"匿名/无效"降级）。
+            await _sendErrorEnvelope(send, exc.status_code, str(exc.detail))
+            return
         if identity is not None:
             await self.app(scope, receive, send)
             return
@@ -165,6 +176,28 @@ class GlobalAuthMiddleware:
         await send({"type": "http.response.body", "body": body})
 
 
+async def _sendErrorEnvelope(send, status_code: int, message: str) -> None:
+    """按 APIError 信封形状回错误响应（与 enforce 401 同形）。"""
+    body = json.dumps(
+        {
+            "code": "SERVICE_UNAVAILABLE" if status_code >= 500 else "AUTH_FAILED",
+            "message": message,
+            "timestamp": time.time(),
+        }
+    ).encode("utf-8")
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status_code,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"www-authenticate", b"Bearer"),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
 def _headers_dict(scope) -> Dict[str, str]:
     """ASGI headers → 小写键字典"""
     out: Dict[str, str] = {}
@@ -178,6 +211,9 @@ def _headers_dict(scope) -> Dict[str, str]:
 
 def authenticateRequest(headers: Dict[str, str]) -> Optional[Dict]:
     """验证 Bearer JWT 或 X-Service-Token；有效返回身份，无效/缺失返回 None。
+
+    API-03：黑名单判据面故障时抛 HTTPException(503)（fail-closed，经
+    blacklistStateOr503 单源转换），不按"无效"折算成 None 放行。
 
     复用 neurova.api.auth 契约（单一事实源），不在本模块重复实现。
     公开契约：限流中间件也走这一份取身份——每请求只允许存在一条凭证解析路径，

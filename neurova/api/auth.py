@@ -65,6 +65,16 @@ class AuthError(Exception):
         super().__init__(message)
 
 
+class TokenBlacklistUnavailableError(RuntimeError):
+    """令牌撤销名单（黑名单）持久层不可用。
+
+    API-03（审计 2026-11-25）：撤销判据面故障时**不得**按"未登记"放行——
+    那会把已撤销的 token 全部放回，"撤销即失效"的承诺在故障窗口内整体失效。
+    调用方须 fail-closed：经 `blacklistStateOr503` 转显式 503 拒绝服务，
+    不吞异常、不降级放行。
+    """
+
+
 # 安全审计 M1: JWT 密钥最小长度（HS256 对称密钥，过短可被暴力破解）
 _MIN_SECRET_LENGTH = 32
 
@@ -465,9 +475,13 @@ def blacklist_token(token: str, exp: float = 0.0) -> None:
 
 
 def is_token_blacklisted_global(token: str) -> bool:
-    """token 是否已撤销。查询故障按"未登记"放行（fail-open 与原内存实现
-    的失效语义一致——不因持久层故障扩大拒绝面）；登出写入失败仍由调用方
-    诚实报错。"""
+    """token 是否已撤销（SQLite 持久化单源）。
+
+    API-03（审计 2026-11-25）：查询故障**不再**按"未登记"放行。原 fail-open
+    把"黑名单库读不出来"折算成"没登记"，等于故障窗口内撤销承诺整体失效；
+    现抛 `TokenBlacklistUnavailableError`，由 `blacklistStateOr503` 的消费方
+    fail-closed 拒绝。登出写入失败仍由调用方诚实报错（不变）。
+    """
     try:
         with _blacklist_lock:
             conn = _blacklist_conn()
@@ -478,20 +492,45 @@ def is_token_blacklisted_global(token: str) -> bool:
                 return row is not None
             finally:
                 conn.close()
-    except Exception as exc:  # noqa: BLE001 - 持久层不可用不扩大拒绝面
-        logger.warning("登出黑名单查询失败，按未登记处理: %s", exc)
-        return False
+    except Exception as exc:  # noqa: BLE001 - 判据面故障向上抛，禁止吞成"未登记"
+        logger.error("登出黑名单查询失败（fail-closed，拒绝放行）: %s", exc)
+        raise TokenBlacklistUnavailableError(str(exc)) from exc
+
+
+def blacklistStateOr503(token: str) -> bool:
+    """撤销名单查询的统一取数口：持久层故障转显式 503（fail-closed）。
+
+    凡"用黑名单判放行"的消费方（verify_access_token / verify_refresh_token /
+    refresh 端点 / me 端点 / 2fa verify / 全局鉴权中间件）都从这一处取判定——
+    故障语义只许有一种答案：拒绝服务（503），不是放行。
+    """
+    try:
+        return is_token_blacklisted_global(token)
+    except TokenBlacklistUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="认证暂不可用：令牌撤销名单校验失败（fail-closed）",
+        ) from exc
 
 
 def verify_access_token(token: str) -> Optional[Dict[str, Any]]:
-    if is_token_blacklisted_global(token):
+    """验证 Access Token；已撤销/无效返回 None。
+
+    黑名单故障经 `blacklistStateOr503` 显式 503（fail-closed），不吞异常放行。
+    """
+    if blacklistStateOr503(token):
         return None  # 已登出的 token 视为无效
-    """验证 Access Token"""
     return verify_token(token, "access")
 
 
 def verify_refresh_token(token: str) -> Optional[Dict[str, Any]]:
-    """验证 Refresh Token"""
+    """验证 Refresh Token；已撤销/无效返回 None。
+
+    API-03：与 access 侧同守一份撤销单源——原先不查黑名单，凡走本门的
+    refresh 校验都绕过了登出/轮换撤销。
+    """
+    if blacklistStateOr503(token):
+        return None
     return verify_token(token, "refresh")
 
 

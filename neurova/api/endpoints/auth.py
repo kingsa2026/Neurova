@@ -521,10 +521,14 @@ def _alertRecoveryHit(username: str, ip_address: str) -> None:
 
 
 def is_token_blacklisted(token: str) -> bool:
-    """检查token是否在黑名单中（全局单源，SQLite 持久化）。"""
-    from neurova.api.auth import is_token_blacklisted_global
+    """检查token是否在黑名单中（全局单源，SQLite 持久化）。
 
-    return is_token_blacklisted_global(token)
+    API-03：判据面故障 fail-closed —— 经 `blacklistStateOr503` 转显式 503，
+    不再按"未登记"吞异常放行。
+    """
+    from neurova.api.auth import blacklistStateOr503
+
+    return blacklistStateOr503(token)
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -576,6 +580,21 @@ async def refresh_token(request: Request, body: RefreshRequest):
         if user.status != "active":
             _auditAuthLogin(str(user.id), request, success=False, attempted_username=str(user.username))
             raise HTTPException(status_code=403, detail="Account is inactive")
+
+        # API-03 刷新轮换：旧 refresh 先撤销再发新对——旧 refresh 重放即 401，
+        # 泄露的 refresh 无法反复续签。撤销失败不得发新对（否则新旧并存且无
+        # 重放检测），诚实 503 让客户端持旧 refresh 重试。
+        # blacklist_token 函数内取（同 logout 的判据注入缝，见 logout 注释）。
+        from neurova.api.auth import blacklist_token
+
+        try:
+            blacklist_token(body.refresh_token)
+        except Exception as e:  # noqa: BLE001 - 撤销失败不得假称轮换成功
+            logger.error(f"Refresh rotation failed to revoke old refresh token: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Refresh failed: unable to revoke old refresh token",
+            )
 
         # 生成新 token (审计修复 P0-2: 补齐身份声明；批 B: 部门 tenant claim 走同一单源)
         identity_claims = buildIdentityClaims({"id": user.id, "username": user.username})
@@ -902,8 +921,18 @@ async def verify_code(request: Request, email: str = Query(...), code: str = Que
         raise HTTPException(status_code=500, detail="Failed to verify code")
 
 
+class LogoutRequest(BaseModel):
+    """登出请求体（可省略）。
+
+    API-03：带 refresh_token 时一并撤销——原先 logout 只撤 access，
+    refresh 留在客户端手里仍可续签。
+    """
+
+    refresh_token: Optional[str] = Field(default=None, description="需一并撤销的 refresh token")
+
+
 @router.post("/logout")
-async def logout(request: Request):
+async def logout(request: Request, body: Optional[LogoutRequest] = None):
     """用户登出
 
     撤销失败**不得**回 200：token 若没进黑名单就仍然有效，客户端却会据此清掉本地凭据，
@@ -915,6 +944,12 @@ async def logout(request: Request):
     撤销路径出错则由 FastAPI 兜底为 500。
     """
     _get_request_id(request)
+
+    # 函数内取 `blacklist_token`（不改模块级绑定）：既有判据
+    # test_internalFaultIsNotReportedAsVerdict 以 `monkeypatch.setattr(neurova.api.auth,
+    # "blacklist_token", ...)` 注入撤销故障——模块级 from-import 会把绑定冻在导入期，
+    # 注入静默失效（假绿）。函数内 import 才让判据咬合真链路。
+    from neurova.api.auth import blacklist_token as blacklistToken
 
     # 获取当前用户的 token
     auth_header = request.headers.get("Authorization", "")
@@ -928,9 +963,7 @@ async def logout(request: Request):
             logoutPayload = decode_token(token) or {}
             logoutUserId = str(logoutPayload["sub"]) if logoutPayload.get("sub") else None
             try:
-                from neurova.api.auth import blacklist_token
-
-                blacklist_token(token)
+                blacklistToken(token)
             except Exception as e:  # noqa: BLE001
                 logger.warning("全局黑名单注册失败: %s", e)
                 # BUG AUDIT S-12: 黑名单写入失败时不得谎报"登出成功"，否则
@@ -940,6 +973,19 @@ async def logout(request: Request):
                 )
             logger.info("Token added to blacklist")
             _auditLogout(logoutUserId, request)
+
+    # API-03：logout 同撤 refresh——只撤 access 时，refresh 仍是可续签的活凭据。
+    refreshToken = (body.refresh_token or "").strip() if body is not None else ""
+    if refreshToken:
+        try:
+            blacklistToken(refreshToken)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("refresh token 黑名单登记失败: %s", e)
+            raise HTTPException(
+                status_code=500,
+                detail="Logout failed: unable to invalidate refresh token",
+            )
+        logger.info("Refresh token added to blacklist")
 
     return {
         "code": 0,

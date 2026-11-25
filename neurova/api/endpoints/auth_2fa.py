@@ -29,10 +29,10 @@ from pydantic import BaseModel, Field
 
 from neurova.api.auth import (
     blacklist_token,
+    blacklistStateOr503,
     create_access_token,
     create_refresh_token,
     get_current_user,
-    is_token_blacklisted_global,
     verify_2fa_challenge_token,
 )
 from neurova.core.logger import get_logger
@@ -224,8 +224,9 @@ async def verifyTwoFactor(request: Request, body: TwoFactorVerifyRequest):
     if not challenge:
         raise HTTPException(status_code=401, detail="缺少挑战令牌")
 
-    # 成功消费过的 challenge 再来 → 黑名单命中即拒（重放）
-    if is_token_blacklisted_global(challenge):
+    # 成功消费过的 challenge 再来 → 黑名单命中即拒（重放）。
+    # API-03：判据面故障 fail-closed（blacklistStateOr503 显式 503），不吞异常放行。
+    if blacklistStateOr503(challenge):
         raise HTTPException(status_code=401, detail="挑战令牌已使用")
 
     payload = verify_2fa_challenge_token(challenge)
