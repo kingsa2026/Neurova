@@ -99,6 +99,8 @@ class PreparedImport:
     created_cron_tasks: List[Any] = field(default_factory=list)
     backup_token: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     backup_dirs: List[Path] = field(default_factory=list)
+    #: 恢复失败的备份目录：里面是唯一旧数据，任何清理路径都不得删除（CORE-05）。
+    retained_backups: List[Path] = field(default_factory=list)
     placed_root: bool = False
     placed_trajectory: bool = False
     applied: bool = False
@@ -518,29 +520,63 @@ def _moveToBackup(path: Path, prepared: PreparedImport) -> None:
 
 
 def _restoreBackup(prepared: PreparedImport) -> None:
+    """把备份逐项移回原位（CORE-05）。
+
+    删除任何备份目录前**逐项校验**恢复结果：原位仍被占（上游删除新目标失败）、
+    或移动本身失败时，备份是旧数据的唯一副本——必须原样保留并如实报错，
+    绝不允许"没恢复成功却把备份删了"的三重丢失。
+    """
+    failures: List[str] = []
     for backup_parent in prepared.backup_dirs:
         if not backup_parent.is_dir():
             continue
+        restored_all = True
         for child in list(backup_parent.iterdir()):
             target = backup_parent.parent / child.name
-            if not target.exists():
+            try:
+                if target.exists():
+                    restored_all = False
+                    failures.append(f"{child.name} 的原位仍被占用，未恢复：{target}")
+                    continue
                 shutil.move(str(child), str(target))
-        shutil.rmtree(backup_parent, ignore_errors=True)
+            except OSError as e:
+                restored_all = False
+                failures.append(f"{child.name} 恢复失败：{e}")
+        if restored_all:
+            try:
+                shutil.rmtree(backup_parent)
+            except OSError as e:
+                # 数据已全部恢复，残留的空备份目录只是现场，如实记录即可
+                logger.error("备份目录清理失败（数据已恢复，残留 %s）：%s", backup_parent, e)
+        else:
+            prepared.retained_backups.append(backup_parent)
+    if failures:
+        raise MigrationError("；".join(failures))
 
 
 def _purgeBackup(prepared: PreparedImport) -> None:
     for backup_parent in prepared.backup_dirs:
-        shutil.rmtree(backup_parent, ignore_errors=True)
-
-
-def _removePath(path: Path) -> None:
-    if path.is_dir():
-        shutil.rmtree(path, ignore_errors=True)
-    elif path.exists():
+        if backup_parent in prepared.retained_backups:
+            # 恢复失败的备份是唯一旧数据，任何清理路径都不得碰它（CORE-05）
+            logger.error("备份 %s 恢复失败被保留，跳过清理（旧数据在其中）", backup_parent)
+            continue
         try:
+            shutil.rmtree(backup_parent)
+        except OSError as e:
+            logger.error("备份目录清理失败（保留现场 %s）：%s", backup_parent, e)
+
+
+def _removePath(path: Path) -> bool:
+    """删除路径；失败如实返回 False 并报错，不再静默吞掉（CORE-05）。"""
+    try:
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
             path.unlink()
-        except OSError:
-            pass
+        return True
+    except OSError as e:
+        logger.error("路径删除失败（回滚恢复将拒绝覆盖其原位）：%s: %s", path, e)
+        return False
 
 
 def _buildAgentConfig(target_id: str, target_root: Path, manifest: Dict[str, Any], importer: str):
@@ -706,7 +742,20 @@ def apply_import(prepared: PreparedImport, old_agent_config: Any = None) -> Dict
                     )
                 except Exception:
                     pass
-            _restoreBackup(prepared)
+            try:
+                _restoreBackup(prepared)
+            except Exception as restore_err:
+                # CORE-05：恢复失败＝旧数据还在备份里。如实上抛并点名备份位置，
+                # 让调用方拿到"失败 + 可恢复现场"，而不是假装回滚成功。
+                logger.error(
+                    "迁移回滚恢复失败，旧数据备份保留于 %s: %s",
+                    prepared.retained_backups or prepared.backup_dirs, restore_err,
+                )
+                raise RuntimeError(
+                    f"导入失败，且回滚恢复未完成——旧数据备份已保留在 "
+                    f"{prepared.retained_backups or prepared.backup_dirs}，请人工恢复；"
+                    f"恢复失败原因：{restore_err}"
+                ) from e
             try:
                 from neurova.collaborate.workflow.scheduler import get_scheduler
 

@@ -232,6 +232,87 @@ def test_overwrite_failure_restores_old_data(env, client, monkeypatch):
     assert marker.read_text(encoding="utf-8") == "old"
 
 
+# ── CORE-05：回滚不得在"新目标未删净"时销毁旧数据备份 ──────────────────
+
+def _restoreScene(tmp_path: Path):
+    """构造回滚现场：旧 agent 数据已移入备份目录。"""
+    from neurova.agent_migration import PreparedImport
+
+    base = tmp_path / "data"
+    backup_parent = base / ".nvmig-backup-tok123"
+    old_dir = backup_parent / "packb"
+    old_dir.mkdir(parents=True)
+    (old_dir / "OLD_MARKER.txt").write_text("old-data", encoding="utf-8")
+    prepared = PreparedImport(
+        manifest={}, source_id="packa", target_id="packb", importer="u1",
+        overwrite=True, stage_dir=tmp_path / "stage",
+        target_root=base / "packb", target_trajectory_dir=base / "traj" / "packb",
+        source_paths={}, trajectory_sources={}, registry_entry=None,
+    )
+    prepared.backup_dirs.append(backup_parent)
+    return prepared, backup_parent, old_dir
+
+
+def test_rollbackKeepsBackupWhenTargetStillOccupied(tmp_path):
+    """原位仍被（删不净的）新目标占着时，恢复必须报错并保留备份。
+
+    缺陷形态：跳过恢复 → 无条件 rmtree 备份 → 旧数据唯一副本被销毁。
+    """
+    from neurova.agent_migration import MigrationError, _restoreBackup
+
+    prepared, backup_parent, old_dir = _restoreScene(tmp_path)
+    prepared.target_root.mkdir(parents=True)
+    (prepared.target_root / "NEW_MARKER.txt").write_text("new-data", encoding="utf-8")
+
+    with pytest.raises(MigrationError):
+        _restoreBackup(prepared)
+
+    assert (old_dir / "OLD_MARKER.txt").read_text(encoding="utf-8") == "old-data", \
+        "恢复失败后旧备份被删——三重丢失"
+
+
+def test_rollbackFailureSurvivesDiscardPrepared(tmp_path):
+    """恢复失败的备份必须活过 discard_prepared（失败路径的兜底清理不得销毁它）。"""
+    from neurova.agent_migration import _restoreBackup, discard_prepared
+
+    prepared, backup_parent, old_dir = _restoreScene(tmp_path)
+    prepared.target_root.mkdir(parents=True)
+
+    with pytest.raises(Exception):
+        _restoreBackup(prepared)
+    discard_prepared(prepared)
+    assert (old_dir / "OLD_MARKER.txt").exists(), "discard_prepared 把恢复失败的备份删了"
+
+
+def test_rollbackStillRestoresAndCleansOnHappyPath(tmp_path):
+    """对照：原位已腾空时，恢复照旧移回旧数据并清掉备份目录（不因修复而退化）。"""
+    from neurova.agent_migration import _restoreBackup
+
+    prepared, backup_parent, old_dir = _restoreScene(tmp_path)
+    _restoreBackup(prepared)
+    assert (prepared.target_root / "OLD_MARKER.txt").read_text(encoding="utf-8") == "old-data"
+    assert not backup_parent.exists(), "恢复成功后备份目录应被清理"
+
+
+def test_overwriteFailureWithStuckTargetKeepsBackup(env, client, monkeypatch):
+    """端到端：新目标删不净（文件占用/权限）时，回滚保留旧数据备份并如实报失败。"""
+    _seed_agent(env)
+    package = _export(client)
+    _write(env / "data" / "packa" / "OLD_MARKER.txt", "old")
+
+    def _boom(*a, **kw):
+        raise RuntimeError("build failed")
+
+    monkeypatch.setattr("neurova.agent_migration._buildAgentConfig", _boom)
+    # 模拟文件占用：placed 的新目标删不掉（_removePath 失败且不再静默吞掉）
+    monkeypatch.setattr("neurova.agent_migration._removePath", lambda p: False)
+    resp = _import(client, package, agent_id="packa", overwrite=True)
+    assert resp.status_code == 500
+    backups = list((env / "data").glob(".nvmig-backup-*/packa/OLD_MARKER.txt"))
+    assert backups, "回滚恢复失败后旧数据备份被删——数据三重丢失"
+    assert backups[0].read_text(encoding="utf-8") == "old"
+
+
 def test_zip_slip_rejected(env, client):
     import io
 
