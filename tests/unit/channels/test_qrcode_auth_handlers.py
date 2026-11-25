@@ -92,6 +92,44 @@ def httpx_routes(monkeypatch):
     return _setup
 
 
+class _FakeSafeFetchResponse:
+    def __init__(self, payload):
+        self._payload = payload
+        self.status = 200
+
+    def json(self):
+        return self._payload
+
+
+@pytest.fixture
+def safe_fetch_routes(monkeypatch):
+    """微信 handler 的出网单源是 `security.safe_fetch`（CHAN-02）。
+
+    本文件钉协议语义，不重复安全门判定：把 safe_fetch 与逐跳守卫替换为
+    按 URL 前缀路由的替身，记录调用供断言；SSRF 拒绝判据归
+    `test_qrcodeAuthBaseUrlGuard.py`。
+    """
+    import neurova.security.safe_fetch as safe_fetch_module
+
+    calls = []
+
+    def _setup(routes):
+        calls.clear()
+
+        def _fakeSafeFetch(url, **kwargs):
+            calls.append(url)
+            for route in routes:
+                if url.startswith(route["url_startswith"]):
+                    return _FakeSafeFetchResponse(route.get("json", {}))
+            raise AssertionError(f"unrouted safe_fetch: {url}")
+
+        monkeypatch.setattr(safe_fetch_module, "assertHopAllowed", lambda url: None)
+        monkeypatch.setattr(safe_fetch_module, "safe_fetch", _fakeSafeFetch)
+        return calls
+
+    return _setup
+
+
 def _req(**query):
     return SimpleNamespace(query_params=query)
 
@@ -339,25 +377,28 @@ async def test_wecom_fetch_and_poll(httpx_routes):
 
 
 @pytest.mark.asyncio
-async def test_wechat_fetch_uses_real_ilink_host(httpx_routes):
+async def test_wechat_fetch_uses_real_ilink_host(safe_fetch_routes):
     from neurova.channels.qrcode_auth import QRCODE_AUTH_HANDLERS
 
-    httpx_routes([
-        {"method": "GET", "url_startswith": "https://ilinkai.weixin.qq.com/ilink/bot/get_bot_qrcode",
+    calls = safe_fetch_routes([
+        {"url_startswith": "https://ilinkai.weixin.qq.com/ilink/bot/get_bot_qrcode",
          "json": {"qrcode": "qr-abc", "qrcode_img_content": ""}},
     ])
     h = QRCODE_AUTH_HANDLERS["wechat"]
     qr = await h.fetch_qrcode(_req())
     assert qr.poll_token == "qr-abc"
     assert qr.scan_url == "https://liteapp.weixin.qq.com/q/7GiQu1?qrcode=qr-abc&bot_type=3"
+    assert calls == [
+        "https://ilinkai.weixin.qq.com/ilink/bot/get_bot_qrcode?bot_type=3"
+    ]
 
 
 @pytest.mark.asyncio
-async def test_wechat_poll_confirmed(httpx_routes):
+async def test_wechat_poll_confirmed(safe_fetch_routes):
     from neurova.channels.qrcode_auth import QRCODE_AUTH_HANDLERS
 
-    httpx_routes([
-        {"method": "GET", "url_startswith": "https://ilinkai.weixin.qq.com/ilink/bot/get_qrcode_status",
+    safe_fetch_routes([
+        {"url_startswith": "https://ilinkai.weixin.qq.com/ilink/bot/get_qrcode_status",
          "json": {"status": "confirmed", "bot_token": "tok-1", "baseurl": "https://gw.example.com"}},
     ])
     h = QRCODE_AUTH_HANDLERS["wechat"]
@@ -368,16 +409,19 @@ async def test_wechat_poll_confirmed(httpx_routes):
 
 
 @pytest.mark.asyncio
-async def test_wechat_poll_custom_base_url(httpx_routes):
+async def test_wechat_poll_custom_base_url(safe_fetch_routes):
     from neurova.channels.qrcode_auth import QRCODE_AUTH_HANDLERS
 
-    httpx_routes([
-        {"method": "GET", "url_startswith": "https://my.gateway.local/ilink/bot/get_bot_qrcode",
+    calls = safe_fetch_routes([
+        {"url_startswith": "https://my.gateway.example.com/ilink/bot/get_bot_qrcode",
          "json": {"qrcode": "q2", "qrcode_img_content": ""}},
     ])
     h = QRCODE_AUTH_HANDLERS["wechat"]
-    qr = await h.fetch_qrcode(_req(base_url="https://my.gateway.local"))
+    qr = await h.fetch_qrcode(_req(base_url="https://my.gateway.example.com"))
     assert qr.poll_token == "q2"
+    assert calls == [
+        "https://my.gateway.example.com/ilink/bot/get_bot_qrcode?bot_type=3"
+    ]
 
 
 # ------------------------------------------------------------------

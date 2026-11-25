@@ -27,6 +27,7 @@ wechat 回填 bot_token+base_url），用户点保存即完成配置——替代
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import logging
@@ -96,33 +97,54 @@ ILINK_DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
 class WeChatQRCodeAuthHandler(QRCodeAuthHandler):
     """微信 iLink Bot 扫码登录（GET 二维码 → 轮询 confirmed 取 bot_token+baseurl）。"""
 
-    async def _get_base_url(self, request: Request) -> str:
-        base_url = request.query_params.get("base_url", "")
-        if base_url:
-            return base_url.rstrip("/")
-        # 回落到已保存配置的 extra.base_url（default agent 视图）
-        try:
-            from neurova.api.endpoints.channel_config import _load_configs
+    @staticmethod
+    def _validatedBaseUrl(raw: str) -> str:
+        """base_url 是用户可控输入：出网前必须过 SSRF 单源守卫（CHAN-02）。
 
-            cfg = _load_configs().get("wechat", {}) or {}
-            saved = ((cfg.get("extra") or {}) or {}).get("base_url", "")
-            if saved:
-                return str(saved).rstrip("/")
-        except Exception:
-            pass
-        return ILINK_DEFAULT_BASE_URL
+        此前 query 参数原样拼进服务端 GET，且 httpx 自动跟随重定向——任何
+        登录用户可借服务端网络能力探测内网/云元数据。校验单源是
+        `security.url_guard`（经 safe_fetch.assertHopAllowed，与全仓出站同门）。
+        """
+        from neurova.security.safe_fetch import assertHopAllowed
+
+        base_url = str(raw or "").rstrip("/")
+        try:
+            assertHopAllowed(base_url)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"base_url 不允许（SSRF 防护）: {exc}",
+            ) from exc
+        return base_url
+
+    async def _get_base_url(self, request: Request) -> str:
+        raw = request.query_params.get("base_url", "")
+        if not raw:
+            # 回落到已保存配置的 extra.base_url（default agent 视图）
+            try:
+                from neurova.api.endpoints.channel_config import _load_configs
+
+                cfg = _load_configs().get("wechat", {}) or {}
+                raw = str(((cfg.get("extra") or {}) or {}).get("base_url", ""))
+            except Exception:
+                raw = ""
+            if not raw:
+                raw = ILINK_DEFAULT_BASE_URL
+        return self._validatedBaseUrl(raw)
 
     async def fetch_qrcode(self, request: Request) -> QRCodeResult:
-        import httpx
+        from urllib.parse import urlencode
+
+        from neurova.security.safe_fetch import safe_fetch
 
         base_url = await self._get_base_url(request)
+        url = f"{base_url}/ilink/bot/get_bot_qrcode?{urlencode({'bot_type': 3})}"
         try:
-            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-                resp = await client.get(
-                    f"{base_url}/ilink/bot/get_bot_qrcode", params={"bot_type": 3}
-                )
-                resp.raise_for_status()
-                qr_data = resp.json()
+            # safe_fetch 逐跳复核 redirect 目标，阻断 302 绕进环回/元数据
+            resp = await asyncio.to_thread(safe_fetch, url, timeout=15)
+            qr_data = resp.json()
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
@@ -149,17 +171,17 @@ class WeChatQRCodeAuthHandler(QRCodeAuthHandler):
         return QRCodeResult(scan_url=scan_url, poll_token=qrcode)
 
     async def poll_status(self, token: str, request: Request) -> PollResult:
-        import httpx
+        from urllib.parse import urlencode
+
+        from neurova.security.safe_fetch import safe_fetch
 
         base_url = await self._get_base_url(request)
+        url = f"{base_url}/ilink/bot/get_qrcode_status?{urlencode({'qrcode': token})}"
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.get(
-                    f"{base_url}/ilink/bot/get_qrcode_status",
-                    params={"qrcode": token},
-                )
-                resp.raise_for_status()
-                data = resp.json()
+            resp = await asyncio.to_thread(safe_fetch, url, timeout=60)
+            data = resp.json()
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
