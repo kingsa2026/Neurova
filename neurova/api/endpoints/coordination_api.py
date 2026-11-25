@@ -221,13 +221,28 @@ async def get_triage_stats():
 @router.post("/triage/check")
 async def triage_message(
     conversation_id: str = Query(..., description="Conversation ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """对对话进行 triage 分类。
 
     §R1：TriageGateError 是分诊门的基础设施性不可用（历史源缺失/凭据缺失/
     输出不可解析，P1-10 起诚实上抛）——本端点以 503 诚实暴露"分诊门不可用"，
     不再让未处理异常落 500。
+
+    API-09：会话属主校验前置。此前 router 只收 conversation_id，任何登录用户
+    可对任意已知会话触发分诊，把他人会话历史发往默认 provider 并产生账单。
+    判据转交全仓唯一归属比较式（console._check_session_ownership，经
+    session_sync._requireSessionOwnership 同一封装）：空属主归主管理员、
+    请求者缺失一律 403；会话不存在 404，不进分诊链。
     """
+    from neurova.api.endpoints.session_sync import _requireSessionOwnership
+    from neurova.sync.session_sync_manager import get_session_sync_manager
+
+    session = get_session_sync_manager().get_session(conversation_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"会话不存在: {conversation_id}")
+    _requireSessionOwnership(session, current_user)
+
     gate = get_small_brain_triage_gate()
 
     try:

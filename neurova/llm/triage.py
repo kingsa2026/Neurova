@@ -224,6 +224,9 @@ Agent: "Starting task Y with deadline tomorrow"
             logger.warning("分诊门解析默认服务商失败: %s", e)
             default_provider = None
         if default_provider is not None and getattr(default_provider, "api_key", ""):
+            # API-09：回落不许静默——显式点名"用的是全仓默认服务商（system 级凭据）"。
+            # 跨用户触发面已在端点层被会话属主校验关死（coordination_api.triage_message）。
+            logger.info("分诊门未显式配置凭据，回落全仓默认服务商（system 级凭据）")
             return ProviderConfig(
                 api_key=default_provider.api_key,
                 base_url=getattr(default_provider, "base_url", None) or cfg.base_url,

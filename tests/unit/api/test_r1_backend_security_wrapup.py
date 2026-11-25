@@ -244,6 +244,15 @@ class TestMediaListSideUploaderFilter:
 
 
 class TestTriageCheckHonest503:
+    @staticmethod
+    def _seedOwnedSession():
+        """API-09 起端点带会话属主门：直调以 _ADMIN 身份预置其名下会话。"""
+        from neurova.sync.session_sync_manager import get_session_sync_manager
+
+        get_session_sync_manager().register_or_create_session(
+            session_id="conv-1", user_id=_ADMIN["user_id"], agent_id="agent_x"
+        )
+
     def test_triage_gate_error_maps_to_503(self, monkeypatch):
         from neurova.api.endpoints import coordination_api as mod
         from neurova.llm.triage import TriageGateError
@@ -253,8 +262,9 @@ class TestTriageCheckHonest503:
                 raise TriageGateError("对话历史源不可用")
 
         monkeypatch.setattr(mod, "get_small_brain_triage_gate", lambda: _BoomGate())
+        self._seedOwnedSession()
         with pytest.raises(HTTPException) as exc:
-            asyncio.run(mod.triage_message(conversation_id="conv-1"))
+            asyncio.run(mod.triage_message(conversation_id="conv-1", current_user=_ADMIN))
         assert exc.value.status_code == 503, "分诊门不可用应 503，而非未处理异常落 500"
         assert "分诊门" in str(exc.value.detail)
 
@@ -269,7 +279,8 @@ class TestTriageCheckHonest503:
                 )
 
         monkeypatch.setattr(mod, "get_small_brain_triage_gate", lambda: _OkGate())
-        out = asyncio.run(mod.triage_message(conversation_id="conv-1"))
+        self._seedOwnedSession()
+        out = asyncio.run(mod.triage_message(conversation_id="conv-1", current_user=_ADMIN))
         assert out == {
             "actionable": True,
             "reason": "human waiting",
