@@ -38,7 +38,7 @@ def accountabilityQuery(store: Any, subject: Optional[str] = None,
     # ② derivation_ledger：推导溯源（规则→结论）
     events += _fromDerivationLedger(store, tenant, subject, ledgerCounts)
     # ③ agent_run_ledger：运行态（回合/续跑/取消）
-    events += _fromAgentRunLedger(store, subject, actor,
+    events += _fromAgentRunLedger(store, tenant, subject, actor,
                                   timeWindowStart, timeWindowEnd, ledgerCounts)
     # ④ 决策台账：决策/链接
     events += _fromDecisionLedger(store, tenant, actor,
@@ -92,7 +92,8 @@ def _fromDerivationLedger(store: Any, tenant: str, subject: Optional[str],
         from .derivation_ledger import DerivationLedger
 
         ledger = DerivationLedger(store)
-        fires = ledger.fires()[:_PER_LEDGER_LIMIT]
+        # KNOW-06：按请求租户圈域，不全局读取推导流水
+        fires = ledger.fires(tenantId=tenant)[:_PER_LEDGER_LIMIT]
     except Exception:  # noqa: BLE001 - 账本缺席如实空
         return []
     out: List[Dict[str, Any]] = []
@@ -115,18 +116,17 @@ def _fromDerivationLedger(store: Any, tenant: str, subject: Optional[str],
     return out
 
 
-def _fromAgentRunLedger(store: Any, subject: Optional[str],
+def _fromAgentRunLedger(store: Any, tenant: str, subject: Optional[str],
                         actor: Optional[str], start: Optional[str],
                         end: Optional[str], counts: Dict[str, int]) -> List[Dict[str, Any]]:
     try:
         from ...core.agent_run_store import get_agent_run_store
 
         runStore = get_agent_run_store()
-        with runStore._lock:
-            rows = runStore._conn.execute(
-                "SELECT * FROM agent_runs ORDER BY seq DESC LIMIT ?",
-                (_PER_LEDGER_LIMIT,)).fetchall()
-        runRows = [dict(r) for r in rows]
+        # KNOW-06：走运行台账的租户审计读面（tenant_sql_where 单源），
+        # 不再取全库最近 200 条——他租户用户/会话/状态不进本租户追责面。
+        runRows = runStore.list_runs_for_audit(tenant_id=tenant,
+                                               limit=_PER_LEDGER_LIMIT)
     except Exception:  # noqa: BLE001 - 台账缺席如实空
         return []
     out: List[Dict[str, Any]] = []
@@ -187,10 +187,13 @@ def _fromDecisionLedger(store: Any, tenant: str, actor: Optional[str],
 def _fromDigestChain(store: Any, tenant: str, subject: Optional[str],
                      counts: Dict[str, int]) -> List[Dict[str, Any]]:
     try:
-        from .digest_chain import ActivityDigestChain
+        # 摘要链在 foundation/（与 ontology/ 同库不同目录）——此前误用相对
+        # 当前包的导入，异常被吞成空账，聚合面从未真正产出过摘要链事件。
+        from ..foundation.digest_chain import ActivityDigestChain
 
         chain = ActivityDigestChain(store)
-        result = chain.verify()
+        # KNOW-06：完整性校验按请求租户圈域，不全局对账
+        result = chain.verify(tenantId=tenant)
     except Exception:  # noqa: BLE001 - 链缺席如实空
         return []
     counts["digest_chain"] = 1

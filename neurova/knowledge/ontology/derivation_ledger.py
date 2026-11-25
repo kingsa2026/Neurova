@@ -21,7 +21,7 @@ import threading
 import uuid
 from typing import Any, Dict, List, Optional
 from neurova.core.time_utils import nowIso as _now
-from neurova.core.tenant_scope import tenant_sql_where
+from neurova.core.tenant_scope import tenant_matches, tenant_sql_where
 
 _SCHEMA_V10 = """
 CREATE TABLE IF NOT EXISTS knowledge_derivation_edges (
@@ -122,7 +122,11 @@ class DerivationLedger:
                 " ORDER BY derived_fact_id").fetchall()
         return [r["derived_fact_id"] for r in rows]
 
-    def fires(self, ruleId: Optional[str] = None) -> List[Dict[str, Any]]:
+    def fires(self, ruleId: Optional[str] = None,
+              tenantId: str = "") -> List[Dict[str, Any]]:
+        """点燃流水账。tenantId 非空时按推导结论的租户圈域（KNOW-06）：
+        fires 表无租户列，租户以结论事实的 tenant_id 为准——推导事实经咽喉
+        落库带租户戳；无法归因到本租户的流水不进本租户读面。"""
         sql = "SELECT * FROM ontology_rule_fires"
         params: List[Any] = []
         if ruleId:
@@ -138,9 +142,17 @@ class DerivationLedger:
             d["derived_fact_ids"] = ids
             # 每次点燃现在还剩几条：审计问的是"这批结论还在不在"，
             # 而不是"退掉过几条"——后者写成一列就会和事实表各说各话。
-            d["live_count"] = sum(
-                1 for fid in ids
-                if (self._store.fact(fid) or {}).get("status") == "active")
+            firstFact: Dict[str, Any] = {}
+            live = 0
+            for fid in ids:
+                fact = self._store.fact(fid) or {}
+                if not firstFact:
+                    firstFact = fact
+                if fact.get("status") == "active":
+                    live += 1
+            d["live_count"] = live
+            if tenantId and not tenant_matches({"tenant_id": tenantId}, firstFact):
+                continue
             out.append(d)
         return out
 

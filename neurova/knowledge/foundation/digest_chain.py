@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Dict, List, Optional
 from neurova.core.time_utils import nowIso as _now
+from neurova.core.tenant_scope import tenant_sql_where
 
 _SCHEMA_V11 = """
 ALTER TABLE knowledge_assertions ADD COLUMN seq INTEGER NOT NULL DEFAULT 0;
@@ -263,22 +264,34 @@ class ActivityDigestChain:
                 prev = str(item["digest"])
         return out
 
-    def _activityIds(self, activityId: Optional[str]) -> List[str]:
+    def _activityIds(self, activityId: Optional[str], tenantId: str = "") -> List[str]:
+        """活动链清单。tenantId 非空时按断言所挂事实的租户圈域（KNOW-06）：
+        assertions 表无租户列，链的租户以其事实行的 tenant_id 为准。"""
+        sql = ("SELECT DISTINCT a.activity_id FROM knowledge_assertions a"
+               " WHERE a.activity_id IS NOT NULL AND a.activity_id <> ''")
+        params: List[Any] = []
+        if tenantId:
+            clause, tparams = tenant_sql_where(tenantId, alias="f")
+            sql += (" AND EXISTS (SELECT 1 FROM knowledge_facts f"
+                    " WHERE f.fact_id = a.fact_id AND %s)" % clause)
+            params.extend(tparams)
+        if activityId:
+            sql += " AND a.activity_id = ?"
+            params.append(activityId)
+        sql += " ORDER BY a.activity_id"
         with self._store._lock:
-            rows = self._store._conn.execute(
-                "SELECT DISTINCT activity_id FROM knowledge_assertions"
-                " WHERE activity_id IS NOT NULL AND activity_id <> ''"
-                + (" AND activity_id = ?" if activityId else "") + " ORDER BY activity_id",
-                (activityId,) if activityId else ()).fetchall()
+            rows = self._store._conn.execute(sql, params).fetchall()
         return [r["activity_id"] for r in rows]
 
-    def verify(self, activityId: Optional[str] = None) -> Dict[str, Any]:
+    def verify(self, activityId: Optional[str] = None,
+               tenantId: str = "") -> Dict[str, Any]:
         """重算每条链并与链头对账，返回首个断裂点。
 
+        tenantId 非空时只校验该租户的活动链（KNOW-06），不全局对账。
         上链之前的行（`digest` 为空）算 `unlinked` 不算断裂：那是一维没依据，
         不是有人改过数据——把没测过的事报成故障，巡检就没人信了。
         """
-        ids = self._activityIds(activityId)
+        ids = self._activityIds(activityId, tenantId)
         checked = unlinked = 0
         firstBreak: Optional[Dict[str, Any]] = None
         for one in ids:
