@@ -12,6 +12,12 @@ from typing import Any, Callable, Dict, Optional
 
 from neurova.core.trigger_rate_limiter import TriggerRateLimiter
 from neurova.core.webhook_security import verify_request, verify_signature
+from neurova.core.webhook_replay import (
+    ReplayStoreUnavailable,
+    claimReplayKey,
+    computeReplayKey,
+    releaseReplayKey,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +116,28 @@ async def handle_webhook_ingress(
     if workflow is None:
         raise IngressRejected(404, "WORKFLOW_NOT_PUBLISHED")
 
-    instance = await d["run_workflow"](workflow, inputs)
+    # CORE-09：重放去重。键由**签名覆盖物**派生（trigger + 规范时间戳 + payload），
+    # 领取原子；窗口内的原样重放显式 409，不再二次派发。开放 trigger（无 secret）
+    # 没有可绑定的签名材料，不做去重（其入口本就无认证语义）。
+    replay_key = ""
+    if encrypted and timestamp_header:
+        replay_key = computeReplayKey(trigger_id, str(int(str(timestamp_header).strip())), payload)
+        try:
+            claimed = claimReplayKey(trigger_id, replay_key)
+        except ReplayStoreUnavailable as e:
+            raise IngressRejected(503, "REPLAY_GUARD_UNAVAILABLE") from e
+        if not claimed:
+            logger.info("webhook replay rejected: %s", trigger_id)
+            raise IngressRejected(409, "REPLAY_DETECTED")
+
+    try:
+        instance = await d["run_workflow"](workflow, inputs)
+    except BaseException:
+        # 派发未成功：释放领取，发送方对同一签名的重试仍可执行（不把失败投递
+        # 记成“已处理”）。取消/异常都释放，避免永久吞掉合法重试。
+        if replay_key:
+            releaseReplayKey(trigger_id, replay_key)
+        raise
     status_value = getattr(instance, "status", None)
     return {
         "code": 0,
