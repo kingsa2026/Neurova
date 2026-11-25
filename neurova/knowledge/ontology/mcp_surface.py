@@ -65,6 +65,10 @@ CURATED_TOOLS: Tuple[dict, ...] = (
      "when_to_use": "先列当前可见项目拿 project_id，再进详情或协作房间。"},
     {"name": "project_detail",
      "when_to_use": "查单个项目的成员/可见性/状态与团队任务计数，判断能否协作接入。"},
+    {"name": "ontology_graph_path",
+     "when_to_use": "查两实体间沿 active 事实边的最短关联路径（BFS 深度钳位 1-6，只读）。"},
+    {"name": "ontology_graph_overview",
+     "when_to_use": "看知识图节点/边计数、谓词分布与高度数主体 Top-K（治理诊断读面）。"},
 )
 
 

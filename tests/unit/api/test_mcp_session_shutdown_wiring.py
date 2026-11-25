@@ -139,6 +139,36 @@ def test_startupKeepsMcpBootstrapTaskHandle():
         )
 
 
+def test_appLifespanServesOntologyMcpInitialize(monkeypatch):
+    """真后端 lifespan 必须驱动本体 MCP，并由挂载后的 ASGI 完成协议握手。"""
+    token = "live-verify-ontology-service-token"
+    monkeypatch.setenv("NEUROVA_SERVICE_TOKEN", token)
+    app = create_app()
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/mcp/",
+            headers={
+                "X-Service-Token": token,
+                "Accept": "application/json, text/event-stream",
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "live-verify", "version": "1"},
+                },
+            },
+        )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["jsonrpc"] == "2.0"
+    assert payload["id"] == 1
+    assert payload["result"]["serverInfo"]["name"] == "neurova-ontology"
+
+
 def test_repeatedBootstrapDoesNotReconnectSameServer():
     """同一进程内二次 bootstrap 不得为同一 server 再建会话（顶掉即泄漏）"""
 

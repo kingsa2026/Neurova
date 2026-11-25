@@ -947,7 +947,7 @@ def _schedule_mcp_bootstrap(app_state: AppState):
                 if router is None:
                     continue
                 try:
-                    attach_bootstrapped_clients(router)
+                    attach_bootstrapped_clients(router, agent=agent)
                 except Exception as e:  # noqa: BLE001 - 单个 agent 挂载失败不拖垮整体
                     logger.debug("MCP attach to agent '%s' skipped: %s", agent_id, e)
         except Exception as e:  # noqa: BLE001 - bootstrap 失败不阻断启动
@@ -1908,10 +1908,12 @@ def create_app(
             _mcp_asgi, _mcp_lifespan = build_ontology_mcp_asgi()
             app.mount("/v1/mcp", _mcp_asgi)
             _app_state.ontology_mcp_lifespan = _mcp_lifespan
+            _app_state.ontology_mcp_asgi = _mcp_asgi
             logger.info("Ontology MCP server mounted at /v1/mcp")
         except Exception as _mcpMountErr:  # noqa: BLE001
             logger.error("本体 MCP server 挂载异常（MCP 面将不可用）: %s", _mcpMountErr)
             _app_state.ontology_mcp_lifespan = None
+            _app_state.ontology_mcp_asgi = None
 
         # 注册健康检查路由
         _add_health_routes(app, _app_state)

@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+from functools import wraps
 from typing import Any, Dict, List, Optional
 
 from mcp.server.mcpserver import Context, MCPServer
@@ -141,8 +142,46 @@ def _tenantOf(user: Dict[str, Any]) -> str:
     return resolve_tenant(user)
 
 
+class AgentAccessDeniedError(PermissionError):
+    """调用方请求了自身无权访问的 Agent 域。"""
+
+
 def _agentIdOf(user: Dict[str, Any], agentId: Optional[str]) -> str:
-    return str(agentId or (user or {}).get("agent_id") or "default")
+    """解析 Agent 域并执行全仓唯一属主 ACL。
+
+    Agent id 只是请求参数，不是授权事实；属主仍由
+    ``api.agent_access.agentOwnerById`` 单源解析。
+    """
+    from neurova.api.agent_access import agentOwnerById, can_access_agent
+
+    target = str(agentId or (user or {}).get("agent_id") or "default").strip() or "default"
+    userId = str((user or {}).get("user_id") or "")
+    role = str((user or {}).get("role") or "user")
+    if not can_access_agent(userId, role, agentOwnerById(target)):
+        raise AgentAccessDeniedError(
+            f"无权访问 Agent『{target}』（仅属主或管理员可操作）"
+        )
+    return target
+
+
+def _agentScopedTool(description: Optional[str] = None):
+    """注册工具并把统一 ACL 拒绝翻译为 MCP 的结构化结果。"""
+    def decorate(fn):
+        @wraps(fn)
+        async def guarded(*args, **kwargs):
+            try:
+                return await fn(*args, **kwargs)
+            except AgentAccessDeniedError as exc:
+                return {
+                    "rejected": True,
+                    "code": "agent_access_denied",
+                    "detail": str(exc),
+                }
+
+        register = _SERVER.tool() if description is None else _SERVER.tool(description=description)
+        return register(guarded)
+
+    return decorate
 
 
 def _store():
@@ -153,7 +192,7 @@ def _store():
 
 # ── A1：ontology_query（只读）────────────────────────────────────────────────
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_query(
     ctx: Context,
     query: str = "",
@@ -238,7 +277,7 @@ async def ontology_query(
 
 # ── A1：ontology_validate（只读 dry-run）─────────────────────────────────────
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_validate(
     ctx: Context,
     subject_label: str,
@@ -269,7 +308,7 @@ async def ontology_validate(
 
 # ── A2：fact_submit（写入，经 admission 唯一咽喉）────────────────────────────
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def fact_submit(
     ctx: Context,
     subject_label: str,
@@ -335,7 +374,7 @@ def _resolveAgentForActions(agentId: str) -> Optional[Dict[str, Any]]:
     return {"executor": ToolExecutor(agent), "agent": agent}
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_sparql(
     ctx: Context,
     query: str,
@@ -357,7 +396,7 @@ async def ontology_sparql(
         return {"rejected": True, "detail": str(exc)}
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_abduce(
     ctx: Context,
     subject_label: str,
@@ -375,7 +414,7 @@ async def ontology_abduce(
                        tenantId=_tenantOf(user))
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_community_search(
     ctx: Context,
     query: str,
@@ -404,7 +443,7 @@ async def ontology_community_search(
     return {"mode": mode, "hits": hits, "count": len(hits)}
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def graph_search(
     ctx: Context,
     query: str,
@@ -455,7 +494,7 @@ async def graph_search(
     return {"mode": mode, "results": results, "count": len(results)}
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_decision_record(
     ctx: Context,
     category: str,
@@ -491,7 +530,7 @@ async def ontology_decision_record(
     return row
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_decision_link(
     ctx: Context,
     source_decision_id: str,
@@ -512,7 +551,7 @@ async def ontology_decision_link(
         return {"rejected": True, "detail": str(exc)}
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_decision_trace(
     ctx: Context,
     decision_id: str,
@@ -527,7 +566,7 @@ async def ontology_decision_trace(
                 decision_id, direction=direction, tenantId=_tenantOf(user))}
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_decision_precedents(
     ctx: Context,
     query: str,
@@ -543,7 +582,7 @@ async def ontology_decision_precedents(
     return {"query": query, "hits": hits, "count": len(hits)}
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_simulate(
     ctx: Context,
     scope_json: str = "{}",
@@ -564,15 +603,26 @@ async def ontology_simulate(
             raise ValueError("scope_json/hypotheses_json 须是 JSON 对象")
     except ValueError as exc:
         return {"rejected": True, "detail": str(exc)}
-    scope.setdefault("agentId", _agentIdOf(user, None))
-    scope.setdefault("tenantId", _tenantOf(user))
+    trustedIdentity = {
+        "agentId": _agentIdOf(user, None),
+        "tenantId": _tenantOf(user),
+    }
+    # scope 是客户端的推演选择器，不是身份事实源；两个身份键必须剥离后
+    # 由已鉴权、已过 Agent ACL 的显式参数注入，禁止 setdefault 保留越权值。
+    scope.pop("agentId", None)
+    scope.pop("tenantId", None)
     try:
-        return runSimulation(_store(), scope=scope, hypotheses=hypotheses)
+        return runSimulation(
+            _store(), scope=scope, hypotheses=hypotheses,
+            trustedIdentity=trustedIdentity,
+        )
     except ScopeTooLargeError as exc:
+        return {"rejected": True, "detail": str(exc)}
+    except ValueError as exc:
         return {"rejected": True, "detail": str(exc)}
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_act(
     ctx: Context,
     action_id: str,
@@ -595,6 +645,7 @@ async def ontology_act(
 
     user = _currentUserFromContext(ctx)
     tenant = _tenantOf(user)
+    agentId = _agentIdOf(user, agent_id)
     try:
         params = _json.loads(params_json or "{}")
         if not isinstance(params, dict):
@@ -607,14 +658,14 @@ async def ontology_act(
         return {"rejected": True, "detail": "动作未登记: %s" % action_id}
     if not action.get("enabled"):
         return {"rejected": True, "detail": "动作已停用: %s" % action_id}
-    resolved = _resolveAgentForActions(_agentIdOf(user, agent_id))
+    resolved = _resolveAgentForActions(agentId)
     if resolved is None:
         return {"rejected": True,
                 "detail": "Agent 未就绪（动作执行载体不可用，稍后重试）"}
     try:
         receipt = await executeAction(
             action, params, resolved["executor"], _store(),
-            agentId=_agentIdOf(user, agent_id), tenantId=tenant,
+            agentId=agentId, tenantId=tenant,
             machineRegistry=None)
         if simulation_id:
             receipt["simulation_id"] = simulation_id
@@ -624,7 +675,7 @@ async def ontology_act(
                 "action_id": action.get("action_id")}
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_state(
     ctx: Context,
     subject_label: str,
@@ -670,7 +721,7 @@ async def ontology_state(
     }
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_compute(
     ctx: Context,
     function_id: str,
@@ -697,7 +748,7 @@ async def ontology_compute(
     return result
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_derive(
     ctx: Context,
     subject_label: str,
@@ -768,7 +819,7 @@ async def ontology_derive(
     }
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_answerability(
     ctx: Context,
     question: str,
@@ -793,7 +844,7 @@ async def ontology_answerability(
                                threshold=clamped)
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_readiness(ctx: Context) -> dict:
     """复合就绪探针（只读，P2-2）：这个部署现在能不能答知识/数据问题。
 
@@ -865,13 +916,13 @@ async def _executeViaNativeTool(ctx: Context, mcpName: str, nativeName: str,
     return await resolved["executor"].execute(nativeName, params)
 
 
-@_SERVER.tool(description=_nativeToolDescription("list_teams"))
+@_agentScopedTool(description=_nativeToolDescription("list_teams"))
 async def team_list(ctx: Context, agent_id: str = "") -> dict:
     """列出可派活的固定团队（映射原生 list_teams 同一执行体）。"""
     return await _executeViaNativeTool(ctx, "team_list", "list_teams", {}, agent_id)
 
 
-@_SERVER.tool(description=_nativeToolDescription("dispatch_team"))
+@_agentScopedTool(description=_nativeToolDescription("dispatch_team"))
 async def team_dispatch(ctx: Context, team_id: str, task: str,
                         task_unit: Optional[dict] = None,
                         background: bool = True, agent_id: str = "") -> dict:
@@ -884,14 +935,14 @@ async def team_dispatch(ctx: Context, team_id: str, task: str,
                                        params, agent_id)
 
 
-@_SERVER.tool(description=_nativeToolDescription("project_list"))
+@_agentScopedTool(description=_nativeToolDescription("project_list"))
 async def project_list(ctx: Context, agent_id: str = "") -> dict:
     """列出当前 agent 可见项目（映射原生 project_list 同一执行体）。"""
     return await _executeViaNativeTool(ctx, "project_list", "project_list",
                                        {}, agent_id)
 
 
-@_SERVER.tool(description=_nativeToolDescription("project_detail"))
+@_agentScopedTool(description=_nativeToolDescription("project_detail"))
 async def project_detail(ctx: Context, project_id: str, agent_id: str = "") -> dict:
     """查看单个项目详情（映射原生 project_detail 同一执行体；非成员且非公开不可见）。"""
     return await _executeViaNativeTool(ctx, "project_detail", "project_detail",
@@ -905,10 +956,19 @@ def build_ontology_mcp_asgi():
     /v1/mcp）；lifespan 是子 Starlette 的 lifespan_context——FastAPI mount 不触发
     子 Starlette 的 lifespan（SDK 的 session_manager task group 在其中启动），
     主 app 的 startup/shutdown 钩子手动驱动它。
+
+    SDK 对非 localhost host 会启用 DNS-rebinding 防护且允许清单只有 localhost
+    族——生产经反代域名访问必吃 421。本面挂主 app 同源路径，边界鉴权在
+    ``asgi_entry._resolveIdentity``（服务令牌/API key/JWT 全不成立即 401），
+    故此处显式关闭 SDK 层 Host 校验，鉴权不缺位。
     """
+    from mcp.server.transport_security import TransportSecuritySettings
+
     sub_app = _SERVER.streamable_http_app(streamable_http_path="/",
                                           json_response=True,
-                                          stateless_http=True)
+                                          stateless_http=True,
+                                          transport_security=TransportSecuritySettings(
+                                              enable_dns_rebinding_protection=False))
     lifespan_cm = sub_app.router.lifespan_context
 
     async def asgi_entry(scope, receive, send):
@@ -920,6 +980,9 @@ def build_ontology_mcp_asgi():
                                 status_code=401)
             await resp(scope, receive, send)
             return
+        from neurova.core.identity_context import set_request_user_id
+
+        set_request_user_id(user.get("user_id") or None)
         scope.setdefault("state", {})["neurova_user"] = user
         await sub_app(scope, receive, send)
 
@@ -931,7 +994,7 @@ def create_ontology_mcp_server() -> MCPServer:
     return _SERVER
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_graph_path(
     ctx: Context,
     from_label: str,
@@ -950,7 +1013,7 @@ async def ontology_graph_path(
         maxDepth=max_depth)
 
 
-@_SERVER.tool()
+@_agentScopedTool()
 async def ontology_graph_overview(
     ctx: Context,
     top_k: int = 10,

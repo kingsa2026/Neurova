@@ -5,7 +5,7 @@ P3-d MCP OAuth 授权码流 API 端点测试
 端点：POST /v1/tool-layers/mcp-servers/{server_id}/oauth/authorize
 语义：从 SharedConfigManager 读 oauth 子配置，要求 grant_type=authorization_code，
 后端经 webbrowser.open 打开浏览器（本机应用=用户浏览器），等待环回回调换 token
-并入 per-call 缓存；未认证 401（路由级依赖）、server 不存在 404、配置不符 400。
+并入 per-call 缓存；未认证 401、非管理员 403、server 不存在 404、配置不符 400。
 
 记录形状（2026-10-17 断点①复核修正）：本档 entry 一律经 `validate_mcp_server_config`
 产出，即 SharedConfigManager 实际落盘的那份扁平字典。旧版自造
@@ -83,7 +83,7 @@ def _authed_client(app):
     app.dependency_overrides[get_current_user] = lambda: {
         "user_id": "u1",
         "username": "user1",
-        "role": "user",
+        "role": "admin",
         "neuser_id": "ne1",
     }
     return TestClient(app)

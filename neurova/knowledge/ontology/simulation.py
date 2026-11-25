@@ -121,17 +121,40 @@ def _injectHypotheses(copyStore: Any, hypotheses: Dict[str, Any],
 
 def runSimulation(store: Any, scope: Dict[str, Any], hypotheses: Dict[str, Any],
                   workDir: Optional[str] = None,
-                  simulationId: Optional[str] = None) -> Dict[str, Any]:
+                  simulationId: Optional[str] = None,
+                  trustedIdentity: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """克隆世界推演：备份→副本注入→引擎到不动点→diff→台账追加→副本即删。
 
     返回 {simulation_id, diff:{added,removed,affected_subjects}, scoped_facts}。
-    生产库唯一写＝台账追加一行；其余全部发生在副本内。"""
+    生产库唯一写＝台账追加一行；其余全部发生在副本内。
+    ``trustedIdentity`` 由已完成认证与 Agent ACL 的调用方显式传入；给出时
+    scope 中的同名身份只能一致，不得覆盖或冲突。
+    """
+    scope = dict(scope or {})
+    if trustedIdentity is not None:
+        if not isinstance(trustedIdentity, dict):
+            raise ValueError("trustedIdentity 必须是包含 agentId/tenantId 的对象")
+        trustedAgentId = str(trustedIdentity.get("agentId") or "").strip()
+        trustedTenantId = str(trustedIdentity.get("tenantId") or "").strip()
+        if not trustedAgentId or not trustedTenantId:
+            raise ValueError("trustedIdentity 必须同时给出非空 agentId/tenantId")
+        for key, trustedValue in (
+            ("agentId", trustedAgentId), ("tenantId", trustedTenantId)
+        ):
+            supplied = scope.get(key)
+            if supplied not in (None, "") and str(supplied).strip() != trustedValue:
+                raise ValueError(
+                    "scope 身份 %s 与 trustedIdentity 冲突；拒绝保留客户端越权值" % key
+                )
+        scope["agentId"] = trustedAgentId
+        scope["tenantId"] = trustedTenantId
+
     from ..foundation.foundation_schema import applyTo
 
     with store._lock, store._conn:
         applyTo(store._conn)  # v46 台账表随迁移链装配（副本库亦然）
-    agentId = str((scope or {}).get("agentId") or "default")
-    tenantId = str((scope or {}).get("tenantId") or "default")
+    agentId = str(scope.get("agentId") or "default")
+    tenantId = str(scope.get("tenantId") or "default")
     hypotheses = hypotheses or {}
 
     # 规模边界：scope 事实行数（agent+tenant 域）超上限显式拒

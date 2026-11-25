@@ -25,9 +25,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
+from neurova.api.deps import require_admin
 from neurova.execution_engine.tool_engine import ToolEngine, ToolStatus
-from neurova.security.url_guard import assert_public_url
-from neurova.tool_layers.mcp_config import OAUTH_OUTBOUND_URL_KEYS, validate_mcp_server_config
+from neurova.tool_layers.mcp_config import validate_mcp_server_config
 from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
@@ -185,12 +185,12 @@ async def list_mcp_servers():
 @router.post("/mcp-servers", response_model=MCPServerInfo)
 async def connect_mcp_server(
     body: MCPServerConnectRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_admin()),
 ):
     """注册（持久化）并连接 MCP Server；失败原因可经 GET /mcp-servers 查询。
 
-    安全门与 catalog 安装共用 _register_mcp_server（P0-2 抽取，防两条注册路径
-    漂移）：stdio 需 admin / schema+shell 校验 / 非 admin 私网 URL 拒绝。
+    安全门与 catalog 安装共用 _register_mcp_server（防两条注册路径漂移）：
+    所有传输仅 admin、schema+shell 校验、全局 ID 唯一、按注册者属主接入。
     """
     import re
 
@@ -210,7 +210,9 @@ async def connect_mcp_server(
         "oauth": dict(body.oauth or {}),
     }
 
-    result = await _register_mcp_server(config_raw, role)
+    result = await _register_mcp_server(
+        config_raw, role, str(current_user.get("user_id") or "")
+    )
     config, ok, status = result["config"], result["connected"], result["status"]
     return MCPServerInfo(
         server_id=sid,
@@ -224,50 +226,37 @@ async def connect_mcp_server(
     )
 
 
-async def _register_mcp_server(config_raw: Dict[str, Any], role: str) -> Dict[str, Any]:
-    """MCP server 注册唯一入口（P0-2 抽取）：schema 校验 + 角色门 + 私网门 + 持久化 + 连接。
+async def _register_mcp_server(config_raw: Dict[str, Any], role: str,
+                               user_id: str) -> Dict[str, Any]:
+    """MCP server 注册唯一入口：管理员门 + 全局 ID 唯一 + 属主隔离接入。
 
-    与 connect / catalog-install 共用，避免两条平行注册路径漂移（同 schema↔分派
-    表历史根因教训）。安全序（P0-1 原样迁移）：
-    1. 归一化校验（未知键/shell/字段非法 → 400，指名字段）
-    2. stdio = 本机进程派生面 → 仅 admin（403）
-    3. 非 admin 的 http/sse 私网/环回 URL 拒绝（400）——admin 豁免保自托管；
-       server url 与 oauth 的三个出网端点走同一道门
-    4. 持久化（重复/非法 → 400）→ 连接（失败也返回 error 态，原因可查）
+    与 connect / catalog-install 共用，避免两条平行注册路径漂移。所有传输都
+    会改变全局工具面，故仅 admin 可注册；运行期 server 归属注册者 user_id。
     """
     from neurova.shared_config import get_shared_config_manager
     from neurova.tool_layers.mcp_client import get_mcp_client
+
+    if role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="MCP server 注册与连接仅限管理员（会改变全局工具面）",
+        )
+    if not str(user_id or "").strip():
+        raise HTTPException(status_code=403, detail="管理员身份缺少 user_id，拒绝注册")
 
     try:
         config = validate_mcp_server_config(config_raw)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    if config["transport"] == "stdio" and role != "admin":
-        raise HTTPException(
-            status_code=403,
-            detail="stdio 传输需要管理员角色（stdio MCP server 由本机派生进程执行）",
-        )
-
-    if role != "admin" and config.get("transport") in ("http", "sse"):
-        # 出网目标一并过同一道私网门：oauth 的 token_url / authorization_url /
-        # registration_endpoint 是本仓**主动 POST 过去**的地址，与 server url 同攻击面
-        # （169.254.169.254 这类链路本地元数据端点）。字段名单取 mcp_config 单源，
-        # 不在这里另抄一份键名。
-        outbound = [config.get("url") or ""]
-        outbound += [(config.get("oauth") or {}).get(key) or "" for key in OAUTH_OUTBOUND_URL_KEYS]
-        for target in outbound:
-            if not target:
-                continue
-            try:
-                assert_public_url(target)
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=f"MCP server url 被拒绝: {e}")
-
     sid = config["id"]
-    if not get_shared_config_manager().add_mcp_server(config):
-        if get_shared_config_manager().get_mcp_server(sid) is None:
-            raise HTTPException(status_code=400, detail="MCP Server 配置非法或已存在")
+    from neurova.tool_layers.mcp_bootstrap import get_bootstrapped_clients
+
+    manager = get_shared_config_manager()
+    if manager.get_mcp_server(sid) is not None or sid in get_bootstrapped_clients():
+        raise HTTPException(status_code=409, detail="MCP Server ID 已存在，拒绝覆盖")
+    if not manager.add_mcp_server(config):
+        raise HTTPException(status_code=409, detail="MCP Server ID 已存在，拒绝覆盖")
 
     client = get_mcp_client()
     ok = await client.connect_server(sid, config)
@@ -285,9 +274,14 @@ async def _register_mcp_server(config_raw: Dict[str, Any], role: str) -> Dict[st
     from neurova.tool_layers.mcp_client import ServerScopedClientView
 
     view = ServerScopedClientView(client, sid)
-    register_client(sid, view)
+    try:
+        register_client(sid, view, owner_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     if ok:
-        attach_server_to_running_agents(sid, view, _running_app_state())
+        attach_server_to_running_agents(
+            sid, view, _running_app_state(), owner_id=user_id
+        )
 
     return {"config": config, "connected": ok, "status": status}
 
@@ -308,12 +302,12 @@ class MCPCatalogInstallRequest(BaseModel):
 async def install_mcp_catalog_server(
     entry_id: str,
     body: MCPCatalogInstallRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_admin()),
 ):
     """一键安装白名单 MCP server（P0-2）。
 
     目录条目 → build_server_config → 与 connect 端点同一注册入口
-    （_register_mcp_server）：stdio 需 admin、schema/私网门、持久化、连接。
+    （_register_mcp_server）：仅 admin、schema 校验、全局 ID 唯一、属主隔离接入。
     """
     from neurova.tool_layers.mcp_catalog import build_server_config
 
@@ -326,7 +320,9 @@ async def install_mcp_catalog_server(
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        result = await _register_mcp_server(config_raw, role)
+        result = await _register_mcp_server(
+        config_raw, role, str(current_user.get("user_id") or "")
+    )
     except HTTPException as e:
         if e.status_code == 400 and "已存在" in str(e.detail):
             raise HTTPException(status_code=409, detail="该工具包已安装，请先卸载或改用手动配置")
@@ -346,7 +342,11 @@ async def install_mcp_catalog_server(
 
 
 @router.post("/mcp-servers/{server_id}/oauth/authorize")
-async def authorize_mcp_oauth(server_id: str, body: Optional[MCPOAuthAuthorizeRequest] = None):
+async def authorize_mcp_oauth(
+    server_id: str,
+    body: Optional[MCPOAuthAuthorizeRequest] = None,
+    _current_user: Dict[str, Any] = Depends(require_admin()),
+):
     """MCP OAuth2 授权码流：打开浏览器完成授权 → 环回回调换 token → 入缓存。
 
     仅支持 oauth.grant_type=authorization_code 的 server；
@@ -387,7 +387,10 @@ async def authorize_mcp_oauth(server_id: str, body: Optional[MCPOAuthAuthorizeRe
 
 
 @router.delete("/mcp-servers/{server_id}")
-async def disconnect_mcp_server(server_id: str):
+async def disconnect_mcp_server(
+    server_id: str,
+    _current_user: Dict[str, Any] = Depends(require_admin()),
+):
     """断开 MCP Server 并移除持久化配置"""
     from neurova.shared_config import get_shared_config_manager
     from neurova.tool_layers.mcp_bootstrap import (
@@ -407,7 +410,10 @@ async def disconnect_mcp_server(server_id: str):
 
 
 @router.post("/mcp-servers/{server_id}/test", response_model=MCPServerInfo)
-async def test_mcp_server(server_id: str):
+async def test_mcp_server(
+    server_id: str,
+    _current_user: Dict[str, Any] = Depends(require_admin()),
+):
     """连接测试：对持久化配置重新连接并返回实时状态（前端"刷新"按钮的真实语义）。
 
     复核补全 2026-09-12：前端 ToolLayerPage 一直在调用本端点，后端从未实现
@@ -530,10 +536,11 @@ def _executeOwnershipGate(tool_name: str, current_user: Dict[str, Any]) -> Optio
     任何登录用户可点名执行，横向越权。归属判定**复用注册面派生单源
     `_ownershipFromRegistration`**，不在执行面另立第二套口径：
 
-    - stdio MCP → 仅 admin（注册门 `_register_mcp_server` 已保证 stdio 只可能
-      出自 admin，执行面同口径收口；server 配置缺失按 fail-closed 拒非 admin）；
+    - 运行期 MCP → 按注册表 owner 判定（属主本人或 admin），不再把 http/sse
+      当成普通登录用户可执行的豁免通道；
+    - 启动期历史 stdio MCP → 仅 admin；配置缺失按 fail-closed 拒非 admin；
     - 带 owner 的动态工具 → 属主本人或 admin；
-    - public / 无属主动态 / http(sse) MCP → 登录即可（与聊天链可见性一致）。
+    - public / 无属主动态 / 无运行期属主的历史 http(sse) MCP → 登录即可。
 
     引擎查无此工具（builtin 等真内置来源）不在此判——与现状一致，由执行路径
     如实报"未注册"。
@@ -549,7 +556,17 @@ def _executeOwnershipGate(tool_name: str, current_user: Dict[str, Any]) -> Optio
     if tool_source == MCP_SOURCE:
         if role == "admin":
             return None
+        from neurova.tool_layers.mcp_bootstrap import get_server_owner
         from neurova.shared_config import get_shared_config_manager
+
+        registeredOwner = get_server_owner(tool_server_id or "")
+        if registeredOwner:
+            if registeredOwner != user_id:
+                return (
+                    f"工具 {tool_name} 来自其他用户注册的 MCP server"
+                    f"（owner={registeredOwner}），仅属主或 admin 可执行"
+                )
+            return None
 
         entry = get_shared_config_manager().get_mcp_server(tool_server_id or "")
         transport = str((entry or {}).get("transport") or "")

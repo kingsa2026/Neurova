@@ -20,6 +20,8 @@ from neurova.tool_layers.mcp_config import validate_mcp_server_config
 logger = get_logger(__name__)
 
 _clients: typing.Dict[str, MCPToolClient] = {}
+#: 运行期注册者的 user_id；启动期历史配置没有此元数据，保持全局工具面语义。
+_server_owners: typing.Dict[str, str] = {}
 _bootstrapped: bool = False
 _lock = asyncio.Lock()
 
@@ -63,6 +65,10 @@ async def bootstrap_mcp(config_manager: typing.Optional[typing.Any] = None) -> t
             if not server_id or not server.get("enabled", True):
                 continue
 
+            if server_id in _clients:
+                logger.warning("MCP bootstrap: %s 全局 ID 已注册，跳过重复配置", server_id)
+                continue
+
             try:
                 cfg = validate_mcp_server_config(server)
             except ValueError as e:
@@ -97,27 +103,57 @@ def get_bootstrapped_clients() -> typing.Dict[str, MCPToolClient]:
     return dict(_clients)
 
 
-def attach_bootstrapped_clients(router: typing.Any) -> int:
-    """把已 bootstrap 的客户端挂载到 ToolRouter（同步、幂等），返回挂载数量"""
+def _ownerForRouter(agent_id: str, router: typing.Any,
+                    agent: typing.Any = None) -> str:
+    """从真实 Agent 或 ToolExecutor 回链解析属主，复用唯一 owner 口径。"""
+    from neurova.api.agent_access import resolve_agent_owner
+
+    if agent is None:
+        executor = getattr(router, "_tool_executor", None)
+        agent = getattr(executor, "_agent", None)
+    return str(resolve_agent_owner(agent_id, state_agent=agent) or "")
+
+
+def attach_bootstrapped_clients(router: typing.Any,
+                                agent: typing.Any = None) -> int:
+    """挂载注册表客户端；运行期有属主的 server 只挂同属主 Agent。
+
+    启动期历史 server 没有属主元数据，保持既有全局语义；运行期注册一定带
+    owner_id，后续新建 Agent 也经同一过滤，不能绕回“挂到全部 Agent”。
+    """
+    targetOwner = _ownerForRouter("", router, agent)
     count = 0
     for server_id, client in _clients.items():
+        ownerId = _server_owners.get(server_id, "")
+        if ownerId and ownerId != targetOwner:
+            continue
         router.register_mcp_client(server_id, client)
         count += 1
     return count
 
 
-def register_client(server_id: str, client: typing.Any) -> None:
+def register_client(server_id: str, client: typing.Any,
+                    owner_id: str = "") -> None:
     """把运行期连接的客户端登记进 bootstrap 同一张注册表（发现口单源）。
 
-    运行期经 API 注册的 server 与启动期 bootstrap 的 server 共用这张表：
-    attach 的全部消费方（新建 agent、_get_client_for、shutdown）只认这里。
+    全局 ID 已存在即拒绝，禁止后注册者覆盖当前进程的工具视图。
     """
+    if server_id in _clients:
+        raise ValueError("MCP server ID 已注册: %s" % server_id)
     _clients[server_id] = client
+    if owner_id:
+        _server_owners[server_id] = str(owner_id)
+
+
+def get_server_owner(server_id: str) -> str:
+    """运行期注册者属主；启动期历史 server 返回空串。"""
+    return _server_owners.get(server_id, "")
 
 
 def unregister_client(server_id: str) -> None:
     """从注册表摘除（删除 server 时同步，防 zombie 被后续 attach 误挂）。"""
     _clients.pop(server_id, None)
+    _server_owners.pop(server_id, None)
 
 
 def _iter_agent_routers(app_state: typing.Any):
@@ -126,16 +162,23 @@ def _iter_agent_routers(app_state: typing.Any):
     for agent_id, agent in list(agents.items()):
         router = getattr(agent, "tool_router", None)
         if router is not None:
-            yield agent_id, router
+            yield agent_id, router, agent
 
 
-def attach_server_to_running_agents(server_id: str, client: typing.Any, app_state: typing.Any = None) -> int:
-    """把某 server 的客户端挂到运行中所有 agent 的 ToolRouter，返回挂载数量。
+def attach_server_to_running_agents(server_id: str, client: typing.Any,
+                                    app_state: typing.Any = None,
+                                    owner_id: str = "") -> int:
+    """把运行期 server 只挂到同属主 Agent，返回挂载数量。
 
-    运行期注册即接入的落点：不等重启 bootstrap。单个 agent 挂载失败不拖垮其余。
+    缺属主是装配错误，必须显式失败，不能退化为挂到全部 Agent。
     """
+    ownerId = str(owner_id or "").strip()
+    if not ownerId:
+        raise ValueError("运行期 MCP attach 必须给出 owner_id")
     count = 0
-    for agent_id, router in _iter_agent_routers(app_state):
+    for agent_id, router, agent in _iter_agent_routers(app_state):
+        if _ownerForRouter(agent_id, router, agent) != ownerId:
+            continue
         try:
             router.register_mcp_client(server_id, client)
             count += 1
@@ -152,7 +195,7 @@ def detach_server_from_running_agents(server_id: str, app_state: typing.Any = No
     删除 server 的同步面：不摘则 agent 决策面残留已删 server 的工具（zombie）。
     """
     count = 0
-    for agent_id, router in _iter_agent_routers(app_state):
+    for agent_id, router, _agent in _iter_agent_routers(app_state):
         try:
             # 钩子优先（测试桩/特殊 router 只暴露 detach_mcp_client），
             # 真 ToolRouter 走 _mcp_clients 字典摘除
@@ -174,6 +217,7 @@ def reset_bootstrap() -> None:
     """清空 bootstrap 状态（测试用）"""
     global _bootstrapped
     _clients.clear()
+    _server_owners.clear()
     _bootstrapped = False
 
 
@@ -189,6 +233,7 @@ async def shutdown_mcp() -> None:
 
     for server_id in list(_clients.keys()):
         client = _clients.pop(server_id, None)
+        _server_owners.pop(server_id, None)
         if client is None:
             continue
         try:

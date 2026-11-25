@@ -8,10 +8,8 @@ RCE 面证据（评测文档 M1，tool_layers.py:27）：
 
 修复设计（对评测计划的白名单方案有一处修正，理由见实现 commit）：
 - 路由级鉴权（get_current_user）
-- stdio 传输 = 本机进程派生面，仅限 admin 角色（解释器类白名单
-  如 npx/python 本身就能执行任意代码，属安全剧场；真正的边界是角色）
-- 非 admin 的 http/sse 配置拒绝私网 URL（admin 豁免，保住自托管
-  localhost MCP 场景）；shell 类 command 任何角色都拒绝
+- 所有传输的注册/连接都会改变全局工具面，仅限 admin 角色
+- admin 可配置自托管 localhost MCP；shell 类 command 任何角色都拒绝
 """
 
 import os
@@ -194,11 +192,11 @@ class TestShellCommandDenylist:
         assert "shell" in resp.json()["detail"]
 
 
-# ── 4. 非 admin 的 http/sse 拒绝私网 URL（admin 豁免） ────────────
+# ── 4. http/sse 注册同样仅限 admin（全局工具面） ──────────────────
 
 
-class TestPrivateUrlGate:
-    def test_private_url_rejected_for_user_400(self, isolated_env):
+class TestRemoteRegistrationAdminGate:
+    def test_private_url_rejected_for_user_403(self, isolated_env):
         app = FastAPI()
         app.include_router(tool_layers.router, prefix=BASE)
         client = _authed_client(app, "user")
@@ -207,7 +205,7 @@ class TestPrivateUrlGate:
                 f"{BASE}/mcp-servers",
                 json={"name": "local", "transport": "http", "url": "http://127.0.0.1:9000/mcp"},
             )
-        assert resp.status_code == 400
+        assert resp.status_code == 403
 
     def test_private_url_allowed_for_admin(self, isolated_env):
         app = FastAPI()
@@ -220,7 +218,7 @@ class TestPrivateUrlGate:
             )
         assert resp.status_code == 200
 
-    def test_public_url_ok_for_user(self, isolated_env):
+    def test_public_url_rejected_for_user_403(self, isolated_env):
         app = FastAPI()
         app.include_router(tool_layers.router, prefix=BASE)
         client = _authed_client(app, "user")
@@ -229,7 +227,7 @@ class TestPrivateUrlGate:
                 f"{BASE}/mcp-servers",
                 json={"name": "remote", "transport": "http", "url": "http://8.8.8.8:9000/mcp"},
             )
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from neurova.api.app import AppState
 from neurova.api.auth import get_current_user
 from neurova.api.endpoints import tool_layers
+from neurova.tool_layers import mcp_bootstrap
 from neurova.tool_layers.mcp_bootstrap import get_bootstrapped_clients
 
 BASE = "/v1/tool-layers"
@@ -85,13 +86,17 @@ class FakeClient:
 
 @pytest.fixture
 def env(monkeypatch):
+    mcp_bootstrap.reset_bootstrap()
     manager, client = FakeManager(), FakeClient()
     monkeypatch.setattr("neurova.shared_config.get_shared_config_manager", lambda: manager)
     monkeypatch.setattr("neurova.tool_layers.mcp_client.get_mcp_client", lambda user_id=None: client)
 
     state = AppState()
     router = FakeRouter()
-    state.agents["default"] = types.SimpleNamespace(tool_router=router)
+    state.agents["default"] = types.SimpleNamespace(
+        tool_router=router,
+        config=types.SimpleNamespace(owner_user_id="u_admin"),
+    )
     monkeypatch.setattr(
         "neurova.api.endpoints.tool_layers._running_app_state", lambda: state, raising=False
     )
@@ -106,6 +111,7 @@ def env(monkeypatch):
     }
     yield TestClient(app), router, client, manager
     app.dependency_overrides.clear()
+    mcp_bootstrap.reset_bootstrap()
 
 
 def test_register_attaches_server_to_running_agents(env):
