@@ -250,24 +250,32 @@ class XiaoYiAdapter(ChannelAdapter):
         if receive_task is not None:
             receive_task.cancel()
 
-    async def send_message(self, message: str, session_id: str = None, **kwargs) -> bool:
-        """发送小艺消息"""
+    async def send_message(
+        self, chat_id: str, content: str, message_type: str = "text", **kwargs
+    ) -> Optional[str]:
+        """发送小艺消息（基类契约：chat_id/content 各就各位，失败返回 None）。
+
+        CHAN-05：原签名 (message, session_id=None) 与基类 (chat_id, content,
+        message_type, **kwargs) 错位——manager 直调时第三个位置参数直接
+        TypeError，且 bool False 被 `result is not None` 判成成功。
+        """
         if not self.authenticated:
             logger.warning("小艺未初始化")
-            return False
+            return None
 
         try:
-            if not self._connected:
+            if not self._connected or self.ws is None:
                 # 审计 §3.4-3：未连接时原桩打"模拟"日志却 return True——
                 # 上游把没发出去的消息当成功。如实失败。
-                logger.warning("小艺未连接，发送失败: %s", message[:50])
-                return False
+                logger.warning("小艺未连接，发送失败: %s", str(content)[:50])
+                return None
 
             # 构建消息
+            session_id = str(kwargs.pop("session_id", "") or chat_id or uuid.uuid4())
             msg_data = {
                 "type": "message",
-                "session_id": session_id or str(uuid.uuid4()),
-                "content": message,
+                "session_id": session_id,
+                "content": content,
                 "message_id": str(uuid.uuid4()),
                 "timestamp": datetime.now().isoformat(),
                 "metadata": kwargs,
@@ -275,12 +283,12 @@ class XiaoYiAdapter(ChannelAdapter):
 
             # 发送消息
             await self.ws.send(json.dumps(msg_data))
-            logger.info("小艺消息发送成功: %s...", message[:50])
-            return True
+            logger.info("小艺消息发送成功: %s...", str(content)[:50])
+            return ""
 
         except Exception as e:
             logger.error("小艺消息发送异常: %s", e)
-            return False
+            return None
 
     async def receive_message(self) -> Optional[Dict[str, Any]]:
         """接收小艺消息"""

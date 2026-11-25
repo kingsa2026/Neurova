@@ -395,7 +395,9 @@ def test_xiaoyi_send_message_not_connected_is_false():
     adapter = XiaoYiAdapter()
     adapter.authenticated = True
     adapter._connected = False
-    assert asyncio.run(adapter.send_message("hi")) is False, "未连接发送必须如实失败"
+    # CHAN-05：失败按基类契约返回 None（原 bool False 被 manager 的
+    # `result is not None` 判成成功，正是"没发出去却算已发送"的根因）
+    assert asyncio.run(adapter.send_message("chat-1", "hi")) is None, "未连接发送必须如实失败"
 
 
 # ── §3.4-4 三模板节点类型全注册 ──────────────────────────────────────────

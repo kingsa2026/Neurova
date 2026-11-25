@@ -136,7 +136,13 @@ class WeChatAdapter(
         )
         # P1-16: mixin 的 send_message 内部是 requests 同步 HTTP（wecom/kf/
         # ilink/official 四分支），直调会阻塞事件循环——下沉工作线程。
-        await asyncio.to_thread(WeChatMessagingMixin.send_message, self, msg)
+        # CHAN-05：mixin 以 bool 回报真实发送结果；此前丢弃恒返回 ""，失败也
+        # 被 manager 当成已发送。失败如实 None（基类契约）。
+        sent = await asyncio.to_thread(WeChatMessagingMixin.send_message, self, msg)
+        if not sent:
+            logger.error("微信消息发送失败（mode=%s，chat=%s）: %s",
+                         self.mode, str(chat_id)[:20], str(content)[:50])
+            return None
         return ""
 
     def __init__(self):

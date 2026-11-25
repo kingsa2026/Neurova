@@ -427,7 +427,10 @@ class ChannelManager:
                                      channel_type, str(chat_id)[:20], partIndex, len(parts))
             elif first_id is None:
                 first_id = result
-            await self._sync_reply_to_session(session_scope, part, channel_type)
+            # CHAN-05：只有真正发出去的片才同步为 AGENT_REPLY。失败片此前
+            # 照样广播，其他渠道看到"已发送"，用户端却收不到。
+            if result is not None:
+                await self._sync_reply_to_session(session_scope, part, channel_type)
         if failed:
             logger.error("渠道 %s 回复有 %d/%d 片发送失败（chat=%s）", channel_type, failed, len(parts), str(chat_id)[:20])
         return first_id
