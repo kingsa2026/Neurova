@@ -12,6 +12,7 @@ RSI 编排器
 from neurova.core.logger import get_logger
 from neurova.skills.library_service import agentLibrary
 from dataclasses import dataclass
+import threading
 from typing import Any, Dict, List, Optional
 
 from .convergence_analyzer import (
@@ -246,6 +247,10 @@ class RSIOrchestrator:
         # 归属先定（G2）：部署控制器按本 agent 的相位解析装配，agent_id 必须
         # 先于控制器存在——覆写条目按 agent_id 命中，顺序颠倒就是全员吃全局。
         self.agent_id = str(agent_id or "default")
+        # EVO-01：迭代单飞闸。post_chat 多个回合可并发 to_thread(run_iteration)，
+        # 同实例只允许一轮进入迭代主体；后来者返回结构化 skipped，不排队——
+        # 排队只会把重复轮次延后执行，照样竞争轮次/提案/快照/世代账。
+        self._iterationLock = threading.Lock()
         # 创建集成管理器
         # 上下文经济性宿主（004 M2）：预算对象在生产由 `TokenBudget()` 默认构造
         # （`context/orchestrator.py` 两处装配点亦如此），故此处同源取默认构造；
@@ -992,6 +997,11 @@ class RSIOrchestrator:
         """
         运行一次 RSI 迭代（真实棘轮：应用 → 实测 → 保留/回滚）
 
+        EVO-01：本方法是**单飞**入口——同一编排器同一时刻只允许一轮进入
+        迭代主体。并发调用者（post_chat 多回合 to_thread）返回
+        ``skipped=True / reason=iteration_in_progress`` 的结构化读数，不排队、
+        不进入主体；配额闸先于主体，拒绝时不占迭代轮次。
+
         Returns:
             Dict[str, Any]: 迭代结果，包含：
                 - feedback_signals: 反馈信号（占位替身那几路带 `verdict` = unevidenced）
@@ -1005,22 +1015,42 @@ class RSIOrchestrator:
                 - phase_verdict: 阶段晋升判据（`GateVerdict` 三态）
                 - metrics: 监控指标
         """
-        # 资源治理 P1-2：RSI 迭代每日原子配额——超额/配额存储不可用即拒绝
-        # 本轮（fail-closed：少跑一轮可恢复，失控跑批不可恢复）。
-        from neurova.core.background_quota import acquireDailyQuota, dailyLimitFromEnv
-
-        if not acquireDailyQuota(
-            "rsi_iteration", dailyLimitFromEnv("NEUROVA_RSI_DAILY_QUOTA", 500)
-        ):
+        # 兼容以 SimpleNamespace 桩做无绑定调用的既有测试：锁按实例懒建。
+        lock = getattr(self, "_iterationLock", None)
+        if lock is None:
+            lock = self._iterationLock = threading.Lock()
+        if not lock.acquire(blocking=False):
+            logger.info("RSI 迭代单飞拦下并发调用：上一轮仍在执行")
             return {
-                "quota_denied": True,
-                "reason": "rsi_iteration_daily_quota",
+                "skipped": True,
+                "reason": "iteration_in_progress",
                 "feedback_signals": [],
                 "convergence": None,
                 "applied_count": 0,
                 "gain": 0.0,
             }
+        try:
+            # 资源治理 P1-2：RSI 迭代每日原子配额——超额/配额存储不可用即拒绝
+            # 本轮（fail-closed：少跑一轮可恢复，失控跑批不可恢复）。
+            from neurova.core.background_quota import acquireDailyQuota, dailyLimitFromEnv
 
+            if not acquireDailyQuota(
+                "rsi_iteration", dailyLimitFromEnv("NEUROVA_RSI_DAILY_QUOTA", 500)
+            ):
+                return {
+                    "quota_denied": True,
+                    "reason": "rsi_iteration_daily_quota",
+                    "feedback_signals": [],
+                    "convergence": None,
+                    "applied_count": 0,
+                    "gain": 0.0,
+                }
+            return RSIOrchestrator._runIterationBody(self)
+        finally:
+            lock.release()
+
+    def _runIterationBody(self) -> Dict[str, Any]:
+        """迭代主体（调用方必须已持单飞锁与配额放行）。"""
         # 1. 收集反馈信号
         feedback_signals = self.collect_feedback_signals()
 
