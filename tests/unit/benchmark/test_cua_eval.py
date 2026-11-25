@@ -256,3 +256,87 @@ class TestActionDiscipline:
                              lambda task: {"evidence": {}})
         assert report["action_invalid_total"] == 0
         assert report["per_task"][0]["action_invalid"] == 0
+
+
+class TestRepeatedRuns:
+    """C2 多 run 聚合（OSWorld M5 教训：同任务同配置跨 run 翻转
+    ——冒烟轮 1.0/子集轮 0.0）。同任务集 N 轮评测 → 均值±std、逐任务
+    翻转标记；repeats=1 时与单轮 runCuaTasks 口径一致（零破坏）。"""
+
+    def _flipFlopTasks(self):
+        def _check(evidence):
+            done = bool(evidence.get("done"))
+            return done, (1.0 if done else 0.0), {}
+
+        return [CuaTask(task_id="t_flip", instruction="任务", check=_check,
+                        description="样例")]
+
+    def test_flippedTaskMarkedWithMeanAndScores(self):
+        from neurova.benchmark.cua_eval import runCuaTasksRepeated
+
+        state = {"call": 0}
+
+        def episode(task):
+            state["call"] += 1
+            return {"done": state["call"] % 2 == 1}  # 轮1过、轮2不过
+
+        report = runCuaTasksRepeated(self._flipFlopTasks(), episode, repeats=2)
+        assert report["runs"] == 2
+        row = report["per_task"][0]
+        assert row["task_id"] == "t_flip"
+        assert row["scores"] == [1.0, 0.0]
+        assert row["mean_score"] == pytest.approx(0.5)
+        assert row["flipped"] is True, "轮次间 0/非0 分歧必须标翻转"
+        assert report["flipped_tasks"] == 1
+        assert report["mean_score"] == pytest.approx(0.5)
+
+    def test_stableTaskNotFlipped(self):
+        from neurova.benchmark.cua_eval import runCuaTasksRepeated
+
+        report = runCuaTasksRepeated(
+            [_task("t_stable", passed=True)], lambda task: {"done": True}, repeats=3)
+        row = report["per_task"][0]
+        assert row["flipped"] is False
+        assert row["scores"] == [1.0, 1.0, 1.0]
+        assert row["mean_score"] == pytest.approx(1.0)
+        assert report["flipped_tasks"] == 0
+        assert report["mean_score"] == pytest.approx(1.0)
+
+    def test_repeatsOneKeepsSingleRunContract(self):
+        from neurova.benchmark.cua_eval import runCuaTasksRepeated
+
+        single = runCuaTasks([_task("t1", passed=True)], lambda t: {"evidence": {}})
+        repeated = runCuaTasksRepeated([_task("t1", passed=True)],
+                                       lambda t: {"evidence": {}}, repeats=1)
+        assert repeated["runs"] == 1
+        assert repeated["score"] == single["score"]
+        assert repeated["tasks_total"] == single["tasks_total"]
+        assert repeated["per_task"][0]["flipped"] is False
+
+    def test_repeatedRunKeepsInfraAndInvalidFacts(self):
+        from neurova.benchmark.cua_eval import runCuaTasksRepeated
+
+        def episode(task):
+            if task.task_id == "t_infra":
+                raise RuntimeError("桌面不可用")
+            return {"done": True, "action_invalid": 2}
+
+        tasks = [
+            _task("t_ok", passed=True),
+            CuaTask(task_id="t_infra", instruction="任务",
+                    check=lambda e: (True, 1.0, {}), description="样例"),
+        ]
+        report = runCuaTasksRepeated(tasks, episode, repeats=2)
+        assert report["action_invalid_total"] == 4, "跨轮 invalid 累计"
+        byId = {row["task_id"]: row for row in report["per_task"]}
+        assert byId["t_infra"]["runs_infra"] == 2, "每轮器械故障计数保留"
+        assert byId["t_infra"]["flipped"] is False, "全量 infra 不算翻转（没量到≠翻转）"
+        assert byId["t_ok"]["mean_score"] == pytest.approx(1.0)
+
+    def test_costNoteOnTopLevelReport(self):
+        from neurova.benchmark.cua_eval import runCuaTasksRepeated
+
+        report = runCuaTasksRepeated([_task("t1", passed=True)],
+                                     lambda t: {"evidence": {}}, repeats=2,
+                                     costNote={"run_by": "manual"})
+        assert report["cost_note"] == {"run_by": "manual"}

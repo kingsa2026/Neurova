@@ -37,6 +37,7 @@ __all__ = [
     "ToolExecutorEpisodeAdapter",
     "cuaActionWhitelist",
     "runCuaTasks",
+    "runCuaTasksRepeated",
 ]
 
 CheckFn = Callable[[Dict[str, Any]], Tuple[bool, float, dict]]
@@ -224,6 +225,86 @@ def runCuaTasks(
         "score": round(sum(scores) / len(scores), _SCORE_DIGITS) if scores else None,
         "avg_latency_ms": round(sum(latencies) / len(latencies), 2) if latencies else None,
         "per_task": perTask,
+        "executed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if costNote is not None:
+        report["cost_note"] = dict(costNote)
+    return report
+
+
+def runCuaTasksRepeated(
+    tasks: List[CuaTask],
+    episodeFn: EpisodeFn,
+    repeats: int = 1,
+    clockFn: Callable[[], float] = time.perf_counter,
+    costNote: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """同任务集 N 轮评测 → 多 run 聚合（C2，OSWorld M5 教训：同任务同配置
+    跨 run 翻转，单轮读数把上游非确定采样当确定结论）。
+
+    - 逐轮跑 :func:`runCuaTasks`（口径不变），按 task_id 对齐轮次；
+    - 逐任务：每轮得分列表、均值、翻转标记（judged 轮次间通过与否分歧；
+      全量 infra＝没量到，不算翻转）、跨轮 invalid/infra 累计；
+    - 总览：mean_score、score_std、pass_rate 区间（逐轮通过率 min/max）、
+      action_invalid_total；每轮完整报告保留在 ``runs_reports``；
+    - ``repeats=1`` 时 ``score``/``tasks_total`` 与单轮 :func:`runCuaTasks`
+      同值（零破坏）。
+    """
+    repeats = max(1, int(repeats))
+    runs = [
+        runCuaTasks(tasks, episodeFn, clockFn=clockFn,
+                    costNote=costNote if i == repeats - 1 else None)
+        for i in range(repeats)
+    ]
+
+    byTask: Dict[str, List[Dict[str, Any]]] = {}
+    for run in runs:
+        for row in run["per_task"]:
+            byTask.setdefault(row["task_id"], []).append(row)
+
+    perTask: List[Dict[str, Any]] = []
+    for taskId, rows in byTask.items():
+        scores = [row["score"] for row in rows]
+        judgedRows = [row for row in rows if row["failure_class"] == ""]
+        flipped = len({row["passed"] for row in judgedRows}) > 1
+        perTask.append(
+            {
+                "task_id": taskId,
+                "scores": scores,
+                "mean_score": round(sum(scores) / len(scores), _SCORE_DIGITS),
+                "flipped": flipped,
+                "runs_infra": len(rows) - len(judgedRows),
+                "action_invalid": sum(row["action_invalid"] for row in rows),
+                "rows": rows,
+            }
+        )
+
+    means = [row["mean_score"] for row in perTask]
+    meanScore = round(sum(means) / len(means), _SCORE_DIGITS) if means else None
+    scoreStd: Optional[float] = None
+    if means and repeats > 1:
+        mu = sum(means) / len(means)
+        scoreStd = round(
+            (sum((m - mu) ** 2 for m in means) / len(means)) ** 0.5, _SCORE_DIGITS
+        )
+    passRates = [
+        round(run["tasks_correct"] / run["tasks_judged"], _SCORE_DIGITS)
+        for run in runs if run["tasks_judged"] > 0
+    ]
+
+    report = {
+        "status": "completed",
+        "runs": repeats,
+        "tasks_total": len(perTask),
+        "flipped_tasks": sum(1 for row in perTask if row["flipped"]),
+        "score": meanScore,
+        "mean_score": meanScore,
+        "score_std": scoreStd,
+        "pass_rate_min": min(passRates) if passRates else None,
+        "pass_rate_max": max(passRates) if passRates else None,
+        "action_invalid_total": sum(row["action_invalid"] for row in perTask),
+        "per_task": perTask,
+        "runs_reports": runs,
         "executed_at": datetime.now(timezone.utc).isoformat(),
     }
     if costNote is not None:
