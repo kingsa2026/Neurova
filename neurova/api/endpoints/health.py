@@ -15,6 +15,8 @@ from __future__ import annotations
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -79,7 +81,8 @@ async def get_health_status():
             message="Health checker not available",
         )
 
-    checker.run_all_checks()
+    # 检查函数是同步 I/O：直接调用会占住事件循环（CORE-04），送工作线程执行。
+    await asyncio.to_thread(checker.run_all_checks)
     report = checker.get_report()
 
     return HealthStatusResponse(
@@ -138,7 +141,7 @@ async def run_check(name: str, current_user: Dict[str, Any] = Depends(get_curren
     if not checker:
         raise HTTPException(status_code=503, detail="Health checker not available")
 
-    result = checker.run_check(name)
+    result = await asyncio.to_thread(checker.run_check, name)
     if not result:
         raise HTTPException(status_code=404, detail=f"Check '{name}' not found")
 
@@ -158,7 +161,8 @@ async def get_health_report():
     if not checker:
         raise HTTPException(status_code=503, detail="Health checker not available")
 
-    checker.run_all_checks()
+    # 检查函数是同步 I/O：直接调用会占住事件循环（CORE-04），送工作线程执行。
+    await asyncio.to_thread(checker.run_all_checks)
     report = checker.get_report()
 
     return HealthReportResponse(**report)

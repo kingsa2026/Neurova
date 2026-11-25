@@ -176,18 +176,24 @@ class HealthChecker:
             return None
 
         start = time.monotonic()
+        import concurrent.futures as _cf
+
+        pool = _cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="health-check")
         try:
-            import concurrent.futures as _cf
-            with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
-                future = _pool.submit(health_check.check_func)
-                success, message = future.result(timeout=health_check.timeout)
+            future = pool.submit(health_check.check_func)
+            success, message = future.result(timeout=health_check.timeout)
             status = HealthStatus.HEALTHY if success else HealthStatus.UNHEALTHY
         except _cf.TimeoutError:
+            future.cancel()
             status = HealthStatus.UNHEALTHY
             message = f"Health check '{name}' timed out after {health_check.timeout}s"
         except Exception as exc:  # 检查函数抛异常视为不健康
             status = HealthStatus.UNHEALTHY
             message = str(exc)
+        finally:
+            # 超时后不准 wait=True：上下文管理器退出时的 shutdown(wait=True) 会把
+            # 「按预算返回」重新拖成无限等待，超时语义被整个抵消（CORE-04）。
+            pool.shutdown(wait=False, cancel_futures=True)
         duration = (time.monotonic() - start) * 1000.0
 
         result = HealthCheckResult(
