@@ -88,17 +88,18 @@ class TestSourceStore:
         first = s.register(_source(), created_by="1")
         s.register(_source(name="第二源"), created_by="1")
 
-        assert len(s.list()) == 2
-        assert s.list()[0]["auth_token"] == "", "token 不出列表（脱敏）"
+        assert len(s.list(tenantId="t1")) == 2
+        assert s.list(tenantId="t1")[0]["auth_token"] == "", "token 不出列表（脱敏）"
 
-        s.update(first["source_id"], _source(name="改名", auth_token="tok-2"))
-        updated = s.get(first["source_id"])
+        s.update(first["source_id"], _source(name="改名", auth_token="tok-2"),
+                 tenantId="t1")
+        updated = s.get(first["source_id"], tenantId="t1")
         assert updated["name"] == "改名"
         assert updated["auth_token"] == "tok-2", "get 单条回 token（编辑需要）"
 
-        s.delete(first["source_id"])
-        assert s.get(first["source_id"]) is None
-        assert len(s.list()) == 1
+        s.delete(first["source_id"], tenantId="t1")
+        assert s.get(first["source_id"], tenantId="t1") is None
+        assert len(s.list(tenantId="t1")) == 1
 
 
 class TestFetchViaSession:
@@ -143,7 +144,7 @@ class TestPull:
             lambda source: _null_session_ctx(),
             raising=False)
 
-        outcome = asyncio.run(pullFromSource(s, s.get(src["source_id"]), repo))
+        outcome = asyncio.run(pullFromSource(s, s.get(src["source_id"], tenantId="t1"), repo))
         assert outcome["knowledge_id"]
         assert outcome["duplicate"] is not True
         item = repo.visible_items(
@@ -151,7 +152,7 @@ class TestPull:
         assert item["source_type"] == "mcp"
         assert item["source"] == "mcp:企微知识源"
 
-        again = asyncio.run(pullFromSource(s, s.get(src["source_id"]), repo))
+        again = asyncio.run(pullFromSource(s, s.get(src["source_id"], tenantId="t1"), repo))
         assert again["duplicate"] is True, "同内容二次拉取命中 A1 去重"
 
     def testPullStampsTenantAndFailsLoudly(self, store, repo, monkeypatch):
@@ -163,7 +164,7 @@ class TestPull:
             raising=False)
 
         with pytest.raises(RuntimeError):
-            asyncio.run(pullFromSource(s, s.list()[0], repo))
+            asyncio.run(pullFromSource(s, s.list(tenantId="t1")[0], repo))
 
 
 class _NullSessionCtx:

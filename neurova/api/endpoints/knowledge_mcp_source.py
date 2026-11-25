@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant
 from neurova.knowledge.mcp_source import (
     McpSourceStore,
     fetchViaSession,
@@ -45,6 +46,11 @@ def _requireAdmin(current_user: Dict[str, Any]) -> None:
             status_code=403, detail="MCP 信息源是治理动作，仅管理员可管理")
 
 
+def _tenantOf(current_user: Dict[str, Any]) -> str:
+    """归属租户唯一取法：认证上下文（KNOW-04）——请求体不再决定租户。"""
+    return resolve_tenant(current_user)
+
+
 class McpSourceSpec(BaseModel):
     name: str = Field(..., min_length=1)
     endpoint: str = Field(..., min_length=1)
@@ -52,7 +58,6 @@ class McpSourceSpec(BaseModel):
     tool_name: str = ""
     tool_args: Dict[str, Any] = Field(default_factory=dict)
     agent_id: str = "default"
-    tenant_id: str = "default"
 
 
 def _trustedHosts() -> set:
@@ -74,7 +79,7 @@ async def list_mcp_sources(
     request: Request,
     current_user: Dict = Depends(get_current_user_or_service),
 ):
-    items = _store().list()
+    items = _store().list(_tenantOf(current_user))
     return {"code": 0, "message": "success",
             "data": {"items": items, "total": len(items)}}
 
@@ -86,7 +91,10 @@ async def register_mcp_source(
 ):
     _requireAdmin(current_user)
     _checkEndpoint(body.endpoint)
-    sourceId = _store().register(body.model_dump(),
+    spec = body.model_dump()
+    # KNOW-04：归属租户由认证上下文写入，请求体不自报租户
+    spec["tenant_id"] = _tenantOf(current_user)
+    sourceId = _store().register(spec,
                                  created_by=str(current_user.get("user_id") or ""))["source_id"]
     return {"code": 0, "message": "success", "data": {"source_id": sourceId}}
 
@@ -98,7 +106,8 @@ async def update_mcp_source(
 ):
     _requireAdmin(current_user)
     _checkEndpoint(body.endpoint)
-    updated = _store().update(source_id, body.model_dump())
+    updated = _store().update(source_id, body.model_dump(),
+                              tenantId=_tenantOf(current_user))
     if updated is None:
         raise HTTPException(status_code=404, detail="信息源未登记: %s" % source_id)
     return {"code": 0, "message": "success", "data": {"source_id": source_id}}
@@ -110,7 +119,7 @@ async def delete_mcp_source(
     current_user: Dict = Depends(get_current_user_or_service),
 ):
     _requireAdmin(current_user)
-    _store().delete(source_id)
+    _store().delete(source_id, tenantId=_tenantOf(current_user))
     return {"code": 0, "message": "success", "data": {"source_id": source_id}}
 
 
@@ -121,7 +130,7 @@ async def pull_mcp_source(
 ):
     """手动拉取：连外部 server 调工具 → 文本入知识库（dedupe/租户全链）。"""
     _requireAdmin(current_user)
-    source = _store().get(source_id)
+    source = _store().get(source_id, tenantId=_tenantOf(current_user))
     if source is None:
         raise HTTPException(status_code=404, detail="信息源未登记: %s" % source_id)
     if not source.get("tool_name"):

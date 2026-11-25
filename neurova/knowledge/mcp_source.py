@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
-from neurova.core.tenant_scope import resolve_tenant
+from neurova.core.tenant_scope import resolve_tenant, tenant_sql_where
 
 logger = get_logger(__name__)
 
@@ -32,7 +32,11 @@ def _now() -> str:
 
 
 class McpSourceStore:
-    """`knowledge_mcp_sources` 的唯一读写面。"""
+    """`knowledge_mcp_sources` 的唯一读写面。
+
+    全部读写在 tenant 圈域内（KNOW-04）：tenantId 是必传参数——归属校验在
+    查询单点做，调用方不得绕过；他租户的源不可见、不可改、不可删、不可拉。
+    """
 
     def __init__(self, store: Any) -> None:
         self._store = store
@@ -40,6 +44,7 @@ class McpSourceStore:
     def register(self, spec: Dict[str, Any], created_by: str = "") -> Dict[str, Any]:
         sourceId = "mcp_%s" % uuid.uuid4().hex[:12]
         stamp = _now()
+        tenantId = resolve_tenant(spec)
         with self._store._lock, self._store._conn:
             self._store._conn.execute(
                 "INSERT INTO knowledge_mcp_sources (source_id, name, endpoint, auth_token,"
@@ -48,33 +53,38 @@ class McpSourceStore:
                 (sourceId, str(spec.get("name") or ""), str(spec.get("endpoint") or ""),
                  str(spec.get("auth_token") or ""), str(spec.get("tool_name") or ""),
                  json.dumps(spec.get("tool_args") or {}, ensure_ascii=False),
-                 str(spec.get("agent_id") or "default"), resolve_tenant(spec),
+                 str(spec.get("agent_id") or "default"), tenantId,
                  str(created_by or ""), stamp, stamp, None, "never"))
-        return self.get(sourceId) or {}
+        return self.get(sourceId, tenantId=tenantId) or {}
 
-    def list(self) -> List[Dict[str, Any]]:
+    def list(self, tenantId: str) -> List[Dict[str, Any]]:
+        clause, params = tenant_sql_where(tenantId)
         with self._store._lock:
             rows = self._store._conn.execute(
-                "SELECT * FROM knowledge_mcp_sources ORDER BY created_at").fetchall()
+                "SELECT * FROM knowledge_mcp_sources WHERE %s ORDER BY created_at" % clause,
+                params).fetchall()
         return [self._redact(dict(r)) for r in rows]
 
-    def get(self, sourceId: str) -> Optional[Dict[str, Any]]:
+    def get(self, sourceId: str, tenantId: str) -> Optional[Dict[str, Any]]:
+        clause, params = tenant_sql_where(tenantId)
         with self._store._lock:
             row = self._store._conn.execute(
-                "SELECT * FROM knowledge_mcp_sources WHERE source_id = ?", (sourceId,)).fetchone()
+                "SELECT * FROM knowledge_mcp_sources WHERE source_id = ? AND %s" % clause,
+                (sourceId, *params)).fetchone()
         if row is None:
             return None
         return self._withArgs(dict(row))
 
-    def update(self, sourceId: str, spec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        existing = self.get(sourceId)
+    def update(self, sourceId: str, spec: Dict[str, Any], tenantId: str) -> Optional[Dict[str, Any]]:
+        existing = self.get(sourceId, tenantId=tenantId)
         if existing is None:
             return None
+        clause, clauseParams = tenant_sql_where(tenantId)
         with self._store._lock, self._store._conn:
             self._store._conn.execute(
                 "UPDATE knowledge_mcp_sources SET name=?, endpoint=?, auth_token=?,"
                 " tool_name=?, tool_args=?, agent_id=?, tenant_id=?, updated_at=?"
-                " WHERE source_id=?",
+                " WHERE source_id=? AND %s" % clause,
                 (str(spec.get("name") or existing["name"]),
                  str(spec.get("endpoint") or existing["endpoint"]),
                  str(spec.get("auth_token") or existing["auth_token"]),
@@ -83,19 +93,23 @@ class McpSourceStore:
                             else json.loads(existing["tool_args"]), ensure_ascii=False),
                  str(spec.get("agent_id") or existing["agent_id"]),
                  str(spec.get("tenant_id") or existing["tenant_id"]),
-                 _now(), sourceId))
-        return self.get(sourceId)
+                 _now(), sourceId, *clauseParams))
+        return self.get(sourceId, tenantId=tenantId)
 
-    def delete(self, sourceId: str) -> None:
+    def delete(self, sourceId: str, tenantId: str) -> None:
+        clause, params = tenant_sql_where(tenantId)
         with self._store._lock, self._store._conn:
             self._store._conn.execute(
-                "DELETE FROM knowledge_mcp_sources WHERE source_id = ?", (sourceId,))
+                "DELETE FROM knowledge_mcp_sources WHERE source_id = ? AND %s" % clause,
+                (sourceId, *params))
 
-    def markPulled(self, sourceId: str, status: str) -> None:
+    def markPulled(self, sourceId: str, status: str, tenantId: str) -> None:
+        clause, params = tenant_sql_where(tenantId)
         with self._store._lock, self._store._conn:
             self._store._conn.execute(
-                "UPDATE knowledge_mcp_sources SET last_pull_at=?, last_status=? WHERE source_id=?",
-                (_now(), status, sourceId))
+                "UPDATE knowledge_mcp_sources SET last_pull_at=?, last_status=?"
+                " WHERE source_id=? AND %s" % clause,
+                (_now(), status, sourceId, *params))
 
     @staticmethod
     def _withArgs(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -156,15 +170,16 @@ async def pullFromSource(store: McpSourceStore, source: Dict[str, Any],
     空间才能打穿；缺省用本模块实现。"""
     fetchFn = fetcher or fetchViaSession
     opener = sessionOpener or openSourceSession
+    tenantId = resolve_tenant(source)
     try:
         async with opener(source) as session:
             text = await fetchFn(
                 session, str(source.get("tool_name") or ""), source.get("tool_args") or {})
     except Exception:
-        store.markPulled(str(source.get("source_id")), "failed")
+        store.markPulled(str(source.get("source_id")), "failed", tenantId=tenantId)
         raise
     if not text.strip():
-        store.markPulled(str(source.get("source_id")), "empty")
+        store.markPulled(str(source.get("source_id")), "empty", tenantId=tenantId)
         raise ValueError("MCP 工具返回空内容：%s" % source.get("tool_name"))
 
     name = str(source.get("name") or "mcp-source")
@@ -181,7 +196,7 @@ async def pullFromSource(store: McpSourceStore, source: Dict[str, Any],
         visibility="private",
         dedupe=True,
     )
-    store.markPulled(str(source.get("source_id")), "ok")
+    store.markPulled(str(source.get("source_id")), "ok", tenantId=tenantId)
     return {
         "knowledge_id": item.get("knowledge_id"),
         "duplicate": bool(item.get("duplicate")),
