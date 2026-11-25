@@ -1529,8 +1529,12 @@ async def generate_pairing(
     )
 
 
-@router.get("/pairing/qrcode/{code}", dependencies=[Depends(_get_current_user_id)])
-async def get_pairing_qrcode(code: str, request: Request):
+@router.get("/pairing/qrcode/{code}")
+async def get_pairing_qrcode(
+    code: str,
+    request: Request,
+    user_id: str = Depends(_get_current_user_id),
+):
     """配对二维码（PNG）——渲染只走渠道侧那**唯一一份** segno 实现（§6-172 批 25）。
 
     原先这里 `import qrcode`，而那个库**不在依赖清单**（清单里声明的是 segno），
@@ -1541,9 +1545,14 @@ async def get_pairing_qrcode(code: str, request: Request):
     文本形状由 `protocol.pairingQrPayload()` 定（2026-11-16 按用户裁定升为**一扫配全**：
     载荷含 `ref` ＋ 对外地址 `host`，手机扫码即完成服务器档案配置与设备配对；
     host 取 `_wsOrigin()` 同源：隧道 route > advertised > 入站请求）。
+
+    审计 API-08（2026-11-25）：读图限**配对记录属主**——原先只验登录，任何登录
+    用户拿到他人的 code 就能取走那张二维码（图里是一次性配对引用 `ref`）。判据与
+    `cancel_pairing` / `get_pairing_status` 同源：非属主与码不存在同形 404，不给
+    枚举者确认存在性的机会。
     """
     pairing = _pairing_codes.get(code)
-    if not pairing:
+    if not pairing or pairing.get("user_id") != user_id:
         raise HTTPException(status_code=404, detail="Pairing code not found")
 
     from fastapi.responses import Response
