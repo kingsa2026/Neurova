@@ -317,6 +317,9 @@ class KnowledgeRepository:
         # 治理投影只在闸内发生（工单 019b-2）；闸外三个写动词与旧行为逐字相同。
         # 账本与事实库句柄都是短命的：长持有会让 Windows 清不掉 tmp 目录。
         self._projectionDrift: List[str] = []
+        # KNOW-09 统一事务边界进行中的事实库句柄：非 None 时 _entryLedger 复用它，
+        # 事实/断言/治理与叙述同库同连接一次提交（见 _foundationWrite）。
+        self._txFacts: Optional[KnowledgeFactStore] = None
         if _narrativeStoreEnabled():
             self._narratives = NarrativeStore(self._narrative_db_path)
         self._lock = threading.RLock()
@@ -629,7 +632,9 @@ class KnowledgeRepository:
             self._items = self._itemsFromNarratives()
             # 装载即对齐：开闸后不必再手工跑回填，缺的治理行按同一口径补投
             # （admit 幂等，同内容即同一知识）。只报不修等于留一道人工断点。
-            self._syncEntryGovernance()
+            # KNOW-09：补投同样走统一事务边界，半途失败不留半截治理行。
+            with self._foundationWrite():
+                self._syncEntryGovernance()
             with self._entryLedger() as ledger:
                 self._projectionDrift = ledger.verifyProjection(self._items)
             if self._projectionDrift:
@@ -842,7 +847,61 @@ class KnowledgeRepository:
     # ── 治理投影（工单 019b-2，闸内）───────────────────────────
 
     @contextlib.contextmanager
+    def _foundationWrite(self) -> Iterator[Optional[KnowledgeFactStore]]:
+        """KNOW-09 统一事务边界：事实/断言/治理/叙述/墓碑/冲突同库一次提交。
+
+        底座三面（事实库、叙述层、冲突/墓碑旁账）共用同一个 SQLite 文件；
+        本边界开一条短命事实库连接并套其既有 `batchScope`（SAVEPOINT，提交
+        时机是连接的事），叙述层经 `NarrativeStore.boundTo` 绑到同一条连接上——
+        边界内所有写入折成**一次**提交，任一步失败整体回滚。
+
+        失败时除库回滚外，内存权威（_items/_tombstones/_conflicts）随库重读——
+        否则"内存写成功、库已回滚"就是同一枚硬币的反面分叉。句柄仍是短命的
+        （长持有会让 Windows 清不掉 tmp 目录）。已在边界内时直接并入当前事务
+        （不另开 SAVEPOINT，嵌套作用域会互相踩提交时机）。
+        """
+        if self._narratives is None:
+            # JSON 回退后端：治理投影本就不跑（_syncEntryGovernance 闸外即返），
+            # 无跨连接事务可统一，保持旧行为。
+            yield None
+            return
+        if self._txFacts is not None:
+            yield self._txFacts
+            return
+        store = KnowledgeFactStore(self._narrative_db_path)
+        self._txFacts = store
+        try:
+            with store.batchScope() as conn:
+                with self._narratives.boundTo(conn):
+                    yield store
+        except Exception:
+            self._resyncMemoryFromNarratives()
+            raise
+        finally:
+            self._txFacts = None
+            store.close()
+
+    def _resyncMemoryFromNarratives(self) -> None:
+        """事务回滚后把内存权威拉回库内现状（KNOW-09：不留内存/磁盘分叉）。
+
+        只在失败路径跑：全量重读有成本，但换来的不变式是"读到的内存即已提交
+        的库"。索引与 FTS 一并置脏，下次检索按库内真值重建。
+        """
+        if self._narratives is None:
+            return
+        self._items = self._itemsFromNarratives()
+        self._tombstones = self._narratives.loadTombstones()
+        self._conflicts = self._narratives.loadConflicts()
+        self._ftsDirty = True
+        self._index_dirty = True
+        self._pending_ops = []
+
+    @contextlib.contextmanager
     def _entryLedger(self) -> Iterator[EntryLedger]:
+        if self._txFacts is not None:
+            # 统一事务内：复用边界的事实库连接，不另开短连接分次提交
+            yield EntryLedger(self._txFacts)
+            return
         store = KnowledgeFactStore(self._narrative_db_path)
         try:
             yield EntryLedger(store)
@@ -1047,7 +1106,7 @@ class KnowledgeRepository:
             # None=扁平模式（存量条目与 create 默认，行为不变）
             "parents": parents if parents else None,
         }
-        with self._lock:
+        with self._lock, self._foundationWrite():
             self._items.setdefault(agent_id, []).append(item)
             self._syncEntryGovernance()
             self._save()
@@ -1822,7 +1881,7 @@ class KnowledgeRepository:
         if lifecycle_change:
             fields = dict(fields)
             fields["lifecycle_status"] = normalizeLifecycleStatus(fields["lifecycle_status"])
-        with self._lock:
+        with self._lock, self._foundationWrite():
             for item in self._items.get(agent_id, []):
                 if item.get("knowledge_id") == knowledge_id:
                     # P0-2 revision 链：知识实体字段被覆盖前，旧值快照进账本
@@ -1893,7 +1952,7 @@ class KnowledgeRepository:
         只做"文档再解析"这一种受控写：不改 title/visibility/owner/tenant，
         也不做正文重切（新块必须保留页码/标题映射，重切会丢）。
         """
-        with self._lock:
+        with self._lock, self._foundationWrite():
             for item in self._items.get(agent_id, []):
                 if item.get("knowledge_id") != knowledge_id:
                     continue
@@ -2032,7 +2091,7 @@ class KnowledgeRepository:
 
 物理清除走 purge_knowledge 显式通道
         """
-        with self._lock:
+        with self._lock, self._foundationWrite():
             items = self._items.get(agent_id, [])
             for idx, item in enumerate(items):
                 if item.get("knowledge_id") == knowledge_id:
@@ -2187,7 +2246,7 @@ class KnowledgeRepository:
     def _eraseEntryRow(self, agent_id: str, knowledge_id: str,
                        reason: str) -> Dict[str, Any]:
         """条目层与墓碑：叙述行经 `_save()` 落到 `knowledge_narratives`，正文唯一副本在此。"""
-        with self._lock:
+        with self._lock, self._foundationWrite():
             items = self._items.get(agent_id, [])
             for idx, item in enumerate(items):
                 if item.get("knowledge_id") == knowledge_id:
@@ -2211,7 +2270,7 @@ class KnowledgeRepository:
 
     def restore_knowledge(self, knowledge_id: str, tenantId: Optional[str] = None) -> bool:
         """从墓碑复活条目（普通复活不带 supersede 链）。活着/不存在/跨租户返回 False。"""
-        with self._lock:
+        with self._lock, self._foundationWrite():
             rec = self._tombstones.get(knowledge_id)
             if rec is None:
                 return False
@@ -2264,15 +2323,17 @@ class KnowledgeRepository:
                     if status == ACTIVE and isExpired(item, now):
                         due.append((agent_id, item))
             if apply and due:
-                stamp = datetime.datetime.now(datetime.timezone.utc)
-                for _agent_id, item in due:
-                    item["lifecycle_status"] = ARCHIVED
-                    item["lifecycle_reason"] = "expired"
-                    item["lifecycle_changed_at"] = stamp.isoformat()
-                    item["updated_at"] = stamp.timestamp()
-                    self._record_index_op("remove", item["knowledge_id"])
-                self._syncEntryGovernance()
-                self._save()
+                # KNOW-09：批量归档的治理投影与叙述保存同边界收口
+                with self._foundationWrite():
+                    stamp = datetime.datetime.now(datetime.timezone.utc)
+                    for _agent_id, item in due:
+                        item["lifecycle_status"] = ARCHIVED
+                        item["lifecycle_reason"] = "expired"
+                        item["lifecycle_changed_at"] = stamp.isoformat()
+                        item["updated_at"] = stamp.timestamp()
+                        self._record_index_op("remove", item["knowledge_id"])
+                    self._syncEntryGovernance()
+                    self._save()
         return {"due": len(due), "archived": len(due) if apply else 0, "applied": bool(apply)}
 
     def lifecycleReport(
@@ -2738,7 +2799,7 @@ class KnowledgeRepository:
         入墓碑可复活）。非法裁决值抛 ValueError。"""
         if resolution not in ("keep_both", "supersede_old"):
             raise ValueError("未知裁决: %r（有效值: keep_both / supersede_old）" % resolution)
-        with self._lock:
+        with self._lock, self._foundationWrite():
             rec = self._conflicts.get(conflict_id)
             if rec is None or rec.get("status") != "pending":
                 return False

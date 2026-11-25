@@ -551,6 +551,16 @@ class KnowledgeFactStore:
         with self._lock:
             self._conn.close()
 
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """底层连接（只读出口）。
+
+        统一事务边界（KNOW-09）用：叙述层经 `NarrativeStore.boundTo` 绑到
+        同一条连接上，事实/断言/治理/叙述折成一次提交。只暴露连接对象，
+        不转移所有权——连接的生死仍归本 store。
+        """
+        return self._conn
+
     def queryReadOnly(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
         """只读查询公开口（P3-6 收口）：外部读数面一律经此取行，不再直摸 `_lock`/`_conn`。
 

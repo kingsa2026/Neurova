@@ -10,11 +10,11 @@
     按 (agentId, tenantId) 分组复用，不自造第二套判定。
   * **整批原子**：任一行在第一段被判不合法 → 整个装载零落盘，回执点名
     违规行号（0-based）与原因；不是只回滚违规所在批。
-  * **补偿撤销**：第二段是"校验通过后仍失败"的兜底（理论上不该发生，例如
-    批内先后依赖构成的基数冲突，只读干跑看不见）。一旦发生立即停批，对本批
-    **新建**的行调 foundation 既有 `KnowledgeFactStore.retract`（"可撤销不可
-    遗忘"）逐行撤销；凭写前 fact_id 快照区分"本批新落库"与"按内容键折回既有
-    行"，绝不撤到别人的存量行。
+  * **第二段同边界**：第二段是"校验通过后仍失败"的兜底（理论上不该发生，
+    例如批内先后依赖构成的基数冲突，只读干跑看不见）。整段套 foundation
+    既有 `batchScope`（SAVEPOINT）——一旦发生立即停批，整批未提交的写入
+    一次退净，不留半截事实/断言/推导；不靠事后补偿撤销（它撤不干净
+    状态迁移与链式推导）。
   * **线程安全**：不引入新锁；行级写入的串行化由 store 既有 RLock 语义承担。
     极端并发下（他线程与本批同内容并发写入且本批恰在此时补偿）快照判新可能
     把他线程的新行误认作本批所写——那是共享库并发写同内容的病态场景，与
@@ -77,7 +77,8 @@ def bulkLoadFacts(
     dry-run 另带 `precheck: [{index, verdict, violations}]`。成功时 failed=[]。
 
     任何一行不合法（结构、必填、逐字可核、本体 violation）→ 整批零落盘；
-    第二段若仍有异常行 → 立即停批并补偿撤销本批已写入行，回执仍判 failed。
+    第二段若仍有异常行 → 立即停批，整批经 batchScope 事务回滚零落盘，
+    回执仍判 failed。
     """
     if isinstance(batchSize, bool) or not isinstance(batchSize, int) or batchSize < 1:
         raise ValueError("batchSize 必须是 >= 1 的整数，得到 %r" % (batchSize,))
@@ -239,61 +240,28 @@ def _admitAll(store: Any, gate: Any, requests: List[AdmissionRequest], total: in
               onProgress: Optional[Callable[[int, int], None]]) -> Dict[str, Any]:
     """第二段：逐行 admit 落库（不开第二条写路径），按批回调进度。
 
-    任一行异常 → 立即停批，对本批新建行做补偿撤销后以 failed 回执收场。
+    整批套 store 既有 `batchScope`（SAVEPOINT）：事实/断言/活动/推导全部折成
+    一次提交，任一行异常 → 立即停批，整批未提交的写入一次退净——不留半截
+    事实/冲突/推导，也不再依赖事后补偿撤销（KNOW-09：补偿撤不干净状态迁移
+    与链式推导，事务回滚才是完整边界）。
     """
-    # 写前 fact_id 快照：补偿只撤本批新建的行，不碰按内容键折回的存量行
-    preExisting = {row["fact_id"] for row in
-                   store.queryReadOnly("SELECT fact_id FROM knowledge_facts")}
-    admittedRows: List[Tuple[int, str, bool, List[str]]] = []
-    for startIndex in range(0, total, batchSize):
-        endIndex = min(startIndex + batchSize, total)
-        for index in range(startIndex, endIndex):
-            try:
-                receipt = gate.admit(requests[index])
-            except Exception as exc:  # noqa: BLE001 - 理论不该发生；停批补偿，如实点名
-                return _compensateAndFail(store, admittedRows, index, exc, total)
-            factId = str(receipt.factId or "")
-            admittedRows.append((index, factId, bool(factId) and factId not in preExisting,
-                                 list(receipt.segmentsApplied or [])))
-        if onProgress is not None:
-            onProgress(endIndex, total)
-    return {"total": total, "admitted": len(admittedRows), "failed": [],
-            "dryRun": False}
-
-
-def _compensateAndFail(store: Any, admittedRows: List[Tuple[int, str, bool, List[str]]],
-                       triggerIndex: int, exc: Exception, total: int) -> Dict[str, Any]:
-    """补偿撤销：foundation 既有 `retract` 语义（可撤销不可遗忘），逆序逐行撤。"""
-    written: List[str] = []
-    seen = set()
-    for _index, factId, isNew, _segments in admittedRows:
-        if isNew and factId and factId not in seen:
-            seen.add(factId)
-            written.append(factId)
-    compensated: List[str] = []
-    compensationFailures: List[str] = []
-    for factId in reversed(written):
-        try:
-            store.retract(factId, "bulkLoadFacts 第 %d 行写入失败，整批补偿撤销"
-                          % triggerIndex)
-            compensated.append(factId)
-        except Exception as retractError:  # noqa: BLE001 - 补偿失败点名，不吞
-            compensationFailures.append("%s: %s"
-                                        % (type(retractError).__name__, retractError))
-    compensatedSet = set(compensated)
-    # 仍成立行 = 折回既有行的（内容本就存在，未被撤销） + 补偿未成功的
-    stillAdmitted = [entry for entry in admittedRows
-                     if not entry[2] or entry[1] not in compensatedSet]
-    parts = ["第二段写入失败（行 %d）：%s: %s" % (triggerIndex, type(exc).__name__, exc),
-             "已按 foundation 既有 retract 语义补偿撤销本批新落库 %d 行" % len(compensated)]
-    if any("state_supersede" in segments
-           for _index, factId, isNew, segments in admittedRows
-           if isNew and factId in compensatedSet):
-        parts.append("被撤行曾触发 has_state 状态迁移取代（state_supersede），"
-                     "旧值行保持 superseded：foundation 无反取代口，如需恢复请重放旧值")
-    if compensationFailures:
-        parts.append("补偿撤销失败 %d 行（仍在账上）：%s"
-                     % (len(compensationFailures), "；".join(compensationFailures)))
-    return {"total": total, "admitted": len(stillAdmitted),
-            "failed": [{"index": triggerIndex, "reason": "；".join(parts)}],
+    failedIndex = -1
+    try:
+        with store.batchScope():
+            for startIndex in range(0, total, batchSize):
+                endIndex = min(startIndex + batchSize, total)
+                for index in range(startIndex, endIndex):
+                    failedIndex = index
+                    gate.admit(requests[index])
+                if onProgress is not None:
+                    onProgress(endIndex, total)
+    except Exception as exc:  # noqa: BLE001 - 停批如实点名；整批已回滚，零落盘
+        return {
+            "total": total, "admitted": 0, "dryRun": False,
+            "failed": [{"index": failedIndex,
+                        "reason": "第二段写入失败（行 %d）：%s: %s；"
+                                  "整批经 batchScope 事务回滚，零落盘"
+                                  % (failedIndex, type(exc).__name__, exc)}],
+        }
+    return {"total": total, "admitted": total, "failed": [],
             "dryRun": False}

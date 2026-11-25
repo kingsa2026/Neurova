@@ -6,8 +6,8 @@
   * 逐行仍经唯一写咽喉 `admit` 落库，批量只是编排，不开第二条写路径；
   * 任一行违规 → 整批零落盘（对齐 pipeline dry-run 整批拒绝语义）；
   * dry-run 零写入并给逐行预检摘要；
-  * 第二段出现异常行 → 立即停批，并对已写入行按 foundation 既有 retract
-    语义补偿撤销，最终回执仍判 failed，不留半截数据装成功。
+  * 第二段出现异常行 → 立即停批，整批经 foundation 既有 batchScope（SAVEPOINT）
+    事务回滚，最终回执仍判 failed，不留半截数据装成功。
 """
 
 from __future__ import annotations
@@ -174,11 +174,11 @@ class TestMalformedRows:
             bulkLoadFacts(store, _validRows(2), batchSize=0, dryRun=False)
 
 
-class TestPhaseTwoCompensation:
-    def test_withinBatchCardinalityConflict_stopsAndRetractsWrittenRows(self, store, gate):
+class TestPhaseTwoAtomicRollback:
+    def test_withinBatchCardinalityConflict_stopsAndRollsBackWholeBatch(self, store, gate):
         """干跑逐行只读、看不见批内先后依赖：第 0 行落库后，第 1 行才在咽喉
-        校验段撞上 cardinality=1。此时必须立即停批，并对已写入行按既有
-        retract 语义补偿撤销，最终回执仍判 failed，不留半截数据装成功。"""
+        校验段撞上 cardinality=1。此时必须立即停批，整批经 batchScope 事务
+        回滚——回执仍判 failed，零落盘，不留半截事实/断言/推导装成功。"""
         registry = _registerDomainTerms(store)
         _typedSubject(store, registry, "甲", "person")
         rows = [_row("甲", "married_to", "乙", qualifier={"env": "x"}),
@@ -187,9 +187,9 @@ class TestPhaseTwoCompensation:
 
         receipt = bulkLoadFacts(store, rows, batchSize=2, dryRun=False)
 
-        assert receipt["admitted"] == 0, "补偿撤销后不留半截数据装成功"
+        assert receipt["admitted"] == 0, "整批回滚后不留半截数据装成功"
         assert [f["index"] for f in receipt["failed"]] == [1]
         assert "cardinality" in receipt["failed"][0]["reason"]
-        assert "补偿撤销" in receipt["failed"][0]["reason"]
-        assert _activeFactCount(store) == before, "已写入行经既有 retract 出清 active 候选"
-        assert store.factCount() > before, "可撤销不可遗忘：账面行保留、可溯源"
+        assert "回滚" in receipt["failed"][0]["reason"]
+        assert _activeFactCount(store) == before, "active 事实零残留"
+        assert store.factCount() == before, "整批事务回滚：账面行也零落盘"

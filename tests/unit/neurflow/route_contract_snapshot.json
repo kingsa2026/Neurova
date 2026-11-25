@@ -37,7 +37,7 @@
     "name": "delete_store",
     "decorator": "router.delete('/stores/{store_id}')",
     "signature": "store_id: str, current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
-    "doc": "删除店铺（含 SecretStore 密钥清理；仅限归属用户）"
+    "doc": "删除店铺（含 SecretStore 密钥清理；仅限归属用户）。\n\nEVO-13：结果分层如实——凭据清理失败显式 503 可重试，不假成功。"
   },
   {
     "method": "POST",

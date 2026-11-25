@@ -61,9 +61,30 @@ class NarrativeStore:
         # 等到写盘才拦就等于让调用方以为拿到了一个可用的库。
         assertNotUnderProductionStorage(db_path, "叙述层底座库")
         self._db_path = db_path
+        # 统一事务边界（KNOW-09）借用中的外部连接：非 None 时所有读写走它，
+        # 不再各自提交/回滚/关闭——事务边界归外层统一管。
+        self._boundConn: Optional[sqlite3.Connection] = None
+
+    @contextmanager
+    def boundTo(self, conn: sqlite3.Connection) -> Iterator["NarrativeStore"]:
+        """在统一事务内借用外部连接（KNOW-09）：期间所有读写走这条连接，
+        不再各自提交/回滚/关闭。借用的连接必须与事实层同库，且已应用过
+        底座 schema（事实库构造时已 `applyTo`）——半截提交正是 KNOW-09 要灭的病，
+        事务边界归外层统一收口。
+        """
+        previous = self._boundConn
+        self._boundConn = conn
+        try:
+            yield self
+        finally:
+            self._boundConn = previous
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
+        if self._boundConn is not None:
+            # 统一事务内：直接用借用连接，提交/回滚/关闭都归外层事务边界
+            yield self._boundConn
+            return
         if self._db_path != ":memory:":
             Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self._db_path)
