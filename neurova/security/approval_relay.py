@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 import typing
 
 from neurova.core.logger import get_logger
@@ -36,18 +37,28 @@ __all__ = [
     "registerApprovalWaiter",
     "unregisterApprovalWaiter",
     "installApprovalRelay",
+    "reserveExecutionConsumer",
+    "executionConsumer",
     "hasApprovalWaiter",
     "pendingWaiterCount",
 ]
 
-# request_id → (等待方的 loop, 该 loop 上的 Future)
+# request_id → (等待方的 loop, Future)
 _waiters: typing.Dict[str, typing.Tuple[asyncio.AbstractEventLoop, "asyncio.Future"]] = {}
-_lock = threading.RLock()
+# 已裁决请求的执行归属。等待登记弹出后仍可查询，杜绝批准后按"是否仍有 waiter"改判。
+_consumers: typing.Dict[str, str] = {}
+_CONSUMER_TTL_SECONDS = 3600.0
+_consumer_times: typing.Dict[str, float] = {}
 _installedManagers: typing.List[int] = []  # 已装中继的 manager id，防重复注册
+# 登记/注销/认领/清退共用一把进程内锁：跨线程（HTTP 批准方 vs 等待方事件循环）的
+# 登记表与执行归属必须原子变更，否则 P0-04 的"批准前唯一执行方"判据会竞态失效。
+_lock = threading.RLock()
 
 
-def registerApprovalWaiter(request_id: str) -> typing.Optional["asyncio.Future"]:
-    """在当前循环上登记一次等待；无运行循环时返回 None（调用方据此退回不阻塞）。"""
+def registerApprovalWaiter(
+    request_id: str, consumer: str = "waiter",
+) -> typing.Optional["asyncio.Future"]:
+    """登记等待；登记与等待方执行预占在同一锁内完成。"""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -55,7 +66,11 @@ def registerApprovalWaiter(request_id: str) -> typing.Optional["asyncio.Future"]
         return None
     future = loop.create_future()
     with _lock:
+        if request_id in _waiters:
+            raise RuntimeError(f"审批 {request_id} 已有等待消费者")
         _waiters[request_id] = (loop, future)
+        _consumers[request_id] = consumer
+        _consumer_times[request_id] = time.monotonic()
     return future
 
 
@@ -68,6 +83,38 @@ def unregisterApprovalWaiter(request_id: str, future: typing.Optional["asyncio.F
         if future is not None and current[1] is not future:
             return
         _waiters.pop(request_id, None)
+        if _consumers.get(request_id) == "waiter":
+            _consumers.pop(request_id, None)
+            _consumer_times.pop(request_id, None)
+
+
+def reserveExecutionConsumer(request_id: str) -> str:
+    """批准前原子确定唯一执行方：已有等待归 waiter，否则归 endpoint。
+
+    中继弹出等待登记不会改变该决定；另一条路径只能读取同一终态归属。
+    """
+    with _lock:
+        now = time.monotonic()
+        expired = [key for key, claimedAt in _consumer_times.items()
+                   if now - claimedAt >= _CONSUMER_TTL_SECONDS]
+        for key in expired:
+            _consumers.pop(key, None)
+            _consumer_times.pop(key, None)
+        existing = _consumers.get(request_id)
+        if existing is not None:
+            return existing
+        if request_id in _waiters:
+            _waiters.pop(request_id, None)
+            return "waiter"
+        _consumers[request_id] = "endpoint"
+        _consumer_times[request_id] = now
+        return "endpoint"
+
+
+def executionConsumer(request_id: str) -> typing.Optional[str]:
+    """读取已认领消费者；未认领不执行。"""
+    with _lock:
+        return _consumers.get(request_id)
 
 
 def pendingWaiterCount() -> int:
@@ -77,14 +124,7 @@ def pendingWaiterCount() -> int:
 
 
 def hasApprovalWaiter(request_id: str) -> bool:
-    """这一次审批是否有人正在等 —— 批准端点据此决定**要不要重放**。
-
-    为什么必须有这个判据：咽喉被唤醒后会在完整管线里执行这一次调用（钩子/超时/
-    审计/大输出折叠一样不缺）。若批准端点同时按 metadata 重放，同一条命令就被
-    执行了两遍 —— 对 `exec_command` 这类工具，"跑两次"不是性能问题而是正确性问题。
-    裁决权必须只有一个主人：有人在等就归咽喉，没人等（超时后人工才点、或本来
-    就走带外重放）才归端点。
-    """
+    """是否有等待登记（仅观测/兼容读取）；执行归属只读 executionConsumer。"""
     with _lock:
         return request_id in _waiters
 
@@ -92,7 +132,13 @@ def hasApprovalWaiter(request_id: str) -> bool:
 def _resolve(request_id: str, status: str) -> None:
     entry = None
     with _lock:
-        if request_id in _waiters:
+        current = _waiters.get(request_id)
+        if current is None:
+            entry = None
+        else:
+            if _consumers.get(request_id) in (None, "waiter"):
+                _consumers[request_id] = "waiter"
+                _consumer_times[request_id] = time.monotonic()
             entry = _waiters.pop(request_id)
     if entry is None:
         return  # 无人等待：交给投递侧，本模块不报错

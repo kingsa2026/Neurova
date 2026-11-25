@@ -1200,8 +1200,16 @@ class ToolExecutor:
         ".venv", "venv", "dist", "build", ".idea", ".vscode",
     })
 
-    # P0-3：会话式 shell 工具（自管常驻进程，不走一次性沙箱裁决路由）
+    # P0-03/P0-12：会话式 shell 的 stdin 也必须按命令语义裁决；SANDBOX 不豁免宿主常驻进程。
     _SESSION_SHELL_TOOLS = frozenset({"exec_command", "write_stdin"})
+
+    def _sessionCommandParams(self, tool_name: str, params: Dict) -> Dict:
+        """stdin 与初始命令共用治理投影；不在执行器另造认键口径。"""
+        if tool_name != "write_stdin":
+            return params
+        from neurova.security.tool_guard import commandParamsForTool
+
+        return commandParamsForTool(tool_name, params)
 
     # calculator 指数上限 — 防止 9**999999999 这类表达式撑爆内存
     _CALC_MAX_EXPONENT = 10000
@@ -1919,7 +1927,17 @@ class ToolExecutor:
         except Exception as exc:
             self._retryGateRecordOutcome(tool_name, params, None, error=exc)
             raise
-        self._retryGateRecordOutcome(tool_name, params, result, error=None)
+        # 账本结构化拒绝发生在工具真正执行之前，不是工具失败——若记入失败
+        # 分级账本，原 call ID 的合法回放会被 U11 抑制窗误拦
+        # （P0-10 判据：终态仅原请求级 call ID 可回放）。同时清掉本次入口
+        # MarkRunning 的在途指纹：工具未执行，running 残留会挡住后续合法调用。
+        if tool_call_journal.isJournalRejection(result):
+            from neurova.security.tool_metadata import executionFingerprint
+
+            with self._retryLedgerLock:
+                self._retryLedger.pop(executionFingerprint(tool_name, params), None)
+        else:
+            self._retryGateRecordOutcome(tool_name, params, result, error=None)
         return result
 
     def _retryGateCheck(self, tool_name: str, params: Dict) -> Optional[Dict[str, Any]]:
@@ -2740,7 +2758,8 @@ class ToolExecutor:
         后端为异步执行）。
 
         覆盖所有执行路径（ToolEngine/builtin/skill/router），做四级裁决：
-        allow / deny / ask / sandbox。
+        allow / deny / ask / sandbox。常驻 shell 的 stdin 与初始命令共用命令语义，
+        session_id 仅定位会话，不参与授权或豁免。
 
         P0-2（评测 M3/M4）：
         - MCP 工具（mcp.* 命名空间）走 scan_all 全参数扫描——参数键名不再
@@ -2754,6 +2773,7 @@ class ToolExecutor:
         """
         is_mcp = tool_name.startswith("mcp.")
         is_builtin = tool_name in self._builtin_dispatch
+        governance_params = self._sessionCommandParams(tool_name, params)
 
         # P0-4：技能声明仲裁——skill 执行作用域内的工具调用按 manifest
         # 声明裁决（fail-closed 有依据，先于内容裁决；无声明恒放行）
@@ -2782,8 +2802,9 @@ class ToolExecutor:
             # 本上下文无事实，记 n-a——它的裁决在渠道路由准入已做出；SANDBOX
             # 等 verdict 语义经 decision.raw 原样透传，下方分支不变。
             decision = resolveCommandAuthority(
-                userId=self._agent_identity()[0], toolName=tool_name, params=params,
-                scanAll=is_mcp)
+                userId=self._agent_identity()[0], toolName=tool_name,
+                params=governance_params, scanAll=is_mcp,
+            )
             verdict = decision.raw
         except Exception as e:
             logger.warning("治理预检不可用 %s（fail-%s）: %s",
@@ -2807,7 +2828,7 @@ class ToolExecutor:
             verdict = self._applyPermissionMode(tool_name, verdict)
         except Exception as e:  # noqa: BLE001 - 模式面故障不改变既有裁决语义
             logger.warning("权限模式应用异常 %s（按未应用处理）: %s", tool_name, e)
-        self._audit_governance(tool_name, verdict.to_dict(), params)
+        self._audit_governance(tool_name, verdict.to_dict(), governance_params)
 
         if verdict.decision == GovernanceDecision.DENY:
             logger.warning("治理拦截工具 %s: %s", tool_name, "; ".join(verdict.reasons))
@@ -2818,13 +2839,14 @@ class ToolExecutor:
             }
 
         if verdict.decision == GovernanceDecision.SANDBOX:
-            # P0-3 核验修正（断点③）：会话式 shell 自管进程生命周期——
-            # exec_command 产出 session_id 供 write_stdin 跨轮复用，一次性
-            # 沙箱包装会切断会话连续性（write_stdin 无 command 参数还会被
-            # 下方文件保护分支误拦）。放行至自有执行器；上方 _audit_governance
-            # 已记录裁决，审计不丢。沙箱化常驻会话属后续独立工作。
             if tool_name in self._SESSION_SHELL_TOOLS:
-                return None
+                logger.warning("常驻 shell 命中隔离裁决，拒绝降级到宿主进程: %s", tool_name)
+                return {
+                    "success": False,
+                    "error": "常驻 shell 必须运行在隔离包装器内；当前隔离后端不支持持久会话，已拒绝宿主执行",
+                    "code": "persistent_shell_sandbox_unsupported",
+                    "governance": verdict.to_dict(),
+                }
             if is_mcp:
                 # MCP 调用（远端协议/子进程）没有命令行沙箱语义——JSON 参数
                 # 落沙箱执行无意义，按阻断处理（fail-closed 语义一致）
@@ -3015,11 +3037,17 @@ class ToolExecutor:
             return None
 
         logger.info("审批 %s 终态为 %s，回结构化裁决: %s", approval_id, status, tool_name)
-        return _pendingShape({
+        result = _pendingShape({
             "approval_denied": True,
             "approval_status": status,
             "error": f"操作未获批准（{status}）：" + "; ".join(verdict.reasons),
         })
+        from neurova.security.approval_manager import get_approval_manager
+
+        manager = get_approval_manager()
+        if manager.get_execution_consumer(approval_id) == "endpoint":
+            manager._record_execution_result(approval_id, "endpoint", result)
+        return result
 
     # ── U6 动态干预审计注册表 + U4 派发前最后一刻授权复验 ──────────────
 
@@ -8703,11 +8731,16 @@ class ToolExecutor:
                 ws = str(getattr(self._agent, "workspace_path", "") or "")
                 if ws:
                     workdir = _os.path.join(ws, workdir)
+            user_id, agent_id = self._agent_identity()
+            if not str(user_id or "").strip() or not str(agent_id or "").strip():
+                return {"error": "exec_command 缺少可绑定的用户与 Agent 身份"}
             result = await get_shell_session_manager().start_session(
                 command,
                 workdir=workdir or None,
                 yield_time_ms=params.get("yield_time_ms"),
                 max_output_tokens=params.get("max_output_tokens") or 10000,
+                owner_user_id=user_id,
+                owner_agent_id=agent_id,
             )
             # U10：会话进程的超时/用户停止清算走 kill_tree（含 shell 之下
             # 孵化的孙进程），失败降级逐 pid terminate。挂在本轮取消令牌上，
@@ -8718,6 +8751,21 @@ class ToolExecutor:
         except Exception as e:
             logger.error("exec_command 执行失败: %s", e)
             return {"error": f"exec_command 执行失败: {str(e)}"}
+
+    def _sessionProcess(self, session_id) -> Any:
+        """只读本执行器所属会话的进程句柄，供取消树清算；不接受调用方身份参数。"""
+        from neurova.execution_engine.shell_sessions import get_shell_session_manager
+
+        user_id, agent_id = self._agent_identity()
+        manager = get_shell_session_manager()
+        session = next(
+            (item for item in manager._sessions.values()
+             if item.session_id == int(session_id)
+             and item.owner_user_id == str(user_id)
+             and item.owner_agent_id == str(agent_id or "")),
+            None,
+        )
+        return getattr(session, "proc", None)
 
     def _registerSessionTreeReaper(self, session_id) -> None:
         """U10：把 exec_command 会话进程树的清算挂到本轮取消令牌（kill_tree 单源）。
@@ -8733,10 +8781,8 @@ class ToolExecutor:
                 currentCancelEpoch,
                 registerKillAction,
             )
-            from neurova.execution_engine.shell_sessions import get_shell_session_manager
-
-            session = get_shell_session_manager()._sessions.get(int(session_id))
-            pid = getattr(getattr(session, "proc", None), "pid", None)
+            proc = self._sessionProcess(session_id)
+            pid = getattr(proc, "pid", None)
             if not pid:
                 return
             registerKillAction(lambda: reapToolProcessTree(int(pid)), currentCancelEpoch())
@@ -8752,11 +8798,14 @@ class ToolExecutor:
 
             from neurova.execution_engine.shell_sessions import get_shell_session_manager
 
+            user_id, agent_id = self._agent_identity()
             return await get_shell_session_manager().poll_session(
                 int(session_id),
                 chars=str(params.get("chars", "") or ""),
                 yield_time_ms=params.get("yield_time_ms"),
                 max_output_tokens=params.get("max_output_tokens") or 10000,
+                owner_user_id=user_id,
+                owner_agent_id=agent_id or "",
             )
         except (TypeError, ValueError):
             return {"error": "session_id 必须是整数"}

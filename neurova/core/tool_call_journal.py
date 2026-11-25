@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS tool_call_journal (
     idem_key TEXT NOT NULL UNIQUE,
     tool_name TEXT NOT NULL,
     scope TEXT NOT NULL DEFAULT '',
+    owner TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'running',
     result_json TEXT,
     error_class TEXT,
@@ -71,12 +73,13 @@ _MIGRATIONS = [_SCHEMA]
 
 @dataclass(frozen=True)
 class JournalEntry:
-    """一条工具调用账目（不可变快照；status: running/succeeded/failed/unknown）。"""
+    """一条工具调用账目（不可变快照；status 含 cancelled 终态）。"""
 
     id: int
     idem_key: str
     tool_name: str
     scope: str
+    owner: str
     status: str
     result_json: Optional[str]
     error_class: Optional[str]
@@ -144,6 +147,13 @@ class ToolCallJournal:
         with self._lock, self._conn:
             for step in _MIGRATIONS:
                 self._conn.executescript(step)
+            columns = {row[1] for row in self._conn.execute(
+                "PRAGMA table_info(tool_call_journal)"
+            )}
+            if "owner" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE tool_call_journal ADD COLUMN owner TEXT NOT NULL DEFAULT ''"
+                )
 
     def close(self) -> None:
         with self._lock:
@@ -151,20 +161,26 @@ class ToolCallJournal:
 
     # ── 存储层 ──────────────────────────────────────────────────────
 
-    def begin(self, idem_key: str, tool_name: str, scope: str = "") -> JournalEntry:
-        """登记一条 running 账目；同 key 已存在时返回**既有条目**（幂等）。"""
+    def begin(
+        self, idem_key: str, tool_name: str, scope: str = "", owner: str = ""
+    ) -> Tuple[JournalEntry, bool]:
+        """原子创建并认领；返回 (条目, 是否本次创建)。已有 running 只有 owner 能继续。"""
+        owner = str(owner or "")
+        if not owner:
+            raise ValueError("工具账本认领必须提供请求级 call ID")
         now = time.time()
         with self._lock, self._conn:
-            self._conn.execute(
+            cursor = self._conn.execute(
                 "INSERT OR IGNORE INTO tool_call_journal"
-                " (idem_key, tool_name, scope, status, created_at)"
-                " VALUES (?, ?, ?, 'running', ?)",
-                (idem_key, tool_name, scope, now),
+                " (idem_key, tool_name, scope, owner, status, created_at)"
+                " VALUES (?, ?, ?, ?, 'running', ?)",
+                (idem_key, tool_name, scope, owner, now),
             )
+            claimed = cursor.rowcount == 1
             row = self._conn.execute(
                 "SELECT * FROM tool_call_journal WHERE idem_key = ?", (idem_key,)
             ).fetchone()
-        return self._toEntry(row)
+        return self._toEntry(row), claimed
 
     def settle(
         self,
@@ -172,16 +188,23 @@ class ToolCallJournal:
         status: str,
         result_json: Optional[str] = None,
         error_class: Optional[str] = None,
-    ) -> None:
-        """收敛终态（succeeded/failed/unknown）；running 不可作为终态。"""
+        owner: str = "",
+    ) -> bool:
+        """仅 running 属主可原子收敛；取消写 cancelled，过期失联写 unknown。"""
         if status == "running":
             raise ValueError("running 不是终态，不能 settle")
+        if status not in ("succeeded", "failed", "unknown", "cancelled"):
+            raise ValueError(f"不支持的工具账本终态: {status}")
+        owner = str(owner or "")
+        if not owner:
+            raise ValueError("工具账本收敛必须提供 owner")
         with self._lock, self._conn:
-            self._conn.execute(
+            cursor = self._conn.execute(
                 "UPDATE tool_call_journal SET status = ?, result_json = ?,"
-                " error_class = ?, settled_at = ? WHERE id = ?",
-                (status, result_json, error_class, time.time(), entry_id),
+                " error_class = ?, settled_at = ? WHERE id = ? AND status = 'running' AND owner = ?",
+                (status, result_json, error_class, time.time(), entry_id, owner),
             )
+            return cursor.rowcount == 1
 
     def get_by_key(self, idem_key: str) -> Optional[JournalEntry]:
         with self._lock:
@@ -223,6 +246,7 @@ class ToolCallJournal:
             idem_key=str(row["idem_key"]),
             tool_name=str(row["tool_name"]),
             scope=str(row["scope"] or ""),
+            owner=str(row["owner"] or ""),
             status=str(row["status"]),
             result_json=row["result_json"],
             error_class=row["error_class"],
@@ -240,26 +264,35 @@ class ToolCallJournal:
         scope: str,
         invoke: Callable[[], Any],
         is_success: Callable[[Dict[str, Any]], bool],
+        owner: str = "",
     ) -> Dict[str, Any]:
         """先记账再执行的编排入口（键由调用方经 ``computeKey`` 预计算）。
 
-        - 新 key：begin(running) → 执行 → settle(succeeded/failed/unknown)；
-        - 命中 succeeded/failed：**回放**原结果（附 ``replayed: true``），不执行；
-        - 命中 unknown（含超时未收敛的 stale running）：**封锁重放**，返回
-          ``code=tool_result_unknown`` 的结构化拦截，不执行；
+        - 新 key：begin(running) → 执行 → settle(succeeded/failed/unknown/cancelled)；
+        - 命中 succeeded/failed：仅同一请求级 call ID 可回放原结果，其他调用拒绝；
+        - 命中 unknown/cancelled（含超时未收敛的 stale running）：**封锁重放**，返回
+          结构化拦截，不执行；
         - 账本关闭（``enabled=False``）：直接执行，零拦截。
         """
         if not self.enabled:
             return await invoke()
 
-        entry = self.begin(idem_key, tool_name, scope)
+        owner = str(owner or "")
+        if not owner:
+            raise ValueError("工具账本执行必须提供请求级 call ID")
+        entry, claimed = self.begin(idem_key, tool_name, scope, owner=owner)
 
+        if entry.status == "cancelled":
+            return {
+                "error": "工具调用已取消，终态不因重试恢复执行",
+                "code": "tool_call_cancelled", "journal_id": entry.id,
+                "tool_name": tool_name,
+            }
         if entry.status == "unknown" or (
             entry.status == "running" and (time.time() - entry.created_at) > _STALE_RUNNING_SECONDS
         ):
-            # 结果未知（或前次执行未收敛即失联）：封锁重放，如实报告
             if entry.status == "running":
-                self.settle(entry.id, "unknown", error_class="stale_running")
+                self.settle(entry.id, "unknown", error_class="stale_running", owner=entry.owner)
             return {
                 "error": (
                     "工具调用结果未知：此前一次执行未能确认结果，"
@@ -269,7 +302,20 @@ class ToolCallJournal:
                 "journal_id": entry.id,
                 "tool_name": tool_name,
             }
+        if entry.status == "running" and (not claimed or entry.owner != owner):
+            return {
+                "error": "同一业务幂等键仍在执行，当前请求级 call ID 不是认领者",
+                "code": "tool_call_in_progress", "journal_id": entry.id,
+                "tool_name": tool_name, "owner": entry.owner,
+            }
         if entry.status in ("succeeded", "failed"):
+            if entry.owner != owner:
+                return {
+                    "error": "该业务幂等键已有终态，仅原请求级 call ID 可回放",
+                    "code": "tool_call_terminal_owner_mismatch",
+                    "journal_id": entry.id,
+                    "tool_name": tool_name,
+                }
             replay: Dict[str, Any]
             if entry.result_json:
                 try:
@@ -288,31 +334,71 @@ class ToolCallJournal:
                     )
             return replay
 
-        # 新账目：执行并收敛
+        # 新账目：执行并收敛。取消抢先落 cancelled 后，迟到结果不得覆盖终态。
         try:
             result = await invoke()
+        except asyncio.CancelledError:
+            self.cancel(idem_key, owner=owner, error_class="cancelled_by_caller")
+            raise
         except Exception as exc:  # noqa: BLE001 - 异常也必须收敛账目
             status = classifyFailure(exc=exc)
-            self.settle(entry.id, status, error_class=type(exc).__name__)
+            self.settle(entry.id, status, error_class=type(exc).__name__, owner=owner)
             raise
         status = "succeeded" if is_success(result) else classifyFailure(result=result)
         try:
             result_json = json.dumps(result, ensure_ascii=False, default=str)[:_RESULT_JSON_MAX]
         except Exception:  # noqa: BLE001 - 不可序列化结果只留摘要
             result_json = json.dumps({"tool_name": tool_name}, ensure_ascii=False)
-        self.settle(
+        if self.settle(
             entry.id,
             status,
             result_json=result_json,
             error_class=None if status == "succeeded" else str((result or {}).get("error") or "")[:200],
-        )
+            owner=owner,
+        ):
+            return result
+        current = self.get_by_key(idem_key)
+        if current is not None and current.status == "cancelled":
+            return {
+                "error": "工具调用已被取消，迟到结果不写入终态",
+                "code": "tool_call_cancelled",
+                "journal_id": entry.id,
+                "tool_name": tool_name,
+            }
         return result
+
+    def cancel(self, idem_key: str, owner: str, error_class: str = "cancelled_by_caller") -> bool:
+        """请求取消只把仍由该 owner 持有的 running 账目原子写为 cancelled。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, owner FROM tool_call_journal WHERE idem_key = ?", (idem_key,)
+            ).fetchone()
+        if row is None or str(row["owner"] or "") != str(owner):
+            return False
+        return self.settle(int(row["id"]), "cancelled", error_class=error_class, owner=owner)
 
 
 # ── 进程级单例（DCL + RLock，仓规） ──────────────────────────────────
 
 _journal_instance: Optional[ToolCallJournal] = None
 _journal_lock = threading.RLock()
+
+
+#: 账本结构化拒绝码全集：这些结果产生于工具**真正执行之前**（记账层的
+#: 归属/终态判定），不是工具执行产物——消费方（如 U11 失败分级重试门）
+#: 不得把它们当工具失败记账，否则原 call ID 的合法回放会被误抑制。
+JOURNAL_REJECTION_CODES = (
+    "tool_call_cancelled",
+    "tool_call_in_progress",
+    "tool_call_terminal_owner_mismatch",
+    "tool_result_unknown",
+    "tool_call_id_missing",
+)
+
+
+def isJournalRejection(result: Any) -> bool:
+    """判定一个结果是否为账本结构化拒绝（而非工具执行结果）。"""
+    return isinstance(result, dict) and str(result.get("code") or "") in JOURNAL_REJECTION_CODES
 
 
 def get_tool_call_journal() -> ToolCallJournal:
@@ -367,12 +453,22 @@ async def _runJournaledCall(executor: Any, tool_name: str, params: Dict[str, Any
         return await executor._execute_single_tool(tool_name, params)
     scope = _journalScope(executor)
     key = computeKey(tool_name, params, scope)
+    from neurova.core.turn_context import get_turn_tool_call_id
+
+    call_id = str(get_turn_tool_call_id() or "")
+    if not call_id:
+        return {
+            "error": "工具调用缺少请求级 call ID，拒绝写入工具账本",
+            "code": "tool_call_id_missing",
+            "tool_name": tool_name,
+        }
     return await journal.run(
         key,
         tool_name,
         scope,
         invoke=lambda: executor._execute_single_tool(tool_name, params),
         is_success=getattr(executor, "_result_is_success", None) or (lambda result: True),
+        owner=call_id,
     )
 
 

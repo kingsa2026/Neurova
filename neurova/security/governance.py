@@ -526,7 +526,14 @@ class GovernancePolicy:
         if declaration_verdict is not None:
             return declaration_verdict
 
-        command, path_values = extract_adjudicable_params(tool_name, params, scan_all=scan_all)
+        # P0-03/P0-12：stdin 与初始命令共用命令语义——参数投影唯一出处是
+        # tool_guard.commandParamsForTool（执行器与守卫引擎同源）；取数口径
+        # 亦与 exec_command 同源（会话 shell 是它的常驻形态）。
+        from neurova.security.tool_guard import commandParamsForTool
+
+        params = commandParamsForTool(tool_name, params)
+        extract_tool_name = "exec_command" if tool_name == "write_stdin" else tool_name
+        command, path_values = extract_adjudicable_params(extract_tool_name, params, scan_all=scan_all)
         if not command and not path_values:
             return None
         return self.evaluate(

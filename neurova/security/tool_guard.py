@@ -160,6 +160,31 @@ class BaseGuardian:
 # 治理预检（`governance.extract_adjudicable_params`）与守卫扫描面**都从这里取数**。
 # 此前 governance.py 另抄了一份 `_ADJUDICABLE_COMMAND_KEYS`／`_ADJUDICABLE_PATH_KEYS`，
 # 同一个问题（"哪些参数是命令、哪些是路径"）有两个答案，改一处另一处静默不跟（教义第 6 条）。
+def commandParamsForTool(tool_name: Any, params: Any) -> Dict[str, Any]:
+    """工具输入到命令语义参数面的唯一投影。
+
+    常驻 shell 的 stdin 写入不是普通文本：接收它的 shell 会把 chars 当新命令解释，
+    因而与初始 ``command`` 走完全相同的键清单、归一化和守护者，不按工具名豁免。
+    """
+    if not isinstance(params, dict):
+        return {}
+    if tool_name != "write_stdin":
+        return dict(params)
+    chars = params.get("chars")
+    if not isinstance(chars, str) or not chars:
+        return dict(params)
+    return {**params, "command": chars}
+
+
+def commandSurfaceForTool(tool_name: Any, params: Any) -> str:
+    """从参数面构建命令语义扫描文本；供引擎与治理取数共用。"""
+    command_params = commandParamsForTool(tool_name, params)
+    return " ".join(
+        f"{key}={value}" for key, value in command_params.items()
+        if not (key in pathSurfaceOwnerNames(tool_name) and looksLikePathValue(value))
+    )
+
+
 COMMAND_PARAM_KEYS = ("command", "code")
 
 #: 「哪些名字指向路径语义」的**唯一出处**：一个名字在这件事上可以扮演四种角色，
@@ -929,6 +954,7 @@ class ToolGuardEngine:
         guard_params = tool_params
         normalizedFrom: Dict[str, str] = {}
         if isinstance(tool_params, dict):
+            guard_params = commandParamsForTool(tool_name, tool_params)
             for key in COMMAND_PARAM_KEYS:
                 value = tool_params.get(key)
                 if isinstance(value, str):
@@ -955,7 +981,7 @@ class ToolGuardEngine:
         # 构建工具输入文本，并按 guardian 声明的语义分两面（§6-255 甲案）：
         # 命令语义的 guardian 不吃"路径键里的纯路径值"，全量面照旧。
         tool_input = self._build_tool_input(tool_name, guard_params)
-        command_input = self._build_command_surface(tool_name, guard_params)
+        command_input = commandSurfaceForTool(tool_name, guard_params)
         # 声明在这里算**一次**交下去（两面已构建完，保留键进不了任何扫描面）：guardian 手上没有
         # tool_name，由引擎替它问 schema。两处各自解释声明，迟早给出两个答案。
         guardianContext = {**guard_params,
@@ -981,7 +1007,6 @@ class ToolGuardEngine:
         if normalizedFrom:
             result.metadata["normalized_command"] = True
             result.metadata["original_command"] = tool_params.get(next(iter(normalizedFrom)))
-
         if not safe:
             logger.warning("工具守卫阻止: %s, " f"发现 %s 个问题", tool_name, len(all_findings))
 
@@ -995,21 +1020,8 @@ class ToolGuardEngine:
         return " ".join(str(p) for p in parts)
 
     def _build_command_surface(self, tool_name: str, tool_params: Dict[str, Any]) -> str:
-        """命令语义扫描面：从整串输入里剔除"确实是一个路径"的路径键值（§6-255 甲案／§6-266 第①刀）。
-
-        剔除条件只看两件事：**这个键按路径语义裁决**（声明 ∪ 名字表的 scanned 兜底，
-        `pathSurfaceOwnerNames`），且值过 `looksLikePathValue`（形状）。
-        **字符不再决定豁免**——含 `$` `;` 引号的合法文件名照样按路径语义走，改由
-        `FilePathGuardian` 出一条 low 级 `path_with_shell_metacharacters` 读数落进审计面。
-        没登记进任何一把清单、也没声明的键一律照命令面扫（那是仍然保守的那一侧）。
-        """
-        ownerNames = pathSurfaceOwnerNames(tool_name)
-        parts = [tool_name]
-        for key, value in tool_params.items():
-            if key in ownerNames and looksLikePathValue(value):
-                continue
-            parts.append(f"{key}={value}")
-        return " ".join(str(p) for p in parts)
+        """兼容入口；实际语义由 commandSurfaceForTool 单源构建。"""
+        return commandSurfaceForTool(tool_name, tool_params)
 
     def _evaluate_safety(self, findings: List[GuardFinding]) -> bool:
         """评估安全性"""

@@ -48,6 +48,12 @@ CREATE INDEX IF NOT EXISTS idx_apr_status ON approval_requests(status);
 CREATE INDEX IF NOT EXISTS idx_apr_agent ON approval_requests(agent_id);
 """
 register_migration(1, _APPROVAL_SCHEMA, domain=APPROVAL_DOMAIN)
+register_migration(
+    2,
+    "ALTER TABLE approval_requests ADD COLUMN execution_consumer TEXT;"
+    "ALTER TABLE approval_requests ADD COLUMN result_json TEXT;",
+    domain=APPROVAL_DOMAIN,
+)
 
 
 class ApprovalStatus(str, Enum):
@@ -178,6 +184,8 @@ class ApprovalRequest:
     approved_by: Optional[str] = None
     approval_note: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    execution_consumer: Optional[str] = None
+    result_json: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -195,6 +203,8 @@ class ApprovalRequest:
             "approved_by": self.approved_by,
             "approval_note": self.approval_note,
             "metadata": self.metadata,
+            "execution_consumer": self.execution_consumer,
+            "result_json": self.result_json,
         }
 
     @classmethod
@@ -222,6 +232,8 @@ class ApprovalRequest:
             approved_by=data.get("approved_by"),
             approval_note=data.get("approval_note"),
             metadata=data.get("metadata", {}),
+            execution_consumer=data.get("execution_consumer"),
+            result_json=data.get("result_json"),
         )
 
 
@@ -289,7 +301,18 @@ class ApprovalManager:
             logger.warning("审批 SQLite 初始化失败, 降级纯 JSON 存储: %s", e)
             self._db_path = None
 
+    def get_execution_consumer(self, request_id: str) -> Optional[str]:
+        """执行归属的读取口：进行中的认领优先，终态记录保证重启后仍可判定。"""
+        with self._lock:
+            request = self._requests.get(request_id)
+            if request is not None and request.execution_consumer:
+                return request.execution_consumer
+        from neurova.security.approval_relay import executionConsumer
+
+        return executionConsumer(request_id)
+
     def _upsert_request_sqlite(self, request: ApprovalRequest) -> None:
+        """裁决状态的真实来源；JSON 是可读副本。"""
         """单条 upsert 到 SQLite（每写一 commit，量级低无需批量）。"""
         if not getattr(self, "_db_path", None):
             return
@@ -300,8 +323,9 @@ class ApprovalManager:
                 conn.execute(
                     """INSERT OR REPLACE INTO approval_requests
                    (request_id, agent_id, user_id, command, description, danger_reason,
-                    status, created_at, updated_at, expires_at, approved_by, approval_note, metadata)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    status, created_at, updated_at, expires_at, approved_by, approval_note, metadata,
+                    execution_consumer, result_json)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         request.request_id,
                         request.agent_id,
@@ -316,6 +340,8 @@ class ApprovalManager:
                         request.approved_by,
                         request.approval_note,
                         json.dumps(request.metadata, ensure_ascii=False),
+                        request.execution_consumer,
+                        request.result_json,
                     ),
                 )
         except Exception as e:
@@ -350,6 +376,8 @@ class ApprovalManager:
                         approved_by=row["approved_by"],
                         approval_note=row["approval_note"],
                         metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+                        execution_consumer=row["execution_consumer"],
+                        result_json=row["result_json"],
                     )
                     self._requests[request.request_id] = request
                     loaded += 1
@@ -510,6 +538,11 @@ class ApprovalManager:
             request.approval_note = note
             request.updated_at = datetime.datetime.now(datetime.timezone.utc)
 
+            # 在状态变更与唤醒之前原子认领执行方；中继随后弹出 waiter 也不能让端点改判。
+            from neurova.security.approval_relay import reserveExecutionConsumer
+
+            request.execution_consumer = reserveExecutionConsumer(request.request_id)
+
             # 记录到历史（用于智能模式）——P0-5：按规范化 key 记与查，
             # shell 包装/绝对路径差异不产生"同命令重复审批"
             self._approved_history[self.canonicalize_command(request.command)] = (
@@ -528,6 +561,7 @@ class ApprovalManager:
             except Exception as exc:  # noqa: BLE001 - 采集旁路
                 logger.debug("审批反馈采集跳过：%s", exc)
 
+            # 批准状态与执行归属先持久化；waiter 的执行结果稍后由原调用写回。
             self._upsert_request_sqlite(request)
             self._save_requests()
 
@@ -560,6 +594,9 @@ class ApprovalManager:
             request.approved_by = rejected_by
             request.approval_note = note
             request.updated_at = datetime.datetime.now(datetime.timezone.utc)
+            from neurova.security.approval_relay import reserveExecutionConsumer
+
+            request.execution_consumer = reserveExecutionConsumer(request.request_id)
 
             # Dreaming 反馈采集（项 7）：拒绝是强纠偏信号（采集失败不阻断）
             try:
@@ -578,6 +615,35 @@ class ApprovalManager:
             logger.info("审批请求已拒绝: %s, 拒绝人: %s", request_id, rejected_by)
 
             return True
+
+    def _record_execution_result(self, request_id: str, consumer: str, result: Any) -> None:
+        """唯一执行方原子写回终态快照；另一条消费路径只能读取该结果。"""
+        try:
+            payload = json.dumps(result, ensure_ascii=False, default=str)[:64 * 1024]
+        except Exception as exc:  # noqa: BLE001 - 留档失败必须显式暴露
+            logger.warning("审批执行结果序列化失败: %s", exc)
+            return
+        with self._lock:
+            request = self._requests.get(request_id)
+            if request is None or request.execution_consumer != consumer:
+                logger.warning("审批结果写入消费者不匹配: %s", request_id)
+                return
+            request.result_json = payload
+            self._upsert_request_sqlite(request)
+            self._save_requests()
+
+    def get_execution_result(self, request_id: str) -> Optional[Any]:
+        """读取唯一执行方留下的终态快照。"""
+        with self._lock:
+            request = self._requests.get(request_id)
+            payload = request.result_json if request is not None else None
+        if not payload:
+            return None
+        try:
+            return json.loads(payload)
+        except Exception as exc:  # noqa: BLE001 - 损坏快照按缺失处理，不伪造成功
+            logger.warning("审批执行结果快照损坏: %s", exc)
+            return None
 
     def confirmByVoiceTranscript(
         self, request_id: str, transcript: str, user_id: str = ""

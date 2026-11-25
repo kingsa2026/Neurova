@@ -149,6 +149,7 @@ async def test_approve_endpoint_triggers_continuation_after_out_of_band_replay(m
         agent_id="agt",
         user_id="u1",
         status="pending",
+        execution_consumer=None,
         metadata={
             "tool_name": TOOL,
             "params": {"command": "ls"},
@@ -164,6 +165,12 @@ async def test_approve_endpoint_triggers_continuation_after_out_of_band_replay(m
         def approve_request(self, *a, **k):
             return True
 
+        def get_execution_consumer(self, rid):
+            return getattr(req, "execution_consumer", None)
+
+        def _record_execution_result(self, rid, consumer, result):
+            return None
+
     class _Exec:
         def __init__(self, agent):
             pass
@@ -177,8 +184,9 @@ async def test_approve_endpoint_triggers_continuation_after_out_of_band_replay(m
     monkeypatch.setattr(gov, "_get_approvals", lambda: _AM())
     monkeypatch.setattr(gov, "_get_agent", lambda aid: object())
     monkeypatch.setattr("neurova.tool_executor.ToolExecutor", _Exec)
-    # governance 顶部已绑定 hasApprovalWaiter 名字——补丁必须打它的命名空间
-    monkeypatch.setattr(gov, "hasApprovalWaiter", lambda rid: False)
+    # P0-04 新契约：端点按"批准前原子认领的执行归属"判定，不再读 hasApprovalWaiter。
+    # 带外重放场景：无 waiter 在等 → 认领归 endpoint，端点真执行。
+    monkeypatch.setattr(gov, "reserveExecutionConsumer", lambda rid: "endpoint")
 
     captured = {}
 
@@ -210,6 +218,7 @@ async def test_approve_endpoint_no_continuation_when_waiter_holds_replay(monkeyp
         agent_id="agt",
         user_id="u1",
         status="pending",
+        execution_consumer=None,
         metadata={"tool_name": TOOL, "params": {}, "session_id": "s1", "tool_call_id": "c1"},
     )
 
@@ -220,9 +229,19 @@ async def test_approve_endpoint_no_continuation_when_waiter_holds_replay(monkeyp
         def approve_request(self, *a, **k):
             return True
 
+        def get_execution_consumer(self, rid):
+            return getattr(req, "execution_consumer", None)
+
+        def get_execution_result(self, rid):
+            return None
+
+        def _record_execution_result(self, rid, consumer, result):
+            return None
+
     monkeypatch.setattr(gov, "_get_approvals", lambda: _AM())
     monkeypatch.setattr(gov, "_get_agent", lambda aid: object())
-    monkeypatch.setattr(gov, "hasApprovalWaiter", lambda rid: True)
+    # P0-04 新契约：waiter 持有 → 认领归 waiter，端点不重放（原轮自己收尾）。
+    monkeypatch.setattr(gov, "reserveExecutionConsumer", lambda rid: "waiter")
 
     def _forbidden(**kwargs):
         raise AssertionError("waiter 路径不得拉起续跑（原轮在管线里自己执行）")

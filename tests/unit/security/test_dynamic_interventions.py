@@ -101,6 +101,22 @@ class TestRegistryRules:
 
 
 class TestExecutorWiring:
+    @pytest.fixture(autouse=True)
+    def _requestScopedJournal(self, monkeypatch, tmp_path):
+        """P0-10 起工具账本强制请求级 call ID：接线测试统一补齐身份与隔离库。"""
+        from neurova.core import tool_call_journal
+        from neurova.core.identity_context import clear_request_user_id, set_request_user_id
+        from neurova.core.turn_context import set_turn_tool_call_id
+
+        monkeypatch.setenv("NEUROVA_TOOL_JOURNAL_DB", str(tmp_path / "journal.db"))
+        tool_call_journal.reset_tool_call_journal()
+        set_turn_tool_call_id("wiring-call")
+        set_request_user_id("alice")
+        yield
+        set_turn_tool_call_id(None)
+        clear_request_user_id()
+        tool_call_journal.reset_tool_call_journal()
+
     @pytest.mark.asyncio
     async def test_fileDeleteOutsideWorkspaceRequiresApproval(
         self, monkeypatch, tmp_path, approvalWaitOff

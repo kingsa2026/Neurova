@@ -84,9 +84,19 @@ class _OutputBuffer:
 
 
 class _ShellSession:
-    def __init__(self, session_id: int, command: str, cwd: Optional[str]) -> None:
+    def __init__(
+        self,
+        session_id: int,
+        command: str,
+        cwd: Optional[str],
+        argv: Optional[List[str]] = None,
+        owner_user_id: str = "",
+        owner_agent_id: str = "",
+    ) -> None:
         self.session_id = session_id
         self.command = command
+        self.owner_user_id = owner_user_id
+        self.owner_agent_id = owner_agent_id
         self.buffer = _OutputBuffer()
         self.finished = threading.Event()
         self.exit_code: Optional[int] = None
@@ -94,8 +104,8 @@ class _ShellSession:
         self.finished_at: Optional[float] = None
         self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self.proc = subprocess.Popen(
-            command,
-            shell=True,
+            argv if argv is not None else command,
+            shell=argv is None,
             cwd=cwd or None,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -138,10 +148,9 @@ class _ShellSession:
                 rest = self.decoder.decode(b"", final=True)
                 if rest:
                     self.buffer.append(rest)
-            except Exception:  # noqa: BLE001
-                pass
-            self.finished.set()
-            self.finished_at = time.time()
+            finally:
+                self.finished.set()
+                self.finished_at = time.time()
 
     def write_stdin(self, chars: str) -> None:
         if not chars or self.proc.stdin is None:
@@ -211,6 +220,26 @@ class ShellSessionManager:
         self._sessions: Dict[int, _ShellSession] = {}
         self._next_id = 1
 
+    @staticmethod
+    def _owner(owner_user_id: Any, owner_agent_id: Any) -> tuple:
+        user_id = str(owner_user_id or "").strip()
+        agent_id = str(owner_agent_id or "").strip()
+        if not user_id or not agent_id:
+            raise ValueError("常驻 shell 必须绑定非空 owner_user_id 与 owner_agent_id")
+        return user_id, agent_id
+
+    @staticmethod
+    def _owned(session: _ShellSession, owner_user_id: Any, owner_agent_id: Any) -> bool:
+        try:
+            user_id, agent_id = ShellSessionManager._owner(owner_user_id, owner_agent_id)
+        except ValueError:
+            return False
+        return session.owner_user_id == user_id and session.owner_agent_id == agent_id
+
+    @staticmethod
+    def _forbidden() -> Dict[str, Any]:
+        return {"status": "forbidden", "error": "会话不属于当前用户与 Agent"}
+
     # ── 内部 ──────────────────────────────────────────────────────
 
     def _reap_expired_locked(self) -> None:
@@ -265,7 +294,14 @@ class ShellSessionManager:
         workdir: Optional[str] = None,
         yield_time_ms: Optional[int] = None,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+        owner_user_id: str = "",
+        owner_agent_id: str = "",
+        argv: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
+        try:
+            owner_user_id, owner_agent_id = self._owner(owner_user_id, owner_agent_id)
+        except ValueError as exc:
+            return {"status": "rejected", "error": str(exc)}
         command = str(command or "").strip()
         if not command:
             return {"status": "rejected", "error": "缺少 command 参数"}
@@ -278,7 +314,10 @@ class ShellSessionManager:
                     "error": f"会话数已达上限 {self.max_sessions}，请先结束或等待现有命令完成",
                 }
             try:
-                session = _ShellSession(self._next_id, command, workdir)
+                session = _ShellSession(
+                    self._next_id, command, workdir, argv=argv,
+                    owner_user_id=owner_user_id, owner_agent_id=owner_agent_id,
+                )
             except OSError as e:
                 return {"status": "rejected", "error": f"进程启动失败: {e}"}
             self._sessions[self._next_id] = session
@@ -294,10 +333,14 @@ class ShellSessionManager:
         chars: str = "",
         yield_time_ms: Optional[int] = None,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+        owner_user_id: str = "",
+        owner_agent_id: str = "",
     ) -> Dict[str, Any]:
         yield_s = self._clamp_yield(yield_time_ms)
         with self._lock:
             session = self._sessions.get(int(session_id)) if session_id is not None else None
+            if session is not None and not self._owned(session, owner_user_id, owner_agent_id):
+                return self._forbidden()
         if session is None:
             return {"status": "not_found", "error": f"会话 {session_id} 不存在或已回收"}
         if chars:
@@ -307,24 +350,47 @@ class ShellSessionManager:
             session.exit_code = session.proc.returncode
         return self._result(session, max_output_tokens)
 
-    def list_sessions(self) -> List[Dict[str, Any]]:
+    def list_sessions(
+        self, owner_user_id: Optional[str] = None, owner_agent_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         with self._lock:
+            sessions = [
+                session for session in self._sessions.values()
+                if owner_user_id is None and owner_agent_id is None
+                or self._owned(session, owner_user_id, owner_agent_id)
+            ]
             return [
                 {
-                    "session_id": s.session_id,
-                    "command": s.command,
-                    "status": "completed" if s.finished.is_set() else "running",
-                    "exit_code": s.exit_code,
+                    "session_id": session.session_id,
+                    "command": session.command,
+                    "status": "completed" if session.finished.is_set() else "running",
+                    "exit_code": session.exit_code,
                 }
-                for s in sorted(self._sessions.values(), key=lambda x: x.session_id)
+                for session in sorted(sessions, key=lambda item: item.session_id)
             ]
 
+    async def terminate_session(
+        self, session_id: int, owner_user_id: str = "", owner_agent_id: str = "",
+    ) -> Dict[str, Any]:
+        with self._lock:
+            session = self._sessions.get(int(session_id)) if session_id is not None else None
+            if session is not None and not self._owned(session, owner_user_id, owner_agent_id):
+                return self._forbidden()
+            if session is not None:
+                self._sessions.pop(session.session_id, None)
+        if session is None:
+            return {"status": "not_found", "error": f"会话 {session_id} 不存在或已回收"}
+        session.terminate()
+        await asyncio.sleep(0)
+        return {"status": "terminated", "session_id": session.session_id}
+
     async def kill_all(self) -> None:
+        """应用关停的全局清理；用户终止必须走带属主校验的 terminate_session。"""
         with self._lock:
             sessions = list(self._sessions.values())
             self._sessions.clear()
-        for s in sessions:
-            s.terminate()
+        for session in sessions:
+            session.terminate()
         await asyncio.sleep(0)  # 让出事件循环，读线程收尾
 
 
