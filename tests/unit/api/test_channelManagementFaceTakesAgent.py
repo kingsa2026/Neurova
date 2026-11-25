@@ -145,7 +145,11 @@ def twoAgents(tmp_path):
 
     app = create_app()
     with TestClient(app, raise_server_exceptions=False) as client:
-        client.app.dependency_overrides[get_current_user] = lambda: {"sub": "tester-b29"}
+        # CHAN-01 后写端点挂 requireAgentOwner（仅属主/admin）：本文件测的是
+        # "端点把 agent 维度交下去"，授权矩阵由 test_channelWriteOpsOwnership.py
+        # 按 属主/admin/他人 三档覆盖，故这里给一个合法操作者（admin）身份。
+        client.app.dependency_overrides[get_current_user] = lambda: {
+            "sub": "tester-b29", "user_id": "tester-b29", "role": "admin"}
         mgr = get_channel_manager()
         for agentId in ("default", "kai"):
             mgr.register_adapter(_make(agentId), agent_id=agentId)
