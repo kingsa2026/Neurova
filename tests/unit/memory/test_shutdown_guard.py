@@ -308,6 +308,20 @@ class TestSessionRecovery:
 
 # ── Test 4: Full Shutdown Flow ──────────────────────────────
 
+class _BoomFlushMemoryManager:
+    """真实失败源：flush_buffer 必炸（不用 mock，走真实异常路径）。"""
+
+    def flush_buffer(self):
+        raise RuntimeError("db locked during flush")
+
+
+class _BoomFlushAgent:
+    """最小真实 Agent 形状：只带一个必炸的 memory_manager。"""
+
+    def __init__(self):
+        self.memory_manager = _BoomFlushMemoryManager()
+
+
 class TestFullShutdownFlow:
     """Tracer bullet: the complete graceful shutdown flow works end-to-end."""
 
@@ -332,6 +346,36 @@ class TestFullShutdownFlow:
             sentinel = temp_dir / ".neurova_shutdown_sentinel"
             assert not sentinel.exists()
             assert result["clean_shutdown"] is True
+
+    def test_graceful_shutdown_keeps_sentinel_when_flush_fails(self, guard, temp_dir):
+        """CORE-12：任一 flush 失败＝缓冲未落盘，不得摘哨兵、必须如实报失败。
+
+        缺陷形态：flush 异常只写进 result，graceful_shutdown 不检查仍
+        mark_clean_shutdown() 删哨兵——下次启动视为干净退出、跳过恢复，
+        缓冲里未落盘的记忆永久丢失。
+        """
+        guard.write_sentinel()
+
+        result = guard.graceful_shutdown({"bad": _BoomFlushAgent()})
+
+        assert result["clean_shutdown"] is False, "flush 失败不得标记干净退出"
+        assert result["flush_failed_agents"] == ["bad"]
+        sentinel = temp_dir / ".neurova_shutdown_sentinel"
+        assert sentinel.exists(), "flush 失败仍摘哨兵＝下次启动跳过恢复，永久丢数据"
+
+    def test_graceful_shutdown_partial_failure_keeps_sentinel(self, guard, temp_dir):
+        """部分 agent 失败同样不得摘哨兵：任何一个缓冲未落盘都不算干净退出。"""
+        from unittest.mock import MagicMock as _MM, patch as _patch
+
+        guard.write_sentinel()
+        good = MagicMock()
+        good.config.agent_id = "good"
+        with _patch.object(good, 'memory_manager', create=True) as mm:
+            mm.flush_buffer = MagicMock(return_value=3)
+            result = guard.graceful_shutdown({"good": good, "bad": _BoomFlushAgent()})
+        assert result["clean_shutdown"] is False
+        assert result["flush_failed_agents"] == ["bad"]
+        assert (temp_dir / ".neurova_shutdown_sentinel").exists()
 
 
 # ── Test 5: Startup Recovery Flow ───────────────────────────

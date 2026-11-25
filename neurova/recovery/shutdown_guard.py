@@ -43,7 +43,8 @@ class ShutdownGuard:
         check_abnormal_shutdown() -> {abnormal, crash_time}  # 返回 dict
         flush_all_agent_buffers(agents) -> {agent_id:{flushed}, total_flushed}
         recover_from_sessions(agents, crash_time) -> {recovered, errors}
-        graceful_shutdown(agents) -> {buffers_flushed, clean_shutdown}
+        graceful_shutdown(agents) -> {buffers_flushed, clean_shutdown,
+                                      flush_failed_agents}
         prepare_startup(agents) -> {abnormal, recovered_memories, sentinel_written}
     """
 
@@ -313,14 +314,19 @@ class ShutdownGuard:
         """
         优雅关闭流程:
         1. 刷新所有 agent 缓冲区
-        2. 删除 sentinel 文件(标记正常关闭)
+        2. 全部刷新成功才删除 sentinel 文件(标记正常关闭)
+
+        任一 agent 的 flush 失败＝缓冲未落盘：此时删除 sentinel 会让下次启动
+        视为干净退出、跳过崩溃恢复，未落盘的记忆永久丢失。因此失败时保留
+        sentinel 与恢复路径，并以 clean_shutdown=False 如实上报（CORE-12）。
 
         Args:
             agents: {agent_id: agent} 字典
             timeout: 超时时间(秒,日志用)
 
         Returns:
-            {buffers_flushed: <flush_all_agent_buffers 结果>, clean_shutdown: bool}
+            {buffers_flushed: <flush_all_agent_buffers 结果>, clean_shutdown: bool,
+             flush_failed_agents: [agent_id, ...]}
         """
         self._is_shutting_down = True
         logger.info("Starting graceful shutdown...")
@@ -331,17 +337,30 @@ class ShutdownGuard:
         logger.info("Buffer flush completed in %.2fs: total_flushed=%d",
                     flush_time, flush_results.get("total_flushed", 0))
 
-        # 删除 sentinel 标记正常关闭
-        self.mark_clean_shutdown()
+        failed_agents = sorted(
+            str(agent_id) for agent_id, res in flush_results.items()
+            if isinstance(res, dict) and res.get("error")
+        )
+        if failed_agents:
+            logger.error(
+                "Graceful shutdown: %d agent buffer(s) failed to flush (%s) —"
+                " sentinel KEPT so next startup recovers from sessions",
+                len(failed_agents), ", ".join(failed_agents),
+            )
+        else:
+            # 全部刷新成功，删除 sentinel 标记正常关闭
+            self.mark_clean_shutdown()
 
         elapsed = time.monotonic() - start_time
         if elapsed > timeout:
             logger.warning("Shutdown took %.2fs (timeout: %.2fs)", elapsed, timeout)
 
-        logger.info("Graceful shutdown completed in %.2fs", elapsed)
+        logger.info("Graceful shutdown completed in %.2fs (clean=%s)",
+                    elapsed, not failed_agents)
         return {
             "buffers_flushed": flush_results,
-            "clean_shutdown": True,
+            "clean_shutdown": not failed_agents,
+            "flush_failed_agents": failed_agents,
         }
 
     def prepare_startup(self, agents: Dict[str, Any]) -> Dict[str, Any]:
