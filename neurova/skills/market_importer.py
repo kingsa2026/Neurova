@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import datetime
 import json
-from neurova.core.logger import get_logger
+import os
+import shutil
 import threading
+import uuid
+from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -323,6 +326,8 @@ class MarketImporter:
             )
             self._import_tasks[skill_id] = task
 
+            # PLUG-03：先解包进 staging、全部成功再原子换名上位——失败不碰旧版
+            staging: Optional[Path] = None
             try:
                 task.status = ImportStatus.DOWNLOADING
                 task.progress = 0.3
@@ -346,29 +351,33 @@ class MarketImporter:
                         )
                         return task
 
+                # 三条取件腿（内置包／已注册远端源／代码侧执行体映射）全不成立时拒绝落
+                # 一具只会让技能页标灰的空壳。纯检查前置到取件之前——先问清来源再动盘。
+                if self.artifactSourceKind(skill_id) is None:
+                    task.status = ImportStatus.FAILED
+                    task.error_message = (
+                        "无可取件地址：条目既无内置技能包（bundle_zip），download_url 也不属"
+                        "已注册远端源，且没有代码侧执行体映射——拒绝落一具只会让技能页标灰的空壳")
+                    logger.error("Refused zero-byte install for '%s'", skill_id)
+                    return task
+
                 # 内置技能包条目: 从包内 market_bundles 资产离线解压（零网络）,
                 # 资产缺失 FAIL 不静默模拟; 远端市场源条目: 真实下载 zip 并
-                # 安全解压到 skills_dir/{skill_id}（SKILL.md 格式技能包;
-                # 本地种子条目仍走原模拟链路）
+                # 安全解压到 staging（SKILL.md 格式技能包; 本地种子条目仍走
+                # 原模拟链路，只写记账件）
                 bundle_name = (entry or {}).get("bundle_zip")
                 download_url = (entry or {}).get("download_url") or ""
                 if bundle_name:
-                    task.status = ImportStatus.INSTALLING
-                    task.progress = 0.7
                     payload = read_builtin_bundle(str(bundle_name))
                     if payload is None:
                         task.status = ImportStatus.FAILED
                         task.error_message = f"builtin bundle missing: {bundle_name}"
                         logger.error("Failed to import skill '%s': %s", skill_id, task.error_message)
                         return task
-                    dest = self._skills_dir / skill_id
-                    if dest.exists():
-                        import shutil
-
-                        shutil.rmtree(dest, ignore_errors=True)
+                    staging = self._newStagingDir(skill_id)
                     from neurova.skills import market_sources
 
-                    refusal = market_sources.extractRemoteSkillZipRefusal(skill_id, payload, dest)
+                    refusal = market_sources.extractRemoteSkillZipRefusal(skill_id, payload, staging)
                     if refusal:
                         task.status = ImportStatus.FAILED
                         # 原因原样带进回执：折成一句 "failed" 会让人去改一个没坏的包（§6-259）
@@ -379,39 +388,22 @@ class MarketImporter:
                     from neurova.skills import market_sources
 
                     if market_sources.is_remote_market_url(download_url):
-                        task.status = ImportStatus.INSTALLING
-                        task.progress = 0.7
-                        dest = self._skills_dir / skill_id
-                        if dest.exists():
-                            import shutil
-
-                            shutil.rmtree(dest, ignore_errors=True)
-                        refusal = market_sources.downloadAndExtractRefusal(skill_id, download_url, dest)
+                        staging = self._newStagingDir(skill_id)
+                        refusal = market_sources.downloadAndExtractRefusal(skill_id, download_url, staging)
                         if refusal:
                             task.status = ImportStatus.FAILED
                             task.error_message = f"download/extract skill from {download_url} failed: {refusal}"
                             logger.error("Failed to import skill '%s': remote download failed", skill_id)
                             return task
 
-                # 三条取件腿（内置包／已注册远端源／代码侧执行体映射）全不成立时，下面
-                # 两步写出来的就只有账本：装"成功"了，目录里什么都没有，读面只能把它
-                # 标灰。本机 code-analysis 的空壳、以及管理端任何一条不填可取件地址的
-                # 上架，走的都是这条尾巴。
-                if self.artifactSourceKind(skill_id) is None:
-                    task.status = ImportStatus.FAILED
-                    task.error_message = (
-                        "无可取件地址：条目既无内置技能包（bundle_zip），download_url 也不属"
-                        "已注册远端源，且没有代码侧执行体映射——拒绝落一具只会让技能页标灰的空壳")
-                    logger.error("Refused zero-byte install for '%s'", skill_id)
-                    return task
-
                 task.status = ImportStatus.INSTALLING
                 task.progress = 0.7
 
-                skill_dir = self._skills_dir / skill_id
-                skill_dir.mkdir(parents=True, exist_ok=True)
+                if staging is None:
+                    staging = self._newStagingDir(skill_id)
+                staging.mkdir(parents=True, exist_ok=True)
 
-                # 写入安装元数据（远端技能 zip 内文件已就位，再补 skill.json）
+                # 写入安装元数据（远端技能 zip 内文件已在 staging 就位，再补 skill.json）
                 installed_version = version or (entry or {}).get("version") or "1.0.0"
                 skill_meta = {
                     "skill_id": skill_id,
@@ -426,10 +418,14 @@ class MarketImporter:
                     from neurova.skills.permissions import SkillPermissions
 
                     skill_meta["permissions"] = SkillPermissions.from_dict(perm_raw).to_dict()
-                (skill_dir / "skill.json").write_text(
+                (staging / "skill.json").write_text(
                     json.dumps(skill_meta, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
+
+                # 全部就位才换名上位；失败由 except 收拾 staging，旧版原地不动
+                self._promoteStaging(staging, skill_id)
+                staging = None
 
                 task.status = ImportStatus.COMPLETED
                 task.progress = 1.0
@@ -443,7 +439,47 @@ class MarketImporter:
                 task.error_message = str(e)
                 logger.error("Failed to import skill '%s': %s", skill_id, e)
 
+            finally:
+                if staging is not None:
+                    shutil.rmtree(staging, ignore_errors=True)
+
             return task
+
+    def _stagingRoot(self) -> Path:
+        """安装 staging 区：安装根下的一层工作目录（与最终落点同盘，换名才原子）。
+
+        放安装根内但不放 `*/skill.json` 那一层——`_restoreInstalledFromDisk`
+        只扫 `<skills_dir>/*/skill.json`，`.install_tmp/<工作目录>/skill.json`
+        深两层，不会被读成幽灵已装条目。
+        """
+        return self._skills_dir / ".install_tmp"
+
+    def _newStagingDir(self, skill_id: str) -> Path:
+        """为这次安装开一个一次性 staging 目录（失败由调用方清理）。"""
+        root = self._stagingRoot()
+        root.mkdir(parents=True, exist_ok=True)
+        return root / f"{skill_id}.{uuid.uuid4().hex[:8]}.staging"
+
+    def _promoteStaging(self, staging: Path, skill_id: str) -> None:
+        """staging 原子换名上位到 `<skills_dir>/<skill_id>`（PLUG-03）。
+
+        旧版先整目录挪进 staging 区作备份，新版就位后再删备份；换名中途失败
+        把备份挪回去——**安装失败旧版不丢**。同一文件系统内 `os.replace` 对
+        目录等价于原子改名（目标已挪走，不存在 Windows 同名冲突）。
+        """
+        dest = self._skills_dir / skill_id
+        backup: Optional[Path] = None
+        if dest.exists():
+            backup = self._stagingRoot() / f"{skill_id}.{uuid.uuid4().hex[:8]}.backup"
+            os.replace(dest, backup)
+        try:
+            os.replace(staging, dest)
+        except Exception:
+            if backup is not None and backup.exists():
+                os.replace(backup, dest)
+            raise
+        if backup is not None:
+            shutil.rmtree(backup, ignore_errors=True)
 
     def _lookup_catalog_entry(self, skill_id: str) -> Optional[Dict[str, Any]]:
         """从市场 catalog 精确查找条目（拿 download_url/version）"""

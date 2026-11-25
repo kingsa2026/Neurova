@@ -157,8 +157,12 @@ def test_update_uses_real_importer(monkeypatch):
     monkeypatch.setattr(mod, "get_market_importer", lambda: _FakeImporter())
     monkeypatch.setattr(mod, "_latest_market_version", lambda s: "2.0.0")
     req = SimpleNamespace(state=SimpleNamespace(user_id="u1"))
+    # PLUG-03：/update 收口属主/管理员门，直调按 admin 身份过门
     resp = asyncio.run(
-        mod.manual_update_skill(mod.UpdateSkillRequest(skill_id="web-search"), req)
+        mod.manual_update_skill(
+            mod.UpdateSkillRequest(skill_id="web-search"), req,
+            current_user={"user_id": "u1", "role": "admin", "neuser_id": "u1"},
+        )
     )
     assert calls == {"skill_id": "web-search", "version": "2.0.0", "force": True}
     assert resp["data"]["new_version"] == "2.0.0"
@@ -169,6 +173,9 @@ def test_update_unavailable_returns_error(monkeypatch):
     monkeypatch.setattr(mod, "get_market_importer", lambda: None)
     req = SimpleNamespace(state=SimpleNamespace(user_id="u1"))
     resp = asyncio.run(
-        mod.manual_update_skill(mod.UpdateSkillRequest(skill_id="any"), req)
+        mod.manual_update_skill(
+            mod.UpdateSkillRequest(skill_id="any"), req,
+            current_user={"user_id": "u1", "role": "admin", "neuser_id": "u1"},
+        )
     )
     assert resp["code"] != 0 or resp.get("data", {}).get("updated") in (None, [], False)

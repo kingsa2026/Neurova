@@ -22,6 +22,7 @@ import tempfile
 import typing
 
 from fastapi import APIRouter, HTTPException, Request
+from neurova.api.agent_access import requireAgentOwner
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel
 
@@ -314,8 +315,13 @@ async def mark_notification_read(notification_id: str, request):
 
 
 @router.post("/auto-update")
-async def auto_update_agent_skills(request):
+async def auto_update_agent_skills(
+    request,
+    current_user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+):
     """自动更新市场来源技能到目录最新版（真实重装通道）"""
+    # PLUG-03：重装落点 data/skills 全局共享，写口过属主/管理员单源门
+    requireAgentOwner(_DEFAULT_AGENT_ID, current_user, action="更新技能")
     updated = []
     for row in _installed_skills():
         if _installed_source(row["skill_id"]) not in ("hub", "import", "marketplace"):
@@ -335,8 +341,13 @@ async def auto_update_agent_skills(request):
 
 
 @router.post("/sync-from-public")
-async def sync_from_public_pool(request):
+async def sync_from_public_pool(
+    request,
+    current_user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+):
     """按市场目录（公共池）比对安装态，落后即真实重装"""
+    # PLUG-03：同上，写口过属主/管理员单源门
+    requireAgentOwner(_DEFAULT_AGENT_ID, current_user, action="更新技能")
     synced = []
     for row in _installed_skills():
         latest = _latest_market_version(row["skill_id"])
@@ -348,8 +359,14 @@ async def sync_from_public_pool(request):
 
 
 @router.post("/update")
-async def manual_update_skill(body: UpdateSkillRequest, request):
+async def manual_update_skill(
+    body: UpdateSkillRequest,
+    request,
+    current_user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+):
     """手动更新技能到指定/最新市场版（真实重装）"""
+    # PLUG-03：同上，写口过属主/管理员单源门
+    requireAgentOwner(_DEFAULT_AGENT_ID, current_user, action="更新技能")
     skill_id = body.skill_id
     old_version = _installed_version(skill_id) or "0.0.0"
     result = _run_update(skill_id, body.target_version)
