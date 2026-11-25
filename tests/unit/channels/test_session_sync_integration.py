@@ -71,7 +71,9 @@ class TestChannelManagerSync:
         channel_manager.register_adapter(mock_adapter)
         
         # 创建会话
-        session = sync_manager.create_session(
+        # CHAN-04 统一会话键：渠道会话以 scope 键注册（与 manager/chat_pipeline 同键）
+        session = sync_manager.register_or_create_session(
+            session_id="chat_123",
             user_id="user_123",
             agent_id="default",
             external_id="chat_123"
@@ -112,7 +114,9 @@ class TestChannelManagerSync:
         channel_manager.register_adapter(mock_adapter)
         
         # 创建会话
-        session = sync_manager.create_session(
+        # CHAN-04 统一会话键：渠道会话以 scope 键注册（与 manager/chat_pipeline 同键）
+        session = sync_manager.register_or_create_session(
+            session_id="chat_123",
             user_id="user_123",
             agent_id="default",
             external_id="chat_123"
@@ -142,7 +146,9 @@ class TestChannelManagerSync:
         channel_manager.register_adapter(mock_adapter)
         
         # 创建会话
-        session = sync_manager.create_session(
+        # CHAN-04 统一会话键：渠道会话以 scope 键注册（与 manager/chat_pipeline 同键）
+        session = sync_manager.register_or_create_session(
+            session_id="chat_123",
             user_id="user_123",
             agent_id="default",
             external_id="chat_123"
@@ -175,7 +181,7 @@ class TestChannelManagerSync:
         assert len(connected_events) >= 1
 
     @pytest.mark.asyncio
-    async def test_sync_creates_session_if_not_exists(self, channel_manager, mock_adapter, sync_manager):
+    async def test_sync_creates_session_if_not_exists(self, channel_manager, mock_adapter, sync_manager, monkeypatch):
         """测试如果会话不存在，自动创建"""
         # 注册适配器
         channel_manager.register_adapter(mock_adapter)
@@ -191,16 +197,22 @@ class TestChannelManagerSync:
             message_id="msg_003",
         )
         
+        # CHAN-04：属主=agent 属主（经 resolveSessionOwner 单源），不再用
+        # 渠道 sender 冒充。事件触发前先钉住属主解析。
+        import neurova.api.agent_access as access_mod
+
+        monkeypatch.setattr(access_mod, "agentOwnerById", lambda agent_id: "owner-9")
+
         # 触发消息接收事件
         await channel_manager._on_channel_event(
             ChannelEventType.MESSAGE_RECEIVED,
             message
         )
-        
-        # 验证会话被创建
+
         session = sync_manager.get_session_by_external_id("new_chat_456")
         assert session is not None
-        assert session.user_id == "user_456"
+        assert session.user_id == "owner-9"
+        assert session.session_id == "new_chat_456"
 
     @pytest.mark.asyncio
     async def test_sync_excludes_source_channel(self, channel_manager, mock_adapter, sync_manager):
@@ -209,7 +221,9 @@ class TestChannelManagerSync:
         channel_manager.register_adapter(mock_adapter)
         
         # 创建会话并注册两个渠道
-        session = sync_manager.create_session(
+        # CHAN-04 统一会话键：渠道会话以 scope 键注册（与 manager/chat_pipeline 同键）
+        session = sync_manager.register_or_create_session(
+            session_id="chat_123",
             user_id="user_123",
             agent_id="default",
             external_id="chat_123"

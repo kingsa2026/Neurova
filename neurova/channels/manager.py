@@ -842,19 +842,30 @@ class ChannelManager:
             # 获取或创建会话（B4-b：群聊隔离键——share_session_in_group=False
             # 时按 sender 隔离，否则群共享）
             scope_id = self.resolve_session_scope_id(message)
-            session = sync_manager.get_session_by_external_id(scope_id)
-            if not session:
-                # 尝试从元数据获取 user_id
-                user_id = getattr(message, "sender_id", None) or "anonymous"
-                # 2026-09-13 agent 隔离：归属取来源 adapter（装配期注入），
-                # 替换原硬编码 "default"——渠道多 agent 路由的数据通路根点。
-                agent_id = str(message.metadata.get("agent_id") or "default")
-                session = sync_manager.create_session(
-                    user_id=user_id,
-                    agent_id=agent_id,
-                    external_id=scope_id,
-                    metadata={"channel_type": message.channel_type},
-                )
+            # 2026-09-13 agent 隔离：归属取来源 adapter（装配期注入），
+            # 替换原硬编码 "default"——渠道多 agent 路由的数据通路根点。
+            agent_id = str(message.metadata.get("agent_id") or "default")
+            # CHAN-04：会话键与属主在生产单点（本处建会话）统一——
+            # 1) 键：以 scope_id 为 session_id（与 channel_router 落盘、
+            #    chat_pipeline._sync_event 注册同一把键），USER_MESSAGE 与
+            #    AGENT_REPLY 收敛进同一个 UnifiedSession。原 create_session
+            #    另生成 session_* id：同一消息两处各建一个会话（split-brain），
+            #    且 (user, agent) 复用让不同 external_id 共用会话。
+            # 2) 属主：接 P0-08 单源——渠道路径会话属主=agent 属主
+            #    （channel_router 写进 meta["session_owner_id"] 的同一取值），
+            #    经 post_chat_pipeline.resolveSessionOwner 统一空值回落
+            #    （无主 agent 判给主管理员），不再用渠道 sender 冒充属主。
+            from neurova.api.agent_access import agentOwnerById
+            from neurova.post_chat_pipeline import resolveSessionOwner
+
+            owner_id = resolveSessionOwner({"session_owner_id": agentOwnerById(agent_id) or ""})
+            session = sync_manager.register_or_create_session(
+                session_id=scope_id,
+                user_id=owner_id,
+                agent_id=agent_id,
+                external_id=scope_id,
+                metadata={"channel_type": message.channel_type},
+            )
 
             # 创建事件
             event = SessionEvent(
