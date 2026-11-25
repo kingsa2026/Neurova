@@ -205,7 +205,7 @@ class TestRollbackFailureHonesty:
         orch.run_iteration()
         orch.applyApprovedOptimizations(approved_by="evo02-admin")
         time.sleep(0.35)
-        genOrch.canaryCheckpoint(1)
+        genOrch.canaryCheckpoint(1, readings={"measure_state": "measured", "gain": 0.0})
         parentNo = genOrch.generationLedger().currentBaseline().generationNo
         parentParam = _toolMemoryThreshold(orch)
         assert parentNo == 1

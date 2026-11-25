@@ -112,6 +112,10 @@ _APPLY_VERDICT_KEYS = ("parameterApply", "patchApply", "shadowRun")
 _BUSINESS_VERDICT_KEY = "g2Business"
 _REGRESSION_VERDICT_KEY = "g3Regression"
 
+#: 金丝雀窗满晋升所需的实测证据键（EVO-03：空读数窗满不得晋升）。
+#: `measure_state=measured` 是首选标记；显式读数键存在即视为本轮有观测信号。
+_CANARY_EVIDENCE_KEYS = ("gain", "gain_ci", "e2e_gain", "case_regressions", "roi")
+
 
 def gitHeadShort() -> str:
     """当前 git HEAD 短 hash（世代 basisCommit 的可复现冻结用）。
@@ -363,14 +367,19 @@ class GenerationOrchestrator:
     ) -> Optional[EvolutionGeneration]:
         """人工批准前的世代门禁：门禁未通过的世代拒绝应用（参数不落地）。
 
-        - 本轮无世代档案（开代失败/未挂接）→ 放行（不因管线缺席卡死人工通道）；
+        - 本轮无世代档案（开代失败/未挂接）→ **409 拒绝**（EVO-03：门禁缺证据
+          不得放行；无档案＝未验证，不能以"管线故障"换取应用许可）；
         - 世代已被拒（影子失败/门禁未过）→ 409；
         - gated（门禁全绿待裁决）→ 记裁决（approval 档记审批人）→ canary；
         - canary（已裁决、上次应用中断的重试）→ 放行，不重复裁决。
         """
         gen = self.generationForRound(roundNo)
         if gen is None:
-            return None
+            raise RSIManualApplyError(
+                "本轮无世代档案（开代失败或影子/门禁未验证），门禁无证据——"
+                "拒绝批准应用；请先修复世代管线并重跑该轮",
+                409,
+            )
         if gen.status == GenerationStatus.REJECTED.value:
             reason = gen.decision.reason if gen.decision is not None else "门禁未通过"
             raise RSIManualApplyError(
@@ -393,13 +402,14 @@ class GenerationOrchestrator:
         门禁的后门：世代被门禁拒绝（影子失败/门禁未过）时其候选必须自动
         淘汰，参数不落地（§2.0「影子失败→候选自动淘汰，不落基线」）。
 
-        - 本轮无世代档案（开代失败/未挂接）→ 放行（管线缺席零行为变化）；
+        - 本轮无世代档案（开代失败/未挂接）→ **False**（EVO-03：无证据不得自动
+          落基线；调用方如实记 blocked_by_gate）；
         - 世代 rejected → False（调用方不得应用）；
         - 其余状态（gated/canary）→ 放行（应用段与观测窗语义照旧）。
         """
         gen = self.generationForRound(roundNo)
         if gen is None:
-            return True
+            return False
         return gen.status != GenerationStatus.REJECTED.value
 
     def onManualApprovalApplied(
@@ -485,6 +495,8 @@ class GenerationOrchestrator:
             "windowSeconds": float(windowSeconds),
             "snapshot": snapshot,
             "parentNo": gen.parentNo,
+            # EVO-03：最近一次检查点的证据状态（pending/measured/insufficient）
+            "lastEvidence": "pending",
         }
         try:
             # P0-③：窗长与应用前参数快照一并落盘——重启后观测窗据此重挂、
@@ -543,8 +555,28 @@ class GenerationOrchestrator:
             return self._executeCanaryRollback(int(roundNo), window, gen, reason)
         elapsed = time.monotonic() - window["startedMonotonic"]
         if elapsed >= window["windowSeconds"]:
+            if not self._canaryEvidenceSufficient(readings):
+                # EVO-03：窗满但没有任何实测证据 ⇒ 不晋升（缺口如实留在观测面）。
+                window["lastEvidence"] = "insufficient"
+                logger.warning(
+                    "世代 %s 金丝雀窗满但观测证据不足，保持 canary 不晋升"
+                    "（readings=%r）",
+                    gen.generationNo,
+                    sorted((readings or {}).keys()),
+                )
+                return gen
+            window["lastEvidence"] = "measured"
             return self._promoteCanary(int(roundNo), window, gen)
         return gen
+
+    @staticmethod
+    def _canaryEvidenceSufficient(readings: Optional[Dict[str, Any]]) -> bool:
+        """窗满晋升的证据判据（单一出口）：无读数/空读数一票拒绝。"""
+        if not isinstance(readings, dict) or not readings:
+            return False
+        if readings.get("measure_state") == "measured":
+            return True
+        return any(key in readings for key in _CANARY_EVIDENCE_KEYS)
 
     def observeOpenCanaries(
         self, readings: Optional[Dict[str, Any]] = None
@@ -581,6 +613,7 @@ class GenerationOrchestrator:
                             time.monotonic() - window["startedMonotonic"], 3
                         ),
                         "startedAt": window["startedAtIso"],
+                        "lastEvidence": window.get("lastEvidence", "pending"),
                     }
                 )
             return {"openWindows": windows, "count": len(windows)}

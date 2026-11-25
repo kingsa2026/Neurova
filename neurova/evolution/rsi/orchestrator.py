@@ -2148,17 +2148,26 @@ class RSIOrchestrator:
         convergenceStatus: str,
         roi: Optional[float],
     ) -> Dict[str, Any]:
-        """组装金丝雀观测读数（本轮实测：判据要吃的键，缺席不硬造）。"""
+        """组装金丝雀观测读数（本轮实测：判据要吃的键，缺席不硬造）。
+
+        EVO-03：`measure_state` 是晋升证据的显式标记。评测未执行（本轮无应用）
+        或度量失明时**不塞 gain**——把"没量到"的 0.0 塞进读数，正是空证据
+        窗满晋升的旧形态；收敛态只作归因，不作晋升证据。
+        """
+        measureState = "not_attempted"
+        if isinstance(eval_after, dict):
+            measureState = str(eval_after.get("state") or "unknown")
         readings: Dict[str, Any] = {
-            "gain": gain,
+            "measure_state": measureState,
             "convergence_status": convergenceStatus,
         }
-        if isinstance(eval_after, dict):
+        if measureState == "measured":
+            readings["gain"] = gain
             for key in ("gain_ci", "e2e_gain", "case_regressions"):
                 if key in eval_after:
                     readings[key] = eval_after[key]
-        if roi is not None:
-            readings["roi"] = roi
+            if roi is not None:
+                readings["roi"] = roi
         return readings
 
     def _canaryReadout(self) -> Optional[Dict[str, Any]]:
@@ -2260,6 +2269,16 @@ class RSIOrchestrator:
             ),
         })
         # P1-3：世代部署/拒绝留痕（挂接点，fail-soft，不改变应用结果）。
+        # EVO-03：人工批准通道的实测读数同步为下一轮金丝雀观测证据——
+        # 观测窗在本调用内开启，第一次检查点发生在下一轮迭代，若不复用这里的
+        # eval_after，窗满时会因"本轮未测量"而永远不晋升（假阴性卡死）。
+        if outcome.get("eval_after") is not None:
+            self._lastCanaryReadings = self._canaryObservationReadings(
+                gain=float(outcome.get("gain") or 0.0),
+                eval_after=outcome.get("eval_after"),
+                convergenceStatus=str(convergence.get("status", "")),
+                roi=None,
+            )
         self._generationRecordApprovalOutcome(store, outcome)
         return outcome
 

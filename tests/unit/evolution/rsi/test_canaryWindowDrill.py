@@ -163,7 +163,7 @@ def _deployFirstGeneration(orch: RSIOrchestrator, genOrch: GenerationOrchestrato
     orch.run_iteration()
     _approve(orch)
     time.sleep(0.35)
-    settled = genOrch.canaryCheckpoint(1)
+    settled = genOrch.canaryCheckpoint(1, readings={"measure_state": "measured", "gain": 0.0})
     assert settled.status == GenerationStatus.DEPLOYED.value
     return settled.generationNo, _toolMemoryThreshold(orch)
 
@@ -203,8 +203,8 @@ class TestCanaryWindowDrill:
         assert gen.status == GenerationStatus.CANARY.value, "窗未满前应处于 canary 观测态"
 
         time.sleep(0.25)
-        settled = genOrch.canaryCheckpoint(1)
-        assert settled.status == GenerationStatus.DEPLOYED.value, "窗满无异常应晋升"
+        settled = genOrch.canaryCheckpoint(1, readings={"measure_state": "measured", "gain": 0.0})
+        assert settled.status == GenerationStatus.DEPLOYED.value, "窗满且证据齐备应晋升"
         assert settled.deployment.promotedAt
         assert genOrch.generationLedger().currentBaseline().generationNo == settled.generationNo
         assert genOrch.canaryReadout()["count"] == 0, "晋升后开窗应关闭"
@@ -219,7 +219,7 @@ class TestCanaryWindowDrill:
         orch.run_iteration()
         _approve(orch)
         time.sleep(0.35)
-        genOrch.canaryCheckpoint(1)
+        genOrch.canaryCheckpoint(1, readings={"measure_state": "measured", "gain": 0.0})
         parentNo = genOrch.generationLedger().currentBaseline().generationNo
         parentParam = _toolMemoryThreshold(orch)
         assert parentNo == 1

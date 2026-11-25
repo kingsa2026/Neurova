@@ -410,6 +410,9 @@ class TestPipelineFailureHonesty:
         assert result["optimizations"]
         assert genOrch.lastPipelineError, "管线故障必须留痕"
 
-        # 无世代档案 → 人工通道不设 veto，仍走 R1 原语义
-        outcome = orch.applyApprovedOptimizations(approved_by="admin1")
-        assert outcome["applied_count"] >= 1
+        # EVO-03：无世代档案 ⇒ 门禁无证据，人工通道一律拒绝（fail-closed）。
+        with pytest.raises(RSIManualApplyError) as err:
+            orch.applyApprovedOptimizations(approved_by="admin1")
+        assert err.value.status_code == 409
+        assert "本轮无世代档案" in str(err.value)
+        assert orch._last_round_proposals.get("state") == "pending", "未应用即保持待批"

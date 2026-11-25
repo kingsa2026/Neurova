@@ -52,6 +52,7 @@ __all__ = [
     "GenerationStatus",
     "GenerationTransitionError",
     "SignalRef",
+    "resolveGenerationsPersistencePath",
     "resolveGenerationsStatePath",
 ]
 
@@ -66,6 +67,34 @@ def resolveGenerationsStatePath() -> Optional[Path]:
     """世代账本落盘路径；未配置环境变量时返回 None（调用方据此零 IO）。"""
     env_path = os.environ.get(GENERATIONS_STATE_ENV)
     return Path(env_path) if env_path else None
+
+
+#: 生产装配的默认落点（数据根内）——治理状态不得因重启而丢失。
+_DEFAULT_GENERATIONS_LANDING = ("evolution", "rsi_generations.json")
+
+
+def resolveGenerationsPersistencePath() -> Optional[Path]:
+    """生产装配的世代账本落盘路径（EVO-03：默认持久化，可显式关闭）。
+
+    与 `rsi/rollback_manager.resolve_rollback_state_path` 同一条三级口径：
+    1. env ``NEUROVA_EVOLUTION_GENERATIONS`` 显式路径——既有部署零漂移；
+    2. 治理设置 `rsi_rollback_persistence_enabled` 开（默认）→ 数据根派生
+       默认 ``evolution/rsi_generations.json``（测试随 NEUROVA_DATA_DIR 隔离）；
+    3. 设置关 → None：生产装配显式退化为内存账本。
+
+    与 `resolveGenerationsStatePath` 的分工：后者是**构造缺省**（未配置零 IO，
+    供测试直接 `GenerationLedger()` 隔离），本函数是**生产装配**入口（默认落盘）。
+    """
+    env_path = os.environ.get(GENERATIONS_STATE_ENV)
+    if env_path:
+        return Path(env_path)
+    from neurova.evolution.evolution_settings import load_settings
+
+    if not load_settings().rsi_rollback_persistence_enabled:
+        return None
+    from neurova.core.data_root import dataLanding
+
+    return dataLanding(*_DEFAULT_GENERATIONS_LANDING, legacy=())
 
 
 def _utcNowIso() -> str:
@@ -376,6 +405,11 @@ class GenerationLedger:
         )
         self._generations: Dict[int, EvolutionGeneration] = {}
         self._load()
+
+    @property
+    def statePath(self) -> Optional[Path]:
+        """落盘路径只读面（None＝纯内存）。治理读面据此答"重启后还在不在"。"""
+        return self._statePath
 
     # ── 开代与查询 ────────────────────────────────────────────
 

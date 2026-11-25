@@ -203,7 +203,7 @@ class TestCanaryWindowResume:
         assert genOrch2.canaryReadout()["count"] == 1
 
         time.sleep(0.25)
-        settled = genOrch2.canaryCheckpoint(1)
+        settled = genOrch2.canaryCheckpoint(1, readings={"measure_state": "measured", "gain": 0.0})
         assert settled.status == GenerationStatus.DEPLOYED.value, (
             "重启后续跑检查点：窗满应晋升，而不是世代永久卡死在 canary"
         )
@@ -230,7 +230,7 @@ class TestCanaryWindowResume:
         orch.run_iteration()
         _approve(orch)
         time.sleep(1.1)
-        settled1 = genOrch.canaryCheckpoint(1)
+        settled1 = genOrch.canaryCheckpoint(1, readings={"measure_state": "measured", "gain": 0.0})
         assert settled1.status == GenerationStatus.DEPLOYED.value
         parentNo = settled1.generationNo
         parentParam = _toolMemoryThreshold(orch)

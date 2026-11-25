@@ -224,7 +224,7 @@ class TestZeroHumanPromotionDrill:
             ), f"r{roundNo}：phase 2 自动档必须自动应用（零人工）"
             # 金丝雀观测窗满 → 晋升（生产观测入口 observeOpenCanaries，非人工）
             time.sleep(CANARY_SETTLE_S)
-            genOrch.observeOpenCanaries({})
+            genOrch.observeOpenCanaries({"measure_state": "measured", "gain": 0.0})
             _assertCompleteDeployedGeneration(
                 genOrch.generationForRound(roundNo),
                 parentNo=None if roundNo == 1 else roundNo - 1,
@@ -276,7 +276,7 @@ class TestAutoRollbackDrill:
         # 第 1 代：同一条全自动链路晋升为父代基线
         orch.run_iteration()
         time.sleep(CANARY_SETTLE_S)
-        genOrch.observeOpenCanaries({})
+        genOrch.observeOpenCanaries({"measure_state": "measured", "gain": 0.0})
         parent = genOrch.generationLedger().currentBaseline()
         assert parent is not None and parent.generationNo == 1
         parentNo = parent.generationNo
@@ -312,7 +312,7 @@ class TestAutoRollbackDrill:
         assert gen3 is not None
         assert gen3.parentNo == parentNo, "回滚后新一代的父代 = 恢复后的基线"
         time.sleep(CANARY_SETTLE_S)
-        genOrch.observeOpenCanaries({})
+        genOrch.observeOpenCanaries({"measure_state": "measured", "gain": 0.0})
         assert gen3.status == GenerationStatus.DEPLOYED.value, "回滚后演化继续自动推进"
 
 

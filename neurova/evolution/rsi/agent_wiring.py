@@ -77,12 +77,21 @@ def wireAgentRsi(agent) -> None:
         # 可选件：装配失败只降级为"无世代管线"（generationOrchestrator 保持
         # None，RSI 零行为变化），不阻断 agent 构造与生产 chat 链路。
         try:
+            from neurova.evolution.rsi.generation_ledger import (
+                GenerationLedger,
+                resolveGenerationsPersistencePath,
+            )
             from neurova.evolution.rsi.generation_orchestrator import (
                 GenerationOrchestrator,
             )
 
+            # EVO-03：生产装配默认挂载持久化账本——治理状态（在途世代/门禁结论/
+            # 金丝雀窗）不得因重启丢失；env 显式路径优先，设置键关闭时退化为内存。
             generationOrchestrator = GenerationOrchestrator(
-                rsiOrchestrator=agent.rsi_orchestrator
+                rsiOrchestrator=agent.rsi_orchestrator,
+                ledger=GenerationLedger(
+                    statePath=resolveGenerationsPersistencePath()
+                ),
             )
             agent.rsi_orchestrator.generationOrchestrator = generationOrchestrator
             # P0-③ 断点续跑：装配即从世代账本重放在途状态（canary 观测窗重挂、
