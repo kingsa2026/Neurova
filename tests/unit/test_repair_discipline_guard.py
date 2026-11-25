@@ -58,7 +58,7 @@ SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 CONTRIBUTING = PROJECT_ROOT / "CONTRIBUTING.md"
 GITIGNORE = PROJECT_ROOT / ".gitignore"
 
-# 修复教义条款 → 判定关键词（任一缺失即判要求没写全；条数以本表为准）
+# 修复教义与测试/提交硬门 → 判定关键词（任一缺失即判要求没写全；条数以本表为准）
 REQUIRED_POINTS = {
     "TDD 红绿灯": ("红绿灯",),
     "放大视角": ("放大视角",),
@@ -67,6 +67,12 @@ REQUIRED_POINTS = {
     "live-verify 真实链路自证": ("live-verify", "真实链路"),
     "单一事实源": ("单一事实源",),
     "同功能实现先比后合再退役": ("取长补短",),
+    "红灯字面证据": ("红灯：",),
+    "绿灯字面证据": ("绿灯：",),
+    "live-verify 命令与输出原文": ("命令 + 输出原文",),
+    "共享文件 A/B 零新增失败": ("失败集合必须零新增",),
+    "生产池净 LOC 字面格式": ("净 LOC：生产池 +N/−M",),
+    "逐文件只读提交": ("git commit --only -- <逐文件路径>",),
 }
 
 # 核心原则 → 判定关键词（动手与作答基线，与修复纪律并列的工程要求）
