@@ -22,10 +22,13 @@ def client(monkeypatch):
         # 管理器经 _get_governance/_get_approval_manager 等取——直接 patch
         am = MagicMock()
 
-    # 构造一个真实 pending 请求对象（属性访问形状对齐 ApprovalRequest）
+    # 构造一个真实 pending 请求对象（属性访问形状对齐 ApprovalRequest，
+    # 含 P0-04 起端点读取的 execution_consumer / agent_id）
     request_obj = SimpleNamespace(
         id="req-1",
+        agent_id="agt",
         status="pending",
+        execution_consumer=None,
         metadata={"tool_name": None, "params": {}},
         approved_by=None,
         note=None,
@@ -44,6 +47,8 @@ def client(monkeypatch):
 
     monkeypatch.setattr(gov_mod, "_get_approvals", lambda: am)
     monkeypatch.setattr(gov_mod, "_pending_status", lambda: "pending")
+    # P0-04：认领判定不打进程级中继，固定归 endpoint（本测试只钉 remember 透传）
+    monkeypatch.setattr(gov_mod, "reserveExecutionConsumer", lambda rid: "endpoint")
 
     app = FastAPI()
     app.include_router(gov_mod.router, prefix="/v1/governance")

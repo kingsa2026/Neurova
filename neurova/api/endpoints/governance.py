@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Literal, Optional
 
-from neurova.security.approval_relay import hasApprovalWaiter
+from neurova.security.approval_relay import reserveExecutionConsumer
 # 合法域取配置单源的常量，不在端点里重打数字：重打的那两份（1000/10_000_000、2/200）
 # 与单源当前同值所以从没红过，而单源一改它们就悄悄漂移——判据
 # `testNumericBoundsComeFromTheClampConstants` 钉的就是这件事。
@@ -296,6 +296,7 @@ async def approve_and_execute(request: Request, request_id: str,
         logger.warning("审批 %s 指纹复核失败，拒绝重放: %s", request_id, fp_err)
         raise HTTPException(status_code=409, detail=str(fp_err))
 
+    consumer = req.execution_consumer or reserveExecutionConsumer(request_id)
     if not am.approve_request(
         request_id, approved_by=body.approved_by, note=body.note, remember=body.remember
     ):
@@ -314,7 +315,9 @@ async def approve_and_execute(request: Request, request_id: str,
 
     # 无可重放内容（纯记录型请求）→ 仅返回批准结果
     if not tool_name:
-        return {"code": 0, "data": {"approved": True, "executed": False}}
+        return {"code": 0, "data": {
+            "approved": True, "executed": False, "execution_consumer": consumer,
+        }}
 
     # 重放必须落在**发起这次调用的那个 agent** 上：审批记录自带 agent_id，
     # 端点此前一律 `_get_agent()` 取默认 agent，等于把别人上下文里的工具
@@ -324,23 +327,32 @@ async def approve_and_execute(request: Request, request_id: str,
         return {
             "code": 0,
             "data": {"approved": True, "executed": False,
-                     "message": "Agent 未就绪，稍后可通过历史记录手动执行"},
+                     "message": "Agent 未就绪，稍后可通过历史记录手动执行",
+                     "execution_consumer": consumer},
         }
 
     from neurova.tool_executor import ToolExecutor
 
-    # G5-B/C：有人在等（咽喉仍阻塞在本次调用上）→ **不在这里重放**。
-    # 咽喉醒来后会在完整管线里执行（钩子/超时/审计/大输出折叠一条不缺）；
-    # 端点再放一次就是同一条命令跑两遍——对 exec_command 这类工具是正确性问题。
-    if hasApprovalWaiter(request_id):
+    # G5-B/C：执行方在批准前已原子认领。waiter 路径由原调用在完整管线执行；
+    # 端点只返回同一终态，绝不因中继已弹出 waiter 再补跑一次。
+    consumer = am.get_execution_consumer(request_id) or consumer
+    if consumer == "waiter":
         logger.info("审批 %s 由等待中的原调用执行，端点不重放", request_id)
-        return {
-            "code": 0,
-            "data": {"approved": True, "executed": False, "resumed_in_turn": True},
+        result = am.get_execution_result(request_id)
+        data = {
+            "approved": True,
+            "executed": result is not None,
+            "resumed_in_turn": True,
+            "execution_consumer": "waiter",
+            "status": "approved",
         }
+        if result is not None:
+            data["result"] = result
+        return {"code": 0, "data": data}
 
     executor = ToolExecutor(agent)
     result = await executor._execute_single_tool(tool_name, params, skip_governance=True)
+    am._record_execution_result(request_id, "endpoint", result)
     logger.info("审批 %s 已批准并重放执行: %s", request_id, tool_name)
 
     # 带外批准（原轮次早已收尾）→ 终态必须回到会话，否则模型那次调用永远停在
@@ -382,7 +394,8 @@ async def approve_and_execute(request: Request, request_id: str,
         except Exception as _mint_err:
             logger.warning("MCP 工具授权铸造失败: %s", _mint_err)
 
-    return {"code": 0, "data": {"approved": True, "executed": True, "result": result}}
+    return {"code": 0, "data": {"approved": True, "executed": True,
+                                "execution_consumer": "endpoint", "result": result}}
 
 
 @router.post("/approvals/{request_id}/reject")
@@ -397,10 +410,8 @@ async def reject_approval(request: Request, request_id: str,
         raise HTTPException(status_code=500, detail="拒绝操作失败")
     logger.info("审批 %s 已拒绝", request_id)
 
-    # 拒绝也要有终态：有人在等时中继已把它叫醒（返回 approval_denied）；
-    # 无人等（原轮次已收尾）则与批准同路投递晚到提示，否则模型那次调用
-    # 永远停在「待用户确认」——用户其实已经答复了，只是答复没人送回去。
-    if not hasApprovalWaiter(request_id):
+    # 拒绝终态只回投一次：waiters 由中继唤醒，其余路径统一走晚到通道。
+    if am.get_execution_consumer(request_id) != "waiter":
         agent = _get_agent(req.agent_id)
         reqMeta = req.metadata or {}
         toolName = str(reqMeta.get("tool_name") or "")

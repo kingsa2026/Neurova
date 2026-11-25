@@ -8,7 +8,7 @@ ToolCoordinator 的 `_completed` 是内存有界留存，此前**没有查询口
 2. console 读面缺 `GET /chat/tools/{task_id}/result` 端点（真 create_app 路由）。
 
 归属双层 fail-closed：entry 盖章 session_id 必须与查询 session_id 精确一致；
-会话 owner 非空时必须与调用者一致（空=共享，与 /chat/runs 同一谓词）。
+会话 owner 必须与调用者一致；空 owner 归主管理员，解析失败不得放行。
 """
 
 import pytest
@@ -78,7 +78,14 @@ class TestCoordinatorReadface:
 
 class TestEndpoint:
 
-    def test_query_returns_result(self, client):
+    def test_query_returns_result(self, client, monkeypatch):
+        from neurova.api.endpoints import console as console_mod
+
+        class _OwnedRepo:
+            def get_session(self, agent_id: str, session_id: str):
+                return {"user_id": "user-a"}
+
+        monkeypatch.setattr(console_mod, "get_session_repository", lambda: _OwnedRepo())
         r = client.get(f"{TOOL_BASE}/bg_ok/result",
                        params={"session_id": "sess-1"}, headers=_token())
         assert r.status_code == 200, r.text
@@ -109,15 +116,30 @@ class TestEndpoint:
                        params={"session_id": "sess-1"}, headers=_token())
         assert r.status_code == 403
 
-    def test_query_ok_for_shared_session(self, client, monkeypatch):
+    def test_query_empty_owner_resolves_to_primary_admin(self, client, monkeypatch):
+        import neurova.post_chat_pipeline as pcp
         from neurova.api.endpoints import console as console_mod
 
         class _StubRepo:
             def get_session(self, agent_id: str, session_id: str):
-                return {"user_id": ""}  # 共享会话（空 owner 视为共享）
+                return {"user_id": ""}
 
-        monkeypatch.setattr(console_mod, "get_session_repository",
-                            lambda: _StubRepo())
+        monkeypatch.setattr(pcp, "_adminOwnerId", lambda: "user-a")
+        monkeypatch.setattr(console_mod, "get_session_repository", lambda: _StubRepo())
         r = client.get(f"{TOOL_BASE}/bg_ok/result",
                        params={"session_id": "sess-1"}, headers=_token())
         assert r.status_code == 200
+
+    def test_query_empty_owner_is_denied_when_admin_unresolved(self, client, monkeypatch):
+        import neurova.post_chat_pipeline as pcp
+        from neurova.api.endpoints import console as console_mod
+
+        class _StubRepo:
+            def get_session(self, agent_id: str, session_id: str):
+                return {"user_id": ""}
+
+        monkeypatch.setattr(pcp, "_adminOwnerId", lambda: "")
+        monkeypatch.setattr(console_mod, "get_session_repository", lambda: _StubRepo())
+        r = client.get(f"{TOOL_BASE}/bg_ok/result",
+                       params={"session_id": "sess-1"}, headers=_token())
+        assert r.status_code == 403
