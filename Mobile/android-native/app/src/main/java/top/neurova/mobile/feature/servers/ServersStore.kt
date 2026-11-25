@@ -33,6 +33,10 @@ class ServersStore(private val persistence: PreferencesStore) {
     val active: ServerProfile? get() = profiles.firstOrNull { it.id == activeId }
     val apiBase: String get() = active?.apiBase ?: ""
 
+    /** 装配层订阅：激活即切换凭据仓，删除即清掉该 serverId 的加密凭证。 */
+    var onActiveServerChanged: ((ServerProfile?) -> Unit)? = null
+    var onServerRemoved: ((String) -> Unit)? = null
+
     fun load() {
         val raw = persistence.readString(PROFILES_KEY)
         val activeRaw = persistence.readString(ACTIVE_KEY)
@@ -58,18 +62,19 @@ class ServersStore(private val persistence: PreferencesStore) {
             activeId = profiles.first().id
             persist()
         }
-        activeId = activeRaw ?: profiles.firstOrNull()?.id
+        setActive(activeRaw?.takeIf { id -> profiles.any { it.id == id } } ?: profiles.firstOrNull()?.id)
     }
 
     fun upsert(profile: ServerProfile) {
         val index = profiles.indexOfFirst { it.id == profile.id }
         if (index >= 0) profiles[index] = profile else profiles.add(profile)
         persist()
+        if (activeId == profile.id) onActiveServerChanged?.invoke(profile)
     }
 
     fun activate(id: String) {
-        activeId = id
-        persistence.writeString(ACTIVE_KEY, id)
+        if (profiles.none { it.id == id }) return
+        setActive(id)
     }
 
     /** 深链一扫配全（对齐鸿蒙端 ensureServerProfile）：按 baseUrl 复用或新建档案并激活。
@@ -89,11 +94,10 @@ class ServersStore(private val persistence: PreferencesStore) {
 
     /** 删除档案；删到当前档案时回退到剩余第一个（列表至少保留一个由 UI 层兜底） */
     fun remove(id: String) {
+        val removedActive = activeId == id
         profiles.removeAll { it.id == id }
-        if (activeId == id) {
-            activeId = profiles.firstOrNull()?.id
-            activeId?.let { persistence.writeString(ACTIVE_KEY, it) }
-        }
+        onServerRemoved?.invoke(id)
+        if (removedActive) setActive(profiles.firstOrNull()?.id)
         persist()
     }
 
@@ -107,6 +111,12 @@ class ServersStore(private val persistence: PreferencesStore) {
 
     fun newProfile(name: String, baseUrl: String, entryMode: ServerProfile.EntryMode): ServerProfile =
         ServerProfile(id = "srv-" + UUID.randomUUID().toString().take(8), name = name, baseUrl = baseUrl, entryMode = entryMode)
+
+    private fun setActive(id: String?) {
+        activeId = id
+        id?.let { persistence.writeString(ACTIVE_KEY, it) }
+        onActiveServerChanged?.invoke(active)
+    }
 
     private fun persist() {
         val payload = profiles.map {

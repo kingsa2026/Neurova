@@ -3,8 +3,6 @@ package top.neurova.mobile.core.net
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -17,12 +15,16 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import top.neurova.mobile.core.model.ServerProfile
 import top.neurova.mobile.core.store.CredentialStore
 import top.neurova.mobile.core.store.SingleFlightRefresher
+import top.neurova.mobile.core.store.canonicalOrigin
+
+/** 请求创建时的服务器身份；后续切档、重放、续签都不得改用当前激活档案。 */
+internal data class AuthBinding(val serverId: String, val origin: String, val refreshUrl: String)
 
 /**
- * HTTP 通道（对齐 Mobile/android/src/utils/http.ts 语义）：
- * - 每请求注入 Bearer + X-Request-ID；
- * - 401 且非鉴权端点 → 单飞续签（POST /auth/refresh）后重放一次；
- * - 响应按信封解包：{data: X} 或裸 X（后端两种形态并存，Vue apiGet/apiPost 同口径）。
+ * HTTP 通道：
+ * - 每请求仅向创建请求时的规范化 origin 注入该 serverId 的 Bearer + X-Request-ID；
+ * - 401 且非鉴权端点 → 按 serverId + origin 单飞续签后重放一次；
+ * - 响应按信封解包：{data: X} 或裸 X。
  */
 class HttpChannel(
     private val profileProvider: () -> ServerProfile,
@@ -32,13 +34,17 @@ class HttpChannel(
 ) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val refresher = SingleFlightRefresher(scope)
-    private val refreshMutex = Mutex()
     private val client = client.newBuilder()
         .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        // 重定向会更换 origin，旧 bearer（以及 307/308 的请求体）不得被转发。
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .addInterceptor { chain -> chain.proceed(withBoundAccessToken(chain.request())) }
+        .addNetworkInterceptor { chain -> chain.proceed(withBoundAccessToken(chain.request())) }
         .build()
 
-    /** 401 后单飞续签（唯一的 token 写回点） */
+    /** 401 后认证失效回调；清仓只针对请求所属 serverId。 */
     var onAuthFailure: (() -> Unit)? = null
 
     suspend fun getJson(path: String, query: Map<String, String> = emptyMap()): JsonElement =
@@ -53,7 +59,7 @@ class HttpChannel(
     suspend fun deleteJson(path: String): JsonElement =
         execute(buildRequest(path, emptyMap(), method = "DELETE", body = null))
 
-    /** 二进制 GET（AIGC 产物预览等）：同一条 Bearer + 401 续签链路，非 2xx 诚实抛 ChannelHttpException */
+    /** 二进制 GET：同一条 Bearer + 401 续签链路，非 2xx 诚实抛 ChannelHttpException。 */
     suspend fun getBytes(path: String): ByteArray = withContext(Dispatchers.IO) {
         val request = buildRequest(path, emptyMap(), method = "GET", body = null)
         sendWithAuthRetry(request).use { response ->
@@ -64,7 +70,7 @@ class HttpChannel(
         }
     }
 
-    /** 信封解包：优先取 data 字段，裸形态原样返回 */
+    /** 信封解包：优先取 data 字段，裸形态原样返回。 */
     fun unwrapData(element: JsonElement): JsonElement = when {
         element is JsonObject && element.containsKey("data") && element["data"] is JsonObject -> element["data"]!!
         element is JsonObject && element.containsKey("data") && element["data"] is JsonPrimitive -> element["data"]!!
@@ -76,12 +82,7 @@ class HttpChannel(
         finish(sendWithAuthRetry(request), request)
     }
 
-    /**
-     * SSE 事件流开口：返回未消费的 Response（调用方在 IO 线程读流）；
-     * 401 走同一条单飞续签 + 重放一次链路，之后由调用方按错误码诚实呈现。
-     * OkHttp 同步调用为阻塞 IO，统一收口 Dispatchers.IO（主线程调用即
-     * NetworkOnMainThreadException，实测复现过，勿移除）。
-     */
+    /** SSE 开口：401 走同一条单飞续签 + 重放一次链路。 */
     suspend fun streamPost(path: String, bodyJson: JsonObject): okhttp3.Response = withContext(Dispatchers.IO) {
         val request = buildRequest(path, emptyMap(), "POST", bodyJson)
             .newBuilder()
@@ -91,35 +92,30 @@ class HttpChannel(
     }
 
     private suspend fun sendWithAuthRetry(request: Request): okhttp3.Response {
+        val binding = checkNotNull(request.tag(AuthBinding::class.java)) { "请求缺少服务器凭据绑定" }
         val first = client.newCall(request).execute()
         if (first.code != 401 || isAuthPath(request.url.encodedPath)) {
             return first
         }
         first.close()
-        // 单飞续签后重放一次（对齐 axios 拦截器 __retried 语义）
-        refreshMutex.withLock {
-            refresher.run { refreshAccessToken() }
-        }
+        refresher.run("${binding.serverId}\u0000${binding.origin}") { refreshAccessToken(binding) }
         val replay = client.newCall(withAccessToken(request)).execute()
         if (replay.code == 401) {
             replay.close()
-            credentials.clearAuth()
+            credentials.clearAuth(binding.serverId)
             onAuthFailure?.invoke()
             throw ChannelAuthRevoked(request.url.encodedPath)
         }
         return replay
     }
 
-    private suspend fun refreshAccessToken(): String = withContext(Dispatchers.IO) {
-        val refresh = credentials.refreshToken()
+    private suspend fun refreshAccessToken(binding: AuthBinding): String = withContext(Dispatchers.IO) {
+        val refresh = credentials.refreshToken(binding.serverId, binding.origin)
         if (refresh.isEmpty()) throw ChannelAuthRevoked("no refresh token")
-        val profile = profileProvider()
         val body = json.encodeToString(JsonObject.serializer(), JsonObject(mapOf("refresh_token" to JsonPrimitive(refresh))))
             .toRequestBody("application/json".toMediaType())
-        val request = Request.Builder()
-            .url(profile.apiBase + "/auth/refresh")
-            .post(body)
-            .build()
+        // refreshUrl 来自原请求档案，不重新读取可能已被切换的 profileProvider。
+        val request = Request.Builder().url(binding.refreshUrl).post(body).build()
         val response = client.newCall(request).execute()
         response.use {
             if (!it.isSuccessful) throw ChannelAuthRevoked("refresh failed: ${it.code}")
@@ -127,7 +123,7 @@ class HttpChannel(
             val access = (payload as? JsonObject)?.get("access_token")?.toString()?.trim('"').orEmpty()
             val newRefresh = (payload as? JsonObject)?.get("refresh_token")?.toString()?.trim('"')
             if (access.isEmpty()) throw ChannelAuthRevoked("refresh response missing access_token")
-            credentials.saveTokens(access, newRefresh ?: refresh)
+            credentials.saveTokens(binding.serverId, binding.origin, access, newRefresh ?: refresh)
             access
         }
     }
@@ -151,17 +147,22 @@ class HttpChannel(
             "DELETE" -> builder.delete(requestBody ?: "{}".toRequestBody(media))
             "PUT" -> builder.put(requestBody!!)
         }
-        val token = credentials.accessToken()
-        if (token.isNotEmpty()) builder.header("Authorization", "Bearer $token")
+        val origin = checkNotNull(canonicalOrigin(builder.build().url.toString()))
+        builder.tag(AuthBinding::class.java, AuthBinding(profile.id, origin, profile.apiBase + "/auth/refresh"))
         builder.header("X-Request-ID", UUID.randomUUID().toString())
-        return builder.build()
+        return withBoundAccessToken(builder.build())
     }
 
-    private fun withAccessToken(request: Request): Request {
-        val token = credentials.accessToken()
-        return request.newBuilder()
-            .apply { if (token.isNotEmpty()) header("Authorization", "Bearer $token") }
-            .build()
+    private fun withAccessToken(request: Request): Request = withBoundAccessToken(request)
+
+    /** 应用与网络两道拦截都在真实发送前复核；origin 变化或无绑定时一律摘除 Authorization。 */
+    private fun withBoundAccessToken(request: Request): Request {
+        val binding = request.tag(AuthBinding::class.java)
+        val token = binding?.takeIf { canonicalOrigin(request.url.toString()) == it.origin }
+            ?.let { credentials.accessToken(it.serverId, it.origin) }.orEmpty()
+        return request.newBuilder().apply {
+            if (token.isEmpty()) removeHeader("Authorization") else header("Authorization", "Bearer $token")
+        }.build()
     }
 
     private fun isAuthPath(path: String): Boolean =

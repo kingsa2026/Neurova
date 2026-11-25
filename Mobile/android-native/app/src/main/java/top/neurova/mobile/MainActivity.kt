@@ -27,6 +27,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        runtime.servers.onActiveServerChanged = { profile ->
+            if (profile == null) runtime.credentials.clearServerBinding()
+            else runtime.credentials.bindServer(profile.id, profile.baseUrl)
+        }
+        runtime.servers.onServerRemoved = { serverId -> runtime.credentials.clearServer(serverId) }
+        bindCredentialScope()
         // 设备桥（2026-11-23 计划卡 A1）：前台服务承载应用级 WS 常连
         ContextCompat.startForegroundService(this, Intent(this, DeviceBridgeService::class.java))
         handlePairingDeepLink(intent)
@@ -56,8 +62,15 @@ class MainActivity : ComponentActivity() {
         runtime.pairing.pendingDeepLinkRef = ref
     }
 
+    private fun bindCredentialScope() {
+        val profile = runtime.servers.active
+        if (profile == null) runtime.credentials.clearServerBinding()
+        else runtime.credentials.bindServer(profile.id, profile.baseUrl)
+    }
+
     override fun onResume() {
         super.onResume()
+        bindCredentialScope()
         AppStateTracker.foreground()
     }
 

@@ -1,14 +1,10 @@
 /**
- * AuthStore - 认证状态存储（P1-36：凭证持久化）
+ * AuthStore - 认证状态存储
  *
- * 管理：access_token、refresh_token、当前 user 对象、移动端配对下发的 wsToken/wsUrl、
- *   长期设备身份（pairingId/deviceSecret）
- * 持久化策略（经 StorageAdapter → @kit.ArkData preferences 落盘）：
- *   - refresh_token / wsToken / wsUrl / pairingId / deviceSecret：**持久化**——
- *     冷启动恢复，配对关系与续签凭证重启不丢；
- *   - access_token：**内存优先**——不落盘，冷启动用 refresh_token 走 /auth/refresh 续签；
- *   - user：不落盘——续签后经 /auth/me 回填。
- * 行为：login / logout / isAuthenticated / isPaired / restore
+ * 凭证按 serverId 分仓，并与该档案的规范化 origin 绑定。
+ * access_token 仅内存；refresh_token / wsToken / pairingId / deviceSecret 沿用既有
+ * StorageAdapter 持久化，不引入新的明文存储。切换档案立即摘除 HttpClient bearer，
+ * 只有协议、主机、端口完全匹配时才重新装配。
  */
 import { StateManager } from '../StateManager';
 import { User, AuthTokens } from '../../types';
@@ -17,187 +13,357 @@ import { HttpClient } from '../../api/HttpClient';
 import { AuthApi } from '../../api/modules/AuthApi';
 import { StorageAdapter } from '../../adapters/StorageAdapter';
 import { Logger } from '../../logger/Logger';
+import { ServerProfiles, ServerProfile } from '../../config/ServerProfiles';
 
 const KEY_ACCESS_TOKEN = 'auth:access_token';
 const KEY_REFRESH_TOKEN = 'auth:refresh_token';
 const KEY_USER = 'auth:user';
-// 移动端配对成功后下发的 WebSocket 凭证
 const KEY_WS_TOKEN = 'auth:ws_token';
 const KEY_WS_URL = 'auth:ws_url';
-// 长期设备身份（refresh 续签用，设计方案 §4.7）
 const KEY_DEVICE_SECRET = 'auth:device_secret';
 const KEY_PAIRING_ID = 'auth:pairing_id';
+const LEGACY_KEYS: string[] = [
+  KEY_ACCESS_TOKEN, KEY_REFRESH_TOKEN, KEY_USER, KEY_WS_TOKEN, KEY_WS_URL, KEY_DEVICE_SECRET, KEY_PAIRING_ID,
+];
+
+interface ServerCredentialSnapshot {
+  origin: string;
+  refreshToken: string;
+  wsToken: string;
+  wsUrl: string;
+  pairingId: string;
+  deviceSecret: string;
+}
+
+/** URL origin 单源：忽略路径/query，保留协议、小写主机与显式端口；默认端口归一。 */
+function normalizeOrigin(raw: string): string {
+  const match = /^(https?):\/\/([^/?#]+)(?:[/?#]|$)/i.exec(raw.trim());
+  if (!match) return '';
+  const scheme = match[1].toLowerCase();
+  const authority = match[2].slice(match[2].lastIndexOf('@') + 1);
+  let host = '';
+  let portText = '';
+  if (authority.startsWith('[')) {
+    const end = authority.indexOf(']');
+    if (end < 0) return '';
+    host = authority.slice(0, end + 1).toLowerCase();
+    const rest = authority.slice(end + 1);
+    if (rest.length > 0) {
+      if (!rest.startsWith(':')) return '';
+      portText = rest.slice(1);
+    }
+  } else {
+    const colon = authority.indexOf(':');
+    if (colon >= 0) {
+      if (authority.indexOf(':', colon + 1) >= 0) return '';
+      host = authority.slice(0, colon).toLowerCase();
+      portText = authority.slice(colon + 1);
+    } else {
+      host = authority.toLowerCase();
+    }
+  }
+  if (host.length === 0) return '';
+  const defaultPort = scheme === 'https' ? 443 : 80;
+  let port = defaultPort;
+  if (portText.length > 0) {
+    if (!/^\d+$/.test(portText)) return '';
+    port = Number(portText);
+    if (port < 1 || port > 65535) return '';
+  }
+  return `${scheme}://${host}:${port}`;
+}
+
+function scopedKey(serverId: string, field: string): string {
+  return `auth:server:${encodeURIComponent(serverId)}:${field}`;
+}
 
 export class AuthStore {
+  private static guardedClient: HttpClient | null = null;
   private state: StateManager = StateManager.getInstance();
   private bus: EventBus = EventBus.getInstance();
   private storage: StorageAdapter = StorageAdapter.getInstance();
   private logger: Logger = Logger.getInstance();
+  private activeServerId: string = '';
+  private activeOrigin: string = '';
+
+  constructor() {
+    this.installHttpGuard();
+  }
+
+  private installHttpGuard(): void {
+    const client = HttpClient.getInstance();
+    if (AuthStore.guardedClient === client) return;
+    client.addInterceptor({
+      before: (headers: Record<string, string>) => { this.applyOriginGuard(headers); },
+    });
+    AuthStore.guardedClient = client;
+  }
+
+  /** 在每次请求头装配前复核当前档案与 HTTP baseUrl；失配立即摘除 bearer。 */
+  private applyOriginGuard(headers: Record<string, string>): void {
+    const token = this.currentCredential('access_token');
+    const requestOrigin = normalizeOrigin(HttpClient.getInstance().getBaseUrl());
+    const serverId = this.resolveServerId();
+    const allowed = serverId.length > 0 && this.activeOrigin.length > 0 &&
+      requestOrigin === this.activeOrigin && token.length > 0;
+    if (allowed) {
+      headers['Authorization'] = `Bearer ${token}`;
+      HttpClient.getInstance().setToken(token);
+    } else {
+      delete headers['Authorization'];
+      HttpClient.getInstance().setToken('');
+    }
+  }
+
+  private resolveServerId(): string {
+    const active = ServerProfiles.getInstance().getActive();
+    if (active) {
+      const origin = normalizeOrigin(active.baseUrl);
+      if (active.id !== this.activeServerId || origin !== this.activeOrigin) {
+        this.activeServerId = active.id;
+        this.activeOrigin = origin;
+        this.syncHttpToken();
+      }
+    } else if (this.activeServerId.length > 0 || this.activeOrigin.length > 0) {
+      this.activeServerId = '';
+      this.activeOrigin = '';
+      this.syncHttpToken();
+    }
+    return this.activeServerId;
+  }
+
+  /** 内存 origin 元数据必须与当前档案一致，避免同 serverId 改地址时沿用旧 token。 */
+  private originMatches(serverId: string): boolean {
+    return serverId.length > 0 && this.activeOrigin.length > 0 &&
+      this.state.get<string>(scopedKey(serverId, 'origin'), '') === this.activeOrigin;
+  }
+
+  private currentCredential(field: string): string {
+    const serverId = this.resolveServerId();
+    if (!this.originMatches(serverId)) return '';
+    return this.state.get<string>(scopedKey(serverId, field), '');
+  }
+
+  private syncHttpToken(): void {
+    const client = HttpClient.getInstance();
+    const token = this.activeServerId.length > 0 && this.originMatches(this.activeServerId)
+      ? this.state.get<string>(scopedKey(this.activeServerId, 'access_token'), '') : '';
+    if (token.length > 0 && normalizeOrigin(client.getBaseUrl()) === this.activeOrigin) {
+      client.setToken(token);
+    } else {
+      client.setToken('');
+    }
+  }
+
+  private targetBinding(serverId: string, origin: string): { serverId: string, origin: string } {
+    const activeId = this.resolveServerId();
+    const targetId = serverId.length > 0 ? serverId : activeId;
+    const targetOrigin = origin.length > 0 ? normalizeOrigin(origin)
+      : (targetId === activeId ? this.activeOrigin : normalizeOrigin(HttpClient.getInstance().getBaseUrl()));
+    if (targetId.length === 0 || targetOrigin.length === 0) {
+      throw new Error('尚未绑定终端档案，不能写入或读取凭证');
+    }
+    return { serverId: targetId, origin: targetOrigin };
+  }
 
   get accessToken(): string {
-    return this.state.get<string>(KEY_ACCESS_TOKEN, '');
+    return this.currentCredential('access_token');
   }
 
   get refreshToken(): string {
-    return this.state.get<string>(KEY_REFRESH_TOKEN, '');
+    return this.currentCredential('refresh_token');
   }
 
   get user(): User | undefined {
-    return this.state.get<User>(KEY_USER);
+    const id = this.resolveServerId();
+    return this.originMatches(id) ? this.state.get<User>(scopedKey(id, 'user')) : undefined;
   }
 
   get isAuthenticated(): boolean {
-    return !!this.accessToken;
+    return this.accessToken.length > 0;
   }
 
-  /** 配对成功后下发的 WebSocket 连接 token（未配对时为空串） */
   get wsToken(): string {
-    return this.state.get<string>(KEY_WS_TOKEN, '');
+    return this.currentCredential('ws_token');
   }
 
-  /** 配对成功后下发的 WebSocket 连接 URL（未配对时为空串） */
   get wsUrl(): string {
-    return this.state.get<string>(KEY_WS_URL, '');
+    return this.currentCredential('ws_url');
   }
 
-  /** 是否已完成移动端配对（wsToken 存在即视为已配对） */
   get isPaired(): boolean {
-    return !!this.wsToken;
+    return this.wsToken.length > 0;
   }
 
-  /** 长期设备身份密钥（confirm 一次性下发；refresh 续签凭证用） */
   get deviceSecret(): string {
-    return this.state.get<string>(KEY_DEVICE_SECRET, '');
+    return this.currentCredential('device_secret');
   }
 
-  /** 在册设备 ID（refresh 续签必须携带） */
   get pairingId(): string {
-    return this.state.get<string>(KEY_PAIRING_ID, '');
+    return this.currentCredential('pairing_id');
   }
 
-  /** 持久化写穿（失败经 ErrorManager 上报，不阻断内存态——存储故障时退化为内存会话） */
   private persist(key: string, value: string): void {
     this.storage.set<string>(key, value).catch((e: Error) => {
       this.logger.error('AuthStore', `持久化 ${key} 失败`, e);
     });
   }
 
-  /** 持久化删除（同上，失败不阻断） */
   private unpersist(key: string): void {
     this.storage.remove(key).catch((e: Error) => {
       this.logger.error('AuthStore', `清除 ${key} 失败`, e);
     });
   }
 
-  /** 写入长期设备身份（confirm 成功后调用；登出/解除配对时清除） */
-  setDeviceIdentity(pairingId: string, deviceSecret: string): void {
-    this.state.set(KEY_PAIRING_ID, pairingId);
-    this.state.set(KEY_DEVICE_SECRET, deviceSecret);
-    this.persist(KEY_PAIRING_ID, pairingId);
-    this.persist(KEY_DEVICE_SECRET, deviceSecret);
+  /** 旧全局凭证无法证明属于哪台服务器，切换/恢复时淘汰，不做迁移。 */
+  private clearLegacyCredentials(): void {
+    LEGACY_KEYS.forEach((key: string) => {
+      this.state.remove(key);
+      this.unpersist(key);
+    });
   }
 
-  /** 设置 tokens（登录成功后调用）；token 同步落 HttpClient 装配点，否则带凭证请求裸奔（me() 401 根因） */
-  setTokens(tokens: AuthTokens): void {
-    this.state.set(KEY_ACCESS_TOKEN, tokens.access_token);
-    this.state.set(KEY_REFRESH_TOKEN, tokens.refresh_token);
-    HttpClient.getInstance().setToken(tokens.access_token);
-    this.persist(KEY_REFRESH_TOKEN, tokens.refresh_token);
+  /** 切换前同步摘 token；随后只恢复目标 serverId 且 origin 相符的持久化凭证。 */
+  async activateServer(serverId: string, baseUrl: string): Promise<void> {
+    HttpClient.getInstance().setToken('');
+    this.clearLegacyCredentials();
+    if (serverId.length === 0) {
+      this.activeServerId = '';
+      this.activeOrigin = '';
+      return;
+    }
+    const origin = normalizeOrigin(baseUrl);
+    if (origin.length === 0) throw new Error('终端地址非法');
+    this.activeServerId = serverId;
+    this.activeOrigin = origin;
+    this.syncHttpToken();
+    await this.loadServerCredentials(serverId, origin);
   }
 
-  /** 设置当前用户 */
+  private async loadServerCredentials(serverId: string, origin: string): Promise<void> {
+    await this.storage.flush();
+    const snapshot: ServerCredentialSnapshot = {
+      origin: await this.storage.get<string>(scopedKey(serverId, 'origin'), ''),
+      refreshToken: await this.storage.get<string>(scopedKey(serverId, 'refresh_token'), ''),
+      wsToken: await this.storage.get<string>(scopedKey(serverId, 'ws_token'), ''),
+      wsUrl: await this.storage.get<string>(scopedKey(serverId, 'ws_url'), ''),
+      pairingId: await this.storage.get<string>(scopedKey(serverId, 'pairing_id'), ''),
+      deviceSecret: await this.storage.get<string>(scopedKey(serverId, 'device_secret'), ''),
+    };
+    if (this.activeServerId !== serverId || this.activeOrigin !== origin) return;
+    if (snapshot.origin.length === 0 || snapshot.origin !== origin) {
+      if (snapshot.origin.length > 0) this.clearServerCredentials(serverId, true);
+      return;
+    }
+    this.setOrRemove(scopedKey(serverId, 'refresh_token'), snapshot.refreshToken);
+    this.setOrRemove(scopedKey(serverId, 'ws_token'), snapshot.wsToken);
+    this.setOrRemove(scopedKey(serverId, 'ws_url'), snapshot.wsUrl);
+    this.setOrRemove(scopedKey(serverId, 'pairing_id'), snapshot.pairingId);
+    this.setOrRemove(scopedKey(serverId, 'device_secret'), snapshot.deviceSecret);
+    this.state.set(scopedKey(serverId, 'origin'), snapshot.origin);
+    this.syncHttpToken();
+  }
+
+  private setOrRemove(key: string, value: string): void {
+    if (value.length > 0) this.state.set(key, value);
+    else this.state.remove(key);
+  }
+
+  setTokens(tokens: AuthTokens, serverId: string = '', origin: string = ''): void {
+    const target = this.targetBinding(serverId, origin);
+    this.state.set(scopedKey(target.serverId, 'access_token'), tokens.access_token);
+    this.state.set(scopedKey(target.serverId, 'refresh_token'), tokens.refresh_token);
+    this.state.set(scopedKey(target.serverId, 'origin'), target.origin);
+    this.persist(scopedKey(target.serverId, 'origin'), target.origin);
+    this.persist(scopedKey(target.serverId, 'refresh_token'), tokens.refresh_token);
+    if (target.serverId === this.activeServerId) this.syncHttpToken();
+  }
+
   setUser(user: User): void {
-    this.state.set(KEY_USER, user);
+    const id = this.resolveServerId();
+    if (id.length === 0) return;
+    this.state.set(scopedKey(id, 'user'), user);
     this.bus.emit('user:login', user);
   }
 
-  /**
-   * 写入移动端配对成功后的 WebSocket 凭证
-   * 由 PairingPage 在 mobilePairing.confirm 成功后调用
-   */
-  setWsPairing(wsToken: string, wsUrl: string): void {
-    this.state.set(KEY_WS_TOKEN, wsToken);
-    this.state.set(KEY_WS_URL, wsUrl);
-    this.persist(KEY_WS_TOKEN, wsToken);
-    this.persist(KEY_WS_URL, wsUrl);
-    const payload: PairingSuccessPayload = { wsToken, wsUrl };
-    this.bus.emit('pairing:success', payload);
+  setWsPairing(wsToken: string, wsUrl: string, serverId: string = '', origin: string = ''): void {
+    const target = this.targetBinding(serverId, origin);
+    this.state.set(scopedKey(target.serverId, 'ws_token'), wsToken);
+    this.state.set(scopedKey(target.serverId, 'ws_url'), wsUrl);
+    this.state.set(scopedKey(target.serverId, 'origin'), target.origin);
+    this.persist(scopedKey(target.serverId, 'origin'), target.origin);
+    this.persist(scopedKey(target.serverId, 'ws_token'), wsToken);
+    this.persist(scopedKey(target.serverId, 'ws_url'), wsUrl);
+    if (target.serverId === this.activeServerId) {
+      const payload: PairingSuccessPayload = { wsToken, wsUrl };
+      this.bus.emit('pairing:success', payload);
+    }
   }
 
-  /**
-   * 冷启动恢复（P1-36）：先回填持久化凭证，再按需续签。
-   * - 持久化凭证（refresh_token/wsToken/wsUrl/pairingId/deviceSecret）回填内存；
-   * - access_token 内存优先：内存没有时用 refresh_token 走 /auth/refresh 换新，
-   *   并经 /auth/me 回填用户；续签失败（过期/被吊销）→ 清除本地凭证回登录页。
-   * 必须在 StorageAdapter.init(context) 之后调用。
-   */
-  async restore(): Promise<void> {
-    try {
-      const refreshToken = await this.storage.get<string>(KEY_REFRESH_TOKEN, '');
-      const wsToken = await this.storage.get<string>(KEY_WS_TOKEN, '');
-      const wsUrl = await this.storage.get<string>(KEY_WS_URL, '');
-      const pairingId = await this.storage.get<string>(KEY_PAIRING_ID, '');
-      const deviceSecret = await this.storage.get<string>(KEY_DEVICE_SECRET, '');
-      if (refreshToken.length > 0) this.state.set(KEY_REFRESH_TOKEN, refreshToken);
-      if (wsToken.length > 0) this.state.set(KEY_WS_TOKEN, wsToken);
-      if (wsUrl.length > 0) this.state.set(KEY_WS_URL, wsUrl);
-      if (pairingId.length > 0) this.state.set(KEY_PAIRING_ID, pairingId);
-      if (deviceSecret.length > 0) this.state.set(KEY_DEVICE_SECRET, deviceSecret);
-    } catch (e) {
-      // 存储不可用：按无持久化处理（退回登录链路），不吞成静默成功
-      this.logger.error('AuthStore', '冷启动恢复读取持久化凭证失败', e as Error);
-      return;
-    }
+  setDeviceIdentity(pairingId: string, deviceSecret: string, serverId: string = '', origin: string = ''): void {
+    const target = this.targetBinding(serverId, origin);
+    this.state.set(scopedKey(target.serverId, 'pairing_id'), pairingId);
+    this.state.set(scopedKey(target.serverId, 'device_secret'), deviceSecret);
+    this.state.set(scopedKey(target.serverId, 'origin'), target.origin);
+    this.persist(scopedKey(target.serverId, 'origin'), target.origin);
+    this.persist(scopedKey(target.serverId, 'pairing_id'), pairingId);
+    this.persist(scopedKey(target.serverId, 'device_secret'), deviceSecret);
+  }
 
-    if (this.accessToken.length > 0) {
-      return; // 进程内已有 access_token（热启动），无需续签
-    }
+  /** 冷启动只恢复当前档案；持久化 origin 与档案不一致时清除该仓，不拿旧 token 续签。 */
+  async restore(): Promise<void> {
+    const serverId = this.resolveServerId();
+    HttpClient.getInstance().setToken('');
+    this.clearLegacyCredentials();
+    if (serverId.length === 0) return;
+    const origin = this.activeOrigin;
+    await this.loadServerCredentials(serverId, origin);
+    if (this.activeServerId !== serverId || this.activeOrigin !== origin) return;
+    if (this.accessToken.length > 0) return;
     const refreshToken = this.refreshToken;
-    if (refreshToken.length === 0) {
-      return; // 无任何凭证：未登录，走登录页
-    }
+    if (refreshToken.length === 0) return;
     const api = new AuthApi(HttpClient.getInstance());
     try {
       const refreshed = await api.refresh(refreshToken);
+      if (this.activeServerId !== serverId || this.activeOrigin !== origin) return;
       if (refreshed.code !== 0 || !refreshed.data) {
-        this.clearPersistedCredentials();
+        this.clearServerCredentials(serverId, false);
         return;
       }
-      this.setTokens(refreshed.data);
+      this.setTokens(refreshed.data, serverId, origin);
       const me = await api.me();
-      if (me.code === 0 && me.data) {
-        this.setUser(me.data);
-      }
+      if (this.activeServerId === serverId && me.code === 0 && me.data) this.setUser(me.data);
     } catch (e) {
       this.logger.error('AuthStore', '冷启动续签失败，清除本地凭证', e as Error);
-      this.clearPersistedCredentials();
+      this.clearServerCredentials(serverId, false);
     }
   }
 
-  /** 清除全部凭证（内存 + 持久化；续签失败/登出共用） */
-  private clearPersistedCredentials(): void {
-    this.state.remove(KEY_ACCESS_TOKEN);
-    this.state.remove(KEY_REFRESH_TOKEN);
-    this.state.remove(KEY_USER);
-    this.unpersist(KEY_REFRESH_TOKEN);
-    HttpClient.getInstance().setToken('');
+  private clearServerCredentials(serverId: string, includePairing: boolean): void {
+    const fields: string[] = ['access_token', 'refresh_token', 'user'];
+    if (includePairing) fields.push('ws_token', 'ws_url', 'pairing_id', 'device_secret', 'origin');
+    fields.forEach((field: string) => {
+      const key = scopedKey(serverId, field);
+      this.state.remove(key);
+      this.unpersist(key);
+    });
+    if (serverId === this.activeServerId) this.syncHttpToken();
   }
 
-  /** 登出：清除所有认证状态（内存 + 持久化，含 HttpClient 装配点的 token） */
+  /** 删除档案时调用：清掉该 serverId 的内存与持久化凭证。 */
+  forgetServer(serverId: string): void {
+    this.clearServerCredentials(serverId, true);
+  }
+
+  /** 登出保持既有全终端、同步内存清理与 fail-soft 持久化语义。 */
   logout(): void {
-    this.state.remove(KEY_ACCESS_TOKEN);
-    this.state.remove(KEY_REFRESH_TOKEN);
-    this.state.remove(KEY_USER);
-    this.state.remove(KEY_WS_TOKEN);
-    this.state.remove(KEY_WS_URL);
-    this.state.remove(KEY_DEVICE_SECRET);
-    this.state.remove(KEY_PAIRING_ID);
-    this.unpersist(KEY_REFRESH_TOKEN);
-    this.unpersist(KEY_WS_TOKEN);
-    this.unpersist(KEY_WS_URL);
-    this.unpersist(KEY_DEVICE_SECRET);
-    this.unpersist(KEY_PAIRING_ID);
+    const ids: Set<string> = new Set<string>();
+    const activeId = this.resolveServerId();
+    if (activeId.length > 0) ids.add(activeId);
+    ServerProfiles.getInstance().getList().forEach((p: ServerProfile) => { ids.add(p.id); });
     HttpClient.getInstance().setToken('');
+    this.clearLegacyCredentials();
+    for (const id of ids) this.clearServerCredentials(id, true);
     this.bus.emit('user:logout', new Object());
   }
 }

@@ -193,7 +193,9 @@ export struct PairingPage {
     const store = ServerProfiles.getInstance();
     const existing = store.getList().find((p: ServerProfile) => p.baseUrl === host);
     const target = existing ?? await store.add('扫码配对', host);
-    await store.switchTo(target.id);
+    // 二维码 host 先摘掉旧终端 bearer，再激活档案；resolve/confirm 不得继承旧 token。
+    await this.authStore.activateServer(target.id, target.baseUrl);
+    if (!(await store.switchTo(target.id))) throw new Error('终端档案不存在');
     await ConfigManager.getInstance().applyServerProfile(`${target.baseUrl}/api/v1`, getContext(this) as Context);
     this.logger.info(TAG, `终端档案就绪：${target.baseUrl}`);
   }

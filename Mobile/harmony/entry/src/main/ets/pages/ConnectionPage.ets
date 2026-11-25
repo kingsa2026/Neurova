@@ -19,6 +19,7 @@ import { AppIcon } from '../components/common/AppIcon';
 import { IconBtn } from '../components/common/IconBtn';
 import { GlassInput } from '../components/glass';
 import { GlassButton } from '../components/glass';
+import { AuthStore } from '../libs/state/stores/AuthStore';
 
 const TAG = 'ConnectionPage';
 
@@ -40,6 +41,7 @@ export struct ConnectionPage {
   private sm = StyleManager.getInstance();
   private logger = Logger.getInstance();
   private msg = MessageManager.getInstance();
+  private authStore = new AuthStore();
 
   aboutToAppear() {
     this.refresh();
@@ -55,7 +57,9 @@ export struct ConnectionPage {
   private async useProfile(p: ServerProfile): Promise<void> {
     this.busy = true;
     try {
-      await this.store.switchTo(p.id);
+      // 先摘旧 bearer，再持久化激活状态；任何一步失败都不能把旧终端 token 带给新终端。
+      await this.authStore.activateServer(p.id, p.baseUrl);
+      if (!(await this.store.switchTo(p.id))) throw new Error('终端档案不存在');
       await this.cm.applyServerProfile(`${p.baseUrl}/api/v1`, getContext(this) as Context);
       this.refresh();
       this.msg.success(`已切换到 ${p.name}，请重新登录`);
@@ -83,7 +87,8 @@ export struct ConnectionPage {
       this.newSsl = false;
       // 新档案立即激活并进入扫码配对：二维码只带 ref 不带地址（§3.4），
       // 所以先录地址、再扫码配对，两步缺一不可
-      await this.store.switchTo(added.id);
+      await this.authStore.activateServer(added.id, added.baseUrl);
+      if (!(await this.store.switchTo(added.id))) throw new Error('终端档案不存在');
       await this.cm.applyServerProfile(`${added.baseUrl}/api/v1`, getContext(this) as Context);
       this.refresh();
       this.activeId = added.id;
@@ -97,7 +102,14 @@ export struct ConnectionPage {
   private async removeProfile(id: string): Promise<void> {
     this.busy = true;
     try {
+      const removedActive = this.store.getActive()?.id === id;
       await this.store.remove(id);
+      this.authStore.forgetServer(id);
+      if (removedActive) {
+        const next = this.store.getActive();
+        await this.authStore.activateServer(next ? next.id : '', next ? next.baseUrl : '');
+        if (next) await this.cm.applyServerProfile(`${next.baseUrl}/api/v1`, getContext(this) as Context);
+      }
       this.refresh();
     } finally {
       this.busy = false;

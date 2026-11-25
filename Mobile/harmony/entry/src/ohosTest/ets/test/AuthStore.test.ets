@@ -40,59 +40,71 @@ export default function authStoreTest() {
   describe('AuthStore', () => {
     let store: AuthStore;
 
-    beforeEach(() => {
+    beforeEach(async () => {
       store = new AuthStore();
-      store.logout();
+      await initStorage();
+      store.forgetServer('server-a');
+      store.forgetServer('server-b');
     });
+
+    async function activateA(): Promise<void> {
+      await store.activateServer('server-a', 'https://a.example');
+    }
 
     it('setTokens_persists_refresh_token_only', 0, async () => {
       const storage = await initStorage();
+      await activateA();
       store.setTokens(makeTokens('at-x', 'rt-y'));
       expect(store.accessToken).assertEqual('at-x');
       expect(store.refreshToken).assertEqual('rt-y');
       // refresh_token 落盘；access_token 只在内存
-      const persistedRefresh = await storage.get<string>('auth:refresh_token', '');
+      const persistedRefresh = await storage.get<string>('auth:server:server-a:refresh_token', '');
       expect(persistedRefresh).assertEqual('rt-y');
+      expect(await storage.get<string>('auth:refresh_token', '')).assertEqual('');
       const persistedAccess = await storage.get<string>('auth:access_token', '');
       expect(persistedAccess).assertEqual('');
     });
 
     it('setDeviceIdentity_persists_pairing_credentials', 0, async () => {
       const storage = await initStorage();
+      await activateA();
       store.setDeviceIdentity('pair-1', 'secret-1');
       expect(store.pairingId).assertEqual('pair-1');
       expect(store.deviceSecret).assertEqual('secret-1');
-      const pairingId = await storage.get<string>('auth:pairing_id', '');
-      const secret = await storage.get<string>('auth:device_secret', '');
+      const pairingId = await storage.get<string>('auth:server:server-a:pairing_id', '');
+      const secret = await storage.get<string>('auth:server:server-a:device_secret', '');
       expect(pairingId).assertEqual('pair-1');
       expect(secret).assertEqual('secret-1');
     });
 
     it('setWsPairing_persists_ws_credentials', 0, async () => {
       const storage = await initStorage();
+      await activateA();
       store.setWsPairing('wst-1', 'ws://s.example.com/ws');
       expect(store.isPaired).assertTrue();
-      const wsToken = await storage.get<string>('auth:ws_token', '');
-      const wsUrl = await storage.get<string>('auth:ws_url', '');
+      const wsToken = await storage.get<string>('auth:server:server-a:ws_token', '');
+      const wsUrl = await storage.get<string>('auth:server:server-a:ws_url', '');
       expect(wsToken).assertEqual('wst-1');
       expect(wsUrl).assertEqual('ws://s.example.com/ws');
     });
 
     it('logout_clears_memory_and_persisted_credentials', 0, async () => {
       const storage = await initStorage();
+      await activateA();
       store.setTokens(makeTokens('at-1', 'rt-1'));
       store.setDeviceIdentity('p1', 's1');
       store.logout();
       expect(store.isAuthenticated).assertFalse();
       expect(store.refreshToken).assertEqual('');
-      const persistedRefresh = await storage.get<string>('auth:refresh_token', '');
-      const persistedPairing = await storage.get<string>('auth:pairing_id', '');
+      const persistedRefresh = await storage.get<string>('auth:server:server-a:refresh_token', '');
+      const persistedPairing = await storage.get<string>('auth:server:server-a:pairing_id', '');
       expect(persistedRefresh).assertEqual('');
       expect(persistedPairing).assertEqual('');
     });
 
     it('restore_without_credentials_stays_logged_out', 0, async () => {
       await initStorage();
+      await activateA();
       await store.restore();
       expect(store.isAuthenticated).assertFalse();
       expect(store.isPaired).assertFalse();
@@ -100,6 +112,7 @@ export default function authStoreTest() {
 
     it('restore_with_memory_access_token_skips_refresh', 0, async () => {
       await initStorage();
+      await activateA();
       store.setTokens(makeTokens('at-warm', 'rt-warm'));
       store.setUser(makeUser());
       // access_token 在内存：restore 直接返回，不发起续签（无网络也平安）
