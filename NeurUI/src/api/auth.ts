@@ -38,8 +38,15 @@ export const authAPI = {
 
   /**
    * Log out the current user (server-side token invalidation).
+   *
+   * 带上 refresh_token 时后端连带撤销 refresh 家族（API-03 根修）；
+   * 不传则只撤 access（兼容旧调用）。
    */
-  logout: () => api.post<ApiResponse<null>>('/auth/logout'),
+  logout: (refreshToken?: string) =>
+    api.post<ApiResponse<null>>(
+      '/auth/logout',
+      refreshToken ? { refresh_token: refreshToken } : undefined,
+    ),
 
   /**
    * Refresh an expired access token using a refresh token.

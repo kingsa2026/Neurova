@@ -229,7 +229,9 @@ export const useAuthStore = defineStore('auth', () => {
    */
   async function logout(): Promise<void> {
     try {
-      await authAPI.logout()
+      // 带上 refresh_token：后端只在收到它时连带撤销 refresh 家族（API-03 根修）；
+      // 空则保持旧行为（可选 body，向后兼容）。
+      await authAPI.logout(refreshToken.value ?? undefined)
     } catch {
       // Ignore errors during logout - clear local state regardless
     } finally {

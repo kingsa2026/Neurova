@@ -194,6 +194,27 @@ describe('useAuthStore', () => {
     expect(store.isAuthenticated).toBe(false)
   })
 
+  it('logout carries the stored refresh_token so the server revokes the whole family', async () => {
+    vi.mocked(authAPI.logout).mockResolvedValue({ code: 0, message: 'ok', data: null })
+
+    const store = useAuthStore()
+    store.setTokensFromRegistration({ access_token: 'a-tok', refresh_token: 'r-tok' })
+    await store.logout()
+
+    // 后端只在收到 refresh_token 时才连带撤销 refresh 家族（API-03 根修）；
+    // 不传 = 网页端登出后旧 refresh 仍可续签，等于修复从未生效。
+    expect(vi.mocked(authAPI.logout)).toHaveBeenCalledWith('r-tok')
+  })
+
+  it('logout passes no refresh token when none is stored', async () => {
+    vi.mocked(authAPI.logout).mockResolvedValue({ code: 0, message: 'ok', data: null })
+
+    const store = useAuthStore()
+    await store.logout()
+
+    expect(vi.mocked(authAPI.logout)).toHaveBeenCalledWith(undefined)
+  })
+
   it('fetchCurrentUser returns null when not authenticated', async () => {
     const store = useAuthStore()
     const result = await store.fetchCurrentUser()
