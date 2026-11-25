@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """SaaS REST 连接器族（U-conn 扩展批：对齐参照系连接器矩阵）。
 
-六家 SaaS/湖仓 SQL 服务，全部走已在依赖清单的 httpx（零新增依赖——
-2026-09-20 六项决策与 W10 同判），凭据走 NEUROVA_KB_SECRET 指针纪律
-（描述符只放环境变量名，值不落明文、不进日志）：
+六家 SaaS/湖仓 SQL 服务，出站统一走 ``neurova.security.safe_fetch``
+（url_guard 逐跳校验 + http_fetch 响应上限；零新增依赖），凭据走
+NEUROVA_KB_SECRET 指针纪律（描述符只放环境变量名，值不落明文、不进日志）：
 
 - bigquery：BigQuery REST ``projects/*/queries``——Bearer 令牌 env 指针，
   页游标 pageToken；行是 ``f/v`` 嵌套形，按 schema.fields 展平成列名字典。
@@ -28,11 +28,11 @@ from __future__ import annotations
 import base64
 import json
 import threading
+import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 
-import httpx
-
 from neurova.core.logger import get_logger
+from neurova.security.safe_fetch import safe_fetch
 from .protocols import resolveCredentialEnv
 
 logger = get_logger(__name__)
@@ -100,11 +100,11 @@ class SaaSRestAdapter:
         if not self._base:
             return SourceHealth(status="error", reason="base_url 缺失（描述符）")
         try:
-            resp = httpx.get(self._base, headers=self._headers(), timeout=10)
-            if resp.status_code < 400:
+            resp = safe_fetch(self._base, method="GET", headers=self._headers(), timeout=10)
+            if resp.status < 400:
                 return SourceHealth(status="ok")
             return SourceHealth(status="degraded",
-                                reason="HTTP %d" % resp.status_code)
+                                reason="HTTP %d" % resp.status)
         except Exception as exc:  # noqa: BLE001 - health 是读数不是断言
             return SourceHealth(status="error", reason=str(exc))
 
@@ -114,11 +114,15 @@ class SaaSRestAdapter:
     def _requestRows(self, url: str, params: Optional[Dict[str, Any]] = None,
                      jsonBody: Optional[Dict[str, Any]] = None) -> Any:
         if jsonBody is not None:
-            resp = httpx.post(url, headers=self._headers(), json=jsonBody, timeout=30)
+            headers = {"Content-Type": "application/json", **self._headers()}
+            resp = safe_fetch(url, method="POST", headers=headers,
+                              data=json.dumps(jsonBody).encode("utf-8"), timeout=30)
         else:
-            resp = httpx.get(url, headers=self._headers(), params=params or {},
-                             timeout=30)
-        resp.raise_for_status()
+            query = urllib.parse.urlencode(params or {})
+            fetch_url = "%s?%s" % (url, query) if query else url
+            resp = safe_fetch(fetch_url, method="GET", headers=self._headers(),
+                              timeout=30)
+        # safe_fetch 对 >=400 已抛 HTTPStatusError，无需再 raise_for_status
         return resp.json()
 
     async def fetchBatch(self, cursor: Any, limit: int) -> Any:
@@ -273,11 +277,11 @@ class LookerAdapter(SaaSRestAdapter):
             clientId = creds.get("client_id", "")
             clientSecret = creds.get("client_secret", "")
             if clientId and clientSecret and self._base:
-                resp = httpx.post("%s/login" % self._base,
-                                  data={"client_id": clientId,
-                                        "client_secret": clientSecret},
-                                  timeout=30)
-                resp.raise_for_status()
+                form = urllib.parse.urlencode(
+                    {"client_id": clientId, "client_secret": clientSecret})
+                resp = safe_fetch("%s/login" % self._base, method="POST",
+                                  headers={"Content-Type": "application/x-www-form-urlencoded"},
+                                  data=form.encode("utf-8"), timeout=30)
                 self._token = str(resp.json().get("access_token") or "")
             self._logged = True
 

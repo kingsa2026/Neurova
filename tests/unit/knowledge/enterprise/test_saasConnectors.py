@@ -32,12 +32,49 @@ class FakeHttpxResponse:
         self._payload = payload
         self.status_code = status_code
 
+    @property
+    def status(self):
+        """safe_fetch 终态响应口径（实现改走 safe_fetch 后同名可用）。"""
+        return self.status_code
+
     def json(self):
         return self._payload
 
     def raise_for_status(self):
         if self.status_code >= 400:
             raise RuntimeError("HTTP %d" % self.status_code)
+
+
+def _patchSafeFetch(monkeypatch, mod, fakeGet=None, fakePost=None):
+    """实现出站统一走 safe_fetch 后，把 httpx 形态的旧 fake 适配到新通路。
+
+    safe_fetch(url, method=..., headers=..., data=..., timeout=...)：
+    GET 的查询串编在 URL 里；POST 的 JSON 体/表单体都在 data 字节。
+    """
+    import urllib.parse
+
+    def fake_safe_fetch(url, *, method="GET", headers=None, data=None,
+                        timeout=None, max_bytes=None):
+        if method == "POST":
+            if fakePost is None:
+                raise AssertionError("unexpected POST %s" % url)
+            raw = (data or b"").decode("utf-8")
+            try:
+                body = json.loads(raw) if raw else None
+            except Exception:
+                body = None
+            if body is not None:
+                return fakePost(url, headers=headers, json=body, timeout=timeout)
+            return fakePost(url, headers=headers,
+                            data=dict(urllib.parse.parse_qsl(raw)), timeout=timeout)
+        if fakeGet is None:
+            raise AssertionError("unexpected GET %s" % url)
+        parsed = urllib.parse.urlparse(url)
+        params = {k: v[0] for k, v in urllib.parse.parse_qs(parsed.query).items()}
+        return fakeGet(url.split("?", 1)[0], headers=headers, params=params,
+                       timeout=timeout)
+
+    monkeypatch.setattr(mod, "safe_fetch", fake_safe_fetch)
 
 
 def _run(coro):
@@ -102,7 +139,7 @@ class TestBigQueryAdapter:
                          {"f": [{"v": "2"}, {"v": "beijing"}]}],
                 "pageToken": "PAGE-2"})
 
-        monkeypatch.setattr(mod.httpx, "post", fakePost)
+        _patchSafeFetch(monkeypatch, mod, fakePost=fakePost)
         batch = _run(adapter.fetchBatch(None, 100))
         assert "projects/proj-1/queries" in seen["url"]
         assert seen["body"]["query"] == "SELECT id, city FROM orders"
@@ -137,7 +174,7 @@ class TestDatabricksAdapter:
                 "status": {"state": "SUCCEEDED"},
                 "result": {"data_array": [["1", "shanghai"], ["2", "beijing"]]}})
 
-        monkeypatch.setattr(mod.httpx, "post", fakePost)
+        _patchSafeFetch(monkeypatch, mod, fakePost=fakePost)
         batch = _run(adapter.fetchBatch(None, 100))
         assert seen["body"]["warehouse_id"] == "wh-1"
         assert batch.rows == [{"id": "1", "city": "shanghai"},
@@ -167,7 +204,7 @@ class TestSalesforceAdapter:
                 "records": [{"attributes": {"type": "Account"}, "Id": "3"}],
                 "done": True})
 
-        monkeypatch.setattr(mod.httpx, "get", fakeGet)
+        _patchSafeFetch(monkeypatch, mod, fakeGet=fakeGet)
         batch = _run(adapter.fetchBatch(None, 100))
         assert "services/data/v59.0/query" in calls[0]
         assert batch.rows == [{"Id": "1"}, {"Id": "2"}]
@@ -200,7 +237,7 @@ class TestServiceNowAdapter:
                     for i in range(min(2, 4 - offset))]
             return FakeHttpxResponse({"result": rows})
 
-        monkeypatch.setattr(mod.httpx, "get", fakeGet)
+        _patchSafeFetch(monkeypatch, mod, fakeGet=fakeGet)
         batch = _run(adapter.fetchBatch(None, 2))
         assert batch.rows[0]["number"] == "INC0000001"
         assert batch.hasMore is True
@@ -236,8 +273,7 @@ class TestLookerAdapter:
             assert headers["Authorization"] == "Bearer lk-token"
             return FakeHttpxResponse([{"city": "shanghai"}, {"city": "beijing"}])
 
-        monkeypatch.setattr(mod.httpx, "post", fakePost)
-        monkeypatch.setattr(mod.httpx, "get", fakeGet)
+        _patchSafeFetch(monkeypatch, mod, fakeGet=fakeGet, fakePost=fakePost)
         batch = _run(adapter.fetchBatch(None, 100))
         assert any(u[1].endswith("/login") for u in calls)
         assert any(u[1].endswith("/queries/42/run/json") for u in calls)
@@ -265,7 +301,7 @@ class TestAirflowAdapter:
                      "state": "success"} for i in range(2)]
             return FakeHttpxResponse({"dag_runs": rows, "total_entries": 4})
 
-        monkeypatch.setattr(mod.httpx, "get", fakeGet)
+        _patchSafeFetch(monkeypatch, mod, fakeGet=fakeGet)
         batch = _run(adapter.fetchBatch(None, 2))
         assert batch.rows[0]["dag_run_id"] == "run1"
         assert batch.hasMore is True
@@ -283,7 +319,7 @@ class TestHealthProbe:
              "project_id": "p", "query": "q", "credential_env": "T_BQ_H"},
             "bq9", "default")
         monkeypatch.setenv("T_BQ_H", "tok")
-        monkeypatch.setattr(mod.httpx, "get", lambda *a, **kw: FakeHttpxResponse({}))
+        _patchSafeFetch(monkeypatch, mod, fakeGet=lambda *a, **kw: FakeHttpxResponse({}))
         health = _run(adapter.health())
         assert health.status == "ok"
 
