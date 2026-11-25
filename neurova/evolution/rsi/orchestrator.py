@@ -947,12 +947,31 @@ class RSIOrchestrator:
                 snapshot[p.name] = {"system": system_name, "value": p.current_value}
         return snapshot
 
-    def _restore_optimizable(self, snapshot: Dict[str, Any]) -> None:
-        """按快照恢复参数（仅恢复应用过的那些）"""
+    def _restore_optimizable(self, snapshot: Dict[str, Any]) -> bool:
+        """按快照恢复参数（仅恢复应用过的那些）。
+
+        Returns:
+            bool: 全部参数是否恢复成功。任一 ``apply_optimization`` 返回 False
+            即 False——EVO-02：回滚结果必须参与状态机，调用方据此如实记账，
+            不得把"没恢复成"当"已恢复"上报。
+        """
+        all_restored = True
         for param_path, info in snapshot.items():
-            self.integration_manager.apply_optimization(
+            system = self.integration_manager._systems.get(info["system"])
+            if system is None or not hasattr(system, param_path):
+                # 该参数在宿主上不存在（缺席参数以 None 进快照）。apply_optimization
+                # 从不创建属性（hasattr 门），故"现在缺席"⇔"应用前也缺席"——
+                # 没有可恢复的实值，跳过不算失败。
+                continue
+            if not self.integration_manager.apply_optimization(
                 f"{info['system']}.{param_path}", info["value"]
-            )
+            ):
+                logger.error(
+                    "RSI 回滚恢复失败：参数 %s.%s 未恢复到 %r（有害参数仍在线上）",
+                    info["system"], param_path, info["value"],
+                )
+                all_restored = False
+        return all_restored
 
     def _compute_days_without_rollback(self) -> Optional[float]:
         """距上次回滚多少天（治理遗留 A / 工单 004：phase 评估的真实数据来源）。
@@ -1079,9 +1098,13 @@ class RSIOrchestrator:
             gain_evidenced = _outcome["gain_evidenced"]
             attempted = _outcome["attempted"]
             # 提案登记随应用段处置：自动档消费后不得再走人工通道重复应用。
-            self._markRoundProposalsConsumed(
-                "rolled_back" if _outcome["rolled_back"] else "applied_auto"
-            )
+            # EVO-02：回滚失败是独立终态，不得混入 rolled_back/applied_auto。
+            if _outcome.get("rollback_failed"):
+                self._markRoundProposalsConsumed("rollback_failed")
+            else:
+                self._markRoundProposalsConsumed(
+                    "rolled_back" if _outcome["rolled_back"] else "applied_auto"
+                )
             # P1-4：自动档应用落地 → 世代金丝雀观测窗开启（与人工通道同一套
             # 观测窗语义；轮次号与建议产出点同源：本轮 = 当前计数 + 1）。
             self._generationRecordAutoOutcome(self._iteration_count + 1, _outcome)
@@ -1800,6 +1823,7 @@ class RSIOrchestrator:
         gain = 0.0
         eval_after: Optional[Dict[str, Any]] = None
         rolled_back = False
+        rollback_failed = False
         if applied_count:
             perf_after = self._measure_performance()
             eval_after = self._last_eval_outcome
@@ -1849,19 +1873,36 @@ class RSIOrchestrator:
                 # 阶段晋升判据的"距上次回滚多少天"只有这一个真实数据来源；
                 # 旧实现只改内存不记账，导致该读数恒 0、phase 1→2 永不可达。
                 snapshot_id = self.rollback_manager.create_snapshot(snapshot)
-                self._restore_optimizable(snapshot)
-                if not self.rollback_manager.execute_rollback(snapshot_id):
+                restore_ok = self._restore_optimizable(snapshot)
+                ledger_ok = True
+                if restore_ok:
+                    # 恢复成功才留痕"已执行的回滚"——恢复失败时再记账，等于
+                    # 账本宣称"已恢复"（EVO-02：账本不得假报成功）。
+                    if not self.rollback_manager.execute_rollback(snapshot_id):
+                        logger.error(
+                            "RSI 回滚已执行但留痕失败（snapshot_id=%s）：晋升判据将看不到本次回滚",
+                            snapshot_id,
+                        )
+                        ledger_ok = False
+                if restore_ok and ledger_ok:
+                    # 回滚处置债务（003 票面"连带必改"）：该笔代价必须结清或
+                    # 显式转挂，不许静默消失 —— 否则回滚反而制造"无主欠账"。
+                    # （回滚未成功时动作未被撤销，债务不随之结清。）
+                    if self.debt_ledger is not None:
+                        self.debt_ledger.settle_on_rollback(reason="rollback_restored_snapshot")
+                    applied_count = 0
+                    gain = 0.0
+                    rolled_back = True
+                else:
+                    # EVO-02：回滚失败显式暴露——有害参数仍在线上，状态机
+                    # 不报"已回滚"；applied_count/gain 保持实测原值（发生的
+                    # 就是发生了），由提案登记/世代账本按 rollback_failed 记账。
+                    rollback_failed = True
                     logger.error(
-                        "RSI 回滚已执行但留痕失败（snapshot_id=%s）：晋升判据将看不到本次回滚",
-                        snapshot_id,
+                        "RSI 回滚失败（restore_ok=%s ledger_ok=%s）：本轮按回滚失败记账，"
+                        "有害参数仍在线上",
+                        restore_ok, ledger_ok,
                     )
-                # 回滚处置债务（003 票面"连带必改"）：该笔代价必须结清或
-                # 显式转挂，不许静默消失 —— 否则回滚反而制造"无主欠账"。
-                if self.debt_ledger is not None:
-                    self.debt_ledger.settle_on_rollback(reason="rollback_restored_snapshot")
-                applied_count = 0
-                gain = 0.0
-                rolled_back = True
                 # C5 恢复成本：回滚耗时（重测成本＝决策落定后的密封档重读，
                 # 与下方 _run_sealed_evidence 同一次调用，此处记时间与次数）。
                 self._last_recovery = {
@@ -1888,6 +1929,7 @@ class RSIOrchestrator:
             "gain_evidenced": gain_evidenced,
             "attempted": attempted,
             "rolled_back": rolled_back,
+            "rollback_failed": rollback_failed,
         }
 
     def _recordRoundProposals(self, optimizations: List[Dict[str, Any]]) -> None:
@@ -2168,7 +2210,11 @@ class RSIOrchestrator:
             [dict(proposal) for proposal in selected],
             convergence_status=str(convergence.get("status", "")),
         )
-        final_state = "rolled_back" if outcome["rolled_back"] else "applied_manual"
+        # EVO-02：回滚失败是独立终态，提案登记不得假记 rolled_back/applied_manual。
+        if outcome.get("rollback_failed"):
+            final_state = "rollback_failed"
+        else:
+            final_state = "rolled_back" if outcome["rolled_back"] else "applied_manual"
         self._markRoundProposalsConsumed(final_state)
         store["applied_by"] = str(approved_by)
         # 与 run_iteration 返回体同形：eval 以 before/after 成对出街（读数三态

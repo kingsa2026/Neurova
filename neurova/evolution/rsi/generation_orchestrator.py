@@ -435,7 +435,14 @@ class GenerationOrchestrator:
         gen = self.generationForRound(roundNo)
         if gen is None:
             return None
-        if outcome.get("rolled_back"):
+        if outcome.get("rollback_failed"):
+            # EVO-02：应用段回滚执行失败（有害参数仍在线上）——世代不得按
+            # "已回滚/已部署"记账，也不得在失败之上开观测窗，如实拒绝留档。
+            self._ledger.markRejected(
+                gen.generationNo,
+                f"{channel}应用段回滚执行失败（有害参数仍在线上），世代淘汰",
+            )
+        elif outcome.get("rolled_back"):
             self._ledger.markRejected(
                 gen.generationNo, f"{channel}应用段触发回滚判据，世代淘汰（未部署）"
             )
@@ -767,16 +774,34 @@ class GenerationOrchestrator:
         """
         self._canaryWindows.pop(int(roundNo), None)
         snapshot = window.get("snapshot") or {}
+        restoreOk = True
         if self._rsi is not None and snapshot:
             snapshotId = self._rsi.rollback_manager.create_snapshot(snapshot)
-            self._rsi._restore_optimizable(snapshot)
-            if not self._rsi.rollback_manager.execute_rollback(snapshotId):
+            # EVO-02：恢复结果必须参与记账——恢复失败时不得记 markRolledBack
+            # （账本显示已恢复、线上仍带有害参数），也不留"已执行的回滚"假账。
+            restoreOk = bool(self._rsi._restore_optimizable(snapshot))
+            if not restoreOk:
+                logger.error(
+                    "金丝雀回滚恢复失败（snapshot_id=%s）：有害参数仍在线上",
+                    snapshotId,
+                )
+            elif not self._rsi.rollback_manager.execute_rollback(snapshotId):
                 logger.error(
                     "金丝雀回滚已执行但 rollback_manager 留痕失败（snapshot_id=%s）",
                     snapshotId,
                 )
+                restoreOk = False
         parentNo = window.get("parentNo")
-        if parentNo is None:
+        if not restoreOk:
+            logger.warning(
+                "世代 %s 金丝雀越界且自动回滚执行失败，按拒绝留档（不伪装已回滚）: %s",
+                gen.generationNo, reason,
+            )
+            self._ledger.markRejected(
+                gen.generationNo,
+                f"金丝雀越界自动回滚执行失败（有害参数仍在线上）：{reason}",
+            )
+        elif parentNo is None:
             # 根代无父代世代可指认：诚实走拒绝留痕，不伪装 rolledBackTo。
             logger.warning(
                 "世代 %s 金丝雀越界但无父代可回滚（根代），按拒绝留档: %s",
