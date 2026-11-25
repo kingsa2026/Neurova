@@ -3,9 +3,11 @@ Transactional Outbox Pattern - Realtime Event Delivery
 """
 
 import json
+import os
 import uuid
 import threading
 import time
+from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -15,6 +17,14 @@ from neurova.core.logger import get_logger
 from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
+
+
+class OutboxPersistenceError(RuntimeError):
+    """事件落盘失败（EVO-12）。
+
+    发布/状态回写的磁盘写入失败时抛出——outbox 的契约是"发布即持久"，
+    落盘失败必须以异常形态诚实暴露，不得返回事件对象假报发布成功。
+    """
 
 class EventStatus(str, Enum):
     """事件状态"""
@@ -230,14 +240,38 @@ class OutboxHandler:
         except Exception as e:
             logger.error(f"Failed to load events: {e}")
 
+    def _atomicWriteJson(self, target: Path, payload: dict) -> None:
+        """原子写 JSON 文件：临时文件 + fsync + os.replace（EVO-12）。
+
+        直接 ``open("w")`` 覆盖写会先把既有文件截断——写中途崩溃就把原文件
+        截成半截 JSON，重启恢复读到坏档。原子写保证目标文件要么是完整旧
+        内容、要么是完整新内容：全量写入同目录临时文件并 fsync 钉盘后，
+        才用 ``os.replace`` 原子替换（同目录内原子）。
+
+        Raises:
+            Exception: 写入/替换失败时抛出（调用方决定如何暴露），残留
+                临时文件在此处清理，不污染事件目录。
+        """
+        tmp_file = target.parent / f".{target.name}.tmp"
+        try:
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, target)
+        except Exception:
+            try:
+                tmp_file.unlink(missing_ok=True)
+            except Exception:  # noqa: BLE001 - 清理失败不掩盖原始写入错误
+                pass
+            raise
+
     def _save_event(self, event: OutboxEvent) -> bool:
-        """保存单个事件"""
+        """保存单个事件（原子写；失败返回 False，由调用方决定是否上抛）"""
         try:
             events_dir = self.data_dir / "events"
             event_file = events_dir / f"{event.event_id}.json"
-
-            with open(event_file, "w", encoding="utf-8") as f:
-                json.dump(event.to_dict(), f, ensure_ascii=False, indent=2)
+            self._atomicWriteJson(event_file, event.to_dict())
 
             logger.debug(f"Saved event: {event.event_id}")
             return True
@@ -283,6 +317,15 @@ class OutboxHandler:
 
             # Set expiration time
             event.expires_at = time.time() + expiration_ttl
+
+            # EVO-12：先落盘后入账。落盘失败向上抛（诚实失败）——旧实现
+            # 忽略落盘结果照常返回事件对象，接口成功但重启丢事件。
+            if not self._save_event(event):
+                raise OutboxPersistenceError(
+                    f"事件落盘失败（event_id={event.event_id}, "
+                    f"event_type={event_type}, agent_id={agent_id}）："
+                    "outbox 不假报发布成功"
+                )
 
             # Store
             self._events[event.event_id] = event
@@ -422,8 +465,9 @@ class OutboxHandler:
             dead_letter_dir = self.data_dir / "dead-letter"
             event_file = dead_letter_dir / f"{event.event_id}.json"
 
-            with open(event_file, "w", encoding="utf-8") as f:
-                json.dump(event.to_dict(), f, ensure_ascii=False, indent=2)
+            # EVO-12：死信副本同走原子写（同一覆盖写病灶）——半截死信档
+            # 会让事故复盘读到坏数据。
+            self._atomicWriteJson(event_file, event.to_dict())
 
             # 死信副本写成功后才移除 pending 原文件：只写副本的话，重启时
             # `events/` 里的原文件会把它重新加载回待投队列。
