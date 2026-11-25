@@ -36,7 +36,8 @@ def _upload(filename: str) -> UploadFile:
 
 
 def _runInstall(filename: str, capturedService):
-    current_user = {"user_id": "u1"}
+    # PLUG-04 后 default agent 落点过属主门——本档测落盘名随机化，按 admin 过门
+    current_user = {"user_id": "u1", "role": "admin", "neuser_id": "u1"}
     asyncio.run(skillPoolModule.install_from_zip(
         file=_upload(filename), target="", current_user=current_user))
     capturedService.install_skill.assert_called_once()

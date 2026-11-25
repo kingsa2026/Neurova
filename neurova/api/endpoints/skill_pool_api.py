@@ -732,6 +732,30 @@ async def reject_pending_skill(
 # ── C10 治理收紧（2026-09-12）：经验记录待审面 ──
 
 
+def _agentSkillIds(agent_id: str) -> set:
+    """该 Agent 技能账本里的 skill_id 集合（经验记录归属收敛的唯一依据）。
+
+    经验库是全局 store、记录只带 skill_id——按"这条经验针对的技能是否在
+    本 Agent 账本里"收敛，跨 Agent 的经验不再借道任何 agent_id 路径外泄。
+    """
+    try:
+        return {sid for sid, _ in _pool_service(agent_id).iter_skills()}
+    except Exception as e:  # noqa: BLE001 - 账本不可用即按空集（fail-closed）
+        logger.warning("agent 技能账本读取失败 %s: %s", agent_id, e)
+        return set()
+
+
+def _pendingExperienceInScope(agent_id: str, record_id: str) -> bool:
+    """待审记录存在且针对本 Agent 账本内的技能（批准/拒绝的前置闸）。"""
+    from neurova.evolution.skill_experience import get_skill_experience_store
+
+    scope = _agentSkillIds(agent_id)
+    return any(
+        r.record_id == record_id and r.skill_id in scope
+        for r in get_skill_experience_store().list_pending_experiences()
+    )
+
+
 @router.get("/agent/{agent_id}/pending-experiences")
 async def list_pending_experiences(
     agent_id: str, current_user: Dict[str, Any] = Depends(get_current_user),
@@ -741,7 +765,9 @@ async def list_pending_experiences(
     try:
         from neurova.evolution.skill_experience import get_skill_experience_store
 
-        items = get_skill_experience_store().list_pending_experiences()
+        # PLUG-04：经验库全局共享，按本 Agent 的技能账本收敛，不外泄他 Agent 记录
+        scope = _agentSkillIds(agent_id)
+        items = [r for r in get_skill_experience_store().list_pending_experiences() if r.skill_id in scope]
         return [
             {
                 "record_id": r.record_id,
@@ -768,6 +794,9 @@ async def approve_pending_experience(
     from neurova.api.endpoints.governance import _get_agent
     from neurova.evolution.skill_experience import get_skill_experience_store
 
+    # PLUG-04：待批经验必须针对本 Agent 账本内的技能，防借任意 agent_id 路径批准他人记录
+    if not _pendingExperienceInScope(agent_id, record_id):
+        raise HTTPException(status_code=404, detail=f"待审经验不存在: {record_id}")
     agent = _get_agent(agent_id)
     registry = getattr(agent, "_skill_registry", None) if agent is not None else None
     ok = get_skill_experience_store().approve_experience(record_id, registry=registry)
@@ -785,6 +814,9 @@ async def reject_pending_experience(
     """拒绝待审经验：直接丢弃。"""
     from neurova.evolution.skill_experience import get_skill_experience_store
 
+    # PLUG-04：同批准面，拒绝也只落在本 Agent 账本内的技能经验上
+    if not _pendingExperienceInScope(agent_id, record_id):
+        raise HTTPException(status_code=404, detail=f"待审经验不存在: {record_id}")
     ok = get_skill_experience_store().reject_experience(record_id)
     if not ok:
         raise HTTPException(status_code=404, detail=f"待审经验不存在: {record_id}")
@@ -880,7 +912,9 @@ async def reject_consolidation(
 
 
 @router.get("/agent/{agent_id}/skills", response_model=List[SkillInfo])
-async def get_agent_skills(agent_id: str):
+async def get_agent_skills(
+    agent_id: str, current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取 Agent 的所有技能
 
     修复 (s1 P0 #7+#6): 原 `return []` 让前端 AgentSkillPage 永远显示空列表。
@@ -891,6 +925,8 @@ async def get_agent_skills(agent_id: str):
     /agent/{agent_id}/skills 上的 pending-skills 路由顶替),技能页实际拿到
     的是待审模板列表——装饰器已分离,路径重新挂回本函数。
     """
+    # PLUG-04：读他人 Agent 的技能库不是"登录即可"——过 agent_access 属主门
+    _require_agent_access(agent_id, current_user, "查看")
     try:
         service = _pool_service(agent_id)
         skills = service.list_skills()
@@ -921,8 +957,11 @@ async def get_agent_domain_harnesses(
     query: str = Query(default="", description="跨域检索关键词"),
     domain: str = Query(default="", description="限定域；空=跨域"),
     limit: int = Query(default=5, ge=1, le=20),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """已采纳 harness 的跨域/域内检索（只读；复用既有技能库，不新建存储）。"""
+    # PLUG-04：同技能列表面，读口同过属主门
+    _require_agent_access(agent_id, current_user, "查看")
     try:
         service = _pool_service(agent_id)
         return {
@@ -954,6 +993,9 @@ async def install_from_url(request: Request, current_user: Dict[str, Any] = Depe
         return dict(_installReceipt(result, "Skill installed from URL"), url=url, version=version)
     except ValueError as bad:
         return {"success": False, "error": str(bad)}
+    except HTTPException:
+        # PLUG-04：归属门 403 必须以诚实形态出去，不许折进 200 success:false
+        raise
     except Exception as e:
         logger.exception("install_from_url failed: %s", e)
         return {"success": False, "error": str(e)}
@@ -976,12 +1018,18 @@ def _installReceipt(result, okMessage: str) -> Dict[str, Any]:
 
 def _install_target(target, current_user: Dict[str, Any]):
     """导入落点解析（V 轮）：空/agent=(default agent 库, 现状语义零变化)；
-    me=(当前账号用户私库, pool 落款 user)。返回 (service, pool, owner)。"""
+    me=(当前账号用户私库, pool 落款 user)。返回 (service, pool, owner)。
+
+    PLUG-04：落点解析即归属门——写 default agent 库不是"登录即可"，与
+    marketplace install_skill 同过 agent_access 属主门（admin/属主；default
+    无主时仅 admin）；me 落点本来就是调用者自己的库，不设 agent 门。
+    """
     if str(target or "").lower() == "me":
         from neurova.skills import library_service as _lib
 
         acct = _account_key(current_user)
         return _lib.get_library(POOL_USER, acct), POOL_USER, acct
+    _require_agent_access("default", current_user, "安装技能到")
     return _pool_service("default"), POOL_AGENT, "default"
 
 
@@ -1020,6 +1068,9 @@ async def install_from_zip(
             return _installReceipt(result, "Skill installed from ZIP")
     except ValueError as bad:
         raise HTTPException(status_code=400, detail=str(bad))
+    except HTTPException:
+        # PLUG-04：归属门 403 必须以诚实形态出去，不许折进 200 success:false
+        raise
     except Exception as e:
         logger.exception("install_from_zip failed: %s", e)
         return {"success": False, "error": str(e)}
@@ -1103,6 +1154,17 @@ async def create_skill_transfer(
                 "（管理员审批）；public→私库升级由系统广播确认卡"
             ),
         )
+    # PLUG-04：src_owner 由请求体自带，必须校验归属——否则任何人可把他人
+    # Agent/用户库的技能发起流转到自己名下（确认人=自己，等于搬走）。
+    if body.src_pool == POOL_AGENT:
+        _require_agent_access(body.src_owner, current_user, "发起流转")
+    elif body.src_pool == POOL_USER:
+        if (
+            str(current_user.get("role") or "") != "admin"
+            and str(body.src_owner or "") != _account_key(current_user)
+        ):
+            raise HTTPException(status_code=403, detail="无权流转他人用户库的技能")
+    # public 池无属主，不设门
     dst_owner = _account_key(current_user)
     try:
         src_entry = _lib.get_library(body.src_pool, body.src_owner).get_skill_info(body.skill_id)

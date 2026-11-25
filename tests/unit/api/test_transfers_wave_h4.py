@@ -44,6 +44,17 @@ def env(tmp_path, monkeypatch):
     reset_skill_transfer_store()
     notif_module.reset_notification_manager()
 
+    # PLUG-04：发起流转校验 src_agent 归属——中枢登记面替身钉住"myagent/
+    # otheragent 属 USER(7)"，走生产 _agent_owner 的真实回退链取属主。
+    class _FakeRegistry:
+        def get_agent(self, agent_id):
+            owner = {"myagent": "7", "otheragent": "7"}.get(agent_id)
+            return {"owner_user_id": owner} if owner else None
+
+    import neurova.api.endpoints.agent as agent_mod
+
+    monkeypatch.setattr(agent_mod, "get_agent_config_manager", lambda: _FakeRegistry())
+
     a = FastAPI()
     a.include_router(skill_pool_api.router, prefix=BASE)
     client = TestClient(a, raise_server_exceptions=False)

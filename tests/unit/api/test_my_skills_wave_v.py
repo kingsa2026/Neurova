@@ -176,9 +176,10 @@ def test_private_execute_route(env, tmp_path, monkeypatch):
 
 def test_install_target_routing(env):
     """V 轮：导入落点路由决策单测（default/agent=现状 default agent 库零变化；
-    me=当前账号用户私库）。"""
+    me=当前账号用户私库）。PLUG-04 后 agent 落点过属主门——按 admin 过门。"""
     client, tmp = env
-    svc, pool, owner = skill_pool_api._install_target(None, USER)
+    admin = {"user_id": "9", "username": "root", "role": "admin", "neuser_id": "9"}
+    svc, pool, owner = skill_pool_api._install_target(None, admin)
     assert pool == "agent" and owner == "default"
     from neurova.core.agent_workspaces import get_agent_skills_dir
 
@@ -209,8 +210,10 @@ def _skill_zip(skill_id: str) -> bytes:
 
 
 def test_install_from_zip_default_target_lands_in_agent_library(env):
-    """默认 target：落 agent 库（default），且不得再出现假失败 payload。"""
+    """默认 target：落 agent 库（default），且不得再出现假失败 payload。
+    PLUG-04 后 default agent 落点过属主门——按 admin 身份过门。"""
     client, tmp = env
+    _as(client, {"user_id": "9", "username": "root", "role": "admin", "neuser_id": "9"})
     r = client.post(
         f"{BASE}/install-from-zip",
         files={"file": ("zipdemo.zip", _skill_zip("zipdemo"), "application/zip")},

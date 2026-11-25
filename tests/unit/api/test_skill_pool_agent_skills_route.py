@@ -13,7 +13,9 @@ from neurova.api.deps import get_current_user
 from neurova.api.endpoints import skill_pool_api
 
 BASE = "/api/v1/skill-pool"
-USER = {"user_id": "u1", "username": "alice", "role": "user", "neuser_id": "u1"}
+# PLUG-04 后 /agent/{id}/skills 过 agent_access 属主门（无主 agent 仅 admin）——
+# 本文件测路由分离与读数机制，统一按 admin 身份过门。
+USER = {"user_id": "u1", "username": "alice", "role": "admin", "neuser_id": "u1"}
 
 
 @pytest.fixture

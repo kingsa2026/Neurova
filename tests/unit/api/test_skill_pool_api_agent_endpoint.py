@@ -20,6 +20,9 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+# PLUG-04 后 get_agent_skills 过 agent_access 属主门——直调按 admin 身份过门
+_ADMIN = {"user_id": "u1", "username": "alice", "role": "admin", "neuser_id": "u1"}
+
 
 def test_get_agent_skills_source_uses_skill_service():
     """s1.1 静态契约: get_agent_skills 源码必须引用 SkillService 与 list_skills"""
@@ -50,7 +53,7 @@ def test_get_agent_skills_calls_list_skills_behavior():
     mock_service.list_skills.return_value = []
 
     with patch("neurova.skills.skill_service.SkillService", return_value=mock_service) as mock_cls:
-        result = asyncio.run(mod.get_agent_skills(agent_id="test_agent"))
+        result = asyncio.run(mod.get_agent_skills(agent_id="test_agent", current_user=_ADMIN))
         assert mock_cls.called, "应实例化 SkillService"
         assert mock_service.list_skills.called, "应调用 list_skills()"
         assert result == [], "空 list_skills 返回时应返回 []"
@@ -73,7 +76,7 @@ def test_get_agent_skills_returns_nonempty_when_service_has_skills():
     mock_service.list_skills.return_value = [fake_skill]
 
     with patch("neurova.skills.skill_service.SkillService", return_value=mock_service):
-        result = asyncio.run(mod.get_agent_skills(agent_id="agent_with_skills"))
+        result = asyncio.run(mod.get_agent_skills(agent_id="agent_with_skills", current_user=_ADMIN))
         assert len(result) == 1, f"应返回 1 个技能, 实际 {len(result)}"
         assert result[0].name == "weather", f"技能名应为 weather, 实际 {result[0].name}"
 
@@ -87,7 +90,7 @@ def test_get_agent_skills_passes_agent_id_to_skill_service():
     mock_service.list_skills.return_value = []
 
     with patch("neurova.skills.skill_service.SkillService", return_value=mock_service) as mock_cls:
-        asyncio.run(mod.get_agent_skills(agent_id="my-special-agent"))
+        asyncio.run(mod.get_agent_skills(agent_id="my-special-agent", current_user=_ADMIN))
         # 验证 SkillService 被以 agent_id="my-special-agent" 构造
         call_args, call_kwargs = mock_cls.call_args
         # agent_id 可能是位置参数或关键字参数
@@ -109,6 +112,6 @@ def test_get_agent_skills_degrades_gracefully_on_exception():
 
     with patch("neurova.skills.skill_service.SkillService", return_value=mock_service):
         with patch.object(mod.logger, "exception") as mock_log_exc:
-            result = asyncio.run(mod.get_agent_skills(agent_id="broken_agent"))
+            result = asyncio.run(mod.get_agent_skills(agent_id="broken_agent", current_user=_ADMIN))
             assert result == [], "异常时应优雅降级返回 []"
             assert mock_log_exc.called, "异常时必须调用 logger.exception (不能静默吞)"

@@ -23,7 +23,9 @@ from neurova.api.deps import get_current_user
 from neurova.skills import library_service as lib
 from neurova.skills.skill_install_gate import reset_install_gate_scanner
 
-USER = {"user_id": "7", "username": "alice", "role": "user", "neuser_id": "7"}
+# PLUG-04 后 install-from-zip 的 default agent 落点过 agent_access 属主门——
+# 本文件测回执诚实映射机制，统一按 admin 身份过门。
+USER = {"user_id": "7", "username": "alice", "role": "admin", "neuser_id": "7"}
 BASE = "/api/v1/skill-pool"
 
 DOC_ONLY_MD = ("---\nname: doc-demo\ndescription: 文档里照抄示例\n---\n\n# 说明\n\n"
