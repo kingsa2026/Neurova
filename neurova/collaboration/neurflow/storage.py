@@ -488,8 +488,8 @@ class NeurflowStorage:
                 ).fetchone()
                 if user_id is None:
                     user_id = (existing_row["user_id"] if existing_row else None) or "default"
-                # INSERT OR REPLACE 会整行重写：安全版本列不在 WorkflowDefinition 上，
-                # 必须显式继承，否则每次保存都会抹掉可回滚底线。
+                # 安全版本列不在 WorkflowDefinition 上，更新时沿用既有值，
+                # 避免每次保存抹掉可回滚底线。
                 safe_version = existing_row["safe_version"] if existing_row else None
                 safe_reason = (existing_row["safe_reason"] if existing_row else "") or ""
                 safe_at = (existing_row["safe_at"] if existing_row else 0) or 0
@@ -498,13 +498,37 @@ class NeurflowStorage:
                 ) or "{}"
                 self._conn.execute(
                     """
-                    INSERT OR REPLACE INTO workflows
+                    INSERT INTO workflows
                     (id, name, description, version, nodes_json, edges_json,
                      variables_json, tags_json, category, author, created_at,
                      updated_at, status, template, public, metadata_json, user_id,
                      project_id, agent_id, origin, safe_version, safe_reason,
                      safe_at, safe_evidence_json)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        name=excluded.name,
+                        description=excluded.description,
+                        version=excluded.version,
+                        nodes_json=excluded.nodes_json,
+                        edges_json=excluded.edges_json,
+                        variables_json=excluded.variables_json,
+                        tags_json=excluded.tags_json,
+                        category=excluded.category,
+                        author=excluded.author,
+                        created_at=excluded.created_at,
+                        updated_at=excluded.updated_at,
+                        status=excluded.status,
+                        template=excluded.template,
+                        public=excluded.public,
+                        metadata_json=excluded.metadata_json,
+                        user_id=excluded.user_id,
+                        project_id=excluded.project_id,
+                        agent_id=excluded.agent_id,
+                        origin=excluded.origin,
+                        safe_version=excluded.safe_version,
+                        safe_reason=excluded.safe_reason,
+                        safe_at=excluded.safe_at,
+                        safe_evidence_json=excluded.safe_evidence_json
                 """,
                     (
                         workflow.id,
