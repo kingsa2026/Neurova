@@ -58,7 +58,12 @@ BATCH3_FILES = (
 )
 
 # 迁移接线断言：这些文件本批收口到 tenant_sql_where（写入 → 读取闭环）。
-TENANT_SQL_WHERE_WIRED = BATCH3_FILES
+# U8（0f49f6128）把 export/graph_exchange.py 的行来源 SQL 迁到 graph_backend.py
+# 门面（conceptTerms/activeTriples 的租户谓词在那边用 tenant_sql_where），
+# 接线断言随 SQL 落点改指 graph_backend.py；graph_exchange.py 保留在裸模式扫描。
+TENANT_SQL_WHERE_WIRED = tuple(
+    rel for rel in BATCH3_FILES if rel != "export/graph_exchange.py"
+) + ("graph_backend.py",)
 
 # 白名单：与 tenant_scope 三助手语义不同构、本批明确保留的比对点。
 # 每条 = (文件, 必须仍存在的原文片段, 保留理由)。

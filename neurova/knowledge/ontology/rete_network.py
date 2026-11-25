@@ -11,8 +11,8 @@ TerminalNode 触发结论写入。三条单点纪律（不新造平行体系）�
 绑定值域：主体位置绑 subject_key（"key" 域），客体位置绑 object_term（"term" 域）。
 relay 链的中项在上一原子是客体、在下一原子是主体，一致性合并经 knowledge_subjects
 的 (agent_id, normalized_label → subject_key) 桥接——与 `_fireRule` 的 SQL JOIN
-逐字同义：客体没登记成主体就接不上、逐跳要求同 agent、conjunction/inverse 形状
-另带租户过滤（relay 与既有 SQL 一样只按 agent 圈域）。
+逐字同义：客体没登记成主体就接不上、逐跳要求同 agent；alpha 快照按租户圈域
+（KNOW-02：relay 与 conjunction/inverse 一体，任何形状都不跨租户取前提）。
 
 激活去重：TerminalNode 按（规则, 绑定规范形）记已点火集合；同一 fireAll 跨轮复用
 同一个网络，因此同绑定即使被后续轮次的 delta 重新匹配到，也不再触发第二次咽喉。
@@ -22,6 +22,8 @@ relay 链的中项在上一原子是客体、在下一原子是主体，一致�
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
+
+from neurova.core.tenant_scope import tenant_sql_where
 
 
 def _sqlLowerTrim(text: str) -> str:
@@ -80,7 +82,7 @@ class BetaNode:
     - 接续变元（relay 链＝上一原子客体即下一原子主体；conjunction＝共享 head 主语）
       按主体键直查 alpha 索引；term 域的值先过主体桥接，没登记成主体的客体接不上；
     - 事实的 agent 必须与左 token 一致（SQL 的 `b.agent_id = a.agent_id`）；
-    - conjunction/inverse 形状另加租户过滤（SQL 的 tenant_id 谓词；relay 无此过滤）。
+    - 租户过滤在 alpha 快照层统一施加（KNOW-02），此处按形状保留行级复核。
     已绑定变元不重复改写（首次绑定为准），token 规范形因此确定。
     """
 
@@ -192,27 +194,29 @@ class TerminalNode:
         if self._shape == "conjunction":
             return self._engine._negatedConstHolds(agentId, self._negated, subjectKey,
                                                    tenantId=tenantId)
-        return self._engine._negatedHolds(agentId, self._negated, negSubject, negObject)
+        return self._engine._negatedHolds(agentId, self._negated, negSubject, negObject,
+                                          tenantId=tenantId)
 
 
 class _AlphaIndex:
     """一轮求值的事实快照（alpha 存储）：谓词索引、(谓词, 主体键) 索引、主体桥接与规范标签。
 
     事实圈域与 `_fireRule` 一致：status='active' 且 record_kind='triple'，agentId 给了
-    就按 agent 圈；租户不过滤在快照层（relay 的 SQL 也没有租户谓词），conjunction/
-    inverse 的租户过滤由 BetaNode 按 shape 施加。主体桥接/规范标签镜像既有 SQL 的两次
-    knowledge_subjects JOIN：桥接只取 active 行、标签不过滤状态。
+    就按 agent 圈；租户在快照层统一过滤（KNOW-02：规则按租户分区，任何形状的
+    前提都不跨租户取）。主体桥接/规范标签镜像既有 SQL 的两次 knowledge_subjects
+    JOIN：桥接只取 active 行、标签不过滤状态，且同样按租户圈域。
     """
 
     def __init__(self, engine: Any, agentId: Optional[str],
-                 rules: List[Dict[str, Any]]) -> None:
+                 rules: List[Dict[str, Any]], tenantId: str = "default") -> None:
         predicates = sorted({str(atom["predicate"]) for rule in rules
                              for atom in rule["body"]
                              if atom.get("kind") == "atom" and atom.get("predicate")})
+        tenantClause, tenantParams = tenant_sql_where(tenantId)
         sql = ("SELECT fact_id, agent_id, tenant_id, subject_key, predicate_term_id,"
                " object_term FROM knowledge_facts"
-               " WHERE status = 'active' AND record_kind = 'triple'")
-        params: List[Any] = []
+               " WHERE status = 'active' AND record_kind = 'triple' AND %s" % tenantClause)
+        params: List[Any] = [*tenantParams]
         if agentId:
             sql += " AND agent_id = ?"
             params.append(agentId)
@@ -234,7 +238,8 @@ class _AlphaIndex:
         with store._lock:
             subjectRows = store._conn.execute(
                 "SELECT subject_key, agent_id, canonical_label, normalized_label, status"
-                " FROM knowledge_subjects").fetchall()
+                " FROM knowledge_subjects WHERE %s" % tenantClause,
+                tuple(tenantParams)).fetchall()
         for row in subjectRows:
             self._labels[row["subject_key"]] = row["canonical_label"]
             if row["status"] == "active":
@@ -324,7 +329,7 @@ class ReteNetwork:
             rules = [r for r in rules if set(r["depends_on"]) & deltaPredicates]
         if not rules:
             return []
-        index = _AlphaIndex(self._engine, agentId, rules)
+        index = _AlphaIndex(self._engine, agentId, rules, tenant)
         produced: List[str] = []
         for rule in rules:
             compiled = self._compile(rule)

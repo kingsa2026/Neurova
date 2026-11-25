@@ -688,15 +688,23 @@ class ForwardChainingEngine:
         first, second = positive[0], (positive[1] if len(positive) > 1 else None)
         live = "status = 'active' AND record_kind = 'triple'"
         aLive, bLive = "a." + live.replace(" AND ", " AND a."), "b." + live.replace(" AND ", " AND b.")
+        # KNOW-02：前提组合全链带租户——规则按租户分区，跨租户事实不得进入
+        # 本租户规则的前提（否则他租户事实会推出本租户结论与血缘）。
+        tenantClause, tenantParams = tenant_sql_where(tenantId)
+        aTenantClause, aTenantParams = tenant_sql_where(tenantId, alias="a")
+        bTenantClause, bTenantParams = tenant_sql_where(tenantId, alias="b")
         if len(positive) > 2:
             # rete_network 档放宽出的 3 原子接力链：与两原子路径同一接法逐跳 JOIN，
             # 结论集与 Rete 网络逐字一致（test_reteNetwork 对拍钉住）。
-            sql, params = self._relayChainQuery(positive, agentId, live)
+            sql, params = self._relayChainQuery(positive, agentId, live,
+                                                tenantId=tenantId)
         elif second is None:
             scope = " AND agent_id = ?" if agentId else ""
             sql = ("SELECT subject_key, object_term, fact_id AS pair FROM knowledge_facts"
-                   " WHERE predicate_term_id = ? AND %s%s" % (live, scope))
-            params = [first["predicate"]] + ([agentId] if agentId else [])
+                   " WHERE predicate_term_id = ? AND %s%s AND %s"
+                   % (live, scope, tenantClause))
+            params = ([first["predicate"]] + ([agentId] if agentId else [])
+                      + tenantParams)
         else:
             # 中项靠"上一跳的客体 = 下一跳主体的规范标签"接上。没被登记成主体的客体接不上，
             # 那是消解段（006）的活，不在推理层偷偷做字符串相似。
@@ -707,10 +715,13 @@ class ForwardChainingEngine:
                    " JOIN knowledge_subjects s2 ON s2.agent_id = a.agent_id"
                    "  AND s2.normalized_label = lower(trim(a.object_term)) AND s2.status = 'active'"
                    " JOIN knowledge_facts b ON b.subject_key = s2.subject_key"
-                   "  AND b.agent_id = a.agent_id"
+                   "  AND b.agent_id = a.agent_id AND b.tenant_id = a.tenant_id"
                    " WHERE a.predicate_term_id = ? AND b.predicate_term_id = ?"
-                   "  AND %s AND %s%s" % (aLive, bLive, scope))
-            params = [first["predicate"], second["predicate"]] + ([agentId] if agentId else [])
+                   "  AND %s AND %s%s AND %s AND %s"
+                   % (aLive, bLive, scope, aTenantClause, bTenantClause))
+            params = ([first["predicate"], second["predicate"]]
+                      + ([agentId] if agentId else [])
+                      + aTenantParams + bTenantParams)
         sql = ("SELECT t.subject_key, t.object_term, MIN(s.canonical_label) AS label,"
                " GROUP_CONCAT(DISTINCT t.pair) AS pairs"
                " FROM (%s) t JOIN knowledge_subjects s ON s.subject_key = t.subject_key"
@@ -723,7 +734,8 @@ class ForwardChainingEngine:
         written: List[str] = []
         for row in rows:
             subjectKey, objectTerm, label = row["subject_key"], row["object_term"], row["label"]
-            if self._negatedHolds(agentId, negated, subjectKey, objectTerm):
+            if self._negatedHolds(agentId, negated, subjectKey, objectTerm,
+                                  tenantId=tenantId):
                 continue
             factId = self._admitDerivedFact(rule, agentId, label, head, objectTerm,
                                             subjectKey, _premiseIds(row["pairs"]),
@@ -734,12 +746,12 @@ class ForwardChainingEngine:
 
     @staticmethod
     def _relayChainQuery(positive: List[Dict[str, str]], agentId: Optional[str],
-                         live: str) -> Tuple[str, List[Any]]:
+                         live: str, tenantId: str = "default") -> Tuple[str, List[Any]]:
         """≥3 个正原子的接力链 SQL（rete_network 档放宽，登记闸限 3）。
 
         与两原子路径同一接法：上一跳客体按规范标签找到下一跳主体，逐跳 JOIN；
-        head 主语取首原子主体、head 客体取末原子客体；agent 圈域与 live 条件
-        与既有路径逐字同源。
+        head 主语取首原子主体、head 客体取末原子客体；agent 圈域、租户过滤
+        （KNOW-02：每个 fact 别名都带 tenant 谓词）与 live 条件同源。
         """
         from string import ascii_lowercase
 
@@ -760,6 +772,10 @@ class ForwardChainingEngine:
         params: List[Any] = [atom["predicate"] for atom in positive]
         for alias in aliases:
             where.append("%s.%s" % (alias, live.replace(" AND ", " AND %s." % alias)))
+            aliasClause, aliasParams = tenant_sql_where(tenantId, alias=alias)
+            if aliasClause:
+                where.append(aliasClause)
+                params.extend(aliasParams)
         if agentId:
             where.append("%s.agent_id = ?" % aliases[0])
             params.append(agentId)
@@ -767,15 +783,21 @@ class ForwardChainingEngine:
         return sql, params
 
     def _negatedHolds(self, agentId: Optional[str], negated: List[Dict[str, str]],
-                      subjectKey: str, objectTerm: str) -> bool:
+                      subjectKey: str, objectTerm: str,
+                      tenantId: str = "default") -> bool:
+        """否定原子求值：与 `_negatedConstHolds` / `_negatedFactExists` 同一口径，
+        SQL 带 tenant 过滤（KNOW-02，否定判定不跨租户找阻断事实）。"""
         if not negated:
             return False
         for atom in negated:
-            params: List[Any] = [agentId or "", subjectKey, atom["predicate"], objectTerm]
+            clause, negParams = tenant_sql_where(tenantId)
+            params: List[Any] = [agentId or "", subjectKey, atom["predicate"],
+                                 objectTerm, *negParams]
             with self._store._lock:
                 row = self._store._conn.execute(
                     "SELECT 1 FROM knowledge_facts WHERE agent_id = ? AND subject_key = ?"
-                    " AND predicate_term_id = ? AND object_term = ? AND status = 'active'",
+                    " AND predicate_term_id = ? AND object_term = ?"
+                    " AND status = 'active' AND " + clause,
                     params).fetchone()
             if row:
                 return True
@@ -907,7 +929,7 @@ class ForwardChainingEngine:
         negated = [a for a in rule.get("body") or [] if a.get("kind") == "not"]
         if not negated:
             return 0
-        tenant = str(tenantId or rule.get("tenant_id") or "default")
+        tenant = str(tenantId or "default")
         retired = 0
         for factId, agentId, label in self._activeConclusionsOfRule(
                 rule["rule_id"], tenant):
@@ -1008,7 +1030,8 @@ class ForwardChainingEngine:
         head = rule["head_predicate"]
         written: List[str] = []
         for row in rows:
-            if self._negatedHolds(agentId, negated, row["x_key"], row["y_label"]):
+            if self._negatedHolds(agentId, negated, row["x_key"], row["y_label"],
+                                  tenantId=tenantId):
                 continue
             factId = self._admitDerivedFact(rule, agentId, row["y_label"], head,
                                             row["x_label"], "",

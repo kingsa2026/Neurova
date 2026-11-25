@@ -543,7 +543,10 @@ class KnowledgeAdmissionGate:
         applied: List[str] = []
         try:
             if reasoning is not None:
-                reasoning.fireFor(request.agentId, request.predicateTermId)
+                # KNOW-02：前向链按请求租户点火——规则表按租户分区，
+                # 不传租户会让本租户写入去点燃 default 的规则。
+                reasoning.fireFor(request.agentId, request.predicateTermId,
+                                  tenantId=request.tenantId)
                 applied.append("forward_chaining")
             if functions is not None:
                 functions.fireFor(request.agentId, request.predicateTermId,
