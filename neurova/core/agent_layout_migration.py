@@ -47,6 +47,7 @@ from neurova.core.agent_workspaces import (
     get_agent_root_dir,
     is_agent_root,
     is_reserved_agent_id,
+    load_agent_owner_index,
 )
 from neurova.core.data_root import get_data_root, repoRoot
 from neurova.core.logger import get_logger
