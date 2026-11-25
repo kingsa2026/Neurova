@@ -71,7 +71,9 @@ def process_ingress_event(
     """执行一个摄取事件。返回 {ok, item_ids?, status, graph, error?}。"""
     source = event.get("source")
     agent_id = event.get("agent_id") or "default"
-    user = {"user_id": event.get("user_id") or "", "role": "user"}
+    # KNOW-08：异步导入身份继承事件租户——没有这行，抽取条目全落 default
+    user = {"user_id": event.get("user_id") or "", "role": "user",
+            "tenant_id": resolve_tenant(event)}
     try:
         if source == "upload":
             path = Path(event.get("storage_path") or "")

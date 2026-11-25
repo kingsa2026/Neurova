@@ -74,6 +74,21 @@ register_migration(2, _SPAN_SCHEMA, domain="knowledge_ingress")
 # 阶段顺序（UI 时间线渲染序）：claim 后 parse → 抽取 extract → 入库 index
 SPAN_STAGES = ("parse", "extract", "index")
 
+
+def _add_tenant_column(conn: sqlite3.Connection) -> None:
+    """v3（KNOW-08）：事件行补租户列——dedupe 与异步落库都按租户分区。
+
+    存量行归 default（旧行为 everything-in-default 的如实延续）。"""
+    columns = {row[1] for row in conn.execute(
+        "PRAGMA table_info(knowledge_ingress_events)")}
+    if "tenant_id" not in columns:
+        conn.execute(
+            "ALTER TABLE knowledge_ingress_events"
+            " ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'")
+
+
+register_migration(3, _add_tenant_column, domain="knowledge_ingress")
+
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -116,9 +131,11 @@ class KnowledgeIngressQueue:
 
     # ── 生产侧 ──────────────────────────────────────────────────
 
-    def enqueue_upload(self, filename: str, data: bytes, agent_id: str, user_id: str) -> Dict[str, Any]:
+    def enqueue_upload(self, filename: str, data: bytes, agent_id: str, user_id: str,
+                       tenant_id: str = "default") -> Dict[str, Any]:
         digest = hashlib.sha256(data).hexdigest()
-        dedupe = f"up:{digest}:{agent_id}:{user_id}"
+        # KNOW-08：dedupe 按租户分区——同用户跨租户同内容不互相吞
+        dedupe = f"up:{digest}:{tenant_id or 'default'}:{agent_id}:{user_id}"
         task_id = f"kin_{digest[:12]}_{os.urandom(4).hex()}"
         safe = _SAFE_NAME.sub("_", filename or "imported")[:80]
         storage = self.files_dir / f"{task_id}__{safe}"
@@ -126,27 +143,31 @@ class KnowledgeIngressQueue:
         return self._insert(
             task_id=task_id, dedupe=dedupe, source="upload", filename=filename or "",
             url="", storage_path=str(storage), agent_id=agent_id, user_id=user_id,
-            on_conflict_storage=storage,
+            tenant_id=tenant_id, on_conflict_storage=storage,
         )
 
-    def enqueue_url(self, url: str, title_hint: str, agent_id: str, user_id: str) -> Dict[str, Any]:
+    def enqueue_url(self, url: str, title_hint: str, agent_id: str, user_id: str,
+                    tenant_id: str = "default") -> Dict[str, Any]:
         digest = hashlib.sha256(url.encode()).hexdigest()
-        dedupe = f"url:{digest}:{agent_id}:{user_id}"
+        dedupe = f"url:{digest}:{tenant_id or 'default'}:{agent_id}:{user_id}"
         task_id = f"kin_{digest[:12]}_{os.urandom(4).hex()}"
         return self._insert(
             task_id=task_id, dedupe=dedupe, source="url", filename=title_hint or "",
-            url=url, storage_path="", agent_id=agent_id, user_id=user_id, on_conflict_storage=None,
+            url=url, storage_path="", agent_id=agent_id, user_id=user_id,
+            tenant_id=tenant_id, on_conflict_storage=None,
         )
 
     def _insert(self, *, task_id, dedupe, source, filename, url, storage_path,
-                agent_id, user_id, on_conflict_storage) -> Dict[str, Any]:
+                agent_id, user_id, tenant_id, on_conflict_storage) -> Dict[str, Any]:
+        tenant = str(tenant_id or "default")
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT OR IGNORE INTO knowledge_ingress_events (task_id, dedupe_key, source,"
-                " filename, url, storage_path, agent_id, user_id, status, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?, 'pending', ?, ?)",
+                " filename, url, storage_path, agent_id, user_id, tenant_id, status,"
+                " created_at, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?, 'pending', ?, ?)",
                 (task_id, dedupe, source, filename, url, storage_path, agent_id, user_id,
-                 _now_iso(), _now_iso()),
+                 tenant, _now_iso(), _now_iso()),
             )
             if cur.rowcount == 0:
                 # 重复内容：删本次临时文件，复用既有任务（幂等语义）

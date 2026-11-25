@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 
 from neurova.api.auth import get_current_user_or_service
 from neurova.core.logger import get_logger
+from neurova.core.tenant_scope import resolve_tenant
 from neurova.knowledge.document_pipeline import resolveSourceDates
 from neurova.security.url_guard import validate_public_http_url
 from neurova.api.endpoints.knowledge_common import get_repository
@@ -82,6 +83,7 @@ async def import_knowledge_file(
         task = get_ingress_queue().enqueue_upload(
             filename=filename, data=data, agent_id=agent_id,
             user_id=str(current_user.get("user_id") or ""),
+            tenant_id=resolve_tenant(current_user),
         )
         return {"code": 0, "message": "Queued", "data": {"task_id": task["task_id"], "status": task.get("status"), "replayed": task.get("replayed", False)}}
     items, extract_status = _import_file_data(
@@ -248,6 +250,7 @@ async def import_knowledge_url(
         task = get_ingress_queue().enqueue_url(
             url=url, title_hint=_title_from_url(url), agent_id=agent_id,
             user_id=str(current_user.get("user_id") or ""),
+            tenant_id=resolve_tenant(current_user),
         )
         return {"code": 0, "message": "Queued", "data": {"task_id": task["task_id"], "status": task.get("status"), "replayed": task.get("replayed", False)}}
 
