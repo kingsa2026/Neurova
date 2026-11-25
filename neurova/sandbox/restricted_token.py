@@ -23,10 +23,11 @@ import ctypes
 import os
 import tempfile
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.lazy_singleton import lazySingleton
+from neurova.sandbox.exec_sandbox import buildWindowsEnvironmentBlock, killProcessTree
 
 logger = get_logger(__name__)
 
@@ -36,6 +37,7 @@ _SAFER_LEVELID_NORMALUSER = 0x20000
 _GENERIC_WRITE = 0x40000000
 _CREATE_ALWAYS = 2
 _CREATE_NO_WINDOW = 0x08000000
+_CREATE_UNICODE_ENVIRONMENT = 0x00000400
 _STARTF_USESTDHANDLES = 0x100
 _HANDLE_FLAG_INHERIT = 1
 _FILE_ATTRIBUTE_NORMAL = 0x80
@@ -112,6 +114,25 @@ class RestrictedTokenSandbox:
         except Exception:
             return False
 
+    def execute_argv(
+        self,
+        argv: List[str],
+        timeout: float = 30.0,
+        cwd: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        if not argv:
+            raise ValueError("受限令牌执行 argv 不能为空")
+        import subprocess as _sp
+
+        return self.execute(
+            _sp.list2cmdline(argv[1:]),
+            timeout=timeout,
+            cwd=cwd,
+            env=env,
+            _direct_app=argv[0],
+        )
+
     def _make_inheritable(self, path: str) -> int:
         k32 = ctypes.windll.kernel32
         h = k32.CreateFileW(
@@ -144,6 +165,7 @@ class RestrictedTokenSandbox:
         timeout: float = 30.0,
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
+        _direct_app: Optional[str] = None,
     ) -> Dict[str, Any]:
         """受限令牌执行：特权剥离隔离；输出经临时文件回传。"""
         import subprocess as _sp
@@ -182,10 +204,18 @@ class RestrictedTokenSandbox:
             si.hStdOutput = h_out
             si.hStdError = h_err
 
+            app_buf = ctypes.create_unicode_buffer(_direct_app) if _direct_app else None
+            command_line = f'"{_direct_app}" {command}' if _direct_app else command
+            environmentBlock = buildWindowsEnvironmentBlock(env)
+            environmentBuffer = (
+                ctypes.create_unicode_buffer(environmentBlock)
+                if environmentBlock is not None
+                else None
+            )
             ok = ctypes.windll.advapi32.CreateProcessAsUserW(
-                h_token, None, ctypes.c_wchar_p(command), None, None,
+                h_token, app_buf, ctypes.c_wchar_p(command_line), None, None,
                 1,  # bInheritHandles
-                _CREATE_NO_WINDOW, None, cwd,
+                _CREATE_NO_WINDOW | _CREATE_UNICODE_ENVIRONMENT, environmentBuffer, cwd,
                 ctypes.byref(si), ctypes.byref(pi),
             )
             if not ok:
@@ -205,11 +235,12 @@ class RestrictedTokenSandbox:
             wait_ms = int(timeout * 1000)
             status = k32.WaitForSingleObject(pi.hProcess, wait_ms)
             if status == _STILL_ACTIVE or status == 0x102:
-                k32.TerminateProcess(pi.hProcess, 1)
+                killProcessTree(pi.dwProcessId)
+                k32.WaitForSingleObject(pi.hProcess, 5000)
                 return {
                     **base,
                     "success": False,
-                    "output": "",
+                    "output": _decode_console_output(open(out_path, "rb").read()),
                     "error": f"Command timed out after {timeout} seconds",
                     "return_code": -1,
                 }

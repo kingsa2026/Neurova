@@ -15,7 +15,9 @@ from __future__ import annotations
 import asyncio
 import os
 import platform
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -28,7 +30,7 @@ from neurova.core.proc_text import decodeChild
 logger = get_logger(__name__)
 
 
-def killProcessTree(proc: subprocess.Popen) -> None:
+def killProcessTree(proc: subprocess.Popen | int) -> None:
     """按平台杀灭整棵进程树（**全仓唯一**的进程组杀灭实现）。
 
     - POSIX: 进程组 SIGKILL（调用方须以 `start_new_session=True` 起进程，
@@ -46,18 +48,22 @@ def killProcessTree(proc: subprocess.Popen) -> None:
     第二份杀灭实现正是本函数要挡掉的形态。
     """
     if sys.platform == "win32":
+        processId = proc if isinstance(proc, int) else proc.pid
         taskkill = shutil.which("taskkill")
         if taskkill is not None:
             try:
                 subprocess.run(
-                    [taskkill, "/T", "/F", "/PID", str(proc.pid)],
+                    [taskkill, "/T", "/F", "/PID", str(processId)],
                     capture_output=True,
                     timeout=10,
                 )
                 return
             except Exception:  # noqa: BLE001 - taskkill 失败退回单杀
                 pass
-        proc.kill()
+        if isinstance(proc, int):
+            os.kill(processId, signal.SIGTERM)
+        else:
+            proc.kill()
         return
     if proc.poll() is not None:      # 已退出：见 docstring，不发信号
         return
@@ -111,7 +117,7 @@ class ExecSandbox:
     def backend_name(self) -> str:
         return "process"
 
-    def wrap_argv(self, command: str) -> List[str]:
+    def wrap_argv(self, command: str, cwd: Optional[str] = None) -> List[str]:
         """返回执行用 argv 列表；子类重写以注入隔离前缀。
 
         默认 shell 语义（管道/重定向由 shell 处理）：POSIX 走 sh -c，
@@ -120,6 +126,27 @@ class ExecSandbox:
         if sys.platform == "win32":
             return ["cmd.exe", "/c", command]
         return ["sh", "-c", command]
+
+    def execute_argv(
+        self,
+        argv: List[str],
+        timeout: float = 30.0,
+        cwd: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """把无 shell 的进程 argv 送入本后端，避免调用方另起宿主进程。"""
+        return self.execute(
+            "",
+            timeout=timeout,
+            cwd=cwd,
+            env=env,
+            _argv=self.wrap_process_argv(argv, cwd=cwd),
+        )
+
+    def wrap_process_argv(
+        self, argv: List[str], cwd: Optional[str] = None
+    ) -> List[str]:
+        return argv
 
     def enforced(self) -> bool:
         """该后端是否真实落实了声明的隔离（P1-7 诚实化：占位实现返回 False）。
@@ -155,8 +182,9 @@ class ExecSandbox:
         timeout: float = 30.0,
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
+        _argv: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        argv = self.wrap_argv(command)
+        argv = _argv if _argv is not None else self.wrap_argv(command, cwd=cwd)
         base = self._base_result()
         try:
             proc = subprocess.Popen(
@@ -235,13 +263,20 @@ class BubblewrapSandbox(ExecSandbox):
     def enforced(self) -> bool:
         return True
 
-    def wrap_argv(self, command: str) -> List[str]:
+    def wrap_argv(self, command: str, cwd: Optional[str] = None) -> List[str]:
         # bwrap 注入隔离前缀；command 作为 sh -c 的单个 argv（无转义层）
         parts = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"]
         if self.severity in (SandboxSeverity.NETWORK_OFF, SandboxSeverity.FULL):
             parts.append("--unshare-net")
+        if cwd:
+            parts.extend(["--bind", cwd, cwd])
         parts.extend(["--", "sh", "-c", command])
         return parts
+
+    def wrap_process_argv(
+        self, argv: List[str], cwd: Optional[str] = None
+    ) -> List[str]:
+        return self.wrap_argv(shlex.join(argv), cwd=cwd)
 
 
 class SeatbeltSandbox(ExecSandbox):
@@ -256,7 +291,7 @@ class SeatbeltSandbox(ExecSandbox):
     def enforced(self) -> bool:
         return True
 
-    def wrap_argv(self, command: str) -> List[str]:
+    def wrap_argv(self, command: str, cwd: Optional[str] = None) -> List[str]:
         profile = (
             "(version 1)"
             "(deny default)"
@@ -268,6 +303,11 @@ class SeatbeltSandbox(ExecSandbox):
             profile += "(deny network*)"
         # profile / command 均作为单个 argv 传递
         return ["sandbox-exec", "-p", profile, "sh", "-c", command]
+
+    def wrap_process_argv(
+        self, argv: List[str], cwd: Optional[str] = None
+    ) -> List[str]:
+        return self.wrap_argv(shlex.join(argv), cwd=cwd)
 
 
 def _detect_backend(severity: SandboxSeverity) -> ExecSandbox:
@@ -318,6 +358,20 @@ def execute_in_sandbox(
 ) -> Dict[str, Any]:
     """便捷入口：按 severity 选择沙箱并执行命令（同步，平台后端）。"""
     return get_exec_sandbox(severity).execute(command, timeout=timeout, cwd=cwd, env=env)
+
+
+def buildWindowsEnvironmentBlock(env: Optional[Dict[str, str]]) -> Optional[str]:
+    """构造 Win32 CreateProcess 所需的双 NUL 结尾 Unicode 环境块。"""
+    if env is None:
+        return None
+    entries = []
+    for key, value in env.items():
+        entry = f"{key}={value}"
+        if "\0" in entry:
+            raise ValueError("Windows 环境变量不能包含 NUL")
+        entries.append(entry)
+    entries.sort(key=str.casefold)
+    return "\0".join(entries) + "\0\0"
 
 
 def docker_available() -> bool:
@@ -461,5 +515,6 @@ __all__ = [
     "reset_exec_sandbox",
     "execute_in_sandbox",
     "execute_in_sandbox_async",
+    "buildWindowsEnvironmentBlock",
     "docker_available",
 ]

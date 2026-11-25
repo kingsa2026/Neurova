@@ -35,7 +35,7 @@ from neurova.sandbox.appcontainer import AppContainerSandbox
 from neurova.sandbox.exec_sandbox import SandboxSeverity
 
 # 调用方（code_sandbox.resolveBackend / execute）实际用到的接口面
-REQUIRED_MEMBERS = ("backend_name", "available", "enforced", "execute")
+REQUIRED_MEMBERS = ("backend_name", "available", "enforced", "execute", "execute_argv")
 
 
 def discoverBackends() -> dict:
@@ -94,9 +94,9 @@ class TestBackendInterfaceContract:
             def execute(self, command, timeout=30.0, cwd=None, env=None):  # noqa: D102
                 return {}
 
-            # 故意漏掉 enforced
+            # 故意漏掉 enforced 与 execute_argv
 
-        assert missingMembers(_HalfBaked) == ("enforced",)
+        assert missingMembers(_HalfBaked) == ("enforced", "execute_argv")
 
     def test_appContainerEnforcedReflectsItsOwnFacts(self):
         """补齐的那条不能是恒真：未声称档位时必须 False。"""

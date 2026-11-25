@@ -26,9 +26,9 @@ class TestAppContainerReal:
         assert sb.available() is True
         assert sb.backend_name() == "appcontainer"
 
-    def test_execute_echo(self):
+    def test_execute_echo(self, tmp_path):
         sb = AppContainerSandbox()
-        result = sb.execute("echo hello-ac", timeout=30, cwd=os.environ["TEMP"])
+        result = sb.execute("echo hello-ac", timeout=30, cwd=str(tmp_path))
         assert result["success"] is True, result["error"]
         assert "hello-ac" in result["output"]
         assert result["isolated"] is True

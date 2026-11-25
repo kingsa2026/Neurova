@@ -29,9 +29,10 @@ import secrets
 import subprocess
 import tempfile
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.sandbox.exec_sandbox import buildWindowsEnvironmentBlock, killProcessTree
 
 logger = get_logger(__name__)
 
@@ -185,6 +186,23 @@ class AppContainerSandbox:
 
         return bool(_DLL.load()) and self.severity in self.enforced_severities()
 
+    def execute_argv(
+        self,
+        argv: List[str],
+        timeout: float = 30.0,
+        cwd: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        if not argv:
+            raise ValueError("AppContainer 执行 argv 不能为空")
+        return self.execute(
+            subprocess.list2cmdline(argv[1:]),
+            timeout=timeout,
+            cwd=cwd,
+            env=env,
+            _direct_app=argv[0],
+        )
+
     def _create_profile_fresh(self) -> tuple:
         """一次性创建全新 AppContainer profile（探针实证：Derive 旧 profile
         的 SID 用于 CreateProcess 会 err 2——profile 实体可能已失效，
@@ -220,12 +238,16 @@ class AppContainerSandbox:
             logger.debug("AppContainer profile 删除失败: %s", name, exc_info=True)
 
     def _grant_dir_access(self, directory: str, sid_string: str) -> None:
-        """容器对输出目录的写权限（icacls 授 ACE）。"""
+        """容器对工作目录及既有源码文件的读写权限。"""
         icacls = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "icacls.exe")
-        subprocess.run(
-            [icacls, directory, "/grant", f"*{sid_string}:(OI)(CI)(R,W)"],
-            capture_output=True, timeout=10,
+        granted = subprocess.run(
+            [icacls, directory, "/grant", f"*{sid_string}:(OI)(CI)(R,W)", "/T"],
+            capture_output=True,
+            timeout=10,
         )
+        if granted.returncode != 0:
+            detail = _decode_console_output(granted.stderr or granted.stdout).strip()
+            raise OSError(f"AppContainer 工作目录授权失败：{detail}")
 
     def execute(
         self,
@@ -265,6 +287,7 @@ class AppContainerSandbox:
 
         out_dir = tempfile.mkdtemp(prefix="nv_ac_")
         out_path = os.path.join(out_dir, "out.txt")
+        err_path = os.path.join(out_dir, "err.txt")
         # 探针实证：CWD 必须是容器已被授权（icacls）的目录——TEMP 等外部
         # 目录会得到"当前目录无效"，且容器对该目录无写权时输出丢失
         work_dir = cwd if (cwd and os.path.isdir(cwd)) else out_dir
@@ -273,12 +296,15 @@ class AppContainerSandbox:
         h_thread = None
         profile_name = None
         h_out = None
+        h_err = None
         try:
             profile_name, psid = self._create_profile_fresh()
             s = ctypes.c_wchar_p()
             _DLL.advapi32.ConvertSidToStringSidW(psid, ctypes.byref(s))
             sid_string = s.value
             self._grant_dir_access(out_dir, sid_string)
+            if os.path.normcase(work_dir) != os.path.normcase(out_dir):
+                self._grant_dir_access(work_dir, sid_string)
 
             # attribute list
             size = ctypes.c_size_t(0)
@@ -310,9 +336,16 @@ class AppContainerSandbox:
                 if h_out in (_INVALID_HANDLE, 0):
                     raise OSError(f"CreateFileW 失败: {ctypes.GetLastError()}")
                 k32.SetHandleInformation(h_out, _HANDLE_FLAG_INHERIT, _HANDLE_FLAG_INHERIT)
+                h_err = k32.CreateFileW(
+                    err_path, _GENERIC_WRITE, _FILE_SHARE_READWRITE,
+                    None, _CREATE_ALWAYS, _FILE_ATTRIBUTE_NORMAL, None,
+                )
+                if h_err in (_INVALID_HANDLE, 0):
+                    raise OSError(f"CreateFileW(stderr) 失败: {ctypes.GetLastError()}")
+                k32.SetHandleInformation(h_err, _HANDLE_FLAG_INHERIT, _HANDLE_FLAG_INHERIT)
                 si.si.dwFlags = _STARTF_USESTDHANDLES
                 si.si.hStdOutput = h_out
-                si.si.hStdError = h_out
+                si.si.hStdError = h_err
                 app_buf = ctypes.create_unicode_buffer(_direct_app)
                 inherit_handles = 1
             else:
@@ -323,10 +356,16 @@ class AppContainerSandbox:
                 app_buf = None
                 inherit_handles = 0
 
+            environmentBlock = buildWindowsEnvironmentBlock(env)
+            environmentBuffer = (
+                ctypes.create_unicode_buffer(environmentBlock)
+                if environmentBlock is not None
+                else None
+            )
             ok = k32.CreateProcessW(
                 app_buf, cmdline, None, None, inherit_handles,
                 _EXTENDED_STARTUPINFO_PRESENT | _CREATE_UNICODE_ENVIRONMENT | _CREATE_NO_WINDOW,
-                None, work_dir,
+                environmentBuffer, work_dir,
                 ctypes.cast(ctypes.byref(si), ctypes.c_void_p),
                 ctypes.byref(pi),
             )
@@ -338,28 +377,44 @@ class AppContainerSandbox:
                 # 读回时撞共享冲突（与 restricted_token 同一坑，见彼处注释）
                 k32.CloseHandle(h_out)
                 h_out = None
+            if h_err is not None:
+                k32.CloseHandle(h_err)
+                h_err = None
 
             status = k32.WaitForSingleObject(pi.hProcess, int(timeout * 1000))
             if status != _WAIT_OBJECT_0:
-                k32.TerminateProcess(pi.hProcess, 1)
+                killProcessTree(pi.dwProcessId)
+                k32.WaitForSingleObject(pi.hProcess, 5000)
+                stdout = ""
+                stderr = ""
+                for _ in range(10):
+                    try:
+                        stdout = _decode_console_output(open(out_path, "rb").read())
+                        if os.path.exists(err_path):
+                            stderr = _decode_console_output(open(err_path, "rb").read())
+                        break
+                    except PermissionError:
+                        time.sleep(0.3)
                 return {
                     **base,
                     "success": False,
-                    "output": "",
+                    "output": stdout,
                     "error": f"Command timed out after {timeout} seconds",
                     "return_code": -1,
                 }
             code = ctypes.c_uint32(-1)
             k32.GetExitCodeProcess(pi.hProcess, ctypes.byref(code))
 
-            text = ""
+            stdout = ""
+            stderr = ""
             for _ in range(10):
                 try:
-                    text = _decode_console_output(open(out_path, "rb").read())
+                    stdout = _decode_console_output(open(out_path, "rb").read())
+                    if os.path.exists(err_path):
+                        stderr = _decode_console_output(open(err_path, "rb").read())
                     break
                 except PermissionError:
                     time.sleep(0.3)
-            stdout, _, stderr = text.partition("\n---stderr---\n") if "\n---stderr---\n" in text else (text, "", "")
             return {
                 **base,
                 "success": code.value == 0,
@@ -378,6 +433,8 @@ class AppContainerSandbox:
         finally:
             if h_out:
                 k32.CloseHandle(h_out)
+            if h_err:
+                k32.CloseHandle(h_err)
             if h_process:
                 k32.CloseHandle(h_process)
             if h_thread:

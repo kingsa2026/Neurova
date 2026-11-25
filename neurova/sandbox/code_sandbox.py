@@ -9,9 +9,9 @@
 
 本模块是沙箱 session 的执行后端，判据只写一份：
 
-- **后端选择**：`auto` = Docker 可用则容器（跨平台真隔离），否则平台后端并
-  **自报 `enforced=False`**（不谎称隔离）；`docker` = 强制容器，不可用即报错，
-  **不静默降级成裸跑**（教义第 1/2 条：降级必须显形）。
+- **后端选择**：`auto` = Docker 可用则容器（跨平台真隔离），否则平台后端；
+  平台后端未落实隔离档位时显式拒绝，**不在宿主裸跑**；`docker` = 强制容器，
+  不可用即报错，**不静默降级**（教义第 1/2 条：降级必须显形）。
 - **语言分派**：语言 → 解释器 argv，白名单外显式拒绝（不许当 python 跑）。
 - **诚实自报**：每次执行都带 `backend` 与 `enforced`。
 
@@ -37,7 +37,6 @@ from neurova.sandbox.exec_sandbox import (
     docker_available,
     get_exec_sandbox,
     killProcessTree,
-    spawnKwargsForKill,
 )
 
 logger = get_logger(__name__)
@@ -55,15 +54,15 @@ class SandboxBackendUnavailable(RuntimeError):
 #: 只认可解释器**显式**调用的四种语言；其余显式拒绝（诚实报错优于改语义）
 LANGUAGES: Dict[str, Dict[str, Any]] = {
     "python": {
-        "executable": sys.executable,
+        "executable": getattr(sys, "_base_executable", sys.executable),
         "argv": [],
         "suffix": ".py",
         "imageFallback": "python",
     },
     "shell": {
-        "executable": "sh",
-        "argv": [],
-        "suffix": ".sh",
+        "executable": "cmd.exe" if sys.platform == "win32" else "sh",
+        "argv": ["/c"] if sys.platform == "win32" else [],
+        "suffix": ".cmd" if sys.platform == "win32" else ".sh",
         "imageFallback": "shell",
     },
     "bash": {
@@ -177,7 +176,7 @@ class CodeSandboxSession:
         """返回 `{backend, enforced, severity, reason}`。
 
         - `backend="docker"`：不可用 → 抛 `SandboxBackendUnavailable`（不降级）；
-        - `backend="auto"`：Docker 可用 → 容器；否则平台后端，`enforced` 取后端自报。
+        - `backend="auto"`：Docker 可用 → 容器；否则平台后端，未强制隔离即拒绝。
         """
         if self.backend == "docker":
             if not docker_available():
@@ -194,17 +193,16 @@ class CodeSandboxSession:
         severity = SandboxSeverity.NETWORK_OFF
         platform_backend = get_exec_sandbox(severity)
         enforced = platform_backend.enforced()
+        if not enforced:
+            raise SandboxBackendUnavailable(
+                f"Docker 不可用，且平台后端 {platform_backend.backend_name()} "
+                "无内核隔离；拒绝在宿主裸跑代码，请启用 Docker"
+            )
         return {
             "backend": platform_backend.backend_name(),
             "enforced": enforced,
             "severity": severity,
-            # 文案必须跟着值走：原先硬写"自报 enforced=False"，而后端如实回 True 时
-            # 这句话就成了替机器撒谎的第二个事实源（补齐 enforced() 的同一批里撞出来的）
-            "reason": (
-                "Docker 不可用，平台后端自报已落实该档隔离"
-                if enforced
-                else "Docker 不可用且平台后端无内核隔离 → 自报 enforced=False"
-            ),
+            "reason": "Docker 不可用，平台后端自报已落实该档隔离",
         }
 
     def workspace(self) -> Path:
@@ -238,59 +236,57 @@ class CodeSandboxSession:
                 "不静默换成别的解释器执行"
             )
         workspace = self.workspace()
-        source = workspace / f"snippet_{uuid.uuid4().hex[:8]}{LANGUAGES[language]['suffix']}"
-        source.write_text(command, encoding="utf-8")
-
-        argv = [executable, *LANGUAGES[language]["argv"], str(source)]
-
-        started = time.time()
         env = dict(os.environ)
         env.setdefault("PYTHONIOENCODING", "utf-8")
-        try:
-            proc = subprocess.Popen(
-                argv,
-                cwd=str(workspace),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                **_spawnKwargs(),
+        if resolved["backend"] == "appcontainer":
+            if language == "python":
+                argv = [executable, "-c", command]
+            elif language == "javascript":
+                argv = [executable, "-e", command]
+            else:
+                argv = [executable, "/c", command]
+        else:
+            source = workspace / f"snippet_{uuid.uuid4().hex[:8]}{LANGUAGES[language]['suffix']}"
+            source.write_text(command, encoding="utf-8")
+            argv = [executable, *LANGUAGES[language]["argv"], str(source)]
+
+        backend = get_exec_sandbox(resolved["severity"])
+        started = time.time()
+        outcome = backend.execute_argv(
+            argv,
+            timeout=timeout,
+            cwd=str(workspace),
+            env=env,
+        )
+        error = str(outcome.get("error") or "")
+        stdout = str(outcome.get("output") or "")
+        exit_code = outcome.get("return_code", -1)
+        timed_out = exit_code == -1 and "timed out" in error.lower()
+        interpreter_failure = (
+            "python path configuration" in f"{stdout}\n{error}".lower()
+            or "fatal python error" in f"{stdout}\n{error}".lower()
+        )
+        if (exit_code == -1 and not timed_out) or interpreter_failure or (
+            resolved["backend"] == "appcontainer"
+            and isinstance(exit_code, int)
+            and exit_code & 0xFFFF0000 == 0xC0000000
+        ):
+            backendLabel = (
+                "AppContainer" if resolved["backend"] == "appcontainer" else resolved["backend"]
             )
-        except OSError as exc:
-            raise SandboxBackendUnavailable(f"解释器启动失败：{exc}") from exc
-
-        enforcer = _Enforcer(proc, timeout)
-        enforcer.arm()
-        timed_out = False
-        try:
-            stdout, stderr = proc.communicate(timeout=timeout)
-            exit_code = proc.returncode
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            killProcessTree(proc)
-            try:
-                stdout, stderr = proc.communicate(timeout=5)
-            except Exception:  # noqa: BLE001 - 收尸失败不改变超时结果契约
-                stdout, stderr = "", ""
-            exit_code = -1
-        finally:
-            enforcer.disarm()
-
-        if enforcer.fired():
-            timed_out = True
-            if exit_code == 0:
-                exit_code = -1
-            if "timed out" not in (stderr or ""):
-                stderr = (stderr or "") + f"\n[sandbox] command timed out after {timeout}s"
-
+            reason = error or stdout or f"Windows 状态码 0x{exit_code & 0xFFFFFFFF:X}"
+            raise SandboxBackendUnavailable(
+                f"{backendLabel} 无法启动 {language} 解释器（{reason}）；"
+                "未降级为宿主执行，请启用 Docker 或改用该后端支持的语言"
+            )
         return {
-            "stdout": stdout or "",
-            "stderr": stderr or "",
+            "stdout": stdout,
+            "stderr": error,
             "exit_code": exit_code,
-            "backend": resolved["backend"],
-            "enforced": bool(resolved["enforced"]),
+            "backend": outcome.get("sandbox") or resolved["backend"],
+            "enforced": bool(
+                resolved["enforced"] and outcome.get("sandbox_enforced", True)
+            ),
             "timed_out": timed_out,
             "duration_ms": round((time.time() - started) * 1000, 2),
         }
@@ -372,13 +368,6 @@ class CodeSandboxSession:
         if self._workspace and self._workspace.exists():
             shutil.rmtree(self._workspace, ignore_errors=True)
         self._workspace = None
-
-
-def _spawnKwargs() -> Dict[str, Any]:
-    """转发到 `exec_sandbox.spawnKwargsForKill`（单源；本处是历史函数名契约）。"""
-    return spawnKwargsForKill()
-
-
 
 
 __all__ = [

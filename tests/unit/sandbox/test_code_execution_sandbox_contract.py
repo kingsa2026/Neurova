@@ -31,6 +31,7 @@
 from __future__ import annotations
 
 import os
+import sys
 
 import pytest
 
@@ -42,6 +43,12 @@ from fastapi.testclient import TestClient
 from neurova.api.auth import get_current_user
 from neurova.api.endpoints import sandbox as sandbox_api_module
 from neurova.api.endpoints.sandbox import router
+from neurova.sandbox import code_sandbox
+from neurova.sandbox.exec_sandbox import (
+    SandboxSeverity,
+    get_exec_sandbox,
+    reset_exec_sandbox,
+)
 
 BASE = "/api/v1/sandbox"
 
@@ -64,6 +71,17 @@ EXECUTION_TEARDOWN_SLACK_SECONDS = 1.0
 EXECUTION_TIMEOUT_CEILING_SECONDS = (
     EXECUTION_LIMIT_SECONDS * EXECUTION_TIMEOUT_CEILING_RATIO + EXECUTION_TEARDOWN_SLACK_SECONDS
 )
+
+
+@pytest.fixture()
+def platformBackend(monkeypatch):
+    monkeypatch.setattr(code_sandbox, "docker_available", lambda: False)
+    reset_exec_sandbox()
+    backend = get_exec_sandbox(SandboxSeverity.NETWORK_OFF)
+    if not backend.enforced():
+        pytest.skip("本机没有可用的强制隔离平台后端")
+    yield backend
+    reset_exec_sandbox()
 
 
 @pytest.fixture(autouse=True)
@@ -116,36 +134,50 @@ class TestSessionShapeMatchesFrontendContract:
         assert body["data"]["total"] == 1
         assert len(body["data"]["sandboxes"]) == 1, "列表信封形状是页面 v-for 的取数口径"
 
+    @pytest.mark.usefixtures("platformBackend")
     def test_steps_count_advances_after_execute(self, client):
         sid = client.post(f"{BASE}/start", json={"name": "ce"}).json()["data"]["id"]
-        client.post(f"{BASE}/{sid}/execute", json={"command": "print(1)", "language": "python"})
+        resp = client.post(
+            f"{BASE}/{sid}/execute",
+            json={"command": "console.log('step')", "language": "javascript"},
+        )
+        assert resp.status_code == 200, resp.text
         data = client.get(f"{BASE}/{sid}").json()["data"]
         assert data["steps_count"] == 1, "执行后卡片步骤数必须真的涨——否则读数与事实脱节"
 
 
+@pytest.mark.usefixtures("platformBackend")
 class TestExecuteIsARealExecution:
     """执行层：`execute` 真跑代码，不是返回占位串。"""
 
-    def _run(self, client, code: str, language: str = "python") -> dict:
+    def _run(self, client, code: str, language: str = "javascript") -> dict:
         sid = client.post(f"{BASE}/start", json={"name": "ce"}).json()["data"]["id"]
         resp = client.post(f"{BASE}/{sid}/execute", json={"command": code, "language": language})
         assert resp.status_code == 200, f"/execute 未命中真路由：{resp.status_code} {resp.text}"
         return resp.json()["data"]
 
-    def test_python_stdout_is_really_captured(self, client):
-        data = self._run(client, "print('neurova-probe-42')")
+    def test_python_stdout_is_really_captured(self, client, platformBackend):
+        if platformBackend.backend_name() == "appcontainer":
+            pytest.skip("当前 AppContainer 不能初始化宿主 Python 标准库")
+        data = self._run(client, "print('neurova-probe-42')", language="python")
+        assert "neurova-probe-42" in (data.get("output") or data.get("stdout") or ""), (
+            "输出里没有探针串——执行面没有真跑解释器。"
+        )
+
+    def test_javascript_stdout_is_really_captured(self, client):
+        data = self._run(client, "console.log('neurova-probe-42')")
         assert "neurova-probe-42" in (data.get("output") or data.get("stdout") or ""), (
             "输出里没有探针串——执行面没有真跑解释器。"
         )
 
     def test_exit_code_is_reported(self, client):
-        ok = self._run(client, "pass")
-        bad = self._run(client, "raise SystemExit(3)")
+        ok = self._run(client, "process.exit(0)")
+        bad = self._run(client, "process.exit(3)")
         assert ok["exit_code"] == 0
         assert bad["exit_code"] != 0, "非零退出码必须如实上报，不得抹平成成功"
 
     def test_stderr_is_reported_separately(self, client):
-        data = self._run(client, "import sys; sys.stderr.write('boom\\n')")
+        data = self._run(client, "console.error('boom')")
         assert "boom" in (data.get("stderr") or ""), "stderr 未与 stdout 分流——排障者看不到错误"
 
     def test_unknown_language_is_rejected_explicitly(self, client):
@@ -185,18 +217,14 @@ class TestExecuteIsARealExecution:
             f"{BASE}/start", json={"name": "ce", "timeout": MIN_TIMEOUT_SECONDS}
         ).json()["data"]["id"]
         command = (
-            "import sys, time\n"
-            "sys.stdout.write('neurova-timeout-sentinel\\n')\n"
-            "sys.stdout.flush()\n"
-            "time.sleep(120)\n"
-            "sys.stdout.write('neurova-timeout-released\\n')\n"
-            "sys.stdout.flush()\n"
+            "console.log('neurova-timeout-sentinel')\n"
+            "setTimeout(() => console.log('neurova-timeout-released'), 120000)\n"
         )
         # 请求时限取「上界」：执行侧同样以它为 hard limit，判据两侧同源一个常量
         request_timeout = EXECUTION_LIMIT_SECONDS * EXECUTION_TIMEOUT_CEILING_RATIO
         resp = client.post(
             f"{BASE}/{sid}/execute",
-            json={"command": command, "timeout": request_timeout},
+            json={"command": command, "language": "javascript", "timeout": request_timeout},
         )
         assert resp.status_code == 200, resp.text
         data = resp.json()["data"]
@@ -260,11 +288,64 @@ class TestExecuteIsARealExecution:
 class TestBackendHONESTY:
     """诚实层：后端选择必须自报，Docker 不可用时不得静默裸跑。"""
 
+    @pytest.mark.usefixtures("platformBackend")
     def test_execute_reports_backend_and_enforcement(self, client):
         sid = client.post(f"{BASE}/start", json={"name": "ce"}).json()["data"]["id"]
-        data = client.post(f"{BASE}/{sid}/execute", json={"command": "print(1)"}).json()["data"]
+        resp = client.post(
+            f"{BASE}/{sid}/execute",
+            json={"command": "console.log(1)", "language": "javascript"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
         assert data.get("backend"), "必须自报实际执行后端——否则「隔离了没有」无从审计"
         assert isinstance(data.get("enforced"), bool), "必须自报是否真隔离（enforced: bool）"
+
+    def test_appcontainer_node_runs_inside_the_container(self, client, monkeypatch):
+        if sys.platform != "win32":
+            pytest.skip("Windows AppContainer 语义")
+        from neurova.sandbox.appcontainer import AppContainerSandbox
+
+        if not AppContainerSandbox().available():
+            pytest.skip("AppContainer API 不可用")
+        monkeypatch.setattr(code_sandbox, "docker_available", lambda: False)
+        from neurova.sandbox.exec_sandbox import reset_exec_sandbox
+
+        reset_exec_sandbox()
+        try:
+            sid = client.post(f"{BASE}/start", json={"name": "ce"}).json()["data"]["id"]
+            resp = client.post(
+                f"{BASE}/{sid}/execute",
+                json={"command": "console.log('node-appcontainer-ok')", "language": "javascript"},
+            )
+            assert resp.status_code == 200, resp.text
+            data = resp.json()["data"]
+            assert data["backend"] == "appcontainer"
+            assert data["enforced"] is True
+            assert "node-appcontainer-ok" in data["stdout"]
+        finally:
+            reset_exec_sandbox()
+
+    def test_appcontainer_interpreter_startup_failure_is_explicit(self, client, monkeypatch):
+        if sys.platform != "win32":
+            pytest.skip("Windows AppContainer 语义")
+        from neurova.sandbox.appcontainer import AppContainerSandbox
+
+        if not AppContainerSandbox().available():
+            pytest.skip("AppContainer API 不可用")
+        monkeypatch.setattr(code_sandbox, "docker_available", lambda: False)
+        from neurova.sandbox.exec_sandbox import reset_exec_sandbox
+
+        reset_exec_sandbox()
+        try:
+            sid = client.post(f"{BASE}/start", json={"name": "ce"}).json()["data"]["id"]
+            resp = client.post(f"{BASE}/{sid}/execute", json={"command": "print(1)", "language": "python"})
+            assert resp.status_code == 503, (
+                "AppContainer 无法初始化 Python 时必须显式拒绝，不能把宿主裸跑或失败进程报成成功执行"
+            )
+            assert "AppContainer" in resp.text
+            assert "Docker" in resp.text
+        finally:
+            reset_exec_sandbox()
 
     def test_docker_unavailable_is_an_explicit_error_not_a_silent_downgrade(self, client, monkeypatch):
         """请求 docker 后端而 Docker 不可用 → 明确报错（不是悄悄换成裸跑还回 200 成功）。
@@ -308,11 +389,18 @@ class TestLifecycle:
         resp = client.post(f"{BASE}/{sid}/commit")
         assert resp.status_code == 200, f"无 body 提交被拒：{resp.status_code} {resp.text}"
 
+    @pytest.mark.usefixtures("platformBackend")
     def test_commit_freezes_further_execution(self, client):
         sid = client.post(f"{BASE}/start", json={"name": "ce"}).json()["data"]["id"]
-        client.post(f"{BASE}/{sid}/execute", json={"command": "print(1)"})
+        client.post(
+            f"{BASE}/{sid}/execute",
+            json={"command": "console.log('before')", "language": "javascript"},
+        )
         assert client.post(f"{BASE}/{sid}/commit").status_code == 200
-        again = client.post(f"{BASE}/{sid}/execute", json={"command": "print(2)"})
+        again = client.post(
+            f"{BASE}/{sid}/execute",
+            json={"command": "console.log('after')", "language": "javascript"},
+        )
         assert again.status_code == 400, "已提交的沙箱仍可执行——生命周期没有终点"
 
 
