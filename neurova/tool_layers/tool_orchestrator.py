@@ -257,7 +257,9 @@ class ToolOrchestrator:
             )
 
         token = _orchestrationDepth.set(_orchestrationDepth.get() + 1)
-        self._step_outputs = {}
+        # 步骤输出是**本次调用局部状态**：实例级容器会被并发编排互相清空/覆盖，
+        # 让上一会话的输出进入下一会话的 `{step_<idx>}` 渲染（CORE-15）。
+        step_outputs: typing.Dict[int, typing.Any] = {}
         try:
             layers = self._partition_plan_into_layers(steps)
             step_results: typing.List[StepResult] = []
@@ -279,7 +281,7 @@ class ToolOrchestrator:
                     )
                 if runnable:
                     layer_results = await self._execute_layer(
-                        runnable, offset, context or {}
+                        runnable, offset, context or {}, step_outputs
                     )
                     step_results.extend(layer_results)
                     for result in layer_results:
@@ -306,7 +308,6 @@ class ToolOrchestrator:
                 error=str(exc),
             )
         finally:
-            self._step_outputs = {}
             _orchestrationDepth.reset(token)
 
     def _resolve_steps(
@@ -339,10 +340,11 @@ class ToolOrchestrator:
                 if deps <= executed:
                     current.append(step)
             if not current:
-                current = list(remaining)
-                logger.warning(
-                    "Cannot resolve dependencies for: %s",
-                    [step.tool_name for step in remaining],
+                # 环依赖不得“整层并行放行”：没有可执行的前驱意味着依赖永远解不开，
+                # 并跑只会让互相依赖的步骤以未定义顺序执行（CORE-15）。显式拒绝。
+                raise ValueError(
+                    "步骤依赖成环，拒绝执行：%s"
+                    % [step.tool_name for step in remaining]
                 )
             layers.append(current)
             current_names = {step.tool_name for step in current}
@@ -375,8 +377,13 @@ class ToolOrchestrator:
         layer: typing.List[OrchestrationStep],
         step_offset: int,
         context: typing.Dict[str, typing.Any],
+        step_outputs: typing.Dict[int, typing.Any],
     ) -> typing.List[StepResult]:
-        """执行一层步进（层内并发受 `_max_parallel` 约束）。"""
+        """执行一层步进（层内并发受 `_max_parallel` 约束）。
+
+        `step_outputs` 由调用方传入本次编排的局部容器——不读实例字段，
+        并发编排天然隔离。
+        """
         semaphore = asyncio.Semaphore(self._max_parallel)
 
         async def _run(index: int, step: OrchestrationStep) -> StepResult:
@@ -385,8 +392,6 @@ class ToolOrchestrator:
                 return await self._execute_step(
                     f"step_{step_offset + index}", step.tool_name, params, context
                 )
-
-        step_outputs: typing.Dict[int, typing.Any] = getattr(self, "_step_outputs", {})
 
         results = await asyncio.gather(
             *(_run(index, step) for index, step in enumerate(layer)),
