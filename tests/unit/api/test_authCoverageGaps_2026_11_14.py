@@ -177,7 +177,7 @@ def anonClient():
     client = TestClient(_buildApp())
     yield client, computer_id
     try:
-        manager.delete_computer(computer_id, hard=True)
+        manager.delete_computer(computer_id, hard=True, user_id=ADMIN["user_id"])
     except Exception:  # noqa: BLE001 - 清理失败不影响判据
         pass
 
@@ -193,7 +193,7 @@ def identityHolder():
     client = TestClient(app)
     yield client, holder, computer_id
     try:
-        manager.delete_computer(computer_id, hard=True)
+        manager.delete_computer(computer_id, hard=True, user_id=ADMIN["user_id"])
     except Exception:  # noqa: BLE001
         pass
 

@@ -2,7 +2,9 @@
 Computer Manager - 计算资源管理器
 """
 
+import hashlib
 import json
+import secrets
 import shutil
 import threading
 import time
@@ -13,11 +15,15 @@ from neurova.models.computer import (
     Computer,
     ComputerKind,
     ComputerEngine,
+    ComputerPairing,
     ComputerStatus,
 )
 from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
+
+PAIR_TOKEN_TTL_SECONDS = 300
+MAX_PAIR_TOKEN_TTL_SECONDS = 300
 
 class ComputerManager:
     """
@@ -48,6 +54,9 @@ class ComputerManager:
         # Indexes
         self._user_computers: Dict[str, Set[str]] = {}  # user_id → set(computer_id)
         self._company_computers: Dict[str, Set[str]] = {}  # company_id → set(computer_id)
+
+        # 一次性配对票据只活在当前进程；键为摘要，绑定设备与属主，消费在同一 RLock 内完成。
+        self._pair_tickets: Dict[str, Dict[str, Any]] = {}
 
         # Initialize
         self._on_init()
@@ -216,8 +225,12 @@ class ComputerManager:
             # 审计 §3.4-11：原 TODO 落成"company_id 后缀匹配即放行"——
             # 任何登录用户把 id 写成 user@{company_id} 就能读他人计算节点。
             # 现收口为 **属主或管理员**，其余一律拒绝。
-            if user_id:
-                if computer.owner_user_id != user_id and not self._is_admin_user(user_id):
+            # None 是 daemon 心跳验签前的内部取数通道；空字符串不是内部通道。
+            if user_id is not None:
+                uid = str(user_id).strip()
+                if not uid:
+                    return None
+                if computer.owner_user_id != uid and not self._is_admin_user(uid):
                     return None
 
             return computer
@@ -233,11 +246,15 @@ class ComputerManager:
             Computer 列表
         """
         with self._lock:
-            computer_ids = self._user_computers.get(user_id, set())
+            uid = str(user_id or "").strip()
+            if not uid:
+                return []
+            computer_ids = self._user_computers.get(uid, set())
             return [
                 self._computers[cid]
                 for cid in computer_ids
                 if cid in self._computers
+                and self._computers[cid].status != ComputerStatus.DELETED
             ]
 
     def heartbeat(self, computer_id: str, version: Optional[str] = None) -> bool:
@@ -324,6 +341,47 @@ class ComputerManager:
                 return True
             return False
 
+    def _purgeExpiredPairTickets(self, now: float) -> None:
+        for digest, ticket in list(self._pair_tickets.items()):
+            if ticket["expires_at"] <= now:
+                del self._pair_tickets[digest]
+
+    def _invalidatePairTickets(self, computer_id: str) -> None:
+        for digest, ticket in list(self._pair_tickets.items()):
+            if ticket["computer_id"] == computer_id:
+                del self._pair_tickets[digest]
+
+    def issue_pair_token(
+        self,
+        computer_id: str,
+        user_id: str,
+        ttl_seconds: float = PAIR_TOKEN_TTL_SECONDS,
+    ) -> Optional[str]:
+        """属主签发短期一次性配对票据；同一设备只保留最后一张。"""
+        with self._lock:
+            computer = self.get_computer(computer_id, user_id=user_id)
+            if not computer or computer.status == ComputerStatus.DELETED:
+                return None
+            if (
+                isinstance(ttl_seconds, bool)
+                or not isinstance(ttl_seconds, (int, float))
+                or ttl_seconds <= 0
+                or ttl_seconds > MAX_PAIR_TOKEN_TTL_SECONDS
+            ):
+                return None
+
+            now = time.time()
+            self._purgeExpiredPairTickets(now)
+            self._invalidatePairTickets(computer_id)
+            pair_token = secrets.token_urlsafe(32)
+            digest = hashlib.sha256(pair_token.encode("utf-8")).hexdigest()
+            self._pair_tickets[digest] = {
+                "computer_id": computer_id,
+                "owner_user_id": str(user_id).strip(),
+                "expires_at": now + ttl_seconds,
+            }
+            return pair_token
+
     def pair_byoa_computer(
         self,
         computer_id: str,
@@ -332,85 +390,77 @@ class ComputerManager:
         available_engines: List[str],
         daemon_version: str,
         supervised: bool = False,
-    ) -> Optional[Computer]:
-        """
-        BYOA Computer 配对
-
-        Args:
-            computer_id: Computer ID
-            pair_token: 配对 token
-            host_name: 主机名
-            available_engines: 可用引擎列表
-            daemon_version: daemon 版本
-            supervised: 是否作为服务运行
-
-        Returns:
-            Computer 对象或 None
-        """
+        *,
+        user_id: str,
+    ) -> Optional[ComputerPairing]:
+        """原子消费配对票据，另发长期 daemon 凭据；原文只在返回值中出现。"""
         with self._lock:
-            computer = self._computers.get(computer_id)
-            if not computer:
+            computer = self.get_computer(computer_id, user_id=user_id)
+            if not computer or computer.status == ComputerStatus.DELETED:
                 return None
 
-            # Generate device token
-            import hashlib
-            device_token = hashlib.sha256(pair_token.encode()).hexdigest()
+            presented = str(pair_token or "").strip()
+            if not presented:
+                return None
+            digest = hashlib.sha256(presented.encode("utf-8")).hexdigest()
+            ticket = self._pair_tickets.pop(digest, None)
+            if not ticket:
+                return None
+            if (
+                ticket["computer_id"] != computer_id
+                or ticket["owner_user_id"] != str(user_id).strip()
+                or ticket["expires_at"] <= time.time()
+            ):
+                return None
 
-            computer.daemon_token = device_token
+            daemon_token = secrets.token_urlsafe(32)
+            computer.daemon_token = hashlib.sha256(daemon_token.encode("utf-8")).hexdigest()
             computer.daemon_version = daemon_version
             computer.paired_at = time.time()
-            computer.credential_hash = device_token
-
-            # Update metadata
+            computer.revoked_at = None
+            computer.updated_at = computer.paired_at
             computer.metadata["host_name"] = host_name
             computer.metadata["available_engines"] = available_engines
             computer.metadata["supervised"] = supervised
 
-            self._save_computer(computer)
+            if not self._save_computer(computer):
+                return None
 
             logger.info(f"Paired BYOA computer: {computer_id}")
-            return computer
+            return ComputerPairing(computer=computer, daemon_token=daemon_token)
 
-    def revoke_computer(self, computer_id: str) -> bool:
-        """
-        撤销 Computer 访问
-
-        Args:
-            computer_id: Computer ID
-
-        Returns:
-            是否成功
-        """
+    def revoke_computer(self, computer_id: str, *, user_id: str) -> bool:
+        """撤销 Computer 访问；只有属主或管理员可操作。"""
         with self._lock:
-            computer = self._computers.get(computer_id)
+            computer = self.get_computer(computer_id, user_id=user_id)
             if not computer:
                 return False
 
+            self._invalidatePairTickets(computer_id)
             computer.revoked_at = time.time()
             computer.status = ComputerStatus.OFFLINE
             computer.daemon_token = None
+            computer.updated_at = computer.revoked_at
+            saved = self._save_computer(computer)
 
-            self._save_computer(computer)
+            if saved:
+                logger.warning(f"Computer revoked: {computer_id}")
+            return saved
 
-            logger.warning(f"Computer revoked: {computer_id}")
-            return True
-
-    def delete_computer(self, computer_id: str, hard: bool = False) -> bool:
-        """
-        删除 Computer
-
-        Args:
-            computer_id: Computer ID
-            hard: 硬删除 (vs soft delete)
-
-        Returns:
-            是否成功
-        """
+    def delete_computer(
+        self,
+        computer_id: str,
+        hard: bool = False,
+        *,
+        user_id: str,
+    ) -> bool:
+        """删除 Computer；computer_id 只定位，写权限由 user_id 判定。"""
         with self._lock:
-            computer = self._computers.get(computer_id)
+            computer = self.get_computer(computer_id, user_id=user_id)
             if not computer:
                 return False
 
+            self._invalidatePairTickets(computer_id)
             if hard:
                 # Hard delete: remove files
                 try:
@@ -429,6 +479,8 @@ class ComputerManager:
                     # Update indexes
                     for user_id in self._user_computers:
                         self._user_computers[user_id].discard(computer_id)
+                    for company_id in self._company_computers:
+                        self._company_computers[company_id].discard(computer_id)
 
                     logger.info(f"Hard deleted computer: {computer_id}")
                     return True
@@ -436,14 +488,16 @@ class ComputerManager:
                 except Exception as e:
                     logger.error(f"Failed to hard delete computer {computer_id}: {e}")
                     return False
-            else:
-                # Soft delete
-                computer.status = ComputerStatus.DELETED
-                computer.deleted_at = time.time()
-                self._save_computer(computer)
 
+            computer.status = ComputerStatus.DELETED
+            computer.deleted_at = time.time()
+            computer.daemon_token = None
+            computer.updated_at = computer.deleted_at
+            saved = self._save_computer(computer)
+
+            if saved:
                 logger.info(f"Soft deleted computer: {computer_id}")
-                return True
+            return saved
 
     def admin_list_all_computers(self, admin_id: str, include_deleted: bool = False) -> List[Computer]:
         """
@@ -473,7 +527,7 @@ class ComputerManager:
         """获取 Cloud Computer 实例 (每公司一行)"""
         with self._lock:
             for computer in self._computers.values():
-                if computer.kind == ComputerKind.CLOUD:
+                if computer.kind == ComputerKind.CLOUD and computer.status != ComputerStatus.DELETED:
                     return computer
             return None
 

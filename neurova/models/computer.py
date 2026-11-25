@@ -41,6 +41,7 @@ class ComputerStatus(str, Enum):
     ONLINE = "online"
     OFFLINE = "offline"
     BUSY = "busy"
+    DELETED = "deleted"
 
 @dataclass
 class Computer:
@@ -67,11 +68,10 @@ class Computer:
     agents: Dict[str, Any] = field(default_factory=dict)  # agent_id -> Agent dict
 
     # BYOA specific fields
-    daemon_token: Optional[str] = None      # 配对 token (device credential)
+    daemon_token: Optional[str] = None      # 旧字段名；值仅为 device credential 的 SHA256 摘要
     daemon_version: Optional[str] = None    # daemon 版本
     paired_at: Optional[float] = None       # 配对时间
     revoked_at: Optional[float] = None      # 撤销时间
-    credential_hash: Optional[str] = None   # SHA256 hash of device token
 
     # Metadata
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -79,6 +79,7 @@ class Computer:
     # Timestamps
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
+    deleted_at: Optional[float] = None
 
     def to_dict(self) -> dict:
         """转换为字典"""
@@ -96,10 +97,10 @@ class Computer:
             "daemon_version": self.daemon_version,
             "paired_at": self.paired_at,
             "revoked_at": self.revoked_at,
-            "credential_hash": self.credential_hash,
             "metadata": self.metadata,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "deleted_at": self.deleted_at,
         }
 
     @classmethod
@@ -114,14 +115,14 @@ class Computer:
             last_seen_at=data.get("last_seen_at"),
             owner_user_id=data.get("owner_user_id", ""),
             company_id=data.get("company_id", ""),
-            daemon_token=data.get("daemon_token"),
+            daemon_token=data.get("daemon_token") or data.get("credential_hash"),
             daemon_version=data.get("daemon_version"),
             paired_at=data.get("paired_at"),
             revoked_at=data.get("revoked_at"),
-            credential_hash=data.get("credential_hash"),
             metadata=data.get("metadata", {}),
             created_at=data.get("created_at", time.time()),
             updated_at=data.get("updated_at", time.time()),
+            deleted_at=data.get("deleted_at"),
         )
 
         # Load agents
@@ -176,6 +177,15 @@ class Computer:
         status_icon = "●" if self.is_online() else "○"
         byoa_tag = " [BYOA]" if self.is_byoa() else ""
         return f"<Computer {self.name} {status_icon}{byoa_tag}>"
+
+
+@dataclass(frozen=True)
+class ComputerPairing:
+    """配对成功的内部结果；daemon_token 原文只允许进入该次响应。"""
+
+    computer: Computer
+    daemon_token: str
+
 
 # 注：Singleton 由 neurova/collaboration/computer_manager.py 提供
 # （get_computer_manager_singleton / reset_computer_manager_singleton），

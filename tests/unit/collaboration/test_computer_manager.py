@@ -179,9 +179,15 @@ class TestBYOAPairing:
             engine=ComputerEngine.CLAUDE_CODE,
         )
         
+        ticket = computer_manager.issue_pair_token(
+            comp.computer_id,
+            user_id="user_123",
+        )
+        assert ticket is not None
         paired = computer_manager.pair_byoa_computer(
             computer_id=comp.computer_id,
-            pair_token="secret_token_123",
+            user_id="user_123",
+            pair_token=ticket,
             host_name="MacBook-Pro.local",
             available_engines=["claude", "sample-engine"],
             daemon_version="0.1.0",
@@ -189,10 +195,11 @@ class TestBYOAPairing:
         )
         
         assert paired is not None
-        assert paired.daemon_token is not None
-        assert paired.daemon_version == "0.1.0"
-        assert paired.paired_at is not None
-        assert paired.metadata["host_name"] == "MacBook-Pro.local"
+        assert paired.computer.daemon_token is not None
+        assert paired.daemon_token != ticket
+        assert paired.computer.daemon_version == "0.1.0"
+        assert paired.computer.paired_at is not None
+        assert paired.computer.metadata["host_name"] == "MacBook-Pro.local"
     
     def test_revoke_computer(self, computer_manager):
         """Test revoking Computer access"""
@@ -201,7 +208,7 @@ class TestBYOAPairing:
             owner_user_id="user_123",
         )
         
-        result = computer_manager.revoke_computer(comp.computer_id)
+        result = computer_manager.revoke_computer(comp.computer_id, user_id="user_123")
         
         assert result is True
         assert comp.revoked_at is not None
