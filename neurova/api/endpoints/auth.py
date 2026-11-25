@@ -787,11 +787,12 @@ async def register(request: Request, body: RegisterRequest):
                 verification_model.record_register_attempt(ip_address, success=False)
                 raise HTTPException(status_code=400, detail="Email already exists")
 
-        # 4. 创建用户（首启场景：系统中尚无任何用户时，注册者即为管理员）
+        # 4. 创建用户（首启场景：系统中尚无任何用户时，注册者即为管理员）。
+        # API-04：首管理员判定与写入原子化——原"先 count 再 create"的并发窗口
+        # 会产生双管理员；判定收进 UserModel 的事务内单源（与 OIDC 供应同源）。
         password_hash = hash_password(body.password)
-        role = "admin" if user_model.count_users() == 0 else "user"
-        user = user_model.create_user(
-            username=body.username, password_hash=password_hash, email=body.email, role=role
+        user = user_model.createUserWithBootstrapRole(
+            username=body.username, password_hash=password_hash, email=body.email
         )
 
         # 5. 生成 token (审计修复 P0-2: 补齐身份声明)

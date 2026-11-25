@@ -51,7 +51,14 @@ def fake_models():
         created.append(kwargs)
         return _make_user(kwargs)
 
+    def _create_bootstrap_user(**kwargs):
+        # 与真 UserModel.createUserWithBootstrapRole 同口径（API-04 原子化）：
+        # 角色由模型层按"系统是否已有用户"判定，端点不再传 role。
+        role = "admin" if user_model.count_users.return_value == 0 else "user"
+        return _create_user(**{**kwargs, "role": role})
+
     user_model.create_user.side_effect = _create_user
+    user_model.createUserWithBootstrapRole.side_effect = _create_bootstrap_user
     user_model.get_user_by_username.return_value = None
     user_model.get_user_by_email.return_value = None
     user_model.created_kwargs = created

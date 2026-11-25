@@ -24,9 +24,11 @@ jwks_uri 公钥集合按 kid 匹配（缓存纪律同 discovery）。PyJWT 的�
 cryptography，缺失时该分支 401 诚实报因，不裸崩。header.alg 只用来选材料，
 decode 的 algorithms 白名单与所选材料一一对应，不制造 alg 混淆面。
 
-用户供应规则：按 oidc_sub 找人 → 无则按 email 绑定现有号（回写 oidc_sub）→
-再无则建号（role 沿用"系统无用户时首个账号即管理员"的既有口径，见
-endpoints/auth.py register 的 is_bootstrap 分支）。
+用户供应规则：按 oidc_sub 找人 → 无则按**已验证** email（id_token 的
+email_verified=true）绑定现有号（回写 oidc_sub）→ 再无则建号（role 由
+UserModel.createUserWithBootstrapRole 在写入事务内判定："系统无用户时首个
+账号即管理员"，与 endpoints/auth.py register 同一单源）。停用账号（status
+!= active）不绑定、不发令牌。
 """
 
 import hashlib
@@ -300,32 +302,45 @@ def _uniqueUsername(model, base: str) -> str:
     return candidate
 
 
-def _provisionOidcUser(model, sub: str, email: str, preferred_username: str):
-    """按 oidc_sub → email 绑定 → 建号 的供应规则返回既有/新建 User。"""
+def _provisionOidcUser(model, sub: str, email: str, preferred_username: str,
+                       email_verified: bool = False):
+    """按 oidc_sub → 已验证 email 绑定 → 建号 的供应规则返回既有/新建 User。
+
+    API-04（审计 2026-11-25）：
+    - email 绑定只接受 **IdP 已验证** 的邮箱（email_verified=true）。信任
+      "不验证邮箱的 IdP" 时，任何人把 IdP 资料邮箱填成他人邮箱即可绑定他人
+      账号——未验证邮箱一律不绑定、也不落库（users 表无 verified 标记列，
+      存了即被下游当真）。
+    - 命中的既有账号 status != active 时拒绝绑定（不把 sub 绑到停用账号上）。
+    - 首管理员判定走 createUserWithBootstrapRole 事务内单源（并发首登不产生
+      双管理员）。
+    """
     existing = model.get_user_by_oidc_sub(sub)
     if existing is not None:
         return existing
 
-    if email:
-        byEmail = model.get_user_by_email(email)
+    verifiedEmail = email if (email and email_verified) else None
+    if verifiedEmail:
+        byEmail = model.get_user_by_email(verifiedEmail)
         if byEmail is not None:
+            if byEmail.status != "active":
+                raise HTTPException(status_code=403, detail="Account is inactive")
             # 绑定现有号：IdP 已验证该邮箱归属，回写 sub 形成绑定
             model.update_user(byEmail.id, oidc_sub=sub)
             return model.get_user_by_id(byEmail.id)
 
     # 建号：用户名取邮箱前缀或 sub 派生；口令置为不可用的随机哈希（SSO 账号
-    # 不经密码登录，但 password_hash 列 NOT NULL）；首用户即管理员（沿用
-    # register 的 is_bootstrap 口径）。
+    # 不经密码登录，但 password_hash 列 NOT NULL）；首用户即管理员——判定与
+    # 写入原子化（createUserWithBootstrapRole，与 register 的 is_bootstrap
+    # 口径同一事务内单源）。
     base = (email.split("@")[0] if email else "") or f"oidc-{sub[:12]}"
     safeBase = "".join(ch for ch in base if ch.isalnum() or ch in "._-") or f"oidc-{sub[:12]}"
-    role = "admin" if model.count_users() == 0 else "user"
     from neurova.api.auth import hash_password
 
-    return model.create_user(
+    return model.createUserWithBootstrapRole(
         username=_uniqueUsername(model, safeBase),
         password_hash=hash_password(secrets.token_urlsafe(32)),
-        email=email or None,
-        role=role,
+        email=verifiedEmail or None,
         oidc_sub=sub,
     )
 
@@ -515,14 +530,24 @@ async def oidcCallback(request: Request, code: str = "", state: str = ""):
         raise HTTPException(status_code=401, detail="OIDC id_token 缺少 sub")
     email = str(claims.get("email") or "").strip()
     preferred = str(claims.get("preferred_username") or "").strip()
+    # API-04：email_verified 标准 claim（布尔；个别 IdP 用字符串形态，兼容判真）
+    rawVerified = claims.get("email_verified")
+    emailVerified = rawVerified is True or str(rawVerified).strip().lower() in ("true", "1", "yes")
 
-    # 供应用户（sub → email 绑定 → 建号）
+    # 供应用户（sub → 已验证 email 绑定 → 建号）
     from neurova.api.endpoints.auth import _get_user_model, buildIdentityClaims
 
     model = _get_user_model()
-    user = _provisionOidcUser(model, sub=sub, email=email, preferred_username=preferred)
+    user = _provisionOidcUser(model, sub=sub, email=email, preferred_username=preferred,
+                              email_verified=emailVerified)
     if user is None:
         raise HTTPException(status_code=500, detail="OIDC 用户供应失败")
+
+    # API-04：SSO 不得给停用账号发令牌（sub 命中复用的存量账号同样在此拦下）
+    if user.status != "active":
+        _auditOidcLogin(str(user.id), request, success=False, sub=sub)
+        logger.warning("OIDC 登录拒绝：账号已停用 user_id=%s sub=%s", user.id, sub)
+        raise HTTPException(status_code=403, detail="Account is inactive")
 
     from neurova.api.auth import create_access_token, create_refresh_token
 

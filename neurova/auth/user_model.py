@@ -278,6 +278,70 @@ class UserModel:
             logger.error("Failed to create user: %s", e)
             raise
 
+    def createUserWithBootstrapRole(
+        self, username: str, password_hash: str, email: str = None,
+        status: str = "active", oidc_sub: str = None,
+    ) -> User:
+        """原子创建用户：系统尚无任何用户时角色即 admin，否则 user。
+
+        API-04（审计 2026-11-25）：原先"先 count_users()==0 再 create_user"的
+        check-then-act 在并发首登/首注下，两个请求都可能读到空表、各自建成
+        管理员。现把"判定 + 写入"收进同一 BEGIN IMMEDIATE 事务（SQLite 写者
+        串行、busy 超时内排队），只有第一个插入者看得到空表——首管理员全局
+        唯一由数据库串行化保证，不再依赖应用层先读后写的窗口。
+
+        供 OIDC 供应（auth_oidc._provisionOidcUser）与本地注册
+        （endpoints/auth.register）共用，是"首账号即管理员"口径的唯一实现。
+
+        Raises:
+            ValueError: 用户名或邮箱已存在（事务内复查，并发下诚实报错）。
+        """
+        conn = self._get_conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM users")
+            row = cursor.fetchone()
+            count = row[0] if row else 0
+            role = "admin" if count == 0 else "user"
+
+            cursor.execute("SELECT id FROM users WHERE username = ?", (username,))
+            if cursor.fetchone():
+                raise ValueError(f"Username '{username}' already exists")
+            if email:
+                cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
+                if cursor.fetchone():
+                    raise ValueError(f"Email '{email}' already exists")
+
+            cursor.execute(
+                """
+                INSERT INTO users (username, email, password_hash, role, status, oidc_sub)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (username, email, password_hash, role, status, oidc_sub),
+            )
+            user_id = cursor.lastrowid
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:  # noqa: BLE001 - 回滚失败不影响原异常上抛
+                pass
+            raise
+        finally:
+            conn.close()
+
+        return User(
+            id=user_id,
+            username=username,
+            email=email,
+            password_hash=password_hash,
+            role=role,
+            status=status,
+            created_at=datetime.datetime.now().isoformat(),
+            oidc_sub=oidc_sub or "",
+        )
+
     def get_user_by_id(self, user_id: int) -> User:
         """
         根据ID获取用户

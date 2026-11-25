@@ -322,7 +322,8 @@ class TestOidcFullFlow:
         assert "NEUROVA_OIDC_ISSUER" in resp.text or "issuer" in resp.text.lower()
 
     def test_callbackIssuesRepoJwtAndMeWorks(self, env):
-        cb, _ = _completeLogin(env, sub="sub-alice-1", email="alice@example.com")
+        cb, _ = _completeLogin(env, sub="sub-alice-1", email="alice@example.com",
+                               codeKwargs={"extraClaims": {"email_verified": True}})
         assert cb.status_code == 200, cb.text
         data = cb.json().get("data") or cb.json()
         assert data.get("access_token") and data.get("refresh_token")
@@ -357,14 +358,15 @@ class TestOidcFullFlow:
         assert env["model"].count_users() == 1
 
     def test_emailBindsExistingAccount(self, env):
-        """无 sub 命中时按 email 绑定现有号（不建新号）。"""
+        """无 sub 命中时按**已验证** email 绑定现有号（不建新号）。"""
         model = env["model"]
         from neurova.api.auth import hash_password
 
         model.create_user(username="legacy-alice",
                           password_hash=hash_password("Legacy-Pw-0001"),
                           email="alice@example.com", role="user")
-        cb, _ = _completeLogin(env, sub="sub-new-bind", email="alice@example.com")
+        cb, _ = _completeLogin(env, sub="sub-new-bind", email="alice@example.com",
+                               codeKwargs={"extraClaims": {"email_verified": True}})
         assert cb.status_code == 200, cb.text
         assert model.count_users() == 1, "email 命中现有号时不得另建账号"
         bound = model.get_user_by_oidc_sub("sub-new-bind")
@@ -412,6 +414,129 @@ class TestOidcFullFlow:
         cb, _ = _completeLogin(env, sub="sub-tamper", email="tamper@example.com",
                                tamperKey="wrong-key-0123456789abcdef")
         assert cb.status_code in (400, 401), "签名校验失败（错钥 id_token）必须拒绝"
+
+
+class TestOidcEmailVerificationAndStatus:
+    """API-04（审计 2026-11-25 批次 C）：
+
+    - email 绑定只认 IdP 已验证邮箱（email_verified），未验证邮箱不得绑定
+      他人账号、也不得落库（users 表无 verified 标记列，存了即被当真）；
+    - SSO 不得给停用（status != active）账号发令牌；停用账号也不得被绑定。
+    """
+
+    def test_unverifiedEmailDoesNotBindExistingAccount(self, env):
+        model = env["model"]
+        from neurova.api.auth import hash_password
+
+        model.create_user(username="legacy-bob",
+                          password_hash=hash_password("Legacy-Pw-0001"),
+                          email="bob@example.com", role="user")
+        cb, _ = _completeLogin(env, sub="sub-attacker", email="bob@example.com")
+        assert cb.status_code == 200, cb.text
+        assert model.count_users() == 2, "未验证邮箱不得绑定现有号（应另建新号）"
+        legacy = model.get_user_by_email("bob@example.com")
+        assert legacy.username == "legacy-bob"
+        assert legacy.oidc_sub is None, "未验证邮箱不得把 IdP sub 绑到他人账号"
+
+    def test_emailVerifiedFalseDoesNotBindExistingAccount(self, env):
+        model = env["model"]
+        from neurova.api.auth import hash_password
+
+        model.create_user(username="legacy-carol",
+                          password_hash=hash_password("Legacy-Pw-0001"),
+                          email="carol@example.com", role="user")
+        cb, _ = _completeLogin(env, sub="sub-false-claim", email="carol@example.com",
+                               codeKwargs={"extraClaims": {"email_verified": False}})
+        assert cb.status_code == 200, cb.text
+        assert model.get_user_by_email("carol@example.com").oidc_sub is None, \
+            "email_verified=false 的邮箱不得绑定现有账号"
+
+    def test_unverifiedEmailNotStoredOnNewAccount(self, env):
+        model = env["model"]
+        cb, _ = _completeLogin(env, sub="sub-noemail", email="someone@example.com")
+        assert cb.status_code == 200, cb.text
+        user = model.get_user_by_oidc_sub("sub-noemail")
+        assert user is not None
+        assert not user.email, "未验证邮箱不得落库（users 表无 verified 标记列）"
+
+    def test_verifiedEmailStillBindsAndStores(self, env):
+        """正向对照：email_verified=true 时绑定与落库语义不变。"""
+        model = env["model"]
+        from neurova.api.auth import hash_password
+
+        model.create_user(username="legacy-dave",
+                          password_hash=hash_password("Legacy-Pw-0001"),
+                          email="dave@example.com", role="user")
+        cb, _ = _completeLogin(env, sub="sub-dave", email="dave@example.com",
+                               codeKwargs={"extraClaims": {"email_verified": True}})
+        assert cb.status_code == 200, cb.text
+        assert model.count_users() == 1
+        bound = model.get_user_by_oidc_sub("sub-dave")
+        assert bound is not None and bound.username == "legacy-dave"
+
+    def test_inactiveSsoUserCannotReLogin(self, env):
+        """sub 命中复用路径：停用账号再走 SSO 必须 403，不得续发令牌。"""
+        model = env["model"]
+        cb1, _ = _completeLogin(env, sub="sub-disable", email="d@example.com",
+                                codeKwargs={"extraClaims": {"email_verified": True}})
+        assert cb1.status_code == 200, cb1.text
+        user = model.get_user_by_oidc_sub("sub-disable")
+        assert model.update_user(user.id, status="disabled")
+
+        cb2, _ = _completeLogin(env, sub="sub-disable", email="d@example.com",
+                                codeKwargs={"extraClaims": {"email_verified": True}})
+        assert cb2.status_code == 403, (
+            f"停用账号不得经 SSO 续发令牌：{cb2.status_code} {cb2.text}"
+        )
+
+    def test_inactiveExistingAccountNotBoundByEmail(self, env):
+        model = env["model"]
+        from neurova.api.auth import hash_password
+
+        model.create_user(username="frozen",
+                          password_hash=hash_password("Legacy-Pw-0001"),
+                          email="frozen@example.com", role="user", status="disabled")
+        cb, _ = _completeLogin(env, sub="sub-frozen", email="frozen@example.com",
+                               codeKwargs={"extraClaims": {"email_verified": True}})
+        assert cb.status_code == 403, (
+            f"不得向停用账号绑定 sub 并发令牌：{cb.status_code} {cb.text}"
+        )
+        frozen = model.get_user_by_email("frozen@example.com")
+        assert frozen.oidc_sub is None, "停用账号不得被绑定"
+
+
+class TestOidcBootstrapAdminAtomicity:
+    """API-04：首管理员判定与写入必须原子——"先 count==0 再 create" 的
+    check-then-act 在并发首登下会产生多个管理员。
+
+    判据把 TOCTOU 读钉成确定性形态：count_users 恒回 0（模拟"两次读都发生在
+    任何写入提交之前"的交错），两次供应都必须仍只产生一个管理员——只有把
+    判定收进写入事务（BEGIN IMMEDIATE 内 recount）才可能同时满足。
+    """
+
+    def test_staleCountReadStillYieldsSingleAdmin(self, env, monkeypatch):
+        model = env["model"]
+        monkeypatch.setattr(model, "count_users", lambda *a, **k: 0, raising=True)
+
+        first = OIDC._provisionOidcUser(model, sub="sub-race-a", email="",
+                                        preferred_username="")
+        second = OIDC._provisionOidcUser(model, sub="sub-race-b", email="",
+                                         preferred_username="")
+
+        admins = [u for u in (first, second) if u.role == "admin"]
+        assert len(admins) == 1, (
+            f"首管理员判定非原子：陈旧 count 读下产生了 {len(admins)} 个管理员 "
+            f"（roles={[u.role for u in (first, second)]}）"
+        )
+        # count_users 已被钉成恒 0，落库行数直查 SQLite（不经过被patch的方法）
+        import sqlite3
+
+        conn = sqlite3.connect(model.db_path)
+        try:
+            rows = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+        finally:
+            conn.close()
+        assert rows[0] == 2, f"两个供应都必须真实落库：{rows[0]}"
 
 
 class TestOidcMigration:
