@@ -413,10 +413,14 @@ class AgentRunStore:
             return cur.rowcount == 1
 
     def takeForResume(self, run_id: str) -> Optional[Dict[str, Any]]:
-        """把 parked 行交还给回合入口（翻回 queued），返回**翻转前**的行。
+        """两阶段领取·第一阶段：把 parked 行原子翻回 queued，返回**翻转前**的行。
 
-        载荷列在换手时即清空：调用方拿到了它，库里就不该再留第二份原文；
-        若这一轮再次挂起，`park` 会重新写入当时的载荷。
+        载荷**保留在库里**：此刻调用方只是"领走了任务"，用户原文要到管线
+        `_step_save_session` 才有第二份 durable 副本。若领取即清空，领取与重建
+        之间一次进程崩溃就把唯一载荷带走（库里已删、内存随进程消失）。载荷
+        留到 `finish` 写终态时才清（第二阶段）；若领取后崩溃，启动对账
+        （`reconcile_at_startup`）会把这种"已领取未重建"的行退回 parked，
+        人工可再次续跑。若这一轮再次挂起，`park` 会重新写入当时的载荷。
 
         非 parked 一律 None：running 被取走＝同一轮双执行；终态行已跑过。
         `seq` 不变，所以它仍排在会话队列最前——这一轮本来就先提交。
@@ -429,8 +433,7 @@ class AgentRunStore:
             if row is None:
                 return None
             self._conn.execute(
-                "UPDATE agent_runs SET status='queued', cancel_requested=0,"
-                " resume_payload=NULL"
+                "UPDATE agent_runs SET status='queued', cancel_requested=0"
                 " WHERE run_id=? AND status=?",
                 (run_id, PARKED_STATUS),
             )
@@ -581,21 +584,38 @@ class AgentRunStore:
         的行必然来自已死进程 → failed(process_died)；遗留 queued →
         cancelled(server_restart)（其等待方 SSE 连接已随进程消失）。
 
+        例外：仍带 `resume_payload` 的 queued/running 行是"已领取未重建"的续跑
+        回合（`takeForResume` 只翻状态不清载荷，用户原文要等管线落会话才有第二
+        副本）——进程在重建前死亡时载荷是唯一副本，把它们**退回 parked** 等
+        人工再续，而不是收敛成终态把唯一载荷锁死在死人行里。
+
         parked **原样留着**：它是"等人"而不是"在跑"，把它收敛掉就等于一次重启
         之后人工再也没东西可续——这条能力的全部意义正是活过进程。数量必须打进
         日志：否则运维只看得到"什么都没发生"，而库里挂着 N 条待办。
         """
         now = time.time()
         with self._lock, self._conn:
+            parked = self._conn.execute(
+                "SELECT COUNT(*) FROM agent_runs WHERE status=?", (PARKED_STATUS,)
+            ).fetchone()[0]
+            reparked = self._conn.execute(
+                "SELECT run_id, session_id FROM agent_runs"
+                " WHERE resume_payload IS NOT NULL AND resume_payload != ''"
+                " AND status IN ('queued','running')"
+            ).fetchall()
+            if reparked:
+                self._conn.execute(
+                    "UPDATE agent_runs SET status=?, owner='', lease_expires_at=0,"
+                    " heartbeat_at=0 WHERE resume_payload IS NOT NULL"
+                    " AND resume_payload != '' AND status IN ('queued','running')",
+                    (PARKED_STATUS,),
+                )
             dead = self._conn.execute(
                 "SELECT run_id, session_id, subagent_id FROM agent_runs WHERE status='running'"
             ).fetchall()
             queued = self._conn.execute(
                 "SELECT run_id, session_id FROM agent_runs WHERE status='queued'"
             ).fetchall()
-            parked = self._conn.execute(
-                "SELECT COUNT(*) FROM agent_runs WHERE status=?", (PARKED_STATUS,)
-            ).fetchone()[0]
             self._conn.execute(
                 "UPDATE agent_runs SET status='failed', error_type='process_died',"
                 " finished_at=? WHERE status='running'",
@@ -605,6 +625,11 @@ class AgentRunStore:
                 "UPDATE agent_runs SET status='cancelled', error_type='server_restart',"
                 " finished_at=? WHERE status='queued'",
                 (now,),
+            )
+        if reparked:
+            logger.warning(
+                "AgentRun 启动对账：%d 条'已领取未重建'的续跑行退回 parked"
+                "（载荷保留，可再次人工续跑）", len(reparked),
             )
         if parked:
             logger.warning(

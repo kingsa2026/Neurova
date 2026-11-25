@@ -91,12 +91,60 @@ def test_resumeReusesTheSameRowAsQueueHead(store):
     assert row is not None
     assert row["status"] == ars.PARKED_STATUS, "返回值应是翻转前的行（调用方据此判定）"
     assert "parked-turn" in row["resume_payload"]
-    assert store.get(parked)["resume_payload"] in (None, ""), "载荷交给调用方后库里不该再留一份"
+    assert "parked-turn" in (store.get(parked)["resume_payload"] or ""), \
+        "两阶段领取：库里载荷要留到重建成功（finish）才清，领取即清＝崩溃丢唯一副本"
 
     # 挂起的回合提交得更早（seq 更小），翻回 queued 后必须抢到队头
     assert store.claim_next("sr") == parked
     assert store.get(parked)["status"] == "running"
     assert store.get(later)["status"] == "queued"
+
+
+def test_takeForResumeKeepsPayloadUntilTurnEnds(store):
+    """两阶段领取：领取（parked→queued）不清载荷；回合终态（finish）才清。
+
+    缺陷形态：takeForResume 先清 resume_payload 再返回，调用方之后才重建消息——
+    两步之间进程崩溃，用户原文在库里已删、在内存随进程消失，唯一续跑载荷丢失。
+    """
+    parked = _runningRun(store, session_id="sr2", message="payload-must-survive")
+    store.park(parked, ars.OWNER_IDENTITY, "rate_limit_cooldown",
+               {"message": "payload-must-survive", "entry": "console"})
+
+    row = store.takeForResume(parked)
+    assert row is not None, "parked 行必须能被领取"
+    assert "payload-must-survive" in row["resume_payload"]
+    # 领取后库里仍留着载荷：领取与重建之间崩溃也不丢
+    assert "payload-must-survive" in (store.get(parked)["resume_payload"] or ""), \
+        "领取即清载荷——崩溃窗口丢唯一续跑载荷"
+    # 行已翻回 queued，仍按队头晋升（既有契约不变）
+    assert store.claim_next("sr2") == parked
+    assert store.get(parked)["status"] == "running"
+    # 终态仍清载荷（既有卫生契约不变）
+    store.finish(parked, ars.OWNER_IDENTITY, "completed")
+    assert store.get(parked)["resume_payload"] in (None, "")
+
+
+def test_crashedResumeClaimIsReparkedAtStartup(tmp_path):
+    """领取后续跑回合没跑完就崩：重启对账把它退回 parked（等人），载荷不丢。
+
+    领取后的行是 queued+载荷；若被启动收敛抹成 cancelled/failed，人工就再也
+    续不了——唯一载荷被锁死在终态行里，等于变相丢失。
+    """
+    db = tmp_path / "crash-resume.db"
+    s1 = ars.AgentRunStore(db)
+    parked = _runningRun(s1, session_id="scrash", message="crash-window-msg")
+    s1.park(parked, ars.OWNER_IDENTITY, "rate_limit_cooldown", {"message": "crash-window-msg"})
+    assert s1.takeForResume(parked) is not None  # 领取：queued + 载荷保留；此后进程崩溃
+    s1.close()
+
+    s2 = ars.AgentRunStore(db)  # 重启＝构造即 reconcile_at_startup
+    row = s2.get(parked)
+    assert row["status"] == ars.PARKED_STATUS, \
+        "领取后崩溃的回合应退回等人态，而不是被收敛成终态锁死载荷"
+    assert "crash-window-msg" in (row["resume_payload"] or ""), "重启后载荷必须还在"
+    # 退回 parked 后人工仍可再次领取续跑
+    assert s2.takeForResume(parked) is not None
+    s2.close()
 
 
 def test_takeForResumeRefusesNonParkedRows(store):
