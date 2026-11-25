@@ -75,13 +75,14 @@ def _ingestedCount(store: Any, sourceId: str) -> int:
 
 
 def _view(sourceId: str, config: Dict[str, Any], adapters: Any,
-          store: Any = None) -> Dict[str, Any]:
+          store: Any = None, tenantId: str = "default") -> Dict[str, Any]:
     view = {
         "source_id": sourceId,
         "descriptor": config.get("descriptor") or {},
         "cursor": config.get("cursor") or "",
         "enabled": bool(config.get("enabled")),
-        "adapter_registered": adapters.get(sourceId) is not None,
+        # 适配器注册表按 (租户, 源) 隔离（KNOW-03）：回显本租户的接线实况
+        "adapter_registered": adapters.get(sourceId, tenantId=tenantId) is not None,
         # 页面重设计配套批：添加/更新时间与已获取数据量进回显
         "created_at": str(config.get("created_at") or ""),
         "updated_at": str(config.get("updated_at") or ""),
@@ -96,8 +97,9 @@ async def listEnterpriseSources(
 ):
     """已提交源列表（登录可读）：只读配置表，不触碰任何外部系统。"""
     ingestor, adapters, store = _parts()
-    rows = [_view(row["source_id"], row, adapters, store)
-            for row in ingestor.listConfigs(_tenantOf(current_user))]
+    tenant = _tenantOf(current_user)
+    rows = [_view(row["source_id"], row, adapters, store, tenantId=tenant)
+            for row in ingestor.listConfigs(tenant)]
     return {"code": 0, "message": "success",
             "data": {"items": rows, "total": len(rows)}}
 
@@ -114,7 +116,8 @@ async def getEnterpriseSource(
     if config is None:
         raise HTTPException(status_code=404, detail="企业源未提交: %s" % source_id)
     return {"code": 0, "message": "success",
-            "data": _view(str(source_id or "").strip(), config, adapters, store)}
+            "data": _view(str(source_id or "").strip(), config, adapters, store,
+                          tenantId=tenant)}
 
 
 @router.post("/enterprise/sources")
@@ -149,7 +152,8 @@ async def submitEnterpriseSource(
         get_logger(__name__).warning(
             "schema 目录自动刷新失败（source=%s）：%s", sourceId, exc)
     config = ingestor.loadConfig(tenant, sourceId) or {}
-    return {"code": 0, "message": "success", "data": _view(sourceId, config, adapters)}
+    return {"code": 0, "message": "success",
+            "data": _view(sourceId, config, adapters, tenantId=tenant)}
 
 
 class InitialLoadRequest(BaseModel):
@@ -188,7 +192,7 @@ async def triggerEnterpriseInitialLoad(
     config = ingestor.loadConfig(tenant, sourceId) or {}
     return {"code": 0, "message": "success",
             "data": {"result": result,
-                     "source": _view(sourceId, config, adapters)}}
+                     "source": _view(sourceId, config, adapters, tenantId=tenant)}}
 
 
 @router.post("/enterprise/sources/{source_id}/ingest")
@@ -216,7 +220,8 @@ async def triggerEnterpriseIngest(
         raise HTTPException(status_code=400, detail=str(exc))
     config = ingestor.loadConfig(tenant, sourceId) or {}
     return {"code": 0, "message": "success",
-            "data": {"result": result, "source": _view(sourceId, config, adapters, store)}}
+            "data": {"result": result,
+                     "source": _view(sourceId, config, adapters, store, tenantId=tenant)}}
 
 
 class SyncIntervalRequest(BaseModel):
@@ -461,7 +466,7 @@ async def deleteEnterpriseSource(
     deleted = ingestor.deleteConfig(tenant, sourceId)
     if not deleted:
         raise HTTPException(status_code=404, detail="企业源未提交: %s" % source_id)
-    adapters.unregister(sourceId)
+    adapters.unregister(sourceId, tenantId=tenant)
     return {"code": 0,
             "message": "连接器配置已删除；已获取的知识数据保留",
             "data": {"source_id": sourceId}}

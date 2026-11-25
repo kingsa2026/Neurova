@@ -148,6 +148,16 @@ class TestInitialBulkLoad:
         assert store.searchableFacts(agentId="default") == []
 
 
+class _RegistryStub:
+    """适配器注册表桩：与 KNOW-03 后的 (tenant, source) 键接口同形。"""
+
+    def get(self, sourceId, tenantId="default", fingerprint=""):
+        return None
+
+    def unregister(self, sourceId, tenantId="default"):
+        return None
+
+
 class TestInitialLoadEndpoint:
     @pytest.fixture
     def client(self, store, ingestor):
@@ -159,7 +169,7 @@ class TestInitialLoadEndpoint:
             lambda: {"user_id": "9", "username": "admin", "role": "admin",
                      "tenant_id": "default"}
         originalParts = knowledge_enterprise._parts
-        knowledge_enterprise._parts = lambda: (ingestor, {}, store)
+        knowledge_enterprise._parts = lambda: (ingestor, _RegistryStub(), store)
         yield TestClient(app)
         knowledge_enterprise._parts = originalParts
 

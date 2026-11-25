@@ -10,9 +10,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.tenant_scope import tenant_sql_where
 from .protocols import ChangeBatch, EnterpriseSourceAdapter, SourceCursor, SOURCE_TYPES
@@ -231,27 +232,60 @@ def _requireVariant(descriptor: Dict[str, Any], sourceId: str, tenantId: str,
 
 
 class EnterpriseSourceRegistry:
-    """sourceType 白名单注册表：默认空表；真实适配器接入只能走 register。"""
+    """sourceType 白名单注册表：默认空表；真实适配器接入只能走 register。
+
+    键是 (tenant_id, source_id)（KNOW-03）：配置按 (租户, 源) 隔离，进程内
+    适配器同口径隔离——不同租户的同名源各连各的，后注册租户不得复用前一
+    租户的连接/数据源。适配器随注册记录配置指纹；`get` 带指纹查询时指纹
+    不一致即返回 None（调用方经唯一工厂按当前配置重建）——描述符改了还拿
+    旧连接跑，就是把旧配置冒充新配置。
+    """
 
     def __init__(self) -> None:
-        self._adapters: Dict[str, EnterpriseSourceAdapter] = {}
+        self._adapters: Dict[Tuple[str, str], EnterpriseSourceAdapter] = {}
+        self._fingerprints: Dict[Tuple[str, str], str] = {}
+
+    @staticmethod
+    def _key(sourceId: str, tenantId: str) -> Tuple[str, str]:
+        return (str(tenantId or "default"), str(sourceId or "").strip())
 
     def register(self, sourceId: str, sourceType: str,
-                 adapter: EnterpriseSourceAdapter) -> None:
+                 adapter: EnterpriseSourceAdapter, tenantId: str = "default",
+                 fingerprint: str = "") -> None:
         if sourceType not in SOURCE_TYPES:
             raise ValueError(
                 "sourceType %r 不在白名单（%s）" % (sourceType, " / ".join(SOURCE_TYPES)))
-        self._adapters[str(sourceId or "").strip()] = adapter
+        key = self._key(sourceId, tenantId)
+        self._adapters[key] = adapter
+        self._fingerprints[key] = str(fingerprint or "")
 
-    def get(self, sourceId: str) -> Optional[EnterpriseSourceAdapter]:
-        return self._adapters.get(str(sourceId or "").strip())
+    def get(self, sourceId: str, tenantId: str = "default",
+            fingerprint: str = "") -> Optional[EnterpriseSourceAdapter]:
+        key = self._key(sourceId, tenantId)
+        adapter = self._adapters.get(key)
+        if adapter is None:
+            return None
+        stored = self._fingerprints.get(key, "")
+        if stored and fingerprint and stored != fingerprint:
+            return None
+        return adapter
 
-    def unregister(self, sourceId: str) -> None:
-        """进程内适配器摘除（DELETE 配置后的配套动作；幂等）。"""
-        self._adapters.pop(str(sourceId or "").strip(), None)
+    def unregister(self, sourceId: str, tenantId: str = "default") -> None:
+        """进程内适配器摘除（DELETE 配置后的配套动作；幂等；只摘本租户）。"""
+        key = self._key(sourceId, tenantId)
+        self._adapters.pop(key, None)
+        self._fingerprints.pop(key, None)
 
     def sources(self) -> List[str]:
-        return sorted(self._adapters)
+        return sorted({sourceId for _tenant, sourceId in self._adapters})
+
+
+def configFingerprint(descriptor: Dict[str, Any]) -> str:
+    """连接器配置指纹：descriptor 规范化 JSON 的 sha256——描述符任何字段
+    （含 path/凭据/映射）变化都换指纹，驱动适配器按当前配置重建（KNOW-03）。"""
+    payload = json.dumps(descriptor or {}, sort_keys=True, ensure_ascii=False,
+                         default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 _sourceRegistry: Optional[EnterpriseSourceRegistry] = None
@@ -408,12 +442,14 @@ class EnterpriseIngestor:
             descriptor["tenantId"] = tenant
             descriptor["sourceId"] = source
             registry = getSourceRegistry()
-            adapter = registry.get(source)
+            fingerprint = configFingerprint(descriptor)
+            adapter = registry.get(source, tenantId=tenant, fingerprint=fingerprint)
             if adapter is None:
                 adapter = buildAdapter(descriptor, source, tenant)
                 registry.register(source,
                                   str(descriptor.get("sourceType") or ""),
-                                  adapter)
+                                  adapter, tenantId=tenant,
+                                  fingerprint=fingerprint)
             cursor = SourceCursor(cursorBefore)
             batches = 0
             truncated = False
@@ -678,10 +714,12 @@ class EnterpriseIngestor:
         descriptor["tenantId"] = tenantId
         descriptor["sourceId"] = sourceId
         registry = getSourceRegistry()
-        adapter = registry.get(sourceId)
+        fingerprint = configFingerprint(descriptor)
+        adapter = registry.get(sourceId, tenantId=tenantId, fingerprint=fingerprint)
         if adapter is None:
             adapter = buildAdapter(descriptor, sourceId, tenantId)
-            registry.register(sourceId, str(descriptor.get("sourceType") or ""), adapter)
+            registry.register(sourceId, str(descriptor.get("sourceType") or ""),
+                              adapter, tenantId=tenantId, fingerprint=fingerprint)
 
         cursor = SourceCursor(str(config.get("cursor") or ""))
         admitted = 0
