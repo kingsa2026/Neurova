@@ -24,6 +24,7 @@ import os
 import subprocess
 import threading
 import time
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -302,12 +303,16 @@ class DockerExecutor(ExecutionRuntime):
         super().__init__(runtime_id, config)
         self._image = image
         self._container_id: Optional[str] = None
+        # 每条 exec 一个唯一容器名（--name），超时/stop 时按名清理；
+        # 集合而非单字段：并发 exec 不会互相覆盖句柄（CORE-16）。
+        self._activeContainers: set[str] = set()
 
     async def start(self) -> bool:
         """启动 Docker 容器"""
         try:
-            # 检查 Docker 是否可用
-            result = subprocess.run(
+            # `docker info` 可能等数百 ms：同步调用会占住事件循环，下沉线程执行。
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["docker", "info"],
                 capture_output=True,
                 timeout=10,
@@ -325,20 +330,41 @@ class DockerExecutor(ExecutionRuntime):
             return False
 
     async def stop(self) -> bool:
-        """停止 Docker 容器"""
-        if self._container_id:
-            try:
-                subprocess.run(
-                    ["docker", "stop", self._container_id],
-                    capture_output=True,
-                    timeout=30,
-                )
-                self._container_id = None
-            except Exception as e:
-                logger.error("Failed to stop container: %s", str(e))
+        """停止全部在跟踪的 Docker 容器（并发 exec 逐个清理，如失败如实返回 False）。"""
+        ok = True
+        for name in list(self._activeContainers):
+            stopped = await asyncio.to_thread(self._stopContainer, name)
+            if stopped:
+                self._activeContainers.discard(name)
+            else:
+                ok = False
+        if self._activeContainers:
+            self._container_id = next(iter(self._activeContainers))
+        else:
+            self._container_id = None
 
         self._started = False
         logger.info("Docker executor stopped")
+        return ok
+
+    def _stopContainer(self, name: str) -> bool:
+        """阻塞的 `docker stop`（调用方必须经 to_thread 使用）。
+
+        返回码即判据：0＝容器已停止（--rm 随停随删）；非 0/异常如实 False，
+        不把"没停掉"报成已清理。
+        """
+        if not name:
+            return True
+        try:
+            result = subprocess.run(
+                ["docker", "stop", name], capture_output=True, timeout=30
+            )
+        except Exception as e:  # noqa: BLE001 - 清理失败必须留痕并返回 False
+            logger.error("Failed to stop container %s: %s", name, e)
+            return False
+        if result.returncode != 0:
+            logger.error("docker stop %s 返回 %s", name, result.returncode)
+            return False
         return True
 
     async def exec(
@@ -351,9 +377,10 @@ class DockerExecutor(ExecutionRuntime):
     ) -> ExecutionResult:
         """在 Docker 容器中执行命令"""
         start_time = time.time()
+        containerName = f"neurova-exec-{uuid.uuid4().hex[:12]}"
 
         try:
-            cmd = ["docker", "run", "--rm"]
+            cmd = ["docker", "run", "--rm", "--name", containerName]
 
             # BUG AUDIT C-11: 原先裸 `docker run --rm` 无任何隔离，却被
             # exec_sandbox 当"真隔离"后端使用。补齐最小安全隔离集：
@@ -393,13 +420,27 @@ class DockerExecutor(ExecutionRuntime):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
+            # 登记容器：并发 exec 各占一条名，超时/stop 才清得掉（CORE-16）。
+            self._activeContainers.add(containerName)
+            self._container_id = containerName
 
             try:
-                stdout, stderr = process.communicate(timeout=timeout)
+                # communicate 是阻塞等待（CLI 附着容器直到结束），下沉线程执行；
+                # timeout 必须走关键字——第一个位置参是 stdin 内容。
+                stdout, stderr = await asyncio.to_thread(
+                    process.communicate, timeout=timeout
+                )
                 exit_code = process.returncode
             except subprocess.TimeoutExpired:
+                # 只杀 CLI 不会停容器：按 --name 显式 docker stop（--rm 随停随删）。
                 process.kill()
-                stdout, stderr = process.communicate()
+                stopped = await asyncio.to_thread(self._stopContainer, containerName)
+                if not stopped:
+                    logger.error("Docker 超时后容器清理失败: %s", containerName)
+                try:
+                    stdout, stderr = await asyncio.to_thread(process.communicate)
+                except Exception:  # noqa: BLE001 - 收尸失败不改变超时契约
+                    stdout, stderr = b"", b""
                 exit_code = -1
 
             duration_ms = (time.time() - start_time) * 1000
@@ -419,6 +460,11 @@ class DockerExecutor(ExecutionRuntime):
                 error=str(e),
                 duration_ms=duration_ms,
             )
+        finally:
+            # 退出即摘登记；并发 exec 下 _container_id 只指向仍在跑的其中一条。
+            self._activeContainers.discard(containerName)
+            if self._container_id == containerName:
+                self._container_id = next(iter(self._activeContainers), None)
 
     def get_info(self) -> RuntimeInfo:
         """获取 Docker 运行时信息"""
