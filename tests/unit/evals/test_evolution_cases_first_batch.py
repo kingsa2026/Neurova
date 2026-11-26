@@ -51,8 +51,10 @@ def testFirstBatchCasesCarrySourceAndSuite():
     subjects = {case.subject_id for case in cases}
     assert subjects == set(FOUR_SUBJECTS)
     for case in cases:
-        assert case.source == CASE_SOURCE
+        # 来源可追溯即可（issue/incident/review 均合法）；不强制与首批统一来源
+        # ——后续 case 可标事故/Issue 出处（如 OSWorld M2 失败分析）。
         assert case.source["kind"] in ("issue", "incident", "review")
+        assert str(case.source.get("ref") or "").strip()
         assert case.prompt.strip()
         assert callable(case.check)
 
@@ -67,6 +69,13 @@ def testValidateCaseFirstUncoveredSubjectStillReportsMissing():
 
 def _casesBySubject():
     return {case.subject_id: case for case in listEvalCases(CASE_SUITE_ID)}
+
+
+def _caseById(caseId: str):
+    matched = [case for case in listEvalCases(CASE_SUITE_ID)
+               if case.case_id == caseId]
+    assert matched, f"case 未注册: {caseId}"
+    return matched[0]
 
 
 def testSoulCaseBitesRedThenGreen():
@@ -98,10 +107,10 @@ def testBehaviorRulesCaseBitesRedThenGreen():
 
 
 def testRulesSectionsCaseBitesRealAssembledText():
-    """rules_sections 用真实拼装输出自检：缺段红、全段绿。"""
+    """rules_sections 结构 case 用真实拼装输出自检：缺段红、全段绿。"""
     from neurova.context.rules_sections import build_all_sections
 
-    case = _casesBySubject()["rules_sections"]
+    case = _caseById("rules-sections-structure-v1")
     full = build_all_sections()
     # 退化文本：删掉一段标题 → 红；真实拼装全文 → 绿
     degraded = full.replace("## 记忆写入规则", "## 已删段")
@@ -109,6 +118,29 @@ def testRulesSectionsCaseBitesRealAssembledText():
         case,
         oldAnswerFn=lambda p: degraded,
         newAnswerFn=lambda p: full,
+    )
+
+
+def testRulesSectionsDoneVerifyCaseBitesRealAssembledText():
+    """C3-2 完成前核验纪律（OSWorld M2：DONE 假完成率 30%）的红绿自检：
+    旧版桌面纪律段（无核验条目）→ 红；现拼装全文（含核验条目）→ 绿。"""
+    from neurova.context.rules_sections import (
+        build_all_sections,
+        build_computer_use_rules_section,
+    )
+
+    case = _caseById("rules-sections-done-verify-v1")
+    assert case.source["kind"] == "incident", "case 必须标注事故来源"
+    import re as _re
+
+    oldSection = _re.sub(
+        r"- 完成前先核验：[^\n]*\n", "", build_computer_use_rules_section()
+    )
+    assert "完成前先核验" not in oldSection, "旧文本构造失败：核验条目未移除"
+    assertCaseRedGreen(
+        case,
+        oldAnswerFn=lambda p: oldSection,
+        newAnswerFn=lambda p: build_all_sections(),
     )
 
 

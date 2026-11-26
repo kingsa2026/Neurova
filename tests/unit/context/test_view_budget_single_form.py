@@ -98,7 +98,11 @@ class TestNoInPlaceOverwrite:
         share = ContextOrchestrator._RECENT_CHANNEL_BUDGET_SHARE
         # seen[0] = 本轮抽屉那次 `_retrievalBudget` 调用（build 里先算额度、
         # 后画信封——信封那次是 seen[-1]，两者因 blocks 已填充而略有差异）。
-        expected_input_budget = int(seen["values"][0] * (1 - share))
+        # 期望值按生产单源同式计算（orchestrator：recentBudget=int(budget*share)
+        # 先截断，inputBudget=budget−recentBudget 取余数——余数法保证两通道
+        # 精确装满召回额度；直乘 int(budget*(1-share)) 会因舍入差 1）。
+        retrieval = seen["values"][0]
+        expected_input_budget = retrieval - int(retrieval * share)
         assert drawer.effective_view_budget() == expected_input_budget, (
             f"本轮生效额度 {drawer.effective_view_budget()} 应为输入通道额度 "
             f"{expected_input_budget}（召回额度 {seen['values'][0]} 的 "

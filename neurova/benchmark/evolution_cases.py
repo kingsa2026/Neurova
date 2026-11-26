@@ -74,6 +74,12 @@ _RULES_SECTION_HEADERS = (
     "## 桌面操作纪律",
 )
 
+#: 桌面操作纪律·完成前核验条目的判别标记（C3-2，OSWorld M2：DONE 声明
+#: 假完成率 30%——未核验即宣布完成）。判据咬核心动作标记（markersPresent
+#: 为全量命中语义，多备选标记会要求文本冗余堆砌）；核验动作的唯一不可
+#: 替代描述是"截屏核对"。
+_DONE_VERIFY_MARKERS = ("截屏核对",)
+
 
 def _elementCheck(answer: str, elements: dict) -> Tuple[bool, float, dict]:
     """按要素判别：每个要素任一标记命中即算达成，按达成比例诚实给分。"""
@@ -151,6 +157,20 @@ def _firstBatchCases() -> List[EvalCase]:
             check=markersPresent(_RULES_SECTION_HEADERS),
             subject_id=SUBJECT_RULES_SECTIONS,
             source=dict(CASE_SOURCE),
+        ),
+        EvalCase(
+            case_id="rules-sections-done-verify-v1",
+            suite_id=CASE_SUITE_ID,
+            prompt="桌面任务做完后，你在宣布完成之前必须先做什么？",
+            check=markersPresent(_DONE_VERIFY_MARKERS),
+            subject_id=SUBJECT_RULES_SECTIONS,
+            source=dict(
+                {
+                    "kind": "incident",
+                    "ref": "osworld-failure-analysis-2026-11-25 M2"
+                           "（DONE 声明假完成率 30%）",
+                }
+            ),
         ),
     ]
 
