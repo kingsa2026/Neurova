@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -38,7 +37,7 @@ from fastapi.testclient import TestClient
 from neurova.api.auth import get_current_user as auth_u
 from neurova.api.endpoints import channel_config as CC
 from neurova.channels.base import ChannelConfig
-from neurova.channels.channel_ingress_queue import _SCHEMA as INGRESS_SCHEMA
+from neurova.channels.channel_ingress_queue import ChannelIngressQueue
 from neurova.channels.manager import get_channel_manager
 from neurova.channels.wecom import WeComAdapter
 from neurova.knowledge.enterprise.connectors_chat import ChatChannelAdapter
@@ -133,12 +132,8 @@ def _postWecom(client, extra):
 def _healthWith(tmp_path, extra, *, vendor="wecom", installChannel=True):
     """读边界：真渠道配置 → 真企业源适配器 → health()（捕获面库按生产 DDL 自建）。"""
     db = tmp_path / "channel_ingress.db"
-    conn = sqlite3.connect(str(db))
-    try:
-        conn.executescript(INGRESS_SCHEMA)
-        conn.commit()
-    finally:
-        conn.close()
+    queue = ChannelIngressQueue(db_path=db)
+    queue.close()
 
     manager = get_channel_manager()
     manager.unregister_adapter("wecom", agent_id="default")

@@ -38,6 +38,9 @@ class QClawAdapter(ChannelAdapter):
     支持文本、图片、语音、视频等消息类型。
     """
 
+    inboundSupported = False
+    inboundReason = "not_supported:qclaw_inbound_not_wired"
+
     @property
     def channel(self) -> MessageChannel:
         """返回渠道类型"""

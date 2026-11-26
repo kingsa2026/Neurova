@@ -227,6 +227,25 @@ class TestMqttInboundPaysTheDoorsCurrency:
         assert (got.raw_event or {}).get("topic") == "server/dev01/up", (
             f"主题该留在 raw_event 里供排查（实得 {got.raw_event}）")
 
+    def testCallbackStampsTenantFromOwnerReconciledConfig(self, mqttDoor, monkeypatch):
+        import asyncio
+
+        mgr, adapter, seen = mqttDoor
+        adapter.config.extra["tenant_id"] = "tenant-config"
+        monkeypatch.setattr(
+            "neurova.api.agent_access.agentOwnerDeptRootById",
+            lambda _agentId: "tenant-owner")
+        parsed = adapter.parse_raw_message({
+            "user_id": "u-mqtt-1", "content": "hello", "chat_id": "room/42",
+        })
+        callback = mgr._make_event_callback("default", adapter)
+
+        asyncio.run(callback(_eventType(), parsed))
+
+        assert parsed.metadata["tenant_id"] == "tenant-owner", (
+            "入队前必须按属主部门根对账租户，不能把渠道配置租户原样落库")
+        assert len(seen) == 1
+
     def testTheDoorItselfRejectsTheOldShape(self, mqttDoor):
         """反证（这一格决定红是不是落在行为上）：拿旧形状真投进装配好的闭包，门自己就要抛。
 

@@ -192,7 +192,7 @@ class TestChannelAdapter:
         callback.assert_called_once_with(ChannelEventType.MESSAGE_RECEIVED, msg)
 
     @pytest.mark.asyncio
-    async def test_emit_event_handles_error(self):
+    async def test_emit_event_propagates_error(self):
         config = ChannelConfig(channel_type="test")
         adapter = ConcreteAdapter(config)
         callback = AsyncMock(side_effect=RuntimeError("boom"))
@@ -205,8 +205,8 @@ class TestChannelAdapter:
             sender_name="test",
             content="hello",
         )
-        # 不应该抛出异常
-        await adapter._emit_event(ChannelEventType.MESSAGE_RECEIVED, msg)
+        with pytest.raises(RuntimeError, match="boom"):
+            await adapter._emit_event(ChannelEventType.MESSAGE_RECEIVED, msg)
 
     def test_make_message(self):
         config = ChannelConfig(channel_type="test")

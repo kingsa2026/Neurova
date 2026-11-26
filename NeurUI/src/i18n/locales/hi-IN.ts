@@ -1993,6 +1993,7 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     disable: 'निष्क्रिय करें',
     connected: 'जुड़ा हुआ',
     notConnected: 'जुड़ा नहीं',
+    inboundNotSupported: 'इनबाउंड समर्थित नहीं',
     noChannels: 'कोई चैनल नहीं',
     configureDesc: 'चैनल पैरामीटर और प्रमाणीकरण कॉन्फ़िगर करें',
     commonSettings: 'सामान्य सेटिंग्स',

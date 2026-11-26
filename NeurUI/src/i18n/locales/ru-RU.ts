@@ -1993,6 +1993,7 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
     disable: 'Отключить',
     connected: 'Подключено',
     notConnected: 'Не подключено',
+    inboundNotSupported: 'Приём не поддерживается',
     noChannels: 'Нет каналов',
     configureDesc: 'Настройка параметров канала и аутентификации',
     commonSettings: 'Общие настройки',

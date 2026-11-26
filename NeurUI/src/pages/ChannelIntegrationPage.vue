@@ -86,7 +86,7 @@
                 </div>
                 <div class="nr-ci-status">
                   <span class="nr-ci-status-dot" :class="{ enabled: ch.enabled }" />
-                  <span class="nr-ci-status-text">{{ ch.connected ? t('channel.connected') : t('channel.enabled') }}</span>
+                  <span class="nr-ci-status-text">{{ ch.status === 'not_supported' ? t('channel.inboundNotSupported') : ch.connected ? t('channel.connected') : t('channel.enabled') }}</span>
                 </div>
               </div>
               <div class="nr-ci-card-actions">
@@ -543,6 +543,9 @@ async function loadConfigs() {
     channels.value.forEach((c) => {
       c.enabled = false
       c.connected = false
+      c.status = 'disconnected'
+      c.transportConnected = false
+      c.inboundReason = ''
     })
 
     const data: any = await listChannelConfigs(agentId.value)
@@ -552,6 +555,9 @@ async function loadConfigs() {
         if (ch) {
           ch.enabled = cfg.enabled
           ch.connected = cfg.connected || false
+          ch.status = cfg.status || (cfg.connected ? 'connected' : 'disconnected')
+          ch.transportConnected = cfg.transport_connected || false
+          ch.inboundReason = cfg.inbound_reason || ''
         }
         // F-2：缓存已存 extra，测试连接时发送真实凭据
         savedExtras.value[cfg.channel_type] = cfg.extra ?? {}

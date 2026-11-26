@@ -27,6 +27,9 @@ export interface ChannelCatalogItem {
   channelKey: string
   backendType: string
   connected: boolean
+  status?: 'connected' | 'disconnected' | 'not_supported'
+  transportConnected?: boolean
+  inboundReason?: string
 }
 
 type T = (key: string) => string

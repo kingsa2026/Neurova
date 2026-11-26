@@ -1993,6 +1993,7 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
     disable: 'Desactivar',
     connected: 'Conectado',
     notConnected: 'No conectado',
+    inboundNotSupported: 'Recepción no compatible',
     noChannels: 'Sin canales',
     configureDesc: 'Configurar los parámetros del canal y la autenticación',
     commonSettings: 'Ajustes comunes',

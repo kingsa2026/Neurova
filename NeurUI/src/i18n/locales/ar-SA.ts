@@ -1993,6 +1993,7 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     disable: 'تعطيل',
     connected: 'متصل',
     notConnected: 'غير متصل',
+    inboundNotSupported: 'الاستقبال غير مدعوم',
     noChannels: 'لا توجد قنوات',
     configureDesc: 'تهيئة معلمات القناة والمصادقة',
     commonSettings: 'الإعدادات العامة',

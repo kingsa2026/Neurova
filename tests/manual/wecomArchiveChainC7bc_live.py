@@ -166,7 +166,7 @@ def main() -> int:
 
         adapter = ChatChannelAdapter(
             {"sourceType": "chat", "vendor": "wecom", "chatSource": "archive",
-             "archiveDb": str(store.path)}, "live_archive")
+             "agentId": "default", "archiveDb": str(store.path)}, "live_archive")
         import asyncio
 
         batch = asyncio.run(adapter.fetchBatch(None, 200))

@@ -129,6 +129,10 @@ class ChannelAdapter(ABC):
     #: False 时的原因，随渠道状态读数原样报出；支持时为空串。
     humanTakeoverReason: str = "unsupported:no_native_event"
 
+    #: 入站接收链是否真正接到事件回调。传输鉴权成功不等于渠道端到端可用。
+    inboundSupported: bool = True
+    inboundReason: str = ""
+
     def __init__(self, config: ChannelConfig):
         self.config = config
         self._connected = False
@@ -141,6 +145,22 @@ class ChannelAdapter(ABC):
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    def connectionStatus(self) -> Dict[str, Any]:
+        """区分传输连接与端到端可用，未接入入站链时绝不报 connected。"""
+        transportConnected = bool(self._connected)
+        inboundSupported = bool(self.inboundSupported)
+        return {
+            "transport_connected": transportConnected,
+            "connected": transportConnected and inboundSupported,
+            "status": (
+                "not_supported" if not inboundSupported
+                else "connected" if transportConnected
+                else "disconnected"
+            ),
+            "inbound_supported": inboundSupported,
+            "inbound_reason": str(self.inboundReason or ""),
+        }
 
     def set_event_callback(self, callback: ChannelEventCallback):
         """设置事件回调 - 收到消息时调用"""
@@ -191,8 +211,8 @@ class ChannelAdapter(ABC):
             Dict: 包含 connected, channel_type, last_error 等
         """
         return {
+            **self.connectionStatus(),
             "channel_type": self.channel_type,
-            "connected": self._connected,
             "enabled": self.config.enabled,
             "human_takeover_events": self.humanTakeoverEvents,
             "human_takeover_reason": self.humanTakeoverReason,

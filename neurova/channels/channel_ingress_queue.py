@@ -89,6 +89,54 @@ def _migrateIngressV3AgentTenant(conn) -> None:
 
 register_migration(3, _migrateIngressV3AgentTenant, domain="channel_ingress")
 
+
+def _ingressAgentId(message: ChannelMessage, agent_id: str) -> str:
+    """入站实例归属单源：显式入参优先，其次消息 metadata；空串保留存量未归因语义。"""
+    return str(agent_id or (message.metadata or {}).get("agent_id") or "")
+
+
+def _ingressDedupeKey(
+    channelType: str, chatId: str, agentId: str, messageId: str
+) -> str:
+    """平台消息 ID 的唯一域＝渠道实例 + 聊天；JSON 数组避免分隔符碰撞。"""
+    return json.dumps(
+        [
+            str(channelType or ""),
+            str(chatId or ""),
+            str(agentId or _DEFAULT_AGENT_ID),
+            str(messageId or ""),
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _migrateIngressV4DedupeScope(conn) -> None:
+    """v4（CHAN-09）：旧键仅含 channel_type/message_id，跨聊天会被误去重。"""
+    rows = conn.execute(
+        "SELECT id, channel_type, message_id, chat_id, agent_id, payload"
+        " FROM channel_ingress_events"
+    ).fetchall()
+    for row in rows:
+        rowId, channelType, messageId, chatId, agentId, rawPayload = row
+        metadata = {}
+        try:
+            payload = json.loads(rawPayload)
+            if isinstance(payload, dict) and isinstance(payload.get("metadata"), dict):
+                metadata = payload["metadata"]
+        except (TypeError, ValueError) as exc:
+            logger.warning("Ingress v4 迁移读取 payload 失败，按列字段续迁 id=%s: %s",
+                           rowId, exc)
+        resolvedAgentId = str(agentId or metadata.get("agent_id") or "")
+        key = _ingressDedupeKey(channelType, chatId, resolvedAgentId, messageId)
+        conn.execute(
+            "UPDATE channel_ingress_events SET dedupe_key=? WHERE id=?",
+            (key, rowId),
+        )
+
+
+register_migration(4, _migrateIngressV4DedupeScope, domain="channel_ingress")
+
 # payload ↔ ChannelMessage 的往返由 dataclasses.asdict/from_dict 承担
 # （timestamp ISO 往返，raw_event/metadata JSON 内嵌）
 
@@ -173,7 +221,10 @@ class ChannelIngressQueue:
 
     def enqueue(self, message: ChannelMessage, priority: Optional[int] = None,
                 agent_id: str = "", tenant_id: str = "") -> bool:
-        """消息持久化。tombstone 去重：同 (channel_type, message_id) 幂等。
+        """消息持久化。tombstone 去重：同 (渠道实例, chat_id, message_id) 幂等。
+
+        渠道实例由 (channel_type, agent_id) 唯一确定；平台消息 ID 只在聊天内
+        唯一时，跨聊天或跨 agent 的相同 ID 是不同消息，不得误去重。
 
         已 done 的重复投递（平台消息重发）重开为 pending 再投一次。
         priority：显式参数优先；缺省取消息 metadata.priority，再缺省 0（FIFO）。
@@ -189,7 +240,10 @@ class ChannelIngressQueue:
 
         payload = asdict(message)
         payload["timestamp"] = message.timestamp.isoformat()
-        dedupe_key = f"{message.channel_type}:{message.message_id}"
+        agentId = _ingressAgentId(message, agent_id)
+        dedupe_key = _ingressDedupeKey(
+            message.channel_type, message.chat_id, agentId, message.message_id
+        )
         # B9：优先级来自消息自带 metadata.priority（审批/人工消息可置高），
         # 缺省 0=既有 FIFO 语义；显式参数供调用方覆盖。
         priority = int(priority if priority is not None
@@ -212,7 +266,7 @@ class ChannelIngressQueue:
                             _now_iso(),
                             _now_iso(),
                             priority,
-                            str(agent_id or ""),
+                            agentId,
                             str(tenant_id or ""),
                         ),
                     )

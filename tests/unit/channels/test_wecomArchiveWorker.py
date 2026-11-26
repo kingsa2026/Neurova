@@ -189,6 +189,26 @@ def test_worker_cycle_backfills_from_zero_and_converges(archiveEnv, monkeypatch)
         "水位收敛后单轮空转（幂等，不重拉）")
 
 
+def test_worker_cycle_stamps_tenant_from_context(archiveEnv, monkeypatch):
+    _priv, pem, pub = _rsaKeyPair()
+    context, _, _ = _readyContext()
+    context["keyMap"] = {"v1": pem}
+    context["tenantId"] = "tenant-a"
+    _patchContext(monkeypatch, context)
+    sdk = FakeArchiveSdk({1: _rawRow(1, _plain(1), pub)})
+
+    outcome = runArchiveWorkerCycle(sdkFactory=lambda: sdk)
+    assert outcome["written"] == 1
+    store = wecom_archive.ArchiveProjectionStore(archiveEnv)
+    try:
+        row = store._conn.execute(
+            "SELECT agent_id, tenant_id FROM channel_archive_messages"
+            " WHERE msgid = 'msg_1'").fetchone()
+        assert tuple(row) == ("default", "tenant-a")
+    finally:
+        store.close()
+
+
 def test_worker_cycle_applies_allowlist_before_projection(archiveEnv, monkeypatch):
     _priv, pem, pub = _rsaKeyPair()
     sdkRows = {
@@ -254,7 +274,7 @@ def test_worker_context_reads_real_adapter_config(tmp_path, monkeypatch):
     class FakeAdapter:
         class config:  # noqa: N801 - 命名跟随被替身形状
             extra = {
-                "corpid": "corp_x", "app_id": "app_x",
+                "corpid": "corp_x", "app_id": "app_x", "tenant_id": "tenant-a",
                 wecom_archive.ARCHIVE_SDK_PATH_FIELD: str(loadable),
                 wecom_archive.ARCHIVE_SECRET_ENV_FIELD: "NEUROVA_UNIT_C7C_SECRET",
                 wecom_archive.ARCHIVE_PRIVATE_KEYS_FIELD: {"v1": str(pemPath)},
@@ -270,6 +290,7 @@ def test_worker_context_reads_real_adapter_config(tmp_path, monkeypatch):
     contexts = wecom_archive._archiveWorkerContexts("default")
     assert len(contexts) == 1 and contexts[0]["ready"] is True
     assert contexts[0]["corpid"] == "corp_x"
+    assert contexts[0]["tenantId"] == "tenant-a"
     assert set(contexts[0]["keyMap"]) == {"v1"}
 
 
@@ -313,7 +334,7 @@ def test_archive_health_names_watermark_lag(archiveEnv, monkeypatch):
 
     adapter = ChatChannelAdapter(
         {"sourceType": "chat", "vendor": "wecom", "chatSource": "archive",
-         "archiveDb": str(archiveEnv)}, "src")
+         "agentId": "default", "archiveDb": str(archiveEnv)}, "src")
     health = asyncio.run(adapter.health())
     assert health.status == "degraded"
     assert "不可取回" in health.reason, "水位落后超窗必须点名（防静默丢历史）"

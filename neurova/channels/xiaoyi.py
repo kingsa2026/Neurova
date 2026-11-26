@@ -34,6 +34,8 @@ class XiaoYiAdapter(ChannelAdapter):
     """
 
     channel = "xiaoyi"
+    inboundSupported = False
+    inboundReason = "not_supported:xiaoyi_inbound_not_emitted"
 
     def __init__(self):
         # BUG AUDIT C-02: 此前 super().__init__() 不传 config，基类要求

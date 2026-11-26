@@ -41,6 +41,22 @@ def _adapterViewKey(agentId: str, channelType: str) -> str:
     return channelType if agentId == "default" else f"{agentId}:{channelType}"
 
 
+def resolveChannelTenant(adapter: Optional[ChannelAdapter], agentId: str) -> str:
+    """渠道消息与存档投影共用的租户边界：配置租户对账 agent 属主部门根。"""
+    extra = getattr(getattr(adapter, "config", None), "extra", None) or {}
+    tenant = str(extra.get("tenant_id") or "default")
+    from neurova.api.agent_access import agentOwnerDeptRootById
+
+    ownerDept = agentOwnerDeptRootById(str(agentId or "default"))
+    if ownerDept and ownerDept != "default" and ownerDept != tenant:
+        logger.warning(
+            "渠道 %s(agent=%s) 配置 tenant_id=%s 与属主部门根 %s 不一致，按属主部门根落库",
+            getattr(adapter, "channel_type", ""), agentId, tenant, ownerDept,
+        )
+        tenant = ownerDept
+    return tenant
+
+
 # 延迟导入 SessionSyncManager 避免循环导入
 _session_sync_manager = None
 
@@ -148,29 +164,13 @@ class ChannelManager:
             # agent 上下文可跨重启排水存活；已有值不覆盖（同一消息不串台）
             if "agent_id" not in message.metadata:
                 message.metadata["agent_id"] = agent_id
-            if adapter is not None and event_type == ChannelEventType.MESSAGE_RECEIVED:
+            if event_type == ChannelEventType.MESSAGE_RECEIVED:
+                message.metadata["tenant_id"] = resolveChannelTenant(adapter, agent_id)
                 try:
                     from neurova.knowledge.ingest_bridge import ingestEnabled
 
                     if ingestEnabled(adapter):
                         message.metadata["ingest_to_kb"] = True
-                        extra = getattr(getattr(adapter, "config", None), "extra", None) or {}
-                        tenant = str(extra.get("tenant_id") or "")
-                        if tenant:
-                            # 部门租户对账（specs/2026-11-07 批 D）：配置租户须等于
-                            # 渠道 agent 属主部门根，不等告警并按属主部门根落库——
-                            # 数据落对租户，配置错不落错库。属主无部门（default）
-                            # 时无从对账，保留渠道配置（行为不变）。
-                            from neurova.api.agent_access import agentOwnerDeptRootById
-
-                            owner_dept = agentOwnerDeptRootById(agent_id)
-                            if owner_dept and owner_dept != "default" and owner_dept != tenant:
-                                logger.warning(
-                                    "渠道 %s(agent=%s) 配置 tenant_id=%s 与属主部门根 %s 不一致，按属主部门根落库",
-                                    adapter.channel_type, agent_id, tenant, owner_dept,
-                                )
-                                tenant = owner_dept
-                            message.metadata["tenant_id"] = tenant
                 except Exception as exc:  # noqa: BLE001 - 入站开关失败不影响聊天
                     logger.debug("知识入站开关读取失败: %s", exc)
             return await self._on_channel_event(event_type, message)
@@ -198,6 +198,19 @@ class ChannelManager:
         if agent_id == "default":
             return self._adapters.get(channel_type)
         return None
+
+    def _allInstances(self):
+        """全量实例清单（单源）：agent 多实例表 + default 兼容视图兜底。
+
+        启停/广播/健康视图共用这一份定义域（CHAN-07：此前 stop 只遍历
+        default 视图 `_adapters`，非 default agent 的连接停机时残留）。
+        """
+        table = getattr(self, "_agent_adapters", {}) or {}
+        targets = list(table.items())
+        for channelType, adapter in self._adapters.items():
+            if ("default", channelType) not in table:
+                targets.append((("default", channelType), adapter))
+        return targets
 
     def resolveInboundAdapter(self, channel_type: str, authenticator=None):
         """入站回调的适配器解析——全仓唯一入口（§6-188）。
@@ -265,7 +278,7 @@ class ChannelManager:
             result[_adapterViewKey(agent_id, channel_type)] = {
                 "channel_type": channel_type,
                 "agent_id": agent_id,
-                "connected": adapter.is_connected,
+                **adapter.connectionStatus(),
                 "enabled": adapter.config.enabled,
                 "human_takeover_events": bool(
                     getattr(adapter, "humanTakeoverEvents", False)
@@ -280,7 +293,7 @@ class ChannelManager:
                 result[_adapterViewKey("default", channel_type)] = {
                     "channel_type": channel_type,
                     "agent_id": "default",
-                    "connected": adapter.is_connected,
+                    **adapter.connectionStatus(),
                     "enabled": adapter.config.enabled,
                     "human_takeover_events": bool(
                         getattr(adapter, "humanTakeoverEvents", False)
@@ -484,12 +497,7 @@ class ChannelManager:
         default 仍是裸渠道名 ⇒ 现有 caller 的 `list(results.values())[0]` 与 mock 形状都不破。
         """
         results = {}
-        table = getattr(self, "_agent_adapters", {}) or {}
-        targets = list(table.items())
-        for channelType, adapter in self._adapters.items():
-            if ("default", channelType) not in table:
-                targets.append((("default", channelType), adapter))
-        for (agent_id, channel_type), adapter in targets:
+        for (agent_id, channel_type), adapter in self._allInstances():
             if adapter.is_connected:
                 try:
                     msg_id = await adapter.send_message("", content, message_type, **kwargs)
@@ -589,7 +597,11 @@ class ChannelManager:
                 from neurova.channels.channel_ingress_queue import IngressQueueUnavailable
 
                 try:
-                    enqueued = queue.enqueue(message)
+                    enqueued = queue.enqueue(
+                        message,
+                        agent_id=str(message.metadata.get("agent_id") or "default"),
+                        tenant_id=str(message.metadata.get("tenant_id") or ""),
+                    )
                 except IngressQueueUnavailable as e:
                     # 批 D（T4 已裁有界直发）：旁路直发必留痕——同一 dispatch 路径
                     # （行为不分叉）＋旁路台账行＋点名告警；旁路计数成为常驻读数后，
@@ -927,11 +939,8 @@ class ChannelManager:
             queue.start_drain(self._dispatch_message, poll_interval=0.5)
 
         tasks = []
-        # agent 多实例：遍历全量表（default 视图兜底保留，防只写 _adapters 的旧路径）
-        table = dict(getattr(self, "_agent_adapters", {}) or {})
-        for channel_type, adapter in self._adapters.items():
-            table.setdefault(("default", channel_type), adapter)
-        for (_aid, _ctype), adapter in table.items():
+        # agent 多实例：与 stop/广播/健康视图同一份实例清单（_allInstances 单源）
+        for (_aid, _ctype), adapter in self._allInstances():
             if adapter.config.enabled:
                 tasks.append(self._connect_adapter(adapter))
 
@@ -956,7 +965,9 @@ class ChannelManager:
             except Exception as e:  # noqa: BLE001 - 停机不因队列失败中断
                 logger.debug("Ingress drain stop skipped: %s", e)
         tasks = []
-        for adapter in self._adapters.values():
+        # CHAN-07：与 start 同一份实例清单（此前只遍历 default 视图，非 default
+        # agent 的长连接/线程在停机时残留）。
+        for (_aid, _ctype), adapter in self._allInstances():
             tasks.append(adapter.disconnect())
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)

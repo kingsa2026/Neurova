@@ -55,8 +55,8 @@
                 <div class="nr-ac-title">
                   <span class="nr-ac-name">
                     {{ ch.name }}
-                    <a-tag :color="ch.connected ? 'green' : 'orange'">
-                      {{ ch.connected ? t('channel.connected') : t('channel.enabled') }}
+                    <a-tag :color="ch.status === 'not_supported' ? 'orange' : ch.connected ? 'green' : 'orange'">
+                      {{ ch.status === 'not_supported' ? t('channel.inboundNotSupported') : ch.connected ? t('channel.connected') : t('channel.enabled') }}
                     </a-tag>
                   </span>
                   <span class="nr-ac-prefix">
@@ -297,7 +297,12 @@ async function fetchConfigs() {
       const row = rows.find((r: any) => r.channel_type === c.backendType)
       if (row) {
         savedExtras.value[c.backendType] = row.extra ?? {}
-        return { ...c, enabled: !!row.enabled, connected: !!row.connected, configured: true }
+        return {
+          ...c, enabled: !!row.enabled, connected: !!row.connected, configured: true,
+          status: row.status || (row.connected ? 'connected' : 'disconnected'),
+          transportConnected: !!row.transport_connected,
+          inboundReason: row.inbound_reason || '',
+        }
       }
       return c
     })

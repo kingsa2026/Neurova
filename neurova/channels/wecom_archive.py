@@ -321,13 +321,11 @@ SEND_ROWS_SQL = (
     " ORDER BY seq LIMIT ?"
 )
 
-#: KNOW-12：按来源实例（agent）圈域的消费查询——声明了 agentId 的聊天源
-#: 只拉本实例的存档行；未打戳的存量行（agent_id=''）保持可读（迁移容忍——
-#: 与捕获面同规，落戳全量覆盖后边界即完整生效）。
-SEND_ROWS_SQL_FOR_AGENT = (
+#: KNOW-12：企业源按来源实例与租户精确圈域；未归因存量行不共享。
+SEND_ROWS_SQL_FOR_SOURCE = (
     "SELECT seq, msgid, action, msgtype, from_id, tolist, roomid, msgtime_ms,"
     " text, media_ref FROM channel_archive_messages"
-    " WHERE seq > ? AND (agent_id = ? OR agent_id = '')"
+    " WHERE seq > ? AND agent_id = ? AND tenant_id = ?"
     " ORDER BY seq LIMIT ?"
 )
 
@@ -363,6 +361,20 @@ def _migrateArchiveV3AgentColumn(conn) -> None:
 
 
 register_migration(3, _migrateArchiveV3AgentColumn, domain="channel_archive")
+
+
+def _migrateArchiveV4TenantColumn(conn) -> None:
+    """v4（KNOW-12）：租户边界列；存量行归空串，不得被租户源无边界共享。"""
+    existing = [row[1] for row in
+                conn.execute("PRAGMA table_info(channel_archive_messages)").fetchall()]
+    if "tenant_id" not in existing:
+        conn.execute("ALTER TABLE channel_archive_messages"
+                     " ADD COLUMN tenant_id TEXT NOT NULL DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_archive_source_seq"
+                 " ON channel_archive_messages(agent_id, tenant_id, seq)")
+
+
+register_migration(4, _migrateArchiveV4TenantColumn, domain="channel_archive")
 
 
 class ArchiveSdkError(RuntimeError):
@@ -697,13 +709,15 @@ class ArchiveProjectionStore:
         applyMigrations(self._conn, domain="channel_archive")
 
     def appendBatch(self, rows: List[Dict[str, Any]], nextSeq: int,
-                    fetchedAt: Optional[str] = None, agentId: str = "") -> int:
+                    fetchedAt: Optional[str] = None, agentId: Optional[str] = None,
+                    tenantId: Optional[str] = None) -> int:
         """单事务落一批＋推水印；返回实际新写入行数（重放幂等时为 0）。
 
-        agentId：来源实例边界（KNOW-12）——共享投影库里多实例并存，行必须
-        带归属，消费面才可能按实例精确过滤。"""
+        agentId/tenantId：共享投影库的来源边界；未显式传值时落 default 实例，
+        不再产生可被任意租户源读取的未归因行。"""
         stamped = fetchedAt or _nowIso()
-        agent = str(agentId or "")
+        agent = "default" if agentId is None else str(agentId)
+        tenant = "default" if tenantId is None else str(tenantId)
         with self._lock:
             cur = self._conn.cursor()
             try:
@@ -713,8 +727,8 @@ class ArchiveProjectionStore:
                         "INSERT OR IGNORE INTO channel_archive_messages ("
                         " seq, msgid, publickey_ver, action, msgtype, from_id,"
                         " tolist, roomid, msgtime_ms, text, media_ref, fetched_at,"
-                        " media_name, media_staged_path, agent_id"
-                        ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        " media_name, media_staged_path, agent_id, tenant_id"
+                        ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (int(row["seq"]), str(row.get("msgid") or ""),
                          str(row.get("publickey_ver") or ""),
                          str(row.get("action") or "send"),
@@ -725,7 +739,7 @@ class ArchiveProjectionStore:
                          int(row.get("msgtime_ms") or 0),
                          str(row.get("text") or ""),
                          str(row.get("media_ref") or ""), stamped,
-                         str(row.get("media_name") or ""), "", agent))
+                         str(row.get("media_name") or ""), "", agent, tenant))
                     written += max(0, cur.rowcount)
                 cur.execute(
                     "INSERT INTO channel_archive_state (key, value, updated_at)"
@@ -824,16 +838,17 @@ def applyArchiveAllowlist(rows: List[Dict[str, Any]],
 
 def _archiveWorkerContexts(agentId: str) -> List[Dict[str, Any]]:
     """装配好的企微渠道 → 存档拉取上下文（凭据在此解引用，不过企业源的手）。"""
-    from neurova.channels.manager import get_channel_manager
+    from neurova.channels.manager import get_channel_manager, resolveChannelTenant
 
     contexts: List[Dict[str, Any]] = []
-    adapter = get_channel_manager().get_adapter("wecom", agent_id=str(agentId or "default"))
+    sourceAgent = str(agentId or "default")
+    adapter = get_channel_manager().get_adapter("wecom", agent_id=sourceAgent)
     if adapter is None:
         return contexts
     extra = adapter.config.extra or {}
     reading = archiveReadiness(extra)
     if not reading.ready:
-        contexts.append({"agentId": str(agentId or "default"), "ready": False,
+        contexts.append({"agentId": sourceAgent, "ready": False,
                          "reason": reading.reason})
         return contexts
     secretEnv = str(extra.get(ARCHIVE_SECRET_ENV_FIELD) or "").strip()
@@ -841,7 +856,8 @@ def _archiveWorkerContexts(agentId: str) -> List[Dict[str, Any]]:
     for version, rawPath in (extra.get(ARCHIVE_PRIVATE_KEYS_FIELD) or {}).items():
         keyMap[str(version)] = resolveArchiveKeyPath(str(rawPath)).read_bytes()
     contexts.append({
-        "agentId": str(agentId or "default"),
+        "agentId": sourceAgent,
+        "tenantId": resolveChannelTenant(adapter, sourceAgent),
         "ready": True,
         "sdkPath": (str(extra.get(ARCHIVE_SDK_PATH_FIELD) or "").strip()
                     or os.environ.get(ARCHIVE_SDK_PATH_ENV, "").strip()),
@@ -917,7 +933,9 @@ def runArchiveWorkerCycle(agentId: str = "default", *,
             filteredTotal += filtered
             for name, value in result.counts.items():
                 counts[name] = counts.get(name, 0) + value
-            store.appendBatch(kept, result.nextSeq, agentId=str(agentId or "default"))
+            store.appendBatch(
+                kept, result.nextSeq, agentId=str(agentId or "default"),
+                tenantId=str(context.get("tenantId") or "default"))
             writtenTotal += len(kept)
             watermark = result.nextSeq
             if not result.hasMore:

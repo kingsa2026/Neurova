@@ -1993,6 +1993,7 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     disable: '無効化',
     connected: '接続済み',
     notConnected: '未接続',
+    inboundNotSupported: '受信は非対応',
     noChannels: 'チャネルがありません',
     configureDesc: 'チャネルのパラメーターと認証情報を設定',
     commonSettings: '共通設定',

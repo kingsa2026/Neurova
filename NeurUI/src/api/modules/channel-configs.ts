@@ -11,6 +11,10 @@ export interface ChannelConfig {
   agent_id?: string
   enabled: boolean
   connected?: boolean
+  transport_connected?: boolean
+  status?: 'connected' | 'disconnected' | 'not_supported'
+  inbound_supported?: boolean
+  inbound_reason?: string
   app_id?: string
   app_secret?: string
   use_stream?: boolean

@@ -112,6 +112,10 @@ class ChannelConfigResponse(BaseModel):
     app_id_masked: str
     use_stream: bool
     connected: bool = False
+    transport_connected: bool = False
+    status: str = "disconnected"
+    inbound_supported: bool = True
+    inbound_reason: str = ""
     extra: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -403,6 +407,18 @@ async def ingress_stats():
         return {"enabled": False, "error": str(e)}
 
 
+def _connection_status(adapter) -> Dict[str, Any]:
+    if adapter is None:
+        return {
+            "connected": False,
+            "transport_connected": False,
+            "status": "disconnected",
+            "inbound_supported": True,
+            "inbound_reason": "",
+        }
+    return adapter.connectionStatus()
+
+
 @router.get("", summary="列出渠道配置")
 async def list_configs(
     agent_id: str = Query(default="default", description="Agent ID"),
@@ -423,7 +439,7 @@ async def list_configs(
                 enabled=cfg.get("enabled", True),
                 app_id_masked=(cfg.get("app_id", "")[:8] + "***") if cfg.get("app_id") else "",
                 use_stream=cfg.get("use_stream", True),
-                connected=adapter.is_connected if adapter else False,
+                **_connection_status(adapter),
                 extra=cfg.get("extra", {}) or {},
             )
         )
@@ -610,7 +626,7 @@ async def get_config(
         enabled=cfg.get("enabled", True),
         app_id_masked=(cfg.get("app_id", "")[:8] + "***") if cfg.get("app_id") else "",
         use_stream=cfg.get("use_stream", True),
-        connected=adapter.is_connected if adapter else False,
+        **_connection_status(adapter),
         extra=cfg.get("extra", {}) or {},
     )
 

@@ -57,6 +57,9 @@ class QQBotAdapter(ChannelAdapter):
     - 消息发送和接收
     """
 
+    inboundSupported = False
+    inboundReason = "not_supported:qqbot_inbound_not_wired"
+
     @property
     def channel(self) -> MessageChannel:
         return MessageChannel.QQBOT

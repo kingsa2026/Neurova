@@ -35,6 +35,8 @@ class DiscordAdapter(ChannelAdapter):
     """
 
     API_BASE = "https://discord.com/api/v10"
+    inboundSupported = False
+    inboundReason = "not_supported:discord_inbound_not_wired"
 
     @property
     def channel(self) -> MessageChannel:

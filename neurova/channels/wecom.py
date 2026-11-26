@@ -156,6 +156,14 @@ class WeComAdapter(ChannelAdapter):
             if isinstance(_share, str) else bool(_share)
         )
 
+    @property
+    def inboundSupported(self) -> bool:
+        return not self.config.use_stream
+
+    @property
+    def inboundReason(self) -> str:
+        return "" if self.inboundSupported else "not_supported:wecom_stream_receive_not_wired"
+
     async def connect(self) -> bool:
         """建立企业微信连接"""
         # 修复 P0-6 (C5): 捕获主 loop 引用，供 handle_callback 跨线程调度

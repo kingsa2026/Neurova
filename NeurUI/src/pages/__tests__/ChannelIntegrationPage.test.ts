@@ -40,6 +40,7 @@ const messages = {
     customChannel: '自定义渠道',
     noChannels: '暂无渠道',
     connected: '已连接',
+    inboundNotSupported: '不支持入站',
     enabled: '已启用',
     disabled: '未启用',
     enable: '启用',
@@ -141,6 +142,21 @@ describe('ChannelIntegrationPage — 负一屏推送渠道卡', () => {
   // Teleport 到 body 的 toast/modal 不随 wrapper 卸载自动清理，跨用例残留会串扰查询
   afterEach(() => {
     document.body.innerHTML = ''
+  })
+
+  it('renders outbound-only channel as inbound not supported instead of connected', async () => {
+    ;(listChannelConfigs as ReturnType<typeof vi.fn>).mockResolvedValue([{
+      channel_type: 'discord', enabled: true, connected: false,
+      transport_connected: true, status: 'not_supported', inbound_supported: false,
+      inbound_reason: 'not_supported:discord_inbound_not_wired', extra: {},
+    }])
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const card = wrapper.findAll('.nr-ci-card').find((c) => c.text().includes('Discord'))
+    expect(card, 'Discord 渠道卡应存在').toBeTruthy()
+    expect(card!.text()).toContain('不支持入站')
+    expect(card!.text()).not.toContain('已连接')
   })
 
   it('renders negative screen as a channel card with enabled state from its own API', async () => {
