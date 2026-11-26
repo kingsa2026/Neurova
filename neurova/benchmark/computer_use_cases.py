@@ -28,9 +28,14 @@ CASE_SOURCE = {
 
 #: 被守卫的模型可见文本 subject_id。
 SUBJECT_COMPUTER_TYPE_DESCRIPTION = "computer_type_description"
+SUBJECT_DOC_EDIT_DESCRIPTION = "computer_doc_edit_description"
 
 #: computer_type 描述须含的引导标记（长文本 → computer_paste）。
 _TYPE_GUIDANCE_MARKERS = ("长文本", "computer_paste")
+
+#: computer_doc_edit 描述须含的路由规则标记（C7：值/公式直写 vs 需要视觉
+#: 确认的界面态走 GUI）。markersPresent 全量命中语义——两个标记都须在场。
+_DOC_EDIT_ROUTING_MARKERS = ("样式", "GUI")
 
 _registered = False
 
@@ -48,6 +53,21 @@ def computerUseCases() -> List[EvalCase]:
             check=_computerTypeGuidanceCheck,
             subject_id=SUBJECT_COMPUTER_TYPE_DESCRIPTION,
             source=dict(CASE_SOURCE),
+        ),
+        EvalCase(
+            case_id="computer-doc-edit-routing-v1",
+            suite_id=CASE_SUITE_ID,
+            prompt="xlsx 表格要批量改很多单元格的值，应该用哪个工具？"
+                   "改样式/合并单元格呢？",
+            check=markersPresent(_DOC_EDIT_ROUTING_MARKERS),
+            subject_id=SUBJECT_DOC_EDIT_DESCRIPTION,
+            source=dict(
+                {
+                    "kind": "incident",
+                    "ref": "osworld-failure-analysis-2026-11-25 M1 反例"
+                           "（宏/直写路径与 GUI 混用无路由约定）",
+                }
+            ),
         ),
     ]
 

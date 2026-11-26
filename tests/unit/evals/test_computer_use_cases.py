@@ -67,3 +67,31 @@ class TestComputerTypeGuidanceCase:
         description = str(_BUILTIN_SCHEMAS["computer_paste"].get("description") or "")
         passed, _, _ = markersPresent(("长文本", "ctrl+v"))(description)
         assert passed, "computer_paste 描述须保留长文本/ctrl+v 引导"
+
+
+class TestDocEditRoutingCase:
+    """C7 脚本通道与 GUI 车道路由约定（OSWorld M1 反例教训）：表格值/公式
+    批量写入走 doc_edit 直写（自动回读校验）；样式/合并/图表等需要视觉
+    确认的界面态走 GUI 动作。判据对真实描述文本判别路由规则存在。"""
+
+    def _docEditDescription(self) -> str:
+        from neurova.builtin_tools import _BUILTIN_SCHEMAS
+
+        return str(_BUILTIN_SCHEMAS["computer_doc_edit"].get("description") or "")
+
+    def test_caseRegisteredWithReviewSource(self):
+        case = _caseById("computer-doc-edit-routing-v1")
+        assert case.subject_id == "computer_doc_edit_description"
+        assert case.source["kind"] in ("incident", "review")
+
+    def test_bitesOldDescriptionThenGreenOnNew(self):
+        case = _caseById("computer-doc-edit-routing-v1")
+        assertCaseRedGreen(
+            case,
+            oldAnswerFn=lambda p: "【结构化直写】对工作区内的 xlsx 文件批量写入值。",
+            newAnswerFn=lambda p: self._docEditDescription(),
+        )
+
+    def test_realDescriptionCarriesRoutingRule(self):
+        passed, _, details = markersPresent(("样式", "GUI"))(self._docEditDescription())
+        assert passed, f"doc_edit 描述缺路由规则：{details!r}"
