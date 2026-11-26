@@ -28,6 +28,7 @@ def env(tmp_path, monkeypatch):
     import neurova.api.endpoints.auth as auth_ep
     from neurova.api.auth import verify_password
 
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
     model = UserModel(db_path=str(tmp_path / "users.db"))
     monkeypatch.setattr(auth_ep, "_user_model", model)
 
@@ -41,7 +42,7 @@ def env(tmp_path, monkeypatch):
     admin = {"user_id": "1", "username": "root-admin", "role": "admin",
              "neuser_id": "1", "tenant_id": "default"}
     app.dependency_overrides[strictIdentityGate] = lambda: admin
-    client = TestClient(app)
+    client = TestClient(app, raise_server_exceptions=False)
 
     # 预置真账本里的操作者账号（id=1，admin）——与身份门 user_id 对齐
     model.create_user("root-admin", "pw-admin-000", role="admin")
@@ -55,6 +56,23 @@ def _create(client, **over):
             "role": "user", "active": True}
     body.update(over)
     return client.post("/v1/enhanced-users", json=body)
+
+
+def _token_pair(model, username):
+    from neurova.api.auth import create_access_token, create_refresh_token
+
+    user = model.get_user_by_username(username)
+    claims = {"sub": str(user.id), "username": user.username,
+              "neuser_id": str(user.id), "user_id": str(user.id)}
+    return (create_access_token({**claims, "role": user.role}),
+            create_refresh_token(claims))
+
+
+def _failTokenVersionWrites(monkeypatch, model):
+    def failVersionWrite(*args, **kwargs):
+        raise RuntimeError("token version write unavailable")
+
+    monkeypatch.setattr(model, "_bumpTokenVersion", failVersionWrite)
 
 
 class TestCreateBitesRealLedger:
@@ -121,23 +139,60 @@ class TestUpdateBitesRealLedger:
         row = model.get_user_by_username("alice")
         assert row.email == "new@x.com" and row.role == "editor" and row.status == "disabled"
 
+    def test_role_or_status_change_revokes_existing_tokens(self, env):
+        client, model = env["client"], env["model"]
+        _create(client)
+        uid = model.get_user_by_username("alice").id
+        old_access, old_refresh = _token_pair(model, "alice")
+
+        r = client.put(f"/v1/enhanced-users/{uid}",
+                       json={"role": "editor", "active": False})
+        assert r.status_code == 200, r.text
+        from neurova.api.auth import verify_access_token, verify_refresh_token
+
+        assert verify_access_token(old_access) is None, "降权/禁用后旧 access 不得沿用旧角色"
+        assert verify_refresh_token(old_refresh) is None, "降权/禁用后旧 refresh 不得续签"
+
     def test_password_reset_takes_effect_on_auth(self, env):
         """断点核心判据：改密必须影响真实鉴权（旧密失效、新密过登录同款验密）。"""
         client, model, verify_password = env["client"], env["model"], env["verify_password"]
         _create(client)
         uid = model.get_user_by_username("alice").id
         old_hash = model.get_user_by_username("alice").password_hash
+        old_access, old_refresh = _token_pair(model, "alice")
         r = client.put(f"/v1/enhanced-users/{uid}/password", json={"password": "brand-new-999"})
         assert r.status_code == 200, r.text
         row = model.get_user_by_username("alice")
         assert verify_password("brand-new-999", row.password_hash) is True
         assert verify_password("pw-alice-123", row.password_hash) is False, "旧密码必须失效"
         assert row.password_hash != old_hash
+        from neurova.api.auth import verify_access_token, verify_refresh_token
+
+        assert verify_access_token(old_access) is None, "改密后旧 access 必须立即失效"
+        assert verify_refresh_token(old_refresh) is None, "改密后旧 refresh 不得续签"
 
     def test_password_reset_unknown_user_404(self, env):
         client = env["client"]
         assert client.put("/v1/enhanced-users/99999/password",
                           json={"password": "x-1234567"}).status_code == 404
+
+    def test_password_reset_rolls_back_when_token_version_write_fails(self, env, monkeypatch):
+        client, model = env["client"], env["model"]
+        _create(client)
+        uid = model.get_user_by_username("alice").id
+        oldHash = model.get_user_by_username("alice").password_hash
+        oldAccess, _ = _token_pair(model, "alice")
+        _failTokenVersionWrites(monkeypatch, model)
+
+        response = client.put(f"/v1/enhanced-users/{uid}/password", json={"password": "must-not-stick"})
+        assert response.status_code == 500, response.text
+        freshModel = UserModel(db_path=model.db_path)
+        assert freshModel.get_user_by_username("alice").password_hash == oldHash, (
+            "版本撤销失败时改密必须同事务回滚，不能留下新密码与旧有效令牌"
+        )
+        from neurova.api.auth import verify_access_token
+
+        assert verify_access_token(oldAccess) is not None, "回滚后旧令牌仍对应当前未变更账号"
 
 
 class TestDeleteGuards:
@@ -147,6 +202,18 @@ class TestDeleteGuards:
         uid = model.get_user_by_username("alice").id
         assert client.delete(f"/v1/enhanced-users/{uid}").status_code == 200
         assert model.get_user_by_username("alice") is None
+
+    def test_delete_revokes_existing_tokens(self, env):
+        client, model = env["client"], env["model"]
+        _create(client)
+        uid = model.get_user_by_username("alice").id
+        old_access, old_refresh = _token_pair(model, "alice")
+
+        assert client.delete(f"/v1/enhanced-users/{uid}").status_code == 200
+        from neurova.api.auth import verify_access_token, verify_refresh_token
+
+        assert verify_access_token(old_access) is None, "删除账号后旧 access 必须失效"
+        assert verify_refresh_token(old_refresh) is None, "删除账号后旧 refresh 必须失效"
 
     def test_delete_self_409(self, env):
         """操作者恒为 admin ⇒ 自删禁令同时保住最后一名 admin（无需第二道护栏）。"""
@@ -171,6 +238,23 @@ class TestDeleteGuards:
 
     def test_delete_unknown_404(self, env):
         assert env["client"].delete("/v1/enhanced-users/424242").status_code == 404
+
+    def test_delete_rolls_back_when_token_version_write_fails(self, env, monkeypatch):
+        client, model = env["client"], env["model"]
+        _create(client)
+        uid = model.get_user_by_username("alice").id
+        oldAccess, _ = _token_pair(model, "alice")
+        _failTokenVersionWrites(monkeypatch, model)
+
+        response = client.delete(f"/v1/enhanced-users/{uid}")
+        assert response.status_code == 500, response.text
+        freshModel = UserModel(db_path=model.db_path)
+        assert freshModel.get_user_by_username("alice") is not None, (
+            "版本撤销失败时删除必须同事务回滚，不能留下已删账号与旧有效令牌"
+        )
+        from neurova.api.auth import verify_access_token
+
+        assert verify_access_token(oldAccess) is not None, "回滚后旧令牌仍对应当前未删除账号"
 
 
 class TestExportSanitized:

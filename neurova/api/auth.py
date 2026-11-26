@@ -75,6 +75,10 @@ class TokenBlacklistUnavailableError(RuntimeError):
     """
 
 
+class TokenVersionUnavailableError(RuntimeError):
+    """用户令牌版本账本不可用；验签与签发都必须显式失败。"""
+
+
 # 安全审计 M1: JWT 密钥最小长度（HS256 对称密钥，过短可被暴力破解）
 _MIN_SECRET_LENGTH = 32
 
@@ -234,6 +238,17 @@ def currentJwtSecretKey() -> str:
 JWT_SECRET_KEY = _load_or_create_secret_key()
 
 
+def _attachTokenVersion(to_encode: Dict[str, Any]) -> None:
+    subject = str(to_encode.get("sub") or "")
+    if not subject:
+        return
+    claimed = to_encode.get("auth_version")
+    if claimed is None:
+        to_encode["auth_version"] = tokenVersionForIssuance(subject)
+    elif isinstance(claimed, bool) or not isinstance(claimed, int) or claimed < 0:
+        raise ValueError("auth_version 必须是非负整数")
+
+
 def create_access_token(
     data: Dict[str, Any],
     expires_delta: Optional[datetime.timedelta] = None,
@@ -249,6 +264,7 @@ def create_access_token(
         JWT Token 字符串
     """
     to_encode = data.copy()
+    _attachTokenVersion(to_encode)
 
     if expires_delta:
         expire = datetime.datetime.now(datetime.timezone.utc) + expires_delta
@@ -282,6 +298,7 @@ def create_refresh_token(
         JWT Token 字符串
     """
     to_encode = data.copy()
+    _attachTokenVersion(to_encode)
 
     if expires_delta:
         expire = datetime.datetime.now(datetime.timezone.utc) + expires_delta
@@ -349,6 +366,7 @@ def create_2fa_challenge_token(user: Dict[str, Any]) -> str:
         "iat": datetime.datetime.now(datetime.timezone.utc),
         "jti": str(uuid.uuid4()),
     }
+    _attachTokenVersion(payload)
     return jwt.encode(payload, currentJwtSecretKey(), algorithm=JWT_ALGORITHM)
 
 
@@ -360,6 +378,8 @@ def verify_2fa_challenge_token(token: str) -> Optional[Dict[str, Any]]:
         return None
     if payload.get("type") != CHALLENGE_TOKEN_TYPE:
         logger.warning("2FA challenge token type mismatch: %s", payload.get("type"))
+        return None
+    if not validateTokenVersion(payload):
         return None
     return payload
 
@@ -405,6 +425,9 @@ def verify_token(token: str, token_type: str = "access") -> Optional[Dict[str, A
         logger.warning("Token type mismatch: expected %s, got %s", token_type, payload.get('type'))
         return None
 
+    if not validateTokenVersion(payload):
+        logger.warning("Token version revoked")
+        return None
     return payload
 
 
@@ -445,6 +468,24 @@ def _blacklist_conn():
     return conn
 
 
+def _writeBlacklistRow(conn, token: str, exp: float, now: float) -> bool:
+    import time as _time
+
+    if not token:
+        return False
+    if not exp:
+        payload = decode_token(token)
+        exp = float(payload.get("exp") or 0) if payload else 0.0
+    if not exp:
+        exp = _time.time() + _BLACKLIST_TTL_FALLBACK_SECONDS
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO revoked_tokens (token, exp) VALUES (?, ?)",
+        (token, float(exp)),
+    )
+    conn.execute("DELETE FROM revoked_tokens WHERE exp <= ?", (now,))
+    return cursor.rowcount == 1
+
+
 def blacklist_token(token: str, exp: float = 0.0) -> None:
     """登出时登记 token（持久化单源）。
 
@@ -453,23 +494,25 @@ def blacklist_token(token: str, exp: float = 0.0) -> None:
     """
     import time as _time
 
-    if not token:
-        return
-    if not exp:
-        payload = decode_token(token)
-        exp = float(payload.get("exp") or 0) if payload else 0.0
-    if not exp:
-        exp = _time.time() + _BLACKLIST_TTL_FALLBACK_SECONDS
-    now = _time.time()
     with _blacklist_lock:
         conn = _blacklist_conn()
         try:
-            conn.execute(
-                "INSERT OR REPLACE INTO revoked_tokens (token, exp) VALUES (?, ?)",
-                (token, float(exp)),
-            )
-            conn.execute("DELETE FROM revoked_tokens WHERE exp <= ?", (now,))
+            _writeBlacklistRow(conn, token, exp, _time.time())
             conn.commit()
+        finally:
+            conn.close()
+
+
+def claim_refresh_token(token: str) -> bool:
+    """原子领取刷新令牌；仅首个请求可继续轮换，重放请求返回 False。"""
+    import time as _time
+
+    with _blacklist_lock:
+        conn = _blacklist_conn()
+        try:
+            claimed = _writeBlacklistRow(conn, token, 0.0, _time.time())
+            conn.commit()
+            return claimed
         finally:
             conn.close()
 
@@ -511,6 +554,60 @@ def blacklistStateOr503(token: str) -> bool:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="认证暂不可用：令牌撤销名单校验失败（fail-closed）",
         ) from exc
+
+
+# ── 用户级令牌版本（API-03）──────────────────────────────────────────────
+# 版本表与 users 同库；UserModel 的每次安全字段更新/删除都在同一事务里递增版本。
+
+
+def currentTokenVersion(userId: str) -> int:
+    """读取用户当前令牌版本；无记录表示从未撤销，版本为 0。"""
+    try:
+        # 复用登录链路的 UserModel 单例，避免另开实例或第二份版本账本。
+        from neurova.api.endpoints.auth import _get_user_model
+
+        return _get_user_model().token_version(str(userId))
+    except Exception as exc:
+        logger.error("用户令牌版本账本读取失败: %s", exc, exc_info=True)
+        raise TokenVersionUnavailableError(str(exc)) from exc
+
+
+def tokenVersionForIssuance(userId: str) -> int:
+    try:
+        return currentTokenVersion(userId)
+    except TokenVersionUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="认证暂不可用：用户令牌版本校验失败（fail-closed）",
+        ) from exc
+
+
+def revokeUserTokens(userId: str) -> int:
+    """原子递增用户令牌版本，使该用户全部 access/refresh 立即失效。"""
+    userId = str(userId or "").strip()
+    if not userId:
+        raise ValueError("撤销用户令牌必须提供 user_id")
+    try:
+        from neurova.api.endpoints.auth import _get_user_model
+
+        return _get_user_model().revoke_user_tokens(userId)
+    except Exception as exc:
+        logger.error("用户令牌版本撤销失败: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="认证暂不可用：用户令牌撤销失败（fail-closed）",
+        ) from exc
+
+
+def validateTokenVersion(payload: Dict[str, Any]) -> bool:
+    """access/refresh 必须携带且匹配当前版本；其他 token 类型不受此门影响。"""
+    if payload.get("type") not in ("access", "refresh", CHALLENGE_TOKEN_TYPE):
+        return True
+    userId = str(payload.get("sub") or "")
+    claimed = payload.get("auth_version")
+    if not userId or isinstance(claimed, bool) or not isinstance(claimed, int):
+        return False
+    return tokenVersionForIssuance(userId) == claimed
 
 
 def verify_access_token(token: str) -> Optional[Dict[str, Any]]:

@@ -272,7 +272,7 @@ class TestJournalAtomicClaim:
             journal.close()
 
     @pytest.mark.asyncio
-    async def test_executor_separates_request_call_id_from_business_key(self, monkeypatch, tmp_path):
+    async def test_executor_replays_same_call_id_and_runs_distinct_calls(self, monkeypatch, tmp_path):
         from neurova.core import tool_call_journal
         from neurova.core.identity_context import clear_request_user_id, set_request_user_id
         from neurova.core.turn_context import set_turn_tool_call_id
@@ -292,16 +292,17 @@ class TestJournalAtomicClaim:
         try:
             set_turn_tool_call_id("request-call-1")
             first = await executor.execute("external_write", {"subject": "same"})
+            assert first.get("success") is True
             assert first.get("replayed") is None
             set_turn_tool_call_id("request-call-2")
             second = await executor.execute("external_write", {"subject": "same"})
-            assert second["code"] == "tool_call_terminal_owner_mismatch"
+            assert second.get("success") is True
             assert second.get("replayed") is None
-            assert len(calls) == 1
+            assert len(calls) == 2
             set_turn_tool_call_id("request-call-1")
             replay = await executor.execute("external_write", {"subject": "same"})
             assert replay.get("replayed") is True
-            assert len(calls) == 1
+            assert len(calls) == 2
         finally:
             set_turn_tool_call_id(None)
             clear_request_user_id()

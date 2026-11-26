@@ -100,6 +100,7 @@ class TestRfc6238Vectors:
 @pytest.fixture()
 def env2(tmp_path, monkeypatch):
     """真 auth + 2FA 路由 + tmp 真账本。"""
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
     model = UserModel(db_path=str(tmp_path / "users.db"))
     monkeypatch.setattr(AUTH, "_user_model", model)
 
@@ -148,6 +149,19 @@ def _setupAndEnable(env2):
     recovery = enable.json().get("recovery_codes")
     assert isinstance(recovery, list) and len(recovery) == 10
     return headers, recovery, secret
+
+
+def _accessHeadersAfterChallenge(env2, secret):
+    client = env2["client"]
+    login = _login(env2)
+    assert login.status_code == 200, login.text
+    challenge = login.json()["challenge_token"]
+    verified = client.post(
+        "/api/v1/auth/2fa/verify",
+        json={"challenge_token": challenge, "code": _codeFromSecret(secret)},
+    )
+    assert verified.status_code == 200, verified.text
+    return {"Authorization": f"Bearer {verified.json()['access_token']}"}
 
 
 class TestTwoFactorEndpoints:
@@ -240,6 +254,11 @@ class TestTwoFactorEndpoints:
                                "code": recovery[0]})
         assert v1.status_code == 200, v1.text
         assert v1.json().get("access_token")
+        me = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {v1.json()['access_token']}"},
+        )
+        assert me.status_code == 200, me.text
 
         # 同一条恢复码：重放拒绝
         login2 = _login(env2)
@@ -264,19 +283,46 @@ class TestTwoFactorEndpoints:
 
     def test_normalAccessTokenNotAcceptedAsChallenge(self, env2):
         client = env2["client"]
-        _setupAndEnable(env2)
-        token = _login(env2).json().get("access_token")
-        # 密码登录在 2FA 启用后只发 challenge；此处用 setup 阶段的旧 access token
-        # 直接打 verify，必须被拒（scope/type 不符）。
-        login = env2["client"].post(
-            "/api/v1/auth/login", json={"username": env2["username"], "password": USER_PW}
-        )
-        challengeOnly = login.json()
-        assert "access_token" not in challengeOnly
+        headers, _, _ = _setupAndEnable(env2)
+        token = headers["Authorization"].removeprefix("Bearer ")
+        # setup 阶段的普通 access token 直接打 verify，必须被拒（scope/type 不符）。
         verify = client.post(
-            "/api/v1/auth/2fa/verify", json={"challenge_token": token or "x", "code": "123456"}
+            "/api/v1/auth/2fa/verify", json={"challenge_token": token, "code": "123456"}
         )
         assert verify.status_code in (400, 401), "普通 access token 不得当 challenge 用"
+
+    def test_passwordChangeInvalidatesOutstandingChallenge(self, env2):
+        client, model = env2["client"], env2["model"]
+        _, _, secret = _setupAndEnable(env2)
+        login = _login(env2)
+        challenge = login.json()["challenge_token"]
+        user = model.get_user_by_username(env2["username"])
+        model.update_user(user.id, password_hash=hash_password("Changed-TwoFa-Pw-0002"))
+
+        verify = client.post(
+            "/api/v1/auth/2fa/verify",
+            json={"challenge_token": challenge, "code": _codeFromSecret(secret)},
+        )
+        assert verify.status_code in (400, 401), verify.text
+
+    def test_revocationDuringChallengeUserReadRejected(self, env2, monkeypatch):
+        client, model = env2["client"], env2["model"]
+        _, _, secret = _setupAndEnable(env2)
+        login = _login(env2)
+        challenge = login.json()["challenge_token"]
+        user = model.get_user_by_username(env2["username"])
+        originalGetUser = model.get_user_by_id
+
+        def revokeThenRead(userId):
+            model.revoke_user_tokens(userId)
+            return originalGetUser(userId)
+
+        monkeypatch.setattr(model, "get_user_by_id", revokeThenRead)
+        verify = client.post(
+            "/api/v1/auth/2fa/verify",
+            json={"challenge_token": challenge, "code": _codeFromSecret(secret)},
+        )
+        assert verify.status_code in (400, 401), verify.text
 
     def test_disabledUserLoginUnaffected(self, env2):
         """未启用 2FA 的用户：登录链路零影响（直接发正式 token 对）。"""
@@ -290,7 +336,8 @@ class TestTwoFactorEndpoints:
 
     def test_disableTurnsOffChallenge(self, env2):
         client, model = env2["client"], env2["model"]
-        headers, recovery, secret = _setupAndEnable(env2)
+        _, _, secret = _setupAndEnable(env2)
+        headers = _accessHeadersAfterChallenge(env2, secret)
         code = _codeFromSecret(secret)
         off = client.post("/api/v1/auth/2fa/disable", json={"code": code}, headers=headers)
         assert off.status_code == 200, off.text

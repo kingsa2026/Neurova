@@ -137,7 +137,9 @@ def _issueTokenPair(user) -> Dict[str, Any]:
     """正式 token 对（身份声明走 buildIdentityClaims 单源）。"""
     from neurova.api.endpoints.auth import buildIdentityClaims
 
-    identityClaims = buildIdentityClaims({"id": user.id, "username": user.username})
+    identityClaims = buildIdentityClaims({
+        "id": user.id, "username": user.username, "auth_version": user.auth_version,
+    })
     return {
         "access_token": create_access_token(data={**identityClaims, "role": user.role}),
         "refresh_token": create_refresh_token(data=identityClaims),
@@ -244,6 +246,8 @@ async def verifyTwoFactor(request: Request, body: TwoFactorVerifyRequest):
         user = None
     if user is None or not user.two_factor_enabled or not user.totp_secret:
         raise HTTPException(status_code=401, detail="两步验证未启用或用户不存在")
+    if user.auth_version != payload.get("auth_version"):
+        raise HTTPException(status_code=401, detail="挑战令牌已撤销")
 
     code = (body.code or "").strip()
     codeOk = verifyTotp(user.totp_secret, code) or _consumeRecoveryCode(model, user, code)

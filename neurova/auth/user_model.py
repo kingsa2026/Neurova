@@ -65,6 +65,29 @@ def _migrateUsersTwoFactorColumns(conn: sqlite3.Connection) -> None:
 register_migration(1, _migrateUsersTwoFactorColumns, domain=USERS_2FA_DOMAIN)
 
 
+USERS_TOKEN_VERSION_DOMAIN = "users_auth_token_version"
+
+
+def _migrateUsersTokenVersionTable(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS auth_token_versions (
+            user_id TEXT PRIMARY KEY,
+            version INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+
+
+register_migration(1, _migrateUsersTokenVersionTable, domain=USERS_TOKEN_VERSION_DOMAIN)
+
+# totp_secret 的 setup 暂存不属于已生效认证变更，不能中断 setup→enable 会话。
+TOKEN_REVOKING_USER_FIELDS = frozenset({
+    "username", "password_hash", "role", "status", "oidc_sub", "two_factor_enabled",
+})
+
+
 class User:
     """User data model - represents a user record"""
 
@@ -87,6 +110,7 @@ class User:
         totp_secret: str = "",
         two_factor_enabled: int = 0,
         recovery_codes_hash: str = "",
+        auth_version: int = 0,
     ):
         self.id = id
         self.username = username
@@ -108,6 +132,7 @@ class User:
         self.totp_secret = totp_secret or None
         self.two_factor_enabled = bool(two_factor_enabled)
         self.recovery_codes_hash = recovery_codes_hash or None
+        self.auth_version = int(auth_version or 0)
 
 
 class UserModel:
@@ -201,6 +226,7 @@ class UserModel:
             # 两域共享 users.db 的 user_version，故经 apply_domain_steps 幂等应用）
             apply_domain_steps(conn, USERS_OIDC_DOMAIN)
             apply_domain_steps(conn, USERS_2FA_DOMAIN)
+            apply_domain_steps(conn, USERS_TOKEN_VERSION_DOMAIN)
 
             conn.commit()
             conn.close()
@@ -356,7 +382,11 @@ class UserModel:
             conn = self._get_conn()
             cursor = conn.cursor()
 
-            cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            cursor.execute(
+                "SELECT u.*, COALESCE(v.version, 0) AS auth_version FROM users u"
+                " LEFT JOIN auth_token_versions v ON v.user_id = CAST(u.id AS TEXT)"
+                " WHERE u.id = ?", (user_id,)
+            )
             row = cursor.fetchone()
             conn.close()
 
@@ -379,6 +409,7 @@ class UserModel:
                     totp_secret=row["totp_secret"] if "totp_secret" in row.keys() else "",
                     two_factor_enabled=(row["two_factor_enabled"] or 0) if "two_factor_enabled" in row.keys() else 0,
                     recovery_codes_hash=row["recovery_codes_hash"] if "recovery_codes_hash" in row.keys() else "",
+                    auth_version=row["auth_version"] if "auth_version" in row.keys() else 0,
                 )
             return None
 
@@ -400,7 +431,11 @@ class UserModel:
             conn = self._get_conn()
             cursor = conn.cursor()
 
-            cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+            cursor.execute(
+                "SELECT u.*, COALESCE(v.version, 0) AS auth_version FROM users u"
+                " LEFT JOIN auth_token_versions v ON v.user_id = CAST(u.id AS TEXT)"
+                " WHERE u.username = ?", (username,)
+            )
             row = cursor.fetchone()
             conn.close()
 
@@ -423,6 +458,7 @@ class UserModel:
                     totp_secret=row["totp_secret"] if "totp_secret" in row.keys() else "",
                     two_factor_enabled=(row["two_factor_enabled"] or 0) if "two_factor_enabled" in row.keys() else 0,
                     recovery_codes_hash=row["recovery_codes_hash"] if "recovery_codes_hash" in row.keys() else "",
+                    auth_version=row["auth_version"] if "auth_version" in row.keys() else 0,
                 )
             return None
 
@@ -444,7 +480,11 @@ class UserModel:
             conn = self._get_conn()
             cursor = conn.cursor()
 
-            cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
+            cursor.execute(
+                "SELECT u.*, COALESCE(v.version, 0) AS auth_version FROM users u"
+                " LEFT JOIN auth_token_versions v ON v.user_id = CAST(u.id AS TEXT)"
+                " WHERE u.email = ?", (email,)
+            )
             row = cursor.fetchone()
             conn.close()
 
@@ -467,6 +507,7 @@ class UserModel:
                     totp_secret=row["totp_secret"] if "totp_secret" in row.keys() else "",
                     two_factor_enabled=(row["two_factor_enabled"] or 0) if "two_factor_enabled" in row.keys() else 0,
                     recovery_codes_hash=row["recovery_codes_hash"] if "recovery_codes_hash" in row.keys() else "",
+                    auth_version=row["auth_version"] if "auth_version" in row.keys() else 0,
                 )
             return None
 
@@ -490,7 +531,11 @@ class UserModel:
             conn = self._get_conn()
             cursor = conn.cursor()
 
-            cursor.execute("SELECT * FROM users WHERE oidc_sub = ?", (oidc_sub,))
+            cursor.execute(
+                "SELECT u.*, COALESCE(v.version, 0) AS auth_version FROM users u"
+                " LEFT JOIN auth_token_versions v ON v.user_id = CAST(u.id AS TEXT)"
+                " WHERE u.oidc_sub = ?", (oidc_sub,)
+            )
             row = cursor.fetchone()
             conn.close()
 
@@ -513,6 +558,7 @@ class UserModel:
                     totp_secret=row["totp_secret"] if "totp_secret" in row.keys() else "",
                     two_factor_enabled=(row["two_factor_enabled"] or 0) if "two_factor_enabled" in row.keys() else 0,
                     recovery_codes_hash=row["recovery_codes_hash"] if "recovery_codes_hash" in row.keys() else "",
+                    auth_version=row["auth_version"] if "auth_version" in row.keys() else 0,
                 )
             return None
 
@@ -623,6 +669,48 @@ class UserModel:
             logger.error("Failed to count users: %s", e)
             return 0
 
+    @staticmethod
+    def _bumpTokenVersion(cursor, userId: str) -> int:
+        cursor.execute(
+            "INSERT INTO auth_token_versions (user_id, version, updated_at)"
+            " VALUES (?, 1, ?)"
+            " ON CONFLICT(user_id) DO UPDATE SET"
+            " version = version + 1, updated_at = excluded.updated_at",
+            (str(userId), datetime.datetime.now(datetime.timezone.utc).isoformat()),
+        )
+        cursor.execute(
+            "SELECT version FROM auth_token_versions WHERE user_id = ?",
+            (str(userId),),
+        )
+        return int(cursor.fetchone()[0])
+
+    def token_version(self, user_id: str) -> int:
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT version FROM auth_token_versions WHERE user_id = ?",
+                (str(user_id),),
+            ).fetchone()
+            return int(row[0]) if row else 0
+        finally:
+            conn.close()
+
+    def revoke_user_tokens(self, user_id: str) -> int:
+        userId = str(user_id or "").strip()
+        if not userId:
+            raise ValueError("撤销用户令牌必须提供 user_id")
+        conn = self._get_conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            version = self._bumpTokenVersion(conn.cursor(), userId)
+            conn.commit()
+            return version
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def update_user(self, user_id: int, **kwargs) -> bool:
         """
         更新用户信息
@@ -634,6 +722,7 @@ class UserModel:
         Returns:
             更新是否成功
         """
+        conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
@@ -670,6 +759,8 @@ class UserModel:
 
             query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = ?"
             cursor.execute(query, params)
+            if TOKEN_REVOKING_USER_FIELDS.intersection(kwargs):
+                self._bumpTokenVersion(cursor, user_id)
 
             conn.commit()
             conn.close()
@@ -680,8 +771,14 @@ class UserModel:
             return True
 
         except Exception as e:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception as rollbackError:
+                    logger.error("Failed to roll back user update: %s", rollbackError)
+                conn.close()
             logger.error("Failed to update user: %s", e)
-            return False
+            raise
 
     def delete_user(self, user_id: int) -> bool:
         """
@@ -693,6 +790,7 @@ class UserModel:
         Returns:
             删除是否成功
         """
+        conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
@@ -708,6 +806,7 @@ class UserModel:
 
             # 删除用户
             cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            self._bumpTokenVersion(cursor, user_id)
 
             conn.commit()
             conn.close()
@@ -716,8 +815,14 @@ class UserModel:
             return True
 
         except Exception as e:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception as rollbackError:
+                    logger.error("Failed to roll back user delete: %s", rollbackError)
+                conn.close()
             logger.error("Failed to delete user: %s", e)
-            return False
+            raise
 
     def increment_login_count(self, user_id: int) -> bool:
         """
@@ -966,6 +1071,7 @@ class UserModel:
                 "created_at": user.created_at,
                 "password_hash": user.password_hash,
                 "two_factor_enabled": bool(user.two_factor_enabled),
+                "auth_version": user.auth_version,
             }
 
         except Exception as e:

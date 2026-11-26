@@ -19,39 +19,19 @@ from fastapi.security import HTTPAuthorizationCredentials
 
 from neurova.api import deps
 from neurova.api import auth as auth_dep
-from neurova.api.auth import create_access_token, create_refresh_token, decode_token
+from neurova.api.auth import create_access_token, create_refresh_token, decode_token, hash_password
 from neurova.api.endpoints import auth as auth_endpoint
 from neurova.api.endpoints.auth import LoginRequest, RefreshRequest
-
-
-class _FakeUserModel:
-    """authenticate_user 返回固定用户 (id=42)"""
-
-    def get_user_by_username(self, username):
-        return {"id": 42, "username": "bob", "role": "user", "status": "active"}
-
-    def authenticate_user(self, username, password):
-        return {
-            "id": 42,
-            "username": "bob",
-            "role": "user",
-            "status": "active",
-            "failed_attempts": 0,
-        }
-
-    def increment_failed_attempts(self, user_id):
-        pass
-
-    def log_login(self, **kwargs):
-        pass
-
-    def get_user_by_id(self, user_id):
-        return SimpleNamespace(id=42, username="bob", role="user", status="active")
+from neurova.auth.user_model import UserModel
 
 
 @pytest.fixture(autouse=True)
-def fake_user_model(monkeypatch):
-    monkeypatch.setattr(auth_endpoint, "_user_model", _FakeUserModel())
+def user_model(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
+    model = UserModel(db_path=str(tmp_path / "users.db"))
+    model.create_user("bob", hash_password("pw"), role="user")
+    monkeypatch.setattr(auth_endpoint, "_user_model", model)
+    return model
 
 
 def _fake_request():
@@ -59,56 +39,62 @@ def _fake_request():
 
 
 class TestLoginWritesIdentityClaims:
-    def test_login_token_contains_neuser_and_user_claims(self):
+    def test_login_token_contains_neuser_and_user_claims(self, user_model):
         resp = asyncio.run(
             auth_endpoint.login(_fake_request(), LoginRequest(username="bob", password="pw"))
         )
         payload = decode_token(resp.access_token)
-        assert payload["neuser_id"] == "42"
-        assert payload["user_id"] == "42"
-        assert payload["sub"] == "42"
+        userId = str(user_model.get_user_by_username("bob").id)
+        assert payload["neuser_id"] == userId
+        assert payload["user_id"] == userId
+        assert payload["sub"] == userId
 
-    def test_refresh_token_keeps_identity_claims(self):
+    def test_refresh_token_keeps_identity_claims(self, user_model):
+        userId = str(user_model.get_user_by_username("bob").id)
         refresh = create_refresh_token(
-            {"sub": "42", "username": "bob", "neuser_id": "42", "user_id": "42"}
+            {"sub": userId, "username": "bob", "neuser_id": userId, "user_id": userId}
         )
         resp = asyncio.run(
             auth_endpoint.refresh_token(_fake_request(), RefreshRequest(refresh_token=refresh))
         )
         payload = decode_token(resp.access_token)
-        assert payload["neuser_id"] == "42"
-        assert payload["user_id"] == "42"
+        assert payload["neuser_id"] == userId
+        assert payload["user_id"] == userId
 
 
 class TestCurrentUserExposesNeuserId:
-    def test_deps_get_current_user_returns_neuser_id(self):
+    def test_deps_get_current_user_returns_neuser_id(self, user_model):
+        userId = str(user_model.get_user_by_username("bob").id)
         token = create_access_token(
-            {"sub": "42", "username": "bob", "role": "user", "neuser_id": "42", "user_id": "42"}
+            {"sub": userId, "username": "bob", "role": "user", "neuser_id": userId, "user_id": userId}
         )
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
         user = asyncio.run(deps.get_current_user(creds))
-        assert user["neuser_id"] == "42"
-        assert user["user_id"] == "42"
+        assert user["neuser_id"] == userId
+        assert user["user_id"] == userId
 
-    def test_deps_get_current_user_legacy_token_falls_back_to_sub(self):
+    def test_deps_get_current_user_legacy_token_falls_back_to_sub(self, user_model):
         """存量 Token 无 neuser_id 声明: 回退 sub, 不再永远 default"""
-        token = create_access_token({"sub": "42", "username": "bob", "role": "user"})
+        userId = str(user_model.get_user_by_username("bob").id)
+        token = create_access_token({"sub": userId, "username": "bob", "role": "user"})
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
         user = asyncio.run(deps.get_current_user(creds))
-        assert user["neuser_id"] == "42"
+        assert user["neuser_id"] == userId
 
-    def test_deps_get_optional_user_returns_neuser_id(self):
+    def test_deps_get_optional_user_returns_neuser_id(self, user_model):
+        userId = str(user_model.get_user_by_username("bob").id)
         token = create_access_token(
-            {"sub": "42", "username": "bob", "role": "user", "neuser_id": "42", "user_id": "42"}
+            {"sub": userId, "username": "bob", "role": "user", "neuser_id": userId, "user_id": userId}
         )
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
         user = asyncio.run(deps.get_optional_user(creds))
-        assert user["neuser_id"] == "42"
+        assert user["neuser_id"] == userId
 
-    def test_auth_get_current_user_or_default_returns_neuser_id(self):
+    def test_auth_get_current_user_or_default_returns_neuser_id(self, user_model):
+        userId = str(user_model.get_user_by_username("bob").id)
         token = create_access_token(
-            {"sub": "42", "username": "bob", "role": "user", "neuser_id": "42", "user_id": "42"}
+            {"sub": userId, "username": "bob", "role": "user", "neuser_id": userId, "user_id": userId}
         )
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
         user = asyncio.run(auth_dep.get_current_user_or_default(creds))
-        assert user["neuser_id"] == "42"
+        assert user["neuser_id"] == userId

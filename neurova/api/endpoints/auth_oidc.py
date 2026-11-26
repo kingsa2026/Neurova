@@ -551,7 +551,9 @@ async def oidcCallback(request: Request, code: str = "", state: str = ""):
 
     from neurova.api.auth import create_access_token, create_refresh_token
 
-    identityClaims = buildIdentityClaims({"id": user.id, "username": user.username})
+    identityClaims = buildIdentityClaims({
+        "id": user.id, "username": user.username, "auth_version": user.auth_version,
+    })
     accessToken = create_access_token(data={**identityClaims, "role": user.role})
     refreshToken = create_refresh_token(data=identityClaims)
 

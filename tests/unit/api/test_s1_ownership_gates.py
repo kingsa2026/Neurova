@@ -617,6 +617,8 @@ def test_shared_config_admin_gated():
         ("/llm-providers/{name}", "PUT"),
         ("/llm-providers/{name}", "DELETE"),
         ("/import", "POST"),
+        ("/mcp-servers", "POST"),
+        ("/mcp-servers/{name}", "PUT"),
         ("/mcp-servers/{name}", "DELETE"),
     ):
         assert _hasAdminGate(mod.router, path, method), f"{method} {path} 应仅管理员"

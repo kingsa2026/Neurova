@@ -388,6 +388,8 @@ def buildIdentityClaims(user: dict) -> dict:
         "neuser_id": str(user["id"]),
         "user_id": str(user["id"]),
     }
+    if user.get("auth_version") is not None:
+        claims["auth_version"] = int(user["auth_version"])
     from neurova.auth.user_group_model import resolveUserDepartment
 
     dept = resolveUserDepartment(str(user.get("username") or ""))
@@ -566,6 +568,15 @@ async def refresh_token(request: Request, body: RefreshRequest):
             )
             raise HTTPException(status_code=401, detail="Invalid token type")
 
+        from neurova.api.auth import validateTokenVersion
+
+        if not validateTokenVersion(payload):
+            _auditAuthLogin(
+                str(payload.get("sub") or ""), request, success=False,
+                attempted_username=str(payload.get("username") or ""),
+            )
+            raise HTTPException(status_code=401, detail="Token has been revoked")
+
         user_id = payload.get("sub")
         username = payload.get("username", "")
 
@@ -576,28 +587,38 @@ async def refresh_token(request: Request, body: RefreshRequest):
             _auditAuthLogin(str(user_id), request, success=False, attempted_username=str(username or ""))
             raise HTTPException(status_code=401, detail="User not found")
 
+        if user.auth_version != payload.get("auth_version"):
+            _auditAuthLogin(str(user.id), request, success=False, attempted_username=str(user.username))
+            raise HTTPException(status_code=401, detail="Token has been revoked")
+
         # 检查用户状态
         if user.status != "active":
             _auditAuthLogin(str(user.id), request, success=False, attempted_username=str(user.username))
             raise HTTPException(status_code=403, detail="Account is inactive")
 
-        # API-03 刷新轮换：旧 refresh 先撤销再发新对——旧 refresh 重放即 401，
-        # 泄露的 refresh 无法反复续签。撤销失败不得发新对（否则新旧并存且无
-        # 重放检测），诚实 503 让客户端持旧 refresh 重试。
-        # blacklist_token 函数内取（同 logout 的判据注入缝，见 logout 注释）。
-        from neurova.api.auth import blacklist_token
+        # API-03 刷新轮换：在同一 SQLite 事务内原子领取旧 refresh，再发新对。
+        # check→write 分开会让并发请求都通过检查并各发一对；INSERT OR IGNORE
+        # 只允许首个请求继续，重放请求显式 401。领取失败不得发新对。
+        from neurova.api.auth import claim_refresh_token
 
         try:
-            blacklist_token(body.refresh_token)
+            claimed = claim_refresh_token(body.refresh_token)
         except Exception as e:  # noqa: BLE001 - 撤销失败不得假称轮换成功
             logger.error(f"Refresh rotation failed to revoke old refresh token: {e}")
             raise HTTPException(
                 status_code=503,
                 detail="Refresh failed: unable to revoke old refresh token",
             )
+        if not claimed:
+            _auditAuthLogin(
+                str(user.id), request, success=False, attempted_username=str(user.username)
+            )
+            raise HTTPException(status_code=401, detail="Token has been revoked")
 
         # 生成新 token (审计修复 P0-2: 补齐身份声明；批 B: 部门 tenant claim 走同一单源)
-        identity_claims = buildIdentityClaims({"id": user.id, "username": user.username})
+        identity_claims = buildIdentityClaims({
+            "id": user.id, "username": user.username, "auth_version": user.auth_version,
+        })
         access_token = create_access_token(data={**identity_claims, "role": user.role})
         refresh_token = create_refresh_token(data=identity_claims)
 
@@ -654,6 +675,10 @@ async def get_current_user(request: Request):
                     # 验证 token 类型
                     if payload.get("type") != "access":
                         raise HTTPException(status_code=401, detail="Invalid token type")
+                    from neurova.api.auth import validateTokenVersion
+
+                    if not validateTokenVersion(payload):
+                        raise HTTPException(status_code=401, detail="Token has been revoked")
 
                     user = {
                         "user_id": payload.get("sub", "unknown"),
@@ -801,6 +826,7 @@ async def register(request: Request, body: RegisterRequest):
             "username": user.username,
             "neuser_id": str(user.id),
             "user_id": str(user.id),
+            "auth_version": user.auth_version,
         }
         access_token = create_access_token(data={**identity_claims, "role": user.role})
         refresh_token = create_refresh_token(data=identity_claims)
@@ -953,6 +979,7 @@ async def logout(request: Request, body: Optional[LogoutRequest] = None):
     from neurova.api.auth import blacklist_token as blacklistToken
 
     # 获取当前用户的 token
+    logoutUserId = None
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
@@ -987,6 +1014,11 @@ async def logout(request: Request, body: Optional[LogoutRequest] = None):
                 detail="Logout failed: unable to invalidate refresh token",
             )
         logger.info("Refresh token added to blacklist")
+
+    if logoutUserId and not refreshToken:
+        from neurova.api.auth import revokeUserTokens
+
+        revokeUserTokens(logoutUserId)
 
     return {
         "code": 0,

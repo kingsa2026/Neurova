@@ -10,6 +10,9 @@
 TestClient 打真端点；密钥经 `tests/auth_headers.pinJwtSecret()` 对齐（不绕身份门）。
 """
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -27,6 +30,7 @@ PASSWORD = "Alice-Pw-123456"
 def env(tmp_path, monkeypatch):
     """真 auth 路由 + tmp 真账本 + tmp 真黑名单库的最小可跑环境。"""
     pinJwtSecret()
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path))
     model = UserModel(db_path=str(tmp_path / "users.db"))
     monkeypatch.setattr(AUTH, "_user_model", model)
     # 黑名单库落点改到本档临时目录：判据之间互不串库（生产取数口不变）
@@ -99,6 +103,42 @@ class TestRefreshRotation:
             f"轮换后新 refresh 必须可用：{second.status_code} {second.text}"
         )
 
+    def test_concurrentRefreshReplayIssuesOnlyOneTokenPair(self, env, monkeypatch):
+        tokens = _login(env)
+        bothValidated = threading.Barrier(2)
+        originalGetModel = AUTH._get_user_model
+        modelCalls = 0
+        modelCallsLock = threading.Lock()
+
+        def synchronizedGetModel():
+            nonlocal modelCalls
+            with modelCallsLock:
+                modelCalls += 1
+                shouldSynchronize = modelCalls <= 2
+            if shouldSynchronize:
+                bothValidated.wait(timeout=10)
+            return originalGetModel()
+
+        monkeypatch.setattr(AUTH, "_get_user_model", synchronizedGetModel)
+
+        def refresh(client):
+            return client.post(
+                "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            with TestClient(env["client"].app) as firstClient, TestClient(env["client"].app) as secondClient:
+                responses = list(pool.map(refresh, (firstClient, secondClient)))
+
+        statuses = sorted(response.status_code for response in responses)
+        assert statuses == [200, 401], (
+            f"同一 refresh 并发重放只能成功轮换一次，实际状态={statuses}："
+            f"{[response.text for response in responses]}"
+        )
+        successful = next(response for response in responses if response.status_code == 200)
+        newRefresh = _tokens(successful)["refresh_token"]
+        assert auth_mod.verify_refresh_token(newRefresh) is not None
+
 
 class TestLogoutRevokesRefresh:
     """logout 必须同撤 refresh：只撤 access 等于给 refresh 留后门。"""
@@ -135,6 +175,77 @@ class TestLogoutRevokesRefresh:
         assert me.status_code == 401, (
             f"登出后原 access 必须失效：{me.status_code} {me.text}"
         )
+
+
+class TestUserTokenRevocation:
+    def test_tokenCannotUsePreRevocationRoleSnapshot(self, env, monkeypatch):
+        model = env["model"]
+        user = model.create_user(
+            "snapshot-admin", auth_mod.hash_password("Snapshot-Pw-123456"), role="admin"
+        )
+        originalCreateAccess = AUTH.create_access_token
+
+        def revokeBeforeIssuance(data, expires_delta=None):
+            model.update_user(user.id, role="user")
+            return originalCreateAccess(data, expires_delta=expires_delta)
+
+        monkeypatch.setattr(AUTH, "create_access_token", revokeBeforeIssuance)
+        login = env["client"].post(
+            "/api/v1/auth/login",
+            json={"username": "snapshot-admin", "password": "Snapshot-Pw-123456"},
+        )
+        assert login.status_code == 200, login.text
+        token = _tokens(login)["access_token"]
+        assert auth_mod.verify_access_token(token) is None, (
+            "降权提交后，登录读取的旧 admin 快照不得借新 auth_version 继续有效"
+        )
+
+    def test_refreshCannotCrossRevocationBetweenValidationAndUserRead(self, env, monkeypatch):
+        tokens = _login(env)
+        model = env["model"]
+        user = model.get_user_by_username(USERNAME)
+        originalGetUser = model.get_user_by_id
+
+        def revokeThenRead(userId):
+            model.revoke_user_tokens(userId)
+            return originalGetUser(userId)
+
+        monkeypatch.setattr(model, "get_user_by_id", revokeThenRead)
+        refreshed = env["client"].post(
+            "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+        )
+        assert refreshed.status_code == 401, (
+            f"验签后发生的撤销必须在读用户时复核并拒绝续签：{refreshed.status_code} {refreshed.text}"
+        )
+
+    def test_logoutWithoutRefreshRevokesRefresh(self, env):
+        tokens = _login(env)
+        logout = env["client"].post(
+            "/api/v1/auth/logout",
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        assert logout.status_code == 200, logout.text
+        refreshed = env["client"].post(
+            "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+        )
+        assert refreshed.status_code == 401, (
+            f"旧客户端未提交 refresh 时，登出也必须使其失效：{refreshed.status_code} {refreshed.text}"
+        )
+
+    def test_userRevocationInvalidatesAccessAndRefresh(self, env):
+        tokens = _login(env)
+        user = env["model"].get_user_by_username(USERNAME)
+        auth_mod.revokeUserTokens(user.id)
+
+        me = env["client"].get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        refreshed = env["client"].post(
+            "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+        )
+        assert me.status_code == 401, me.text
+        assert refreshed.status_code == 401, refreshed.text
 
 
 class TestBlacklistFailClosed:
