@@ -118,6 +118,11 @@ class _ProviderTemplate(BaseModel):
     provider: str
     base_url: str
     api_key_prefix: str = ""
+    # 模板声明的默认模型（D-R4 铺量起有 5 家声明）。缺这一个字段时 Pydantic
+    # 静默丢弃输入里的同名字段，种子 ProviderConfig 的 default_model 恒 None，
+    # 消费方 `default_model or models[0]` 于是回落到列表首项——配置里写的默认
+    # 模型从未生效。校验只要求形态，不要求必填（无默认可配模型的服务商照旧）。
+    default_model: Optional[str] = None
     models: List[str] = []
     note: str = ""
 
@@ -491,9 +496,23 @@ class LLMProviderManager(Module):
         后端必须有对应实体才能让「配置/发现/筛选」工作 —— 这里提供与
         前端种子对齐的核心定义(openrouter/opencode/kilo/github-models)。
         无默认可配模型(models=[]):真实清单由发现流程填充。
+
+        模板声明的 `default_model` 一并带进 ProviderConfig（此前模板类漏字段，
+        该值被静默丢弃）。存量项的空 `default_model` 也按模板补齐：None 是
+        「未设置」而不是用户选择（`update_provider` 传 None 即「不改」），
+        不补齐则升级用户的默认模型永远不生效——审计 OPS-03 的故障面只对新装关闭。
         """
         for definition in builtinProviderDefs():
-            if definition["id"] in self._providers:
+            declaredDefault = definition.get("default_model")
+            existing = self._providers.get(definition["id"])
+            if existing is not None:
+                if declaredDefault and not existing.default_model:
+                    existing.default_model = declaredDefault
+                    logger.info(
+                        "Backfilled default_model=%s for builtin provider %s",
+                        declaredDefault,
+                        definition["id"],
+                    )
                 continue
             self._providers[definition["id"]] = ProviderConfig(
                 id=definition["id"],
@@ -501,6 +520,7 @@ class LLMProviderManager(Module):
                 provider=definition["provider"],
                 base_url=definition["base_url"],
                 api_key_prefix=definition.get("api_key_prefix", ""),
+                default_model=declaredDefault,
                 models=list(definition.get("models", [])),
                 is_builtin=True,
             )
