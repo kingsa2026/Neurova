@@ -83,6 +83,12 @@ def test_ownerStillManagesOwnKey(client):
     assert client.post(f"{BASE}/{created['id']}/revoke").status_code == 200
 
 
+def test_scopesRouteIsNotShadowedByKeyDetail(client):
+    response = client.get(f"{BASE}/scopes")
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["scopes"] == opk._AVAILABLE_SCOPES
+
+
 def test_stateUserIdReaderIsRetired(client):
     """身份不得再从 `request.state.user_id` 取——那个字段全仓无人写入。
     （反证要钉在符号本身上：字面量 `state.user_id` 抓不到

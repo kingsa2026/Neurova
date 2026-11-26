@@ -218,6 +218,11 @@ async def create_api_key(
     return {"code": 0, "message": "Key created", "data": _toFace(apiKey, plaintext=plaintext)}
 
 
+@router.get("/scopes")
+async def get_available_scopes():
+    return {"code": 0, "message": "success", "data": {"scopes": _AVAILABLE_SCOPES}}
+
+
 @router.get("/{key_id}")
 async def get_api_key(
     key_id: str,
@@ -290,8 +295,3 @@ async def get_key_usage(
             "last_used_at": _iso(apiKey.last_used_at),
         },
     }
-
-
-@router.get("/scopes")
-async def get_available_scopes():
-    return {"code": 0, "message": "success", "data": {"scopes": _AVAILABLE_SCOPES}}

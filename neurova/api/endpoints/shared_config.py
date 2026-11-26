@@ -244,20 +244,8 @@ def _mcp_config_from_body(body: "MCPServerRequest") -> dict:
     return config
 
 
-def _mcp_role_of(current_user: typing.Optional[dict]) -> str:
-    return str((current_user or {}).get("role") or "user")
-
-
-def _validate_and_gate_mcp_config(config: dict, role: str) -> dict:
-    """schema 校验 + 角色门/私网门（与 tool_layers.connect_mcp_server 同语义）
-
-    P0-4 修正：门禁基于归一化后的 transport——transport 省略时按
-    command/url 推断为 stdio，若检查原始字符串，推断路径会绕过角色门。
-    Returns:
-        归一化后的配置（调用方应以此为准）
-    Raises:
-        HTTPException: 400（schema/URL）或 403（角色）
-    """
+def _validate_and_gate_mcp_config(config: dict) -> dict:
+    """schema 校验 + 私网 URL 门；写侧管理员门由路由依赖统一执行。"""
     from fastapi import HTTPException
 
     from neurova.security.url_guard import assert_public_url
@@ -268,12 +256,7 @@ def _validate_and_gate_mcp_config(config: dict, role: str) -> dict:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    if cfg.get("transport") == "stdio" and role != "admin":
-        raise HTTPException(
-            status_code=403,
-            detail="stdio 传输需要管理员角色（stdio MCP server 由本机派生进程执行）",
-        )
-    if role != "admin" and cfg.get("transport") in ("http", "sse"):
+    if cfg.get("transport") in ("http", "sse"):
         try:
             assert_public_url(cfg.get("url") or "")
         except ValueError as e:
@@ -292,17 +275,16 @@ async def list_mcp_servers():
     return {"code": 0, "message": "success", "data": {"servers": servers, "total": len(servers)}}
 
 
-@router.post("/mcp-servers")
+@router.post("/mcp-servers", dependencies=[Depends(require_admin())])
 async def add_mcp_server(
     body: MCPServerRequest,
-    current_user: typing.Optional[dict] = Depends(get_current_user),
 ):
     """添加新的 MCP 服务器配置（持久化进 SharedConfigManager）"""
     from neurova.shared_config import get_shared_config_manager
 
     manager = get_shared_config_manager()
     config = _mcp_config_from_body(body)
-    config = _validate_and_gate_mcp_config(config, _mcp_role_of(current_user))
+    config = _validate_and_gate_mcp_config(config)
 
     if manager.get_mcp_server(config["id"]) is not None:
         raise HTTPException(status_code=409, detail=f"MCP server '{config['id']}' already exists")
@@ -328,11 +310,10 @@ async def get_mcp_server(name: str):
     return {"code": 0, "message": "success", "data": _masked_mcp_server(server)}
 
 
-@router.put("/mcp-servers/{name}")
+@router.put("/mcp-servers/{name}", dependencies=[Depends(require_admin())])
 async def update_mcp_server(
     name: str,
     body: MCPServerRequest,
-    current_user: typing.Optional[dict] = Depends(get_current_user),
 ):
     """更新 MCP 服务器配置（掩码回写保护：未重填的掩码值保留原值）"""
     from neurova.shared_config import get_shared_config_manager
@@ -344,7 +325,7 @@ async def update_mcp_server(
 
     config = _mcp_config_from_body(body)
     config["id"] = name  # 路径名为准，不允许改 id
-    config = _validate_and_gate_mcp_config(config, _mcp_role_of(current_user))
+    config = _validate_and_gate_mcp_config(config)
 
     # 掩码回写保护：env 全掩语义 + headers 敏感键，未重填的掩码值保留原值
     new_env = config.get("env") or {}

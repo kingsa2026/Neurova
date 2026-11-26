@@ -471,8 +471,8 @@ def _consumeConnectTicket(ticket: str) -> Optional[Dict[str, str]]:
     info = _verify_ws_token(ticket)
     if not info:
         return None
-    issuedAt = _outstanding_tickets.pop(ticket, None)
-    if issuedAt is None or now - issuedAt > protocol.CONNECT_TICKET_TTL_SECONDS:
+    expiresAt = _outstanding_tickets.pop(ticket, None)
+    if expiresAt is None or now > expiresAt:
         return None
     _spent_tickets[ticket] = now
     return info
@@ -484,7 +484,7 @@ def _pruneTickets() -> None:
     horizon = now - protocol.CONNECT_TICKET_TTL_SECONDS * 2
     for spentKey in [k for k, v in _spent_tickets.items() if v < horizon]:
         _spent_tickets.pop(spentKey, None)
-    for outstandingKey in [k for k, issuedAt in _outstanding_tickets.items() if issuedAt < now]:
+    for outstandingKey in [k for k, expiresAt in _outstanding_tickets.items() if expiresAt < now]:
         _outstanding_tickets.pop(outstandingKey, None)
 
 
@@ -523,9 +523,9 @@ async def _get_current_user_id(
         raise HTTPException(status_code=401, detail="Missing authorization")
 
     try:
-        from neurova.api.auth import decode_token
+        from neurova.api.auth import verify_access_token
 
-        payload = decode_token(credentials.credentials)
+        payload = verify_access_token(credentials.credentials)
         if payload is None:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
         uid = payload.get("sub")
@@ -1580,11 +1580,31 @@ def _pairingByRef(ref: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _pairingIsExpired(pairing: Dict[str, Any]) -> bool:
+    """配对码绝对到期判定；缺字段按已过期处理，避免旧记录无限续命。"""
+    return time.time() > float(pairing.get("expires_at", 0) or 0)
+
+
 def _requireLivePairing(pairing: Dict[str, Any]) -> None:
     """未过期判定（两个入口共用，不各写一遍）。"""
-    if time.time() > pairing["expires_at"]:
+    if _pairingIsExpired(pairing):
         pairing["status"] = "expired"
         raise HTTPException(status_code=410, detail="Pairing code expired")
+
+
+def _consumePairingCode(code: str) -> Optional[Dict[str, str]]:
+    """配对码仅用于首次接入：过期拒绝，成功认证后立即一次性消费。"""
+    pairing = _pairing_codes.get(code)
+    if not pairing or pairing.get("status") != "confirmed":
+        return None
+    if _pairingIsExpired(pairing):
+        pairing["status"] = "expired"
+        return None
+    pairing["status"] = "used"
+    return {
+        "user_id": str(pairing["user_id"]),
+        "pairing_id": str(pairing["pairing_id"]),
+    }
 
 
 def _requireExchangeablePairing(pairing: Dict[str, Any]) -> None:
@@ -1991,7 +2011,7 @@ async def mobile_websocket(websocket: WebSocket):
     """移动设备 WebSocket 连接
 
     三条通道，按可信度排序：一次性接入凭证（header／子协议）→ 旧 `?token=`（兼容一版）
-    → 配对码（首次连接，且 `revoke` 已把那条码写成 revoked，状态判定本身就 gate 住了它）。
+    → 配对码（仅首次接入，过期/已用/撤销均拒绝，成功后立即消费）。
     """
     code = websocket.query_params.get("code")
     legacyToken = websocket.query_params.get("token")
@@ -2019,12 +2039,12 @@ async def mobile_websocket(websocket: WebSocket):
         pairing_id = info["pairing_id"]
         epoch = info["token_epoch"]
     elif code:
-        pairing = _pairing_codes.get(code)
-        if not pairing or pairing["status"] != "confirmed":
-            await websocket.close(code=4001, reason="Invalid or unconfirmed pairing code")
+        info = _consumePairingCode(code)
+        if not info:
+            await websocket.close(code=4001, reason="Invalid, expired or already-used pairing code")
             return
-        user_id = pairing["user_id"]
-        pairing_id = pairing["pairing_id"]
+        user_id = info["user_id"]
+        pairing_id = info["pairing_id"]
 
     if user_id is None:
         await websocket.close(code=4001, reason="Missing authentication")

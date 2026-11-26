@@ -13,6 +13,7 @@
 import asyncio
 import inspect
 import json
+import time
 from types import SimpleNamespace
 from typing import Any, Dict, List
 
@@ -78,20 +79,29 @@ def wsClient(monkeypatch):
 
     mobile_ep._pairing_codes.clear()
     mobile_ep._ws_connections.clear()
+    mobile_ep._outstanding_tickets.clear()
+    mobile_ep._spent_tickets.clear()
     monkeypatch.setitem(
         mobile_ep._pairing_codes, PAIRING_CODE,
-        {"status": "confirmed", "user_id": OWNER, "pairing_id": "pair-device"},
+        {
+            "status": "confirmed",
+            "user_id": OWNER,
+            "pairing_id": "pair-device",
+            "expires_at": time.time() + 300,
+        },
     )
     # 生产顺序：confirm 时设备已入在册库（registry.register）；测试走 code 通道
     # 直连，这里补齐同款在册事实，hello 的 recordHello 才有行可更新。
     mobile_ep.getDeviceRegistry().register(
         pairingId="pair-device", userId=OWNER, deviceName="测试机",
         deviceType="mobile", deviceId="dev-device-1", deviceSecret="sec-device-1")
+    epoch = mobile_ep.getDeviceRegistry().epochOf("pair-device") or 0
 
     app = FastAPI()
     app.include_router(mobile_ep.router, prefix="/api/v1/mobile")
     client = TestClient(app)
     client.agent = agent  # type: ignore[attr-defined]
+    client.connectTicket = mobile_ep._issueConnectTicket(OWNER, "pair-device", epoch)
     return client
 
 
@@ -313,12 +323,11 @@ class TestApprovalDisconnectResume:
             assert len(queued) == 1 and queued[0]["action"] == "clipboard_read"
             assert pushes == [(OWNER, queued[0]["command_id"])]
 
-            # 设备回连：hello 重投递 → 收到入队命令 → 回执收敛
-            # （配对码若被首连消费则重新补登记，保持与夹件同款在册事实）
-            mobile_ep._pairing_codes[PAIRING_CODE] = {
-                "status": "confirmed", "user_id": OWNER, "pairing_id": "pair-device"}
+            # 设备回连：hello 重投递 → 收到入队命令 → 回执收敛。
+            # 首连已消费配对码，重连必须使用设备票据，不得重置码状态绕过一次性门。
             with client.websocket_connect(
-                    f"/api/v1/mobile/ws?code={PAIRING_CODE}") as ws:
+                    "/api/v1/mobile/ws",
+                    headers={"Authorization": f"Bearer {wsClient.connectTicket}"}) as ws:
                 ack = _hello(ws)
                 assert ack["type"] == "device:hello_ok"
                 frame = _waitFor(ws, "device:execute")

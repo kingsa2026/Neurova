@@ -119,7 +119,7 @@ async def get_user_profile(
     """
     try:
         manager = get_memory_manager(agent_id, user)
-        profile = manager.get_user_profile(user_id)
+        profile = manager.get_user_profile()
         return success_response(
             data=profile or {"message": "用户画像不存在"},
             message="获取成功",
@@ -155,7 +155,7 @@ async def update_user_profile(
         if request.knowledge_level is not None:
             updates["knowledge_level"] = request.knowledge_level
 
-        manager.update_user_profile(user_id, updates)
+        manager.update_user_profile(**updates)
         return success_response(
             data={"user_id": user_id, "updated": list(updates.keys())},
             message="用户画像已更新",

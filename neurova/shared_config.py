@@ -25,6 +25,8 @@ shared:
 
 import datetime
 import json
+import os
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -166,24 +168,30 @@ class SharedConfigManager:
         }
 
     def _save_config(self) -> None:
-        """保存配置（P2-3：api_key 写侧加密落盘，内存态保持明文）"""
+        """凭据封存后原子落盘；封存或写入失败必须上抛，不得回落明文。"""
+        self._config["last_updated"] = datetime.datetime.now().isoformat()
+        from neurova.security.secret_store import sealSecrets
+
+        persist = sealSecrets(self._config)
+        payload = json.dumps(persist, ensure_ascii=False, indent=2)
+        descriptor, temporaryPath = tempfile.mkstemp(
+            prefix=f".{self._config_path.name}.",
+            suffix=".tmp",
+            dir=str(self._config_path.parent),
+        )
         try:
-            self._config["last_updated"] = datetime.datetime.now().isoformat()
-
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporaryPath, self._config_path)
+        except BaseException:
             try:
-                from neurova.security.secret_store import sealSecrets
-
-                # sealSecrets 返回新树（不改原对象），无需再自行 deepcopy
-                persist = sealSecrets(self._config)
-            except Exception:  # noqa: BLE001
-                persist = self._config
-
-            with open(self._config_path, "w", encoding="utf-8") as f:
-                json.dump(persist, f, ensure_ascii=False, indent=2)
-
-            logger.debug("配置已保存")
-        except Exception as e:
-            logger.error("保存配置失败: %s", e)
+                os.unlink(temporaryPath)
+            except FileNotFoundError:
+                pass
+            raise
+        logger.debug("配置已保存")
 
     def list_llm_providers(self) -> List[Dict[str, Any]]:
         """

@@ -109,6 +109,36 @@ class TestSealingGoesThroughRealManager:
         assert "sealed-srv" in raw and "https://remote.example.com/mcp" in raw
         assert "cn-north" in raw
 
+    def test_seal_failure_never_falls_back_to_plaintext(self, configPath, monkeypatch):
+        manager = SharedConfigManager(configPath)
+        before = _raw(configPath)
+
+        def fail_seal(_config):
+            raise RuntimeError("sealing unavailable")
+
+        monkeypatch.setattr(secret_store, "sealSecrets", fail_seal)
+        with pytest.raises(RuntimeError, match="sealing unavailable"):
+            manager.add_llm_provider({"id": "p1", "name": "P1", "api_key": API_KEY_SENTINEL})
+
+        assert _raw(configPath) == before
+        assert API_KEY_SENTINEL not in _raw(configPath)
+
+    def test_write_failure_is_not_reported_as_success(self, configPath, monkeypatch):
+        import neurova.shared_config as shared_config
+
+        manager = SharedConfigManager(configPath)
+        before = _raw(configPath)
+
+        def fail_publish(*_args):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(shared_config.os, "replace", fail_publish)
+        with pytest.raises(OSError, match="disk full"):
+            manager.add_llm_provider({"id": "p1", "name": "P1"})
+
+        assert _raw(configPath) == before
+        assert not list(Path(configPath).parent.glob(".shared_config.json.*.tmp"))
+
     def test_preExistingPlaintextValuesStillReadable(self, configPath):
         # 存量兼容：历史上窄通道没管住的键是明文落盘的，收口后必须照读
         with open(configPath, "w", encoding="utf-8") as handle:
