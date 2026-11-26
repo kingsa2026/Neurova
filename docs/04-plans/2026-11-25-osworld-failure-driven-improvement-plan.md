@@ -157,6 +157,28 @@
 每卡独立提交：单任务单 commit，正文含红/绿实测输出、live-verify 证据、
 净 LOC 与去向；不碰本方案外的在途文件（`--only` 逐文件点名）。
 
+## 4.1 执行记录（2026-11-25/26 实施完毕）
+
+| 卡 | commit | 实测 |
+|----|--------|------|
+| C1 动作白名单+invalid_action | `0b9ae7267` | 红灯 5/5→绿灯 14/14；A/B 基线 99=改后 99；live-verify 真实 traj 回放：30e3e107 宏任务 91 步标 invalid、2373b66a 零误标 |
+| C2 runCuaTasksRepeated | `13d7d5cee` | 红灯 5/5→绿灯 19/19；真实 traj × repeats=2：std=0、翻转 0、invalid_total=182 |
+| C3-1 done_without_verify 信号 | 原 `f043b36cd` 被并行 rebase 挤出→补登 `75466b760` | 红灯 6/6→绿灯 25/25；三域 124 passed |
+| C3-2 核验纪律条目+eval case | `ed93c0d6f` | 先 case 后修（incident 来源 M2）；棘轮按协议同段等量删冗（净预算不升 1440）；伴生根修 view_budget 舍入公式（直乘截断→生产余数法单源）；三域 1590 passed 仅余 4 预存失败 |
+| C4 StallGuard 卡顿熔断 | `bf3444013` | 红灯 ImportError→绿灯 9/9；A/B 证实 target_ops_passthrough/evidence_feedback 预存；manager 懒建记账器+6 动作打点+screenshot 信号注入 |
+| C5 paste 优先引导 | `ed93c0d6f` 后独立提交 | 红灯 1F+4E→绿灯 12/12；两域 1008 passed；computer_type 描述+type_text>200 阈值信号 |
+| C7 doc_edit 路由约定 | `150f6e4be` | 红灯 2F（缺"样式"标记）→绿灯；三域 1135 passed |
+| C6 规划器拆步实验 | **未开工** | 按方案 §4 第 4 步：待真桌面多轮 A/B 排期（实验卡，不预设结论） |
+
+执行期坑（复跑必读）：
+- **tool_executor.py 混有他会在途 hunk**：C4 用"HEAD+本卡 hunk"中间态构造
+  + 精确暂存提交，工作树备份恢复——`--only` 仍会卷工作树全量状态，同文件
+  混改时须按 hunk 级构造（C4 首次 amend 卷入 19 行在途改动已当场修正）。
+- **棘轮预算**：rules_sections 加条目必须同段等量删冗（净预算不升）；
+  markersPresent 是**全量命中**语义，判据标记收窄为核心标记勿堆备选。
+- **测试公式对齐生产单源**：view_budget 的舍入公式缺陷被文本变化撞到
+  4654×0.7 边界暴露——测试判据向生产余数法对齐（R6）。
+
 ## 5. 不做什么
 
 - 不把 OSWorld harness/VM 镜像入仓；评测设施留在 F:/osworld。
