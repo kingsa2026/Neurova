@@ -34,6 +34,8 @@ logger = get_logger(__name__)
 __all__ = [
     "CuaInfraError",
     "CuaTask",
+    "PlannedStep",
+    "PlannerExecutorEpisodeAdapter",
     "ToolExecutorEpisodeAdapter",
     "cuaActionWhitelist",
     "runCuaTasks",
@@ -94,6 +96,54 @@ def _firstError(result: Any) -> str:
     return str(result.get("error") or result.get("guardrail") or "未知拒绝")[:200]
 
 
+async def _runActionSteps(
+    executor: Any,
+    taskId: str,
+    script: List[Dict[str, Any]],
+    whitelist: frozenset,
+) -> Tuple[List[Dict[str, Any]], int, List[str]]:
+    """动作步执行原语（C1 口径，两代 adapter 共享——R6 不复制执行逻辑）。
+
+    白名单校验、非法步跳过计数、blocked → CuaInfraError。
+    Returns:
+        (results, invalidCount, executedTools)
+    """
+    results: List[Dict[str, Any]] = []
+    invalidCount = 0
+    for step in script:
+        tool = str(step.get("tool") or "")
+        params = dict(step.get("params") or {})
+        if tool not in whitelist:
+            # C1 动作空间纪律：名单外动作（宏/裸代码）显式记 invalid 且不执行——
+            # 脚本错误≠器械故障（不抛 CuaInfraError），计数进行级与聚合。
+            invalidCount += 1
+            results.append(
+                {
+                    "tool": tool,
+                    "invalid": True,
+                    "reason": "not_in_action_whitelist",
+                }
+            )
+            logger.warning(
+                "[cua_eval] 非法动作步已跳过 tool=%r task=%s", tool, taskId
+            )
+            continue
+        result = await executor.execute(tool, params)
+        results.append({"tool": tool, "result": result})
+        if _looksBlocked(result):
+            raise CuaInfraError(f"动作 {tool} 被环境拒绝/失败: {_firstError(result)}")
+    executedTools = [entry["tool"] for entry in results if not entry.get("invalid")]
+    return results, invalidCount, executedTools
+
+
+async def _takeFrame(executor: Any, terminalTool: str, purpose: str) -> Dict[str, Any]:
+    """取证帧（终态/步后帧共用；blocked → CuaInfraError）。"""
+    frame = await executor.execute(terminalTool, {})
+    if _looksBlocked(frame):
+        raise CuaInfraError(f"{purpose} {terminalTool} 失败: {_firstError(frame)}")
+    return frame
+
+
 class ToolExecutorEpisodeAdapter:
     """把固定 computer_* 动作脚本经 ``ToolExecutor.execute`` 真管线跑成 episode。
 
@@ -117,42 +167,161 @@ class ToolExecutorEpisodeAdapter:
     async def __call__(self, task: Any) -> Dict[str, Any]:
         script = list(self._actions.get(task.task_id) or [])
         whitelist = cuaActionWhitelist()
-        results: List[Dict[str, Any]] = []
-        invalidCount = 0
-        for step in script:
-            tool = str(step.get("tool") or "")
-            params = dict(step.get("params") or {})
-            if tool not in whitelist:
-                # C1 动作空间纪律：名单外动作（宏/裸代码）显式记 invalid 且不执行——
-                # 脚本错误≠器械故障（不抛 CuaInfraError），计数进行级与聚合。
-                invalidCount += 1
-                results.append(
-                    {
-                        "tool": tool,
-                        "invalid": True,
-                        "reason": "not_in_action_whitelist",
-                    }
-                )
-                logger.warning(
-                    "[cua_eval] 非法动作步已跳过 tool=%r task=%s", tool, task.task_id
-                )
-                continue
-            result = await self._executor.execute(tool, params)
-            results.append({"tool": tool, "result": result})
-            if _looksBlocked(result):
-                raise CuaInfraError(f"动作 {tool} 被环境拒绝/失败: {_firstError(result)}")
-        terminal = await self._executor.execute(self._terminalTool, {})
-        if _looksBlocked(terminal):
-            raise CuaInfraError(
-                f"终态取证 {self._terminalTool} 失败: {_firstError(terminal)}"
-            )
-        executedTools = [entry["tool"] for entry in results if not entry.get("invalid")]
+        results, invalidCount, executedTools = await _runActionSteps(
+            self._executor, task.task_id, script, whitelist
+        )
+        terminal = await _takeFrame(self._executor, self._terminalTool, "终态取证")
         return {
             "task_id": task.task_id,
             "instruction": task.instruction,
             "action_results": results,
             "action_invalid": invalidCount,
             "last_action_tool": executedTools[-1] if executedTools else self._terminalTool,
+            "terminal": terminal,
+        }
+
+
+@dataclass
+class PlannedStep:
+    """规划器产出的一个带验收条件的执行步骤（C6 两阶段形态）。"""
+
+    description: str
+    actions: List[Dict[str, Any]]
+    #: 步验收（吃步后证据 dict：action_results/action_invalid/step_frame）；
+    #: 缺省 None＝无验收（episode 里如实记 unverified，没量到≠通过）。
+    verify: Optional[CheckFn] = None
+
+
+class PlannerExecutorEpisodeAdapter:
+    """两阶段 episode（C6）：规划器拆步 → 执行器逐步驱动 → 步失败重规划（有界）。
+
+    - ``plannerFn(task, context) -> List[PlannedStep]``（同步/异步兼容）；
+      ``context``：``{"first_frame": 终态取证证据, "failed_step": 失败步描述|
+      None, "attempt": 重规划轮次}``；
+    - 步验收：带 ``verify`` 的步判 pass/fail，fail → 重规划（``maxReplans``
+      有界，缺省 1）；无 ``verify`` 如实记 unverified；步内全 invalid（C1
+      口径）＝步失败 → 重规划；
+    - 步内动作被环境拒（blocked）→ :class:`CuaInfraError`：器械故障口径
+      不变，不重规划；
+    - 判据不变：终态证据仍由 ``task.check`` 判（本 adapter 只换 episode
+      生成方式，判据/failure_class 与单阶段完全一致）。
+    """
+
+    def __init__(
+        self,
+        toolExecutor: Any,
+        plannerFn: Callable[[Any, Dict[str, Any]], Any],
+        terminalTool: str = "computer_screenshot",
+        maxReplans: int = 1,
+    ):
+        self._executor = toolExecutor
+        self._plannerFn = plannerFn
+        self._terminalTool = terminalTool
+        self._maxReplans = max(0, int(maxReplans))
+
+    async def _callPlanner(
+        self, task: Any, context: Dict[str, Any]
+    ) -> List[PlannedStep]:
+        outcome = self._plannerFn(task, context)
+        if hasattr(outcome, "__await__"):
+            outcome = await outcome
+        return list(outcome or [])
+
+    async def _executeStep(
+        self, taskId: str, step: PlannedStep, whitelist: frozenset
+    ) -> Tuple[Dict[str, Any], int]:
+        """执行一个规划步：动作 → 步后帧 → 验收。返回 (步事实, 步内 invalid 数)。"""
+        results, invalidCount, executedTools = await _runActionSteps(
+            self._executor, taskId, step.actions, whitelist
+        )
+        frame = await _takeFrame(self._executor, self._terminalTool, "步后取证")
+        stepEvidence = {
+            "description": step.description,
+            "action_results": results,
+            "action_invalid": invalidCount,
+            "last_action_tool": executedTools[-1] if executedTools else self._terminalTool,
+            "step_frame": frame,
+        }
+        if step.verify is None:
+            stepEvidence["verify"] = "unverified"
+            return stepEvidence, invalidCount
+        try:
+            passed, _score, details = step.verify(stepEvidence)
+        except Exception as exc:  # noqa: BLE001 - 验收器故障不掩盖执行事实
+            stepEvidence["verify"] = "error"
+            stepEvidence["details"] = {"verify_error": str(exc)}
+            return stepEvidence, invalidCount
+        stepEvidence["verify"] = "pass" if passed else "fail"
+        if details:
+            stepEvidence["details"] = details
+        return stepEvidence, invalidCount
+
+    async def __call__(self, task: Any) -> Dict[str, Any]:
+        whitelist = cuaActionWhitelist()
+        firstFrame = await _takeFrame(
+            self._executor, self._terminalTool, "首帧取证"
+        )
+        steps = await self._callPlanner(
+            task,
+            {"first_frame": firstFrame, "failed_step": None, "attempt": 0},
+        )
+        actionResults: List[Dict[str, Any]] = []
+        invalidTotal = 0
+        stepsDetail: List[Dict[str, Any]] = []
+        replanCount = 0
+        executedSteps = 0
+        lastExecuted: Optional[str] = None
+        index = 0
+        while index < len(steps):
+            step = steps[index]
+            stepEvidence, invalidCount = await self._executeStep(
+                task.task_id, step, whitelist
+            )
+            actionResults.extend(stepEvidence.get("action_results") or [])
+            invalidTotal += invalidCount
+            executedSteps += 1
+            lastExecuted = stepEvidence.get("last_action_tool") or lastExecuted
+            stepsDetail.append(
+                {
+                    "description": step.description,
+                    "action_count": len(step.actions),
+                    "action_invalid": invalidCount,
+                    "verify": stepEvidence.get("verify"),
+                    "from_replan": replanCount > 0,
+                    "details": stepEvidence.get("details") or {},
+                }
+            )
+            index += 1
+            stepFailed = stepEvidence.get("verify") == "fail" or (
+                len(step.actions) > 0 and invalidCount == len(step.actions)
+            )
+            if stepFailed and replanCount < self._maxReplans:
+                replanCount += 1
+                newSteps = await self._callPlanner(
+                    task,
+                    {
+                        "first_frame": firstFrame,
+                        "failed_step": step.description,
+                        "attempt": replanCount,
+                    },
+                )
+                steps = steps[:index] + newSteps
+                index += 0  # 新清单从当前位置接续（失败步事实已记，不重跑）
+
+        terminal = await _takeFrame(self._executor, self._terminalTool, "终态取证")
+        executedTools = [entry["tool"] for entry in actionResults if not entry.get("invalid")]
+        return {
+            "task_id": task.task_id,
+            "instruction": task.instruction,
+            "first_frame": firstFrame,
+            "planned_steps": len(stepsDetail),
+            "executed_steps": executedSteps,
+            "steps_detail": stepsDetail,
+            "replan_count": replanCount,
+            "replanned": replanCount > 0,
+            "action_results": actionResults,
+            "action_invalid": invalidTotal,
+            "last_action_tool": lastExecuted or self._terminalTool,
             "terminal": terminal,
         }
 
@@ -216,6 +385,7 @@ def runCuaTasks(
                 "details": details,
                 "latency_ms": round(elapsedMs, 2),
                 "action_invalid": int(evidence.get("action_invalid") or 0),
+                "replanned": bool(evidence.get("replanned")),
                 "done_without_verify": doneWithoutVerify,
             }
         )
