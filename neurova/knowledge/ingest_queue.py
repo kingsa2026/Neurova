@@ -96,6 +96,21 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _observationWhere(user_id: Optional[str], tenant_id: Optional[str],
+                      alias: str = "") -> tuple[str, List[Any]]:
+    """None 表示内部无域读取；空串是真实边界，不能用真假值跳过过滤。"""
+    clauses: List[str] = []
+    params: List[Any] = []
+    prefix = f"{alias}." if alias else ""
+    if user_id is not None:
+        clauses.append(f"{prefix}user_id=?")
+        params.append(str(user_id))
+    if tenant_id is not None:
+        clauses.append(f"{prefix}tenant_id=?")
+        params.append(str(tenant_id))
+    return " AND ".join(clauses), params
+
+
 def task_status(row: Optional[Dict[str, Any]]) -> str:
     return (row or {}).get("status") or "unknown"
 
@@ -266,25 +281,37 @@ class KnowledgeIngressQueue:
             logger.info("知识摄取队列启动收敛: %d 个 processing→pending", len(ids))
         return ids
 
-    def get(self, task_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, task_id: str, *, user_id: Optional[str] = None,
+            tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        where, params = _observationWhere(user_id, tenant_id)
+        scoped = " AND " + where if where else ""
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM knowledge_ingress_events WHERE task_id=?", (task_id,)
+                "SELECT * FROM knowledge_ingress_events WHERE task_id=?" + scoped,
+                [task_id, *params],
             ).fetchone()
         return dict(row) if row else None
 
-    def list_recent(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def list_recent(self, limit: int = 50, *, user_id: Optional[str] = None,
+                    tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        where, params = _observationWhere(user_id, tenant_id)
+        scoped = " WHERE " + where if where else ""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM knowledge_ingress_events ORDER BY id DESC LIMIT ?", (limit,)
+                "SELECT * FROM knowledge_ingress_events" + scoped
+                + " ORDER BY id DESC LIMIT ?", [*params, limit],
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def stats(self) -> Dict[str, int]:
+    def stats(self, *, user_id: Optional[str] = None,
+              tenant_id: Optional[str] = None) -> Dict[str, int]:
+        where, params = _observationWhere(user_id, tenant_id)
+        scoped = " WHERE " + where if where else ""
         with self._lock:
             counts = {s: 0 for s in ("pending", "processing", "done", "dead", "cancelled")}
             for status, n in self._conn.execute(
-                "SELECT status, COUNT(*) FROM knowledge_ingress_events GROUP BY status"
+                "SELECT status, COUNT(*) FROM knowledge_ingress_events" + scoped
+                + " GROUP BY status", params,
             ).fetchall():
                 if status in counts:
                     counts[status] = int(n)
@@ -306,28 +333,38 @@ class KnowledgeIngressQueue:
         except Exception as e:  # noqa: BLE001 - span 观测面故障绝不影响摄取
             logger.debug("record_span 失败（忽略）: %s", e)
 
-    def get_spans(self, task_id: str) -> List[Dict[str, Any]]:
+    def get_spans(self, task_id: str, *, user_id: Optional[str] = None,
+                  tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """任务阶段时间线（按 SPAN_STAGES 序；未记录阶段不出现）。"""
+        where, params = _observationWhere(user_id, tenant_id, alias="event")
+        scoped = " AND " + where if where else ""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT stage, status, error, updated_at FROM knowledge_ingress_spans WHERE task_id=?",
-                (task_id,),
+                "SELECT span.stage, span.status, span.error, span.updated_at"
+                " FROM knowledge_ingress_spans AS span"
+                " JOIN knowledge_ingress_events AS event ON event.task_id=span.task_id"
+                " WHERE span.task_id=?" + scoped,
+                [task_id, *params],
             ).fetchall()
         by_stage = {r["stage"]: dict(r) for r in rows}
         return [by_stage[s] for s in SPAN_STAGES if s in by_stage]
 
-    def cancel_task(self, task_id: str, by: str = "") -> bool:
+    def cancel_task(self, task_id: str, by: str = "", *,
+                    user_id: Optional[str] = None,
+                    tenant_id: Optional[str] = None) -> bool:
         """取消待处理/处理中的任务（stop-parse 语义 lite）。
 
         pending：直接标 cancelled（claim 不再取）；processing：标 cancelled，
         在飞的 worker 于 ack/nack 处被守卫拦住（不复活为 done/dead）。
         done/dead/cancelled/不存在 → False（无操作，不谎报成功）。
         """
+        where, scopeParams = _observationWhere(user_id, tenant_id)
+        scoped = " AND " + where if where else ""
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "UPDATE knowledge_ingress_events SET status='cancelled', error=?, updated_at=?"
-                " WHERE task_id=? AND status IN ('pending','processing')",
-                ("cancelled_by:" + (by or "user"), _now_iso(), task_id),
+                " WHERE task_id=? AND status IN ('pending','processing')" + scoped,
+                ["cancelled_by:" + (by or "user"), _now_iso(), task_id, *scopeParams],
             )
             if cur.rowcount == 0:
                 return False

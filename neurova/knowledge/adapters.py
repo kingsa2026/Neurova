@@ -29,50 +29,10 @@ IFLOW_DEFAULT_BASE_URL = "https://platform.iflow.cn"
 
 
 def _validate_remote_url(url: str) -> bool:
-    """远程知识库 URL 的 SSRF 校验。
+    """远程知识库 URL 的 SSRF 校验，判定单源在 security.url_guard。"""
+    from neurova.security.url_guard import is_public_url
 
-    返回 False 表示拒绝（协议/主机不合规或解析失败）。
-    """
-    try:
-        from urllib.parse import urlparse
-
-        parsed = urlparse(str(url or ""))
-        if parsed.scheme not in ("http", "https"):
-            return False
-        host = parsed.hostname or ""
-        if not host:
-            return False
-        lowered = host.lower()
-        if lowered == "localhost" or lowered.endswith(".localhost"):
-            return False
-
-        import ipaddress
-        import socket
-
-        candidates = []
-        try:
-            candidates.append(ipaddress.ip_address(lowered))
-        except ValueError:
-            pass
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        try:
-            for info in socket.getaddrinfo(host, port):
-                candidates.append(ipaddress.ip_address(info[4][0]))
-        except Exception:
-            if not candidates:
-                return False  # 既不是合法 IP 又解析失败 → 拒绝
-        for ip in candidates:
-            if (
-                ip.is_private
-                or ip.is_loopback
-                or ip.is_link_local
-                or ip.is_reserved
-                or ip.is_multicast
-            ):
-                return False
-        return True
-    except Exception:
-        return False
+    return is_public_url(url)
 
 
 class KBAdapter:
@@ -537,50 +497,62 @@ class ImaKBAdapter(KBAdapter):
         self._post_jsonrpc = post_jsonrpc or self._default_post_jsonrpc
         self._validate_url = validate_url or self._validate_target_url
 
-    def _validate_target_url(self, url: str) -> bool:
-        """URL 校验（默认安全：仅公开 http(s)）。
-
-        allow_local=True 时仅放行：localhost 或字面环回/私网/链路本地 IP；
-        域名（即使公网）不经 allow_local 放行——杜绝借 allow_local 绕边界。
-        """
+    def _resolveTargetUrl(self, url: str):
         import ipaddress
         from urllib.parse import urlparse
+        from neurova.security.url_guard import resolvePublicUrl
 
-        try:
-            parsed = urlparse(str(url or ""))
-        except Exception:
-            return False
+        parsed = urlparse(str(url or ""))
         if parsed.scheme not in ("http", "https"):
-            return False
+            raise ValueError("仅允许 http/https")
         host = parsed.hostname or ""
         if not host:
-            return False
-        lowered = host.lower()
-        if lowered == "localhost":
-            return bool(self.allow_local)
-        local_ip = None
-        try:
-            local_ip = ipaddress.ip_address(lowered)
-        except ValueError:
-            local_ip = None
-        if self.allow_local and local_ip is not None:
-            if local_ip.is_loopback or local_ip.is_private or local_ip.is_link_local:
-                return True
-            return False
-        return _validate_remote_url(url)
+            raise ValueError("URL 缺少主机名")
+        if self.allow_local:
+            if host.lower() == "localhost":
+                return resolvePublicUrl(
+                    url, allow_private=True, trusted_hosts={"localhost"},
+                )
+            try:
+                address = ipaddress.ip_address(host)
+            except ValueError:
+                address = None
+            if address is None:
+                raise ValueError("allow_local 仅放行 localhost 或字面私网地址")
+            if not (
+                address.is_loopback or address.is_private or address.is_link_local
+            ):
+                raise ValueError("allow_local 仅放行本机或私网字面地址")
+            return resolvePublicUrl(url, allow_private=True)
+        return resolvePublicUrl(url)
 
-    @staticmethod
+    def _validate_target_url(self, url: str) -> bool:
+        """URL 校验（默认安全：仅公开 http(s)；allow_local 显式放行本机/私网）。"""
+        try:
+            self._resolveTargetUrl(url)
+            return True
+        except ValueError:
+            return False
+
     def _default_post_jsonrpc(
-        url: str, payload: Dict, headers: Dict, timeout: float
+        self, url: str, payload: Dict, headers: Dict, timeout: float
     ) -> Dict:
         import json as _json
-        import urllib.request
+        from neurova import http_fetch
 
+        resolution = self._resolveTargetUrl(url)
         data = _json.dumps(payload).encode("utf-8")
-        headers = {**headers, "Content-Type": "application/json"}
-        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return _json.loads(resp.read().decode("utf-8"))
+        response = http_fetch.request_once(
+            url,
+            method="POST",
+            headers={**headers, "Content-Type": "application/json"},
+            data=data,
+            timeout=timeout,
+            resolution=resolution,
+        )
+        if response.status >= 400:
+            raise RuntimeError(f"IMA MCP HTTP {response.status}")
+        return _json.loads(response.content.decode("utf-8"))
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}

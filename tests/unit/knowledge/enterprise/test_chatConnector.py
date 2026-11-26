@@ -43,7 +43,9 @@ CREATE TABLE IF NOT EXISTS channel_ingress_events (
     claimed_by TEXT,
     claimed_at REAL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    agent_id TEXT NOT NULL DEFAULT 'default',
+    tenant_id TEXT NOT NULL DEFAULT 'default'
 );
 """
 

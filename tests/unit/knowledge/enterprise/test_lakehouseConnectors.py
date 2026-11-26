@@ -93,6 +93,75 @@ class TestLakehouseAdapters:
         assert type(adapter).__name__ == "HttpPullAdapter"
 
 
+    @pytest.mark.parametrize("adapterClass,descriptor", [
+        (UnityCatalogAdapter, {"sourceType": "unity_catalog", "base_url": "https://uc.example", "table": "t"}),
+        (SnowflakeAdapter, {"sourceType": "snowflake", "base_url": "https://sf.example", "query": "SELECT id FROM t", "watermark_column": "id"}),
+        (SapOdataAdapter, {"sourceType": "sap_odata", "base_url": "https://sap.example", "entity_set": "Orders"}),
+        (HttpPullAdapter, {"sourceType": "http_pull", "url": "https://x.example/rows"}),
+    ])
+    def test_fetchFailureRaisesInsteadOfEmptySuccess(self, monkeypatch, adapterClass, descriptor):
+        import neurova.knowledge.enterprise.connectors_lakehouse as mod
+
+        def boom(*args, **kwargs):
+            raise ConnectionError("upstream unavailable")
+
+        monkeypatch.setattr(mod.httpx, "get", boom)
+        adapter = adapterClass(descriptor, "failure-source", "default")
+        with pytest.raises(ConnectionError, match="upstream unavailable"):
+            asyncio.run(adapter.fetchBatch(None, 10))
+
+    @pytest.mark.parametrize("adapterClass,descriptor", [
+        (UnityCatalogAdapter, {"sourceType": "unity_catalog", "base_url": "https://uc.example"}),
+        (SnowflakeAdapter, {"sourceType": "snowflake", "base_url": "https://sf.example"}),
+        (SapOdataAdapter, {"sourceType": "sap_odata", "base_url": "https://sap.example"}),
+        (HttpPullAdapter, {"sourceType": "http_pull"}),
+    ])
+    def test_missingRequiredConfigRaisesInsteadOfEmptySuccess(self, adapterClass, descriptor):
+        adapter = adapterClass(descriptor, "missing-config", "default")
+        with pytest.raises(ValueError):
+            asyncio.run(adapter.fetchBatch(None, 10))
+
+    @pytest.mark.parametrize("adapterClass,descriptor,payload", [
+        (UnityCatalogAdapter, {"sourceType": "unity_catalog", "base_url": "https://uc.example", "table": "t"}, {"unexpected": []}),
+        (SnowflakeAdapter, {"sourceType": "snowflake", "base_url": "https://sf.example", "query": "SELECT id FROM t", "watermark_column": "id"}, {"unexpected": []}),
+        (SapOdataAdapter, {"sourceType": "sap_odata", "base_url": "https://sap.example", "entity_set": "Orders"}, {"unexpected": []}),
+        (HttpPullAdapter, {"sourceType": "http_pull", "url": "https://x.example/rows"}, {"unexpected": []}),
+    ])
+    def test_malformedPayloadRaisesInsteadOfEmptySuccess(self, monkeypatch, adapterClass, descriptor, payload):
+        import neurova.knowledge.enterprise.connectors_lakehouse as mod
+
+        monkeypatch.setattr(mod.httpx, "get", lambda *args, **kwargs: FakeHttpxResponse(payload))
+        adapter = adapterClass(descriptor, "malformed-source", "default")
+        with pytest.raises(ValueError):
+            asyncio.run(adapter.fetchBatch(None, 10))
+
+    def test_httpPullServerPaginationAdvances(self, monkeypatch):
+        import neurova.knowledge.enterprise.connectors_lakehouse as mod
+
+        adapter = HttpPullAdapter(
+            {"sourceType": "http_pull", "url": "https://x.example/rows",
+             "pagination": "offset", "limit_param": "limit"},
+            "hp-page", "default")
+        calls = []
+
+        def fakeGet(url, headers=None, params=None, timeout=None):
+            calls.append(dict(params or {}))
+            offset = int((params or {}).get("offset", 0))
+            pageSize = int((params or {}).get("limit", 3))
+            return FakeHttpxResponse({"rows": [{"id": i} for i in range(offset, min(offset + pageSize, 5))]})
+
+        monkeypatch.setattr(mod.httpx, "get", fakeGet)
+        first = asyncio.run(adapter.fetchBatch(None, 3))
+        assert [row["id"] for row in first.rows] == [0, 1, 2]
+        assert first.hasMore is True
+        assert json.loads(first.nextCursor.token)["offset"] == 3
+
+        second = asyncio.run(adapter.fetchBatch(first.nextCursor, 3))
+        assert [row["id"] for row in second.rows] == [3, 4]
+        assert second.hasMore is False
+        assert calls == [{"offset": 0, "limit": 3}, {"offset": 3, "limit": 3}]
+
+
 class TestHttpPullFetch:
     def test_fetchAndCursor(self, monkeypatch, tmp_path):
         import neurova.knowledge.enterprise.connectors_lakehouse as mod

@@ -57,6 +57,9 @@ class ChatChannelAdapter:
         self._descriptor = dict(descriptor)
         self._sourceId = str(sourceId)
         self._tenantId = str(tenantId or "default")
+        self._agentId = str(self._descriptor.get("agentId") or "").strip()
+        if not self._agentId:
+            raise MappingError("chat 源必须声明 agentId（来源实例边界），拒绝无边界全表读取")
         self._vendor = str(self._descriptor.get("vendor") or "")
         # 闭集收口：编译期 validateDescriptor 判过一次，工厂 _requireVariant 只查非空，
         # 构造处按同一单点（VARIANT_CLOSED_SETS）再拦——闭集外描述符到不了运行时。
@@ -77,10 +80,9 @@ class ChatChannelAdapter:
                            else self._resolveIngressDb())
         self._archiveDb = (self._resolveArchiveDb()
                            if self._sourceFace == ARCHIVE_FACE else None)
-        # 边界列存在性缓存（KNOW-12）：共享库可能先于迁移（测试夹具直建 v1 形状、
-        # 存量库未升级）——列不存在时不施加 agent 过滤（行为与改前一致）。
-        self._captureAgentColumn: Optional[bool] = None
-        self._archiveAgentColumn: Optional[bool] = None
+        # 边界列存在性缓存（KNOW-12）：缺列即拒绝读取，不能退化为全表扫描。
+        self._captureBoundaryColumns: Optional[bool] = None
+        self._archiveBoundaryColumns: Optional[bool] = None
 
     # ── Protocol 四动词 ──────────────────────────────────────
 
@@ -134,13 +136,17 @@ class ChatChannelAdapter:
             return SourceHealth(status="error",
                                 reason="既有通道捕获面 DB 不存在: %s" % self._ingressDb)
         try:
+            if not self._captureHasBoundaryColumns():
+                return SourceHealth(
+                    status="error",
+                    reason="既有通道捕获面缺少 agent_id/tenant_id 边界列，拒绝无边界读取")
             conn = sqlite3.connect(self._roUri(), uri=True,
                                    timeout=_RO_TIMEOUT_SECONDS)
             try:
                 conn.execute("SELECT 1 FROM channel_ingress_events LIMIT 1").fetchone()
             finally:
                 conn.close()
-        except sqlite3.Error as exc:
+        except (sqlite3.Error, MappingError) as exc:
             return SourceHealth(status="error",
                                 reason="既有通道捕获面不可读: %s" % exc)
         # 捕获面可达即如实 degraded（历史拉取缺口具名）＋附件能力点名，不冒充全量；
@@ -176,9 +182,9 @@ class ChatChannelAdapter:
     def _roUri(self) -> str:
         return "file:%s?mode=ro" % self._ingressDb.as_posix()
 
-    def _captureHasAgentColumn(self) -> bool:
-        """捕获面库是否已带 agent_id 边界列（KNOW-12，一次性探测后缓存）。"""
-        if self._captureAgentColumn is None:
+    def _captureHasBoundaryColumns(self) -> bool:
+        """捕获面库是否已带 agent_id/tenant_id 边界列（一次性探测后缓存）。"""
+        if self._captureBoundaryColumns is None:
             conn = sqlite3.connect(self._roUri(), uri=True,
                                    timeout=_RO_TIMEOUT_SECONDS)
             try:
@@ -186,33 +192,28 @@ class ChatChannelAdapter:
                     "PRAGMA table_info(channel_ingress_events)").fetchall()}
             finally:
                 conn.close()
-            self._captureAgentColumn = "agent_id" in cols
-        return self._captureAgentColumn
+            self._captureBoundaryColumns = {"agent_id", "tenant_id"} <= cols
+        return self._captureBoundaryColumns
 
     def _readRows(self, since: int, limit: int) -> Tuple[List[Dict[str, Any]], int, bool]:
         """只读拉一批已捕获消息：按 id 升序取 limit+1 行探测 hasMore。
 
-        - 只按 channel_type 过滤本 vendor（wecom/wechat），不按排水 status 过滤——
-          pending/processing/done/dead 都是「已捕获」的真实消息（tombstone 去重保证
-          无重复行）；
-        - 来源实例边界（KNOW-12）：描述符声明 agentId 且共享库已带边界列时，
-          已打戳的行按 agent 圈域（他实例消息不进本源）；未打戳的存量行
-          （agent_id=''）保持可读——迁移容忍，通道分发面落戳后边界即全量生效；
-        - 坏 payload 行跳过但游标推进过它（不卡水位、不重复消费）；
+        - 按 channel_type、agent_id、tenant_id 精确圈域；未归因行不共享；
+        - 不按排水 status 过滤，pending/processing/done/dead 都是已捕获消息；
+        - 坏 payload 行跳过但游标推进过它；
         - 独立 mode=ro 短连接：不写通道库、不留常驻连接。
         """
-        agentFilter = ""
-        params: List[Any] = [self._channelType, since]
-        declaredAgent = str(self._descriptor.get("agentId") or "").strip()
-        if declaredAgent and self._captureHasAgentColumn():
-            agentFilter = " AND (agent_id = ? OR agent_id = '')"
-            params.append(declaredAgent)
-        params.append(limit + 1)
+        if not self._captureHasBoundaryColumns():
+            raise MappingError("捕获面缺少 agent_id/tenant_id 边界列，拒绝无边界读取")
+        params: List[Any] = [
+            self._channelType, since, self._agentId, self._tenantId, limit + 1,
+        ]
         conn = sqlite3.connect(self._roUri(), uri=True, timeout=_RO_TIMEOUT_SECONDS)
         try:
             fetched = conn.execute(
                 "SELECT id, payload FROM channel_ingress_events"
-                " WHERE channel_type = ? AND id > ?%s ORDER BY id LIMIT ?" % agentFilter,
+                " WHERE channel_type = ? AND id > ? AND agent_id = ? AND tenant_id = ?"
+                " ORDER BY id LIMIT ?",
                 params,
             ).fetchall()
         finally:
@@ -274,21 +275,8 @@ class ChatChannelAdapter:
         return callerPath(os.environ.get(CHANNEL_ARCHIVE_DB_ENV),
                           "channel_archive.db")
 
-    def _readArchiveRows(self, since: int, limit: int) -> Tuple[List[Dict[str, Any]], int, bool]:
-        """只读拉一批存档投影行：按 seq 扫描、send 过滤在 Python 侧（recall/switch
-        留档不入账但**游标推进过它们**——否则水位卡死、扫描窗无限增长，§5 同规）。
-
-        来源实例边界（KNOW-12）：描述符声明 agentId 且投影库已带边界列时按
-        agent 圈域——共享投影库里他实例的行不进本源（存档行由通道层 worker
-        落 agent_id 戳）。
-        投影库尚未落盘（worker 未拉过）→ 空批诚实返回，不炸、不冒充有数；
-        mode=ro 短连接，不写通道库、不留常驻连接。"""
-        from neurova.channels.wecom_archive import SEND_ROWS_SQL, SEND_ROWS_SQL_FOR_AGENT
-
-        if not self._archiveDb.exists():
-            return [], int(since), False
-        declaredAgent = str(self._descriptor.get("agentId") or "").strip()
-        if self._archiveAgentColumn is None:
+    def _archiveHasBoundaryColumns(self) -> bool:
+        if self._archiveBoundaryColumns is None:
             conn = sqlite3.connect(self._roUriFor(self._archiveDb), uri=True,
                                    timeout=_RO_TIMEOUT_SECONDS)
             try:
@@ -296,15 +284,26 @@ class ChatChannelAdapter:
                     "PRAGMA table_info(channel_archive_messages)").fetchall()}
             finally:
                 conn.close()
-            self._archiveAgentColumn = "agent_id" in cols
-        useAgentFilter = bool(declaredAgent) and bool(self._archiveAgentColumn)
-        sql = SEND_ROWS_SQL_FOR_AGENT if useAgentFilter else SEND_ROWS_SQL
-        params: Tuple[int, ...] = ((int(since), declaredAgent, int(limit) + 1)
-                                   if useAgentFilter else (int(since), int(limit) + 1))
+            self._archiveBoundaryColumns = {"agent_id", "tenant_id"} <= cols
+        return self._archiveBoundaryColumns
+
+    def _readArchiveRows(self, since: int, limit: int) -> Tuple[List[Dict[str, Any]], int, bool]:
+        """只读拉一批存档投影行：按 seq 扫描、send 过滤在 Python 侧（recall/switch
+        留档不入账但**游标推进过它们**——否则水位卡死、扫描窗无限增长，§5 同规）。
+
+        来源边界（KNOW-12）：按 agent_id＋tenant_id 精确圈域；缺边界列即拒绝，
+        未归因存量行不共享。投影库尚未落盘时返回空批；mode=ro 短连接。"""
+        from neurova.channels.wecom_archive import SEND_ROWS_SQL_FOR_SOURCE
+
+        if not self._archiveDb.exists():
+            return [], int(since), False
+        if not self._archiveHasBoundaryColumns():
+            raise MappingError("存档面缺少 agent_id/tenant_id 边界列，拒绝无边界读取")
+        params = (int(since), self._agentId, self._tenantId, int(limit) + 1)
         conn = sqlite3.connect(self._roUriFor(self._archiveDb), uri=True,
                                timeout=_RO_TIMEOUT_SECONDS)
         try:
-            fetched = conn.execute(sql, params).fetchall()
+            fetched = conn.execute(SEND_ROWS_SQL_FOR_SOURCE, params).fetchall()
         finally:
             conn.close()
         hasMore = len(fetched) > limit
@@ -353,25 +352,30 @@ class ChatChannelAdapter:
                 reason="%s；会话存档投影面尚未落库: %s（常驻增量拉取属批 C7c 未启动）"
                        % (reading.reason, self._archiveDb))
         from neurova.channels.wecom_archive import (
-            SEND_ROWS_SQL,
+            SEND_ROWS_SQL_FOR_SOURCE,
             watermarkLagReading,
         )
 
         try:
+            if not self._archiveHasBoundaryColumns():
+                return SourceHealth(
+                    status="error",
+                    reason="会话存档投影面缺少 agent_id/tenant_id 边界列，拒绝无边界读取")
             conn = sqlite3.connect(self._roUriFor(self._archiveDb), uri=True,
                                    timeout=_RO_TIMEOUT_SECONDS)
             try:
-                conn.execute("SELECT 1 FROM (" + SEND_ROWS_SQL + ") LIMIT 1",
-                             (0, 1)).fetchone()
+                conn.execute("SELECT 1 FROM (" + SEND_ROWS_SQL_FOR_SOURCE + ") LIMIT 1",
+                             (0, self._agentId, self._tenantId, 1)).fetchone()
                 row = conn.execute(
                     "SELECT COUNT(*) FROM channel_archive_messages"
-                    " WHERE action = 'send'").fetchone()
+                    " WHERE action = 'send' AND agent_id = ? AND tenant_id = ?",
+                    (self._agentId, self._tenantId)).fetchone()
                 state = conn.execute(
                     "SELECT value, updated_at FROM channel_archive_state"
                     " WHERE key = 'watermark_seq'").fetchone()
             finally:
                 conn.close()
-        except sqlite3.Error as exc:
+        except (sqlite3.Error, MappingError) as exc:
             return SourceHealth(status="error",
                                 reason="会话存档投影面不可读: %s" % exc)
         reason = "%s；存档投影面可达（send 行已落 %d）" % (reading.reason, row[0])
@@ -469,5 +473,4 @@ class ChatChannelAdapter:
             return ArchiveReadiness(
                 status="degraded",
                 reason="微信侧无官方历史消息拉取通道（会话存档仅企微提供）")
-        return wecomArchiveReadiness(
-            agentId=str(self._descriptor.get("agentId") or "default"))
+        return wecomArchiveReadiness(agentId=self._agentId)

@@ -86,6 +86,8 @@ def validateDescriptor(descriptor: Dict[str, Any], registry: Any,
     if sourceType not in SOURCE_TYPES:
         raise MappingError(
             "sourceType %r 不在白名单（%s）" % (sourceType, " / ".join(SOURCE_TYPES)))
+    if sourceType == "chat" and not str(descriptor.get("agentId") or "").strip():
+        raise MappingError("chat 源必须声明 agentId（来源实例边界），拒绝无边界全表读取")
     if sourceType in VARIANT_CLOSED_SETS:
         field, closed = VARIANT_CLOSED_SETS[sourceType]
         variant = str(descriptor.get(field) or "")

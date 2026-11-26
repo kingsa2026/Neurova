@@ -136,7 +136,7 @@ class GitAdapter:
         from .protocols import ChangeBatch, SourceCursor
 
         if not self._repoUrl:
-            return ChangeBatch(rows=[], nextCursor=None, hasMore=False)
+            raise ValueError("git 缺少 repo_url（描述符）")
         offset = 0
         if cursor and getattr(cursor, "token", ""):
             try:
@@ -145,10 +145,10 @@ class GitAdapter:
                 offset = 0
         try:
             rows = self._files()
-        except Exception as exc:  # noqa: BLE001 - 拉取失败诚实空批＋脱敏日志
+        except Exception as exc:
             logger.warning("git: 拉取失败 %s: %s",
                            self._sanitized(self._repoUrl), exc)
-            rows = []
+            raise
         window = rows[offset:offset + max(1, int(limit))]
         hasMore = offset + len(window) < len(rows)
         nextCursor = SourceCursor(token=json.dumps({"offset": offset + len(window)})) \

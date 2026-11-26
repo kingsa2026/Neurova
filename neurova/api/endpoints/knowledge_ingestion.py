@@ -222,12 +222,15 @@ def _filename_for_url(url: str) -> str:
 
 
 def _fetch_url(url: str) -> bytes:
-    """抓取远程网页（测试可 monkeypatch）。校验通过后由 urllib 拉取。"""
-    import urllib.request
+    """抓取远程网页（测试可 monkeypatch）。统一出网门逐跳固定 DNS。"""
+    from neurova.security import safe_fetch
 
-    req = urllib.request.Request(url, headers={"User-Agent": "Neurova-KB/1.0"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return resp.read(1024 * 1024)  # 最多 1MB
+    return safe_fetch.safe_fetch(
+        url,
+        headers={"User-Agent": "Neurova-KB/1.0"},
+        timeout=15,
+        max_bytes=1024 * 1024,
+    ).content
 
 
 @router.post("/import-url")

@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
 from neurova.api.auth import get_current_user_or_service
 from neurova.api.endpoints.knowledge_common import get_repository
+from neurova.core.tenant_scope import resolve_tenant
 
 
 def _get_kb_storage():
@@ -214,16 +215,17 @@ async def list_ingress_tasks(
     limit: int = Query(default=50, ge=1, le=200),
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """摄取任务列表 + 计数（本人任务；admin 全量）。"""
+    """摄取任务列表 + 计数（本人本租户；admin 全量）。"""
     from neurova.knowledge.ingest_queue import get_ingress_queue
 
     queue = get_ingress_queue()
     uid = str(current_user.get("user_id") or "")
     is_admin = str(current_user.get("role") or "") == "admin"
-    tasks = queue.list_recent(limit=limit)
-    if not is_admin:
-        tasks = [t for t in tasks if t.get("user_id") == uid]
-    return {"code": 0, "data": {"tasks": tasks, "stats": queue.stats()}}
+    scope = {} if is_admin else {"user_id": uid, "tenant_id": resolve_tenant(current_user)}
+    tasks = queue.list_recent(limit=limit, **scope)
+    for task in tasks:
+        task.pop("storage_path", None)
+    return {"code": 0, "data": {"tasks": tasks, "stats": queue.stats(**scope)}}
 
 
 @router.get("/ingress-tasks/{task_id}")
@@ -237,12 +239,11 @@ async def get_ingress_task(
     from neurova.knowledge.ingest_queue import get_ingress_queue
 
     queue = get_ingress_queue()
-    row = queue.get(task_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
     uid = str(current_user.get("user_id") or "")
-    if row.get("user_id") != uid and str(current_user.get("role") or "") != "admin":
-        # 他人任务对普通用户按不存在处理（不泄露存在性）
+    is_admin = str(current_user.get("role") or "") == "admin"
+    scope = {} if is_admin else {"user_id": uid, "tenant_id": resolve_tenant(current_user)}
+    row = queue.get(task_id, **scope)
+    if row is None:
         raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
     row = dict(row)
     try:
@@ -251,7 +252,7 @@ async def get_ingress_task(
         row["item_ids"] = _json.loads(row.get("result_ids") or "[]")
     except Exception:  # noqa: BLE001
         row["item_ids"] = []
-    row["spans"] = queue.get_spans(task_id)
+    row["spans"] = queue.get_spans(task_id, **scope)
     row.pop("storage_path", None)  # 服务端绝对路径不外露
     return {"code": 0, "data": row}
 
@@ -270,13 +271,13 @@ async def cancel_ingress_task(
     from neurova.knowledge.ingest_queue import get_ingress_queue
 
     queue = get_ingress_queue()
-    row = queue.get(task_id)
+    uid = str(current_user.get("user_id") or "")
+    is_admin = str(current_user.get("role") or "") == "admin"
+    scope = {} if is_admin else {"user_id": uid, "tenant_id": resolve_tenant(current_user)}
+    row = queue.get(task_id, **scope)
     if row is None:
         raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
-    uid = str(current_user.get("user_id") or "")
-    if row.get("user_id") != uid and str(current_user.get("role") or "") != "admin":
-        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
-    ok = queue.cancel_task(task_id, by=uid)
+    ok = queue.cancel_task(task_id, by=uid, **scope)
     if not ok:
         raise HTTPException(
             status_code=409,

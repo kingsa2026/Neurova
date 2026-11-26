@@ -53,6 +53,7 @@ def store(tmp_path: Path):
 def _archiveAdapter(dbPath, vendor="wecom", **extra):
     descriptor = {
         "sourceType": "chat", "vendor": vendor, "chatSource": "archive",
+        "agentId": "default",
         "columns": list(ROW_COLUMNS) + [MEDIA_REF_COLUMN],
         "archiveDb": str(dbPath),
     }
@@ -168,7 +169,7 @@ def test_chat_source_closed_set(tmp_path):
         # 微信侧无会话存档面（§1 表），chatSource=archive 构造期即拒
         _archiveAdapter(tmp_path / "x.db", vendor="wechat")
     capture = ChatChannelAdapter(
-        {"sourceType": "chat", "vendor": "wecom",
+        {"sourceType": "chat", "vendor": "wecom", "agentId": "default",
          "columns": list(ROW_COLUMNS) + [MEDIA_REF_COLUMN]},
         "src_capture")
     assert capture._sourceFace == "capture", "缺省＝capture（存量描述符行为不变）"

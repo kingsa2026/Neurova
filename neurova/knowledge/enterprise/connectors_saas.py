@@ -19,8 +19,7 @@ NEUROVA_KB_SECRET 指针纪律（描述符只放环境变量名，值不落明�
   limit/offset 页游标。
 
 均实现既有 EnterpriseSourceAdapter Protocol（describeSchema/fetchBatch/
-health/close），行→applyMapping→admission 主链不动。拉取失败诚实空批＋
-日志留名（W10 同款），不吞成假成功。
+health/close），行→applyMapping→admission 主链不动。拉取失败如实抛出并日志留名，不吞成假成功。
 """
 
 from __future__ import annotations
@@ -131,12 +130,12 @@ class SaaSRestAdapter:
         token = str(getattr(cursor, "token", "") or "") if cursor else ""
         try:
             rows, nextToken = self._fetchRows(token, max(1, int(limit)))
-        except Exception as exc:  # noqa: BLE001 - REST 失败诚实空批＋日志留名
+        except Exception as exc:
             logger.warning("%s: 拉取失败 %s: %s", self._descriptor.get("sourceType"),
                            self._base, exc)
-            rows, nextToken = [], ""
+            raise
         rows = rows if isinstance(rows, list) else []
-        hasMore = bool(nextToken) or len(rows) >= max(1, int(limit))
+        hasMore = bool(nextToken)
         nextCursor = SourceCursor(token=str(nextToken or "")) \
             if hasMore and nextToken else None
         return ChangeBatch(rows=rows, nextCursor=nextCursor, hasMore=hasMore)
@@ -158,7 +157,7 @@ class BigQueryAdapter(SaaSRestAdapter):
 
     def _fetchRows(self, token: str, limit: int) -> Tuple[List[Dict[str, Any]], str]:
         if not (self._projectId and self._query):
-            return [], ""
+            raise ValueError("bigquery 缺少 project_id 或 query（描述符）")
         body: Dict[str, Any] = {"query": self._query, "maxResults": limit,
                                 "useQueryCache": True}
         if token:
@@ -187,7 +186,7 @@ class DatabricksAdapter(SaaSRestAdapter):
 
     def _fetchRows(self, token: str, limit: int) -> Tuple[List[Dict[str, Any]], str]:
         if not (self._warehouseId and self._query):
-            return [], ""
+            raise ValueError("databricks 缺少 warehouse_id 或 query（描述符）")
         body: Dict[str, Any] = {"statement": self._query,
                                 "warehouse_id": self._warehouseId,
                                 "wait_timeout": "30s", "format": "JSON_ARRAY"}
@@ -217,7 +216,7 @@ class SalesforceAdapter(SaaSRestAdapter):
 
     def _fetchRows(self, token: str, limit: int) -> Tuple[List[Dict[str, Any]], str]:
         if not (self._base and self._soql):
-            return [], ""
+            raise ValueError("salesforce 缺少 base_url 或 soql（描述符）")
         if token:
             payload = self._requestRows("%s%s" % (self._base, token))
         else:
@@ -244,7 +243,7 @@ class ServiceNowAdapter(SaaSRestAdapter):
 
     def _fetchRows(self, token: str, limit: int) -> Tuple[List[Dict[str, Any]], str]:
         if not (self._base and self._table):
-            return [], ""
+            raise ValueError("servicenow 缺少 base_url 或 table（描述符）")
         offset = int(token) if token.isdigit() else 0
         params: Dict[str, Any] = {"sysparm_limit": limit,
                                   "sysparm_offset": offset}
@@ -291,7 +290,7 @@ class LookerAdapter(SaaSRestAdapter):
 
     def _fetchRows(self, token: str, limit: int) -> Tuple[List[Dict[str, Any]], str]:
         if not (self._base and self._queryId):
-            return [], ""
+            raise ValueError("looker 缺少 base_url 或 query_id（描述符）")
         payload = self._requestRows(
             "%s/queries/%s/run/json" % (self._base, self._queryId))
         rows = payload if isinstance(payload, list) else []
@@ -311,7 +310,7 @@ class AirflowAdapter(SaaSRestAdapter):
 
     def _fetchRows(self, token: str, limit: int) -> Tuple[List[Dict[str, Any]], str]:
         if not (self._base and self._dagId):
-            return [], ""
+            raise ValueError("airflow 缺少 base_url 或 dag_id（描述符）")
         offset = int(token) if token.isdigit() else 0
         payload = self._requestRows(
             "%s/api/v1/dags/%s/dagRuns" % (self._base, self._dagId),

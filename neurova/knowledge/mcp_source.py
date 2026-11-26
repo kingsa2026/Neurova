@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.tenant_scope import resolve_tenant, tenant_sql_where
+from neurova.security.mcp_transport import pinnedMcpTransport, resolveMcpEndpoint
 
 logger = get_logger(__name__)
 
@@ -138,14 +139,18 @@ async def fetchViaSession(session: Any, toolName: str, toolArgs: Dict[str, Any])
 @asynccontextmanager
 async def openSourceSession(source: Dict[str, Any]):
     """HTTP 传输薄壳：streamable-http + Bearer 鉴权头 + ClientSession（已 initialize）。"""
-    import httpx
+    import httpx2
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
 
     endpoint = str(source.get("endpoint") or "")
+    resolution = resolveMcpEndpoint(endpoint)
     token = str(source.get("auth_token") or "")
     headers = {"Authorization": "Bearer %s" % token} if token else {}
-    async with httpx.AsyncClient(headers=headers, timeout=30) as http:
+    transport = pinnedMcpTransport(resolution)
+    async with httpx2.AsyncClient(
+        headers=headers, timeout=30, transport=transport, trust_env=False,
+    ) as http:
         async with streamable_http_client(endpoint, http_client=http) as streams:
             async with ClientSession(streams[0], streams[1]) as session:
                 await session.initialize()

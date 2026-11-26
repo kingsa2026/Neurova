@@ -138,7 +138,7 @@ class CassandraAdapter:
         from .protocols import ChangeBatch, SourceCursor
 
         if not self._cql:
-            return ChangeBatch(rows=[], nextCursor=None, hasMore=False)
+            raise ValueError("cassandra 缺少 cql（描述符）")
         offset = 0
         if cursor and getattr(cursor, "token", ""):
             try:
@@ -147,9 +147,9 @@ class CassandraAdapter:
                 offset = 0
         try:
             rows = self._query(self._cql)
-        except Exception as exc:  # noqa: BLE001 - 拉取失败诚实空批＋日志留名
+        except Exception as exc:
             logger.warning("cassandra: 拉取失败 %s: %s", self._sourceId, exc)
-            rows = []
+            raise
         window = rows[offset:offset + max(1, int(limit))]
         hasMore = offset + len(window) < len(rows)
         nextCursor = SourceCursor(token=str(offset + len(window))) \

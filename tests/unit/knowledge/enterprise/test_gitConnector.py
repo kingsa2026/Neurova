@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """U-conn 扩展批：Git 仓库连接器——本地 file:// 仓库真 clone（零网络），
-文件清单切页、health 探测、缺 repo_url 诚实空批。
+文件清单切页、health 探测、缺 repo_url 显式拒绝。
 """
 
 from __future__ import annotations
@@ -72,9 +72,17 @@ class TestGitAdapter:
         health = _run(adapter.health())
         assert health.status == "ok"
 
-    def test_missingRepoUrlIsHonestEmptyBatch(self):
+    def test_fetchFailureRaisesInsteadOfEmptySuccess(self, adapter, monkeypatch):
+        def boom():
+            raise RuntimeError("git unavailable")
+
+        monkeypatch.setattr(adapter, "_files", boom)
+        with pytest.raises(RuntimeError, match="git unavailable"):
+            _run(adapter.fetchBatch(None, 10))
+
+    def test_missingRepoUrlRaisesInsteadOfEmptySuccess(self):
         adapter = GitAdapter({"sourceType": "git"}, "git3", "default")
-        batch = _run(adapter.fetchBatch(None, 10))
-        assert batch.rows == [] and batch.hasMore is False
+        with pytest.raises(ValueError, match="repo_url"):
+            _run(adapter.fetchBatch(None, 10))
         health = _run(adapter.health())
         assert health.status == "error" and "repo_url" in health.reason

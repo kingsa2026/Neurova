@@ -361,6 +361,34 @@ class TestSqliteRealSidecar:
         third = _run(adapter.fetchBatch(second.nextCursor, 2))
         assert [r["order_id"] for r in third.rows] == [4], "水位增量对真实旁库成立"
 
+    def test_timestampPaginationUsesStableTiebreaker(self, tmp_path):
+        dbPath = tmp_path / "events.db"
+        conn = sqlite3.connect(str(dbPath))
+        conn.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, updated_at TEXT)")
+        conn.executemany("INSERT INTO events VALUES (?, ?)",
+                         [(i, "2026-11-26T00:00:00") for i in range(1, 6)])
+        conn.commit()
+        conn.close()
+        descriptor = self._sqliteDescriptor(
+            dbPath, table="events", cursorColumn="updated_at",
+            watermarkType="timestamp", tiebreakerColumn="id",
+            columns=["id", "updated_at"])
+        adapter = SqlDirectAdapter(descriptor, "timestamp_orders", "default")
+
+        batches = []
+        cursor = None
+        for _ in range(3):
+            batch = _run(adapter.fetchBatch(cursor, 2))
+            batches.append([row["id"] for row in batch.rows])
+            cursor = batch.nextCursor
+            if not batch.hasMore:
+                break
+
+        assert batches == [[1, 2], [3, 4], [5]], batches
+        assert json.loads(cursor.token[3:]) == {
+            "watermark": "2026-11-26T00:00:00", "tiebreaker": 5,
+        }
+
     def test_describeSchemaReadsPragmaColumns(self, tmp_path):
         dbPath = tmp_path / "sidecar.db"
         self._makeSidecar(dbPath)

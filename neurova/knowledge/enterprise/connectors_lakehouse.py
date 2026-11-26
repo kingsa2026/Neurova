@@ -117,7 +117,7 @@ class UnityCatalogAdapter(LakehouseRestAdapter):
 
         table = str(self._descriptor.get("table") or "")
         if not table or not self._base:
-            return ChangeBatch(rows=[], nextCursor=None, hasMore=False)
+            raise ValueError("unity_catalog 缺少 table 或 base_url（描述符）")
         url = "%s/api/2.0/unity-catalog/tables/%s/rows" % (self._base, table)
         offset = 0
         if cursor and getattr(cursor, "token", ""):
@@ -128,10 +128,12 @@ class UnityCatalogAdapter(LakehouseRestAdapter):
         try:
             payload, _ = self._requestRows(url, {"page_offset": offset,
                                                  "page_size": max(1, int(limit))})
-            rows = payload.get("rows") or []
-        except Exception as exc:  # noqa: BLE001 - REST 失败诚实空批＋日志留名
+            if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
+                raise ValueError("unity_catalog 响应缺少 rows 数组")
+            rows = payload["rows"]
+        except Exception as exc:
             logger.warning("unity_catalog: 拉取失败 %s: %s", table, exc)
-            rows = []
+            raise
         hasMore = len(rows) >= max(1, int(limit))
         nextCursor = SourceCursor(token=json.dumps({"offset": offset + len(rows)})) \
             if hasMore else None
@@ -147,7 +149,9 @@ class SnowflakeAdapter(LakehouseRestAdapter):
         sql = str(self._descriptor.get("query") or "")
         watermarkColumn = str(self._descriptor.get("watermark_column") or "")
         if not sql or not self._base:
-            return ChangeBatch(rows=[], nextCursor=None, hasMore=False)
+            raise ValueError("snowflake 缺少 query 或 base_url（描述符）")
+        if not watermarkColumn:
+            raise ValueError("snowflake 缺少 watermark_column（描述符）")
         params: Dict[str, Any] = {"q": sql, "limit": max(1, int(limit))}
         if cursor and getattr(cursor, "token", ""):
             try:
@@ -158,10 +162,12 @@ class SnowflakeAdapter(LakehouseRestAdapter):
                 pass
         try:
             payload, _ = self._requestRows("%s/queries" % self._base, params)
-            rows = payload.get("rows") or []
-        except Exception as exc:  # noqa: BLE001 - REST 失败诚实空批
+            if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
+                raise ValueError("snowflake 响应缺少 rows 数组")
+            rows = payload["rows"]
+        except Exception as exc:
             logger.warning("snowflake: 拉取失败: %s", exc)
-            rows = []
+            raise
         nextToken = ""
         if rows and watermarkColumn:
             nextToken = json.dumps({"watermark": rows[-1].get(watermarkColumn, "")})
@@ -178,7 +184,7 @@ class SapOdataAdapter(LakehouseRestAdapter):
 
         entitySet = str(self._descriptor.get("entity_set") or "")
         if not entitySet or not self._base:
-            return ChangeBatch(rows=[], nextCursor=None, hasMore=False)
+            raise ValueError("sap_odata 缺少 entity_set 或 base_url（描述符）")
         skiptoken = ""
         if cursor and getattr(cursor, "token", ""):
             skiptoken = cursor.token
@@ -188,10 +194,12 @@ class SapOdataAdapter(LakehouseRestAdapter):
             params["$skiptoken"] = skiptoken
         try:
             payload, _ = self._requestRows(url, params)
-            rows = payload.get("value") or []
-        except Exception as exc:  # noqa: BLE001 - REST 失败诚实空批
+            if not isinstance(payload, dict) or not isinstance(payload.get("value"), list):
+                raise ValueError("sap_odata 响应缺少 value 数组")
+            rows = payload["value"]
+        except Exception as exc:
             logger.warning("sap_odata: 拉取失败 %s: %s", entitySet, exc)
-            rows = []
+            raise
         nextSkiptoken = str(payload.get("__next") or "")
         hasMore = bool(nextSkiptoken)
         nextCursor = SourceCursor(token=nextSkiptoken) if hasMore else None
@@ -202,7 +210,8 @@ class HttpPullAdapter:
     """通用 HTTP 拉取适配器（W10 http_pull 接线——批 C3 欠账清偿）。
 
     descriptor：url（必填）/headers（可选）/pagination（cursor 参数名，可选）/
-    rows_path（payload 中行数组的键，缺省 rows）。凭据 env 指针同款。"""
+    limit_param（服务端页大小参数名，缺省 limit）/rows_path（payload 中行数组的键，
+    缺省 rows）。凭据 env 指针同款。"""
 
     def __init__(self, descriptor: Dict[str, Any], sourceId: str,
                  tenantId: str) -> None:
@@ -247,7 +256,7 @@ class HttpPullAdapter:
         from .protocols import ChangeBatch, SourceCursor
 
         if not self._url:
-            return ChangeBatch(rows=[], nextCursor=None, hasMore=False)
+            raise ValueError("http_pull 缺少 url（描述符）")
         offset = 0
         if cursor and getattr(cursor, "token", ""):
             try:
@@ -256,8 +265,10 @@ class HttpPullAdapter:
                 offset = 0
         params: Dict[str, Any] = {}
         paginationParam = str(self._descriptor.get("pagination") or "")
+        pageLimit = max(1, int(limit))
         if paginationParam:
             params[paginationParam] = offset
+            params[str(self._descriptor.get("limit_param") or "limit")] = pageLimit
         try:
             resp = httpx.get(self._url, headers=self._headers(), params=params,
                              timeout=30)
@@ -265,13 +276,13 @@ class HttpPullAdapter:
             payload = resp.json()
             rowsPath = str(self._descriptor.get("rows_path") or "rows")
             rows = payload.get(rowsPath) if isinstance(payload, dict) else payload
-            rows = rows if isinstance(rows, list) else []
-        except Exception as exc:  # noqa: BLE001 - REST 失败诚实空批＋日志留名
+            if not isinstance(rows, list):
+                raise ValueError("http_pull 响应缺少 %s 数组" % rowsPath)
+        except Exception as exc:
             logger.warning("http_pull: 拉取失败 %s: %s", self._url, exc)
-            rows = []
-        window = rows[offset:offset + max(1, int(limit))] \
-            if not paginationParam else rows[:max(1, int(limit))]
-        hasMore = offset + len(window) < len(rows)
+            raise
+        window = rows[offset:offset + pageLimit] if not paginationParam else rows[:pageLimit]
+        hasMore = len(window) >= pageLimit if paginationParam else offset + len(window) < len(rows)
         nextCursor = SourceCursor(token=json.dumps({"offset": offset + len(window)})) \
             if hasMore else None
         return ChangeBatch(rows=window, nextCursor=nextCursor, hasMore=hasMore)

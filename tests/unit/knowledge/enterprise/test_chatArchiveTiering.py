@@ -155,7 +155,8 @@ async def test_write_archive_entries_replay_is_idempotent(repo, tmp_path):
 async def test_capture_face_has_no_entry_writer(repo):
     adapter = ChatChannelAdapter(
         {"sourceType": "chat", "vendor": "wecom", "chatSource": "capture",
-         "columns": list(ROW_COLUMNS) + [MEDIA_REF_COLUMN]}, "src_capture")
+         "agentId": "default", "columns": list(ROW_COLUMNS) + [MEDIA_REF_COLUMN]},
+        "src_capture")
     outcome = await adapter.writeArchiveEntries(
         [_archiveRow(1, "m1", text="x")], repo=repo)
     assert outcome.get("applied") is False, (

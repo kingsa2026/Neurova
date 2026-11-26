@@ -92,6 +92,21 @@ class TestCassandraAdapter:
         assert batch2.rows == [{"id": 2, "city": "beijing"}]
         assert batch2.hasMore is False
 
+    def test_fetchFailureRaisesInsteadOfEmptySuccess(self, monkeypatch):
+        adapter = _adapter()
+
+        def boom(*args, **kwargs):
+            raise ConnectionError("cassandra unavailable")
+
+        monkeypatch.setattr(adapter, "_query", boom)
+        with pytest.raises(ConnectionError, match="cassandra unavailable"):
+            _run(adapter.fetchBatch(None, 10))
+
+    def test_missingCqlRaisesInsteadOfEmptySuccess(self):
+        adapter = CassandraAdapter({"sourceType": "cassandra"}, "cas-missing", "default")
+        with pytest.raises(ValueError, match="cql"):
+            _run(adapter.fetchBatch(None, 10))
+
     def test_healthProbesSystemLocal(self, fakeDriver):
         adapter = _adapter()
         health = _run(adapter.health())

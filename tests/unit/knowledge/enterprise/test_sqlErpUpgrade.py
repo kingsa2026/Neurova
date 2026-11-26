@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """W11 连接器升级（specs/2026-11-12 §12）：
-SQL 水位列类型显式声明（timestamp/自增整数闭集）＋边界等值处理（timestamp=>
-防漏防重）＋describeSchema 补主键/可空性读数；ERP vendor 注册数据化＋cursor
+SQL 水位列类型显式声明（timestamp/自增整数闭集）＋timestamp 稳定键分页
+＋describeSchema 补主键/可空性读数；ERP vendor 注册数据化＋cursor
 环检测（同 cursor 再现即停并如实报错）。
 """
 
@@ -14,6 +14,7 @@ import pytest
 
 from neurova.knowledge.enterprise.connectors_sql import SqlDirectAdapter
 from neurova.knowledge.enterprise.registry import buildAdapter
+from neurova.knowledge.enterprise.schema_mapping import MappingError
 
 
 class TestWatermarkType:
@@ -23,24 +24,33 @@ class TestWatermarkType:
             "sourceType": "sql", "driver": "sqlite", "database": str(tmp_path / "t.db"),
             "table": "events", "cursorColumn": "updated_at",
             "columns": ["id", "updated_at"],
-            "watermarkType": "timestamp",
+            "watermarkType": "timestamp", "tiebreakerColumn": "id",
             "mapping": {"subject": {"column": "id"}, "predicate": {"termId": "row"},
                         "object": {"column": "updated_at"}},
         }
         adapter = buildAdapter(descriptor, "wt1", "default")
         assert adapter is not None
 
-    def test_boundaryTimestampUsesGteWithDedup(self, tmp_path):
-        """timestamp 边界等值：`>=` 取回同水位行＋去重已处理行（防漏防重）。"""
+    def test_timestampWatermarkRequiresStableTiebreaker(self, tmp_path):
+        with pytest.raises(MappingError, match="tiebreakerColumn"):
+            SqlDirectAdapter(
+                {"sourceType": "sql", "driver": "sqlite", "database": str(tmp_path / "t.db"),
+                 "table": "events", "cursorColumn": "updated_at",
+                 "columns": ["id", "updated_at"], "watermarkType": "timestamp"},
+                "wt-missing-key", "default")
+
+    def test_timestampUsesLexicographicWatermarkAndTiebreaker(self, tmp_path):
+        """同时间戳多行按稳定唯一键推进，不用会重复首批的 `>=`。"""
         adapter = SqlDirectAdapter(
             {"sourceType": "sql", "driver": "sqlite", "database": ":memory:",
              "table": "events", "cursorColumn": "updated_at",
              "columns": ["id", "updated_at"],
-             "watermarkType": "timestamp"},
+             "watermarkType": "timestamp", "tiebreakerColumn": "id"},
             "wt2", "default")
-        # 验证水位比较符按类型选择
-        cond = adapter._watermarkCondition()
-        assert ">=" in cond, "timestamp 类型应使用 >= 防漏"
+        sql, params = adapter._buildFetchSql(("2026-11-26T00:00:00", 2), 3)
+        assert "updated_at > ? OR (updated_at = ? AND id > ?)" in sql
+        assert "ORDER BY updated_at, id" in sql
+        assert params == ("2026-11-26T00:00:00", "2026-11-26T00:00:00", 2, 3)
 
     def test_boundaryIntegerUsesGt(self, tmp_path):
         """自增整数：`>` 保持不变（唯一值不漏不重）。"""

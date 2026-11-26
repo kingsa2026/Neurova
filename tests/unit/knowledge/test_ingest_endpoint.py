@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """知识摄取异步链路（P1 #9）：worker 判定 + 端点契约。
 
-契约：sync=false 入队即返（文件落暂存）；GET 任务状态（本人可见，他人 404
+契约：sync=false 入队即返（文件落暂存）；GET 任务状态（本人本租户可见，越界 404
 不泄露存在性）；done 附 item_ids；确定性失败直入 dead；sync=true 行为不降。
 """
 import json
@@ -111,7 +111,41 @@ def test_task_status_endpoints_owner_scoped(env):
     assert client.get(f"/api/v1/knowledge/ingress-tasks/{other['task_id']}").status_code == 404
     lst = client.get("/api/v1/knowledge/ingress-tasks").json()["data"]
     assert {x["task_id"] for x in lst["tasks"]} == {tid}
-    assert lst["stats"]["pending"] == 2  # stats 是全局观测面
+    assert lst["stats"]["pending"] == 1  # stats 与列表同口径按 uid+tenant 圈域
+    assert all("storage_path" not in task for task in lst["tasks"])
+
+
+def test_task_observation_and_cancel_are_tenant_scoped(env):
+    client, queue, _ = env
+    from neurova.api.auth import get_current_user_or_service
+
+    acme = queue.enqueue_upload("a.txt", b"acme", "ag", "u1", tenant_id="acme")
+    beta = queue.enqueue_upload("b.txt", b"beta", "ag", "u1", tenant_id="beta")
+    other = queue.enqueue_upload("c.txt", b"other", "ag", "u2", tenant_id="acme")
+
+    client.app.dependency_overrides[get_current_user_or_service] = lambda: {
+        "user_id": "u1", "role": "user", "tenant_id": "acme",
+    }
+    listing = client.get("/api/v1/knowledge/ingress-tasks").json()["data"]
+    assert {task["task_id"] for task in listing["tasks"]} == {acme["task_id"]}
+    assert listing["stats"]["pending"] == 1
+    assert all("storage_path" not in task for task in listing["tasks"])
+    assert client.get(
+        f"/api/v1/knowledge/ingress-tasks/{beta['task_id']}").status_code == 404
+    assert client.post(
+        f"/api/v1/knowledge/ingress-tasks/{beta['task_id']}/cancel").status_code == 404
+    assert queue.get(beta["task_id"])["status"] == "pending"
+
+    client.app.dependency_overrides[get_current_user_or_service] = lambda: {
+        "user_id": "admin", "role": "admin", "tenant_id": "acme",
+    }
+    adminListing = client.get("/api/v1/knowledge/ingress-tasks").json()["data"]
+    assert {task["task_id"] for task in adminListing["tasks"]} == {
+        acme["task_id"], beta["task_id"], other["task_id"]}
+    assert adminListing["stats"]["pending"] == 3
+    assert client.post(
+        f"/api/v1/knowledge/ingress-tasks/{beta['task_id']}/cancel").status_code == 200
+    assert queue.get(beta["task_id"])["status"] == "cancelled"
 
 
 def test_drain_roundtrip_end_to_end(env, monkeypatch):

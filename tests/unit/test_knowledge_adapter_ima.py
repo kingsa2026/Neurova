@@ -130,3 +130,33 @@ class TestImaAdapter:
         result = await adapter.search("q", limit=3)
         assert result["status"] == "failed"
         assert "unreachable" in result["error"]
+
+    def test_default_post_uses_validated_address_plan(self, monkeypatch):
+        from neurova import http_fetch
+
+        calls = []
+
+        def fake_request_once(url, **kwargs):
+            calls.append((url, kwargs))
+            return http_fetch.HopResult(
+                200, {"content-type": "application/json"}, b'{"result": {}}', None,
+            )
+
+        monkeypatch.setattr(http_fetch, "request_once", fake_request_once)
+        monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: pytest.fail("IMA 不得直连"))
+        adapter = ImaKBAdapter({"base_url": "http://8.8.8.8/mcp", "token": TEST_TOKEN})
+
+        result = adapter._default_post_jsonrpc(
+            "http://8.8.8.8/mcp", {"jsonrpc": "2.0"}, {}, 3.0,
+        )
+
+        assert result == {"result": {}}
+        assert calls[0][1]["resolution"].addresses == ("8.8.8.8",)
+
+    def test_default_post_rejects_private_before_network(self, monkeypatch):
+        monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: pytest.fail("私网不得直连"))
+        adapter = ImaKBAdapter({"base_url": "http://127.0.0.1:9007/mcp", "token": TEST_TOKEN})
+        with pytest.raises(ValueError):
+            adapter._default_post_jsonrpc(
+                "http://127.0.0.1:9007/mcp", {"jsonrpc": "2.0"}, {}, 3.0,
+            )

@@ -14,6 +14,8 @@
 - sqlite 用只读 URI（mode=ro）开**独立**短连接，绝不 ATTACH、绝不共用主库连接；
 - fetchBatch 按 cursorColumn 水位增量：首轮空游标＝全量快照（无 WHERE），此后
   WHERE col > 水位 ORDER BY col，多取一行判 hasMore，nextCursor=本批最大水位；
+  timestamp 水位必须另配 tiebreakerColumn，按 (水位, 稳定唯一键)  lexicographic
+  推进，避免同时间戳多行在页边界重复或停滞；
 - query 路由（descriptor["query"]，只读模板含 {wmCond}/{lim} 槽位）与
   table+columns 路由二选一；任何写意图形状（INSERT/UPDATE/DELETE/DDL/ATTACH/
   PRAGMA/多语句/注释拼接）构造期显式 MappingError，不静默；
@@ -358,9 +360,19 @@ class SqlDirectAdapter:
 
         self._cursorColumn = str(self._descriptor.get("cursorColumn") or "").strip()
         self._watermarkType = str(descriptor.get("watermarkType") or "integer").strip().lower()
+        if self._watermarkType not in ("integer", "timestamp"):
+            raise MappingError("watermarkType %r 不在闭集（integer/timestamp）"
+                               % self._watermarkType)
         if not self._cursorColumn or not _IDENTIFIER.match(self._cursorColumn):
             raise MappingError("cursorColumn 标识符 %r 缺失或不合法（水位增量列，"
                                "只允许字母数字下划线）" % self._descriptor.get("cursorColumn"))
+        self._tiebreakerColumn = str(self._descriptor.get("tiebreakerColumn") or "").strip()
+        if self._watermarkType == "timestamp":
+            if not self._tiebreakerColumn or not _IDENTIFIER.match(self._tiebreakerColumn):
+                raise MappingError(
+                    "timestamp 水位必须配置合法 tiebreakerColumn（稳定唯一键）")
+            if self._tiebreakerColumn == self._cursorColumn:
+                raise MappingError("tiebreakerColumn 不得与 cursorColumn 相同")
 
         query = str(self._descriptor.get("query") or "").strip()
         table = str(self._descriptor.get("table") or "").strip()
@@ -481,31 +493,61 @@ class SqlDirectAdapter:
         return ChangeBatch(rows=rows, nextCursor=nextCursor, hasMore=hasMore)
 
     def _watermarkCondition(self) -> str:
-        """W11 边界等值（specs/2026-11-12 §12）：timestamp 类型用 >=（防漏——
-        同水位多行不跳过），integer 类型保持 >（唯一值不漏不重）。
-        未声明 watermarkType 的存量行为零漂移（回退 integer → >）。"""
-        if self._watermarkType == "timestamp":
-            return ">="
+        """单列水位比较符；timestamp 的复合比较由 _buildFetchSql 生成。"""
         return ">"
+
+    def _timestampCondition(self, binds: List[Any], watermarkValue: Any,
+                            tiebreakerValue: Any) -> str:
+        watermarkMarker = self._nextMarker(binds)
+        binds.append(watermarkValue)
+        equalMarker = self._nextMarker(binds)
+        binds.append(watermarkValue)
+        tiebreakerMarker = self._nextMarker(binds)
+        binds.append(tiebreakerValue)
+        return "({col} > {wm} OR ({col} = {eq} AND {key} > {keyMark}))".format(
+            col=self._cursorColumn, wm=watermarkMarker, eq=equalMarker,
+            key=self._tiebreakerColumn, keyMark=tiebreakerMarker)
 
     def _buildFetchSql(self, watermark: Optional[Any],
                        boundLimit: int) -> Tuple[str, Tuple[Any, ...]]:
         """组装取数 SQL：值一律参数化，名字全部来自已过白名单的标识符。"""
         if self._route == "table":
             fills = {"cols": ", ".join(self._columns) if self._columns else "*",
-                     "table": self._table, "col": self._cursorColumn}
+                     "table": self._table, "col": self._cursorColumn,
+                     "key": self._tiebreakerColumn}
             if watermark is not None:
                 template = _FETCH_TEMPLATES[self._driver]
-                if self._watermarkCondition() == ">=":
-                    template = template.replace(" > ", " >= ")
+                if self._watermarkType == "timestamp":
+                    watermarkValue, tiebreakerValue = watermark
+                    if self._driver == "oracle":
+                        template = template.replace(
+                            " > :1", " > :1 OR ({col} = :1 AND {key} > :2)")
+                        template = template.replace("ORDER BY {col}", "ORDER BY {col}, {key}")
+                        template = template.replace(":2 ROWS", ":3 ROWS")
+                        return template.format(**fills), (watermarkValue, tiebreakerValue, boundLimit)
+                    marker = "?" if self._driver == "sqlite" else "%s"
+                    template = template.replace(
+                        " > " + marker,
+                        " > " + marker + " OR ({col} = " + marker
+                        + " AND {key} > " + marker + ")")
+                    template = template.replace("ORDER BY {col}", "ORDER BY {col}, {key}")
+                    return template.format(**fills), (
+                        watermarkValue, watermarkValue, tiebreakerValue, boundLimit)
                 return template.format(**fills), (watermark, boundLimit)
-            return _FETCH_TEMPLATES_FIRST[self._driver].format(**fills), (boundLimit,)
+            template = _FETCH_TEMPLATES_FIRST[self._driver]
+            if self._watermarkType == "timestamp":
+                template = template.replace("ORDER BY {col}", "ORDER BY {col}, {key}")
+            return template.format(**fills), (boundLimit,)
         # query 路由：槽位参数化注入（绑定序固定 {wmCond} → {lim}）
         binds: List[Any] = []
         if watermark is not None:
-            condition = "%s %s %s" % (self._cursorColumn, self._watermarkCondition(),
-                                      self._nextMarker(binds))
-            binds.append(watermark)
+            if self._watermarkType == "timestamp":
+                watermarkValue, tiebreakerValue = watermark
+                condition = self._timestampCondition(
+                    binds, watermarkValue, tiebreakerValue)
+            else:
+                condition = "%s > %s" % (self._cursorColumn, self._nextMarker(binds))
+                binds.append(watermark)
         else:
             condition = "1=1"  # 首轮全量快照
         sql = self._queryTemplate.replace("{wmCond}", condition)
@@ -534,13 +576,29 @@ class SqlDirectAdapter:
                            self._driver, self._sourceId)
             return None
         try:
-            return json.loads(token[3:])
+            payload = json.loads(token[3:])
         except ValueError:
             logger.warning("sql[%s/%s] 游标水位不可解析，回退全量快照",
                            self._driver, self._sourceId)
             return None
+        if self._watermarkType == "timestamp":
+            if not isinstance(payload, dict) or not {"watermark", "tiebreaker"} <= payload.keys():
+                logger.warning("sql[%s/%s] 旧时间水位缺稳定键，回退全量快照",
+                               self._driver, self._sourceId)
+                return None
+            return payload["watermark"], payload["tiebreaker"]
+        return payload
 
     def _maxWatermark(self, rows: List[Dict[str, Any]]) -> Optional[Any]:
+        if self._watermarkType == "timestamp":
+            if not rows:
+                return None
+            row = rows[-1]
+            watermark = self._normalizeWmValue(row.get(self._cursorColumn))
+            tiebreaker = self._normalizeWmValue(row.get(self._tiebreakerColumn))
+            if watermark is None or tiebreaker is None:
+                raise RuntimeError("timestamp 水位行缺少 cursorColumn 或 tiebreakerColumn 值")
+            return {"watermark": watermark, "tiebreaker": tiebreaker}
         values = [self._normalizeWmValue(row.get(self._cursorColumn)) for row in rows]
         values = [v for v in values if v is not None]
         if not values:

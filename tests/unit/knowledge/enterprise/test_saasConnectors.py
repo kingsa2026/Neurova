@@ -101,6 +101,31 @@ class TestRegistryDispatch:
         assert isinstance(cassandra, CassandraAdapter)
         assert isinstance(git, GitAdapter)
 
+    @pytest.mark.parametrize("sourceType", list(SAAS_ADAPTERS))
+    def test_missingRequiredConfigRaisesInsteadOfEmptySuccess(self, sourceType):
+        adapter = buildAdapter({"sourceType": sourceType}, "saas-missing", "default")
+        with pytest.raises(ValueError):
+            _run(adapter.fetchBatch(None, 10))
+
+    def test_fullPageWithoutNextTokenDoesNotLoop(self, monkeypatch):
+        import neurova.knowledge.enterprise.connectors_saas as mod
+
+        adapter = DatabricksAdapter(
+            {"sourceType": "databricks", "base_url": "https://dbx.example",
+             "warehouse_id": "wh-1", "query": "SELECT id FROM t",
+             "columns": ["id"]}, "dbx-page", "default")
+
+        def fakePost(url, headers=None, json=None, timeout=None):
+            return FakeHttpxResponse({
+                "status": {"state": "SUCCEEDED"},
+                "result": {"data_array": [["1"], ["2"]]}})
+
+        _patchSafeFetch(monkeypatch, mod, fakePost=fakePost)
+        batch = _run(adapter.fetchBatch(None, 2))
+        assert len(batch.rows) == 2
+        assert batch.hasMore is False
+        assert batch.nextCursor is None
+
     def test_variantRegression_realUrlsPassCompileGate(self):
         """修正回归：http_pull/unity_catalog 真实 url 曾被 kind 名闭集误拒。"""
         httpPull = {"sourceType": "http_pull", "url": "https://x.example/rows",
@@ -148,12 +173,26 @@ class TestBigQueryAdapter:
         assert batch.hasMore is True
         assert batch.nextCursor.token == "PAGE-2"
 
-    def test_missingProjectYieldsEmptyBatch(self):
+    def test_fetchFailureRaisesInsteadOfEmptySuccess(self, monkeypatch):
+        import neurova.knowledge.enterprise.connectors_saas as mod
+
+        adapter = BigQueryAdapter(
+            {"sourceType": "bigquery", "project_id": "proj-1",
+             "query": "SELECT id FROM orders"}, "bq-fail", "default")
+
+        def boom(*args, **kwargs):
+            raise ConnectionError("upstream unavailable")
+
+        monkeypatch.setattr(mod, "safe_fetch", boom)
+        with pytest.raises(ConnectionError, match="upstream unavailable"):
+            _run(adapter.fetchBatch(None, 10))
+
+    def test_missingProjectRaisesInsteadOfEmptySuccess(self):
         adapter = BigQueryAdapter({"sourceType": "bigquery",
                                    "base_url": "https://bq.example"},
                                   "bq2", "default")
-        batch = _run(adapter.fetchBatch(None, 10))
-        assert batch.rows == [] and batch.hasMore is False
+        with pytest.raises(ValueError, match="project_id"):
+            _run(adapter.fetchBatch(None, 10))
 
 
 class TestDatabricksAdapter:

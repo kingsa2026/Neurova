@@ -4,7 +4,7 @@
 审计定位（全仓逐文件审计报告 2026-11-25 §6 KNOW-08）：schema、dedupe、enqueue、
 worker 均无 tenant——同用户跨租户同内容互相去重，异步抽取落 default。
 判据：事件行带租户、dedupe 按租户分区、worker 以事件租户构建导入身份，
-真实导入链落条目进事件租户。
+真实导入链落条目进事件租户；观测、span 与取消按 uid+tenant 圈域。
 """
 
 from __future__ import annotations
@@ -45,6 +45,23 @@ class TestQueueTenant:
                                  agent_id="default", user_id="u1",
                                  tenant_id="acme")
         assert queue.get(task["task_id"])["tenant_id"] == "acme"
+
+    def test_observationMethodsEnforceUserAndTenant(self, queue):
+        acme = queue.enqueue_upload("a.txt", b"acme", "default", "u1", "acme")
+        beta = queue.enqueue_upload("b.txt", b"beta", "default", "u1", "beta")
+        queue.enqueue_upload("c.txt", b"other", "default", "u2", "acme")
+        queue.record_span(acme["task_id"], "parse", "done")
+        queue.record_span(beta["task_id"], "parse", "done")
+
+        assert [row["task_id"] for row in queue.list_recent(
+            user_id="u1", tenant_id="acme")] == [acme["task_id"]]
+        assert queue.stats(user_id="u1", tenant_id="acme")["pending"] == 1
+        assert queue.get(beta["task_id"], user_id="u1", tenant_id="acme") is None
+        assert queue.get_spans(
+            beta["task_id"], user_id="u1", tenant_id="acme") == []
+        assert queue.cancel_task(
+            beta["task_id"], by="u1", user_id="u1", tenant_id="acme") is False
+        assert queue.get(beta["task_id"])["status"] == "pending"
 
 
 class TestWorkerTenant:
