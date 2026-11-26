@@ -8455,6 +8455,14 @@ class ToolExecutor:
                         )
                 except Exception:
                     logger.debug("截图元数据附带回带失败（不影响截图结果）", exc_info=True)
+                # C4 卡顿熔断：截图取帧点记账——连续多次操作后画面无变化时
+                # 随结果注入换策略提醒（M3 教训：动作未生效时空转到步数耗尽）。
+                try:
+                    stallSignal = manager.stallObserve(screenshot_data)
+                    if stallSignal:
+                        result["stall"] = stallSignal
+                except Exception:
+                    logger.debug("卡顿记账失败（不影响截图结果）", exc_info=True)
                 # P1-1 帧权威：观测成功即签发新帧（旧帧自动失效），模型可携带
                 # frame_id 让后续坐标动作受"陈旧帧拒点"保护。
                 try:

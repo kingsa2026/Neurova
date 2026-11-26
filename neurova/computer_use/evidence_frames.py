@@ -36,6 +36,7 @@ __all__ = [
     "evidenceFramesEnabled",
     "buildEvidenceCrop",
     "buildEvidencePair",
+    "framesDiffer",
     "storeEvidence",
     "getEvidence",
     "attachToResult",
@@ -58,6 +59,46 @@ def evidenceFramesEnabled() -> bool:
     """证据帧档是否开启（env 显式值，缺省关）。"""
     raw = str(os.environ.get(EVIDENCE_FRAMES_ENV, "")).strip().lower()
     return raw in ("1", "true", "yes", "on")
+
+
+def framesDiffer(
+    beforeBytes: Optional[bytes],
+    afterBytes: Optional[bytes],
+    threshold: float = 0.01,
+) -> Optional[bool]:
+    """前后帧像素差分判别画面是否变化（C4 卡顿熔断的判别原语）。
+
+    降采样加速 + 抗噪：按像素通道差（>24/通道和）的占比超阈值判变化。
+
+    Returns:
+        True/False＝变化/无变化；任一侧缺失或解码失败＝None（无法判定，
+        调用方不得把 None 当 False 用）。
+    """
+    if not beforeBytes or not afterBytes:
+        return None
+    try:
+        imgA = Image.open(io.BytesIO(beforeBytes)).convert("RGB")
+        imgB = Image.open(io.BytesIO(afterBytes)).convert("RGB")
+    except Exception as exc:  # noqa: BLE001 - 坏帧不阻断动作结果
+        logger.debug("帧差分解码失败: %s", exc)
+        return None
+    if imgA.size != imgB.size:
+        return True  # 尺寸变化本身就是画面变化（窗口开合/缩放）
+    scale = max(1, imgA.size[0] // 240)
+    target = (max(1, imgA.size[0] // scale), max(1, imgA.size[1] // scale))
+    smallA = imgA.resize(target)
+    smallB = imgB.resize(target)
+    pixelsA, pixelsB = smallA.load(), smallB.load()
+    total = changed = 0
+    for y in range(target[1]):
+        for x in range(target[0]):
+            pa, pb = pixelsA[x, y], pixelsB[x, y]
+            total += 1
+            if (abs(pa[0] - pb[0]) + abs(pa[1] - pb[1]) + abs(pa[2] - pb[2])) > 24:
+                changed += 1
+    if total == 0:
+        return None
+    return (changed / total) > threshold
 
 
 def buildEvidenceCrop(

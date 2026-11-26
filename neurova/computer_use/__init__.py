@@ -193,6 +193,8 @@ class ComputerUseManager:
         self._screenshot_backend = None
         self.dpi_aware = False
         self._screen_metadata_cache: typing.Optional[dict] = None
+        #: C4 卡顿熔断记账器（懒建；截图指纹 + 前台动作打点，见 stall_guard）。
+        self._stall_guard = None
 
         # 检测截图后端
         self._detect_screenshot_backend()
@@ -388,6 +390,22 @@ class ComputerUseManager:
                 logger.warning("浏览器管理器不可用")
         return self._browser_manager
 
+    def stallGuard(self):
+        """C4 卡顿熔断记账器（懒建单例；见 stall_guard.StallGuard）。"""
+        if self._stall_guard is None:
+            from neurova.computer_use.stall_guard import StallGuard
+
+            self._stall_guard = StallGuard()
+        return self._stall_guard
+
+    def stallObserve(self, pngBytes) -> typing.Optional[dict]:
+        """截图取帧点记账（computer_screenshot 消费）：达窗返回 stall 信号。"""
+        return self.stallGuard().observe(pngBytes)
+
+    def markDesktopAction(self) -> None:
+        """前台注入动作完成打点（动作方法成功路径消费）。"""
+        self.stallGuard().markAction()
+
     def screenshot(self, region: typing.Tuple[int, int, int, int] = None) -> typing.Optional[bytes]:
         """截取屏幕截图（进程内 Pillow，PNG 字节流）。
 
@@ -423,6 +441,7 @@ class ComputerUseManager:
             import pyautogui
 
             pyautogui.click(int(x), int(y), button=button)
+            self.markDesktopAction()
             return True
         except ImportError:
             logger.warning("点击失败：缺少 pyautogui")
@@ -437,6 +456,7 @@ class ComputerUseManager:
             import pyautogui
 
             pyautogui.typewrite(text, interval=interval)
+            self.markDesktopAction()
             return True
         except ImportError:
             logger.warning("输入失败：缺少 pyautogui")
@@ -471,6 +491,7 @@ class ComputerUseManager:
                     pyautogui.scroll(int(clicks))
                 else:
                     pyautogui.scroll(int(clicks), int(x), int(y))
+            self.markDesktopAction()
             return True
         except ImportError:
             logger.warning("滚动失败：缺少 pyautogui")
@@ -510,6 +531,7 @@ class ComputerUseManager:
                     import time
 
                     time.sleep(interval)
+            self.markDesktopAction()
             return True
         except ImportError:
             logger.warning("按键失败：缺少 pyautogui")
@@ -537,6 +559,7 @@ class ComputerUseManager:
             import pyautogui
 
             pyautogui.hotkey("ctrl", "v")
+            self.markDesktopAction()
             return True
         except Exception as e:
             logger.error("粘贴派发失败: %s", e)
@@ -636,6 +659,7 @@ class ComputerUseManager:
             pyautogui.dragTo(
                 int(ex), int(ey), duration=max(0.05, float(duration or 0.5)), button=button
             )
+            self.markDesktopAction()
             return True
         except ImportError:
             logger.warning("拖拽失败：缺少 pyautogui")
