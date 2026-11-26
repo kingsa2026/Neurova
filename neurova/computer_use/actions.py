@@ -77,7 +77,7 @@ def click_screenshot_point(manager: Any, x: Any, y: Any, button: str = "left") -
 
 
 def type_text(manager: Any, text: Any, interval: float = 0.05) -> Dict:
-    """键盘输入文本"""
+    """键盘输入文本（C5：超阈值长文本附 paste 引导，不拒绝执行）"""
     if not text:
         return {"error": "缺少输入文本"}
     try:
@@ -86,7 +86,15 @@ def type_text(manager: Any, text: Any, interval: float = 0.05) -> Dict:
     except LaneRefusal as refusal:
         return _laneRefusalResult(refusal)
     if success:
-        return {"success": True, "text": text, "length": len(text)}
+        result = {"success": True, "text": text, "length": len(text)}
+        if len(text) > 200:
+            # C5 长文本引导（M4 教训：逐字符敲长文本又慢又易错）
+            result["suggest_paste"] = True
+            result["suggest_paste_hint"] = (
+                "长文本建议改用 computer_paste（写剪贴板+ctrl+v，快且不易错）；"
+                "逐字符键入长文本耗时且容易丢字。"
+            )
+        return result
     return {"error": "输入操作失败"}
 
 

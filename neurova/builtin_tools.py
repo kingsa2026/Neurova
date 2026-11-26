@@ -280,7 +280,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         "interactive_desktop": True,
         # 并行能力声明：操作共享宿主桌面——键盘焦点是全局单例，并发输入会串到对方的窗口。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
-        "description": "键盘输入文本",
+        "description": "键盘输入文本（适合短文本；长文本约 200 字符以上请改用 computer_paste——逐字符键入长文本既慢又易错）",
         "parameters": {
             "type": "object",
             "properties": {
