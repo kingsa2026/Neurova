@@ -32,7 +32,9 @@ def face(tmp_path, monkeypatch):
     monkeypatch.setattr(MEDIA, "_INDEX_FILE", str(tmp_path / "media_index.json"))
     monkeypatch.setattr(MEDIA, "_CONFIG_FILE", str(tmp_path / "media_config.json"))
     MEDIA._media_store.clear()
-    MEDIA._media_config["storage_path"] = str(tmp_path / "media_storage")
+    monkeypatch.setattr(MEDIA, "_media_config", {
+        **MEDIA._media_config, "storage_path": str(tmp_path / "media_storage"),
+    })
     app = FastAPI()
     app.include_router(MEDIA.router, prefix="/api/v1/media")
     who = {"v": ALICE}
@@ -69,6 +71,26 @@ class TestMediaOwnerGates:
         assert c.delete(f"/api/v1/media/{mid}").status_code == 404
         assert c.delete(f"/api/v1/media/{mid}?mode=trash").status_code == 404
         assert mid in MEDIA._media_store, "非属主删除仍把条目删掉了"
+
+    def test_owner_can_restore_trashed_record(self, face):
+        c, who = face
+        mid = _upload(c)
+        assert c.delete(f"/api/v1/media/{mid}?mode=trash").status_code == 200
+        response = c.post(f"/api/v1/media/{mid}/restore")
+        assert response.status_code == 200, response.text
+        assert MEDIA._media_store[mid].get("is_deleted") is False
+        assert c.get(f"/api/v1/media/{mid}").content == PAYLOAD
+
+    def test_owner_can_permanently_delete_trashed_record_in_batch(self, face):
+        c, who = face
+        mid = _upload(c)
+        assert c.delete(f"/api/v1/media/{mid}?mode=trash").status_code == 200
+        response = c.post("/api/v1/media/batch-delete", json={
+            "media_ids": [mid], "mode": "permanent",
+        })
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["succeeded"] == [mid]
+        assert mid not in MEDIA._media_store
 
     def test_non_owner_cannot_restore(self, face):
         c, who = face

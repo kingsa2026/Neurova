@@ -337,14 +337,14 @@ def _mediaVisibleTo(media: Dict[str, Any], current_user: Dict[str, Any]) -> bool
     return owner == str(current_user.get("user_id") or "") or str(current_user.get("role") or "") == "admin"
 
 
-def _ownedMediaOr404(media_id: str, current_user: Dict[str, Any]) -> Dict[str, Any]:
-    """按 id 取**当前登录用户名下**的活条目；非属主与不存在统一 404（P1-7）。
+def _ownedMediaOr404(media_id: str, current_user: Dict[str, Any],
+                     includeTrashed: bool = False) -> Dict[str, Any]:
+    """按 id 取当前登录用户名下条目；非属主与不存在统一 404。
 
-    `files_api._get_owned_file` 的同构闸（防 IDOR 探测：404 不区分"无权"与"不存在"）。
-    写入侧自 §6-172 起记录的 `user_id` 在这里首次成为读取闸门。
+    现役读写默认只取活条目；恢复是回收站写动作，显式包含已软删行。
     可见性判据见 `_mediaVisibleTo`（本文件唯一口径，列表面共用）。
     """
-    media = _liveMedia(media_id)
+    media = _media_store.get(media_id) if includeTrashed else _liveMedia(media_id)
     if not media or not _mediaVisibleTo(media, current_user):
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
     return media
@@ -571,7 +571,7 @@ async def batch_delete_media(
     failed: List[Dict[str, str]] = []
     for media_id in body.media_ids:
         try:
-            _ownedMediaOr404(media_id, current_user)
+            _ownedMediaOr404(media_id, current_user, includeTrashed=True)
         except HTTPException:
             failed.append({"media_id": media_id, "reason": "media not found"})
             continue
@@ -700,7 +700,7 @@ async def restore_media(
 ):
     """从回收站恢复。字节已不在即 410——不许把"恢复失败"折成 200，
     留下一条列表里看得见、取字节却 404 的活记录。"""
-    _ownedMediaOr404(media_id, current_user)  # P1-7：恢复也是写动作，先过属主门
+    _ownedMediaOr404(media_id, current_user, includeTrashed=True)
     media, reason = _restoreMediaEntry(media_id)
     if media is None:
         raise _reject(reason)
@@ -758,7 +758,7 @@ async def delete_media(
             status_code=400,
             detail=f"未知的删除模式: {mode}（可用：{' / '.join(DELETE_MODES)}）",
         )
-    _ownedMediaOr404(media_id, current_user)  # P1-7：删前过属主门
+    _ownedMediaOr404(media_id, current_user, includeTrashed=True)
 
     if mode == "trash":
         media, reason = _trashMediaEntry(media_id)

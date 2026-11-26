@@ -4,9 +4,9 @@
 - `SkillMarketRegistry` 现役注册 **7** 只适配器（`market_adapters.py:515-523`：
   skills_sh/clawhub/skillsmp/lobehub/github/modelscope/skillhub_cn），
   `search_all_markets` 是**串行** for 循环（`market_searcher.py:151-156`）；
-- 每市场走 `market_adapters.py:127` 的 `urlopen(req, timeout=30)` ⇒ 一次搜索最坏 7 × 30 = **210 秒**；
-- 同一能力的另两份私有实现各写各的预算：`market_sources.py:37` `HTTP_TIMEOUT = 20`、
-  `hub_client.py:127` `config.get("HTTP_TIMEOUT", "30")`——后者还有 `retries+1 = 4` 次重试 + 退避，
+- 每市场走 `market_adapters.py` 的 `safe_fetch(..., timeout=MARKET_FETCH_TIMEOUT_SECONDS)` ⇒ 一次搜索最坏 7 × 6 = **42 秒**；
+- 同一能力的另两份私有实现各写各的预算：`market_sources.py` `HTTP_TIMEOUT = 20`、
+  `hub_client.py` `config.get("HTTP_TIMEOUT", "30")`——后者还有 `retries+1 = 4` 次重试 + 退避，
   单次调用最坏 120 秒以上，而这条路在**生产安装链**上（`agent_skill_manager.py:79`、
   `manifest_source.py:119`、`skill_service.py:652`）；
 - 每个市场的失败都被 `except Exception` 吞掉（只 warn），所以"转了两分钟什么也没搜到"
@@ -29,6 +29,7 @@ import pathlib
 import sys
 import tomllib
 import time
+from types import SimpleNamespace
 
 import pytest
 from tests.ast_scan import parseSource
@@ -169,13 +170,13 @@ class TestHubRetryStackIsBounded:
         attempts: list = []
         perAttempt = 0.2
 
-        def fake_urlopen(request, timeout=None):
-            attempts.append(timeout)
+        def fake_safe_fetch(url, **kwargs):
+            attempts.append(kwargs["timeout"])
             clock.now += perAttempt        # 慢远端：在虚拟钟上花钱，不真睡
             raise ue.URLError("simulated slow remote")
 
         monkeypatch.setattr(H, "time", clock)
-        monkeypatch.setattr(H, "urlopen", fake_urlopen)
+        monkeypatch.setattr("neurova.security.safe_fetch.safe_fetch", fake_safe_fetch)
         monkeypatch.setattr(H, "_compute_backoff_seconds", lambda attempt: 0.0)
         monkeypatch.setattr(H, "HUB_FETCH_TOTAL_SECONDS", 0.5, raising=False)
         monkeypatch.setattr(H, "_http_retries", lambda: 50)   # 重试次数故意给大
@@ -188,6 +189,59 @@ class TestHubRetryStackIsBounded:
             f"重试次数应当被总预算掐在 3 次（每试 {perAttempt}s ÷ 预算 0.5s），实得 {len(attempts)} 次")
         assert clock.now == pytest.approx(0.6, abs=1e-9), (
             f"虚拟钟推进量异常：{clock.now}——截止线不是由这条预算算出来的")
+
+
+class TestSkillPackageBudgetReachesTransport:
+    def testMarketAdapterPackageUsesZipBudget(self, tmp_path, monkeypatch):
+        import neurova.skills.market_adapters as MA
+        from neurova.skills.market_sources import MAX_SKILL_ZIP_BYTES
+
+        calls = []
+
+        def fakeSafeFetch(url, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(content=b"package")
+
+        monkeypatch.setattr("neurova.security.safe_fetch.safe_fetch", fakeSafeFetch)
+        destination = tmp_path / "skill.zip"
+
+        assert MA.SkillsShAdapter()._download_file("https://skills.sh/skill.zip", str(destination))
+        assert calls[0]["max_bytes"] == MAX_SKILL_ZIP_BYTES
+
+    def testHubPackageUsesZipBudget(self, tmp_path, monkeypatch):
+        import neurova.skills.hub_client as H
+        from neurova.skills.market_sources import MAX_SKILL_ZIP_BYTES
+
+        calls = []
+
+        def fakeSafeFetch(url, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(content=b"package")
+
+        monkeypatch.setattr("neurova.security.safe_fetch.safe_fetch", fakeSafeFetch)
+        monkeypatch.setattr(H, "safe_extract_zip", lambda *args, **kwargs: None)
+        client = H.SkillHubClient(base_dir=str(tmp_path))
+
+        skillDir = client._download_and_extract_skill("https://github.com/o/r/archive/main.zip", "demo")
+
+        assert skillDir == tmp_path / "installed" / "demo"
+        assert calls[0]["max_bytes"] == MAX_SKILL_ZIP_BYTES
+
+    def testRegisteredMarketSourceUsesSafeFetchAndZipBudget(self, monkeypatch):
+        import neurova.skills.market_sources as MS
+
+        host = next(iter(MS._remote_hosts()))
+        calls = []
+
+        def fakeSafeFetch(url, **kwargs):
+            calls.append((url, kwargs))
+            return SimpleNamespace(content=b"package")
+
+        monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: pytest.fail("市场下载不得绕过 safe_fetch"))
+        monkeypatch.setattr("neurova.security.safe_fetch.safe_fetch", fakeSafeFetch)
+
+        assert MS._http_get(f"https://{host}/skill.zip") == b"package"
+        assert calls[0][1]["max_bytes"] == MS.MAX_SKILL_ZIP_BYTES
 
 
 class TestBudgetIsSingleSource:

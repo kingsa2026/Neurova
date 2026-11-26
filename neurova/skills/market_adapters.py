@@ -7,13 +7,10 @@ from neurova.core.logger import get_logger
 import os
 import re
 import tempfile
-import urllib.error
 import urllib.parse
-import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-from urllib.error import HTTPError, URLError
 from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
@@ -25,6 +22,7 @@ logger = get_logger(__name__)
 #: （`market_searcher.MARKET_SEARCH_AGGREGATE_SECONDS`）一起钉在墙钟以下，
 #: 常驻账见 tests/unit/skills/test_marketFetchBudgetIsSingleSource.py（§6-198）。
 MARKET_FETCH_TIMEOUT_SECONDS: float = 6.0
+MAX_SKILL_ZIP_BYTES = 10 * 1024 * 1024
 
 
 @dataclass
@@ -115,7 +113,10 @@ class SkillMarketAdapter(ABC):
             Optional[SkillInfo]: 技能信息，如果不存在则返回 None
         """
 
-    def _http_get(self, url: str, headers: Optional[Dict[str, str]] = None) -> bytes:
+    def _http_get(
+        self, url: str, headers: Optional[Dict[str, str]] = None,
+        *, max_bytes: Optional[int] = None,
+    ) -> bytes:
         """
         发送 HTTP GET 请求
 
@@ -126,25 +127,14 @@ class SkillMarketAdapter(ABC):
         Returns:
             bytes: 响应内容
         """
-        # SSRF 单源校验（url_guard）：条目与技能包 download_url 来自市场 API
-        # 响应（外部内容驱动），私网/环回目标 fail-closed，ValueError 诚实上抛
-        from neurova.security.url_guard import assert_public_url
+        from neurova.security import safe_fetch
 
-        assert_public_url(url)
-        req = urllib.request.Request(url)
-        if headers:
-            for key, value in headers.items():
-                req.add_header(key, value)
-
-        try:
-            with urllib.request.urlopen(req, timeout=MARKET_FETCH_TIMEOUT_SECONDS) as response:
-                return response.read()
-        except HTTPError as e:
-            logger.error("HTTP error %s for %s: %s", e.code, url, e.reason)
-            raise
-        except URLError as e:
-            logger.error("URL error for %s: %s", url, e.reason)
-            raise
+        return safe_fetch.safe_fetch(
+            url,
+            headers=dict(headers or {}),
+            timeout=MARKET_FETCH_TIMEOUT_SECONDS,
+            max_bytes=max_bytes or safe_fetch.DEFAULT_MAX_BYTES,
+        ).content
 
     def _download_file(self, url: str, target_path: str) -> bool:
         """
@@ -158,7 +148,7 @@ class SkillMarketAdapter(ABC):
             bool: 是否下载成功
         """
         try:
-            content = self._http_get(url)
+            content = self._http_get(url, max_bytes=MAX_SKILL_ZIP_BYTES)
             with open(target_path, "wb") as f:
                 f.write(content)
             return True

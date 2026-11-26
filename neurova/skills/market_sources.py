@@ -23,7 +23,6 @@ import io
 import json
 import os
 import tempfile
-import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -32,26 +31,33 @@ from urllib.parse import urlparse
 from neurova.core.logger import get_logger
 from neurova.security import safe_archive
 # 预算单点在适配器表（同一能力的三份 fetcher 共用一份口径，教义第 6 条）
-from neurova.skills.market_adapters import MARKET_FETCH_TIMEOUT_SECONDS
+from neurova.skills.market_adapters import (
+    MARKET_FETCH_TIMEOUT_SECONDS,
+    MAX_SKILL_ZIP_BYTES,
+)
 
 logger = get_logger(__name__)
 
-# 单技能包大小上限（与讯飞官方规范一致 10MB）
-MAX_SKILL_ZIP_BYTES = 10 * 1024 * 1024
 # 安全解压条目上限
 MAX_ZIP_ENTRIES = 500
 
 
 def _http_get(url: str) -> bytes:
     """GET 指定 URL，非 200 抛 OSError。仅允许已注册市场源白名单域。"""
+    from neurova.security import safe_fetch
+
     host = (urlparse(url).hostname or "").lower()
     if host not in _remote_hosts():
         raise ValueError(f"blocked non-whitelisted market host: {host}")
-    req = urllib.request.Request(url, headers={"Accept": "*/*", "User-Agent": "Neurova-Market/1.0"})
-    with urllib.request.urlopen(req, timeout=MARKET_FETCH_TIMEOUT_SECONDS) as resp:
-        if resp.status != 200:
-            raise OSError(f"HTTP {resp.status} for {url}")
-        return resp.read()
+    try:
+        return safe_fetch.safe_fetch(
+            url,
+            headers={"Accept": "*/*", "User-Agent": "Neurova-Market/1.0"},
+            timeout=MARKET_FETCH_TIMEOUT_SECONDS,
+            max_bytes=MAX_SKILL_ZIP_BYTES,
+        ).content
+    except safe_fetch.HTTPStatusError as e:
+        raise OSError(f"HTTP {e.status} for {url}") from e
 
 
 class RemoteSkillSource:

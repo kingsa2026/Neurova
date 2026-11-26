@@ -49,8 +49,8 @@ class MemorySkillExecutor(BaseSkillExecutor):
         """B2（F7）：遗忘指定记忆（反驳→更新/删除，不新增矛盾记忆）。
 
         与 store 同对待审门：挂载 pending_store 时删除提议先进待审
-        （proposed_action="forget"），confirm=True 才直删——删除是不可逆
-        写操作，不允许模型静默绕过用户。"""
+        （proposed_action="forget"）；可信用户确认由待审端点完成，模型参数
+        不得绕过审批直接删除。"""
         memory_id = str(params.get("memory_id", "") or "").strip()
         if not memory_id:
             return SkillResult(
@@ -59,7 +59,7 @@ class MemorySkillExecutor(BaseSkillExecutor):
                 metadata={"action": "forget", "execution_time": time.time() - start_time},
             )
 
-        if self.pending_store is not None and params.get("confirm") is not True:
+        if self.pending_store is not None:
             try:
                 rec = self.pending_store.propose(
                     content=str(params.get("content", "") or f"[遗忘记忆 {memory_id}]"),
@@ -94,7 +94,7 @@ class MemorySkillExecutor(BaseSkillExecutor):
         return self._forget_direct(memory_id, params, start_time)
 
     def _forget_direct(self, memory_id: str, params: Dict[str, Any], start_time: float) -> SkillResult:
-        """confirm=True 或未挂载待审队列时的直删通道（与 store 直写语义对齐）。"""
+        """未挂载待审队列时的直删通道；可信确认由待审端点执行。"""
         if self.memory_manager is None:
             return SkillResult(
                 success=True,
@@ -183,10 +183,9 @@ class MemorySkillExecutor(BaseSkillExecutor):
             )
 
         # P1-2 待确认中间态：挂载了 pending_store 的实例，交互式单条写入
-        # 默认进待审队列；
-        # confirm=True 按次强制直写；未挂载实例保持原直写语义（opt-in 在
-        # 构造处，不挂载 = 行为完全不变）。
-        if self.pending_store is not None and params.get("confirm") is not True:
+        # 默认进待审队列；可信用户确认由待审端点完成，模型自报 confirm 无效。
+        # 未挂载实例保持原直写语义（opt-in 在构造处）。
+        if self.pending_store is not None:
             try:
                 rec = self.pending_store.propose(
                     content=content,

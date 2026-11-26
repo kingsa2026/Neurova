@@ -327,6 +327,23 @@ class TestCallTimeArbitrationIsTheSkillOne:
 
 
 class TestMountedRouteIsReallyLive:
+    def testUnderscorePluginIdCanBeMountedAndUnmounted(self, client):
+        pluginId = "my_plugin"
+        _install(client, pluginId, permissions={})
+        _load(client, pluginId)
+        mounted = client.post(f"/api/v1/plugins/{pluginId}/routes/mount")
+        assert mounted.status_code == 200, mounted.text
+        assert client.manager.mountedRoutes(pluginId) == [
+            "/api/v1/plugin-api/my_plugin/status",
+        ]
+        assert client.get("/api/v1/plugin-api/my_plugin/status").status_code == 200
+
+        unmounted = client.post(f"/api/v1/plugins/{pluginId}/routes/unmount")
+        assert unmounted.status_code == 200, unmounted.text
+        assert unmounted.json()["data"]["removed"] == 1
+        assert client.manager.mountedRoutes(pluginId) == []
+        assert client.get("/api/v1/plugin-api/my_plugin/status").status_code == 404
+
     def testMountRunsThePluginHandler(self, client):
         _install(client, "live")
         _load(client, "live")

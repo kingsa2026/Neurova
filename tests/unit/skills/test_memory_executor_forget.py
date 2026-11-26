@@ -11,6 +11,38 @@ from unittest.mock import MagicMock
 import pytest
 
 from neurova.skills.builtin.memory_executor import MemorySkillExecutor
+from neurova.benchmark.suite_eval import EvalCase, assertCaseRedGreen
+
+
+def testMemoryConfirmSurfaceCaseFirst():
+    """模型可见 schema 移除 confirm 前，先立确定性红绿判据。"""
+    import neurova.skills.builtin.schemas as schemas
+
+    oldFields = [
+        ("action", "string", True, "操作类型：search 检索 / store 存储（默认进待审队列，用户确认后落库，这是设计行为，不要重复提交或擅自 confirm）/ forget 遗忘指定记忆（同样默认进待审）"),
+        ("query", "string", False, "检索词或待存储的内容主题"),
+        ("limit", "integer", False, "返回条数上限"),
+        ("content", "string", False, "action=store 时要存储的完整内容；action=forget 时为待遗忘记忆的内容摘要"),
+        ("category", "string", False, "记忆分类（可选）"),
+        ("memory_id", "string", False, "action=forget 时目标记忆的 ID（可先 search 获取）"),
+        ("confirm", "boolean", False, "仅当用户在对话中明确同意该具体写入/删除时才可传 true"),
+    ]
+    newFields = schemas._BUILTIN_SKILL_FIELDS["memory"]
+
+    def check(answer):
+        passed = "confirm" not in answer and "待审" in answer
+        return passed, 1.0 if passed else 0.0, "confirm 不得出现在模型可见参数中"
+
+    case = EvalCase(
+        case_id="PLUG-07-memory-confirm-surface",
+        suite_id="memory-v1",
+        prompt="记忆技能的模型可见参数面",
+        check=check,
+        subject_id="tool:memory.parameters",
+        source={"kind": "review", "ref": "全仓逐文件审计报告_2026-11-25.md PLUG-07"},
+        cost_hint={"model": "deterministic", "est_tokens": 0},
+    )
+    assertCaseRedGreen(case, lambda _: str(oldFields), lambda _: str(newFields))
 
 
 def _memory_manager(memory_id="mem_123"):
@@ -53,13 +85,26 @@ class TestForgetAction:
         kwargs = pending.propose.call_args.kwargs
         assert kwargs.get("proposed_action") == "forget"
 
-    def test_forget_confirm_bypasses_pending(self):
-        pending = MagicMock()
-        mm = _memory_manager()
-        ex = MemorySkillExecutor(mm, pending_store=pending)
-        result = ex.execute({"action": "forget", "memory_id": "mem_123", "confirm": True})
-        pending.propose.assert_not_called()
-        mm.forget.assert_called_once_with("mem_123", soft=True)
+    def test_forget_model_confirm_cannot_bypass_pending(self):
+        from neurova.memory.pending_memory import PendingMemoryStore
+
+        pending = PendingMemoryStore(db_path=":memory:")
+        forgotten = []
+
+        class Manager:
+            def forget(self, memory_id, soft=True):
+                forgotten.append((memory_id, soft))
+                return True
+
+        try:
+            ex = MemorySkillExecutor(Manager(), pending_store=pending)
+            result = ex.execute({"action": "forget", "memory_id": "mem_123", "confirm": True})
+            assert result.success is True
+            assert result.output.get("pending") is True
+            assert forgotten == []
+            assert len(pending.list_pending()) == 1
+        finally:
+            pending.close()
 
 
 class TestSchemaContract:
@@ -80,6 +125,13 @@ class TestSchemaContract:
         blob = str(schemas._BUILTIN_SKILL_FIELDS["memory"])
         assert "forget" in blob
         assert "待审" in blob
+
+    def test_memory_schema_does_not_expose_confirm(self):
+        import neurova.skills.builtin.schemas as schemas
+
+        params = schemas.get_builtin_skill_parameters("memory")
+        assert "confirm" not in params
+        assert "待审" in params["action"]["description"]
 
     def test_adapter_builds_enum(self):
         """适配器层：action 字段产出 enum（这是模型可见面的最终形态）。"""

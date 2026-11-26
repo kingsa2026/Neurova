@@ -111,12 +111,8 @@ def resolveMountedPath(pluginId: str, declaredPath: str) -> str:
 
 
 def _routeOwner(route) -> str:
-    """从路由名回读插件归属（`plugin_{id}_{METHOD}_{slug}`）。"""
-    name = getattr(route, "name", "") or ""
-    if not name.startswith("plugin_"):
-        return ""
-    parts = name.split("_", 2)
-    return parts[1] if len(parts) > 1 else ""
+    """读取挂载时写入的显式 plugin ID；不从路由名猜截断。"""
+    return str(getattr(route, "plugin_id", "") or "")
 
 
 def _pathTaken(app, full: str, method: str, pluginId: str) -> str:
@@ -278,6 +274,7 @@ def _addRoutes(app, pluginId, plan, manager=None):
         handler = endpoint.handler
         if manager is not None:
             handler = _withSkillPermissionScope(pluginId, handler, manager)
+        before = {id(route) for route in getattr(app, "routes", []) or []}
         app.add_api_route(
             full,
             handler,
@@ -288,9 +285,11 @@ def _addRoutes(app, pluginId, plan, manager=None):
             # 一律带身份门：`auth_required: false` 不采信，拒绝结果写进 _declinedAuth 供读数
             dependencies=[Depends(_identityGate())],
         )
-        created = [r for r in getattr(app, "routes", []) or []
-                   if getattr(r, "path", None) == full and _routeOwner(r) == pluginId]
-        routes.extend(created[-1:])
+        created = [route for route in getattr(app, "routes", []) or []
+                   if id(route) not in before]
+        for route in created:
+            route.plugin_id = pluginId
+        routes.extend(created)
     _mounted[pluginId] = routes
     return routes
 

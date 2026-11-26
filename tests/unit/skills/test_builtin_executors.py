@@ -224,29 +224,34 @@ class TestBuiltinFactoryPendingStore:
         assert writes == [{"content": "c", "category": "general",
                            "memory_type": "semantic"}] or writes, writes
 
-    def test_mounted_store_intercepts_store_action(self, tmp_path):
-        """挂载后（默认）store 写入待审队列且不直写主库；confirm=True 按次直写。"""
-        from unittest.mock import MagicMock
-
+    def test_mounted_store_intercepts_store_action_even_with_model_confirm(self, tmp_path):
+        """挂载后 store 始终进待审；模型自报 confirm 不构成可信确认。"""
         from neurova.memory.pending_memory import PendingMemoryStore
         from neurova.skills.builtin import create_builtin_executor_skills
 
-        from unittest import mock
+        writes = []
 
-        import neurova.skills.builtin as builtin_pkg
+        class Manager:
+            def remember(self, **kwargs):
+                writes.append(kwargs)
+                return {"id": "m-1"}
 
-        mm = MagicMock()
-        with mock.patch.object(builtin_pkg, "_mount_pending_store", lambda: None):
-            skills = builtin_pkg.create_builtin_executor_skills(memory_manager=mm)
+        skills = create_builtin_executor_skills(memory_manager=Manager())
         memory_skill = next(s for s in skills if s.name == "memory")
-        memory_skill._executor.pending_store = PendingMemoryStore(db_path=str(tmp_path / "p.db"))
+        pending = PendingMemoryStore(db_path=str(tmp_path / "p.db"))
+        memory_skill._executor.pending_store = pending
+        try:
+            r1 = memory_skill._executor.execute({"action": "store", "content": "需要确认"})
+            assert r1.success is True
+            assert r1.output.get("pending") is True
+            assert writes == []
 
-        r1 = memory_skill._executor.execute({"action": "store", "content": "需要确认"})
-        assert r1.success is True
-        assert r1.output.get("pending") is True
-        mm.remember.assert_not_called()
-
-        r2 = memory_skill._executor.execute({"action": "store", "content": "强制直写", "confirm": True})
-        assert r2.success is True
-        assert r2.output == {"stored": True}
-        mm.remember.assert_called_once()
+            r2 = memory_skill._executor.execute(
+                {"action": "store", "content": "模型自称已确认", "confirm": True}
+            )
+            assert r2.success is True
+            assert r2.output.get("pending") is True
+            assert writes == []
+            assert len(pending.list_pending()) == 2
+        finally:
+            pending.close()

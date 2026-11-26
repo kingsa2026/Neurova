@@ -20,7 +20,10 @@ from neurova.security.safe_archive import safe_extract_tar, safe_extract_zip
 from neurova.core.logger import get_logger
 # 预算单点在适配器表；这条路上另有 retries+1 次尝试与退避（`_http_retries`），
 # 所以最坏值是「预算 × (重试+1) + 退避」，不在这里另开一份数字。
-from neurova.skills.market_adapters import MARKET_FETCH_TIMEOUT_SECONDS
+from neurova.skills.market_adapters import (
+    MARKET_FETCH_TIMEOUT_SECONDS,
+    MAX_SKILL_ZIP_BYTES,
+)
 from neurova.skills.models import SkillSource
 
 #: `hub_client` 单次调用的总预算（尝试 + 退避的合值上限）。单次超时取市场预算单点，
@@ -34,7 +37,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 logger = get_logger(__name__)
 
@@ -182,7 +185,10 @@ def _build_request(url: str, headers: Dict[str, str] = None) -> Request:
     return Request(url, headers=headers)
 
 
-def _http_fetch(url: str, headers: Dict[str, str] = None, timeout: float = None) -> bytes:
+def _http_fetch(
+    url: str, headers: Dict[str, str] = None, timeout: float = None,
+    *, max_bytes: Optional[int] = None,
+) -> bytes:
     """
     执行HTTP请求（带重试机制）
 
@@ -211,17 +217,20 @@ def _http_fetch(url: str, headers: Dict[str, str] = None, timeout: float = None)
                 HUB_FETCH_TOTAL_SECONDS, attempt, last_error)
             break
         try:
-            # SSRF 单源校验（url_guard）：hub API 地址与技能包 download_url
-            # （来自市场响应/拼接，外部内容驱动）出站前把关；不合规 ValueError
-            # 不在 (HTTPError, URLError) 捕获范围 → 直接上抛、不重试
-            from neurova.security.url_guard import assert_public_url
+            # SSRF 判定与本次连接计划统一由 safe_fetch 提供；HTTP/URL 失败
+            # 仍按既有重试预算处理，安全拒绝不在重试范围。
+            from neurova.security import safe_fetch
 
-            assert_public_url(url)
             request = _build_request(url, headers)
-            response = urlopen(request, timeout=timeout)
-            return response.read()
+            response = safe_fetch.safe_fetch(
+                url,
+                headers=dict(request.header_items()),
+                timeout=timeout,
+                max_bytes=max_bytes or safe_fetch.DEFAULT_MAX_BYTES,
+            )
+            return response.content
 
-        except (HTTPError, URLError) as e:
+        except (HTTPError, URLError, safe_fetch.HTTPStatusError) as e:
             last_error = e
             if attempt < retries:
                 backoff = _compute_backoff_seconds(attempt)
@@ -698,7 +707,7 @@ class SkillHubClient:
             技能目录路径
         """
         # 下载文件
-        content = _http_fetch(url)
+        content = _http_fetch(url, max_bytes=MAX_SKILL_ZIP_BYTES)
 
         # 创建技能目录
         skill_dir = self._installed_dir / skill_name
