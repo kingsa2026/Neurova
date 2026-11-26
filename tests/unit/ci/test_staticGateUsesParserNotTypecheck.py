@@ -96,6 +96,50 @@ class TestRealUndefinedNamesStillTurnRed:
         assert [n for _line, _col, n in readings] == ["otherThing"], readings
 
 
+class TestScopeBoundariesAreRespected:
+    """复核必须按**词法作用域**取绑定集合（审计 CORE-01 形态）。
+
+    旧行为：`_importedNamesIn` 把整个文件的 import 并成一个集合，于是"同文件任意函数
+    import 过这个名字"就给所有作用域作保——真 NameError 因此能穿过门禁。判据按
+    "同名但不同作用域"逐条钉住：兄弟函数的局部导入、模块级注解被函数内导入作保，
+    这两种都不该放行；而**同一作用域链**（含外层函数）的导入仍然合法。
+    """
+
+    def testSiblingFunctionLocalImportDoesNotWhitelist(self):
+        readings = _readings(
+            "from __future__ import annotations\n"
+            "def f():\n"
+            "    return helper()\n"
+            "def other():\n"
+            "    from somewhere import helper\n"
+            "    return helper()\n"
+        )
+        assert [n for _line, _col, n in readings] == ["helper"], readings
+
+    def testModuleAnnotationIsNotWhitelistedByFunctionLocalImport(self):
+        readings = _readings(
+            "from __future__ import annotations\n"
+            "def f(x: Widget) -> None:\n"
+            "    return None\n"
+            "def other():\n"
+            "    from somewhere import Widget\n"
+            "    return Widget\n"
+        )
+        assert [n for _line, _col, n in readings] == ["Widget"], readings
+
+    def testEnclosingFunctionImportStillCoversInnerFunctionAnnotation(self):
+        """同一作用域链上的导入必须继续放行——收紧不许变成"只认模块级"。"""
+        readings = _readings(
+            "from __future__ import annotations\n"
+            "def outer():\n"
+            "    from somewhere import Widget\n"
+            "    def inner(x: Widget) -> None:\n"
+            "        return None\n"
+            "    return inner\n"
+        )
+        assert readings == [], readings
+
+
 class TestWholeTreeReadsClean:
     """全仓读数：这道闸门跑在**真目录**上，不许只在小样例上绿。
 

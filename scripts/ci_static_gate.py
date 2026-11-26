@@ -122,14 +122,14 @@ def check_syntax() -> bool:
     return False
 
 
-def _importedNamesIn(tree) -> set:
-    """本文件里以任何方式被 import 过的名字（含函数体内的局部导入）。
+def _moduleLevelImportNames(tree) -> set:
+    """模块作用域可见的 import 名：模块级、`TYPE_CHECKING` 块内，以及模块级 If/Try/With 里。
 
-    取数走 AST 而不在 pyflakes 的报告文本上做字符串补丁：闸门要判的是语义
-    （这个名字在本文件里到底被绑过没有），不是 pyflakes 的行格式。
+    只走模块作用域自身的节点，**不下钻**函数/类/lambda 体——那是别的词法作用域。
     """
     names = set()
-    for node in ast.walk(tree):
+
+    def addImport(node) -> None:
         if isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 names.add(alias.asname or alias.name)
@@ -139,21 +139,162 @@ def _importedNamesIn(tree) -> set:
                     names.add(alias.asname)
                 else:
                     names.add(alias.name.split(".")[0])
+
+    def walk(node) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                continue
+            addImport(child)
+            walk(child)
+
+    walk(tree)
     return names
+
+
+def _scopeImportBindings(node) -> set:
+    """某个函数/类作用域**自身**绑定的 import 名（含形参、赋值目标这类本地绑定）。
+
+    同样不下钻嵌套函数/类；`global`/`nonlocal` 声明的名字不在此列（它们指向外层，
+    由作用域链继续向上找）。
+    """
+    names = set()
+
+    def addImport(target) -> None:
+        if isinstance(target, ast.ImportFrom):
+            for alias in target.names:
+                names.add(alias.asname or alias.name)
+        elif isinstance(target, ast.Import):
+            for alias in target.names:
+                if alias.asname:
+                    names.add(alias.asname)
+                else:
+                    names.add(alias.name.split(".")[0])
+
+    def addTarget(target) -> None:
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for elt in target.elts:
+                addTarget(elt)
+        elif isinstance(target, ast.Starred):
+            addTarget(target.value)
+
+    def addArguments(args: ast.arguments) -> None:
+        for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
+            if arg is not None:
+                names.add(arg.arg)
+
+    def walk(node) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                continue
+            addImport(child)
+            if isinstance(child, ast.Assign):
+                for target in child.targets:
+                    addTarget(target)
+            elif isinstance(child, ast.AnnAssign):
+                addTarget(child.target)
+            elif isinstance(child, ast.AugAssign):
+                addTarget(child.target)
+            elif isinstance(child, ast.For):
+                addTarget(child.target)
+            elif isinstance(child, (ast.With, ast.AsyncWith)):
+                for item in child.items:
+                    if item.optional_vars is not None:
+                        addTarget(item.optional_vars)
+            elif isinstance(child, ast.ExceptHandler) and child.name:
+                names.add(child.name)
+            walk(child)
+
+    walk(node)
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        addArguments(node.args)
+    return names
+
+
+class _LexicalScope:
+    """词法作用域节点：只有 `FunctionDef`/`AsyncFunctionDef`/`Lambda`/`ClassDef` 建栈。"""
+
+    __slots__ = ("node", "parent", "kind", "bindings")
+
+    def __init__(self, node, parent: "_LexicalScope | None", kind: str):
+        self.node = node
+        self.parent = parent
+        self.kind = kind
+        self.bindings = _scopeImportBindings(node)
+
+
+def _scopeChainAt(tree, row: int) -> set:
+    """出现位置的**词法作用域链**上的绑定名（由内向外逐层合并）。
+
+    内层名字才是允许的（局部导入断循环导入）；兄弟函数的局部导入不在链上，
+    不能给这里作保。类体名字对嵌套函数不可见（Python 语义），链条跨出函数时跳过
+    类体那一层——宁可多报也不替真正的 NameError 掩护。
+    """
+    scopes: list[_LexicalScope] = []
+
+    def visit(node, parent: _LexicalScope | None) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                scope = _LexicalScope(child, parent, "function")
+                scopes.append(scope)
+                visit(child, scope)
+            elif isinstance(child, ast.ClassDef):
+                scope = _LexicalScope(child, parent, "class")
+                scopes.append(scope)
+                visit(child, scope)
+            else:
+                visit(child, parent)
+
+    visit(tree, None)
+
+    enclosing = [
+        s for s in scopes
+        if getattr(s.node, "lineno", 0) <= row <= (getattr(s.node, "end_lineno", None) or row)
+    ]
+    visible = set()
+    furthest: _LexicalScope | None = None
+    for scope in enclosing:
+        # 深度 = 父链长度；取最深即为出现点所在的作用域
+        depth = 0
+        cursor = scope.parent
+        while cursor is not None:
+            depth += 1
+            cursor = cursor.parent
+        if furthest is None or depth > furthest[0]:
+            furthest = (depth, scope)
+
+    child: _LexicalScope | None = None
+    cursor = furthest[1] if furthest else None
+    while cursor is not None:
+        if cursor.kind == "class" and child is not None and child.kind == "function":
+            # 类体名字不进嵌套函数；跨过去继续向上（模块/外层函数仍可见）
+            child = cursor
+            cursor = cursor.parent
+            continue
+        visible |= cursor.bindings
+        child = cursor
+        cursor = cursor.parent
+    return visible
 
 
 def collectUndefinedNames(source: str, filename: str) -> list:
     """pyflakes 的 `undefined name` 读数，剔除「注解专用」形状，返回 `[(行, 列, 名字)]`。
 
     判据仍是 pyflakes 自己的：本函数不另写 AST 名解析，只做**复核**（教义第 6 条）。
-    被剔除的只有一种：该名字在**本文件**里被 import 过（模块级、`TYPE_CHECKING` 块内、
-    或函数体内的局部导入），因而「按解析器可读、按求值未绑定」。
+    被剔除的只有一种：该名字在**出现位置的词法作用域链上**被 import/绑定过
+    （模块级、`TYPE_CHECKING` 块内，或出现点所在函数及其外层函数的局部导入），
+    因而「按解析器可读、按求值未绑定」。
 
     为什么这是修在闸门侧而不是修在被报的代码：`from __future__ import annotations`
     下注解不求值（PEP 563）；而局部导入的存在理由就是断循环导入（AGENTS.md §3）。
     把这类导入提到模块级会改坏生产，删掉注解会丢掉解析器能读的事实——两条都是把报错
     挪走（教义第 1、2 条）。闸门问错的问句，改闸门。真·未定义（拼错的名字、写错的形参）
-    不在此列：那些名字在本文件里从来没有被 import 过，一条都跑不掉。
+    不在此列：那些名字在它自己的作用域链上从来没有被绑定过，一条都跑不掉。
+
+    复核必须**按作用域**取集合（审计 TEST-02/CORE-01 形态）：旧实现把整文件的 import
+    并成一池，兄弟函数的局部导入、甚至毫不相干的函数里的 `from x import Y`，都能给
+    这里未定义的名字作保——真 NameError 于是穿门而过。绑定集合改为沿作用域链逐层取。
     """
     reporter_out, reporter_err = io.StringIO(), io.StringIO()
     pyflakes.api.check(source, filename, pyflakes.reporter.Reporter(reporter_out, reporter_err))
@@ -162,19 +303,22 @@ def collectUndefinedNames(source: str, filename: str) -> list:
         return []
 
     try:
-        imported = _importedNamesIn(parseSource(source, filename=filename))
+        tree = parseSource(source, filename=filename)
+        moduleNames = _moduleLevelImportNames(tree) if tree is not None else set()
     except SyntaxError:
-        imported = set()
+        tree = None
+        moduleNames = set()
 
     readings = []
     for line in text.splitlines():
         match = _PYFLAKES_LINE.match(line)
         if not match:
             continue
+        row = int(match.group("row"))
         name = match.group("detail").split(" ", 2)[2].strip("'\"")
-        if name in imported:
+        if tree is not None and name in (moduleNames | _scopeChainAt(tree, row)):
             continue
-        readings.append((int(match.group("row")), int(match.group("col")), name))
+        readings.append((row, int(match.group("col")), name))
     return readings
 
 
@@ -289,13 +433,14 @@ def main() -> int:
     print(f"📁 项目根目录：{PROJECT_ROOT}")
     print(f"🐍 Python：{sys.version.split()[0]}")
 
-    results = {}
+    results: dict[str, bool | None] = {}
     results["syntax"] = check_syntax()
     results["pyflakes"] = check_pyflakes()
 
     if args.skip_import:
         print("\n⏭️  已跳过全模块导入巡检（--skip-import）")
-        results["imports"] = True
+        # `None` = 未执行。不记 True：没跑过的检查不许冒充通过（审计 TEST-03）。
+        results["imports"] = None
     else:
         ok, total, skipped, failed = check_imports()
         results["imports"] = ok
@@ -303,13 +448,21 @@ def main() -> int:
     _hr("📊 静态门禁汇总")
     labels = {"syntax": "语法检查", "pyflakes": "未定义名称", "imports": "模块导入巡检"}
     all_pass = True
+    skippedKeys = []
     for key, ok in results.items():
+        if ok is None:
+            print(f"⏭️  {labels.get(key, key)}：已跳过（未执行）")
+            skippedKeys.append(labels.get(key, key))
+            continue
         mark = "✅" if ok else "❌"
         print(f"{mark} {labels.get(key, key)}：{'通过' if ok else '失败'}")
         all_pass = all_pass and ok
 
     if all_pass:
-        print("\n🎉 静态门禁全部通过")
+        if skippedKeys:
+            print(f"\n🎉 已执行的检查全部通过（{len(skippedKeys)} 项跳过未执行：{'、'.join(skippedKeys)}）")
+        else:
+            print("\n🎉 静态门禁全部通过")
         return 0
     print("\n💥 静态门禁未通过，请修复上述问题")
     return 1

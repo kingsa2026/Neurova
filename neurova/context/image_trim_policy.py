@@ -24,6 +24,11 @@ from __future__ import annotations
 
 import typing
 
+if typing.TYPE_CHECKING:
+    # 注解名可被解析器/`get_type_hints` 看见；运行期仍走函数内惰性导入，
+    # 依赖方向保持 压缩器 → 本模块（模块级导入会反向成环）。
+    from neurova.context.window_compactor import WindowTokenMeter
+
 # 单源读数：`MULTIMODAL_IMAGE_RETAIN_PER_TURN` 必须经模块属性在调用时读取
 # （`from ... import` 值绑定会钉死 import 期快照，单源改值/测试 monkeypatch
 # 都不再生效——见 tests/unit/agent/test_imageRetentionReadsSingleSource.py）。
