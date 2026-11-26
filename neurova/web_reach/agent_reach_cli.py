@@ -26,6 +26,7 @@ PyPI ``agent-reach`` 0.1.0 与源码仓 main 的 ``src`` 布局都**不存在**�
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import shutil
@@ -35,7 +36,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.text_encoding import utf8ChildEnv
-from neurova.security.url_guard import assert_public_url
+from neurova.security.url_guard import resolvePublicUrl
 
 logger = get_logger(__name__)
 
@@ -138,13 +139,24 @@ def runRead(url: str) -> Dict[str, Any]:
     url = (url or "").strip()
     if not url:
         return {"success": False, "error": "缺少 URL"}
-    scheme = url.split(":", 1)[0].lower()
-    if scheme not in ("http", "https"):
-        return {"success": False, "error": f"仅支持 http/https 协议（收到 {scheme or '空'}）"}
     try:
-        assert_public_url(url)
+        resolution = resolvePublicUrl(url)
     except ValueError as e:
         return {"success": False, "error": str(e)}
+    try:
+        ipaddress.ip_address(resolution.host)
+    except ValueError:
+        return {
+            "success": False,
+            "code": "not_supported",
+            "error": "外部 CLI 无法固定本次连接的 DNS；仅允许公网 IP 字面量",
+        }
+    if not resolution.directConnectable:
+        return {
+            "success": False,
+            "code": "not_supported",
+            "error": "fake-ip 不能作为直连地址传给外部 CLI",
+        }
     return runAgentReach(["read", url])
 
 

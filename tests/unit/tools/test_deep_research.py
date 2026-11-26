@@ -44,7 +44,7 @@ def _settings_searxng():
     return patch("neurova.shared_config.get_shared_config_manager", return_value=mgr)
 
 
-def _fake_fetch(url, ua, timeout=10):
+def _fake_fetch(url, ua, timeout=10, url_validator=None):
     """searxng /search → JSON 结果；其余 URL → 网页正文。"""
     if "127.0.0.1:8888" in url:
         return SEARXNG_RESULTS
@@ -94,7 +94,7 @@ class TestDeepResearchCollection:
         exe = _make_executor()
         seen = {}
 
-        def fake(url, ua, timeout=10):
+        def fake(url, ua, timeout=10, url_validator=None):
             if "127.0.0.1:8888" in url:
                 # 每次搜索都返回相同的两条 URL → 两个子查询应去重为 2 条源
                 return json.dumps({"results": [
@@ -115,7 +115,7 @@ class TestDeepResearchCollection:
         """单源抓取失败不得让整轮失败——诚实跳过该源（不吞整体）。"""
         exe = _make_executor()
 
-        def fake(url, ua, timeout=10):
+        def fake(url, ua, timeout=10, url_validator=None):
             if "127.0.0.1:8888" in url:
                 return json.dumps({"results": [
                     {"title": "OK", "url": "https://ex.com/good", "content": "c"},

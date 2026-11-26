@@ -33,16 +33,16 @@ class TestValidConfigs:
     def test_valid_http_config(self):
         cfg = validate_mcp_server_config({
             "id": "remote",
-            "url": "http://localhost:9000/mcp",
+            "url": "http://8.8.8.8:9000/mcp",
         })
         assert cfg["transport"] == "http"
-        assert cfg["url"] == "http://localhost:9000/mcp"
+        assert cfg["url"] == "http://8.8.8.8:9000/mcp"
 
     def test_valid_sse_config(self):
         cfg = validate_mcp_server_config({
             "id": "sse1",
             "transport": "sse",
-            "url": "http://localhost:9000/sse",
+            "url": "http://8.8.8.8:9000/sse",
             "headers": {"Authorization": "Bearer x"},
         })
         assert cfg["transport"] == "sse"
@@ -71,12 +71,12 @@ class TestTransportInference:
         assert cfg["transport"] == "stdio"
 
     def test_infer_http_from_url(self):
-        cfg = validate_mcp_server_config({"id": "s", "url": "http://x/mcp"})
+        cfg = validate_mcp_server_config({"id": "s", "url": "http://8.8.8.8/mcp"})
         assert cfg["transport"] == "http"
 
     def test_explicit_transport_wins(self):
         cfg = validate_mcp_server_config({
-            "id": "s", "transport": "sse", "url": "http://x/sse",
+            "id": "s", "transport": "sse", "url": "http://8.8.8.8/sse",
         })
         assert cfg["transport"] == "sse"
 

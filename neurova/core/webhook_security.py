@@ -5,7 +5,7 @@ HMAC-SHA256 签名计算与常量时间校验（GitHub X-Hub-Signature-256 风�
 独立纯函数模块：无 I/O、无状态，便于单测与复用。
 
 重放防护（P0-7/N3）：签名覆盖 "<timestamp>." 前缀 + payload，
-配合 X-Neurova-Timestamp 头做时效校验——旧签名过期即失效。
+配合 X-Neurova-Timestamp 头做时效校验；缺时间戳的旧签名不再接受。
 """
 
 import hashlib
@@ -29,23 +29,6 @@ def compute_signed_payload_signature(
 ) -> str:
     """计算带时间戳的签名：HMAC 覆盖 "<timestamp>." + payload。"""
     return compute_signature(f"{timestamp}.".encode("utf-8") + payload, secret)
-
-
-def verify_signature(payload: bytes, secret: str, header_value: str | None) -> bool:
-    """校验入站请求的签名头（不带时间戳的旧约定，保留兼容）。
-
-    规则：
-    - 使用 hmac.compare_digest 常量时间比较（防时序侧信道）
-    - header 缺失 / 空串 / 前缀非 sha256= / secret 为空 → False（不抛异常）
-    - hex 大小写不敏感
-    """
-    if not header_value or not secret:
-        return False
-    received = header_value.strip().lower()
-    if not received.startswith(_SIGNATURE_PREFIX):
-        return False
-    expected = compute_signature(payload, secret)
-    return hmac.compare_digest(expected.encode("utf-8"), received.encode("utf-8"))
 
 
 def verify_request(

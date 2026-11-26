@@ -284,6 +284,38 @@ def test_authPhaseDoesNotRetry(isolatedDataRoot):
     assert "认证失败" in result.error
 
 
+def test_execTimeoutUnknownDoesNotRetry(isolatedDataRoot):
+    attempts = []
+
+    def executor(params):
+        attempts.append(1)
+        raise RemoteNotExecutedError(
+            "SSH 命令执行超时（零输出，执行状态未知）",
+            phase="timeout",
+            retryable=False,
+            executed="unknown",
+        )
+
+    sleeps = []
+    result = dispatchRemoteCall(
+        toolName="computer_ssh_exec",
+        params={"command": "reboot"},
+        endpoint=_endpoint(),
+        executor=executor,
+        holdTimeoutMs=10000,
+        sleepFn=sleeps.append,
+    )
+
+    assert result.ok is False
+    assert result.executed == "unknown"
+    assert result.phase == "timeout"
+    assert result.retryable is False
+    assert result.holdAttempts == 0
+    assert result.holdElapsedMs == 0
+    assert attempts == [1]
+    assert sleeps == []
+
+
 def test_execUnknownPhaseDoesNotRetry(isolatedDataRoot):
     def executor(params):
         raise RemoteNotExecutedError(

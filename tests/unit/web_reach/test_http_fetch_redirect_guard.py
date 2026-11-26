@@ -31,11 +31,18 @@ class _Resp:
         self.status_code = status_code
         self.headers = headers or {}
 
+    def iter_content(self, chunk_size=None):
+        yield self.content
+
+    def close(self):
+        pass
+
 
 def _install_fake_curl(monkeypatch, calls, routes):
     """注入假 curl_cffi 模块：不自动跟随重定向（与修复后的引擎配置一致），
     按 routes[url] 返回响应，记录每次调用。"""
     curl = types.ModuleType("curl_cffi")
+    curl.CurlOpt = types.SimpleNamespace(RESOLVE=10204)
     requests_mod = types.ModuleType("curl_cffi.requests")
 
     def _get(url, **kwargs):
@@ -61,16 +68,24 @@ class TestReachPerHopGuard:
 
     def test_redirectToLoopback_is_rejected(self, monkeypatch):
         from neurova.security import safe_fetch as safe_fetch_mod
+        from neurova.security.url_guard import PublicUrlResolution
         from neurova.web_reach import reach
 
         seen = []
 
-        def fake_gate(url, *args, **kwargs):
-            seen.append(url)
-            if url.startswith("http://127.0.0.1"):
-                raise ValueError("私网拒绝(测试桩): " + url)
+        def fake_resolver(url, *args, **kwargs):
+            from urllib.parse import urlparse
 
-        monkeypatch.setattr(safe_fetch_mod, "assert_public_url", fake_gate)
+            seen.append(url)
+            parsed = urlparse(url)
+            if parsed.hostname == "127.0.0.1":
+                raise ValueError("私网拒绝(测试桩): " + url)
+            return PublicUrlResolution(
+                scheme=parsed.scheme, host=parsed.hostname,
+                port=parsed.port or 80, addresses=("93.184.216.34",),
+            )
+
+        monkeypatch.setattr(safe_fetch_mod, "resolvePublicUrl", fake_resolver)
         calls = []
         _install_fake_curl(monkeypatch, calls, {
             "http://public.example/a": _Resp(b"", 302, {"Location": "http://127.0.0.1:9527/admin"}),
@@ -83,9 +98,20 @@ class TestReachPerHopGuard:
 
     def test_publicRedirect_still_follows_and_returns_content(self, monkeypatch):
         from neurova.security import safe_fetch as safe_fetch_mod
+        from neurova.security.url_guard import PublicUrlResolution
         from neurova.web_reach import reach
 
-        monkeypatch.setattr(safe_fetch_mod, "assert_public_url", lambda url, *a, **k: None)
+        def fake_resolver(url, *args, **kwargs):
+            from urllib.parse import urlparse
+
+            parsed = urlparse(url)
+            return PublicUrlResolution(
+                scheme=parsed.scheme, host=parsed.hostname,
+                port=parsed.port or (443 if parsed.scheme == "https" else 80),
+                addresses=("93.184.216.34",),
+            )
+
+        monkeypatch.setattr(safe_fetch_mod, "resolvePublicUrl", fake_resolver)
         calls = []
         _install_fake_curl(monkeypatch, calls, {
             "http://public.example/a": _Resp(b"", 302, {"Location": "https://public2.example/b"}),
@@ -96,6 +122,59 @@ class TestReachPerHopGuard:
         assert len(calls) == 2, "两跳两次显式请求"
         for _url, kwargs in calls:
             assert kwargs.get("allow_redirects") is False, "引擎不得自动跟随（守卫要插到跳间）"
+
+
+class TestWebFetchToolPerHopGuard:
+    """工具咽喉点必须把逐跳 validator 接到共享抓取层。"""
+
+    @pytest.mark.asyncio
+    async def test_webFetchUsesAddressPlanForFirstRequest(self, monkeypatch):
+        from neurova.tool_executor import ToolExecutor
+
+        monkeypatch.setattr(
+            "neurova.security.url_guard.socket.getaddrinfo",
+            lambda host, port, *args, **kwargs: [
+                (2, 1, 6, "", ("93.184.216.34", port)),
+            ],
+        )
+        calls = []
+        _install_fake_curl(monkeypatch, calls, {
+            "https://public.example/a": _Resp(b"<p>pinned</p>", 200),
+        })
+        executor = ToolExecutor.__new__(ToolExecutor)
+
+        result = await executor._execute_web_fetch({"url": "https://public.example/a"})
+
+        assert result["content"] == "pinned"
+        assert len(calls) == 1
+        options = calls[0][1].get("curl_options")
+        assert options, "web_fetch 必须把 URL 校验返回的地址计划传到连接引擎"
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_loopback_is_rejected_before_second_request(self, monkeypatch):
+        from neurova.tool_executor import ToolExecutor
+
+        monkeypatch.setattr(
+            "neurova.security.url_guard.socket.getaddrinfo",
+            lambda host, port, *args, **kwargs: [
+                (2, 1, 6, "", ("93.184.216.34", port)),
+            ],
+        )
+        calls = []
+        _install_fake_curl(monkeypatch, calls, {
+            "https://public.example/a": _Resp(
+                b"", 302, {"Location": "http://127.0.0.1:9527/admin"}
+            ),
+            "http://127.0.0.1:9527/admin": _Resp(b"secret", 200),
+        })
+        executor = ToolExecutor.__new__(ToolExecutor)
+
+        result = await executor._execute_web_fetch({"url": "https://public.example/a"})
+
+        assert "error" in result, result
+        assert "127.0.0.1" in result["error"]
+        assert len(calls) == 1, "私网第二跳必须在连接前被拒绝"
+        assert "secret" not in result.get("content", "")
 
 
 class TestSharedLayerHopLoop:

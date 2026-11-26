@@ -85,6 +85,35 @@ def _basic_auth_header(client_id: str, client_secret: str) -> str:
     return "Basic " + base64.b64encode(raw).decode("ascii")
 
 
+def _postOauth(
+    url: str, *, headers: Dict[str, str], timeout: float,
+    data: Optional[Dict[str, Any]] = None, jsonPayload: Optional[Dict[str, Any]] = None,
+):
+    import json as _json
+    import httpx
+    from neurova import http_fetch
+    from neurova.security.mcp_transport import trustedHosts
+    from neurova.security.safe_fetch import SSRFBlockedError, assertHopAllowed
+
+    try:
+        resolution = assertHopAllowed(url, trusted_hosts=trustedHosts())
+    except SSRFBlockedError as exc:
+        raise OAuthTokenError(f"OAuth endpoint 未通过出站安全校验: {exc}") from exc
+    if jsonPayload is not None:
+        body = _json.dumps(jsonPayload, ensure_ascii=False).encode("utf-8")
+    else:
+        body = urlencode(data or {}).encode("utf-8")
+    result = http_fetch.request_once(
+        url, method="POST", headers=headers, data=body, timeout=timeout,
+        resolution=resolution,
+    )
+    return httpx.Response(result.status, headers=result.headers, content=result.content)
+
+
+async def _postOauthAsync(url: str, **kwargs):
+    return await asyncio.to_thread(_postOauth, url, **kwargs)
+
+
 class OAuthTokenProvider:
     """client_credentials token 获取器（可注入 transport 便于测试）。"""
 
@@ -108,8 +137,6 @@ class OAuthTokenProvider:
 
     async def fetch_client_credentials(self) -> Dict[str, Any]:
         """client_credentials 流：POST token_url，返回 token 响应 dict。"""
-        import httpx
-
         data = {
             "grant_type": "client_credentials",
             "client_id": self.client_id,
@@ -133,8 +160,9 @@ class OAuthTokenProvider:
                     self.token_url, data=data, headers=headers
                 )
             else:
-                async with httpx.AsyncClient(timeout=self.timeout_s) as hc:
-                    resp = await hc.post(self.token_url, data=data, headers=headers)
+                resp = await _postOauthAsync(
+                    self.token_url, data=data, headers=headers, timeout=self.timeout_s,
+                )
             return resp
 
         resp = await _post()
@@ -178,8 +206,6 @@ class OAuthTokenProvider:
         self, code: str, code_verifier: str, redirect_uri: str
     ) -> str:
         """授权码换 token（RFC 6749 §4.1.3），成功后写入缓存供 per-call 解析。"""
-        import httpx
-
         data = {
             "grant_type": "authorization_code",
             "code": code,
@@ -206,8 +232,9 @@ class OAuthTokenProvider:
         if transport is not None:
             resp = await transport.post(self.token_url, data=data, headers=headers)
         else:
-            async with httpx.AsyncClient(timeout=self.timeout_s) as hc:
-                resp = await hc.post(self.token_url, data=data, headers=headers)
+            resp = await _postOauthAsync(
+                self.token_url, data=data, headers=headers, timeout=self.timeout_s,
+            )
 
         if resp.status_code != 200:
             raise OAuthTokenError(
@@ -391,8 +418,6 @@ async def _register_client_dynamically(
     Raises:
         OAuthTokenError: 注册端点非 200 / 响应缺 client_id
     """
-    import httpx
-
     payload = {
         "client_name": client_name,
         "grant_types": ["authorization_code", "refresh_token"],
@@ -410,8 +435,9 @@ async def _register_client_dynamically(
         # 注入 transport 的桩测形态不得与生产不一致（data= 是表单编码）。
         resp = await transport.post(registration_endpoint, json=payload, headers=headers)
     else:
-        async with httpx.AsyncClient(timeout=10.0) as hc:
-            resp = await hc.post(registration_endpoint, json=payload, headers=headers)
+        resp = await _postOauthAsync(
+            registration_endpoint, jsonPayload=payload, headers=headers, timeout=10.0,
+        )
 
     if resp.status_code != 201 and resp.status_code != 200:
         raise OAuthTokenError(

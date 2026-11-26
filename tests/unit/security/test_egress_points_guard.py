@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """S2 出站点位 SSRF 复检扫荡——B 类应防护点位清单断言（先红后绿）。
 
-单源：``neurova/security/url_guard.py``（assert_public_url / is_public_url /
-validate_public_http_url，拦私网/环回/链路本地，fail-closed）。
+单源：``neurova/security/url_guard.py``（判定）＋ ``safe_fetch`` / ``mcp_transport``
+（把判定返回的地址计划固定到本次连接）。B 类点位必须引用这些安全入口之一。
 
 本测试把"外部/用户内容驱动但尚未过 url_guard"的出站点位**硬编码为清单**，
 逐点断言其模块已引用 url_guard 单源。点位新增/移除必须同步改本清单并
@@ -18,17 +18,21 @@ validate_public_http_url，拦私网/环回/链路本地，fail-closed）。
   用户消息内容影响。
 - neurova/tool_executor.py 内 searxng（settings.searxng_url 运维配置的自托管实例，
   常在私网/127.0.0.1）与 Bing/wttr.in（固定公网端点，用户内容仅进 query 参数）。
-- neurova/api/endpoints/knowledge_ingestion.py：/import-url 入口 :241 已过
-  validate_public_http_url（安全门先于入队与抓取）。
-- neurova/api/endpoints/webhooks.py：:99/:135/:167/:196 投递前均已过单源校验。
-- neurova/knowledge/adapters.py：各远程知识库适配器调用前过 _validate_remote_url
-  （等效 SSRF 校验；该平行实现收口到单源属另一张卡，不在本卡扩散）。
+- neurova/api/endpoints/knowledge_ingestion.py：/import-url 入口先校验，
+  _fetch_url 再经 safe_fetch 逐跳固定 DNS。
+- neurova/api/endpoints/webhooks.py：create/update/test 共用 URL 闸，test 投递
+  经 safe_fetch 固定 DNS。
+- neurova/knowledge/adapters.py：远程 URL 判定已收口 url_guard，IMA 默认
+  JSON-RPC 传输把解析计划交给 http_fetch.request_once。
 - neurova/knowledge/ingest_bridge.py、neurova/web_reach/**、
   neurova/api/endpoints/shared_config.py、neurova/tool_layers/mcp_config.py、
-  neurova/security/governance.py：已接 url_guard 单源（A 类）。
+  neurova/tool_layers/mcp_client.py、neurova/tool_layers/mcp_oauth.py、
+  neurova/collaboration/neurflow/builtin.py、neurova/security/governance.py：
+  已接 url_guard / safe_fetch / mcp_transport 单源（A 类）。
 - neurova/plugins/plugin_sources.py：仅允许已注册插件源 host 白名单，且重定向后
   复查最终 host（强于 url_guard 的等效防护）。
-- neurova/skills/market_sources.py：仅允许已注册市场源 host 白名单。
+- neurova/skills/market_sources.py：仅允许已注册市场源 host 白名单，实际下载
+  也经 safe_fetch 固定 DNS，并按单技能包预算限量。
 - neurova/api/endpoints/mobile_pairing.py preflight：admin 面对外地址连通性预检，
   auto/direct 模式探测入站来源（合法私网地址是功能本身），套 guard 会断手机配对。
 - neurova/agent/neuacp/registry.py：硬编码官方 CDN 常量 REGISTRY_URL，不受用户影响。
@@ -52,32 +56,35 @@ EGRESS_POINTS_REQUIRING_GUARD = [
     (
         "neurova/tool_executor.py",
         "_execute_web_fetch：web_fetch 工具抓取任意 url（模型/用户完全可控），"
-        "经 _blocking_fetch→http_fetch 出站，现仅校验 scheme",
+        "经 resolvePublicUrl→http_fetch 固定 DNS",
     ),
     (
         "neurova/agent/scheduler.py",
         "WebhookTaskExecutor.execute：automation webhook_url 由任务创建者指定，"
-        "aiohttp 直接 POST，validate() 仅查 scheme 前缀",
+        "POST 经 safe_fetch 逐跳固定 DNS",
     ),
     (
         "neurova/skills/market_adapters.py",
         "_http_get/_download_file：技能市场 API 响应驱动的条目抓取与技能包下载，"
-        "download_url 来自远端响应，无任何 host 校验",
+        "download_url 来自远端响应，请求经 safe_fetch",
     ),
     (
         "neurova/skills/hub_client.py",
-        "_http_fetch：hub API 拉取与 download_url 技能包下载（download_url 来自"
-        "市场响应或 html_url 拼接），urlopen 前无校验",
+        "_http_fetch：hub API 拉取与 download_url 技能包下载，请求经 safe_fetch",
     ),
     (
         "neurova/channels/wechat_media.py",
-        "iLink 媒体下载：media_url 取自 iLink API 响应体，服务端再 GET 拉取"
-        "（attachment 拉取类出站）",
+        "iLink 媒体下载：media_url 取自 iLink API 响应体，服务端再经 safe_fetch 拉取",
     ),
 ]
 
 _GUARD_CALL_RE = re.compile(
-    r"assert_public_url|is_public_url|validate_public_http_url"
+    r"assert_public_url|is_public_url|validate_public_http_url|"
+    r"resolvePublicUrl|assertHopAllowed|safe_fetch\.safe_fetch"
+)
+_GUARD_IMPORT_RE = re.compile(
+    r"neurova\.security\.(?:url_guard|safe_fetch|mcp_transport)|"
+    r"from neurova\.security import safe_fetch"
 )
 
 
@@ -92,7 +99,7 @@ def testB类点位模块已引用UrlGuard单源():
     missing = []
     for rel_path, reason in EGRESS_POINTS_REQUIRING_GUARD:
         source = _moduleSource(rel_path)
-        has_import = "neurova.security.url_guard" in source
+        has_import = bool(_GUARD_IMPORT_RE.search(source))
         has_call = bool(_GUARD_CALL_RE.search(source))
         if not (has_import and has_call):
             missing.append(

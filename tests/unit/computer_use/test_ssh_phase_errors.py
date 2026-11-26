@@ -1,8 +1,9 @@
 """SSH 失败相位追踪（U3）
 
 验收：
-- 连接失败/认证失败/超时且零输出 → RemoteNotExecutedError（executed=False,
-  retryable=True, phase=connect|auth|timeout）
+- 连接失败/认证失败 → RemoteNotExecutedError（executed=False,
+  retryable=True, phase=connect|auth）
+- 执行期超时（即使零输出）→ executed="unknown"、retryable=False（不可盲目重试）
 - 已获部分输出后中断 → executed="unknown"、retryable=False（不可盲目重试）
 - tool_executor ssh 分支把 RemoteNotExecutedError 映射为结构化错误载荷
   {error_code:"REMOTE_NOT_EXECUTED", phase, retryable, executed}；其余工具行为不变
@@ -79,7 +80,7 @@ class TestPhaseClassification:
         assert ei.value.executed is False
         assert ei.value.retryable is True
 
-    def test_timeout_with_zero_output_is_retryable(self):
+    def test_timeout_with_zero_output_is_not_blindly_retryable(self):
         class TimeoutClient:
             def set_missing_host_key_policy(self, p):
                 pass
@@ -96,8 +97,8 @@ class TestPhaseClassification:
         with pytest.raises(RemoteNotExecutedError) as ei:
             run_ssh_command("h", "longjob", client_factory=lambda: TimeoutClient())
         assert ei.value.phase == "timeout"
-        assert ei.value.executed is False
-        assert ei.value.retryable is True
+        assert ei.value.executed == "unknown"
+        assert ei.value.retryable is False
 
     def test_partial_output_interrupt_is_not_blindly_retryable(self):
         class HalfDoneClient:

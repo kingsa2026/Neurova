@@ -102,6 +102,38 @@ async def _safe_evaluate(page, timeout: float) -> Dict[str, Any]:
     return last
 
 
+async def _routeThroughSafeFetch(route, timeout: float) -> None:
+    from neurova.security import safe_fetch
+
+    request = route.request
+    if not request.url.lower().startswith(("http://", "https://")):
+        await route.continue_()
+        return
+    try:
+        response = await asyncio.to_thread(
+            safe_fetch.safe_fetch,
+            request.url,
+            method=request.method,
+            headers=dict(request.headers),
+            data=request.post_data_buffer,
+            timeout=timeout,
+        )
+    except safe_fetch.HTTPStatusError as e:
+        await route.fulfill(status=e.status, body=b"")
+        return
+    except safe_fetch.SSRFBlockedError:
+        await route.abort("blockedbyclient")
+        return
+    except Exception:
+        await route.abort("failed")
+        return
+    headers = {
+        key: value for key, value in response.headers.items()
+        if key.lower() not in ("content-length", "content-encoding", "transfer-encoding")
+    }
+    await route.fulfill(status=response.status, headers=headers, body=response.content)
+
+
 async def _browser_read_async(url: str, timeout: float) -> Dict[str, Any]:
     """启动 headless 浏览器导航并提取页面。
 
@@ -117,7 +149,12 @@ async def _browser_read_async(url: str, timeout: float) -> Dict[str, Any]:
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         try:
-            page = await browser.new_page()
+            page = await browser.new_page(service_workers="block")
+
+            async def routeHandler(route):
+                await _routeThroughSafeFetch(route, timeout)
+
+            await page.route("**/*", routeHandler)
             await page.goto(url, wait_until="load", timeout=int(timeout * 1000))
             # 给 SPA 水合与懒加载模块留出执行时间
             await page.wait_for_timeout(2000)

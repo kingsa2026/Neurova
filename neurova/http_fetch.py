@@ -28,11 +28,14 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 import tempfile
 import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from functools import partial
+from http import client as httpClient
 from typing import Callable, Dict, Iterable, NamedTuple, Optional, Tuple
 
 DEFAULT_TIMEOUT = 20.0
@@ -112,7 +115,9 @@ def _redirectLocation(resp) -> Optional[str]:
     return str(location).strip() or None
 
 
-def _curl_bytes(url: str, user_agent: str, timeout: float) -> Optional[Tuple[bytes, Optional[str]]]:
+def _curl_bytes(
+    url: str, user_agent: str, timeout: float, resolution=None
+) -> Optional[Tuple[bytes, Optional[str]]]:
     """经 curl_cffi 单跳抓取（禁自动跟随，跳转交上层循环逐跳处理）。
 
     未安装返回 None（调用方回落 urllib），网络/HTTP 错误照抛。
@@ -122,6 +127,17 @@ def _curl_bytes(url: str, user_agent: str, timeout: float) -> Optional[Tuple[byt
     except ImportError:
         return None
     kw = {"timeout": timeout, "headers": {"User-Agent": user_agent}, "allow_redirects": False}
+    if resolution is not None and resolution.addresses:
+        if not resolution.directConnectable:
+            raise ValueError("fake-ip 解析结果不能固定为直连地址；请使用可解析到真实 IP 的 DNS")
+        from curl_cffi import CurlOpt
+
+        entries = []
+        for address in resolution.addresses:
+            formatted = f"[{address}]" if ":" in address else address
+            entries.append(f"{resolution.host}:{resolution.port}:{formatted}")
+        kw["curl_options"] = {CurlOpt.RESOLVE: entries}
+        kw["proxies"] = {}
     ca = _ascii_ca()
     if ca:
         kw["verify"] = ca
@@ -141,14 +157,76 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def _urllib_bytes(url: str, user_agent: str, timeout: float) -> Tuple[bytes, Optional[str]]:
+class _PinnedHTTPConnection(httpClient.HTTPConnection):
+    def __init__(self, host, *args, pinnedAddress: str, **kwargs):
+        super().__init__(host, *args, **kwargs)
+        self._pinnedAddress = pinnedAddress
+
+    def connect(self):
+        self.sock = socket.create_connection(
+            (self._pinnedAddress, self.port), self.timeout, self.source_address
+        )
+        try:
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
+
+
+class _PinnedHTTPSConnection(httpClient.HTTPSConnection):
+    def __init__(self, host, *args, pinnedAddress: str, **kwargs):
+        super().__init__(host, *args, **kwargs)
+        self._pinnedAddress = pinnedAddress
+
+    def connect(self):
+        self.sock = socket.create_connection(
+            (self._pinnedAddress, self.port), self.timeout, self.source_address
+        )
+        try:
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+
+
+def _pinnedOpener(resolution):
+    address = resolution.addresses[0]
+
+    class PinnedHTTPHandler(urllib.request.HTTPHandler):
+        def http_open(self, req):
+            return self.do_open(
+                partial(_PinnedHTTPConnection, pinnedAddress=address), req
+            )
+
+    class PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req):
+            return self.do_open(
+                partial(_PinnedHTTPSConnection, pinnedAddress=address),
+                req, context=self._context,
+            )
+
+    return urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        PinnedHTTPHandler(),
+        PinnedHTTPSHandler(),
+        _NoRedirectHandler(),
+    )
+
+
+def _urllib_bytes(
+    url: str, user_agent: str, timeout: float, resolution=None
+) -> Tuple[bytes, Optional[str]]:
     """urllib 兜底单跳（同样禁自动跟随）。
 
     3xx 被 _NoRedirectHandler 转成 HTTPError 抛出，此处归一成 (空体, Location)
     交还上层循环；其余 HTTPError 照抛（错误可见语义不变）。
     """
     req = urllib.request.Request(url, headers={"User-Agent": user_agent})
-    opener = urllib.request.build_opener(_NoRedirectHandler())
+    if resolution is not None and resolution.addresses:
+        if not resolution.directConnectable:
+            raise ValueError("fake-ip 解析结果不能固定为直连地址；请使用可解析到真实 IP 的 DNS")
+        opener = _pinnedOpener(resolution)
+    else:
+        opener = urllib.request.build_opener(_NoRedirectHandler())
     try:
         with opener.open(req, timeout=timeout) as resp:
             return resp.read(), _redirectLocation(resp)
@@ -158,27 +236,37 @@ def _urllib_bytes(url: str, user_agent: str, timeout: float) -> Tuple[bytes, Opt
         raise
 
 
-def _fetch_once(url: str, user_agent: str, timeout: float) -> Tuple[bytes, Optional[str]]:
+def _requireResolutionPlan(resolution) -> None:
+    if resolution is not None and not resolution.addresses:
+        raise ValueError("出站地址计划为空：拒绝回退到未固定 DNS 的连接")
+
+
+def _fetch_once(
+    url: str, user_agent: str, timeout: float, resolution=None
+) -> Tuple[bytes, Optional[str]]:
     """单跳双引擎：curl_cffi 优先，ImportError/引擎故障回落 urllib 一次。"""
+    _requireResolutionPlan(resolution)
     try:
-        result = _curl_bytes(url, user_agent, timeout)
+        result = _curl_bytes(url, user_agent, timeout, resolution=resolution)
     except _HttpStatusError:
         raise
     except ImportError:
-        return _urllib_bytes(url, user_agent, timeout)
+        return _urllib_bytes(url, user_agent, timeout, resolution=resolution)
     except Exception as curl_err:
         try:
-            return _urllib_bytes(url, user_agent, timeout)
+            return _urllib_bytes(url, user_agent, timeout, resolution=resolution)
         except Exception:
             raise curl_err
-    return result if result is not None else _urllib_bytes(url, user_agent, timeout)
+    return result if result is not None else _urllib_bytes(
+        url, user_agent, timeout, resolution=resolution
+    )
 
 
 def fetch_bytes(
     url: str,
     user_agent: str,
     timeout: float = DEFAULT_TIMEOUT,
-    url_validator: Optional[Callable[[str], None]] = None,
+    url_validator: Optional[Callable[[str], object]] = None,
 ) -> bytes:
     """阻塞 GET 返回原始字节（curl_cffi 优先，urllib 兜底链见模块 docstring）。
 
@@ -188,9 +276,10 @@ def fetch_bytes(
     current = url
     hops = 0
     while True:
-        if url_validator is not None:
-            url_validator(current)
-        content, location = _fetch_once(current, user_agent, timeout)
+        resolution = url_validator(current) if url_validator is not None else None
+        content, location = _fetch_once(
+            current, user_agent, timeout, resolution=resolution
+        )
         if location is None:
             return content
         if hops >= MAX_REDIRECT_HOPS:
@@ -205,7 +294,7 @@ def fetch_text(
     url: str,
     user_agent: str,
     timeout: float = DEFAULT_TIMEOUT,
-    url_validator: Optional[Callable[[str], None]] = None,
+    url_validator: Optional[Callable[[str], object]] = None,
 ) -> str:
     """阻塞 GET 返回 UTF-8 文本（fetch_bytes 链 + utf-8 errors=replace 解码）。"""
     return fetch_bytes(url, user_agent, timeout, url_validator=url_validator).decode(
@@ -271,29 +360,54 @@ def _curl_once(
     data: Optional[bytes],
     timeout: float,
     max_bytes: Optional[int],
+    resolution=None,
 ) -> HopResult:
     """curl_cffi 单跳（禁自动跟随）。引擎不可用抛 ImportError 交上层回落。"""
     from curl_cffi import requests as curl_requests
 
     kw: Dict = {"timeout": timeout, "headers": headers, "allow_redirects": False}
+    if max_bytes is not None:
+        kw["stream"] = True
+    if resolution is not None and resolution.addresses:
+        if not resolution.directConnectable:
+            raise ValueError("fake-ip 解析结果不能固定为直连地址；请使用可解析到真实 IP 的 DNS")
+        from curl_cffi import CurlOpt
+
+        resolveEntries = []
+        for address in resolution.addresses:
+            formatted = f"[{address}]" if ":" in address else address
+            resolveEntries.append(f"{resolution.host}:{resolution.port}:{formatted}")
+        kw["curl_options"] = {CurlOpt.RESOLVE: resolveEntries}
+        kw["proxies"] = {}
     ca = _ascii_ca()
     if ca:
         kw["verify"] = ca
     if (headers.get("User-Agent") or "").startswith("Mozilla"):
         kw["impersonate"] = "chrome"
     resp = curl_requests.request(method, url, data=data, **kw)
-    resp_headers = _lowerHeaders(resp.headers.items())
-    status = int(resp.status_code)
-    location = _locationFromHeaders(resp_headers, status)
-    content = b""
-    if not (location is not None):
-        # 3xx 跳转不读体（Location 已取）；其余按上限读取
-        if _contentLengthExceeds(resp_headers, max_bytes):
-            raise PayloadTooLargeError(f"响应体超过上限 {max_bytes} 字节")
-        content = resp.content
-        if max_bytes is not None and len(content) > max_bytes:
-            raise PayloadTooLargeError(f"响应体超过上限 {max_bytes} 字节")
-    return HopResult(status, resp_headers, content, location)
+    try:
+        resp_headers = _lowerHeaders(resp.headers.items())
+        status = int(resp.status_code)
+        location = _locationFromHeaders(resp_headers, status)
+        content = b""
+        if not (location is not None):
+            # 3xx 跳转不读体（Location 已取）；其余按上限分块读取
+            if _contentLengthExceeds(resp_headers, max_bytes):
+                raise PayloadTooLargeError(f"响应体超过上限 {max_bytes} 字节")
+            if max_bytes is None:
+                content = resp.content
+            else:
+                buf = bytearray()
+                for chunk in resp.iter_content(chunk_size=_CHUNK_SIZE):
+                    if not chunk:
+                        continue
+                    buf += chunk
+                    if len(buf) > max_bytes:
+                        raise PayloadTooLargeError(f"响应体超过上限 {max_bytes} 字节")
+                content = bytes(buf)
+        return HopResult(status, resp_headers, content, location)
+    finally:
+        resp.close()
 
 
 def _urllib_once(
@@ -303,6 +417,7 @@ def _urllib_once(
     data: Optional[bytes],
     timeout: float,
     max_bytes: Optional[int],
+    resolution=None,
 ) -> HopResult:
     """urllib 兜底单跳（禁自动跟随，流式限量读体）。
 
@@ -310,7 +425,12 @@ def _urllib_once(
     交上层循环；4xx/5xx 状态透明返回（体按上限读取供诊断），不代判成败。
     """
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    opener = urllib.request.build_opener(_NoRedirectHandler())
+    if resolution is not None and resolution.addresses:
+        if not resolution.directConnectable:
+            raise ValueError("fake-ip 解析结果不能固定为直连地址；请使用可解析到真实 IP 的 DNS")
+        opener = _pinnedOpener(resolution)
+    else:
+        opener = urllib.request.build_opener(_NoRedirectHandler())
     try:
         with opener.open(req, timeout=timeout) as resp:
             status = int(getattr(resp, "status", resp.getcode()))
@@ -339,6 +459,7 @@ def request_once(
     data: Optional[bytes] = None,
     timeout: float = DEFAULT_TIMEOUT,
     max_bytes: Optional[int] = None,
+    resolution=None,
 ) -> HopResult:
     """单跳请求：curl_cffi 优先，ImportError/引擎故障回落 urllib 一次。
 
@@ -347,14 +468,15 @@ def request_once(
     统一安全门（连接前逐跳校验）。
     """
     hdrs = dict(headers or {})
+    _requireResolutionPlan(resolution)
     try:
-        return _curl_once(url, method, hdrs, data, timeout, max_bytes)
+        return _curl_once(url, method, hdrs, data, timeout, max_bytes, resolution=resolution)
     except PayloadTooLargeError:
         raise
     except ImportError:
-        return _urllib_once(url, method, hdrs, data, timeout, max_bytes)
+        return _urllib_once(url, method, hdrs, data, timeout, max_bytes, resolution=resolution)
     except Exception as curl_err:
         try:
-            return _urllib_once(url, method, hdrs, data, timeout, max_bytes)
+            return _urllib_once(url, method, hdrs, data, timeout, max_bytes, resolution=resolution)
         except Exception:
             raise curl_err

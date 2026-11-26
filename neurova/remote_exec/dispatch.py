@@ -34,7 +34,7 @@ _FIRST_RETRY_DELAY_S = 0.5
 _RETRY_BACKOFF_FACTOR = 2.0
 _RETRY_DELAY_CAP_S = 5.0
 
-#: 触发离线 hold 的失败相位（U3：连接失败/超时且零输出，确认未执行）
+#: 触发离线 hold 的失败相位（连接期 connect/timeout，且确认未执行、可安全重试）
 _HOLD_PHASES = frozenset({"connect", "timeout"})
 
 _PHASE_DISPATCH = "dispatch"

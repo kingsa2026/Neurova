@@ -129,6 +129,22 @@ def _download_file(url: str, dest: Path) -> None:
             f.write(chunk)
 
 
+def _psLiteral(value: str) -> str:
+    """PowerShell 单引号字面量：内部 `'` 按规则双写，路径含引号也不会断开命令。"""
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _sha256(path: Path) -> str:
+    """下载件内容摘要（小写 hex）——验签与提权执行之间的内容绑定。"""
+    import hashlib
+
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _verify_authenticode(exe: Path) -> bool:
     """校验下载包的 Microsoft Authenticode 签名——执行外部二进制的红线。
 
@@ -138,8 +154,8 @@ def _verify_authenticode(exe: Path) -> bool:
         r = runText(
             [
                 "powershell", "-NoProfile", "-Command",
-                "(Get-AuthenticodeSignature -FilePath '%s').Status -eq 'Valid'"
-                % exe,
+                "(Get-AuthenticodeSignature -FilePath %s).Status -eq 'Valid'"
+                % _psLiteral(str(exe)),
             ],
             timeout=60,
         )
@@ -148,13 +164,27 @@ def _verify_authenticode(exe: Path) -> bool:
     return r.returncode == 0 and "True" in r.stdout
 
 
-def _run_elevated_installer(exe: Path) -> int:
-    """seam：提权静默安装（-Verb RunAs 触发 UAC），返回安装器退出码。"""
+def _run_elevated_installer(exe: Path, expected_sha256: str) -> int:
+    """seam：提权静默安装（-Verb RunAs 触发 UAC），返回安装器退出码。
+
+    `expected_sha256` 是验签通过时算出的内容摘要；提权脚本在 Start-Process
+    **之前**用 Get-FileHash 复核同一路径，内容在验签后被替换即退出 86——
+    把 TOCTOU 窗口收进同一个提权进程里，而不是信任调用方先验后执行。
+    """
+    expected = str(expected_sha256 or "").strip().lower()
+    if not expected:
+        logger.warning("vc_redist 提权执行被拒：缺少内容摘要（无法绑定验签结果）")
+        return -1
     ps = (
-        "$p = Start-Process -FilePath '{exe}' "
+        "$ErrorActionPreference = 'Stop';"
+        "$p = %s;"
+        "$want = %s;"
+        "$h = (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant();"
+        "if ($h -ne $want) { exit 86 };"
+        "$proc = Start-Process -FilePath $p "
         "-ArgumentList '/install','/quiet','/norestart' "
-        "-Verb RunAs -Wait -PassThru; exit $p.ExitCode"
-    ).format(exe=str(exe))
+        "-Verb RunAs -Wait -PassThru; exit $proc.ExitCode"
+    ) % (_psLiteral(str(exe)), _psLiteral(expected))
     try:
         r = runText(
             ["powershell", "-NoProfile", "-Command", ps],
@@ -192,29 +222,48 @@ def ensure_vc_redist(
     if not auto_install:
         return EnsureResult(installed=False, reason="auto-install-off")
 
-    dest = (download_dir or Path(tempfile.gettempdir()) / "neurova_envcheck") / "vc_redist.x64.exe"
+    # CORE-10：每次运行一个私有唯一目录（mkdtemp 保证 0700/用户专属），不共享
+    # 固定 TEMP 路径——并发运行或路径植入无法替换“另一次运行”的待执行件。
+    workdir = Path(tempfile.mkdtemp(
+        prefix="neurova-envcheck-",
+        dir=str(download_dir or tempfile.gettempdir()),
+    ))
+    dest = workdir / "vc_redist.x64.exe"
     try:
         logger.info("检测到 VC++ 2022 运行库缺失，开始下载: %s", VC_REDIST_URL)
         _download_file(VC_REDIST_URL, dest)
     except Exception as e:  # noqa: BLE001 - 网络/磁盘错误都归为下载失败
+        _cleanup(workdir)
         return EnsureResult(installed=False, reason=f"download-failed: {e}")
 
     if not _verify_authenticode(dest):
-        _cleanup(dest)
+        _cleanup(workdir)
         return EnsureResult(installed=False, reason="signature-invalid")
 
+    # 验签后立即固定内容：提权进程在执行前复核同一摘要（_run_elevated_installer）。
+    try:
+        digest = _sha256(dest)
+    except OSError as e:
+        _cleanup(workdir)
+        return EnsureResult(installed=False, reason=f"hash-failed: {e}")
+
     logger.info("开始安装 VC++ 运行库（如弹出 UAC 请确认）…")
-    exit_code = _run_elevated_installer(dest)
-    _cleanup(dest)
+    exit_code = _run_elevated_installer(dest, digest)
+    _cleanup(workdir)
     if exit_code not in _VC_SUCCESS_EXIT:
         return EnsureResult(installed=False, reason=f"install-failed exit={exit_code}")
     return EnsureResult(installed=True, reason="ok")
 
 
-def _cleanup(exe: Path) -> None:
+def _cleanup(path: Path) -> None:
+    """清理私有临时目录（下载/验签/安装任一失败都调用；残留只告警不掩盖主因）。"""
     try:
-        if exe.exists():
-            exe.unlink()
+        if path.is_dir():
+            import shutil
+
+            shutil.rmtree(path, ignore_errors=True)
+        elif path.exists():
+            path.unlink()
     except OSError:
         pass
 

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -44,6 +45,8 @@ def localSource(monkeypatch, tmp_path):
     thread.start()
     try:
         monkeypatch.setenv("NEUROVA_FFMPEG_URL", f"http://127.0.0.1:{server.server_address[1]}/ffmpeg")
+        monkeypatch.setenv("NEUROVA_FFMPEG_SHA256", hashlib.sha256(_PayloadHandler.payload).hexdigest())
+        monkeypatch.delenv("NEUROVA_FFMPEG_TAG", raising=False)
         monkeypatch.delenv("NEUROVA_FFMPEG_PATH", raising=False)
         monkeypatch.delenv("NEUROVA_FFMPEG_AUTODOWNLOAD", raising=False)
         monkeypatch.setenv("PATH", "")  # 不命中系统 ffmpeg
@@ -53,6 +56,41 @@ def localSource(monkeypatch, tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.mark.asyncio
+async def testHashMismatchNeverExecutesOrPublishes(localSource, monkeypatch):
+    monkeypatch.setenv("NEUROVA_FFMPEG_SHA256", "00" * 32)
+    executed = []
+
+    def probe(path):
+        executed.append(path)
+        return True
+
+    monkeypatch.setattr(ffmpeg, "_verify_binary", probe)
+
+    assert await ffmpeg.ensure_ffmpeg() == ""
+    assert executed == [], "哈希不匹配的下载件不得进入执行校验"
+    assert not ffmpeg.managed_path().exists()
+    assert list(localSource.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def testUnpinnedCustomBuildFailsClosed(localSource, monkeypatch):
+    monkeypatch.setenv("NEUROVA_FFMPEG_TAG", "custom-build")
+    monkeypatch.delenv("NEUROVA_FFMPEG_SHA256")
+    executed = []
+
+    def probe(path):
+        executed.append(path)
+        return True
+
+    monkeypatch.setattr(ffmpeg, "_verify_binary", probe)
+
+    assert await ffmpeg.ensure_ffmpeg() == ""
+    assert executed == [], "没有可信哈希的自定义构建不得执行"
+    assert not ffmpeg.managed_path().exists()
+    assert not localSource.exists() or list(localSource.iterdir()) == []
 
 
 @pytest.mark.asyncio
@@ -81,6 +119,11 @@ async def testVerifiedBinaryIsPublishedAtomically(localSource, monkeypatch):
     seen: dict = {}
 
     def probe(path):
+        import os
+        expected = os.environ["NEUROVA_FFMPEG_SHA256"]
+        assert hashlib.sha256(Path(path).read_bytes()).hexdigest() == expected, (
+            "执行 -version 前必须先通过可信 SHA256"
+        )
         seen["path"] = Path(path)
         seen["published"] = ffmpeg.managed_path().exists()
         seen["content"] = Path(path).read_bytes()

@@ -45,9 +45,9 @@ class _Hop:
 
 def _install_fake_engine(monkeypatch, calls, routes, error=None):
     def fake_request_once(url, *, method="GET", headers=None, data=None,
-                          timeout=None, max_bytes=None, user_agent=None):
+                          timeout=None, max_bytes=None, user_agent=None, resolution=None):
         calls.append({"url": url, "method": method, "headers": headers,
-                      "data": data, "max_bytes": max_bytes})
+                      "data": data, "max_bytes": max_bytes, "resolution": resolution})
         if error is not None:
             raise error
         hop = routes.get(url)
@@ -112,6 +112,32 @@ class TestDirectTargetsRejected:
         assert issubclass(SSRFBlockedError, ValueError)
 
 
+class TestResolutionPinning:
+    def test_eachHopReceivesItsValidatedAddressPlan(self, monkeypatch):
+        import socket
+
+        monkeypatch.delenv("NEUROVA_SAFE_FETCH_ALLOW_PRIVATE", raising=False)
+        monkeypatch.setattr(
+            socket, "getaddrinfo",
+            lambda host, port, *args, **kwargs: [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port)),
+            ],
+        )
+        calls = []
+        _install_fake_engine(monkeypatch, calls, {
+            "https://public.example/a": _Hop(302, location="https://public2.example/b"),
+            "https://public2.example/b": _Hop(200, b"pinned"),
+        })
+
+        response = safe_fetch_fn("https://public.example/a", timeout=3.0)
+
+        assert response.content == b"pinned"
+        assert [call["resolution"].host for call in calls] == [
+            "public.example", "public2.example",
+        ]
+        assert all(call["resolution"].addresses == ("93.184.216.34",) for call in calls)
+
+
 # ── 每一跳 redirect 都过同一道门（P1-3 场景在统一门上复验） ──────────────
 
 class TestPerHopRedirectGuard:
@@ -145,6 +171,39 @@ class TestPerHopRedirectGuard:
         assert resp.status == 200
         assert resp.text == "跳转后正文"
         assert len(calls) == 2, "合法公网重定向链两跳两次显式请求"
+
+    def test_crossOriginRedirectStripsCredentials(self, monkeypatch):
+        import socket
+
+        monkeypatch.delenv("NEUROVA_SAFE_FETCH_ALLOW_PRIVATE", raising=False)
+        monkeypatch.setattr(
+            socket, "getaddrinfo",
+            lambda host, port, *args, **kwargs: [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port)),
+            ],
+        )
+        calls = []
+        _install_fake_engine(monkeypatch, calls, {
+            "https://public.example/a": _Hop(302, location="https://public2.example/b"),
+            "https://public2.example/b": _Hop(200, b"ok"),
+        })
+
+        safe_fetch_fn(
+            "https://public.example/a",
+            headers={
+                "Authorization": "Bearer secret",
+                "Cookie": "session=secret",
+                "X-Api-Key": "secret",
+                "Accept": "application/json",
+            },
+            timeout=3.0,
+        )
+
+        secondHeaders = calls[1]["headers"]
+        assert "Authorization" not in secondHeaders
+        assert "Cookie" not in secondHeaders
+        assert "X-Api-Key" not in secondHeaders
+        assert secondHeaders["Accept"] == "application/json"
 
     def test_redirectHopsCapped_honestError(self, monkeypatch):
         calls = []

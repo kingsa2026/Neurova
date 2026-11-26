@@ -37,7 +37,7 @@ from collections import OrderedDict
 import time
 
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from datetime import datetime, timezone
 from neurova.core.data_root import dataPath
 from neurova.core.ast_scan import parseSource
@@ -6145,7 +6145,12 @@ class ToolExecutor:
         return payload
 
     @staticmethod
-    def _blocking_fetch(url: str, user_agent: str, timeout: int = 10) -> str:
+    def _blocking_fetch(
+        url: str,
+        user_agent: str,
+        timeout: int = 10,
+        url_validator: Optional[Callable[[str], object]] = None,
+    ) -> str:
         """阻塞式 HTTP 抓取 — 只允许经 asyncio.to_thread 在线程池中调用。
 
         P2-11 修复: urllib.request.urlopen 是阻塞调用（最长卡 timeout 秒），
@@ -6154,7 +6159,9 @@ class ToolExecutor:
         """
         from neurova import http_fetch
 
-        return http_fetch.fetch_text(url, user_agent, timeout)
+        return http_fetch.fetch_text(
+            url, user_agent, timeout, url_validator=url_validator
+        )
 
     def _searxng_search(self, query: str, base_url: str) -> str:
         """searxng 自托管实例 JSON 检索（P1-2）。返回拼好的摘要文本。
@@ -6383,10 +6390,10 @@ class ToolExecutor:
             return {"error": f"不支持的协议: {scheme or '(空)'}，仅支持 http/https"}
         # SSRF 单源校验（url_guard）：web_fetch 的 url 由模型/用户完全指定，
         # 私网/环回/链路本地目标 fail-closed（不合规以 error 诚实回，不吞）
-        from neurova.security.url_guard import assert_public_url
+        from neurova.security.url_guard import resolvePublicUrl
 
         try:
-            assert_public_url(url)
+            resolvePublicUrl(url)
         except ValueError as e:
             return {"error": f"URL 未通过出站安全校验: {e}"}
         try:
@@ -6396,7 +6403,13 @@ class ToolExecutor:
 
         try:
             # 阻塞抓取走线程池（复用 P2-11 的 _blocking_fetch），不卡事件循环
-            html = await asyncio.to_thread(self._blocking_fetch, url, "Mozilla/5.0", 15)
+            html = await asyncio.to_thread(
+                self._blocking_fetch,
+                url,
+                "Mozilla/5.0",
+                15,
+                url_validator=resolvePublicUrl,
+            )
             text = self._html_to_text(html)
             return {
                 "url": url,

@@ -100,7 +100,7 @@ class TestEnsureVcRedist:
         )
         monkeypatch.setattr(env_check, "_verify_authenticode", lambda exe: True)
         monkeypatch.setattr(
-            env_check, "_run_elevated_installer", lambda exe: calls.append(("install", exe)) or 0
+            env_check, "_run_elevated_installer", lambda exe, digest: calls.append(("install", exe)) or 0
         )
         result = env_check.ensure_vc_redist(auto_install=True, download_dir=tmp_path)
         assert result.installed is True
@@ -155,7 +155,7 @@ class TestEnsureVcRedist:
             env_check, "_download_file", lambda url, dest: self._noop_download(calls, url, dest)
         )
         monkeypatch.setattr(env_check, "_verify_authenticode", lambda exe: True)
-        monkeypatch.setattr(env_check, "_run_elevated_installer", lambda exe: 1638)
+        monkeypatch.setattr(env_check, "_run_elevated_installer", lambda exe, digest: 1638)
         result = env_check.ensure_vc_redist(auto_install=True, download_dir=tmp_path)
         assert result.installed is False
         assert "exit=1638" in result.reason

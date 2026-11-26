@@ -6,6 +6,7 @@ webhook.url 由 create/update 任意指定，test 端点会向它发起服务端
 """
 
 import os
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -79,3 +80,36 @@ class TestWebhookSsrfGuard:
         assert r2.status_code == 400, (
             f"test 端点对内网 url 应 400 拒发，实得 {r2.status_code}: {r2.text}"
         )
+
+    def test_test_endpoint_uses_safe_fetch(self, client, monkeypatch):
+        import httpx
+
+        r = _create(client, "http://1.2.3.4/hook")
+        wh_id = r.json()["webhook_id"]
+        calls = []
+
+        def fake_safe_fetch(url, **kwargs):
+            calls.append((url, kwargs))
+            return SimpleNamespace(
+                status=200,
+                headers={"content-type": "application/json"},
+                content=b'{"accepted": true}',
+                text='{"accepted": true}',
+            )
+
+        async def forbid_httpx_post(*args, **kwargs):
+            raise AssertionError("webhook 测试投递不得绕过 safe_fetch")
+
+        monkeypatch.setattr("neurova.security.safe_fetch.safe_fetch", fake_safe_fetch)
+        monkeypatch.setattr(httpx.AsyncClient, "post", forbid_httpx_post)
+
+        response = client.post(
+            f"/api/v1/webhooks/{wh_id}/test",
+            json={"event_type": "test", "payload": {"n": 1}},
+        )
+
+        assert response.status_code == 200
+        assert calls[0][0] == "http://1.2.3.4/hook"
+        assert calls[0][1]["method"] == "POST"
+        delivery = next(iter(WH._deliveries.values()))
+        assert delivery["status"] == "delivered"

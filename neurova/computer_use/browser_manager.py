@@ -2940,9 +2940,8 @@ class BrowserManager:
         return await b.fill_ref(ref, text, generation)
 
     async def open_target(self, url: Optional[str] = None, backend: Optional[str] = None) -> BrowserResult:
-        """新开 tab 并激活"""
-        b = await self._get_backend(backend)
-        return await b.open_target(url)
+        """新开 tab 并激活（导航护栏与车道互斥见 lane_mutex.runOpenTarget）"""
+        return await laneSeam.runOpenTarget(self, url, backend)
 
     async def list_targets(self, backend: Optional[str] = None) -> BrowserResult:
         """列出全部 tab（含 generation 与活动标记）"""

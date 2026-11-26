@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import time
 from pathlib import Path
 
@@ -26,6 +27,7 @@ async def test_verifyBinary_doesNotBlockTheLoop(monkeypatch, tmp_path):
     calls = {"n": 0}
     monkeypatch.delenv("NEUROVA_FFMPEG_PATH", raising=False)
     monkeypatch.delenv("NEUROVA_FFMPEG_AUTODOWNLOAD", raising=False)
+    monkeypatch.setenv("NEUROVA_FFMPEG_SHA256", hashlib.sha256(b"fake-binary").hexdigest())
     monkeypatch.setattr(fm, "MANAGED_DIR", tmp_path / "tools" / "ffmpeg")
     # 三处解析口一律回"本机没有"，把执行体逼进下载 + 校验那一支
     monkeypatch.setattr(fm, "resolve_ffmpeg_path", lambda preferred="": "")
@@ -75,6 +77,7 @@ async def test_verifyBinaryFailureLandsHonest(monkeypatch, tmp_path):
 
     monkeypatch.delenv("NEUROVA_FFMPEG_PATH", raising=False)
     monkeypatch.delenv("NEUROVA_FFMPEG_AUTODOWNLOAD", raising=False)
+    monkeypatch.setenv("NEUROVA_FFMPEG_SHA256", hashlib.sha256(b"garbage").hexdigest())
     monkeypatch.setattr(fm, "MANAGED_DIR", tmp_path / "tools" / "ffmpeg")
     monkeypatch.setattr(fm, "resolve_ffmpeg_path", lambda preferred="": "")
     monkeypatch.setattr(fm, "download_url_candidates",

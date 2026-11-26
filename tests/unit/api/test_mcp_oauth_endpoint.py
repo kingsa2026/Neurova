@@ -21,7 +21,6 @@ import json
 import urllib.request
 from urllib.parse import parse_qs, urlparse
 
-import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -101,22 +100,20 @@ def isolated_env(monkeypatch):
 
 
 def _fake_token_endpoint(monkeypatch, token="ep-token"):
-    """令 token 换取走假 httpx：返回固定 access_token，并记录请求"""
+    """令 token 换取走假 HTTP 引擎：返回固定 access_token，并记录请求。"""
+    from neurova import http_fetch
 
-    class FakeResp:
-        status_code = 200
-        text = json.dumps({"access_token": token, "expires_in": 3600})
-
-        def json(self):
-            return {"access_token": token, "expires_in": 3600}
-
+    payload = {"access_token": token, "expires_in": 3600}
     calls = []
 
-    async def fake_post(self, url, data=None, headers=None):
-        calls.append({"url": url, "data": data})
-        return FakeResp()
+    def fake_request_once(url, **kwargs):
+        calls.append({"url": url, "data": kwargs.get("data")})
+        return http_fetch.HopResult(
+            200, {"content-type": "application/json"},
+            json.dumps(payload).encode("utf-8"), None,
+        )
 
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    monkeypatch.setattr(http_fetch, "request_once", fake_request_once)
     return calls
 
 
@@ -173,7 +170,7 @@ class TestOAuthAuthorizeEndpoint:
 
     def test_client_credentials_grant_rejected_400(self, app, isolated_env):
         client = _authed_client(app)
-        isolated_env([_oauth_server_entry(oauth={"token_url": "u", "client_id": "a"})])
+        isolated_env([_oauth_server_entry(oauth={"token_url": "https://8.8.8.8/token", "client_id": "a"})])
         resp = client.post(f"{BASE}/mcp-servers/remote-ac/oauth/authorize")
         assert resp.status_code == 400
 
@@ -188,8 +185,9 @@ class TestOAuthAuthorizeEndpoint:
         assert resp.status_code == 200, resp.text
         assert resp.json()["status"] == "authorized"
         # 换 token 走授权码 grant
-        assert token_calls[0]["data"]["grant_type"] == "authorization_code"
-        assert token_calls[0]["data"]["code"] == "code-1"
+        form = parse_qs(token_calls[0]["data"].decode("utf-8"))
+        assert form["grant_type"] == ["authorization_code"]
+        assert form["code"] == ["code-1"]
         # token 已入 per-call 解析缓存
         import asyncio
 

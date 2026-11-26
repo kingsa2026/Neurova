@@ -32,11 +32,11 @@ from __future__ import annotations
 
 import os
 import urllib.parse
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 
 from neurova import http_fetch
 from neurova.core.logger import get_logger
-from neurova.security.url_guard import assert_public_url
+from neurova.security.url_guard import PublicUrlResolution, resolvePublicUrl
 
 logger = get_logger(__name__)
 
@@ -44,8 +44,10 @@ DEFAULT_TIMEOUT = http_fetch.DEFAULT_TIMEOUT
 DEFAULT_MAX_BYTES = 8 * 1024 * 1024  # 8MB：常规网页/接口响应的安全上界
 MAX_REDIRECT_HOPS = http_fetch.MAX_REDIRECT_HOPS
 ALLOW_PRIVATE_ENV = "NEUROVA_SAFE_FETCH_ALLOW_PRIVATE"
+SENSITIVE_REDIRECT_HEADERS = frozenset({
+    "authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key",
+})
 
-_ALLOWED_SCHEMES = ("http", "https")
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
@@ -81,21 +83,27 @@ def originOf(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else str(url or "")
 
 
-def assertHopAllowed(url: str) -> None:
-    """逐跳 SSRF 门：scheme 白名单 + 目标主机/逐 IP 网段校验。
-
-    - scheme 仅 http/https（该校验不受 ALLOW_PRIVATE 开关影响）；
-    - ALLOW_PRIVATE 开启时放行私网目标（本地测试/自托管场景）；
-    - 其余情形委托单源 ``url_guard.assert_public_url``（含 DNS 逐 IP
-      解析校验与 fail-closed），任何拒绝转成可识别的 ``SSRFBlockedError``。
-    """
-    scheme = urllib.parse.urlparse(str(url or "")).scheme.lower()
-    if scheme not in _ALLOWED_SCHEMES:
-        raise SSRFBlockedError(f"仅支持 http/https 协议（收到 {scheme or '空'}）")
-    if privateFetchAllowed():
-        return
+def _originTuple(url: str):
+    parsed = urllib.parse.urlsplit(url)
     try:
-        assert_public_url(url)
+        port = parsed.port
+    except ValueError:
+        port = None
+    return (
+        parsed.scheme.lower(),
+        (parsed.hostname or "").lower(),
+        port or (443 if parsed.scheme.lower() == "https" else 80),
+    )
+
+
+def assertHopAllowed(
+    url: str, *, trusted_hosts: Optional[Iterable[str]] = None,
+) -> PublicUrlResolution:
+    """逐跳 SSRF 门，并返回本次连接必须使用的已验证地址计划。"""
+    try:
+        return resolvePublicUrl(
+            url, allow_private=privateFetchAllowed(), trusted_hosts=trusted_hosts,
+        )
     except ValueError as e:
         raise SSRFBlockedError(str(e)) from e
 
@@ -142,7 +150,7 @@ def safe_fetch(
     current_data = data
     for hop in range(MAX_REDIRECT_HOPS + 1):
         try:
-            assertHopAllowed(current)
+            resolution = assertHopAllowed(current)
         except SSRFBlockedError as e:
             logger.warning("safe_fetch 拒绝出站请求 origin=%s hop=%d 原因=%s",
                            originOf(current), hop, e)
@@ -150,7 +158,7 @@ def safe_fetch(
         try:
             hop_result = http_fetch.request_once(
                 current, method=current_method, headers=headers, data=current_data,
-                timeout=timeout, max_bytes=max_bytes,
+                timeout=timeout, max_bytes=max_bytes, resolution=resolution,
             )
         except Exception as e:
             # 只记异常类名：异常 message 可能内嵌完整 URL（含查询串凭据）
@@ -168,7 +176,13 @@ def safe_fetch(
             if hop_result.status not in (307, 308):
                 current_method = "GET"
                 current_data = None
-            current = urllib.parse.urljoin(current, location)
+            next_url = urllib.parse.urljoin(current, location)
+            if _originTuple(next_url) != _originTuple(current):
+                headers = {
+                    key: value for key, value in (headers or {}).items()
+                    if key.lower() not in SENSITIVE_REDIRECT_HEADERS
+                }
+            current = next_url
             continue
         if hop_result.status >= 400:
             logger.warning("safe_fetch 收到错误状态 origin=%s status=%d",

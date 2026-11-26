@@ -8,7 +8,7 @@ Neurova 安装包不含 FFmpeg（打包包含项属用户硬约束决策）；�
   env NEUROVA_FFMPEG_PATH > 托管下载件（data/tools/ffmpeg/）> 系统 PATH；
 - ``ensure_ffmpeg()``：三处全不可得才从官方 ffmpeg-static 构建下载单文件
   （免解压），主源 npmmirror（国内可达），回退 GitHub release；
-  下载后必须经 ``-version`` 真实校验才移入托管目录——校验失败绝不就位；
+  下载后必须先核验可信 SHA256，再经 ``-version`` 真实校验才移入托管目录——校验失败绝不就位；
 - ``start_ffmpeg_bootstrap()``：随服务启动的后台任务（不阻塞启动路径，
   系统已有 ffmpeg 时零下载零网络）；NEUROVA_FFMPEG_AUTODOWNLOAD=0 可关。
 
@@ -18,6 +18,7 @@ manifest 诚实降级（见 collaboration/neurflow/drama_nodes.py）。
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import platform
 import shutil
@@ -39,6 +40,13 @@ BINARY_NAME = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
 
 # ffmpeg-static 构建版本（asset 命名 ffmpeg-<platform>-<arch>，单文件可执行）
 DEFAULT_TAG = "b6.0"
+EXPECTED_BINARY_SHA256 = {
+    "win32-x64": "e9fd5e711debab9d680955fc1e38a2c1160fd280b144476cc3f62bc43ef49db1",
+    "darwin-x64": "cfe20936c83ecf5d68e424b87e8cc45b24dd6be81787810123bb964a0df686f9",
+    "darwin-arm64": "a90e3db6a3fd35f6074b013f948b1aa45b31c6375489d39e572bea3f18336584",
+    "linux-x64": "ed652b2f32e0851d1946894fb8333f5b677c1b2ce6b9d187910a67f8b99da028",
+    "linux-arm64": "237800b37bb65a81ad47871c6c8b7c45c0a3ca62a5b3f9d2a7a9a2dd9a338271",
+}
 _MIRROR_TMPL = f"https://registry.npmmirror.com/-/binary/ffmpeg-static/{{tag}}/ffmpeg-{{asset}}"
 _GITHUB_TMPL = f"https://github.com/eugeneware/ffmpeg-static/releases/download/{{tag}}/ffmpeg-{{asset}}"
 
@@ -65,6 +73,32 @@ def download_url_candidates() -> List[str]:
     tag = (os.environ.get("NEUROVA_FFMPEG_TAG") or DEFAULT_TAG).strip() or DEFAULT_TAG
     asset = _asset_name()
     return [_MIRROR_TMPL.format(tag=tag, asset=asset), _GITHUB_TMPL.format(tag=tag, asset=asset)]
+
+
+def expectedBinarySha256() -> str:
+    """返回下载前必须固定的摘要；自定义构建无显式摘要时拒绝继续。"""
+    override = (os.environ.get("NEUROVA_FFMPEG_SHA256") or "").strip().lower()
+    if override:
+        if len(override) == 64 and all(char in "0123456789abcdef" for char in override):
+            return override
+        logger.warning("NEUROVA_FFMPEG_SHA256 不是合法 SHA256，拒绝自动下载")
+        return ""
+    tag = (os.environ.get("NEUROVA_FFMPEG_TAG") or DEFAULT_TAG).strip() or DEFAULT_TAG
+    if tag != DEFAULT_TAG:
+        return ""
+    return EXPECTED_BINARY_SHA256.get(_asset_name(), "")
+
+
+def _verifyBinarySha256(path: Path, expected: str) -> bool:
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as binary:
+            for chunk in iter(lambda: binary.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest() == expected
+    except OSError as e:
+        logger.warning("FFmpeg 摘要读取失败: %s", e)
+        return False
 
 
 def _is_exec_file(p: str) -> bool:
@@ -151,6 +185,12 @@ async def ensure_ffmpeg() -> str:
         existing = resolve_ffmpeg_path()  # 等锁期间可能已有并发下载完成
         if existing:
             return existing
+        expectedHash = expectedBinarySha256()
+        if not expectedHash:
+            logger.warning(
+                "FFmpeg 自动下载缺少可信 SHA256（自定义构建须设置 NEUROVA_FFMPEG_SHA256），拒绝下载"
+            )
+            return ""
         MANAGED_DIR.mkdir(parents=True, exist_ok=True)
         for url in download_url_candidates():
             logger.info("FFmpeg 不在本机，开始下载（%s）…", url)
@@ -162,6 +202,10 @@ async def ensure_ffmpeg() -> str:
             os.close(fd)
             tmp = Path(tmpName)
             if not await _download_to(url, tmp):
+                tmp.unlink(missing_ok=True)
+                continue
+            if not await asyncio.to_thread(_verifyBinarySha256, tmp, expectedHash):
+                logger.warning("FFmpeg 下载文件 SHA256 不匹配，丢弃：%s", url)
                 tmp.unlink(missing_ok=True)
                 continue
             try:

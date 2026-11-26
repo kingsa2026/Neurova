@@ -34,7 +34,7 @@ import re
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 AGENT_WORKSPACES_ENV = "NEUROVA_AGENT_WORKSPACES_DIR"
 

@@ -121,8 +121,11 @@ class TestJournalUnknownBlocksLane:
         reset_tool_call_journal()
         try:
             journal = get_tool_call_journal()
-            entry = journal.begin("k-nav-1", "browser_navigate", scope="u1:s1")
-            journal.settle(entry.id, "unknown", error_class="timeout")
+            entry, claimed = journal.begin(
+                "k-nav-1", "browser_navigate", scope="u1:s1", owner="call-nav-1"
+            )
+            assert claimed is True
+            journal.settle(entry.id, "unknown", error_class="timeout", owner="call-nav-1")
             lm = LaneMutex()
             with pytest.raises(LaneRefusal) as ei:
                 with lm.hold("desktop", scope="u1:s1"):
@@ -146,8 +149,11 @@ class TestJournalUnknownBlocksLane:
         reset_tool_call_journal()
         try:
             journal = get_tool_call_journal()
-            entry = journal.begin("k-click-1", "computer_click", scope="u1:s1")
-            journal.settle(entry.id, "unknown", error_class="timeout")
+            entry, claimed = journal.begin(
+                "k-click-1", "computer_click", scope="u1:s1", owner="call-click-1"
+            )
+            assert claimed is True
+            journal.settle(entry.id, "unknown", error_class="timeout", owner="call-click-1")
             lm = LaneMutex()
             with pytest.raises(LaneRefusal) as ei:
                 with lm.hold("browser:s1", scope="u1:s1"):
@@ -166,8 +172,11 @@ class TestJournalUnknownBlocksLane:
         reset_tool_call_journal()
         try:
             journal = get_tool_call_journal()
-            entry = journal.begin("k-ok-1", "browser_navigate", scope="u1:s1")
-            journal.settle(entry.id, "succeeded", result_json="{}")
+            entry, claimed = journal.begin(
+                "k-ok-1", "browser_navigate", scope="u1:s1", owner="call-ok-1"
+            )
+            assert claimed is True
+            journal.settle(entry.id, "succeeded", result_json="{}", owner="call-ok-1")
             lm = LaneMutex()
             with lm.hold("desktop", scope="u1:s1"):
                 pass  # 已收敛的账目不阻塞

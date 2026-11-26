@@ -104,6 +104,40 @@ class TestConnectDisconnect:
         assert "mcp" in client._servers["srv"]["last_error"].lower()
 
     @pytest.mark.asyncio
+    async def testSessionContextEntersAndExitsInSameTask(self, monkeypatch):
+        from neurova.tool_layers import mcp_client
+
+        class TaskBoundContext:
+            def __init__(self, value):
+                self.value = value
+                self.enterTask = None
+                self.exitTask = None
+
+            async def __aenter__(self):
+                self.enterTask = asyncio.current_task()
+                return self.value
+
+            async def __aexit__(self, *args):
+                self.exitTask = asyncio.current_task()
+                if self.exitTask is not self.enterTask:
+                    raise RuntimeError("MCP cancel scope crossed tasks")
+                return False
+
+        transport = TaskBoundContext((object(), object()))
+        session = _make_session([])
+        sessionContext = TaskBoundContext(session)
+        monkeypatch.setattr(mcp_client, "_SDK_AVAILABLE", True)
+        monkeypatch.setattr(mcp_client, "stdio_client", lambda params: transport)
+        monkeypatch.setattr(mcp_client, "ClientSession", lambda *args: sessionContext)
+        client = MCPToolClient()
+
+        assert await client.connect_server("srv", _stdio_config())
+        await client.disconnect_server("srv")
+
+        assert transport.exitTask is transport.enterTask
+        assert sessionContext.exitTask is sessionContext.enterTask
+
+    @pytest.mark.asyncio
     async def test_disconnect_server(self):
         client = MCPToolClient()
         stack = AsyncMock()

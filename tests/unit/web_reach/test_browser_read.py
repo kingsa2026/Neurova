@@ -7,10 +7,12 @@
 - 与 web_reach._ok/_error 返回契约一致
 """
 
+import asyncio
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from tests.unit.web_reach._playwrightStub import stubAsyncPlaywright
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -112,6 +114,75 @@ class TestBrowserReadSuccess(unittest.TestCase):
         self.assertEqual(kw["wait_until"], "load")
         self.assertLessEqual(kw["timeout"], 30_000)
         page.wait_for_timeout.assert_awaited_once()
+        page.route.assert_awaited_once()
+
+
+class TestBrowserReadNetworkRoute(unittest.TestCase):
+    def _routeHandler(self, safeFetch):
+        from neurova.web_reach.browser_read import browser_read
+
+        page = _make_fake_page({"title": "t", "text": "正文"})
+        browser = _make_fake_browser(page)
+        pw = _make_fake_playwright(browser)
+        patcher = patch("neurova.security.safe_fetch.safe_fetch", safeFetch)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        with stubAsyncPlaywright() as factory:
+            factory.return_value = pw
+            self.assertTrue(browser_read("http://1.2.3.4/page")["success"])
+        return page.route.await_args.args[1]
+
+    def test_privateSubresourceIsBlockedBySafeFetch(self):
+        from neurova.security.safe_fetch import SSRFBlockedError
+
+        def safeFetch(url, **kwargs):
+            raise SSRFBlockedError("私网拒绝")
+
+        handler = self._routeHandler(safeFetch)
+        request = SimpleNamespace(
+            url="http://127.0.0.1/admin", method="GET", headers={}, post_data_buffer=None,
+        )
+        route = SimpleNamespace(
+            request=request,
+            continue_=AsyncMock(), fulfill=AsyncMock(), abort=AsyncMock(),
+        )
+
+        asyncio.run(handler(route))
+
+        route.abort.assert_awaited_once()
+        route.fulfill.assert_not_awaited()
+
+    def test_publicSubresourceIsFulfilledWithoutBrowserDNS(self):
+        from neurova.security.safe_fetch import SafeFetchResponse
+
+        calls = []
+
+        def safeFetch(url, **kwargs):
+            calls.append((url, kwargs))
+            return SafeFetchResponse(
+                200,
+                {"content-type": "text/html", "content-length": "999", "content-encoding": "gzip"},
+                b"<p>safe</p>",
+                url,
+            )
+
+        handler = self._routeHandler(safeFetch)
+        request = SimpleNamespace(
+            url="https://public.example/app.js", method="GET", headers={}, post_data_buffer=None,
+        )
+        route = SimpleNamespace(
+            request=request,
+            continue_=AsyncMock(), fulfill=AsyncMock(), abort=AsyncMock(),
+        )
+
+        asyncio.run(handler(route))
+
+        self.assertEqual(calls[0][0], request.url)
+        kwargs = route.fulfill.await_args.kwargs
+        self.assertEqual(kwargs["body"], b"<p>safe</p>")
+        self.assertNotIn("content-length", kwargs["headers"])
+        self.assertNotIn("content-encoding", kwargs["headers"])
+        route.continue_.assert_not_awaited()
 
 
 class TestBrowserReadErrors(unittest.TestCase):

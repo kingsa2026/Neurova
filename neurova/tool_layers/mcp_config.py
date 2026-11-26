@@ -221,6 +221,27 @@ def _require_transport_inputs(transport: str, server: typing.Dict[str, typing.An
         _reject(f"transport={transport} 需要 url 字段")
 
 
+def _validate_outbound_urls(server: typing.Dict[str, typing.Any], transport: str) -> None:
+    from neurova.security.mcp_transport import trustedHosts
+    from neurova.security.url_guard import assert_public_url
+
+    targets = []
+    if transport in ("http", "sse"):
+        targets.append(("url", server["url"]))
+    oauth = server.get("oauth")
+    if isinstance(oauth, dict):
+        targets.extend(
+            (f"oauth.{key}", oauth[key])
+            for key in OAUTH_OUTBOUND_URL_KEYS
+            if oauth.get(key)
+        )
+    for field, url in targets:
+        try:
+            assert_public_url(url, trusted_hosts=trustedHosts())
+        except ValueError as exc:
+            _reject(f"{field} 未通过出网安全校验: {exc}")
+
+
 def validate_mcp_server_config(server: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     """校验并规范化 MCP server 配置。
 
@@ -241,6 +262,7 @@ def validate_mcp_server_config(server: typing.Dict[str, typing.Any]) -> typing.D
     transport = _infer_transport(server)
     _require_transport_inputs(transport, server)
     _reject_shell_command(server)
+    _validate_outbound_urls(server, transport)
 
     normalized = {
         "id": server["id"],

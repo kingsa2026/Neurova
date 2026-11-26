@@ -12,8 +12,9 @@
   ``agent_run_store``（RLock + WAL + 迁移链）；
 - ``run()`` 编排层：begin → 命中 running/succeeded/failed/unknown 的分流 →
   执行 → settle；unknown 与 replayed 语义在这里实现；
-- ``computeKey``：幂等键 = sha256(工具名 + 规范化参数 + 作用域)，
-  作用域 = ``<request_user_id>:<session_id>``（键在会话内有效，跨会话不误伤）。
+- ``computeKey``：幂等键 = sha256(工具名 + 规范化参数 + 作用域 + 请求级 call ID)，
+  作用域 = ``<request_user_id>:<session_id>``；同一 call ID 的重试在会话内幂等，
+  不同 call ID 的同参调用是独立动作，不互相误伤。
 
 消费方：``ToolExecutor.execute``（tool_executor.py 单管道）——只读能力声明的
 工具不记账（零开销），其余工具全部先记账。
@@ -88,17 +89,20 @@ class JournalEntry:
     settled_at: Optional[float] = None
 
 
-def computeKey(tool_name: str, params: Dict[str, Any], scope: str) -> str:
-    """幂等键 = sha256(工具名 + 规范化参数 + 作用域)。
+def computeKey(tool_name: str, params: Dict[str, Any], scope: str, callId: str) -> str:
+    """请求级幂等键：工具名 + 规范化参数 + 作用域 + call ID。
 
     参数规范化：JSON 序列化按键排序（键序无关）；不可序列化值退化为 str()。
-    作用域 = ``<request_user_id>:<session_id>``——键在会话内判重，跨会话不误伤。
+    作用域 = ``<request_user_id>:<session_id>``；call ID 区分真实动作与网络重试。
     """
+    callId = str(callId or "")
+    if not callId:
+        raise ValueError("工具账本幂等键必须提供请求级 call ID")
     try:
         canonical = json.dumps(params or {}, sort_keys=True, ensure_ascii=False, default=str)
     except Exception:  # noqa: BLE001 - 不可序列化参数退化为字符串化
         canonical = str(params)
-    raw = f"{tool_name}\n{canonical}\n{scope}"
+    raw = f"{tool_name}\n{canonical}\n{scope}\n{callId}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -452,23 +456,23 @@ async def _runJournaledCall(executor: Any, tool_name: str, params: Dict[str, Any
     if not journal.enabled or not _shouldJournal(executor, tool_name):
         return await executor._execute_single_tool(tool_name, params)
     scope = _journalScope(executor)
-    key = computeKey(tool_name, params, scope)
     from neurova.core.turn_context import get_turn_tool_call_id
 
-    call_id = str(get_turn_tool_call_id() or "")
-    if not call_id:
+    callId = str(get_turn_tool_call_id() or "")
+    if not callId:
         return {
             "error": "工具调用缺少请求级 call ID，拒绝写入工具账本",
             "code": "tool_call_id_missing",
             "tool_name": tool_name,
         }
+    key = computeKey(tool_name, params, scope, callId)
     return await journal.run(
         key,
         tool_name,
         scope,
         invoke=lambda: executor._execute_single_tool(tool_name, params),
         is_success=getattr(executor, "_result_is_success", None) or (lambda result: True),
-        owner=call_id,
+        owner=callId,
     )
 
 

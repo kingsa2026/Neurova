@@ -171,8 +171,15 @@ class TestRunRead:
     def test_buildsReadArgv(self, monkeypatch):
         captured = _patchRun(monkeypatch, stdout=_OK_READ)
         _patchExecutable(monkeypatch, "AR")
-        cli.runRead("https://example.com")
-        assert captured["cmd"] == ["AR", "read", "https://example.com"]
+        cli.runRead("http://1.2.3.4/page")
+        assert captured["cmd"] == ["AR", "read", "http://1.2.3.4/page"]
+
+    def test_hostnameIsNotSupportedBecauseDnsCannotBePinned(self, monkeypatch):
+        captured = _patchRun(monkeypatch, stdout=_OK_READ)
+        result = cli.runRead("https://example.com/page")
+        assert result["success"] is False
+        assert result["code"] == "not_supported"
+        assert captured == {}, "无法固定 DNS 时不得启动子进程"
 
     def test_ssrfBlockedBeforeSubprocess(self, monkeypatch):
         """CLI 自带抓取会绕过本仓出网层——入口必须先过 url_guard 同一道门。"""

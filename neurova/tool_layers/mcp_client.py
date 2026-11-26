@@ -97,20 +97,37 @@ class MCPToolClient:
                     cwd=config.get("cwd"),
                 )
                 read_stream, write_stream = await stack.enter_async_context(stdio_client(server_params))
-            elif transport == "sse":
-                read_stream, write_stream = await stack.enter_async_context(
-                    sse_client(config["url"], headers=config.get("headers") or {})
-                )
-            elif transport == "http":
-                import httpx
+            elif transport in ("sse", "http"):
+                import httpx2
+                from neurova.security.mcp_transport import pinnedMcpTransport, resolveMcpEndpoint
 
-                # 2.x：http_client 为关键字参数，上下文 yield (read, write) 二元组；
-                # headers（Bearer 等）经注入的 http_client 携带
-                http_client = httpx.AsyncClient(headers=config.get("headers") or {})
-                await stack.enter_async_context(http_client)
-                read_stream, write_stream = await stack.enter_async_context(
-                    streamable_http_client(config["url"], http_client=http_client)
-                )
+                endpoint = config["url"]
+                resolution = resolveMcpEndpoint(endpoint)
+                httpTransport = pinnedMcpTransport(resolution)
+                if transport == "sse":
+                    def clientFactory(**kwargs):
+                        return httpx2.AsyncClient(
+                            transport=httpTransport, trust_env=False, **kwargs,
+                        )
+
+                    read_stream, write_stream = await stack.enter_async_context(
+                        sse_client(
+                            endpoint,
+                            headers=config.get("headers") or {},
+                            httpx_client_factory=clientFactory,
+                        )
+                    )
+                else:
+                    http_client = httpx2.AsyncClient(
+                        headers=config.get("headers") or {},
+                        timeout=config.get("timeout_ms", 30000) / 1000,
+                        transport=httpTransport,
+                        trust_env=False,
+                    )
+                    await stack.enter_async_context(http_client)
+                    read_stream, write_stream = await stack.enter_async_context(
+                        streamable_http_client(endpoint, http_client=http_client)
+                    )
             else:
                 raise ValueError(f"不支持的 transport: {transport}")
 

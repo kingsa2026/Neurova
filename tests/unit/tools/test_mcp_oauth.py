@@ -13,6 +13,7 @@ import pytest
 from neurova.tool_layers.mcp_oauth import (
     OAuthTokenError,
     OAuthTokenProvider,
+    _register_client_dynamically,
     generate_pkce_pair,
     get_token_cache,
     resolve_mcp_token,
@@ -414,6 +415,53 @@ class TestResolveGrantAware:
             {"grant_type": "authorization_code", "token_url": "u", "client_id": "a", "client_secret": "b"},
         )
         assert token == "pre-authed"
+
+
+class TestOAuthDefaultEgressPinned:
+    def _install_engine(self, monkeypatch, payload):
+        import httpx
+        from neurova import http_fetch
+
+        calls = []
+
+        def fake_request_once(url, **kwargs):
+            calls.append((url, kwargs))
+            return http_fetch.HopResult(
+                200, {"content-type": "application/json"},
+                json.dumps(payload).encode("utf-8"), None,
+            )
+
+        class ForbiddenClient:
+            def __init__(self, *args, **kwargs):
+                raise AssertionError("OAuth 默认出网不得使用未固定 DNS 的 httpx 客户端")
+
+        monkeypatch.setattr(http_fetch, "request_once", fake_request_once)
+        monkeypatch.setattr(httpx, "AsyncClient", ForbiddenClient)
+        return calls
+
+    @pytest.mark.asyncio
+    async def test_client_credentials_uses_address_plan(self, monkeypatch):
+        calls = self._install_engine(monkeypatch, {"access_token": "tok"})
+        provider = OAuthTokenProvider("http://1.2.3.4/token", "cid", "secret")
+        assert await provider.get_access_token() == "tok"
+        assert calls[0][1]["resolution"].addresses == ("1.2.3.4",)
+
+    @pytest.mark.asyncio
+    async def test_code_exchange_uses_address_plan(self, monkeypatch):
+        calls = self._install_engine(monkeypatch, {"access_token": "tok"})
+        provider = OAuthTokenProvider("http://1.2.3.4/token", "cid", "secret")
+        token = await provider.fetch_token_by_code("code", "verifier", "http://127.0.0.1/cb")
+        assert token == "tok"
+        assert calls[0][1]["resolution"].addresses == ("1.2.3.4",)
+
+    @pytest.mark.asyncio
+    async def test_dynamic_registration_uses_address_plan(self, monkeypatch):
+        calls = self._install_engine(monkeypatch, {"client_id": "cid"})
+        result = await _register_client_dynamically(
+            "http://1.2.3.4/register", "http://127.0.0.1/cb", "mcp", "client",
+        )
+        assert result == ("cid", "", "")
+        assert calls[0][1]["resolution"].addresses == ("1.2.3.4",)
 
 
 if __name__ == "__main__":

@@ -10,9 +10,10 @@ UnknownHostKeyPolicy 抛 HostKeyConfirmationNeeded（携带公钥 SHA256
 （data/<agent_id>/ssh_known_hosts.json）并重连。已确认主机：指纹一致放行；指纹变化抛
 HostKeyMismatchError（fail-closed + 审计 HIGH）。
 
-失败相位（U3）：连接失败/认证失败/超时且零输出 → RemoteNotExecutedError
-（executed=False、retryable=True、phase=connect|auth|timeout）；已获部分输出后中断 →
-executed="unknown"、retryable=False（不可盲目重试）。上层据此映射结构化错误载荷。
+失败相位（U3）：连接失败/认证失败/连接期超时 → RemoteNotExecutedError
+（executed=False、retryable=True、phase=connect|auth|timeout）；执行期超时或
+已获部分输出后中断 → executed="unknown"、retryable=False（不可盲目重试）。
+上层据此映射结构化错误载荷。
 """
 
 from __future__ import annotations
@@ -62,7 +63,7 @@ class RemoteNotExecutedError(Exception):
     """命令未在远端执行（或执行状态未知）的结构化失败（U3 相位追踪）。
 
     phase: connect | auth | timeout | exec；
-    executed: False（确认未执行）| "unknown"（已获部分输出后中断）；
+    executed: False（确认未执行）| "unknown"（执行期超时或已获部分输出后中断）；
     retryable: 是否可安全重试（executed="unknown" 时恒为 False）。
     """
 
@@ -178,13 +179,15 @@ def _classifyConnectFailure(e: Exception, user: Optional[str], host: str) -> Rem
 
 
 def _classifyExecFailure(e: Exception, outBytes: bytes, errBytes: bytes) -> RemoteNotExecutedError:
-    """执行期失败：已获部分输出 → executed="unknown" 不可盲目重试；零输出 → 判未执行。"""
+    """执行期失败：超时或已获部分输出均判执行状态未知，不可盲目重试。"""
+    if isinstance(e, (socket.timeout, TimeoutError)):
+        return RemoteNotExecutedError(
+            f"SSH 命令执行超时（无法确认远端是否已执行，不可盲目重试）: {e}",
+            phase="timeout", retryable=False, executed="unknown")
     if outBytes or errBytes:
         return RemoteNotExecutedError(
             f"SSH 命令执行中断（已获部分输出，不可盲目重试）: {e}",
             phase="exec", retryable=False, executed="unknown")
-    if isinstance(e, (socket.timeout, TimeoutError)):
-        return RemoteNotExecutedError(f"SSH 命令执行超时（零输出）: {e}", phase="timeout")
     return RemoteNotExecutedError(
         f"SSH 命令执行失败（零输出，判定未执行）: {e}", phase="exec")
 

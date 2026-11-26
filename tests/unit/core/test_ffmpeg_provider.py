@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import stat
 
 import pytest
@@ -69,6 +70,31 @@ class TestPlatformAssets:
         monkeypatch.setenv("NEUROVA_FFMPEG_URL", "https://example.test/ffmpeg")
         assert ff.download_url_candidates() == ["https://example.test/ffmpeg"]
 
+    def test_default_build_uses_pinned_digest(self, monkeypatch):
+        monkeypatch.setattr(ff.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(ff.platform, "machine", lambda: "AMD64")
+        monkeypatch.delenv("NEUROVA_FFMPEG_SHA256", raising=False)
+        monkeypatch.delenv("NEUROVA_FFMPEG_TAG", raising=False)
+        assert ff.expectedBinarySha256() == (
+            "e9fd5e711debab9d680955fc1e38a2c1160fd280b144476cc3f62bc43ef49db1"
+        )
+
+    def test_custom_build_requires_explicit_digest(self, monkeypatch):
+        monkeypatch.setenv("NEUROVA_FFMPEG_TAG", "custom-build")
+        monkeypatch.delenv("NEUROVA_FFMPEG_SHA256", raising=False)
+        assert ff.expectedBinarySha256() == ""
+
+    def test_invalid_explicit_digest_is_rejected(self, monkeypatch):
+        monkeypatch.setenv("NEUROVA_FFMPEG_SHA256", "not-a-sha256")
+        assert ff.expectedBinarySha256() == ""
+
+    def test_unsupported_official_asset_is_rejected(self, monkeypatch):
+        monkeypatch.setattr(ff.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(ff.platform, "machine", lambda: "ARM64")
+        monkeypatch.delenv("NEUROVA_FFMPEG_SHA256", raising=False)
+        monkeypatch.delenv("NEUROVA_FFMPEG_TAG", raising=False)
+        assert ff.expectedBinarySha256() == ""
+
 
 class TestEnsureDownload:
     @pytest.mark.asyncio
@@ -98,6 +124,10 @@ class TestEnsureDownload:
         async def fake_download(url, dest):
             dest.write_bytes(b"#!/bin/sh\necho fake")
             return True
+
+        monkeypatch.setenv(
+            "NEUROVA_FFMPEG_SHA256", hashlib.sha256(b"#!/bin/sh\necho fake").hexdigest()
+        )
 
         class P:
             returncode = 0
@@ -150,6 +180,8 @@ class TestEnsureDownload:
         async def fake_download(url, dest):
             dest.write_bytes(b"garbage")
             return True
+
+        monkeypatch.setenv("NEUROVA_FFMPEG_SHA256", hashlib.sha256(b"garbage").hexdigest())
 
         class P:
             returncode = 1

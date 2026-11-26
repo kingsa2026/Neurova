@@ -44,6 +44,7 @@ __all__ = [
     "currentLaneScope",
     "activeSessionKey",
     "runNavigation",
+    "runOpenTarget",
 ]
 
 #: 桌面车道键（前台输入注入族）
@@ -309,5 +310,44 @@ async def runNavigation(manager: Any, url: str, backend: Any, generation: Any) -
             },
         )
     if result.success:
+        guardrail.noteSeenLinks(manager, [url])
+    return result
+
+
+async def runOpenTarget(manager: Any, url: Optional[str], backend: Any) -> "BrowserResult":
+    """新标签（open_target）的车道包装：与 `runNavigation` 同一护栏与车道。
+
+    新开 tab 会激活并占据操作面，等价于一次导航：URL 非空必须先过
+    `navigationRefusal`（CORE-17——原实现直调后端，可带任意 URL 绕过复核），
+    执行必须持 browser:<session> 车道（与 desktop 互斥）。成功且 URL 非空时
+    记入已见链接册，后续同站/已见链接免审判据与 navigate 一致。
+    """
+    from neurova.computer_use import guardrail
+
+    if url:
+        refusal = await guardrail.navigationRefusal(manager, url)
+        if refusal is not None:
+            return refusal
+    laneKey = f"{BROWSER_LANE_PREFIX}{activeSessionKey(manager)}"
+    try:
+        with get_lane_mutex().hold(laneKey, scope=currentLaneScope()):
+            b = await manager._get_backend(backend)
+            result = await b.open_target(url)
+    except LaneRefusal as laneRefusal:
+        logger.warning("新标签被车道拒绝（%s）：%s", laneRefusal.code, laneRefusal.message)
+        from neurova.computer_use.browser_manager import BrowserResult
+
+        return BrowserResult(
+            success=False,
+            error=laneRefusal.message,
+            data={
+                "guardrail": {
+                    "code": laneRefusal.code,
+                    "lane": laneRefusal.lane,
+                    "url": url,
+                }
+            },
+        )
+    if result.success and url:
         guardrail.noteSeenLinks(manager, [url])
     return result

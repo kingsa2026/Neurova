@@ -14,6 +14,8 @@ Webhook 管理 API
 from neurova.core.atomic_io import loadJsonStore, saveJsonStore
 from neurova.core.logger import get_logger
 from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
+import asyncio
+import json
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -205,16 +207,28 @@ async def test_webhook(webhook_id: str, body: WebhookTestRequest,
         "created_at": time.time(),
     }
     try:
-        import httpx
+        from neurova.security import safe_fetch
 
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                wh["url"],
-                json={"event_type": body.event_type, "payload": body.payload},
-                headers={"X-Neurova-Webhook": webhook_id},
-            )
-        delivery["response_code"] = resp.status_code
-        delivery["status"] = "delivered" if 200 <= resp.status_code < 300 else "failed"
+        response = await asyncio.to_thread(
+            safe_fetch.safe_fetch,
+            wh["url"],
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "X-Neurova-Webhook": webhook_id,
+            },
+            data=json.dumps(
+                {"event_type": body.event_type, "payload": body.payload},
+                ensure_ascii=False,
+            ).encode("utf-8"),
+            timeout=10,
+        )
+        delivery["response_code"] = response.status
+        delivery["status"] = "delivered" if 200 <= response.status < 300 else "failed"
+    except safe_fetch.HTTPStatusError as e:
+        delivery["response_code"] = e.status
+        delivery["error"] = str(e)[:200]
+        logger.warning("Webhook test to %s failed: %s", wh.get("url"), e)
     except Exception as e:  # noqa: BLE001
         delivery["error"] = str(e)[:200]
         logger.warning("Webhook test to %s failed: %s", wh.get("url"), e)
