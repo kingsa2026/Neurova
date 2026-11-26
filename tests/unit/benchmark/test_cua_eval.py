@@ -340,3 +340,62 @@ class TestRepeatedRuns:
                                      lambda t: {"evidence": {}}, repeats=2,
                                      costNote={"run_by": "manual"})
         assert report["cost_note"] == {"run_by": "manual"}
+
+
+class TestDoneWithoutVerify:
+    """C3-1 行级信号（OSWorld M2 教训：DONE 声明假完成率 30%）：任务声明
+    完成（claimed_done）但最后一步不是观察面核验动作（截图/窗口枚举）
+    → 行级 done_without_verify=True，聚合 done_without_verify_tasks 计数。
+    无声明不标；last_action_tool 缺失不臆造。"""
+
+    def test_claimedDoneWithoutCheckActionFlagged(self):
+        def episode(task):
+            return {"claimed_done": True, "last_action_tool": "computer_click"}
+
+        report = runCuaTasks([_task("t1", passed=False)], episode)
+        row = report["per_task"][0]
+        assert row["done_without_verify"] is True
+        assert report["done_without_verify_tasks"] == 1
+
+    def test_claimedDoneAfterScreenshotNotFlagged(self):
+        def episode(task):
+            return {"claimed_done": True, "last_action_tool": "computer_screenshot"}
+
+        report = runCuaTasks([_task("t1", passed=True)], episode)
+        assert report["per_task"][0]["done_without_verify"] is False
+        assert report["done_without_verify_tasks"] == 0
+
+    def test_noClaimNotFlagged(self):
+        report = runCuaTasks([_task("t1", passed=False)],
+                             lambda t: {"last_action_tool": "computer_click"})
+        assert report["per_task"][0]["done_without_verify"] is False
+        assert report["done_without_verify_tasks"] == 0
+
+    def test_missingLastActionToolNotFabricated(self):
+        def episode(task):
+            return {"claimed_done": True}
+
+        report = runCuaTasks([_task("t1", passed=False)], episode)
+        assert report["per_task"][0]["done_without_verify"] is False, \
+            "无最后动作信息时不臆造判定"
+
+    def test_adapterEpisodeDefaultsNoClaim(self):
+        adapter = ToolExecutorEpisodeAdapter(_executorStub(), {
+            "t1": [{"tool": "computer_click", "params": {"x": 1, "y": 2}}]})
+
+        import asyncio
+        evidence = asyncio.run(adapter(_task("t1", passed=True)))
+        assert "claimed_done" not in evidence, "脚本化形态无完成声明概念"
+        assert evidence["last_action_tool"] == "computer_click"
+        report = runCuaTasks([_task("t1", passed=True)], lambda t: evidence)
+        assert report["done_without_verify_tasks"] == 0
+
+    def test_repeatedRunAccumulatesDoneWithoutVerify(self):
+        from neurova.benchmark.cua_eval import runCuaTasksRepeated
+
+        def episode(task):
+            return {"claimed_done": True, "last_action_tool": "computer_type"}
+
+        report = runCuaTasksRepeated([_task("t1", passed=False)], episode, repeats=2)
+        assert report["done_without_verify_tasks"] == 2, "跨轮累计"
+        assert report["per_task"][0]["done_without_verify"] is True

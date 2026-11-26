@@ -146,11 +146,13 @@ class ToolExecutorEpisodeAdapter:
             raise CuaInfraError(
                 f"终态取证 {self._terminalTool} 失败: {_firstError(terminal)}"
             )
+        executedTools = [entry["tool"] for entry in results if not entry.get("invalid")]
         return {
             "task_id": task.task_id,
             "instruction": task.instruction,
             "action_results": results,
             "action_invalid": invalidCount,
+            "last_action_tool": executedTools[-1] if executedTools else self._terminalTool,
             "terminal": terminal,
         }
 
@@ -197,6 +199,13 @@ def runCuaTasks(
                 failureClass = "infra_checker"
                 logger.warning("[cua_eval] 判据异常 task=%s: %s", task.task_id, exc)
 
+        # C3-1 假完成信号（M2 教训）：声明完成但最后一步不是观察面核验动作。
+        # 无声明不标；last_action_tool 缺失不臆造判定。
+        lastTool = str(evidence.get("last_action_tool") or "")
+        doneWithoutVerify = bool(evidence.get("claimed_done")) and (
+            lastTool != "" and lastTool not in _CUA_OBSERVATION_TOOLS
+        )
+
         perTask.append(
             {
                 "task_id": task.task_id,
@@ -207,6 +216,7 @@ def runCuaTasks(
                 "details": details,
                 "latency_ms": round(elapsedMs, 2),
                 "action_invalid": int(evidence.get("action_invalid") or 0),
+                "done_without_verify": doneWithoutVerify,
             }
         )
 
@@ -222,6 +232,9 @@ def runCuaTasks(
         "tasks_failed": sum(1 for row in judgedRows if not row["passed"]),
         "tasks_infra_failed": tasksTotal - len(judgedRows),
         "action_invalid_total": sum(row["action_invalid"] for row in perTask),
+        "done_without_verify_tasks": sum(
+            1 for row in perTask if row["done_without_verify"]
+        ),
         "score": round(sum(scores) / len(scores), _SCORE_DIGITS) if scores else None,
         "avg_latency_ms": round(sum(latencies) / len(latencies), 2) if latencies else None,
         "per_task": perTask,
@@ -275,6 +288,9 @@ def runCuaTasksRepeated(
                 "flipped": flipped,
                 "runs_infra": len(rows) - len(judgedRows),
                 "action_invalid": sum(row["action_invalid"] for row in rows),
+                "done_without_verify": any(
+                    row["done_without_verify"] for row in rows
+                ),
                 "rows": rows,
             }
         )
@@ -303,6 +319,9 @@ def runCuaTasksRepeated(
         "pass_rate_min": min(passRates) if passRates else None,
         "pass_rate_max": max(passRates) if passRates else None,
         "action_invalid_total": sum(row["action_invalid"] for row in perTask),
+        "done_without_verify_tasks": sum(
+            1 for row in perTask for sub in row["rows"] if sub["done_without_verify"]
+        ),
         "per_task": perTask,
         "runs_reports": runs,
         "executed_at": datetime.now(timezone.utc).isoformat(),
