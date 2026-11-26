@@ -37,7 +37,7 @@ class TestValidateOutboundUrl:
 
     def test_rejects_non_http_schemes(self):
         for url in ("ftp://example.com", "file:///etc/passwd", "gopher://x.com"):
-            with pytest.raises(ValueError, match="不允许的协议"):
+            with pytest.raises(ValueError, match="http"):
                 _validate_outbound_url(url)
 
     def test_rejects_missing_host(self):
@@ -45,36 +45,36 @@ class TestValidateOutboundUrl:
             _validate_outbound_url("http:///path")
 
     def test_rejects_loopback_ip_literal(self):
-        with pytest.raises(ValueError, match="受限地址"):
+        with pytest.raises(ValueError, match="禁止"):
             _validate_outbound_url("http://127.0.0.1:9527/api")
 
     def test_rejects_private_ranges(self):
         for ip in ("10.0.0.5", "172.16.1.1", "192.168.1.100"):
-            with pytest.raises(ValueError, match="受限地址"):
+            with pytest.raises(ValueError, match="禁止"):
                 _validate_outbound_url(f"http://{ip}/x")
 
     def test_rejects_metadata_link_local(self):
         # 云厂商元数据端点 169.254.169.254 属链路本地段
-        with pytest.raises(ValueError, match="受限地址"):
+        with pytest.raises(ValueError, match="禁止"):
             _validate_outbound_url("http://169.254.169.254/latest/meta-data")
 
     def test_rejects_ipv6_loopback(self):
-        with pytest.raises(ValueError, match="受限地址"):
+        with pytest.raises(ValueError, match="禁止"):
             _validate_outbound_url("http://[::1]/x")
 
     def test_rejects_ipv4_mapped_ipv6(self):
         with patch("socket.getaddrinfo", _fake_dns({"evil.example": "::ffff:10.0.0.8"})):
-            with pytest.raises(ValueError, match="受限地址"):
+            with pytest.raises(ValueError, match="禁止"):
                 _validate_outbound_url("http://evil.example/x")
 
     def test_domain_resolving_to_private_rejected(self):
         with patch("socket.getaddrinfo", _fake_dns({"rebind.example": "192.168.0.7"})):
-            with pytest.raises(ValueError, match="受限地址"):
+            with pytest.raises(ValueError, match="禁止"):
                 _validate_outbound_url("http://rebind.example/x")
 
     def test_dns_failure_rejected(self):
         with patch("socket.getaddrinfo", _fake_dns({})):
-            with pytest.raises(ValueError, match="解析失败"):
+            with pytest.raises(ValueError, match="无法解析"):
                 _validate_outbound_url("http://nonexistent.invalid/x")
 
     def test_allowlist_bypasses_resolution(self, monkeypatch):
@@ -98,7 +98,7 @@ class TestSafeRequestBehavior:
         assert "SSRF" in str(result["error"])
 
     def test_safe_request_rejects_bad_scheme_before_network(self):
-        with pytest.raises(ValueError, match="不允许的协议"):
+        with pytest.raises(ValueError, match="http"):
             _safe_request("GET", "file:///etc/passwd")
 
     def test_response_adapter_shape(self):

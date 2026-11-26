@@ -128,6 +128,9 @@ def _makeChannel(tmp_path: Path, workspace: Path, shadow=None) -> PrPatchChannel
         shadowVerify=shadow,
         checkpointService=CheckpointService("kai", base_dir=str(tmp_path / "ckpt")),
         mergeBoard=CandidateMergeBoard(),
+        # EVO-04：三判据齐备才可用；本组测桥接/目标校验行为，按生产装配口径
+        # 注入 G2（未装配时的 not_supported 由 test_prPatchChannelReadiness 覆盖）。
+        businessCriteria=lambda change, verdicts: GateVerdict.passed("业务判据在案"),
         regressionCriteria=lambda change, verdicts: GateVerdict.passed("A/B 零新增失败"),
         doctrineCriteria=lambda change, verdicts: GateVerdict.passed("红绿+live-verify 在案"),
     )

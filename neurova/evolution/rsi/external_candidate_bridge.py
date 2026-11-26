@@ -123,7 +123,7 @@ def submitExternalPatch(
         proposer: 显式注入的 :class:`SelfImprovementProposer`（swarm 接线 /
             测试用）。缺省经 :func:`resolveProposerForAgent` 按 agentId 解析。
         channel: 显式注入的 :class:`PrPatchChannel`（测试用隔离实例）。
-            缺省懒构造生产单例形态（全局注册表 + 仓库根工作区）。
+            缺省取 proposer 自己的 ``prPatchChannel``——预检与批准同一实例。
 
     Returns:
         proposal_id（PENDING 状态，等人工评审）。
@@ -146,6 +146,19 @@ def submitExternalPatch(
     if proposer is None:
         proposer = resolveProposerForAgent(agentId)
 
+    # 通道取 proposer 自己那份（懒构造单例形态）——外部提案与内部批准必须
+    # 走同一个通道实例，否则预检用的判据/合并板与真正 apply 的那份不是同一
+    # 个对象，预检结论对批准无效（EVO-04）。
+    if channel is None:
+        channel = proposer.prPatchChannel
+    # EVO-04：判据未装配 ⇒ 通道显式不可用，503 拒绝在**入账之前**——
+    # 不把注定批不了的提案塞进待审台账，也不让影子验证做无意义 IO。
+    unready = channel.unavailableReason()
+    if unready:
+        raise ExternalPatchRejected(
+            f"外部补丁通道不可用（agent={agentId}）：{unready}", status_code=503
+        )
+
     cleanDescription = str(description or "").strip()
     if not cleanDescription:
         cleanDescription = f"外部成员 {agentId} 的代码补丁: {targetFile}"
@@ -157,10 +170,6 @@ def submitExternalPatch(
 
     # 提交前预检：与批准时同一道闸（PrPatchChannel.plan → TargetRegistry
     # assertMutable fail-closed）。禁改内核 / 白名单外目标在这里就拒。
-    if channel is None:
-        from neurova.evolution.rsi.pr_patch_channel import PrPatchChannel
-
-        channel = PrPatchChannel()
     planOutcome = channel.plan(proposal)
     if isinstance(planOutcome, str):
         raise ExternalPatchRejected(f"外部补丁预检被拒：{planOutcome}")

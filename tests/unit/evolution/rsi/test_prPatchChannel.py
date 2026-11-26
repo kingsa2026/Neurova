@@ -128,6 +128,10 @@ def _channel(tmp_path: Path, workspace: Path, shadow=None, **kwargs) -> PrPatchC
         shadowVerify=shadow,
         checkpointService=CheckpointService("kai", base_dir=str(tmp_path / "ckpt")),
         mergeBoard=CandidateMergeBoard(),
+        # EVO-04：通道判据三件齐备才可用；本组测 plan/白名单/门禁行为，
+        # 按生产装配口径注入 G2 业务判据（未装配时的 not_supported 由
+        # test_prPatchChannelReadiness.py 专格钉住）。
+        businessCriteria=lambda change, verdicts: GateVerdict.passed("业务判据在案"),
         regressionCriteria=lambda change, verdicts: GateVerdict.passed("A/B 零新增失败"),
         doctrineCriteria=lambda change, verdicts: GateVerdict.passed(
             "红绿+live-verify 证据在案"

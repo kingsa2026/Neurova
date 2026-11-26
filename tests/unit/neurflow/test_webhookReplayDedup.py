@@ -15,7 +15,10 @@ from types import SimpleNamespace
 import pytest
 
 from neurova.core.trigger_rate_limiter import TriggerRateLimiter
-from neurova.core.webhook_security import compute_signed_payload_signature
+from neurova.core.webhook_security import (
+    compute_signature,
+    compute_signed_payload_signature,
+)
 
 
 @pytest.fixture()
@@ -57,6 +60,25 @@ def _deps(run_calls: list, workflow=SimpleNamespace(id="wf_replay")):
 def _signed(payload: bytes, ts: int | None = None):
     stamp = str(int(time.time()) if ts is None else ts)
     return stamp, compute_signed_payload_signature(stamp, payload, "raw-secret")
+
+
+@pytest.mark.asyncio
+async def testLegacySignatureWithoutTimestampIsRejected(replayDb):
+    from neurova.collaboration.neurflow.webhook_ingress import (
+        IngressRejected,
+        handle_webhook_ingress,
+    )
+
+    calls: list = []
+    deps = _deps(calls)
+    payload = b'{"payload":{"legacy":true}}'
+    legacySig = compute_signature(payload, "raw-secret")
+
+    with pytest.raises(IngressRejected) as exc:
+        await handle_webhook_ingress("trg_replay", payload, legacySig, deps=deps)
+    assert exc.value.status_code == 401
+    assert exc.value.reason == "INVALID_SIGNATURE"
+    assert calls == [], "旧签名不得绕过时间戳与重放守卫再次派发"
 
 
 @pytest.mark.asyncio

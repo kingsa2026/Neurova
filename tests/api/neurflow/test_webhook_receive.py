@@ -13,13 +13,15 @@ handler：neurova/collaboration/neurflow/webhook_ingress.py（纯注入 deps）
 - WorkflowTrigger.secret_encrypted 字段（AES-GCM 可逆，供验签）
 TDD：先红后绿。
 """
+import time
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from neurova.core.trigger_rate_limiter import TriggerRateLimiter
-from neurova.core.webhook_security import compute_signature
+from neurova.core.webhook_security import compute_signed_payload_signature
 from tests.route_table import registeredPaths
 
 
@@ -97,9 +99,11 @@ class TestIngressHandler:
         deps = _make_deps(trigger=trigger, instance=instance)
 
         payload = b'{"payload":{"a":1}}'
-        sig = compute_signature(payload, "raw-secret")
+        timestamp = str(int(time.time()))
+        sig = compute_signed_payload_signature(timestamp, payload, "raw-secret")
 
-        result = await handle_webhook_ingress("trg_1", payload, sig, deps=deps)
+        result = await handle_webhook_ingress(
+            "trg_1", payload, sig, deps=deps, timestamp_header=timestamp)
         assert result["code"] == 0
         assert result["data"]["execution_id"] == "exec_9"
 
@@ -241,11 +245,13 @@ class TestDeliveryRecording:
     def test_success_delivery_recorded(self, patched_client):
         c, storage, secret = patched_client
         payload = b'{"payload":{"a":1}}'
-        sig = compute_signature(payload, secret)
+        timestamp = str(int(time.time()))
+        sig = compute_signed_payload_signature(timestamp, payload, secret)
         r = c.post(
             "/triggers/webhook/trg_dl/receive",
             content=payload,
-            headers={"Content-Type": "application/json", "X-Hub-Signature-256": sig},
+            headers={"Content-Type": "application/json", "X-Hub-Signature-256": sig,
+                     "X-Neurova-Timestamp": timestamp},
         )
         assert r.status_code == 200
         items = storage.list_deliveries("trg_dl")

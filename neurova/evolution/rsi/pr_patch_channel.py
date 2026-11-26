@@ -148,13 +148,38 @@ class PrPatchChannel:
         self._gitTimeoutSeconds = int(gitTimeoutSeconds)
         self._checkpointCache: Dict[str, Any] = {}
 
+    # ── 可用性（EVO-04：判据未装配即显式不可用，不留死通道） ─────────
+
+    def unavailableReason(self) -> str:
+        """通道不可用原因（空串＝三判据齐备）。
+
+        G2 由注入影子验证器提供时视为齐备（影子本身的业务判据由调用方
+        负责）；G3/G4 是本通道 `_organizeGates` 的注入面，缺席即整链
+        unevidenced——`apply` 永远不会放行，继续接受提案就是引用户走死路。
+        """
+        missing: List[str] = []
+        if self._shadow is None and self._businessCriteria is None:
+            missing.append("G2 业务判据（businessCriteria）")
+        if self._regressionCriteria is None:
+            missing.append("G3 回归判据（regressionCriteria）")
+        if self._doctrineCriteria is None:
+            missing.append("G4 教义判据（doctrineCriteria）")
+        if not missing:
+            return ""
+        return (
+            f"{_NOT_SUPPORTED}: PR_PATCH 通道未装配取证判据："
+            f"{'、'.join(missing)}——门禁链必然 unevidenced，apply 永远拒绝；"
+            "请在生产装配注入判据，或保持本通道显式不可用（不要批准注定失败的提案）"
+        )
+
     # ── plan：提案 → 激活计划（白名单/禁改校验） ──────────────────
 
     def plan(self, proposal: Any) -> Any:
         """把 PR_PATCH 提案翻成 :class:`PatchPlan`；不可激活时返回拒绝理由串。
 
-        拒绝**必须**显式：目标未登记（白名单外）、禁改内核、目标文件缺失，
-        逐条点名——绝不静默放行，也绝不把"不能生效"伪装成"已计划"。
+        拒绝**必须**显式：目标未登记（白名单外）、禁改内核、目标文件缺失、
+        通道判据未装配，逐条点名——绝不静默放行，也绝不把"不能生效"伪
+        装成"已计划"。
         """
         proposalType = getattr(proposal, "proposal_type", None)
         if proposalType is not ProposalType.PR_PATCH:
@@ -178,6 +203,9 @@ class PrPatchChannel:
             return f"{_L2_NOT_ALLOWED}: {exc}"
         if not (self._workspace / targetFile).exists():
             return f"{_L2_NOT_ALLOWED}: 目标文件在工作区不存在: {targetFile}"
+        unready = self.unavailableReason()
+        if unready:
+            return unready
         return PatchPlan(
             proposalId=str(proposal.proposal_id),
             targetId=target.targetId,
@@ -275,8 +303,12 @@ class PrPatchChannel:
 
         顺序即安全序：门禁链 → CAS 合入（冲突升级人工）→ scope 快照（应用前
         基线）→ ``git apply``。应用失败时把已合入候选打回 reviseRequired，
-        板上不留"已合入却未生效"的假账。
+        板上不留"已合入却未生效"的假账。判据未装配时**先于影子验证**返回
+        not_supported（EVO-04：不做无意义验证、不放行）。
         """
+        unready = self.unavailableReason()
+        if unready:
+            return PatchApplyOutcome(ok=False, error=unready)
         gateResult = self.verify(proposal, plan)
         overall = gateResult[GATE_OVERALL][0]
         summary = {

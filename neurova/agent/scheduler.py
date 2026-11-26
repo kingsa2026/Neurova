@@ -569,34 +569,33 @@ class WebhookTaskExecutor(TaskExecutor):
     async def execute(self, task: AutomationTask, execution: TaskExecution) -> Dict[str, Any]:
         """执行 Webhook 任务"""
         try:
-            import aiohttp
+            from neurova.security import safe_fetch
 
             webhook_url = task.request.webhook_url if task.request else None
             if not webhook_url:
                 return {"success": False, "error": "Webhook URL is required"}
 
-            # SSRF 单源校验（url_guard）：webhook_url 由任务创建者指定，
-            # 私网/环回目标 fail-closed；ValueError 走下方 except 诚实回
-            # success=False + 原因，不吞
-            from neurova.security.url_guard import assert_public_url
-
-            assert_public_url(webhook_url)
-
             input_data = task.request.input if task.request else {}
-
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    webhook_url, json=input_data, timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    result = (
-                        await response.json() if response.content_type == "application/json" else await response.text()
-                    )
-
-                    return {
-                        "success": response.status < 400,
-                        "status_code": response.status,
-                        "result": result,
-                    }
+            response = await asyncio.to_thread(
+                safe_fetch.safe_fetch,
+                webhook_url,
+                method="POST",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(input_data, ensure_ascii=False).encode("utf-8"),
+                timeout=30,
+            )
+            result = (
+                response.json()
+                if response.headers.get("content-type", "").startswith("application/json")
+                else response.text
+            )
+            return {
+                "success": response.status < 400,
+                "status_code": response.status,
+                "result": result,
+            }
+        except safe_fetch.HTTPStatusError as e:
+            return {"success": False, "status_code": e.status, "result": None}
         except Exception as e:
             logger.exception("Webhook task execution failed: %s", e)
             return {"success": False, "error": str(e)}

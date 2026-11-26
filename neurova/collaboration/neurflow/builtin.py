@@ -1391,7 +1391,7 @@ async def exec_memory_save(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
 
     P1-2 闭环审查修 E：工作流的 memory-save 节点是交互式单条写入口
     （与聊天 memory_save 工具平行），默认进待确认队列、人工确认后才
- 入主库；config.confirm=True 按次直写。
+    入主库；config.confirm 不是可信用户确认，不得绕过待审门。
     队列不可用时降级直写——错误方向是"少一个待审项"，不是"工作流坏掉"。
     """
     memory_manager = ctx.get("memory_manager") or _get_memory_manager()
@@ -1407,13 +1407,12 @@ async def exec_memory_save(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
     tags = config.get("tags", [])
 
     pending_store = None
-    if config.get("confirm") is not True:
-        try:
-            from neurova.memory.pending_memory import get_pending_memory_store
+    try:
+        from neurova.memory.pending_memory import get_pending_memory_store
 
-            pending_store = get_pending_memory_store()
-        except Exception as e:  # noqa: BLE001 — 队列缺席降级直写
-            logger.warning("待确认队列不可用，memory-save 节点降级直写: %s", e)
+        pending_store = get_pending_memory_store()
+    except Exception as e:  # noqa: BLE001 — 队列缺席降级直写
+        logger.warning("待确认队列不可用，memory-save 节点降级直写: %s", e)
 
     if pending_store is not None:
         try:
@@ -1852,70 +1851,14 @@ async def exec_file_input(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[s
     return {"status": "success", "output": {"file": file_payload}}
 
 
-def _ssrf_allowlisted(host: str) -> bool:
-    """SSRF 放行名单：NEUROVA_SSRF_ALLOWLIST（逗号分隔主机；"*" 关闭防护）"""
-    import os
-
-    raw = os.environ.get("NEUROVA_SSRF_ALLOWLIST", "")
-    entries = {entry.strip().lower() for entry in raw.split(",") if entry.strip()}
-    return "*" in entries or host.lower() in entries
-
-
 def _validate_outbound_url(url: str) -> str:
-    """出站 URL 的 SSRF 边界校验；违规抛 ValueError，通过则返回净化后的 URL。
+    """出站 URL 判定单源在 security.url_guard；违规抛 ValueError。"""
+    from neurova.security.url_guard import resolvePublicUrl
 
-    - 仅允许 http/https
-    - 主机逐条解析为 IP 后判定：私网/环回/链路本地（含云元数据 169.254.0.0/16）/
-      保留/组播/未指定地址一律拒绝，IPv4-mapped IPv6 折算后判定
-    - NEUROVA_SSRF_ALLOWLIST 可显式放行主机（供纯内网/本机部署的合法调用）
-    """
-    from urllib.parse import urlparse
-    import ipaddress
-    import socket
-
-    parsed = urlparse(str(url or ""))
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"SSRF 防护: 不允许的协议 {parsed.scheme!r}（仅限 http/https）")
-    host = parsed.hostname
-    if not host:
-        raise ValueError("SSRF 防护: URL 缺少主机名")
-    if _ssrf_allowlisted(host):
-        return str(url)
-
-    candidates = []
     try:
-        candidates.append(ipaddress.ip_address(host))
-    except ValueError:
-        pass  # 域名，走解析
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        for info in socket.getaddrinfo(host, port):
-            addr = info[4][0]
-            try:
-                candidates.append(ipaddress.ip_address(str(addr).split("%")[0]))
-            except ValueError:
-                continue
-    except OSError as e:
-        raise ValueError(f"SSRF 防护: 域名解析失败 {host}: {e}") from e
-
-    checked = set()
-    for ip in candidates:
-        if ip.version == 6 and getattr(ip, "ipv4_mapped", None):
-            ip = ip.ipv4_mapped  # ::ffff:x.y.z.w 按嵌入 IPv4 判定
-        if ip in checked:
-            continue
-        checked.add(ip)
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
-            raise ValueError(f"SSRF 防护: 目标 {host} 解析到受限地址 {ip}")
-
-    # 全部解析地址均在允许边界内
+        resolvePublicUrl(url)
+    except ValueError as exc:
+        raise ValueError(f"SSRF 防护: {exc}") from exc
     return str(url)
 
 
@@ -1939,19 +1882,15 @@ class _OutboundResponse:
 
 
 def _safe_request(method: str, url: str, **kwargs) -> "_OutboundResponse":
-    """流程节点出站 HTTP 唯一通道（SSRF 防护收敛点）。
-
-    1. _validate_outbound_url 先行校验：协议白名单 + 解析后 IP 边界判定
-    2. 以禁用重定向的 opener 发起请求 —— 任何 3xx 不跟随，杜绝二次跳转绕过边界
-    3. 残余风险：DNS rebinding 的 TOCTOU；严格场景用 NEUROVA_SSRF_ALLOWLIST 圈定可信主机
-    """
+    """流程节点出站 HTTP 唯一通道：单源判定后把地址计划交给单跳引擎。"""
     import json as _json
-    from urllib import request as _urlrequest
-    from urllib.error import HTTPError as _HTTPError
-    from urllib.error import URLError as _URLError
+    from neurova import http_fetch
+    from neurova.security.safe_fetch import SSRFBlockedError, assertHopAllowed
 
-    safe_url = _validate_outbound_url(url)
-
+    try:
+        resolution = assertHopAllowed(url)
+    except SSRFBlockedError as exc:
+        raise ValueError(f"SSRF 防护: {exc}") from exc
     headers = {str(k): str(v) for k, v in (kwargs.get("headers") or {}).items()}
     payload = kwargs.get("json")
     data = None
@@ -1959,28 +1898,19 @@ def _safe_request(method: str, url: str, **kwargs) -> "_OutboundResponse":
         data = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers.setdefault("Content-Type", "application/json")
 
-    class _NoRedirectHandler(_urlrequest.HTTPRedirectHandler):
-        """3xx 一律不跟随（返回 None 使 urlopen 抛 HTTPError）"""
-
-        def redirect_request(self, req, fp, code, msg, hdrs, newurl):
-            return None
-
-    req = _urlrequest.Request(safe_url, data=data, headers=headers, method=method.upper())
     timeout = float(kwargs.get("timeout", 30))
     try:
-        opener = _urlrequest.build_opener(_NoRedirectHandler())
-        with opener.open(req, timeout=timeout) as raw:
-            status = int(raw.status)
-            body = raw.read()
-            final_url = raw.geturl()
-    except _HTTPError as e:  # 含"重定向被拒绝"的 3xx 响应
-        status = int(e.code)
-        body = e.read() if hasattr(e, "read") else b""
-        final_url = getattr(e, "url", "") or safe_url
-    except _URLError as e:
-        raise ConnectionError(f"出站请求失败: {e}") from e
-
-    return _OutboundResponse(status, body, final_url)
+        response = http_fetch.request_once(
+            url,
+            method=method.upper(),
+            headers=headers,
+            data=data,
+            timeout=timeout,
+            resolution=resolution,
+        )
+    except Exception as exc:
+        raise ConnectionError(f"出站请求失败: {exc}") from exc
+    return _OutboundResponse(response.status, response.content, url)
 
 
 def _load_kb_config_secret(config_id: str, user_id: str = "") -> Optional[str]:
