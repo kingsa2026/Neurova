@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from neurova.agent_config import reset_config_manager
+import neurova.core.agent_workspaces as aw
 from neurova.core.agent_layout_migration import (
     auto_migrate_legacy_agent_layout,
     migrate_legacy_agent_layout,
@@ -65,9 +66,20 @@ def _seed_legacy(env: Path, agent_id: str = "kai") -> Path:
 
 
 def test_moves_all_legacy_faces_into_agent_root(env):
+    """v1 遗留面全部收进**当前** agent 根（v3 分区位），不留 v2 平铺目录。
+
+    契约腐化归因：本判据写于 v2 时代，目标位硬写 `data/<id>/`。v3 拍板
+    （2026-11-24，`agent_workspaces.get_agent_root_dir`）把已登记 agent 解析到
+    `data/agent/<桶>/<id>/`，于是搬迁落在分区位、`data/kai/` 不再出现——判据
+    没跟着布局走，红的是测试不是生产。目标位取生产解析器本身（同一事实源），
+    并对 v3 分区位显式断言，避免"代码说哪就是哪"的循环自证。
+    """
     legacy_ws = _seed_legacy(env)
     data = env / "data"
-    root = data / "kai"
+    root = aw.get_agent_root_dir("kai")
+    assert root == data / "agent" / "share" / "kai", (
+        f"当前布局下已登记 agent 的根应在 v3 分区位，实际 {root}"
+    )
 
     report = migrate_legacy_agent_layout(legacy_workspace_root=legacy_ws)
 
@@ -94,6 +106,7 @@ def test_moves_all_legacy_faces_into_agent_root(env):
     assert not (data / "sessions" / "kai").exists()
     assert not (data / "agents" / "kai").exists()
     assert not (data / "personality" / "kai.json").exists()
+    assert not (data / "kai").exists(), "v2 平铺目录不得残留（搬迁目标是 v3 分区位）"
 
 
 def test_second_run_is_idempotent(env):
@@ -106,7 +119,8 @@ def test_second_run_is_idempotent(env):
 
 def test_conflict_keeps_both_sides_and_reports(env):
     legacy_ws = _seed_legacy(env)
-    target = env / "data" / "kai" / "workspaces" / "attachments" / "a.txt"
+    # 目标位取生产解析器（先取再写盘：写 `data/kai` 会造出 v2 兼容位、把解析结果改掉）
+    target = aw.get_agent_root_dir("kai") / "workspaces" / "attachments" / "a.txt"
     _write(target, "already-here")
 
     report = migrate_legacy_agent_layout(legacy_workspace_root=legacy_ws)
@@ -121,7 +135,7 @@ def test_dry_run_does_not_touch_disk(env):
     report = migrate_legacy_agent_layout(legacy_workspace_root=legacy_ws, dry_run=True)
     assert report["moved"], report
     assert (legacy_ws / "kai" / "attachments" / "a.txt").exists()
-    assert not (env / "data" / "kai" / "workspaces" / "attachments" / "a.txt").exists()
+    assert not (aw.get_agent_root_dir("kai") / "workspaces" / "attachments" / "a.txt").exists()
 
 
 def test_report_written_for_apply(env):
@@ -158,13 +172,14 @@ def test_stored_absolute_paths_follow_the_move(env):
 
     migrate_legacy_agent_layout(legacy_workspace_root=legacy_ws)
 
-    new_attachment = env / "data" / "kai" / "workspaces" / "attachments" / "a.txt"
-    conn = sqlite3.connect(env / "data" / "kai" / "memory" / "memory.db")
+    root = aw.get_agent_root_dir("kai")
+    new_attachment = root / "workspaces" / "attachments" / "a.txt"
+    conn = sqlite3.connect(root / "memory" / "memory.db")
     stored = conn.execute("SELECT file_path FROM attachments").fetchone()[0]
     conn.close()
     assert stored == str(new_attachment)
     moved_session = json.loads(
-        (env / "data" / "kai" / "sessions" / "session_s1_2026-01-01.json").read_text(encoding="utf-8")
+        (root / "sessions" / "session_s1_2026-01-01.json").read_text(encoding="utf-8")
     )
     assert moved_session["messages"][0]["metadata"]["artifacts"][0]["path"] == str(new_attachment)
 

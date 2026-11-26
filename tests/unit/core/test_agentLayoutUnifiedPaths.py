@@ -40,8 +40,17 @@ def unified(tmp_path, monkeypatch):
 
 
 def test_agent_root_is_data_agent_id(unified):
+    """解析器的两支：登记在册 → v3 分区位；未登记且无 v2 目录 → v2 兼容平铺位。
+
+    契约腐化归因：本判据写于 v2 时代，硬断 `default` 在 `data/default`。v3 拍板
+    （2026-11-24）把 `default` 定为**恒登记**（`is_registered_agent_id`），其根随
+    即解析到 `data/agent/share/default`。断言改按当前布局写实，且两支都在场——
+    只留一支就等于把另一支的行为从判据里删掉。
+    """
+    assert aw.is_registered_agent_id("default") is True
+    assert aw.get_agent_root_dir("") == unified / "data" / "agent" / "share" / "default"
+    # kai 未登记、`data/kai` 不存在 → 仍走 v2 兼容位（迁移扫描前的可解析性）
     assert aw.get_agent_root_dir("kai") == unified / "data" / "kai"
-    assert aw.get_agent_root_dir("") == unified / "data" / "default"
 
 
 def test_four_primary_faces_under_agent_root(unified):
