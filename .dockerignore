@@ -76,14 +76,24 @@ deploy/
 scripts/
 
 # 配置文件（保留 config/ 目录）
-# 注意：config/*.json 会连运行时**必须**读的 config/cors.json 一起挡掉——
-# Dockerfile 的 `COPY config/ ./config/` 于是拷了个空目录，应用静默回落到内置
-# 默认 CORS 来源（生产浏览器请求被拒，日志无线索）。
+# 注意：config/*.json 会连运行时**必须**读的资产一起挡掉——Dockerfile 的
+# `COPY config/ ./config/` 于是只拷到放行的那几个，应用在容器里静默回落到内置
+# 默认值（cors.json 缺失 → 生产浏览器请求被拒），或直接抛 FileNotFoundError
+# （内置服务商模板缺失 → 服务商管理页整块不可用）。日志里都没有线索。
+#
+# 放行面 = 生产代码运行时的真读取点，登记在
+# scripts/ci/deploy_config_consistency_check.py 的 RUNTIME_CONFIG_ASSETS（单源）；
+# R10 逐条核"声明的资产不得被本文件排除"，守卫
+# tests/unit/deploy/test_image_config_assets.py 另核"读取点不得漏登记"。
+# 新增读取方时两处必须同批对齐，不要在这里凭印象补 `!`。
 # 判据：被代码在运行时读取的资产必须显式放行（apps 读取方见
-# neurova/api/middleware.py / neurova/llm/presets.py）。
+# neurova/api/cors_policy.py / neurova/llm/presets.py / neurova/llm/provider_manager.py /
+# neurova/evolution/evolution_settings.py）。
 # 守卫：scripts/ci/deploy_config_consistency_check.py 的 R10。
 config/*.json
 !config/cors.json
+!config/llm_provider_templates.json
+!config/evolution_settings.json
 !config/llm_presets/
 !config/llm_presets/**
 

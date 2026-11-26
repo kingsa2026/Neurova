@@ -75,10 +75,19 @@ HARD_DEPS = ("apscheduler", "feedparser", "segno", "prometheus_client")
 ENV_ALLOWLIST = {"PYTHONUNBUFFERED", "PYTHONUTF8", "PYTHONIOENCODING", "TZ", "LC_ALL", "LANG"}
 
 # 应用运行时会从 config/ 目录读取的文件（reader 见注释）。镜像缺它们时不会报错，
-# 只会静默回落到内置默认值——比崩溃更难发现。
+# 只会静默回落到内置默认值或直接抛错——比崩溃更难发现。
+# 这份表是 R10（交付面）与 R12（挂载遮蔽面）的共同事实源：新增读取方时只在这里
+# 登记一处，守卫 tests/unit/deploy/test_image_config_assets.py 会把它与生产代码里
+# 的真解析点逐条对齐（表漏登记 = 那条资产无人看守）。
 RUNTIME_CONFIG_ASSETS = {
     "config/cors.json": "neurova/api/cors_policy.py（CORS 口径单源）",
     "config/llm_presets/defaults.json": "neurova/llm/presets.py（模型预设）",
+    # 内置服务商种子：缺失时 builtinProviderDefs() 直接抛 FileNotFoundError，
+    # 服务商管理页整块不可用（不是"静默降级"）。
+    "config/llm_provider_templates.json": "neurova/llm/provider_manager.py（内置服务商模板）",
+    # 进化设置：缺失时 load_settings() 回默认（保守关闭）——那等于把管理员
+    # 保存的开关/节流参数静默重置；镜像交付一份，与 compose 的 ./config 挂载同源。
+    "config/evolution_settings.json": "neurova/evolution/evolution_settings.py（进化设置）",
 }
 
 # 最小调度间隔由平台限制（5 分钟）；周级 cadence 的判据见 _check_ci_wiring。
@@ -761,43 +770,55 @@ def _check_hard_deps(reqs: Dict[str, set]) -> List[Finding]:
     return out
 
 
-def _check_config_assets() -> List[Finding]:
-    """R10：应用运行时读的 config/ 资产必须真进镜像。
-
-    Dockerfile 有 `COPY config/ ./config/`，但 .dockerignore 里的 `config/*.json`
-    会把 cors.json 挡在构建上下文之外 —— 构建成功、容器正常启动，只是 CORS
-    来源静默回落到内置的 localhost/tauri 默认值（生产浏览器请求被拒，
-    且日志里毫无线索）。
-    """
-    out: List[Finding] = []
-    rules = [
+def dockerignoreRules() -> List[str]:
+    """`.dockerignore` 的有效规则行（去注释/空行）。"""
+    return [
         line.strip()
         for line in _read(".dockerignore").splitlines()
         if line.strip() and not line.startswith("#")
     ]
 
-    def ignored(path: str) -> bool:
-        state = False
-        for rule in rules:
-            negate = rule.startswith("!")
-            pattern = (rule[1:] if negate else rule).rstrip("/")
-            matched = (
-                fnmatch.fnmatch(path, pattern)
-                or path.startswith(pattern + "/")
-                or fnmatch.fnmatch(path.split("/")[-1], pattern)
-            )
-            if matched:
-                state = not negate
-        return state
 
+def isDockerignored(path: str, rules: List[str] | None = None) -> bool:
+    """按 .dockerignore 规则判定某个仓内相对路径（posix 分隔）是否被排除。
+
+    Docker 的语义是"按顺序应用，最后一条命中者为准"；取顶层目录名与整路径两种
+    形态，与 Docker 的 pattern 匹配面保持一致。R10（本文件）与镜像交付守卫
+    （tests/unit/deploy/test_image_config_assets.py）共用这一份实现——两份口径
+    各自演化时，门禁与守卫会对同一份 .dockerignore 给出相反的结论。
+    """
+    effective = dockerignoreRules() if rules is None else rules
+    state = False
+    for rule in effective:
+        negate = rule.startswith("!")
+        pattern = (rule[1:] if negate else rule).rstrip("/")
+        matched = (
+            fnmatch.fnmatch(path, pattern)
+            or path.startswith(pattern + "/")
+            or fnmatch.fnmatch(path.split("/")[-1], pattern)
+        )
+        if matched:
+            state = not negate
+    return state
+
+
+def _check_config_assets() -> List[Finding]:
+    """R10：应用运行时读的 config/ 资产必须真进镜像。
+
+    Dockerfile 有 `COPY config/ ./config/`，但 .dockerignore 里的 `config/*.json`
+    会把 cors.json / 内置服务商模板挡在构建上下文之外 —— 构建成功、容器正常启动，
+    只是 CORS 来源静默回落到内置默认值、服务商页直接抛 FileNotFoundError，
+    且日志里毫无线索。
+    """
+    out: List[Finding] = []
     for asset, reader in RUNTIME_CONFIG_ASSETS.items():
-        if ignored(asset):
+        if isDockerignored(asset):
             out.append(
                 Finding(
                     "error",
                     "R10-config-assets",
                     f"{asset} 被 .dockerignore 排除，镜像内不存在（读取方：{reader}）"
-                    "—— 构建/启动都正常，只是运行时静默走内置默认值",
+                    "—— 构建/启动都正常，只是运行时静默走内置默认值或直接抛错",
                 )
             )
     return out
