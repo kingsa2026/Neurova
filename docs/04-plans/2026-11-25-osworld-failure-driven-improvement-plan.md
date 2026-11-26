@@ -168,7 +168,7 @@
 | C4 StallGuard 卡顿熔断 | `bf3444013` | 红灯 ImportError→绿灯 9/9；A/B 证实 target_ops_passthrough/evidence_feedback 预存；manager 懒建记账器+6 动作打点+screenshot 信号注入 |
 | C5 paste 优先引导 | `ed93c0d6f` 后独立提交 | 红灯 1F+4E→绿灯 12/12；两域 1008 passed；computer_type 描述+type_text>200 阈值信号 |
 | C7 doc_edit 路由约定 | `150f6e4be` | 红灯 2F（缺"样式"标记）→绿灯；三域 1135 passed |
-| C6 规划器拆步实验 | **未开工** | 按方案 §4 第 4 步：待真桌面多轮 A/B 排期（实验卡，不预设结论） |
+| C6 规划器拆步两阶段适配器 | `2c7b0c594` | 红灯 ImportError→绿灯 10/10（cua_eval 全文件 34/34 零破坏；benchmark+evals 193 passed）；live-verify L1 真桌面管线全链（首帧→3 步→终态，零 invalid 零 infra）；L2（OSWorld VM 3 任务 A/B）留排期 |
 
 执行期坑（复跑必读）：
 - **tool_executor.py 混有他会在途 hunk**：C4 用"HEAD+本卡 hunk"中间态构造
