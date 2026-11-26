@@ -13,7 +13,7 @@ NeurFlow 是 Neurova 的可视化工作流引擎，将工作流从"配置文件"
 | 可视化画布 | 拖拽式节点编排，六种节点（开始/结束/任务/条件/并行/子流程） | ✅ |
 | 调试走查器 | 外挂式 Mock 引擎，单步/跳过执行，局部变量查看 | ✅ |
 | 版本快照与回滚 | 内容指纹 + 保留 status + 回滚入史（工作流定义级） | ✅ |
-| 触发器系统 | Cron 定时触发 + Webhook 入站触发（HMAC-SHA256 + token bucket 限流） | ✅ |
+| 触发器系统 | Cron 定时触发 + Webhook 入站触发（时间戳 HMAC-SHA256 + 原子重放去重 + token bucket 限流） | ✅ |
 | 子工作流 Subflow | 嵌套工作流，深度 ≤ 5 + 防环检测 | ✅ |
 | Agent 编译 | 工作流 → AgentManifest 编译（纯函数 + deps 注入） | ✅ |
 | 安全审计 | Webhook 投递审计记录、历史回溯 | ✅ |
@@ -27,7 +27,7 @@ neurova/collaboration/neurflow/
 ├── subflow.py                # 子工作流（深度限制 + 防环）
 ├── storage.py                # 工作流存储（定义级版本快照）
 ├── triggers.py               # 触发器（Cron + Webhook）
-├── webhook_ingress.py        # Webhook 入站触发（HMAC-SHA256 校验实现在 neurova/core/webhook_security.py）
+├── webhook_ingress.py        # Webhook 入站触发（时间戳 HMAC-SHA256 与重放领取；校验在 neurova/core/webhook_security.py）
 ├── agent_manager.py          # Agent 编译与派发
 ├── adapters.py               # 适配器
 ├── nl_designer.py            # 自然语言设计（DSL 解析）
