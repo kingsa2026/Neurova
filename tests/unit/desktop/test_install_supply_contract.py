@@ -213,6 +213,51 @@ class TestInstallRunsRealDownloaderAndPlan:
             assert not missing, f"{lang} 缺文案键: {sorted(missing)}"
 
 
+class TestFinalVerificationFailureIsHonest:
+    """OPS-01（2026-11-25 批次 E）：最终验证失败必须如实非零退出。
+
+    审计实测：`verifyInstallation()` 返回 False 时 `main()` 只打一行 WARN
+    「部分组件验证失败，安装可继续」，随后照旧 `printCompletion()` + `return 0`。
+    于是 `start.py` 的 auto_install、CI、任何包一层的一键脚本都把**失败安装
+    当成功**——用户看到「安装完成！」，实际缺依赖/缺权重，下游表现为
+    「装完却跑不起来」且退出码无线索（教义第 2 条禁止把失败改写成了事）。
+    """
+
+    @staticmethod
+    def _runMain(mod, monkeypatch, *, verifyOk: bool):
+        import sys as _sys
+
+        monkeypatch.setattr(mod, "loadSupplyManifest", lambda: {"models": []})
+        monkeypatch.setattr(mod, "buildSteps", lambda args, manifest: [])
+        monkeypatch.setattr(mod, "verifyInstallation", lambda manifest: verifyOk)
+        printed = []
+        monkeypatch.setattr(mod, "printCompletion", lambda: printed.append("completion"))
+        monkeypatch.setattr(_sys, "argv", ["install.py", "--lang", "zh"])
+        return mod.main(), printed
+
+    def test_verificationFailureExitsNonZero(self, monkeypatch, capsys):
+        mod = _install_module()
+        code, printed = self._runMain(mod, monkeypatch, verifyOk=False)
+        assert code != 0, (
+            "最终验证失败仍返回 0——自动化把失败安装当成功，退出码不携带任何事实"
+        )
+        assert not printed, (
+            "验证失败时仍打印「安装完成」横幅——与真实结果相反，属表面抹除"
+        )
+        output = capsys.readouterr().out
+        assert "ERROR" in output, f"验证失败未以 ERROR 形态点名（实际输出尾部：{output[-400:]!r}）"
+        assert "安装可继续" not in output, (
+            "验证失败文案仍在说「安装可继续」——与退出码语义矛盾"
+        )
+
+    def test_verificationSuccessStillReturnsZero(self, monkeypatch):
+        """反向控制：验证通过时行为不得被改坏（仍 0 且打完成横幅）。"""
+        mod = _install_module()
+        code, printed = self._runMain(mod, monkeypatch, verifyOk=True)
+        assert code == 0
+        assert printed == ["completion"]
+
+
 class TestEnginePackageShortageIsNamed:
     """引擎包缺席必须点名「缺哪个包」，不能抛裸 ModuleNotFoundError 了事。
 

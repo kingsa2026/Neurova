@@ -136,7 +136,7 @@ TRANSLATIONS = {
         "step_verify": "验证安装",
         "verify_ok": "[OK] {name}",
         "verify_fail": "[FAIL] {name}",
-        "verify_warn": "[WARN] 部分组件验证失败，安装可继续，但上述功能会降级",
+        "verify_failed": "[ERROR] 安装验证未通过：上述组件当前不可用。修复后重跑: python install.py --verify-only",
         "verify_model_ok": "[OK] 模型就绪: {name}",
         "verify_model_fail": "[FAIL] 模型缺失: {name}（必需项）",
         "complete_title": "安装完成！",
@@ -197,7 +197,7 @@ TRANSLATIONS = {
         "step_verify": "Verifying installation",
         "verify_ok": "[OK] {name}",
         "verify_fail": "[FAIL] {name}",
-        "verify_warn": "[WARN] Some components failed verification; affected features degrade",
+        "verify_failed": "[ERROR] Installation verification failed: the components above are unavailable. Fix, then re-run: python install.py --verify-only",
         "verify_model_ok": "[OK] Model ready: {name}",
         "verify_model_fail": "[FAIL] Required model missing: {name}",
         "complete_title": "Installation Complete!",
@@ -258,7 +258,7 @@ TRANSLATIONS = {
         "step_verify": "インストールを検証",
         "verify_ok": "[OK] {name}",
         "verify_fail": "[FAIL] {name}",
-        "verify_warn": "[WARN] 一部の検証に失敗しましたが続行します（該当機能は低下）",
+        "verify_failed": "[ERROR] インストール検証に失敗しました：上記コンポーネントは現在使用できません。修正後に再実行: python install.py --verify-only",
         "verify_model_ok": "[OK] モデル準備完了: {name}",
         "verify_model_fail": "[FAIL] 必須モデルがありません: {name}",
         "complete_title": "インストール完了！",
@@ -319,7 +319,7 @@ TRANSLATIONS = {
         "step_verify": "Проверка установки",
         "verify_ok": "[OK] {name}",
         "verify_fail": "[FAIL] {name}",
-        "verify_warn": "[WARN] Часть компонентов не прошла проверку, продолжаем",
+        "verify_failed": "[ERROR] Проверка установки не пройдена: указанные компоненты недоступны. Исправьте и повторите: python install.py --verify-only",
         "verify_model_ok": "[OK] Модель готова: {name}",
         "verify_model_fail": "[FAIL] Обязательная модель отсутствует: {name}",
         "complete_title": "Установка завершена!",
@@ -840,7 +840,10 @@ def main() -> int:
         return 1
 
     if args.verify_only:
-        return 0 if verifyInstallation(manifest) else 1
+        if verifyInstallation(manifest):
+            return 0
+        print(f"\n{t('verify_failed')}")
+        return 1
 
     steps = buildSteps(args, manifest)
     total = len(steps)
@@ -858,8 +861,12 @@ def main() -> int:
             return 1
 
     print(f"\n[{total + 1}/{total + 1}] {t('step_verify')}...")
+    # 最终验证是「装完」与「跑得起来」的唯一判据：失败即安装失败。
+    # 旧行为只打一行 WARN 后照旧 printCompletion + return 0，自动化把失败安装
+    # 当成功（审计 OPS-01）——退出码必须携带事实，完成横幅不得与结果相反。
     if not verifyInstallation(manifest):
-        print(f"\n{t('verify_warn')}")
+        print(f"\n{t('verify_failed')}")
+        return 1
 
     printCompletion()
     return 0
