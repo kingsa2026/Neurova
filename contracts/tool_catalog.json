@@ -1648,7 +1648,7 @@
         ],
         "type": "object"
       },
-      "description": "【结构化直写】对工作区内的 xlsx/xlsm/csv 文件按单元格引用（如 A1）直接批量写入值（数值/公式/文本自动推断），写后逐格回读校验并返回回读明细。绕开逐格 GUI 点击，适合表格批量修改。【何时不用】目标文件不在工作区时不可用；纯文本文件用 file_edit。",
+      "description": "【结构化直写】对工作区内的 xlsx/xlsm/csv 文件按单元格引用（如 A1）直接批量写入值（数值/公式/文本自动推断），写后逐格回读校验并返回回读明细。绕开逐格 GUI 点击，适合表格批量修改。【与 GUI 的分工】表格值/公式的批量写入走本工具；样式/合并/图表等需要视觉确认的界面态用 computer_* GUI 动作改。【何时不用】目标文件不在工作区时不可用；纯文本文件用 file_edit。",
       "external_write": true,
       "min_role": null,
       "name": "computer_doc_edit",
@@ -1994,7 +1994,7 @@
         ],
         "type": "object"
       },
-      "description": "键盘输入文本",
+      "description": "键盘输入文本（适合短文本；长文本约 200 字符以上请改用 computer_paste——逐字符键入长文本既慢又易错）",
       "external_write": true,
       "min_role": null,
       "name": "computer_type",
