@@ -30,8 +30,14 @@ TDD 测试: AgentLLMClient.chat() 错误包装层透明化
 """
 
 import logging
+import typing
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+if typing.TYPE_CHECKING:
+    # 运行期仍走 setUp 内的局部导入（断 agent_core 循环导入）；这里只让字符串注解
+    # `-> "AgentLLMClient"` 的名字可被解析器/`get_type_hints` 看见。
+    from neurova.agent_core import AgentLLMClient
 
 
 class _ListLogHandler(logging.Handler):

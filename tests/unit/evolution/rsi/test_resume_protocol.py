@@ -28,7 +28,7 @@ import os
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 import pytest
 

@@ -11,6 +11,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from neurova.agent.loops.anthropic_loop import AnthropicLoop
 from neurova.llm_client import LLMResponse
 

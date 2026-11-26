@@ -50,7 +50,7 @@ class TestThreeStateDiscipline:
         """接口格：I_t/I_0 版本缺失报 unevidenced 而非空转（GateVerdict 纪律）。"""
         probe = ImproverPairedProbe(
             policy_t=None, policy_0=None,
-            starting_states=lambda: list(STATES),
+            starting_states=lambda: list(_states()),
             outcome_evaluator=lambda state, candidate: 0.5,
         )
         readout = probe.run()
