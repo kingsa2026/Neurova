@@ -9,9 +9,9 @@
 <br/>
 
 <div align="center">
-  <a href="https://github.com/kingsa2026/Neurova/stargazers"><img src="https://img.shields.io/github/stars/kingsa2026/Neurova?style=social" alt="Stars"></a>
-  <a href="https://github.com/kingsa2026/Neurova/issues"><img src="https://img.shields.io/github/issues/kingsa2026/Neurova" alt="Issues"></a>
-  <a href="https://github.com/kingsa2026/Neurova/blob/main/LICENSE"><img src="https://img.shields.io/github/license/kingsa2026/Neurova" alt="License"></a>
+  <a href="https://github.com/kingsa2020/Neurova/stargazers"><img src="https://img.shields.io/github/stars/kingsa2020/Neurova?style=social" alt="Stars"></a>
+  <a href="https://github.com/kingsa2020/Neurova/issues"><img src="https://img.shields.io/github/issues/kingsa2020/Neurova" alt="Issues"></a>
+  <a href="https://github.com/kingsa2020/Neurova/blob/main/LICENSE"><img src="https://img.shields.io/github/license/kingsa2020/Neurova" alt="License"></a>
   <img src="https://img.shields.io/badge/Python-3.10+-blue" alt="Python">
   <img src="https://img.shields.io/badge/TypeScript-5.0+-blue" alt="TypeScript">
 </div>
@@ -329,8 +329,8 @@ This project is licensed under the **MIT License**, see the license statement in
 
 Welcome to submit Issues and Pull Requests!
 
-- **Bug Reports**: Please use [Issue Tracker](https://github.com/kingsa2026/Neurova/issues)
-- **Feature Suggestions**: Please use [Discussions](https://github.com/kingsa2026/Neurova/discussions)
+- **Bug Reports**: Please use [Issue Tracker](https://github.com/kingsa2020/Neurova/issues)
+- **Feature Suggestions**: Please use [Discussions](https://github.com/kingsa2020/Neurova/discussions)
 - **Code Contributions**: Please Fork and submit PR
 
 ---

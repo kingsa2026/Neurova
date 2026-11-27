@@ -19,7 +19,7 @@ import requests
 from datetime import datetime
 
 # 配置
-REPO_OWNER = "kingsa2026"
+REPO_OWNER = "kingsa2020"
 REPO_NAME = "Neurova"
 # 版本事实源 = neurova/__init__.__version__（与 Chart.yaml 的 R4 同一口径）：
 # 发布 tag 跟随代码版本，不再手写死值（fullrepo 审计 2026-11-18）。

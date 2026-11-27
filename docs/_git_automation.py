@@ -8,7 +8,7 @@ import sys
 import json
 import re
 
-REPO_URL = "https://github.com/kingsa2026/Neurova.git"
+REPO_URL = "https://github.com/kingsa2020/Neurova.git"
 WORK_DIR = "/workspace/neurova-repo"
 
 def run(cmd, cwd=None, check=True):

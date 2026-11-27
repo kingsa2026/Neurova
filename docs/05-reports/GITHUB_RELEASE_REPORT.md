@@ -5,7 +5,7 @@
 ## 📊 当前状态分析
 
 ### 仓库信息
-- **仓库地址**: https://github.com/kingsa2026/Neurova
+- **仓库地址**: https://github.com/kingsa2020/Neurova
 - **默认分支**: main
 - **当前版本**: v0.0.1 (发布于 2026-06-04)
 - **最新提交**: `d25fde8` - 更新README.md：添加RSI（递归自我进化系统）作为第13个亮点特性
@@ -132,7 +132,7 @@ gh release create v0.0.2 --title "v0.0.2" --notes "## v0.0.2 更新内容
 ```
 
 ### 方案3：使用 GitHub Web 界面
-1. 访问：https://github.com/kingsa2026/Neurova/releases/new
+1. 访问：https://github.com/kingsa2020/Neurova/releases/new
 2. 选择标签：`v0.0.2`（输入新标签名）
 3. 目标分支：`main`
 4. 发布标题：`v0.0.2`
@@ -146,6 +146,6 @@ gh release create v0.0.2 --title "v0.0.2" --notes "## v0.0.2 更新内容
 - 下次版本：v0.0.3
 
 ## 🔗 相关链接
-- 仓库：https://github.com/kingsa2026/Neurova
-- 最新 Release：https://github.com/kingsa2026/Neurova/releases/tag/v0.0.1
-- 创建 Release：https://github.com/kingsa2026/Neurova/releases/new
+- 仓库：https://github.com/kingsa2020/Neurova
+- 最新 Release：https://github.com/kingsa2020/Neurova/releases/tag/v0.0.1
+- 创建 Release：https://github.com/kingsa2020/Neurova/releases/new

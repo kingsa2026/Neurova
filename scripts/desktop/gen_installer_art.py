@@ -54,12 +54,12 @@ def make_hero(lang: str) -> None:
     if lang == "zh":
         t1 = "Neurova 智星"
         t2 = "记忆 · 情感 · 自我进化的个人 AI 智能体"
-        l1 = "开源 github.com/kingsa2026/Neurova · cnb.cool/kingsa2026/neurova"
+        l1 = "开源 github.com/kingsa2020/Neurova · cnb.cool/kingsa2026/neurova"
         l2 = "官网 www.neurova.top"
     else:
         t1 = "Neurova"
         t2 = "Memory · Emotion · Self-Evolution — Personal AI Agent"
-        l1 = "Open Source  github.com/kingsa2026/Neurova · cnb.cool/kingsa2026/neurova"
+        l1 = "Open Source  github.com/kingsa2020/Neurova · cnb.cool/kingsa2026/neurova"
         l2 = "Website  www.neurova.top"
     tx = lx + lw + 18
     f1 = _font(24, bold=True)

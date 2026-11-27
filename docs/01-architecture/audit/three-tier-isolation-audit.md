@@ -1,6 +1,6 @@
 # Neurova 三层隔离 / 多用户模块深度核查报告
 
-**数据源**：`kingsa2026/Neurova@main`（HEAD `33d7329`，2026-08-28）
+**数据源**：`kingsa2020/Neurova@main`（HEAD `33d7329`，2026-08-28）
 **核查方法**：`gh api` + `WebFetch` 拉 raw GitHub 源码，逐文件读取关键路径
 **重点文件**：`isolation.py`、`mem_core.py`、`memory_layer/manager.py`、`context_pool.py`、`session_manager.py`、`api/deps.py`、`api/auth.py`、`security/rbac.py`、`channels/manager.py`、`mobile_pairing.py`、`collaboration_isolation.py`、`skill_system/skill_pool_manager.py`、`auth/user_model.py`、`auth/enhanced_user_model.py`
 

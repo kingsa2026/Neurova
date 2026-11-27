@@ -9,9 +9,9 @@
 <br/>
 
 <div align="center">
-  <a href="https://github.com/kingsa2026/Neurova/stargazers"><img src="https://img.shields.io/github/stars/kingsa2026/Neurova?style=social" alt="Stars"></a>
-  <a href="https://github.com/kingsa2026/Neurova/issues"><img src="https://img.shields.io/github/issues/kingsa2026/Neurova" alt="Issues"></a>
-  <a href="https://github.com/kingsa2026/Neurova/blob/main/LICENSE"><img src="https://img.shields.io/github/license/kingsa2026/Neurova" alt="License"></a>
+  <a href="https://github.com/kingsa2020/Neurova/stargazers"><img src="https://img.shields.io/github/stars/kingsa2020/Neurova?style=social" alt="Stars"></a>
+  <a href="https://github.com/kingsa2020/Neurova/issues"><img src="https://img.shields.io/github/issues/kingsa2020/Neurova" alt="Issues"></a>
+  <a href="https://github.com/kingsa2020/Neurova/blob/main/LICENSE"><img src="https://img.shields.io/github/license/kingsa2020/Neurova" alt="License"></a>
   <img src="https://img.shields.io/badge/Python-3.10+-blue" alt="Python">
   <img src="https://img.shields.io/badge/TypeScript-5.0+-blue" alt="TypeScript">
 </div>
@@ -281,8 +281,8 @@ npm run dev
 
 IssueとPull Requestの送付を歓迎します！
 
-- **バグ報告**：[Issue Tracker](https://github.com/kingsa2026/Neurova/issues)をご利用ください
-- **機能提案**：[Discussions](https://github.com/kingsa2026/Neurova/discussions)をご利用ください
+- **バグ報告**：[Issue Tracker](https://github.com/kingsa2020/Neurova/issues)をご利用ください
+- **機能提案**：[Discussions](https://github.com/kingsa2020/Neurova/discussions)をご利用ください
 - **コード貢献**：ForkしてPRを送付してください
 
 ---

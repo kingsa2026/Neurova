@@ -8,7 +8,7 @@
     "locale": "zh-CN",
     "quality_profile": "standard",
     "viewBox": [960, 1100],
-    "repository": { "url": "https://github.com/kingsa2026/Neurova", "provider": "github", "link_mode": "web", "revision": "666f14a2349da09891fec46c1b3ed4020585da47" }
+    "repository": { "url": "https://github.com/kingsa2020/Neurova", "provider": "github", "link_mode": "web", "revision": "666f14a2349da09891fec46c1b3ed4020585da47" }
   },
   "components": [
     { "id": "hub", "type": "backend", "label": "ChatPipeline", "sublabel": "6 步对话管线 · 中枢", "tag": "串接全部", "pos": [60, 470], "size": [160, 120], "sources": [ { "path": "neurova/agent/chat_pipeline.py" } ] },

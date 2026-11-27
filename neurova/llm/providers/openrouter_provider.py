@@ -463,7 +463,7 @@ class OpenRouterProvider(BaseProvider):
         """
         headers = {
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/kingsa2026/Neurova",
+            "HTTP-Referer": "https://github.com/kingsa2020/Neurova",
             "X-OpenRouter-Title": "Neurova",
         }
         if self.api_key:

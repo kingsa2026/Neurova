@@ -29,7 +29,7 @@ import requests
 API = "https://api.cnb.cool"
 GH_API = "https://api.github.com"
 # 平台 slug 大小写不同（cnb 全小写、GitHub 仓库名大写），故各留一份而非统一小写拼 URL
-RELEASE_REPO_SLUG = {"cnb": "kingsa2026/neurova", "github": "kingsa2026/Neurova"}
+RELEASE_REPO_SLUG = {"cnb": "kingsa2026/neurova", "github": "kingsa2020/Neurova"}
 
 
 def log(msg: str) -> None:
