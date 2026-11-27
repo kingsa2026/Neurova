@@ -226,6 +226,7 @@ logs/
 # 根目录临时md文件（排除项目入口文档）
 /*.md
 !README.md
+!README_zh-CN.md
 !CONTRIBUTING.md
 !SECURITY.md
 # AGENTS.md：AI 指令文件 + 修复教义事实源，被全仓 90+ 处编号引用，
