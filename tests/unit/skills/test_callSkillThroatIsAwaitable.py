@@ -261,11 +261,5 @@ def _trackedNeurovaPy():
             and str(rel).endswith(".py")]
 
 
-def _makeStep(stepId: str, skillId: str):
-    from neurova.skills.models import SkillChainStep
-
-    return SkillChainStep(step_id=stepId, skill_id=skillId, input_mapping={})
-
-
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))

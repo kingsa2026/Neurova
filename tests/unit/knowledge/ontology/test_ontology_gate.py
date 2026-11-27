@@ -150,6 +150,19 @@ class TestFiveRules:
 
         assert "disjoint" in [v["rule"] for v in violations], "同一主体被断言成 person 与 city"
 
+    def test_disjointDeclarationIsSymmetricRegardlessOfTypeOrder(self, store, registry, report):
+        registry.registerMany([
+            {"termId": "left", "kind": "concept"},
+            {"termId": "right", "kind": "concept", "disjointWith": ["left"]},
+        ])
+        key = store.upsertSubject("default", "甲")
+        registry.assignSubjectType(key, "left")
+        store.upsertFact("default", key, "is_a", "right", "甲也是右类型")
+
+        violations = report.violations(_request("甲", "is_a", "right"), key)
+
+        assert "disjoint" in [v["rule"] for v in violations]
+
     def test_oneTypeIsNeverDisjointWithItself(self, store, registry, report):
         key = self._setup(store, registry)
         store.upsertFact("default", key, "is_a", "person", "甲是人")

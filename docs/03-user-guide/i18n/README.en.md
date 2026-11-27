@@ -282,7 +282,7 @@ Where:
 
 ```bash
 cd neurova
-pip install -r requirements.txt
+pip install -r requirements-full.lock
 python -m neurova.api.main
 ```
 

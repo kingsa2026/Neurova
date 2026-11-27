@@ -6,7 +6,7 @@ Neurova 一键安装脚本 / One-Click Install / 一键インストール / Од
 自动完成以下步骤：
 1. 检查 Python 版本 (>= 3.10)
 2. 创建虚拟环境 (.venv)
-3. 安装 Python 依赖（清单 single source: requirements.txt）
+3. 安装 Python 依赖（清单选择由 models/MANIFEST.json 声明，安装完整锁）
 4. 安装前端依赖 (npm ci，判据与 start.py 同契约)
 5. 安装浏览器内核 (Playwright Chromium，browser_read / computer_use 依赖)
 6. 安装本地 ASR 引擎包（可选，由 --with-local-asr 显式开启）
@@ -29,9 +29,11 @@ Neurova 一键安装脚本 / One-Click Install / 一键インストール / Од
    安装成功而模型根本不存在。模型下载因此走 `--model-worker` 子进程（同一份
    代码、同一套真下载器），退出码即事实。
 
-2. **依赖与模型只有一处声明**。基础依赖 = `requirements.txt`；模型 id / 仓库 /
-   引擎包 = `models/MANIFEST.json`（Windows 首启链路 `src-tauri/src/lib.rs`
-   读的同一份）。本脚本不新造名单，只消费它们。
+2. **依赖与模型只有一处选择声明**。依赖安装目标由 `models/MANIFEST.json` 的
+   `runtime.pip.requirements` 指定（当前为 `requirements-full.lock`，由
+   `requirements.txt` 编译）；模型 id / 仓库 / 引擎包也在同一份 MANIFEST。
+   Windows 首启链路（`src-tauri/src/lib.rs`）读的是同一份。本脚本不新造名单，
+   只消费它们。
 
 3. **失败必须诚实**。模型下载失败就报 WARN + 点名原因与后续取法，不用空目录
    冒充 OK（旧版 `download_asr_model` 只 mkdir 就打印「[OK] FunASR 模型」）。
@@ -68,11 +70,11 @@ from scripts.config import (  # noqa: E402
     MIN_PYTHON_VERSION,
     VENV_DIR,
     get_venv_python,
+    frontendInstallArgv,
 )
 
-# 供给清单：Windows 首启链路（src-tauri/src/lib.rs）与本脚本共用的唯一声明源
+# 供给清单：Windows 首启链路（src-tauri/src/lib.rs）与本脚本共用的唯一选择源
 SUPPLY_MANIFEST = PROJECT_ROOT / "models" / "MANIFEST.json"
-REQUIREMENTS_FILE = "requirements.txt"
 
 
 def runWithProgress(description, cmd, cwd=None, env=None, indeterminateMsg=None):
@@ -398,6 +400,15 @@ def loadSupplyManifest() -> dict:
         raise RuntimeError(f"{SUPPLY_MANIFEST} 解析失败: {e}") from e
 
 
+def runtimeRequirementsPath(manifest: dict) -> Path:
+    """依赖安装目标——MANIFEST 声明，安装器不再另抄文件名。"""
+    pip = (manifest.get("runtime") or {}).get("pip") or {}
+    requirements = pip.get("requirements")
+    if not requirements:
+        raise RuntimeError("清单缺少 runtime.pip.requirements")
+    return PROJECT_ROOT / requirements
+
+
 def pipIndexCandidates(manifest: dict) -> list:
     """pip 索引候选（镜像在前、官方兜底）——与首启链路同一份声明。"""
     pip = (manifest.get("runtime") or {}).get("pip") or {}
@@ -468,7 +479,7 @@ def installPythonDeps(manifest: dict) -> bool:
         print(t("deps_error", error=f"Python not found: {venvPython}"))
         return False
 
-    req = PROJECT_ROOT / REQUIREMENTS_FILE
+    req = runtimeRequirementsPath(manifest)
     if not req.exists():
         print(t("deps_missing_file", path=str(req)))
         return False
@@ -520,8 +531,7 @@ def installFrontendDeps() -> bool:
         print(t("frontend_exists"))
         return True
 
-    lock = FRONTEND_DIR / "package-lock.json"
-    cmd = ["npm", "ci"] if lock.exists() else ["npm", "install"]
+    cmd = frontendInstallArgv(FRONTEND_DIR)
     if not installWithProgress(t("step_frontend"), cmd, cwd=str(FRONTEND_DIR)):
         print(t("frontend_error", error=" ".join(cmd)))
         return False

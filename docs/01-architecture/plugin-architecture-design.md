@@ -101,8 +101,6 @@ Neurova 是一个基于 Flask/FastAPI 的 AI Agent 系统，具备记忆管理�
 | EventBus | `event_bus.py` | 发布-订阅事件系统 | ✅ 完善 |
 | ModuleLib | `module_lib.py` | 模块注册/加载/卸载 | ✅ 完善 |
 | StateManager | `state_manager.py` | 状态树/快照/回滚 | ✅ 完善 |
-| ConfigManager | `config_manager.py` | 分层配置管理 | ✅ 完善 |
-| ErrorHandler | `error_handler.py` | 错误码/恢复策略 | ✅ 完善 |
 | LogManager | `logger.py` | 统一日志管理 | ✅ 完善 |
 
 **Plugin 框架**（位于 `neurova/plugins/`）：
@@ -710,8 +708,6 @@ Neurova 统一应用入口
 
 from neurova.core.event_bus import EventBus, get_event_bus
 from neurova.core.state_manager import StateManager, get_state_manager
-from neurova.core.config_manager import ConfigManager, get_config_manager
-from neurova.core.error_handler import ErrorHandler, get_error_handler
 from neurova.core.logger import LogManager, get_log_manager
 from neurova.core.module_lib import ModuleLib, get_module_lib
 from neurova.plugins.plugin_manager import PluginManager, get_plugin_manager
@@ -732,8 +728,6 @@ class NeurovaApp:
         # 初始化核心服务
         self.event_bus = get_event_bus()
         self.state_manager = get_state_manager()
-        self.config_manager = get_config_manager()
-        self.error_handler = get_error_handler()
         self.log_manager = get_log_manager()
         self.module_lib = get_module_lib()
         
@@ -741,9 +735,7 @@ class NeurovaApp:
         self.plugin_manager = PluginManager(
             event_bus=self.event_bus,
             state_manager=self.state_manager,
-            config_manager=self.config_manager,
             log_manager=self.log_manager,
-            error_handler=self.error_handler,
             module_lib=self.module_lib,
         )
         

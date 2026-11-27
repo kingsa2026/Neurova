@@ -57,6 +57,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from tests import ast_scan  # noqa: E402  清单取的唯一读法（本档不另开一份）
+from scripts.ci import protected_shard_matrix  # noqa: E402
 
 CI_DIR = PROJECT_ROOT / "scripts" / "ci"
 INDEX = CI_DIR / "protected_tests.txt"
@@ -166,13 +167,28 @@ class TestBothSidesRunTheSameShards:
 
     def testGithubLegFansOutOverEveryShard(self):
         job = _ghwJob()
+        assert "protected-shards" in (job.get("needs") or [])
         matrix = (job.get("strategy") or {}).get("matrix") or {}
         shards = matrix.get("shard")
-        assert shards, (
-            "GitHub 侧没有分片矩阵：同一份清单在两侧要跑同样的片数，"
-            "一侧单片一侧分片即放行标准分叉")
+        assert shards == "${{ fromJSON(needs.protected-shards.outputs.shards) }}", (
+            "GitHub 矩阵必须从 protected-shards job 输出取值，不能手抄片号"
+        )
         runs = _ghwRuns(job)
         assert "matrix.shard" in runs, "GitHub 侧的矩阵没被用在跑测命令上"
+
+    def testGithubShardMatrixIsDerivedFromShardFiles(self):
+        job = _load(GHW)["jobs"]["protected-shards"]
+        assert job["outputs"]["shards"] == "${{ steps.matrix.outputs.shards }}"
+        runs = _ghwRuns(job)
+        assert "protected_shard_matrix.py --github-output" in runs
+        assert "GITHUB_OUTPUT" in runs
+
+    def testShardMatrixReaderUsesDirectoryAsSingleSource(self, tmp_path):
+        for name in ("protected_tests.10.txt", "protected_tests.2.txt", "protected_tests.1.txt"):
+            (tmp_path / name).write_text("", encoding="utf-8")
+        (tmp_path / "protected_tests.txt").write_text("", encoding="utf-8")
+        (tmp_path / "protected_tests.foo.txt").write_text("", encoding="utf-8")
+        assert protected_shard_matrix.shardNumbers(tmp_path) == [1, 2, 10]
 
     def testCoverageGateSurvivesAndIsJudgedOnceOverTheWholeSubset(self):
         """分片不许把覆盖率门禁顺手摘掉；门禁必须落在**合并之后**，不是逐片各判一次。

@@ -4672,6 +4672,25 @@
           "title": "DailySummary",
           "type": "object"
         },
+        "DeadLetterRequeueRequest": {
+          "description": "死信重排必须逐 ID 点名，空数组不是“全部”的别名。",
+          "properties": {
+            "event_ids": {
+              "items": {
+                "type": "integer"
+              },
+              "maxItems": 500,
+              "minItems": 1,
+              "title": "Event Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "event_ids"
+          ],
+          "title": "DeadLetterRequeueRequest",
+          "type": "object"
+        },
         "DecisionRequest": {
           "description": "决策请求",
           "properties": {
@@ -27401,6 +27420,152 @@
           ]
         }
       },
+      "/api/v1/channel-configs/ingress/dead-letters": {
+        "get": {
+          "description": "登录后按属主权限读取；存储故障以 5xx 暴露，不伪装成空列表。",
+          "operationId": "list_ingress_dead_letters_channel_configs_ingress_dead_letters_get",
+          "parameters": [
+            {
+              "description": "归属 Agent（必填）",
+              "in": "query",
+              "name": "agent_id",
+              "required": true,
+              "schema": {
+                "description": "归属 Agent（必填）",
+                "minLength": 1,
+                "title": "Agent Id",
+                "type": "string"
+              }
+            },
+            {
+              "description": "渠道类型；留空＝该 Agent 全渠道",
+              "in": "query",
+              "name": "channel_type",
+              "required": false,
+              "schema": {
+                "default": "",
+                "description": "渠道类型；留空＝该 Agent 全渠道",
+                "title": "Channel Type",
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "default": 50,
+                "maximum": 500,
+                "minimum": 1,
+                "title": "Limit",
+                "type": "integer"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "按 Agent 读取入站死信明细",
+          "tags": [
+            "Channel Config API",
+            "渠道配置"
+          ]
+        }
+      },
+      "/api/v1/channel-configs/ingress/dead-letters/requeue": {
+        "post": {
+          "description": "属主可写；只接受明确 ID，并再次按 agent/渠道收口更新范围。",
+          "operationId": "requeue_ingress_dead_letters_channel_configs_ingress_dead_letters_requeue_post",
+          "parameters": [
+            {
+              "description": "归属 Agent（必填）",
+              "in": "query",
+              "name": "agent_id",
+              "required": true,
+              "schema": {
+                "description": "归属 Agent（必填）",
+                "minLength": 1,
+                "title": "Agent Id",
+                "type": "string"
+              }
+            },
+            {
+              "description": "渠道类型；留空＝该 Agent 全渠道",
+              "in": "query",
+              "name": "channel_type",
+              "required": false,
+              "schema": {
+                "default": "",
+                "description": "渠道类型；留空＝该 Agent 全渠道",
+                "title": "Channel Type",
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeadLetterRequeueRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "按 ID 重排入站死信",
+          "tags": [
+            "Channel Config API",
+            "渠道配置"
+          ]
+        }
+      },
       "/api/v1/channel-configs/ingress/stats": {
         "get": {
           "description": "渠道入站持久化队列统计（pending/processing/dead_letter/processed）。\n\n供渠道管理页展示\"重启不丢消息\"的队列健康面。队列不可用时返回\nenabled=False（fail-open 直发模式）。",
@@ -27517,6 +27682,92 @@
             }
           ],
           "summary": "存量迁移的候选源与可迁渠道（Issue #326）",
+          "tags": [
+            "Channel Config API",
+            "渠道配置"
+          ]
+        }
+      },
+      "/api/v1/channel-configs/outbound/failures": {
+        "get": {
+          "description": "登录后按属主权限读取出口失败片；保留渠道/会话组合过滤。",
+          "operationId": "list_outbound_failures_channel_configs_outbound_failures_get",
+          "parameters": [
+            {
+              "description": "归属 Agent（必填）",
+              "in": "query",
+              "name": "agent_id",
+              "required": true,
+              "schema": {
+                "description": "归属 Agent（必填）",
+                "minLength": 1,
+                "title": "Agent Id",
+                "type": "string"
+              }
+            },
+            {
+              "description": "渠道类型；留空＝该 Agent 全渠道",
+              "in": "query",
+              "name": "channel_type",
+              "required": false,
+              "schema": {
+                "default": "",
+                "description": "渠道类型；留空＝该 Agent 全渠道",
+                "title": "Channel Type",
+                "type": "string"
+              }
+            },
+            {
+              "description": "会话 ID；留空＝该 Agent 全会话",
+              "in": "query",
+              "name": "chat_id",
+              "required": false,
+              "schema": {
+                "default": "",
+                "description": "会话 ID；留空＝该 Agent 全会话",
+                "title": "Chat Id",
+                "type": "string"
+              }
+            },
+            {
+              "in": "query",
+              "name": "limit",
+              "required": false,
+              "schema": {
+                "default": 100,
+                "maximum": 500,
+                "minimum": 1,
+                "title": "Limit",
+                "type": "integer"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "summary": "按 Agent 读取出口失败明细",
           "tags": [
             "Channel Config API",
             "渠道配置"

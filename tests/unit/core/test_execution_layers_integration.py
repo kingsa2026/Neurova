@@ -3,8 +3,7 @@ ExecutionLayers 集成测试
 
 验证 ExecutionLayers（只有运行时那一半——HTTP/WebSocket 传输那半从未接线，已退役）与核心流程的接线:
 1. run_code 内置工具通过 LocalExecutor 执行
-2. execute_skill_isolated 在隔离运行时中执行技能
-3. RuntimeManager 生命周期管理
+2. RuntimeManager 生命周期管理
 """
 
 import sys
@@ -12,10 +11,8 @@ import sys
 import pytest
 import asyncio
 import time
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
+from unittest.mock import Mock, patch, AsyncMock
 from typing import Dict, Any
-
-from neurova.skills.executor import SkillResult
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -347,114 +344,6 @@ class TestRunCodeBuiltinTool:
         assert "duration_ms" in result
         assert result["duration_ms"] >= 0
         assert result["runtime_type"] == "local"
-
-
-# ═══════════════════════════════════════════════════════════════
-# 4. SkillRegistry.execute_skill_isolated
-# ═══════════════════════════════════════════════════════════════
-
-class TestExecuteSkillIsolated:
-    """测试 SkillRegistry 隔离执行技能"""
-
-    def _create_registry_with_skill(self):
-        """创建带有一个已注册技能的 SkillRegistry 实例"""
-        from neurova.skills.registry import SkillRegistry
-        from neurova.skills.executor import SkillResult
-        from neurova.skill_system import Skill as SystemSkill
-
-        # 重置单例以确保干净状态；注入 mock runtime_manager 使隔离执行走 Factory 路径
-        SkillRegistry._instance = None
-        registry = SkillRegistry(runtime_manager=Mock())
-
-        # 规范 Skill 子类（含 execute），降级执行时可成功完成
-        class DummySkill(SystemSkill):
-            async def execute(self, params=None, context=None):
-                return SkillResult(success=True, output={"ok": True})
-
-        skill = DummySkill(name="test_dummy_skill", description="A dummy skill for testing")
-        registry.register_skill(skill)
-        return registry
-
-    @pytest.mark.asyncio
-    async def test_execute_skill_isolated_method_exists(self):
-        """验证 execute_skill_isolated 方法存在"""
-        registry = self._create_registry_with_skill()
-        assert hasattr(registry, 'execute_skill_isolated')
-        assert callable(getattr(registry, 'execute_skill_isolated'))
-
-    @pytest.mark.asyncio
-    async def test_execute_skill_isolated_fallback(self):
-        """验证 RuntimeFactory 失败时降级为普通执行"""
-        registry = self._create_registry_with_skill()
-
-        with patch(
-            'neurova.execution_layers.RuntimeFactory',
-            side_effect=ImportError("not available"),
-        ):
-            result = await registry.execute_skill_isolated(
-                "test_dummy_skill", {"a": 1}
-            )
-
-        # 降级为普通 execute_skill（返回 SkillResult 对象）
-        assert result.success is True
-
-    @pytest.mark.asyncio
-    async def test_execute_skill_isolated_nonexistent_skill(self):
-        """验证执行不存在的技能时返回错误"""
-        registry = self._create_registry_with_skill()
-
-        result = await registry.execute_skill_isolated("nonexistent_skill", {})
-        assert result.success is False
-        assert "不存在" in result.error
-
-    @pytest.mark.asyncio
-    async def test_execute_skill_isolated_creates_runtime(self):
-        """验证隔离执行时创建独立运行时"""
-        registry = self._create_registry_with_skill()
-
-        mock_runtime = AsyncMock()
-        mock_runtime.start = AsyncMock(return_value=True)
-        mock_runtime.stop = AsyncMock(return_value=True)
-        mock_runtime.exec = AsyncMock(return_value=Mock(
-            success=True,
-            stdout='{"success": true, "data": {}}',
-            stderr=None,
-            error=None,
-        ))
-
-        with patch(
-            'neurova.execution_layers.RuntimeFactory',
-        ) as mock_factory:
-            mock_factory.create.return_value = mock_runtime
-
-            result = await registry.execute_skill_isolated(
-                "test_dummy_skill", {"key": "val"}, runtime_type="local"
-            )
-
-            assert mock_runtime.start.called
-            assert mock_runtime.exec.called
-            assert mock_runtime.stop.called
-
-    @pytest.mark.asyncio
-    async def test_execute_skill_isolated_stops_runtime_on_error(self):
-        """验证执行异常时仍能停止运行时"""
-        registry = self._create_registry_with_skill()
-
-        mock_runtime = AsyncMock()
-        mock_runtime.start = AsyncMock(return_value=True)
-        mock_runtime.stop = AsyncMock(return_value=True)
-        mock_runtime.exec = AsyncMock(side_effect=Exception("exec failed"))
-
-        with patch(
-            'neurova.execution_layers.RuntimeFactory',
-        ) as mock_factory:
-            mock_factory.create.return_value = mock_runtime
-
-            result = await registry.execute_skill_isolated("test_dummy_skill", {})
-
-            assert mock_runtime.stop.called
-            # 异常被外层 try/except 捕获，降级为普通执行（返回 SkillResult）
-            assert isinstance(result, SkillResult)
 
 
 # ═══════════════════════════════════════════════════════════════

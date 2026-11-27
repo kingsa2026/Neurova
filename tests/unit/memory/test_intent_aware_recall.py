@@ -279,14 +279,15 @@ class TestIntentAwareRecallIntegration:
         params_captured = {}
 
         def mock_phase1(query, channels, limit, channel_weights=None, **kwargs):
-            params_captured.update(kwargs)
+            params_captured["limit"] = limit
             return []
 
         with patch.object(engine, '_phase1_multichannel_recall', side_effect=mock_phase1):
             engine.recall("explore new topics", query_intent=QueryIntent.EXPLORATORY)
 
-        # 探索意图应有不同的限制
-        assert "min_score" in params_captured or "limit" in params_captured or True  # 宽松检查
+        assert params_captured["limit"] == (
+            engine.intent_strategy.get_retrieval_params(QueryIntent.EXPLORATORY)["limit"] * 2
+        )
 
 
 # ────── Integration Tests ──────

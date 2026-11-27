@@ -56,4 +56,26 @@ class ExecutorGateTest {
         setClock(1_000_000L + 110_001)
         assertFalse(g.isArmed())
     }
+
+    @Test
+    fun gate_taskWindowNeverOutlivesServerExpiry() {
+        val (g, _, setClock) = gate(now = 1_000_000L, idle = 60_000L)
+        g.arm(taskId = "task-1", expiresAt = 1_030_000L)
+        assertTrue(g.isArmed("task-1"))
+        assertFalse(g.isArmed("task-2"))
+        setClock(1_020_000L)
+        g.onActivity("task-1")
+        setClock(1_030_001L)
+        assertFalse(g.isArmed("task-1"))
+    }
+
+    @Test
+    fun gate_activityFromForeignTaskCannotRenew() {
+        val (g, _, setClock) = gate(now = 1_000_000L, idle = 60_000L)
+        g.arm(taskId = "task-1", expiresAt = 1_030_000L)
+        setClock(1_020_000L)
+        g.onActivity("task-2")
+        setClock(1_030_001L)
+        assertFalse(g.isArmed("task-1"))
+    }
 }

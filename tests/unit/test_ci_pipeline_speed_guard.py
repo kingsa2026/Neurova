@@ -131,6 +131,20 @@ class TestOsvOfflineCacheIsSharedAcrossBuilds:
             "GitHub 侧每次构建同样要现下整份漏洞库"
         )
 
+    def test_github_cache_key_is_time_bucketed_and_code_sensitive(self):
+        job = _ghw_jobs()["dependency-audit"]
+        caches = [
+            step for step in job.get("steps") or []
+            if isinstance(step, dict) and str(step.get("uses", "")).startswith("actions/cache")
+        ]
+        keys = [str(step.get("with", {}).get("key", "")) for step in caches]
+        assert any("steps.osv-cache-date.outputs.day" in key for key in keys), (
+            "GitHub OSV 缓存键没有按天分桶——昨天的库会被今天原样复用，年龄却无人判"
+        )
+        assert any("hashFiles('scripts/ci/osv_audit.py')" in key for key in keys), (
+            "GitHub OSV 缓存键没有绑定判定脚本——新鲜度规则变更后旧缓存仍可命中"
+        )
+
     def test_cache_volume_is_not_a_second_cache_root(self):
         """卷必须落在门禁脚本自己用的那个目录上，不是另建一份缓存。
 

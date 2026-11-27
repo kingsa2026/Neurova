@@ -233,7 +233,7 @@ class TestModelSchema:
 
         schema = get_model_schema("totally-unknown-xyz-99")
         assert schema.parameter_rules, "未知模型也要有基础参数规则"
-        assert schema.supports("text") or schema.supports("reasoning") or True
+        assert schema.supports("text") is True
 
     def test_capability_filter_driven_by_schema(self):
         from neurova.llm.model_runtime.schema import get_model_schema

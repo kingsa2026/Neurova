@@ -477,6 +477,64 @@ class OntologyPipeline:
                 "communities": self._refreshCommunities("", tenant)}
 
 
+class _CheckGateAdmission:
+    """真实咽喉的拒绝记账包装；候选与推导共用同一写入口。"""
+
+    def __init__(self, store: Any, notes: List[str]) -> None:
+        from ..foundation.admission import productionAdmissionGate
+
+        self._gate = productionAdmissionGate(store, toolVersion="ontology_check_gate")
+        self._notes = notes
+
+    def admit(self, request: Any, **kwargs: Any) -> Any:
+        try:
+            return self._gate.admit(request, **kwargs)
+        except ValueError as exc:
+            kind = "推导注入" if getattr(request, "activityKind", "") == "derive" else "候选注入"
+            self._notes.append("%s被拒（%s %s %s）：%s"
+                               % (kind, getattr(request, "subjectLabel", ""),
+                                  getattr(request, "predicateTermId", ""),
+                                  getattr(request, "objectTerm", ""), exc))
+            raise
+
+
+def _postStateViolations(store: Any, agentId: str,
+                         tenantId: str) -> List[Dict[str, Any]]:
+    """按当前唯一事实窗口复验整域 triple，返回带事实定位的 violation。"""
+    from ..foundation.admission import AdmissionRequest
+    from .shapes import ShapeRegistry
+
+    registry = OntologyTermRegistry(store)
+    report = OntologyValidationReport(registry, shapes=ShapeRegistry(store))
+    rows: List[Dict[str, Any]] = []
+    for fact in store.factsBitemporal(agentId=agentId, tenantId=tenantId):
+        request = AdmissionRequest(
+            agentId=agentId, tenantId=tenantId,
+            subjectLabel=str(fact.get("canonical_label") or ""),
+            predicateTermId=str(fact.get("predicate_term_id") or ""),
+            objectTerm=str(fact.get("object_term") or ""),
+            qualifier=dict(fact.get("qualifier") or {}),
+            recordKind="triple", evidenceText="", assertions=[])
+        for finding in report.findings(request, str(fact.get("subject_key") or "")):
+            if finding.get("kind") != "violation":
+                continue
+            rows.append({
+                "fact_id": str(fact.get("fact_id") or ""),
+                "subject_key": str(fact.get("subject_key") or ""),
+                "predicate_term_id": str(fact.get("predicate_term_id") or ""),
+                "object_term": str(fact.get("object_term") or ""),
+                "finding": finding,
+            })
+    return rows
+
+
+def _violationKey(row: Dict[str, Any]) -> tuple:
+    finding = row["finding"]
+    return (row["fact_id"], row["subject_key"], row["predicate_term_id"],
+            row["object_term"], str(finding.get("rule") or ""),
+            str(finding.get("term_id") or ""), str(finding.get("message") or ""))
+
+
 def checkGate(store: Any, agentId: str, tenantId: str,
               termUpserts: Optional[List[Dict[str, Any]]] = None,
               ruleRegistrations: Optional[List[Dict[str, Any]]] = None,
@@ -491,8 +549,10 @@ def checkGate(store: Any, agentId: str, tenantId: str,
       「环境不稳定」，门禁结果不可信，直接 fail。
 
     gate 判定（诚实、可复算）：任一候选「基线 pass、草稿 violation」的倒退
-    即 fail（新假设制造了违规）；纯新增推导不拦（shifts 如实随报）。只读：
-    生产库零写入（副本即删）；不落台账（门禁是审批辅助，结论随审批流记录）。
+    即 fail（新假设制造了违规）；候选或推导写入被咽喉拒绝即 fail；候选注入、
+    推导到不动点后按同一验证器复验 post-state，仅新增 violation 才 fail，
+    存量违规不连坐。只读：生产库零写入（副本即删）；不落台账（门禁是审批
+    辅助，结论随审批流记录）。
     """
     import os
     import sqlite3
@@ -514,6 +574,7 @@ def checkGate(store: Any, agentId: str, tenantId: str,
 
     baseline = _arm(store)
     replay = _arm(store)  # 臂3：同参重放（确定性对照）
+    baselineState = _postStateViolations(store, agent, tenant)
     reasons: List[str] = []
     if baseline["verdicts"] != replay["verdicts"]:
         reasons.append("replay drifted：基线臂与重放臂结论不一致——环境不稳定，门禁结果不可信")
@@ -521,6 +582,7 @@ def checkGate(store: Any, agentId: str, tenantId: str,
     draft: Dict[str, Any] = {"rows": 0, "violations": 0, "verdicts": []}
     shifts: Dict[str, Any] = {"added": 0, "removed": 0, "affected_subjects": [],
                               "notes": []}
+    injectionNotes: List[str] = []
     workDirCreated = False
     copyPath = ""
     copyStore: Any = None
@@ -538,13 +600,16 @@ def checkGate(store: Any, agentId: str, tenantId: str,
         finally:
             copyConn.close()
         copyStore = KnowledgeFactStore(copyPath)
+        before = _factSnapshot(copyStore, agent, tenant)
         # 术语/规则假设先应用进副本（机器候选只进副本，不进生产）
         copyRegistry = OntologyTermRegistry(copyStore)
         for spec in termUpserts:
             copyRegistry.declarePartial(str(spec.get("termId") or "").strip(),
                                         str(spec.get("kind") or "").strip(),
                                         dict(spec), tenantId=tenant)
-        copyEngine = ForwardChainingEngine(copyStore)
+        copyEngine = ForwardChainingEngine(
+            copyStore,
+            gateFactory=lambda target: _CheckGateAdmission(target, injectionNotes))
         for spec in ruleRegistrations:
             copyEngine.registerRule(
                 str(spec.get("ruleId") or "").strip(),
@@ -557,10 +622,9 @@ def checkGate(store: Any, agentId: str, tenantId: str,
                 version=str(spec.get("version") or "v1"), tenantId=tenant)
         draft = _arm(copyStore)
         # 候选事实经同一咽喉注入副本（dispatch 自动点燃规则+函数引擎）
-        from ..foundation.admission import AdmissionRequest, productionAdmissionGate
+        from ..foundation.admission import AdmissionRequest
 
-        gate = productionAdmissionGate(copyStore, toolVersion="ontology_check_gate")
-        before = _factSnapshot(copyStore, agent, tenant)
+        gate = _CheckGateAdmission(copyStore, injectionNotes)
         for candidate in factCandidates:
             subject = str(candidate.get("subjectLabel") or "").strip()
             predicate = str(candidate.get("predicateTermId") or "").strip()
@@ -579,17 +643,17 @@ def checkGate(store: Any, agentId: str, tenantId: str,
                                  "statementText": content}],
                     activityKind="admit",
                     activityBasis="pipeline.checkGate（草稿臂候选注入）"))
-            except ValueError as exc:
-                shifts["notes"].append("候选注入被拒（%s %s %s）：%s"
-                                       % (subject, predicate, obj, exc))
+            except ValueError:
+                continue  # 拒绝已由 _CheckGateAdmission 记账，继续收集整批结果
         copyEngine.fireAll(agentId=agent, tenantId=tenant)
+        draftState = _postStateViolations(copyStore, agent, tenant)
         after = _factSnapshot(copyStore, agent, tenant)
         addedKeys = set(after) - set(before)
         removedKeys = set(before) - set(after)
         shifts = {"added": len(addedKeys), "removed": len(removedKeys),
                   "affected_subjects": sorted({after[k]["subject_key"]
                                                for k in addedKeys}),
-                  "notes": shifts["notes"]}
+                  "notes": injectionNotes}
     finally:
         if copyStore is not None:
             copyStore.close()
@@ -607,6 +671,16 @@ def checkGate(store: Any, agentId: str, tenantId: str,
         if beforeVerdict == "pass" and afterVerdict == "violation":
             reasons.append("candidate %d regressed：基线 pass、草稿 violation——"
                            "新假设制造违规" % index)
+    reasons.extend(injectionNotes)
+    baselineViolations = {_violationKey(row) for row in baselineState}
+    for row in draftState:
+        key = _violationKey(row)
+        if key in baselineViolations:
+            continue
+        finding = row["finding"]
+        reasons.append("post-state %s violation[%s] fact_id=%s：%s"
+                       % (row["predicate_term_id"], finding.get("rule"),
+                          row["fact_id"], finding.get("message")))
     return {"gate": "fail" if reasons else "pass", "reasons": reasons,
             "arms": {"baseline": baseline, "draft": draft, "replay": replay},
             "shifts": shifts}

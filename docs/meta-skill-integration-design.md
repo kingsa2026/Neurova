@@ -1,5 +1,7 @@
 # Meta-skill 直接集成设计文档
 
+> 状态：历史设计，不是当前实现契约。2026-11-27 DEAD-15 已退役 `plan_skill_chain()`、`optimize_chain()`、`estimate_chain_cost()` 及技能链模型；`TaskDecomposer` 当前只保留并消费 `decompose()` 等现役能力。
+
 ## 目标
 将 Meta-skill 的 4 个核心能力直接集成到 Neurova 的现有技能系统中，不采用渐进式方法，因为 Neurova 是未发布的框架。
 

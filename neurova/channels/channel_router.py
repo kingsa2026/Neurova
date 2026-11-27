@@ -152,8 +152,19 @@ def _detect_sender_is_bot(message: ChannelMessage) -> bool:
     return isinstance(sender, dict) and bool(sender.get("is_bot") or sender.get("bot"))
 
 
-def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -> Callable:
-    """构造渠道→agent 处理器。agent_lookup(agent_id)->Agent|None 可注入（测试用）。"""
+def make_handler(
+    manager,
+    agent_lookup: Optional[Callable[[str], Any]] = None,
+    *,
+    session_id: Optional[str] = None,
+    turn_identity: Optional[Dict[str, str]] = None,
+) -> Callable:
+    """构造渠道→agent 处理器。agent_lookup(agent_id)->Agent|None 可注入（测试用）。
+
+    `session_id` / `turn_identity` 只供已经完成可信鉴权的内部入站面使用：
+    Session Sync 的 REST/WS 入口会把 token 主体作为发送者身份传入，渠道适配器
+    仍走下方绑定表解析，两条入口共用同一段 Agent 执行体而不共享身份口径。
+    """
     lookup = agent_lookup or _default_agent_lookup
 
     async def _handler(message: ChannelMessage) -> Optional[str]:
@@ -193,7 +204,7 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         # 语音闸/词法闸/唯一待审闸都在助手内判（单一判定点）；反自答是结构性
         # 的：只有入站用户消息路径会到这里。纯旁路。
         _tryVoiceConfirmPendingApprovals(agent_id, message)
-        session_id = manager.resolve_session_scope_id(message)
+        scopedSessionId = session_id or manager.resolve_session_scope_id(message)
         # Wave H-W0 修复：owner_user_id 在 agent.config 上——原读
         # getattr(agent, "owner_user_id") 恒 None，渠道会话归属链自
         # 2026-09 断链设计起从未生效（save_to_session 落"共享可见"）。
@@ -219,27 +230,35 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         # 退到渠道专属命名空间 `ch:{渠道}:{发送者}`——不再落 default 共享桶（那正是 §6-123 的
         # 成因）。`user_id` 在这里**只产生一次**，下游 `chat_pipeline._init_agent_state` 照旧读
         # metadata；解析单点若多出一处，两条通道就会给同一个人算出两个身份。
-        from neurova.channels.user_identity import UserIdentityManager
+        # Session Sync 是可信内部入口，token 主体由入口鉴权后显式传入，不能再用渠道绑定表
+        # 二次解释；普通渠道没有这个参数，仍走唯一绑定表解析。
+        if turn_identity is None:
+            from neurova.channels.user_identity import UserIdentityManager
 
-        turnIdentity = UserIdentityManager().resolveTurnIdentity(
-            agent_id, message.channel_type, str(meta["channel_user_id"]))
-        meta["user_id"] = turnIdentity["user_id"]
-        meta["identity_bound"] = turnIdentity["bound"]
+            resolvedIdentity = UserIdentityManager().resolveTurnIdentity(
+                agent_id, message.channel_type, str(meta["channel_user_id"]))
+        else:
+            resolvedIdentity = {
+                "user_id": str(turn_identity.get("user_id") or ""),
+                "neuser_id": str(turn_identity.get("neuser_id") or turn_identity.get("user_id") or ""),
+                "bound": str(turn_identity.get("bound") or "true"),
+            }
+        meta["user_id"] = resolvedIdentity["user_id"]
+        meta["identity_bound"] = resolvedIdentity["bound"]
         # 记忆三层隔离键是 (neuser_id, user_id) 一对（`api/deps.py:118-125` 从 JWT 成对取）；
         # 只带一个键名过去会复现不出控制台写入的那把键，等于同一个人两份记忆。
-        meta["memory_scope"] = {"neuser_id": turnIdentity["neuser_id"],
-                                "user_id": turnIdentity["user_id"]}
+        meta["memory_scope"] = {"neuser_id": resolvedIdentity["neuser_id"],
+                                "user_id": resolvedIdentity["user_id"]}
         # 会话记录的可见性归 agent 属主（Issue #290 Wave H-W0）。§6-163 把身份合并成一条
         # "谁在说话"之后，属主**不再靠环境里那条通道捎带**——它是一条显式元数据，
         # 由 `post_chat_pipeline` 交给 `save_to_session(session_owner=…)`。
         meta["session_owner_id"] = owner or ""
-        # 观察面（工单批 6）：每条入站都记下"这个 agent 的这条渠道里见过这个发送者"。
-        # 控制台的绑定面板只能靠这一面列人——人抄不到自己的 `ou_xxx`/`tg_xxx`，
-        # 而发码之前他得先知道"我在飞书里那个身份"是哪一格。写侧就在这一行，读侧是
-        # `GET /channel-configs/identity/observed`。
-        UserIdentityManager().observeSender(
-            agent_id, message.channel_type, str(meta["channel_user_id"]),
-            str(meta.get("channel_name") or "") or None)
+        # 观察面（工单批 6）：渠道入站记下"这个 agent 的这条渠道里见过这个发送者"。
+        # Session Sync 的 token 身份不是渠道发送者，不写这张观察表。
+        if turn_identity is None:
+            UserIdentityManager().observeSender(
+                agent_id, message.channel_type, str(meta["channel_user_id"]),
+                str(meta.get("channel_name") or "") or None)
         # 可信轮次来源（任务2 actionability 门控地基）：默认 human——人类/未标注一律
         # 按人类对待，门控永不抑制；仅当渠道侧显式标注发送者是 bot/对端 agent 才 bot_peer。
         sender_is_bot = _detect_sender_is_bot(message)
@@ -250,7 +269,7 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         # 字节不塞进 metadata——入站队列按 `default=str` 序列化会把它变形掉，登记后只剩 file_id。
         attachments = landInboundMedia(
             metadata=message.metadata, user_id=str(meta["user_id"]),
-            agent_id=agent_id, session_id=session_id,
+            agent_id=agent_id, session_id=scopedSessionId,
         )
         if attachments:
             meta["attachments"] = attachments
@@ -311,17 +330,17 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
             }
             return reasons.get(outcome["reason"], "绑定失败，请重试。")
 
-        ledger = AgentRunLedger(session_id, owner or "", agent_id, content)
+        ledger = AgentRunLedger(scopedSessionId, owner or "", agent_id, content)
         try:
             # 唯一那条身份通道装的是**发送者**（§6-163 裁定甲）：配额、usage、
             # 浏览器 profile 池、工具三层隔离都按"谁在说话"计。会话记录的可见性
             # 不走这条通道，走上面的 `meta["session_owner_id"]`——原先"一条装属主、
             # 一条装发送者"的那处声明式分叉（§6-127 裁定 ④）就此收口成一处显式传参。
-            set_request_user_id(turnIdentity["user_id"])
+            set_request_user_id(resolvedIdentity["user_id"])
             memoryManager = getattr(agent, "memory_manager", None)
             if memoryManager is not None and hasattr(memoryManager, "set_request_scope"):
                 memoryManager.set_request_scope(
-                    neuser_id=turnIdentity["neuser_id"], user_id=turnIdentity["user_id"])
+                    neuser_id=resolvedIdentity["neuser_id"], user_id=resolvedIdentity["user_id"])
             # P1-10 残留实装：共享组可见性的读者组解析器接线（渠道路径）——
             # 组员关系源是用户名清单，绑定账号 user_id → UserModel 取 username → 组集
             if memoryManager is not None and hasattr(memoryManager, "set_shared_group_resolver"):
@@ -353,13 +372,13 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
                 ledger=ledger,
                 agentId=agent_id,
                 modelName="",  # 渠道不指定模型：未归因回合仍受并发/间距/限流各层约束
-                sessionId=session_id,
+                sessionId=scopedSessionId,
                 userInput=content,
                 payload={
                     "entry": ENTRY_CHANNEL,
                     "message": content,
                     "agent_id": agent_id,
-                    "session_id": session_id,
+                    "session_id": scopedSessionId,
                     "model": None,
                     "stream": False,
                 },
@@ -369,7 +388,7 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
                     # SB-4 分诊门 skip：渠道不回复（上层对空列表即不发送）
                     logger.debug(
                         "分诊门跳过本轮（渠道不回复）：agent_id=%s session_id=%s reason=%s run_id=%s",
-                        agent_id, session_id, admission.parkReason, admission.runId,
+                        agent_id, scopedSessionId, admission.parkReason, admission.runId,
                     )
                     return []
                 if admission.ledgerFailed:
@@ -381,7 +400,7 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
                 return [parkReceiptText(admission, resumableWhere="请在网页控制台该会话里点「续跑」")]
 
             try:
-                resp = await agent.chat(user_input=content, session_id=session_id, metadata=meta)
+                resp = await agent.chat(user_input=content, session_id=scopedSessionId, metadata=meta)
             except Exception as exc:
                 logger.exception("ChannelRouter: agent.chat 失败（channel=%s agent=%s）", message.channel_type, agent_id)
                 ledger.settleResult({"error": "chat_error"})
@@ -444,6 +463,27 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         return parts or None
 
     return _handler
+
+
+async def process_inbound(
+    manager,
+    message: ChannelMessage,
+    agent_lookup: Optional[Callable[[str], Any]] = None,
+    *,
+    session_id: Optional[str] = None,
+    turn_identity: Optional[Dict[str, str]] = None,
+):
+    """Sync 与渠道共用的唯一入站处理口。
+
+    渠道适配器仍由 `make_handler()` 包成常驻 handler；Session Sync 直接调用本函数。
+    两条路径最终执行同一段准入、身份、台账、Agent 与回复装配逻辑。
+    """
+    return await make_handler(
+        manager,
+        agent_lookup,
+        session_id=session_id,
+        turn_identity=turn_identity,
+    )(message)
 
 
 def install_channel_router(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -> None:

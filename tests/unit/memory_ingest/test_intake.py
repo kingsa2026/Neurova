@@ -11,7 +11,9 @@ from typing import Any, Dict, List
 import pytest
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+from neurova.cognitive_layers.memory_layer.models import LifecycleStage
 from neurova.memory_ingest.bundle.manifest import BundleError
+from neurova.memory_ingest.bundle.records import MemoryRecord
 from neurova.memory_ingest.intake import apply_bundle, plan_bundle
 from neurova.session_manager import SessionManager
 
@@ -60,12 +62,14 @@ def _write_bundle(tmp_path: Path, rows, memories=(), *, counts=None, dropped=())
 
 
 @pytest.fixture()
-def manager(tmp_path: Path) -> MemoryManager:
+def manager(tmp_path: Path, monkeypatch) -> MemoryManager:
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
     return MemoryManager(db_path=str(tmp_path / "memory" / "memory.db"))
 
 
 @pytest.fixture()
 def sessions(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("NEUROVA_SESSIONS_DIR", str(tmp_path / "sessions"))
     SessionManager._instance = None
     yield SessionManager()
@@ -167,16 +171,42 @@ def test_oversized_bundle_is_refused(manager, sessions, bundle, monkeypatch):
         apply_bundle(bundle, agent_id="default", manager=manager, sessions=sessions)
 
 
-def test_session_write_failure_tells_how_to_undo(manager, sessions, bundle, monkeypatch):
-    """半途失败不能留悬批：报错必须给出撤销路径，已落的记忆才收得回。"""
-    def boom(*args, **kwargs):
-        raise OSError("disk full")
+def test_session_write_failure_rolls_back_memories_media_and_prior_sessions(
+        manager, sessions, tmp_path: Path, monkeypatch):
+    """第二支会话写失败：第一支会话、记忆与已暂存媒体都必须补偿回滚。"""
+    import base64
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+    from neurova.memory_ingest.bundle.media import MediaSink
 
-    monkeypatch.setattr(sessions, "import_session_messages", boom)
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+                           "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    bundle_dir = tmp_path / "bundle"
+    ref = dict(MediaSink(bundle_dir, name_hint="shot.png").put(png), type="image")
+    rows = [
+        dict(_ROWS[0], content_blocks=[{"type": "text", "text": "看图"}, ref]),
+        dict(_ROWS[0], session_id="sB", seq=1, identity_key="e5",
+             content_blocks=[{"type": "text", "text": "第二支"}]),
+    ]
+    root = _write_bundle(tmp_path, rows, [_MEM])
+    original = sessions.import_session_messages
+    calls = []
 
-    with pytest.raises(BundleError, match="undo"):
-        apply_bundle(bundle, agent_id="default", manager=manager, sessions=sessions)
-    assert any(m.content == "历史记忆" for m in manager._memories.values())
+    def fail_second(*args, **kwargs):
+        calls.append(kwargs.get("ingest_run_id"))
+        if len(calls) == 2:
+            raise OSError("disk full")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(sessions, "import_session_messages", fail_second)
+
+    with pytest.raises(BundleError, match="disk full"):
+        apply_bundle(root, agent_id="rollback-agent", manager=manager, sessions=sessions,
+                     run_id="run-rollback")
+
+    assert manager._memories == {}
+    assert sessions.list_sessions("rollback-agent") == []
+    staged = get_agent_workspace_dir("rollback-agent") / "media"
+    assert list(staged.glob("*")) == []
 
 
 def test_apply_stages_media_into_the_agent_workspace(manager, sessions, tmp_path: Path):
@@ -260,12 +290,53 @@ def test_undo_keeps_media_still_referenced_by_other_runs(tmp_path: Path, manager
     assert second.messages_skipped == 1 and len(first.staged_media) == 1
     first.undo(manager=manager, sessions=sessions)
 
-    assert list(staged.glob("*")) == []            # 两条都被删了，文件自然无人引用(manager, sessions, bundle, tmp_path):
+    assert list(staged.glob("*")) == []            # 两条都被删了，文件自然无人引用
+
+
+def test_apply_rejects_unsafe_agent_id(manager, sessions, bundle, tmp_path: Path):
     with pytest.raises(BundleError, match="agent_id"):
         apply_bundle(bundle, agent_id="../escape", manager=manager, sessions=sessions)
 
     assert manager._memories == {}
     assert not list(tmp_path.glob("**/session_*.json"))
+
+
+def test_import_memories_does_not_ignore_persist_failure(manager, monkeypatch):
+    monkeypatch.setattr(manager, "persist_memory_batch", lambda mems: False)
+    record = MemoryRecord(**dict(_MEM, supersedes=""))
+
+    with pytest.raises(OSError, match="未落盘"):
+        manager.import_memories([record], ingest_run_id="run-persist-fail")
+
+    assert manager._memories == {}
+
+
+def test_undo_restores_memory_superseded_by_the_batch(manager, sessions, tmp_path: Path):
+    old_id = manager.remember(content="旧事实", category="general", auto_analyze_emotion=False)
+    old = manager._memories[old_id]
+    record = dict(_MEM, content="新事实", supersedes="旧事实")
+    root = _write_bundle(tmp_path, [_ROWS[0]], [record])
+
+    report = apply_bundle(root, agent_id="default", manager=manager, sessions=sessions,
+                          run_id="run-supersede")
+    assert old.lifecycle_stage == LifecycleStage.FORGOTTEN
+
+    report.undo(manager=manager, sessions=sessions)
+
+    assert old.lifecycle_stage == LifecycleStage.ACTIVE
+    assert "superseded_by_ingest" not in (old.metadata or {})
+
+
+def test_duplicate_run_id_is_rejected_even_after_undo(manager, sessions, bundle):
+    first = apply_bundle(bundle, agent_id="default", manager=manager, sessions=sessions,
+                         run_id="run-reused")
+    first.undo(manager=manager, sessions=sessions)
+
+    with pytest.raises(BundleError, match="run_id"):
+        apply_bundle(bundle, agent_id="default", manager=manager, sessions=sessions,
+                     run_id="run-reused")
+
+    assert manager._memories == {}
 
 
 class _SessionsWith:

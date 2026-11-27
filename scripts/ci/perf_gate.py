@@ -38,7 +38,7 @@ success；该 sha 之后两次主线构建 11/11 全绿，其间无 perf 相关�
 2. **关键路径微基准**：管线与共享线程池的最热操作必须有数量级裕量。
    - PostChatPipeline 步骤埋点开销（每步一次 counter+histogram）
    - 共享线程池 get_thread_pool() 复用（不得退化为每次新建）
-   - MetricsCollector 假数据默认禁用（接线假数 = 仪表盘失真）
+   - 无消费者的假指标采集器保持退役（真实统计走 core.metrics 与账本）
 
 阈值策略：给足裕量（CI 机器比开发机慢、负载抖动），且同一判据连量
 `SCORING_ROUNDS` 轮取最优。门禁只回答"是否发生数量级退化"，不追求精确
@@ -84,7 +84,6 @@ perf-gate 流水线（同一份脚本、同一份预算）34s / 46s 全绿，说
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import os
 import subprocess
@@ -412,29 +411,20 @@ def check_shared_pool_reuse(failures: Failures) -> dict:
     return {"iterations": iterations, "distinct_pools": len(pools), "elapsed_ms": elapsed_ms}
 
 
-def check_no_mock_metrics_by_default(failures: Failures) -> dict:
-    """检查 4：假指标默认禁用（接线假数 = 仪表盘失真，比空更坏）。"""
-    import os
+def check_mock_metrics_collector_retired(failures: Failures) -> dict:
+    """检查 4：无消费者的假指标采集器不得复活。"""
+    from importlib.util import find_spec
 
-    from neurova.analytics.collector import ALLOW_MOCK_METRICS_ENV
-
-    os.environ.pop(ALLOW_MOCK_METRICS_ENV, None)
-    module = importlib.import_module("neurova.analytics.collector")
-    if module.mock_metrics_enabled():
+    moduleName = "neurova.analytics.collector"
+    modulePath = Path(__file__).resolve().parents[2] / "neurova" / "analytics" / "collector.py"
+    if modulePath.exists() or find_spec(moduleName) is not None:
         failures.add(
             "mock-metrics-gate",
-            "假指标在未设开关时被视为开启——仪表盘会显示编造的数字",
+            "analytics.collector 已退役：它只有测试消费者且会产出假指标，"
+            "真实统计必须走 core.metrics、SessionRepository 与 TokenUsageAccounting",
         )
-    try:
-        module.MetricsCollector()._generate_mock_agent_metrics("a", "A")
-    except module.MockMetricsDisabledError:
-        return {"gated": True}
-    failures.add(
-        "mock-metrics-gate",
-        "_generate_mock_agent_metrics 在默认配置下仍产出假数（应抛 "
-        "MockMetricsDisabledError）",
-    )
-    return {"gated": False}
+        return {"retired": False}
+    return {"retired": True}
 
 
 def check_hot_path_file_size(failures: Failures) -> dict:
@@ -470,7 +460,7 @@ CHECKS = (
     ("import-budget", check_import_budget),
     ("pipeline-step-metric", check_step_metric_overhead),
     ("shared-thread-pool", check_shared_pool_reuse),
-    ("mock-metrics-gate", check_no_mock_metrics_by_default),
+    ("mock-metrics-gate", check_mock_metrics_collector_retired),
     ("hot-path-file-size", check_hot_path_file_size),
 )
 

@@ -213,6 +213,43 @@ class TestInstallRunsRealDownloaderAndPlan:
             assert not missing, f"{lang} 缺文案键: {sorted(missing)}"
 
 
+class TestRuntimeDependencyLockSelection:
+    """安装器必须消费 MANIFEST 选中的完整锁，不另抄 requirements.txt 路径。"""
+
+    def testInstallPythonDepsUsesManifestRequirements(self, monkeypatch, tmp_path):
+        from types import SimpleNamespace
+
+        mod = _install_module()
+        venvPython = tmp_path / "python.exe"
+        venvPython.write_bytes(b"")
+        requirements = tmp_path / "compiled.lock"
+        requirements.write_text("fastapi==0.0.0\n", encoding="utf-8")
+        commands = []
+        monkeypatch.setattr(mod, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "get_venv_python", lambda: venvPython)
+        monkeypatch.setattr(
+            mod,
+            "installWithProgress",
+            lambda description, cmd, cwd=None, env=None: commands.append(cmd) or True,
+        )
+        monkeypatch.setattr(mod.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0))
+        manifest = {
+            "runtime": {
+                "pip": {
+                    "requirements": "compiled.lock",
+                    "indexUrls": ["https://mirror.example/simple/"],
+                    "probe": ["fastapi"],
+                }
+            }
+        }
+
+        assert mod.installPythonDeps(manifest), "完整锁安装被误判为失败"
+        assert len(commands) == 1, f"pip 安装命令未唯一执行: {commands}"
+        assert commands[0][-2:] == ["-r", str(requirements)], (
+            f"install.py 未按 MANIFEST 的 runtime.pip.requirements 构造命令: {commands[0]}"
+        )
+
+
 class TestFinalVerificationFailureIsHonest:
     """OPS-01（2026-11-25 批次 E）：最终验证失败必须如实非零退出。
 
@@ -377,12 +414,63 @@ class TestFrontendInstallMatchesStartContract:
             )
 
     def test_both_entrypoints_prefer_npm_ci_with_lock(self):
+        """锁优先 + 干净安装参数只许一处定义（scripts/config.py 的共用构造）。
+
+        曾经两处各写一份 `["npm", "ci"]`，且 start.py 用 shell=True 传列表：
+        POSIX 下 `sh -c npm ci` 只把首项当命令，参数被丢掉（审计 OPS-04）。
+        现在锁判据与 `--no-audit --no-fund` 都由 `frontendInstallArgv()` 一处决定，
+        两侧只消费——两处各写一套时，一侧加了参数另一侧没加，语义就分叉。
+        """
+        config_src = _read(_REPO / "scripts" / "config.py")
+        for token, why in (
+            ('"ci"', "npm ci 干净安装"),
+            ("package-lock.json", "lock 优先判据"),
+            ("--no-audit", "关闭审计网络请求"),
+            ("--no-fund", "关闭赞助输出"),
+        ):
+            assert token in config_src, f"共用命令构造 scripts/config.py 缺少 {token}（{why}）"
         for src, who in (
             (_code_only(_INSTALL_SRC), "install.py"),
             (_code_only(self._start_probe()), "start.py"),
         ):
-            assert "npm" in src and '"ci"' in src, f"{who} 未走 npm ci（lock 优先）"
-            assert "package-lock.json" in src, f"{who} 未按 lock 存在与否选择 ci/install"
+            assert "frontendInstallArgv" in src, (
+                f"{who} 未消费 scripts/config.py 的共用 npm 安装构造——"
+                "锁优先与干净安装参数会重新长出第二份定义"
+            )
+
+    def test_sharedHelperEncodesLockFirstAndCleanFlags(self, tmp_path):
+        """行为判据：共用构造在 lock 在场/缺席两种形态下的 argv 都正确。"""
+        from scripts.config import frontendInstallArgv
+
+        lock = tmp_path / "package-lock.json"
+        lock.write_text("{}", encoding="utf-8")
+        withLock = [str(part) for part in frontendInstallArgv(tmp_path)]
+        assert withLock[1] == "ci", f"lock 在场应走 npm ci（实际 argv={withLock}）"
+        assert "--no-audit" in withLock and "--no-fund" in withLock
+
+        withoutLock = [str(part) for part in frontendInstallArgv(tmp_path / "missing")]
+        assert withoutLock[1] == "install", f"无 lock 应回落 npm install（实际 argv={withoutLock}）"
+        assert "--no-audit" in withoutLock and "--no-fund" in withoutLock
+
+    def test_installEntrypointPassesTheSameCleanInstallCommand(self, tmp_path, monkeypatch):
+        """install.py 侧行为：真走 installFrontendDeps() 时 argv 带齐参数。"""
+        mod = _install_module()
+        fe = tmp_path / "NeurUI"
+        fe.mkdir(parents=True)
+        (fe / "package-lock.json").write_text("{}", encoding="utf-8")
+        (fe / "package.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(mod, "FRONTEND_DIR", fe)
+        captured = {}
+
+        def fakeInstall(description, cmd, cwd=None, env=None):
+            captured["cmd"] = cmd
+            return True
+
+        monkeypatch.setattr(mod, "installWithProgress", fakeInstall)
+        assert mod.installFrontendDeps() is True
+        argv = [str(part) for part in captured["cmd"]]
+        assert argv[1] == "ci"
+        assert "--no-audit" in argv and "--no-fund" in argv
 
 
 class TestOutcomeProjectionsAreTrue:

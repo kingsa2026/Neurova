@@ -5,7 +5,7 @@
 延迟代理与 standalone 反射加载）。
 
 真实 API（neurova/skill_system/core.py 的 class A）：
-    SkillRegistry(runtime_manager=None)
+    SkillRegistry()
     register(skill)                     # 按 skill.name 存储，skill.add_event_handler
     skills -> Dict[str, Skill]
     register_skill(manifest, path=None) -> bool

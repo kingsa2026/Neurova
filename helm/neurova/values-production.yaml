@@ -60,26 +60,14 @@ ingress:
       hosts:
         - neurova.example.com
 
-# 自动扩缩容
+# 自动扩缩容：当前使用持久化 SQLite，必须保持单副本；HPA 可扩容到多 Pod，
+# 会同时挂载 RWO 卷并让多个 SQLite 进程共写同一数据文件。
 hpa:
-  enabled: true
-  minReplicas: 2
-  maxReplicas: 10
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 1
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
-
-# PodDisruptionBudget
-pdb:
-  enabled: true
-  minAvailable: 1
-
-# 监控配置
-monitoring:
-  enabled: true
-  serviceMonitor:
-    enabled: true
-    namespace: monitoring
-    interval: 30s
 
 # 日志配置（键名对齐 values.yaml：level / json / file）
 logging:

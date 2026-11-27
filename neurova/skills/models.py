@@ -539,27 +539,6 @@ class OptimizationGoal(Enum):
     SECURITY = "security"
 
 
-class ChainStatus(Enum):
-    """技能链状态"""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    PAUSED = "paused"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class StepStatus(Enum):
-    """步骤状态"""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-
-
 @dataclass
 class SkillGenerationResult:
     """技能生成结果"""
@@ -632,74 +611,6 @@ class SkillPackage:
     skill_name: str = ""
     version: str = "1.0.0"
     error: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class SkillChainStep:
-    """技能链步骤"""
-
-    step_id: str = ""
-    skill_id: str = ""
-    input_mapping: Dict[str, str] = field(default_factory=dict)
-    output_mapping: Dict[str, str] = field(default_factory=dict)
-    condition: Optional[str] = None
-    timeout: float = 30.0
-    retry_count: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class SkillChain:
-    """技能链"""
-
-    chain_id: str = ""
-    name: str = ""
-    description: str = ""
-    steps: List[SkillChainStep] = field(default_factory=list)
-    variables: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class StepExecutionResult:
-    """步骤执行结果"""
-
-    step_id: str = ""
-    skill_id: str = ""
-    status: StepStatus = StepStatus.PENDING
-    input_data: Dict[str, Any] = field(default_factory=dict)
-    output_data: Dict[str, Any] = field(default_factory=dict)
-    error: str = ""
-    duration: float = 0.0
-    retries: int = 0
-
-
-@dataclass
-class ChainExecutionResult:
-    """技能链执行结果"""
-
-    chain_id: str = ""
-    status: ChainStatus = ChainStatus.PENDING
-    success: bool = False
-    results: List[StepExecutionResult] = field(default_factory=list)
-    final_output: Dict[str, Any] = field(default_factory=dict)
-    error: str = ""
-    total_duration: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class ChainStatusInfo:
-    """技能链状态信息"""
-
-    chain_id: str = ""
-    status: ChainStatus = ChainStatus.PENDING
-    progress: float = 0.0
-    current_step: int = 0
-    total_steps: int = 0
-    started_at: Optional[str] = None
-    estimated_remaining: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 

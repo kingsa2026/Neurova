@@ -15,20 +15,41 @@ class ExecutorGate(
     @Volatile
     private var armedUntil: Long = 0
 
+    @Volatile
+    private var armedTaskId: String = ""
+
+    @Volatile
+    private var taskWindowExpiresAt: Long = 0
+
     fun arm(durationMs: Long = idleTimeoutMs) {
         armedUntil = clock() + durationMs
+        armedTaskId = ""
     }
 
-    /** 每次命令活动续期（任务连续执行时不被闲置超时打断） */
-    fun onActivity() {
-        arm()
+    /** 服务端确认的显式任务窗口：端上到期不得晚于服务端 expires_at。 */
+    fun arm(taskId: String, expiresAt: Long) {
+        if (taskId.isBlank() || expiresAt <= clock()) return
+        armedTaskId = taskId
+        taskWindowExpiresAt = expiresAt
+        armedUntil = minOf(expiresAt, clock() + idleTimeoutMs)
+    }
+
+    /** 每次命令活动续期；外地任务不能续期当前窗口。 */
+    fun onActivity(taskId: String? = null) {
+        if (taskId == null) {
+            arm()
+        } else if (taskId == armedTaskId && isArmed(taskId)) {
+            armedUntil = minOf(taskWindowExpiresAt, clock() + idleTimeoutMs)
+        }
     }
 
     fun disarm() {
         armedUntil = 0
+        armedTaskId = ""
     }
 
-    fun isArmed(): Boolean = clock() <= armedUntil
+    fun isArmed(taskId: String? = null): Boolean =
+        clock() <= armedUntil && (taskId == null || taskId == armedTaskId)
 
     companion object {
         const val DEFAULT_IDLE_TIMEOUT_MS = 60_000L

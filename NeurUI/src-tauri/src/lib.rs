@@ -1318,12 +1318,12 @@ mod runtime_extract_tests {
     /// 且不许出现 --extra-index-url 之类会让候选次序失效的写法。
     #[test]
     fn pip_args_carry_index_and_requirements_in_order() {
-        let args = pip_install_args("https://mirrors.example/simple/", "requirements.txt");
+        let args = pip_install_args("https://mirrors.example/simple/", "requirements-full.lock");
         let joined = args.join("\u{1}");
         assert!(joined.contains("\u{1}pip\u{1}install\u{1}"), "未走 python -m pip install: {args:?}");
         assert!(args.windows(2).any(|w| w[0] == "--index-url" && w[1] == "https://mirrors.example/simple/"),
             "索引 URL 未作为 --index-url 的值传入: {args:?}");
-        assert!(args.windows(2).any(|w| w[0] == "-r" && w[1] == "requirements.txt"),
+        assert!(args.windows(2).any(|w| w[0] == "-r" && w[1] == "requirements-full.lock"),
             "清单文件未作为 -r 的值传入: {args:?}");
         assert!(!joined.contains("extra-index"), "候选次序由 Rust 侧循环负责，不交给 pip");
     }

@@ -201,7 +201,7 @@ class TerminalNode:
 class _AlphaIndex:
     """一轮求值的事实快照（alpha 存储）：谓词索引、(谓词, 主体键) 索引、主体桥接与规范标签。
 
-    事实圈域与 `_fireRule` 一致：status='active' 且 record_kind='triple'，agentId 给了
+    事实圈域与 `_fireRule` 一致：当前有效且 record_kind='triple'，agentId 给了
     就按 agent 圈；租户在快照层统一过滤（KNOW-02：规则按租户分区，任何形状的
     前提都不跨租户取）。主体桥接/规范标签镜像既有 SQL 的两次 knowledge_subjects
     JOIN：桥接只取 active 行、标签不过滤状态，且同样按租户圈域。
@@ -213,17 +213,19 @@ class _AlphaIndex:
                              for atom in rule["body"]
                              if atom.get("kind") == "atom" and atom.get("predicate")})
         tenantClause, tenantParams = tenant_sql_where(tenantId)
+        store = engine._store
+        currentClause, currentParams = store.currentFactWhere()
         sql = ("SELECT fact_id, agent_id, tenant_id, subject_key, predicate_term_id,"
                " object_term FROM knowledge_facts"
-               " WHERE status = 'active' AND record_kind = 'triple' AND %s" % tenantClause)
-        params: List[Any] = [*tenantParams]
+               " WHERE %s AND record_kind = 'triple' AND %s"
+               % (currentClause, tenantClause))
+        params: List[Any] = [*currentParams, *tenantParams]
         if agentId:
             sql += " AND agent_id = ?"
             params.append(agentId)
         if predicates:
             sql += " AND predicate_term_id IN (%s)" % ",".join("?" * len(predicates))
             params.extend(predicates)
-        store = engine._store
         with store._lock:
             rows = store._conn.execute(sql, params).fetchall()
         self._byPredicate: Dict[str, List[Dict[str, Any]]] = {}

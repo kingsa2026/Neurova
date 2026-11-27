@@ -9,6 +9,7 @@
 """
 
 import os
+import sqlite3
 import tempfile
 from unittest.mock import MagicMock
 
@@ -39,15 +40,20 @@ class TestTemperatureDecayPath:
         mem_id = manager.remember("温度衰减测试记忆")
         assert mem_id
 
-        before = manager.get(mem_id) if hasattr(manager, "get") else None
+        before = next(m for m in manager.get_memories() if m["id"] == mem_id)
         result = manager.update_memory_temperature(
             memory_id=mem_id,
             interaction_type="consolidation",
         )
-        # 返回 True 或更新后可读取即视为通路
-        after = manager.get(mem_id) if hasattr(manager, "get") else None
-        if before is not None and after is not None:
-            assert result in (True, None) or after["temperature"] != before["temperature"] or True
+        assert result is True
+        after = next(m for m in manager.get_memories() if m["id"] == mem_id)
+        assert after["temperature"] > before["temperature"]
+
+        with sqlite3.connect(manager.persistenceDbPath()) as conn:
+            persisted = conn.execute(
+                "SELECT temperature FROM memories WHERE id = ?", (mem_id,)
+            ).fetchone()
+        assert persisted == (after["temperature"],)
 
     def test_unknown_memory_handled_gracefully(self, manager):
         """不存在的记忆 ID 不应抛异常"""

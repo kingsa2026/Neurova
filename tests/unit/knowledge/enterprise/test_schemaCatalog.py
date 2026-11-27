@@ -135,6 +135,36 @@ class TestSchemaCatalogStore:
         assert names == ["new_col"]
         assert cat.counts("default")["tables"] == 1
 
+    def testReingestPreservesApprovedTermsAndDropsStaleObjects(self, store):
+        cat = SchemaCatalogStore(store)
+        cat.ingestSchema("default", "erp", "sql", _sampleSchema())
+        before = cat.listTables("default", sourceId="erp")
+        customers = next(t for t in before if t["table_name"] == "customers")
+        customerDetail = cat.tableDetail("default", customers["catalog_table_id"])
+        customerId = next(c for c in customerDetail["columns"]
+                          if c["column_name"] == "id")
+        cat.linkTableTerm("default", customers["catalog_table_id"], "customer_term")
+        cat.linkColumnTerm("default", customers["catalog_table_id"], "id",
+                           "customer_identifier")
+
+        refreshed = SourceSchema(sourceId="erp", sourceType="sql", tables=[
+            {"name": "customers", "description": "客户主数据", "columns": [
+                {"name": "id", "type": "BIGINT", "description": "客户标识"}]},
+        ])
+        cat.ingestSchema("default", "erp", "sql", refreshed)
+
+        after = cat.listTables("default", sourceId="erp")
+        assert [t["table_name"] for t in after] == ["customers"]
+        assert after[0]["catalog_table_id"] == customers["catalog_table_id"]
+        assert after[0]["term_id"] == "customer_term"
+        assert after[0]["description"] == "客户主数据"
+        detail = cat.tableDetail("default", after[0]["catalog_table_id"])
+        assert len(detail["columns"]) == 1
+        assert detail["columns"][0]["catalog_column_id"] == customerId["catalog_column_id"]
+        assert detail["columns"][0]["term_id"] == "customer_identifier"
+        assert detail["columns"][0]["data_type"] == "BIGINT"
+        assert detail["columns"][0]["description"] == "客户标识"
+
     def testTenantIsolation(self, store):
         cat = SchemaCatalogStore(store)
         cat.ingestSchema("default", "erp", "sql", _sampleSchema())

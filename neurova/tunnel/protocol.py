@@ -174,10 +174,12 @@ FRAME_DEVICE_EXECUTE = "device:execute"      # 后端 → 手机：单条设备�
 FRAME_DEVICE_CANCEL = "device:cancel"        # 后端 → 手机：取消在途命令
 FRAME_DEVICE_RESULT = "device:result"        # 手机 → 后端：命令终态回执
 FRAME_DEVICE_EVENT = "device:event"          # 手机 → 后端：主动事件上报（P1 消费）
+FRAME_DEVICE_TASK = "device:task"            # 手机 → 后端：开始/续期/结束/取消显式任务窗口
 
 DEVICE_FRAME_TYPES = (
     FRAME_DEVICE_HELLO, FRAME_DEVICE_HELLO_OK, FRAME_DEVICE_EXECUTE,
     FRAME_DEVICE_CANCEL, FRAME_DEVICE_RESULT, FRAME_DEVICE_EVENT,
+    FRAME_DEVICE_TASK,
 )
 
 #: 设备能力词表（封闭集）：手机端在 device:hello 里宣称的子集；后端运行前
@@ -196,10 +198,19 @@ DEVICE_ERROR_OFFLINE = "device_offline"                       # 无在线设备�
 DEVICE_ERROR_TIMEOUT = "device_timeout"                       # 命令在窗口内未回执
 DEVICE_ERROR_BRIDGE_DISABLED = "device_bridge_disabled"       # 总闸未开（默认关）
 DEVICE_ERROR_UNKNOWN_CAPABILITY = "unknown_capabilities"      # hello 宣称了未知能力
+DEVICE_ERROR_TASK_WINDOW_REQUIRED = "task_window_required"    # 命令缺少有效显式任务窗口
+DEVICE_ERROR_TASK_WINDOW_EXPIRED = "task_window_expired"      # 任务窗口已到期
+DEVICE_ERROR_TASK_WINDOW_MISMATCH = "task_window_mismatch"    # task_id 与当前窗口不一致
+DEVICE_ERROR_TASK_WINDOW_BUSY = "task_window_busy"            # 已有其他任务窗口
 DEVICE_BRIDGE_ERROR_CODES = (
     DEVICE_ERROR_OFFLINE, DEVICE_ERROR_TIMEOUT,
     DEVICE_ERROR_BRIDGE_DISABLED, DEVICE_ERROR_UNKNOWN_CAPABILITY,
+    DEVICE_ERROR_TASK_WINDOW_REQUIRED, DEVICE_ERROR_TASK_WINDOW_EXPIRED,
+    DEVICE_ERROR_TASK_WINDOW_MISMATCH, DEVICE_ERROR_TASK_WINDOW_BUSY,
 )
+
+#: 显式任务窗口最长有效期；续期只允许在到期前，且不得突破此时长。
+DEVICE_TASK_WINDOW_SECONDS = 120.0
 
 #: 手机侧一次请求等 agent 把数据通道开出来的窗口。到点必须显式 503，
 #: 不许静默重发或降级成 warning（教义第 2 条）。

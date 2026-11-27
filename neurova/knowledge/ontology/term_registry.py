@@ -189,6 +189,7 @@ _DECLARE_COLUMNS: tuple = (
     ("namespace", "namespace"),
     ("iriBase", "iri_base"),
     ("qualifierSchema", "qualifier_schema"),
+    ("conflictPolicy", "conflict_policy"),
     ("version", "version"),
 )
 
@@ -243,6 +244,7 @@ class OntologyTermRegistry:
                  namespace: str = "",
                  iriBase: str = "",
                  qualifierSchema: Optional[Dict[str, Any]] = None,
+                 conflictPolicy: str = "",
                  version: str = "v1",
                  tenantId: str = "default") -> Dict[str, Any]:
         """登记/更新一个术语。非法结构在**写入处**就拒，不留到查询时才炸。
@@ -271,6 +273,14 @@ class OntologyTermRegistry:
             raise ValueError("术语不能是自己的父类: %s" % termId)
         if cardinality is not None and int(cardinality) < 1:
             raise ValueError("cardinality 至少为 1（不限请传 None），收到 %r" % cardinality)
+        conflictPolicyValue = str(conflictPolicy or "").strip()
+        if conflictPolicyValue:
+            from ..foundation.conflict_judge import RESOLUTION_POLICIES
+
+            if conflictPolicyValue not in RESOLUTION_POLICIES:
+                raise ValueError(
+                    "未知冲突策略 %r（有效值: %s）"
+                    % (conflictPolicyValue, "/".join(RESOLUTION_POLICIES)))
         if parentTermId and kind not in ("concept", "relation"):
             raise ValueError("只有 concept/relation 能有父类，%s 是 %s" % (termId, kind))
         parentTerm = self.term(parentTermId, tenantId=tenant) if parentTermId else None
@@ -381,8 +391,8 @@ class OntologyTermRegistry:
                 " inverse_of, symmetric, transitive, aliases_json, external_iris_json,"
                 " deprecated, replaced_by, identity_keys_json,"
                 " labels_json, alt_labels_json, module, namespace, iri_base,"
-                " qualifier_schema_json, definition, datatype)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " qualifier_schema_json, definition, datatype, conflict_policy)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (tenant, termId, kind, label or termId, parentTermId,
                  json.dumps(list(domain or []), ensure_ascii=False),
                  json.dumps(list(rangeTerms or []), ensure_ascii=False),
@@ -401,7 +411,7 @@ class OntologyTermRegistry:
                             ensure_ascii=False),
                  moduleValue, namespaceValue, str(iriBase or ""),
                  json.dumps(qualifierSchema or {}, ensure_ascii=False),
-                 str(definition or ""), datatypeValue),
+                 str(definition or ""), datatypeValue, conflictPolicyValue),
             )
         # inverse_of 双向补齐：A inverse_of B ⇒ B inverse_of A（登记处收口，
         # 单边态在存储层不存在；目标行其他字段不动，只补这一列）。
@@ -527,6 +537,7 @@ class OntologyTermRegistry:
                 datatype=spec.get("datatype") or "",
                 namespace=spec.get("namespace") or "",
                 qualifierSchema=spec.get("qualifierSchema"),
+                conflictPolicy=spec.get("conflictPolicy", ""),
                 tenantId=tenantId,
             )
         return len(terms)
@@ -564,6 +575,7 @@ class OntologyTermRegistry:
                 datatype=spec.get("datatype") or "",
                 namespace=spec.get("namespace") or "",
                 qualifierSchema=spec.get("qualifierSchema"),
+                conflictPolicy=spec.get("conflictPolicy", ""),
                 tenantId=tenantId,
             )
             added += 1
@@ -658,11 +670,12 @@ class OntologyTermRegistry:
         """
         tenant = str(tenantId or "default")
         tenantClause, tenantParams = tenant_sql_where(tenant)
+        currentClause, currentParams = self._store.currentFactWhere()
         with self._store._lock:
             factCount = self._store._conn.execute(
                 "SELECT COUNT(*) AS n FROM knowledge_facts"
-                " WHERE %s AND predicate_term_id = ? AND status = 'active'" % tenantClause,
-                (*tenantParams, termId)).fetchone()["n"]
+                " WHERE %s AND predicate_term_id = ? AND %s" % (tenantClause, currentClause),
+                (*tenantParams, termId, *currentParams)).fetchone()["n"]
             typedSubjects = self._store._conn.execute(
                 "SELECT COUNT(*) AS n FROM knowledge_subjects"
                 " WHERE %s AND type_term_id = ?" % tenantClause,
@@ -760,11 +773,12 @@ class OntologyTermRegistry:
         single = self.subjectType(subjectKey)
         if single:
             types.append(single)
+        currentClause, currentParams = self._store.currentFactWhere()
         with self._store._lock:
             rows = self._store._conn.execute(
                 "SELECT object_term FROM knowledge_facts WHERE agent_id = ?"
-                " AND subject_key = ? AND predicate_term_id = ? AND status = 'active'",
-                (agentId, subjectKey, IS_A_PREDICATE)).fetchall()
+                " AND subject_key = ? AND predicate_term_id = ? AND %s" % currentClause,
+                (agentId, subjectKey, IS_A_PREDICATE, *currentParams)).fetchall()
         types.extend(r["object_term"] for r in rows)
         return sorted(set(types))
 
@@ -777,11 +791,12 @@ class OntologyTermRegistry:
 
     def activeFactsForPredicate(self, agentId: str, subjectKey: str,
                                 predicateTermId: str) -> List[Dict[str, Any]]:
+        currentClause, currentParams = self._store.currentFactWhere()
         with self._store._lock:
             rows = self._store._conn.execute(
                 "SELECT * FROM knowledge_facts WHERE agent_id = ? AND subject_key = ?"
-                " AND predicate_term_id = ? AND status = 'active'",
-                (agentId, subjectKey, predicateTermId)).fetchall()
+                " AND predicate_term_id = ? AND %s" % currentClause,
+                (agentId, subjectKey, predicateTermId, *currentParams)).fetchall()
         return [self._store._hydrate(r) for r in rows]
 
     def ensureSeedPredicates(self, tenantId: str = "default") -> int:

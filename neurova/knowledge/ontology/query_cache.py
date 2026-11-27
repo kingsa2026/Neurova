@@ -12,11 +12,12 @@ LRU 自然淘汰——失效与写入路径解耦，可靠性等价于"键判等
   规则行也进 Turtle 投影（ruleId/headPredicate/body 都是图里的三元组），规则变更
   必须同样击穿缓存，故与术语同段指纹。范围用请求租户——投影按请求租户读行，
   指纹必须盯住真正被读的那批行（KNOW-01）。
-- `factsWatermark`：knowledge_facts 中 `status='active' AND record_kind='triple'`
-  且本租户（真值 agentId 再按 agent 过滤，与 `serializeAll` 同形）的行，取
-  COUNT＋**全量内容滚动哈希**（rowid 序）。count 探增删；内容哈希探一切改写
-  ——长度和探不到等长就地改写（主体合并/回滚的同长形态），水印是失效的
-  唯一判据，宁可多扫一遍不可放过脏读（P1-1 起强化）。
+- `factsWatermark`：knowledge_facts 中 `currentFactWhere` 判定的当前可见行
+  （`record_kind='triple'`，且本租户；真值 agentId 再按 agent 过滤，与
+  `serializeAll` 同形）取 COUNT＋**全量内容滚动哈希**（rowid 序），并把最近
+  的未来生效/到期边界写入水印。count 与内容哈希探增删和就地改写；边界探时间
+  流逝导致的可见性切换——长度和探不到等长改写（主体合并/回滚的同长形态），
+  水印是失效的唯一判据，宁可多扫一遍不可放过脏读（P1-1 起强化）。
 
 缓存值是**投影行集快照**（variables/rows/row_count/truncated 的深拷贝），不是
 rdflib 图对象：命中原样返回快照拷贝，与未命中路径逐字节一致，且连 SPARQL 求值
@@ -32,6 +33,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from neurova.core.cache import MemoryCache
 from neurova.core.logger import get_logger
+from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 
 logger = get_logger(__name__)
 
@@ -77,30 +79,49 @@ def termsFingerprint(store: Any, tenantId: str) -> str:
 
 
 def factsWatermark(store: Any, tenantId: str, agentId: Any) -> str:
-    """事实集水印：投影可见行（active＋triple、本租户，真值 agentId 再过滤）
-    的 COUNT＋**全量内容滚动哈希**（行序按 rowid）。
+    """当前可见事实集的内容哈希＋下一个时效边界。
 
-    长度和口径探不到等长就地改写（主体合并改 subject_key、版本回滚恢复字段
-    的同长形态）——水印是缓存失效的唯一判据，宁可每次多扫一遍，不可放过
-    一次脏读，故逐行内容进滚动哈希（rowid 一并入账，增删必变）。
+    只哈希 active 行仍会让到期/未来事实在时间流逝后复用旧键。这里用唯一
+    当前事实判据取可见行，并把最近的 `valid_from`（缺省回退 recorded_at）或
+    `valid_until` 入水印：边界前键稳定、跨边界键必变，既不靠 TTL 也不按每次
+    时钟变化废掉缓存。行内容与 rowid 仍进哈希，增删和就地改写照常击穿。
     """
-    sql = ("SELECT subject_key, predicate_term_id, object_term, fact_id, rowid"
-           " FROM knowledge_facts"
-           " WHERE tenant_id = ? AND status = 'active' AND record_kind = 'triple'")
-    params: list = [tenantId]
+    currentClause, currentParams = KnowledgeFactStore.currentFactWhere()
+    stamp = currentParams[0]
+    scopeSql = (" FROM knowledge_facts WHERE tenant_id = ?"
+                " AND record_kind = 'triple'")
+    scopeParams: list = [tenantId]
     if agentId:  # 与 serializeAll 的投影过滤同形：真值才按 agent 过滤
-        sql += " AND agent_id = ?"
-        params.append(str(agentId))
-    sql += " ORDER BY rowid"
+        scopeSql += " AND agent_id = ?"
+        scopeParams.append(str(agentId))
+    sql = ("SELECT subject_key, predicate_term_id, object_term, fact_id,"
+           " status, recorded_at, valid_from, valid_until, rowid" + scopeSql +
+           " AND " + currentClause + " ORDER BY rowid")
+    effective = "COALESCE(NULLIF(valid_from, ''), recorded_at)"
+    boundarySql = (
+        "SELECT MIN(boundary) AS next_boundary FROM ("
+        " SELECT " + effective + " AS boundary" + scopeSql +
+        " AND status = 'active' AND " + effective + " > ?"
+        " UNION ALL"
+        " SELECT valid_until AS boundary" + scopeSql +
+        " AND status = 'active' AND NULLIF(valid_until, '') IS NOT NULL"
+        " AND valid_until > ?)"
+    )
     with store._lock:
-        rows = store._conn.execute(sql, params).fetchall()
+        rows = store._conn.execute(
+            sql, [*scopeParams, *currentParams]).fetchall()
+        boundaryRow = store._conn.execute(
+            boundarySql, [*scopeParams, stamp, *scopeParams, stamp]).fetchone()
     rolling = 0
     for row in rows:
         item = (str(row["subject_key"]), str(row["predicate_term_id"]),
                 str(row["object_term"]), str(row["fact_id"]),
+                str(row["status"]), str(row["recorded_at"]),
+                str(row["valid_from"] or ""), str(row["valid_until"] or ""),
                 int(row["rowid"]))
         rolling = ((rolling * 1000003) ^ hash(item)) & 0xFFFFFFFFFFFFFFFF
-    return "facts:%d:%s" % (len(rows), "%016x" % rolling)
+    nextBoundary = str(boundaryRow["next_boundary"] or "") if boundaryRow else ""
+    return "facts:%d:%s:%s" % (len(rows), "%016x" % rolling, nextBoundary)
 
 
 def _copySnapshot(result: Dict[str, Any]) -> Dict[str, Any]:

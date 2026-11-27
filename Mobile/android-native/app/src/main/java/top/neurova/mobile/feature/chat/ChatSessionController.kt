@@ -264,7 +264,7 @@ class ChatSessionController(
                     is MobileWsChannel.Event.Cancelled -> if (event.sessionId == sessionId) {
                         finishStreaming(status = "cancelled")
                     }
-                    is MobileWsChannel.Event.Error -> {
+                    is MobileWsChannel.Event.Error -> if (event.sessionId.isBlank() || event.sessionId == sessionId) {
                         batcher.reset()
                         isGenerating = false
                         sendError = event.message.ifBlank { event.code }
@@ -297,6 +297,9 @@ class ChatSessionController(
                     is MobileWsChannel.Event.DeviceCommandArrived -> {
                         // 设备桥命令由 DeviceBridgeService 派发执行（前台服务持有同一通道），
                         // 聊天控制器不消费、不重复执行。
+                    }
+                    is MobileWsChannel.Event.DeviceTaskArrived -> {
+                        // 任务窗口由 DeviceBridgeService 武装执行闸；聊天页不参与授权。
                     }
                 }
             }

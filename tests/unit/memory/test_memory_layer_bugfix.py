@@ -1,4 +1,4 @@
-"""记忆层模块 15 个 bug 修复测试 — TDD 红绿灯方法
+"""记忆层模块 12 个 bug 修复测试 — TDD 红绿灯方法
 
 每个测试对应一个 bug:
   BUG-1:  flush_buffer() 永远返回 0
@@ -11,11 +11,8 @@
   BUG-8:  asyncio.get_event_loop() 弃用 + 静默吞异常
   BUG-9:  remember 中 except Exception: pass 静默吞情感分析异常
   BUG-10: MemoryWriteQueue.flush_to_storage TOCTOU race
-  BUG-11: AttachmentManager.__del__ 调用 close() 获取锁
   BUG-12: run_*_sleep_cycle 修改模块私有属性非线程安全（SleepModule 已按教义第 7 条退役，测试随之删除）
-  BUG-13: AttachmentManager 重复定义
   BUG-14: TemperatureEngine._default_instance 无锁
-  BUG-15: get_attachment_manager 单例无双重检查锁
 
 测试策略:
   - 锁相关 bug 用契约测试（断言 _lock 是 RLock 类型 / 方法获取锁）
@@ -526,70 +523,6 @@ class TestBug10FlushToStorageTOCTOU:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# BUG-11 (LOW): AttachmentManager.__del__ 调用 close() 获取锁
-# ═══════════════════════════════════════════════════════════════════
-
-class TestBug11AttachmentManagerDelLock:
-    """BUG-11: AttachmentManager.__del__ 调用 close() 获取锁
-
-    根因: __del__ 中获取锁是反模式
-    修复: __del__ 中只做 try/finally 关闭连接,不获取锁
-    """
-
-    def test_del_does_not_acquire_lock(self):
-        """__del__ 不应获取 self._lock"""
-        from neurova.cognitive_layers.memory_layer.attachment_manager import AttachmentManager
-        source = inspect.getsource(AttachmentManager.__del__)
-        # __del__ 不应包含 with self._lock 或 self._lock.acquire
-        assert "self._lock" not in source, (
-            "__del__ 中获取 self._lock 是反模式（GC 期间锁可能不可用）。"
-            "应直接 try/finally 关闭连接。"
-        )
-
-    def test_del_closes_connection(self):
-        """__del__ 应关闭数据库连接"""
-        from neurova.cognitive_layers.memory_layer.attachment_manager import AttachmentManager
-        source = inspect.getsource(AttachmentManager.__del__)
-        assert "close" in source or "_conn" in source, (
-            "__del__ 应关闭 _conn 连接"
-        )
-
-
-# ═══════════════════════════════════════════════════════════════════
-# BUG-13 (LOW): AttachmentManager 重复定义
-# ═══════════════════════════════════════════════════════════════════
-
-class TestBug13AttachmentManagerDuplicate:
-    """BUG-13: AttachmentManager 重复定义
-
-    根因: cognitive_layers/memory_layer/attachment_manager.py 和 core/attachment_manager.py
-          两个同名类（core 版已于 2026-11-14 随死码退役批删除）
-    修复: memory_layer 版本标记为权威实现
-    """
-
-    def test_memory_layer_attachment_manager_is_canonical(self):
-        """memory_layer AttachmentManager 应标记为权威实现"""
-        from neurova.cognitive_layers.memory_layer.attachment_manager import AttachmentManager
-        # 权威实现应有完整的 SQLite + 文件存储 API
-        assert hasattr(AttachmentManager, "_init_db"), "权威 AttachmentManager 应有 _init_db"
-        assert hasattr(AttachmentManager, "save_attachment"), "权威 AttachmentManager 应有 save_attachment"
-        assert hasattr(AttachmentManager, "get_attachment"), "权威 AttachmentManager 应有 get_attachment"
-        assert hasattr(AttachmentManager, "delete_attachment"), "权威 AttachmentManager 应有 delete_attachment"
-
-    def test_memory_layer_attachment_manager_docstring_mentions_canonical(self):
-        """memory_layer AttachmentManager 应在 docstring 中标明权威"""
-        from neurova.cognitive_layers.memory_layer.attachment_manager import AttachmentManager
-        docstring = (AttachmentManager.__doc__ or "") + "\n" + (inspect.getsourcefile(AttachmentManager) or "")
-        # docstring 或模块顶部应提及 "权威" 或 "canonical"
-        source_file = inspect.getsourcefile(AttachmentManager)
-        with open(source_file, "r", encoding="utf-8") as f:
-            source = f.read()
-        assert "权威" in source or "canonical" in source.lower(), (
-            "memory_layer/attachment_manager.py 应在源码中标注为权威实现 (canonical/权威)"
-        )
-
-
-# ═══════════════════════════════════════════════════════════════════
 # BUG-14 (LOW): TemperatureEngine._default_instance 无锁
 # ═══════════════════════════════════════════════════════════════════
 
@@ -629,58 +562,6 @@ class TestBug14DefaultInstanceNoLock:
         assert all(r is results[0] for r in results), (
             "并发 _get_default 返回了不同实例, 说明无锁保护。"
         )
-
-
-# ═══════════════════════════════════════════════════════════════════
-# BUG-15 (LOW): get_attachment_manager 单例无双重检查锁
-# ═══════════════════════════════════════════════════════════════════
-
-class TestBug15GetAttachmentManagerDoubleCheck:
-    """BUG-15: get_attachment_manager 单例无双重检查锁
-
-    根因: 锁外检查后加锁,无二次检查
-    修复: 加双重检查 `with _manager_lock: if _attachment_manager is None: ...`
-    """
-
-    def test_get_attachment_manager_has_double_check(self):
-        """get_attachment_manager 应有双重检查锁模式"""
-        from neurova.cognitive_layers.memory_layer import attachment_manager as am_module
-        source = inspect.getsource(am_module.get_attachment_manager)
-        # 应有两个 `is None` 检查
-        none_checks = source.count("is None")
-        assert none_checks >= 2, (
-            f"get_attachment_manager 只有 {none_checks} 个 `is None` 检查, "
-            "应有 2 个（双重检查锁模式）。"
-        )
-        # 应有 with _manager_lock
-        assert "_manager_lock" in source, "应使用 _manager_lock"
-
-    def test_get_attachment_manager_concurrent_returns_same(self, tmp_path):
-        """并发调用应返回同一实例"""
-        from neurova.cognitive_layers.memory_layer import attachment_manager as am_module
-        am_module._attachment_manager = None
-        results = []
-        barrier = threading.Barrier(4)
-
-        def worker():
-            barrier.wait()
-            results.append(am_module.get_attachment_manager(
-                db_path=str(tmp_path / "test_attach.db"),
-                storage_dir=str(tmp_path / "attachments"),
-            ))
-
-        threads = [threading.Thread(target=worker) for _ in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=5.0)
-
-        assert len(results) == 4
-        assert all(r is results[0] for r in results), (
-            "并发 get_attachment_manager 返回了不同实例"
-        )
-        # 清理
-        am_module.reset_attachment_manager()
 
 
 if __name__ == "__main__":

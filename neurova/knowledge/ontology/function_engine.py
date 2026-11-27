@@ -111,12 +111,14 @@ class FunctionEngine:
         return compiled
 
     def _subjectsFor(self, agentId: str, predicate: str, tenantId: str) -> List[str]:
-        """依赖谓词上有 active 事实的主体（规范标签作 subject 绑定值）。"""
+        """依赖谓词上有当前有效事实的主体（规范标签作 subject 绑定值）。"""
+        currentClause, currentParams = self._store.currentFactWhere("f")
         sql = ("SELECT DISTINCT s.canonical_label FROM knowledge_facts f"
                " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
-               " WHERE f.predicate_term_id = ? AND f.status = 'active'"
-               " AND f.record_kind = 'triple' AND f.agent_id = ? AND s.agent_id = ?")
-        params: List[Any] = [predicate, agentId, agentId]
+               " WHERE f.predicate_term_id = ? AND %s"
+               " AND f.record_kind = 'triple' AND f.agent_id = ? AND s.agent_id = ?"
+               % currentClause)
+        params: List[Any] = [predicate, *currentParams, agentId, agentId]
         fTenantClause, fTenantParams = tenant_sql_where(tenantId, alias="f")
         sTenantClause, sTenantParams = tenant_sql_where(tenantId, alias="s")
         if fTenantClause and sTenantClause:

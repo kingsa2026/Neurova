@@ -36,6 +36,8 @@ import { ErrorManager, ErrorCategory } from '../error/ErrorManager';
 import { WSMessage, WsConnectionRuntimeContract } from '../types';
 import { resolveTunnelAuthFrame, randomNonceHex } from '../protocol/TunnelTokenCrypto';
 import { shouldAttemptIdleConnect } from './WsReconnectGate';
+import { WsReliabilityState } from './WsReliabilityState';
+import { StorageAdapter } from './StorageAdapter';
 
 /** 日志标签 */
 const TAG = 'WebSocketAdapter';
@@ -49,6 +51,9 @@ const RECONNECT_BASE_MS = 500;
 const RECONNECT_CAP_MS = 30000;
 /** 心跳消息内容 */
 const HEARTBEAT_MESSAGE = '{"type":"ping"}';
+const PONG_TIMEOUT_MS = 10000;
+const INBOX_LIMIT = 128;
+const CURSOR_BATCH_MS = 100;
 
 /** close 事件回调数据结构（字段可选以兼容运行时差异） */
 interface CloseEventData {
@@ -147,8 +152,15 @@ export class WebSocketAdapter {
   private manualClose: boolean = false;
   /** 外部注册的原始消息处理器列表 */
   private messageHandlers: Array<(data: string) => void> = [];
-  /** 服务端账本游标：已收到的最大帧 seq（远程驾驶可靠性，重连补拉用；仅内存，不跨启动） */
+  /** 服务端账本游标：已收到的最大帧 seq（持久化，重连补拉用） */
   private lastServerSeq: number = 0;
+  private reliability: WsReliabilityState = new WsReliabilityState();
+  private inbox: string[] = [];
+  private messageChain: Promise<void> = Promise.resolve();
+  private cursorTimerId: number = -1;
+  private pongTimerId: number = -1;
+  private awaitingPong: boolean = false;
+  private hasAuthenticatedConnection: boolean = false;
 
   private constructor() {}
 
@@ -173,6 +185,7 @@ export class WebSocketAdapter {
    * 续签失败不阻断（回落传入 ticket，由握手结果自然暴露）。
    */
   async connect(url: string, token?: string, skipRefresh: boolean = false): Promise<void> {
+    await this.restoreReliabilityState();
     // 记录连接参数以便重连复用
     this.lastUrl = url;
     // relay 模式判定：中继入口是 /t/<routeId> 前缀（ServerProfiles.entryMode 同一判据）。
@@ -342,7 +355,7 @@ export class WebSocketAdapter {
         return;
       }
       if (typeof data === 'string') {
-        this.handleMessage(data);
+        this.enqueueMessage(data);
       }
     });
 
@@ -408,6 +421,62 @@ export class WebSocketAdapter {
     });
   }
 
+  /** 有界持久队列：接收即排队，按序消费后确认；满时重连补拉而非静默丢弃。 */
+  private enqueueMessage(raw: string): void {
+    if (this.inbox.length >= INBOX_LIMIT) {
+      this.bus.emit('ws:error', { message: 'inbox_overflow' } as WsErrorPayload);
+      if (this.ws) {
+        this.ws.close().catch((e: Error) => this.logger.warn(TAG, '队列满关闭失败', e));
+      }
+      return;
+    }
+    this.inbox.push(raw);
+    this.persistInbox();
+    this.messageChain = this.messageChain.then(async (): Promise<void> => {
+      this.handleMessage(raw);
+      this.inbox.shift();
+      this.persistInbox();
+      this.scheduleCursorFlush();
+    }).catch((e: Error) => {
+      this.logger.error(TAG, '持久队列消费失败', e);
+    });
+  }
+
+  private async restoreReliabilityState(): Promise<void> {
+    try {
+      const storage = StorageAdapter.getInstance();
+      const cursor = await storage.get<number>('neurova.ws.last_server_seq', 0);
+      const raw = await storage.get<string>('neurova.ws.inbox', '[]');
+      this.lastServerSeq = cursor;
+      this.reliability = new WsReliabilityState(cursor);
+      this.inbox = JSON.parse(raw) as string[];
+      const pending = this.inbox;
+      this.inbox = [];
+      for (const frame of pending) {
+        this.enqueueMessage(frame);
+      }
+    } catch (e) {
+      this.logger.warn(TAG, '恢复 WS 持久队列失败，按空队列继续', e as Error);
+    }
+  }
+
+  private persistInbox(): void {
+    StorageAdapter.getInstance().set('neurova.ws.inbox', JSON.stringify(this.inbox))
+      .catch((e: Error) => this.logger.warn(TAG, '持久帧队列写入失败', e));
+  }
+
+  private scheduleCursorFlush(): void {
+    if (this.cursorTimerId !== -1) {
+      return;
+    }
+    this.cursorTimerId = setTimeout(() => {
+      this.cursorTimerId = -1;
+      this.lastServerSeq = this.reliability.cursor;
+      StorageAdapter.getInstance().set('neurova.ws.last_server_seq', this.lastServerSeq)
+        .catch((e: Error) => this.logger.warn(TAG, '游标批量落盘失败', e));
+    }, CURSOR_BATCH_MS);
+  }
+
   /** 处理收到的消息：分发原始事件 + 调用注册处理器 + 按 type 路由到 EventBus */
   private handleMessage(raw: string): void {
     // 1. 发送原始消息事件
@@ -458,21 +527,27 @@ export class WebSocketAdapter {
     }
     // 任何非 unknown_type 帧（含 pong/业务帧）到达即说明 auth 交换期已过
     this.authFrameInFlight = false;
+    // pong 既更新连接契约，也清除超时；心跳帧不参与业务去重。
+    if (type === 'pong') {
+      this.awaitingPong = false;
+      if (this.pongTimerId !== -1) {
+        clearTimeout(this.pongTimerId);
+        this.pongTimerId = -1;
+      }
+      if (parsed.connection_runtime !== undefined) {
+        this.applyConnectionRuntime(parsed.connection_runtime);
+      }
+    }
     // 服务端快照重同步通告：游标过旧/非法/预算耗尽时增量必不完整——
     // 立即弃游标并复用既有重连路径，以首屏快照恢复（不做会漏帧的部分重放）
     if (type === 'sync_snapshot_required') {
       this.handleSnapshotRequired(raw);
       return;
     }
-    // D-5 三端契约对齐：pong 携带 connection_runtime 契约（G4 单源），到达即
-    // 覆盖心跳/退避取值；无该字段的 pong（旧后端）保持现行为。
-    if (type === 'pong' && parsed.connection_runtime !== undefined) {
-      this.applyConnectionRuntime(parsed.connection_runtime);
+    if (!this.reliability.accept(parsed as Object as Record<string, Object>)) {
+      return;
     }
-    // 服务端帧带单调 seq（先落账再发送）：推进游标（重放帧按原 seq 计，幂等）
-    if (parsed.seq !== undefined && parsed.seq > this.lastServerSeq) {
-      this.lastServerSeq = parsed.seq;
-    }
+    this.lastServerSeq = this.reliability.cursor;
 
     const event: string = this.typeToEvent(type);
     if (event.length === 0) {
@@ -532,6 +607,7 @@ export class WebSocketAdapter {
       case 'device:execute':
       case 'device:cancel':
       case 'device:hello_ok':
+      case 'device:task':
         // 设备桥帧族（2026-11-23 计划 H2）：原样进总线，由 DeviceBridgeService
         // 消费执行并回执；聊天页不消费这些事件。
         return type;
@@ -575,6 +651,11 @@ export class WebSocketAdapter {
     }
     // 启动心跳保活
     this.startHeartbeat();
+    // 首连缺省 global 保持既有首帧契约；重连或显式非 global 范围必须重设。
+    if (this.hasAuthenticatedConnection || this.subscriptionScope !== 'global') {
+      this.sendSubscriptionScope();
+    }
+    this.hasAuthenticatedConnection = true;
     // 远程驾驶可靠性：重连后按游标补拉断线期间错过的帧（首次连接游标为 0 不发）
     this.resumeMissedFrames();
   }
@@ -617,6 +698,18 @@ export class WebSocketAdapter {
     }
     this.subscriptionScope = normalized;
     this.subscriptionScopeKey = normalized === 'global' ? '' : scopeKey.trim();
+    this.sendSubscriptionScope();
+  }
+
+  private sendSubscriptionScope(): void {
+    const frame: Record<string, Object> = {
+      'type': 'sync_scope',
+      'scope': this.subscriptionScope,
+      'scope_key': this.subscriptionScopeKey,
+    };
+    this.send(JSON.stringify(frame)).catch((e: Error) => {
+      this.logger.warn(TAG, 'scope 即时通知失败，重连后会重设', e);
+    });
   }
 
   /**
@@ -647,6 +740,9 @@ export class WebSocketAdapter {
     this.logger.info(TAG, `服务端要求快照重同步：弃用本地游标 reason=${reason} head_seq=${headSeq} note=${note}`);
     // 弃游标：重连后不发 sync_resume，按首连语义走首屏快照恢复
     this.lastServerSeq = 0;
+    this.reliability.reset();
+    StorageAdapter.getInstance().set('neurova.ws.last_server_seq', 0)
+      .catch((e: Error) => this.logger.warn(TAG, '快照重同步游标落盘失败', e));
     // 复用既有重连流程：主动关闭当前连接，由 on('close') → reauthAndReconnect() 接管
     if (this.ws) {
       try {
@@ -667,7 +763,15 @@ export class WebSocketAdapter {
   private startHeartbeat(): void {
     this.stopHeartbeat();
     const beat = (): void => {
-      this.send(HEARTBEAT_MESSAGE).catch((e: Error) => {
+      this.awaitingPong = true;
+      this.send(HEARTBEAT_MESSAGE).then(() => {
+        this.pongTimerId = setTimeout(() => {
+          if (this.awaitingPong && this.ws) {
+            this.logger.warn(TAG, 'pong 超时，主动拆线重连');
+            this.ws.close().catch((e: Error) => this.logger.warn(TAG, 'pong 超时拆线失败', e));
+          }
+        }, PONG_TIMEOUT_MS);
+      }).catch((e: Error) => {
         this.logger.warn(TAG, '心跳发送失败', e);
       });
       // 递归调度下一次心跳
@@ -683,6 +787,11 @@ export class WebSocketAdapter {
       clearTimeout(this.heartbeatTimerId);
       this.heartbeatTimerId = -1;
     }
+    if (this.pongTimerId !== -1) {
+      clearTimeout(this.pongTimerId);
+      this.pongTimerId = -1;
+    }
+    this.awaitingPong = false;
   }
 
   // ===========================================================================

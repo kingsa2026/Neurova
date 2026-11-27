@@ -53,6 +53,14 @@ def _node(graph, label, ntype=NodeType.CONCEPT, description=""):
     )
 
 
+def _edgeDirections(graph, node_id):
+    return {
+        (edge["source"], edge["target"])
+        for edge in graph.get_node_details(node_id)["edges"]
+        if edge["source"] != edge["target"]
+    }
+
+
 class TestPairKey:
     def test_id_independent_and_order_free(self, graph):
         a1 = _node(graph, "张三")
@@ -82,8 +90,7 @@ class TestMergeNodes:
         assert graph.get_node(src.node_id) is None
         assert graph.search_nodes("OpenAI 公司") == []
         # 边改挂 target
-        edges = graph.get_edges_between(dst.node_id, other.node_id)
-        assert len(edges) == 1
+        assert _edgeDirections(graph, dst.node_id) == {(dst.node_id, other.node_id)}
 
     def test_merge_log_enables_undo(self, graph):
         src = _node(graph, "微软")
@@ -98,8 +105,8 @@ class TestMergeNodes:
         assert graph.undo_merge(src.node_id) is True
         assert graph.get_node(src.node_id) is not None
         assert graph.get_node(src.node_id).label == "微软"
-        assert graph.get_edges_between(src.node_id, other.node_id)
-        assert graph.get_edges_between(other.node_id, dst.node_id)
+        assert (src.node_id, other.node_id) in _edgeDirections(graph, src.node_id)
+        assert (other.node_id, dst.node_id) in _edgeDirections(graph, other.node_id)
         # undo 后 merge 日志清掉，不能重复 undo
         assert graph.undo_merge(src.node_id) is False
 
@@ -263,8 +270,10 @@ class TestClosedLoopReview:
 
         assert graph.merge_nodes(src.node_id, dst.node_id, reason="test") is True
         # dst↔other 双向仍在（各一条）
-        assert len(graph.get_edges_between(dst.node_id, other.node_id)) == 1
-        assert len(graph.get_edges_between(other.node_id, dst.node_id)) == 1
+        assert _edgeDirections(graph, dst.node_id) == {
+            (dst.node_id, other.node_id),
+            (other.node_id, dst.node_id),
+        }
         # 自环被摘除（dst 上不存在 src→src 复制品）
         self_loops = [
             e for e in graph._edges.values()
@@ -273,8 +282,10 @@ class TestClosedLoopReview:
         assert self_loops == []
         # undo：双向边翻回原端点，自环原路放回 src
         assert graph.undo_merge(src.node_id) is True
-        assert len(graph.get_edges_between(src.node_id, other.node_id)) == 1
-        assert len(graph.get_edges_between(other.node_id, src.node_id)) == 1
+        assert _edgeDirections(graph, src.node_id) == {
+            (src.node_id, other.node_id),
+            (other.node_id, src.node_id),
+        }
         assert any(
             e.source_id == src.node_id and e.target_id == src.node_id
             for e in graph._edges.values()
@@ -302,4 +313,4 @@ class TestClosedLoopReview:
         assert graph.delete_edge(edge.edge_id) is True
         assert graph.undo_merge(src.node_id) is True
         assert graph.get_node(src.node_id) is not None  # 节点复活
-        assert graph.get_edges_between(src.node_id, other.node_id) == []  # 边不复活
+        assert _edgeDirections(graph, src.node_id) == set()  # 边不复活

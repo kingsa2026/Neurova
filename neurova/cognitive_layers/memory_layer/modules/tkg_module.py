@@ -154,9 +154,10 @@ class TKGModule:
         与"事实级判定只有一处实现"是同一条纪律：形状若另立一套，读的人还是要去猜。
         """
         from neurova.knowledge.foundation.conflict_judge import KnowledgeConflictJudge
+        from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
 
         store = self._store()
-        judge = KnowledgeConflictJudge(store)
+        judge = KnowledgeConflictJudge(store, OntologyTermRegistry(store))
         contested = {
             member
             for conflict in judge.detect(subjectLabel=subject, predicateTermId=predicate)
@@ -211,7 +212,12 @@ class TKGModule:
     # ── 内部 ──────────────────────────────────────────────────
 
     def _allActiveRows(self) -> List[Dict[str, Any]]:
-        return [f for f in self._store().searchableFacts() if f["record_kind"] == "triple"]
+        from neurova.knowledge.derivation_citation import filterConditionClassFacts
+
+        rows = [f for f in self._store().searchableFacts() if f["record_kind"] == "triple"]
+        for fact in rows:
+            fact.setdefault("lineage_id", fact["fact_id"])
+        return filterConditionClassFacts(rows, self._store())[0]
 
     def _retractedCount(self) -> int:
         store = self._store()

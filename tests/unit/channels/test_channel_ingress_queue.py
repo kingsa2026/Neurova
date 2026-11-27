@@ -83,7 +83,7 @@ class TestEnqueueAndClaim:
             ev = q.claim(worker="w1")
             q.nack(ev.event_id)
         assert q.claim(worker="w1") is None, "超过 max_attempts 进入 dead-letter"
-        dead = q.list_dead_letters()
+        dead = q.list_dead_letters(agent_id="")
         assert len(dead) == 1 and dead[0]["message_id"] == "dl1"
 
     def test_dead_letter_requeue(self, queue):
@@ -91,10 +91,45 @@ class TestEnqueueAndClaim:
         q.enqueue(_msg(mid="dl2"))
         ev = q.claim(worker="w1")
         q.nack(ev.event_id)
-        assert q.list_dead_letters()
-        assert q.requeue_dead_letters() == 1
-        assert q.list_dead_letters() == []
+        assert q.list_dead_letters(agent_id="")
+        eventIds = [row["id"] for row in q.list_dead_letters(agent_id="")]
+        assert q.requeue_dead_letters(agent_id="", event_ids=eventIds) == 1
+        assert q.list_dead_letters(agent_id="") == []
         assert q.claim(worker="w1") is not None
+
+    def test_deadLetterReadsRequireExplicitAgentScope(self, queue):
+        with pytest.raises(TypeError):
+            queue.list_dead_letters()
+
+    def test_deadLetterRequeueRequiresExplicitIds(self, queue):
+        with pytest.raises(ValueError, match="event_ids"):
+            queue.requeue_dead_letters(agent_id="default", event_ids=[])
+
+    def test_deadLetterFiltersAndRequeueStayInsideAgentAndChannel(self, queue):
+        q = ChannelIngressQueue(db_path=queue.db_path, max_attempts=1)
+        for mid, channel, agent in (
+            ("a-feishu", "feishu", "agent-a"),
+            ("a-telegram", "telegram", "agent-a"),
+            ("b-feishu", "feishu", "agent-b"),
+        ):
+            q.enqueue(_msg(mid=mid, channel=channel), agent_id=agent)
+            event = q.claim(worker="w1")
+            q.nack(event.event_id, "boom")
+
+        assert {row["message_id"] for row in q.list_dead_letters(agent_id="agent-a")} == {
+            "a-feishu", "a-telegram"
+        }
+        onlyFeishu = q.list_dead_letters(agent_id="agent-a", channel_type="feishu")
+        assert [row["message_id"] for row in onlyFeishu] == ["a-feishu"]
+
+        assert q.requeue_dead_letters(
+            agent_id="agent-a", channel_type="feishu", event_ids=[onlyFeishu[0]["id"]]
+        ) == 1
+        remaining = q.list_dead_letters(agent_id="agent-a")
+        assert [row["message_id"] for row in remaining] == ["a-telegram"]
+        assert [row["message_id"] for row in q.list_dead_letters(agent_id="agent-b")] == [
+            "b-feishu"
+        ]
 
 
 class TestRestartRecovery:
@@ -160,13 +195,13 @@ class TestDrainLoop:
             q.enqueue(_msg(mid="f1"))
             for _ in range(100):
                 await asyncio.sleep(0.01)
-                if q.list_dead_letters():
+                if q.list_dead_letters(agent_id=""):
                     break
             await q.stop_drain()
 
         asyncio.run(_run())
         assert calls["n"] == 1
-        assert q.list_dead_letters()[0]["message_id"] == "f1"
+        assert q.list_dead_letters(agent_id="")[0]["message_id"] == "f1"
         q.close()
 
 

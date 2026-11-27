@@ -187,16 +187,19 @@ def _apply(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
         manager = manager or _memory_manager(args.agent_id)
         sessions = sessions or _session_manager(args.sessions_dir)
         code = EXIT_OK
-        for label, bundle in bundles:
+        for index, (label, bundle) in enumerate(bundles, start=1):
+            run_id = args.run_id
+            if run_id and len(bundles) > 1:
+                run_id = f"{run_id}-{index:02d}"
             try:
                 report = apply_bundle(bundle, agent_id=args.agent_id, manager=manager,
-                                      sessions=sessions, run_id=args.run_id,
+                                      sessions=sessions, run_id=run_id,
                                       owner_user_id=args.owner_user_id)
             except BundleError as exc:
-                # 跨 store 不做分布式事务：失败者进报告，已写的靠 run_id 撤销
-                print(f"拒绝 {label}：{exc}", file=sys.stderr)
+                # 首错即停：后续 store 不再写，避免一次目录导入留下难解释的半程批次。
+                print(f"拒绝 {label}：{exc}（首错即停，后续 store 未处理）", file=sys.stderr)
                 code = EXIT_INVALID_BUNDLE
-                continue
+                break
             print(f"已写入 {label} run_id={report.run_id}：消息 +{report.messages_added}"
                   f"/跳过 {report.messages_skipped}，会话文件 {report.sessions_touched} 个，"
                   f"记忆 +{report.memories_added}/跳过 {report.memories_skipped}")
@@ -215,7 +218,7 @@ def _apply(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
                 print("          端点不可达时（如后端不支持）重启后端等效")
             print(f"  撤销：python scripts/ingest_memory.py undo --agent-id {args.agent_id} "
                   f"--run-id {report.run_id}")
-        if blocked:
+        if blocked and code == EXIT_OK:
             code = EXIT_UNRECOGNIZED
         return code
 

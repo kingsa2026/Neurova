@@ -38,6 +38,23 @@ class TestRecentOriginsRoundTrip:
         origins = sm.get_recent_origins("agt", "s2", max_messages=10)
         assert list(origins) == [None]
 
+    def test_recent_window_uses_newest_sessions_globally(self, sm):
+        sm.add_message("agt", "s1", "旧人类轮", "a", date="2026-01-01",
+                       metadata={"turn_origin": "human"})
+        sm.add_message("agt", "s1", "新机器轮一", "a", date="2026-01-02",
+                       metadata={"turn_origin": "bot_peer"})
+        sm.add_message("agt", "s1", "新机器轮二", "a", date="2026-01-02",
+                       metadata={"turn_origin": "bot_peer"})
+
+        origins = sm.get_recent_origins("agt", "s1", max_messages=2)
+
+        assert origins == ["bot_peer", "bot_peer"]
+
+    def test_zero_recent_window_returns_empty(self, sm):
+        sm.add_message("agt", "s1", "q", "a", metadata={"turn_origin": "human"})
+
+        assert sm.get_recent_origins("agt", "s1", max_messages=0) == []
+
 
 # ── 管线读侧接线（裸实例 + 假 session_manager.get_recent_origins）──
 def _pipe(origins):

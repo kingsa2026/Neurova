@@ -2885,11 +2885,19 @@ class MemoryManager:
                     # 现场作用域去找，跨上下文导入时永远落空（声明了却"找不到目标"）。
                     retired = self._retireSuperseded(
                         declared, keepId=mem.id, scope=(scope_ne, scope_uid))
-                    superseded.extend(retired)
-                    if not retired:
+                    superseded.extend(row["memory_id"] for row in retired)
+                    if retired:
+                        # 撤销本批时按快照恢复旧行，不能把"软遗忘"误当成永久删除。
+                        mem.metadata["superseded_restore"] = retired
+                    else:
                         unresolved.append(declared)
-            if imported:
-                self.persist_memory_batch(imported)
+            if imported and not self.persist_memory_batch(imported):
+                self._restoreSuperseded(imported)
+                for mem in imported:
+                    self._memories.pop(mem.id, None)
+                self._stats["total_memories"] = len(self._memories)
+                raise OSError(
+                    f"导入记忆未落盘（run_id={ingest_run_id}）：拒绝把仅存在内存中的批次当成功")
             self._stats["total_memories"] = len(self._memories)
         if unresolved:
             self._stats["supersede_unresolved_count"] = (
@@ -2900,13 +2908,12 @@ class MemoryManager:
                 "superseded": superseded, "supersede_unresolved": unresolved}
 
     def _retireSuperseded(self, declared: str, keepId: str,
-                          scope: Optional[Tuple[str, str]] = None) -> List[str]:
-        """把声明被取代的旧活跃行软遗忘；返回被遗忘的 memory_id。
+                          scope: Optional[Tuple[str, str]] = None) -> List[Dict[str, str]]:
+        """把声明被取代的旧活跃行软遗忘；返回可撤销快照。
 
         定位口径复用内容身份（`normalized_key`，与内容门同一把键）：声明值可能是旧行
         的原文，也可能是旧行的 identity_key——两种都按"同一份内容身份"认，不另立匹配规则。
-        只动本作用域、只动仍活跃的行；软遗忘是既有语义（可恢复、不删数据），
-        这里不新造第二种"作废"。
+        只动本作用域、只动仍活跃的行；快照让同批 undo 恢复原生命周期。
 
         `scope` 缺省取调用现场三元组；导入路径显式传**本批行**的作用域（属主给定的
         情况下它与调用现场不是同一个上下文）。
@@ -2917,7 +2924,7 @@ class MemoryManager:
         if not wanted:
             return []
         scope_ne, scope_uid = scope or (self._eff_neuser_id(), self._eff_user_id())
-        retired: List[str] = []
+        retired: List[Dict[str, str]] = []
         # P2 §3.3-1（M-06 口径）：扫描快照持锁（循环内只改记忆对象不动字典）
         with self._lock:
             scan = list(self._memories.values())
@@ -2931,12 +2938,30 @@ class MemoryManager:
             identity = str((mem.metadata or {}).get("ingest", {}).get("identity_key") or "")
             if normalized_key(mem.content) != wanted and normalized_key(identity) != wanted:
                 continue
+            retired.append({"memory_id": mem.id, "lifecycle_stage": mem.lifecycle_stage.value})
             mem.lifecycle_stage = LifecycleStage.FORGOTTEN
             mem.metadata = dict(mem.metadata or {})
             mem.metadata["superseded_by_ingest"] = keepId
             self._persist_memory(mem)
-            retired.append(mem.id)
         return retired
+
+    def _restoreSuperseded(self, imported: List[Memory]) -> None:
+        """按导入行自带快照恢复被本批软遗忘的旧记忆（undo/持久化失败补偿共用）。"""
+        for mem in imported:
+            rows = (mem.metadata or {}).get("superseded_restore") or []
+            for row in rows:
+                old = self._memories.get(str(row.get("memory_id") or ""))
+                if old is None:
+                    continue
+                try:
+                    old.lifecycle_stage = LifecycleStage(str(row.get("lifecycle_stage")))
+                except ValueError:
+                    continue
+                metadata = dict(old.metadata or {})
+                if metadata.get("superseded_by_ingest") == mem.id:
+                    metadata.pop("superseded_by_ingest", None)
+                old.metadata = metadata
+                self._persist_memory(old)
 
     def _build_imported_memory(self, rec, ingest_run_id: str,
                                owner_user_id: str = "") -> "Memory":
@@ -3014,6 +3039,7 @@ class MemoryManager:
             for mem_id, mem in list(self._memories.items()):
                 if (mem.metadata or {}).get("ingest_run_id") != ingest_run_id:
                     continue
+                self._restoreSuperseded([mem])
                 del self._memories[mem_id]
                 self._delete_persisted_memory(
                     mem_id, (mem.agent_id, mem.neuser_id, mem.user_id))

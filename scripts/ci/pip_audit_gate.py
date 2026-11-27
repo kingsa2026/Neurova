@@ -49,10 +49,10 @@
 
 故裁决通路收口为与 `osv_audit.py` 同形的 `resolveVerdictChannel()`：
 
-* 离线库在场（`~/.cache/osv-scalibr/PyPI/all.zip`，与 OSV 那一路**同一份缓存**）
+* 离线库在场且未超过 24h（`~/.cache/osv-scalibr/PyPI/all.zip`，与 OSV 那一路**同一份缓存**）
   → 走离线口径（OSV-Scanner `--offline --offline-vulnerabilities`），
   裁决**不再依赖任何远端**；
-* 离线库不在场 → 回退直连 pip-audit，并**点名缺哪一份**（可读、可复算）。
+* 离线库缺失或过期 → 回退直连 pip-audit，并**点名原因**（可读、可复算）。
 
 `--verdict-channel` 只在自证时显式钉住一条口径，CI 用默认的 `auto`。
 
@@ -186,23 +186,20 @@ OFFLINE_FLAGS = ("--offline", "--offline-vulnerabilities")
 
 
 def offlineDatabaseProblems() -> list:
-    """离线库是否已备齐，返回问题清单（空 = 可走离线）。
+    """离线库是否在场且新鲜，返回问题清单（空 = 可走离线）。
 
-    判据是**文件在场**，不是「下载过」——与 `osv_audit.py` 的
-    `offlineDatabaseProblems()` 同口径：过期库仍好过一个不可达的库，
-    过期只漏报新公告，不可达会让门禁在「网络抖动」与「真有漏洞」之间无从分辨。
+    新鲜度判定复用 `osv_audit.offlineDatabaseFileProblems()`，与跨生态门禁同一份
+    TTL 和错误口径；过期库不冒充新证据，预取未刷新时回退直连并点名。
     """
     db = OSV_DB_CACHE / OFFLINE_ECOSYSTEM / "all.zip"
-    if not db.is_file():
-        return [f"离线库缺失: {db}（生态 {OFFLINE_ECOSYSTEM}）"]
-    return []
+    return _scannerModule().offlineDatabaseFileProblems(db, OFFLINE_ECOSYSTEM)
 
 
 def resolveVerdictChannel() -> tuple:
     """单源决定本次裁决走离线库还是直连，返回 `(用离线吗, 问题清单)`。
 
-    与 `osv_audit.py` 的 `resolveVerdictChannel()` 同形：缓存齐 → 走离线
-    （不再依赖 `api.osv.dev`）；缓存不齐 → **回退直连并点名缺哪一份**。
+    与 `osv_audit.py` 的 `resolveVerdictChannel()` 同形：缓存齐且新鲜 → 走离线
+    （不再依赖 `api.osv.dev`）；缓存缺失/过期 → **回退直连并点名原因**。
 
     为什么回退而不判红：预取是 best-effort（CI 里 `|| true`），门禁若要求
     「缓存必须齐」，就把一条**允许失败**的前置步骤变成了红灯来源，而那与

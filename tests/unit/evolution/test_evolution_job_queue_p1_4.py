@@ -82,10 +82,10 @@ def test_concurrent_claim_disjoint(tmp_path):
 def test_fail_ladder_then_terminal(q):
     q.enqueue("j", {})
     job = q.claim("w")
-    q.fail(job["id"], "boom")  # attempts=1 < max2 → retryable
+    q.fail(job["id"], job["lease_token"], "boom")  # attempts=1 < max2 → retryable
     assert q.pending_count() == 1
     job2 = q.claim("w")
-    q.fail(job2["id"], "boom again")  # attempts=2 == max → failed 终态
+    q.fail(job2["id"], job2["lease_token"], "boom again")  # attempts=2 == max → failed 终态
     assert q.pending_count() == 0
     assert q.claim("w") is None
 

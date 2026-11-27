@@ -476,7 +476,7 @@ class SkillRegistryProtocol(Protocol):
 class SkillRegistry:
     """Skill 注册表"""
 
-    def __init__(self, runtime_manager=None):
+    def __init__(self):
         self._skills: Dict[str, Skill] = {}
         # 身份域索引（工单 014）：skill_id/id → 同一个 Skill 对象。
         # 主字典按 skill.name 建键（name 是执行与展示域：工具清单、LLM 调用都用它），
@@ -485,7 +485,6 @@ class SkillRegistry:
         self._identity_index: Dict[str, Skill] = {}
         self._event_handlers: List[Callable] = []
         self._event_callbacks: Dict[str, List[Callable]] = {}
-        self._runtime_manager = runtime_manager
         import threading
         self._registration_lock = threading.RLock()
         # 同名覆盖计数（工单 006 的可观测读数，供运维复算存量库的冲突规模）
@@ -681,6 +680,15 @@ class SkillRegistry:
         self._skills.clear()
         self._identity_index.clear()
 
+    def _inactiveSkillResult(self, skill_name: str, skill: Skill) -> Optional[SkillResult]:
+        status = getattr(skill, "status", None)
+        if status is None:
+            return None
+        value = str(getattr(status, "value", status) or "").strip().lower()
+        if value == SkillStatus.ACTIVE.value:
+            return None
+        return SkillResult(success=False, error=f"Skill {skill_name} is inactive")
+
     async def execute_skill(
         self, skill_name: str, params: Dict[str, Any], context: Optional[Dict] = None
     ) -> SkillResult:
@@ -688,6 +696,9 @@ class SkillRegistry:
         skill = self.get_skill(skill_name)
         if not skill:
             return SkillResult(success=False, error=f"Skill {skill_name} 不存在")
+        inactive = self._inactiveSkillResult(skill_name, skill)
+        if inactive is not None:
+            return inactive
 
         # 触发前置事件
         self._emit_event("before_execute", skill_name, params)
@@ -712,109 +723,6 @@ class SkillRegistry:
             return SkillResult(success=False, error=str(e))
         finally:
             endToolTrace(trace_token)
-
-    @property
-    def runtime_manager(self):
-        """获取 RuntimeManager（延迟初始化）"""
-        if self._runtime_manager is None:
-            try:
-                from neurova.execution_layers import get_runtime_manager
-
-                self._runtime_manager = get_runtime_manager()
-            except ImportError:
-                logger.debug("execution_layers 模块不可用")
-        return self._runtime_manager
-
-    async def execute_skill_isolated(
-        self,
-        skill_name: str,
-        params: Dict[str, Any],
-        context: Optional[Dict] = None,
-        runtime_type: str = "local",
-    ) -> SkillResult:
-        """
-        在隔离运行时中执行 Skill
-
-        通过 RuntimeManager 在独立运行时（Local/Docker）中执行技能，
-        提供进程级隔离，防止技能崩溃影响主进程。
-
-        Args:
-            skill_name: 技能名称
-            params: 技能参数
-            context: 执行上下文
-            runtime_type: 运行时类型（local / docker）
-        """
-        start_time = time.time()
-
-        skill = self.get_skill(skill_name)
-        if not skill:
-            return SkillResult(success=False, error=f"Skill {skill_name} 不存在")
-
-        rm = self.runtime_manager
-        if rm is None:
-            logger.debug("RuntimeManager 不可用，降级为普通执行")
-            return await self.execute_skill(skill_name, params, context)
-
-        try:
-            from neurova.execution_layers import RuntimeFactory, RuntimeType
-
-            rt = RuntimeType.DOCKER if runtime_type == "docker" else RuntimeType.LOCAL
-            runtime = RuntimeFactory.create(rt, runtime_id=f"skill_{skill_name}_{int(time.time())}")
-            await runtime.start()
-
-            try:
-                import json as _json
-
-                exec_env = {
-                    "NEUROVA_SKILL_NAME": skill_name,
-                    "NEUROVA_SKILL_ARGS": _json.dumps(params),
-                }
-                if context:
-                    exec_env["NEUROVA_SKILL_CONTEXT"] = _json.dumps(context)
-
-                exec_result = await runtime.exec(
-                    command="python",
-                    args=[
-                        "-c",
-                        (
-                            # P2-14（全库断点审计 2026-11-12）：子进程必须**重建**
-                            # 注册表——原代码 `SkillRegistry()` 是空表（builtin 技能
-                            # 只在父进程 create_default_skills 里注册），任何技能
-                            # 在子进程里都落"不存在"，外层再静默降级，隔离语义
-                            # 名存实亡。
-                            "import asyncio, json, os; "
-                            "from neurova.skill_system.core import create_default_skills; "
-                            f"args = json.loads(os.environ.get('NEUROVA_SKILL_ARGS', '{{}}')); "
-                            f"registry = create_default_skills(); "
-                            f"result = asyncio.run(registry.execute_skill('{skill_name}', args)); "
-                            "print(json.dumps({'success': result.success, 'data': result.data}))"
-                        ),
-                    ],
-                    env=exec_env,
-                    timeout=params.get("timeout", 60),
-                )
-
-                duration_ms = (time.time() - start_time) * 1000
-
-                if exec_result.success:
-                    return SkillResult(
-                        success=True,
-                        data={"stdout": exec_result.stdout, "runtime_type": runtime_type},
-                        execution_time=duration_ms,
-                    )
-                else:
-                    return SkillResult(
-                        success=False,
-                        error=exec_result.stderr or exec_result.error or "Isolated execution failed",
-                        execution_time=duration_ms,
-                    )
-            finally:
-                await runtime.stop()
-
-        except Exception as e:
-            duration_ms = (time.time() - start_time) * 1000
-            logger.error("隔离执行 Skill 失败: %s", e)
-            return await self.execute_skill(skill_name, params, context)
 
     def add_event_handler(self, handler: Callable):
         """添加事件处理器"""

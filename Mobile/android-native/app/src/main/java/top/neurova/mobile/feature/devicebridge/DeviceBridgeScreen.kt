@@ -20,7 +20,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +38,8 @@ import androidx.compose.ui.unit.sp
 import top.neurova.mobile.core.capability.DeviceCapabilities
 import top.neurova.mobile.core.capability.DeviceHealthChecks
 import top.neurova.mobile.core.net.MobileWsChannel
+import top.neurova.mobile.core.protocol.DeviceBridgeEvents
+import top.neurova.mobile.core.capability.AppStateTracker
 import top.neurova.mobile.ui.components.LocalAppRuntime
 import top.neurova.mobile.ui.theme.LocalNeurovaColors
 
@@ -55,6 +59,37 @@ fun DeviceBridgeScreen(onBack: () -> Unit) {
     val health = remember(refreshTick) { DeviceHealthChecks.all(context) }
     val enabled = remember(refreshTick) { runtime.deviceAuth.enabledCapabilities() }
     val whitelist = remember(refreshTick) { runtime.deviceAuth.notificationWhitelist() }
+    var taskId by remember { mutableStateOf("") }
+    var pendingTaskId by remember { mutableStateOf("") }
+    var taskExpiresAt by remember { mutableStateOf(0L) }
+
+    LaunchedEffect(runtime.ws) {
+        runtime.ws.events.collect { event ->
+            if (event is MobileWsChannel.Event.DeviceTaskArrived) {
+                when (event.window.status) {
+                    "active" -> {
+                        taskId = event.window.taskId
+                        taskExpiresAt = event.window.expiresAt
+                        pendingTaskId = ""
+                    }
+                    "ended", "error" -> if (event.window.taskId == taskId || event.window.taskId == pendingTaskId) {
+                        taskId = ""
+                        taskExpiresAt = 0
+                        pendingTaskId = ""
+                    }
+                }
+            }
+        }
+    }
+    LaunchedEffect(taskId, taskExpiresAt) {
+        if (taskId.isNotEmpty() && taskExpiresAt > 0) {
+            kotlinx.coroutines.delay((taskExpiresAt - System.currentTimeMillis()).coerceAtLeast(0))
+            if (System.currentTimeMillis() >= taskExpiresAt) {
+                taskId = ""
+                taskExpiresAt = 0
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -76,6 +111,38 @@ fun DeviceBridgeScreen(onBack: () -> Unit) {
 
         SectionTitle("通道")
         InfoRow("通道状态", "WS：${wsState.name} · 前台服务常驻")
+
+        SectionTitle("显式任务窗口")
+        InfoRow(
+            title = when {
+                taskId.isNotEmpty() -> "执行中 · $taskId"
+                pendingTaskId.isNotEmpty() -> "等待服务端确认"
+                else -> "未开始"
+            },
+            subtitle = "仅前台生效；开始后才接受设备命令，结束/取消/到期立即解除",
+        )
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            TextButton(onClick = {
+                val requested = java.util.UUID.randomUUID().toString()
+                pendingTaskId = requested
+                val sent = runtime.ws.sendDeviceFrame(DeviceBridgeEvents.buildTask(
+                    "start", requested, AppStateTracker.current,
+                ))
+                if (!sent) pendingTaskId = ""
+            }, enabled = taskId.isEmpty() && pendingTaskId.isEmpty() && wsState == MobileWsChannel.State.AUTHED) {
+                Text("开始任务")
+            }
+            TextButton(onClick = {
+                runtime.ws.sendDeviceFrame(DeviceBridgeEvents.buildTask(
+                    "end", taskId, AppStateTracker.current,
+                ))
+            }, enabled = taskId.isNotEmpty()) { Text("结束") }
+            TextButton(onClick = {
+                runtime.ws.sendDeviceFrame(DeviceBridgeEvents.buildTask(
+                    "cancel", taskId, AppStateTracker.current,
+                ))
+            }, enabled = taskId.isNotEmpty()) { Text("取消") }
+        }
 
         SectionTitle("能力授权（默认全关）")
         for (capability in DeviceCapabilities.CLAIMED) {

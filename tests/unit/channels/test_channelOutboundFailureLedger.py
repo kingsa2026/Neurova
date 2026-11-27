@@ -168,6 +168,31 @@ class TestFailureLedgerDestination:
             f"重复片的片序没有各自成立（实得 {[(r['part_index'], r['content_head'][:10]) for r in rows]}）"
         )
 
+    def test_ledgerFiltersByAgentAlongsideChannelAndChat(self, tmp_path):
+        """agent 是读面边界；同一会话名跨 agent 不得混查。"""
+        ledger = OutboundFailureLedger(db_path=tmp_path / "outbound-filter.db")
+        try:
+            for agent, channel, chat in (
+                ("agent-a", "feishu", "shared-chat"),
+                ("agent-a", "telegram", "shared-chat"),
+                ("agent-b", "feishu", "shared-chat"),
+            ):
+                ledger.recordFailure(
+                    channel_type=channel, chat_id=chat, agent_id=agent,
+                    part_index=1, total_parts=1, attempts=2, error="boom",
+                )
+
+            rows = ledger.queryFailures(
+                agent_id="agent-a", channel_type="feishu", chat_id="shared-chat"
+            )
+            assert len(rows) == 1
+            assert rows[0]["agent_id"] == "agent-a"
+            assert rows[0]["channel_type"] == "feishu"
+            assert rows[0]["chat_id"] == "shared-chat"
+            assert len(ledger.queryFailures(agent_id="agent-a")) == 2
+        finally:
+            ledger.close()
+
     def test_ledgerFiltersByChat(self, manager):
         """读面可按会话过滤——失败归宿必须能被"哪个会话在丢片"这类问题查到。"""
         mgr, ledger = manager

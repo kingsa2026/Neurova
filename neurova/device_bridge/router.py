@@ -79,7 +79,7 @@ class DeviceBridgeRouter:
     async def execute(self, *, user_id: str, action: str,
                       payload: Optional[Dict[str, Any]] = None,
                       timeout_ms: Optional[int] = None,
-                      intent: str = "") -> Dict[str, Any]:
+                      intent: str = "", task_id: str = "") -> Dict[str, Any]:
         from neurova.computer_use.action_result import refused as actionRefused
         from neurova.computer_use.action_result import attach
 
@@ -90,11 +90,18 @@ class DeviceBridgeRouter:
                            "message": _REFUSAL_MESSAGES["device_bridge_disabled"]}},
                 actionRefused("device", "device_bridge_disabled"))
 
+        if not task_id:
+            return attach(
+                {"success": False, "action": action,
+                 "error": {"code": "task_window_required",
+                           "message": "设备命令必须携带有效 task_id 的显式任务窗口"}},
+                actionRefused("device", "task_window_required"))
+
         connections = self._registryOrGlobal().onlineForUser(user_id)
         if not connections:
             # B7 离线唤醒闭环：有在册设备 → 命令入账待执行 + 唤醒信令；
             # 连在册设备都没有 → 诚实 device_offline。
-            return await self._queueOffline(user_id, action, payload, intent)
+            return await self._queueOffline(user_id, action, payload, intent, task_id)
 
         capable = [c for c in connections if c.claims(action)]
         if not capable:
@@ -111,6 +118,9 @@ class DeviceBridgeRouter:
         # 前台优先；全后台时按后台闸判定
         capable.sort(key=lambda c: 0 if c.app_state == "foreground" else 1)
         conn = capable[0]
+        window = self._taskWindow(conn.pairing_id, task_id)
+        if window is None:
+            return self._taskWindowRefusal(action, conn.pairing_id, task_id)
         if conn.app_state != "foreground" and action in BACKGROUND_UNSAFE_ACTIONS:
             return attach(
                 {"success": False, "action": action,
@@ -128,6 +138,8 @@ class DeviceBridgeRouter:
             "payload": dict(payload or {}),
             "timeout_ms": windowMs,
             "intent": intent,
+            "task_id": task_id,
+            "window_expires_at": window["expires_at_ms"],
         }
         # 幂等登记：新命令 None；同 id 已收敛回原终态（replayed）；运行中回冲突。
         prior = conn.ledger_ws.commandPriorFrame(commandId, FRAME_DEVICE_EXECUTE, frame)
@@ -168,7 +180,8 @@ class DeviceBridgeRouter:
     # -- 离线入队（B7）-------------------------------------------------------
 
     async def _queueOffline(self, user_id: str, action: str,
-                            payload: Optional[Dict[str, Any]], intent: str) -> Dict[str, Any]:
+                            payload: Optional[Dict[str, Any]], intent: str,
+                            task_id: str) -> Dict[str, Any]:
         """设备离线但有在册设备：命令入账待执行 + 唤醒信令（B7）。
 
         execute 帧直接落入该设备的 WS 账本（当前 epoch），设备回连后
@@ -191,6 +204,9 @@ class DeviceBridgeRouter:
         target = max(devices, key=lambda d: float(d.get("last_active")
                                                   or d.get("paired_at") or 0))
         pairingId = str(target.get("pairing_id") or "")
+        window = self._taskWindow(pairingId, task_id)
+        if window is None:
+            return self._taskWindowRefusal(action, pairingId, task_id)
         commandId = f"dev-{uuid.uuid4().hex}"
         frame = {
             "type": FRAME_DEVICE_EXECUTE,
@@ -199,6 +215,8 @@ class DeviceBridgeRouter:
             "payload": dict(payload or {}),
             "timeout_ms": defaultCommandTimeoutMs(),
             "intent": intent,
+            "task_id": task_id,
+            "window_expires_at": window["expires_at_ms"],
         }
         ledger = getMobileWsLedger()
         _, prior = ledger.beginCommand(commandId, pairingId, FRAME_DEVICE_EXECUTE, frame)
@@ -216,6 +234,25 @@ class DeviceBridgeRouter:
              "error": {"code": "device_offline_queued",
                        "message": _REFUSAL_MESSAGES["device_offline_queued"]}},
             actionRefused("device", "device_offline_queued"))
+
+    @staticmethod
+    def _taskWindow(pairing_id: str, task_id: str) -> Optional[Dict[str, Any]]:
+        from neurova.api.mobile_ws_ledger import getMobileWsLedger
+
+        return getMobileWsLedger().taskWindow(pairing_id, task_id)
+
+    def _taskWindowRefusal(self, action: str, pairing_id: str,
+                           task_id: str) -> Dict[str, Any]:
+        from neurova.api.mobile_ws_ledger import getMobileWsLedger
+        from neurova.computer_use.action_result import refused as actionRefused
+        from neurova.computer_use.action_result import attach
+
+        current = getMobileWsLedger().taskWindow(pairing_id)
+        code = "task_window_expired" if current is None else "task_window_mismatch"
+        return attach(
+            {"success": False, "action": action, "pairing_id": pairing_id,
+             "error": {"code": code, "message": "显式任务窗口无效、已到期或 task_id 不匹配"}},
+            actionRefused("device", code))
 
     # -- 回执入口（WS 循环调用） ---------------------------------------------
 

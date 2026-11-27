@@ -8,6 +8,7 @@ import pytest
 from neurova.knowledge.foundation.admission import AdmissionRequest
 from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 from neurova.knowledge.ontology.shapes import ShapeRegistry
+from neurova.knowledge.ontology.pipeline import dryRunFactCandidates
 from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
 from neurova.knowledge.ontology.validation import OntologyValidationReport
 
@@ -54,6 +55,24 @@ def test_dryRunMatchesWriteTimeFindings(store, registry):
         "dry-run 与写前同 finding 同定位串"
     assert any("风险等级取值越界" in f["message"] for f in dryRun), \
         "用户 shape 的 violation 进同一 findings 流"
+
+
+def test_dryRunKeepsViolationSeverityOnEvaluationFailure(store, registry):
+    shapes = ShapeRegistry(store)
+    shapes.register(tenantId="default", shapeId="broken_pattern", targetKind="relation",
+                    targetTermId="hasRiskLevel", constraintKind="pattern",
+                    constraintJson={"pattern": "["}, severity="violation")
+
+    rows = dryRunFactCandidates(
+        store, "default", "default",
+        [{"subjectLabel": "订单D01", "predicateTermId": "hasRiskLevel", "objectTerm": "High"}],
+        registry=registry,
+    )
+
+    assert rows[0]["violations"], "violation 形状求值失败必须在 dry-run 显式报错"
+    finding = next(f for f in rows[0]["violations"] if f["rule"] == "shape:broken_pattern")
+    assert finding["kind"] == "violation"
+    assert "形状求值异常" in finding["message"]
 
 
 def test_disablingShapeSilencesItEverywhere(store, registry):

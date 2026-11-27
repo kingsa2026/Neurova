@@ -67,6 +67,11 @@ def runnerMain(spec: LaunchSpec) -> int:
     out = _FrameWriter(sys.stdout.buffer)
     stdin = sys.stdin.buffer
 
+    # 非 echo 模式在握手前先还原并校验完整 ChannelConfig；配置错误必须让宿主
+    # 在 ready 前看到失败，不能等 ready 后才在适配器构造处炸掉。
+    if spec.entrypoint != "builtin:echo":
+        _channelConfigFromSpec(spec)
+
     # 1) 依赖审计（先于加载任何渠道依赖——审计失败的子进程不应已把重模块拉起来）
     audit = runDependencyAudit(spec.required_deps)
     # 2) 握手 hello（源码版本带子进程**实测**值，供宿主与规格核对）
@@ -114,13 +119,43 @@ def _serveEcho(spec: LaunchSpec, stdin, out: _FrameWriter) -> int:
         logger.warning("echo 模式未知帧 op=%s，忽略", op)
 
 
+def _resolveRunnerValue(value, spec: LaunchSpec):
+    """解析白名单环境变量引用；未声明的凭据来源显式拒绝。"""
+    if isinstance(value, dict):
+        if set(value) == {"env"}:
+            key = str(value.get("env") or "")
+            if key not in set(spec.private_env_keys):
+                raise DependencyAuditError(f"配置引用了未白名单的环境变量：{key}")
+            return os.environ.get(key, "")
+        return {k: _resolveRunnerValue(v, spec) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_resolveRunnerValue(v, spec) for v in value]
+    return value
+
+
+def _channelConfigFromSpec(spec: LaunchSpec):
+    """从启动规格还原完整 ChannelConfig，不能再丢 app_id/secret/extra。"""
+    from neurova.channels.base import ChannelConfig
+
+    payload = _resolveRunnerValue(dict(spec.channel_config or {}), spec)
+    return ChannelConfig(
+        channel_type=str(payload.get("channel_type") or spec.channel_type),
+        enabled=bool(payload.get("enabled", True)),
+        app_id=str(payload.get("app_id") or ""),
+        app_secret=str(payload.get("app_secret") or ""),
+        webhook_url=str(payload.get("webhook_url") or ""),
+        webhook_token=str(payload.get("webhook_token") or ""),
+        use_stream=bool(payload.get("use_stream", True)),
+        encrypt_key=str(payload.get("encrypt_key") or ""),
+        verification_token=str(payload.get("verification_token") or ""),
+        extra=dict(payload.get("extra") or {}),
+    )
+
+
 def _serveAdapter(spec: LaunchSpec, stdin, out: _FrameWriter) -> int:
     """真实适配器模式：asyncio 驱动 connect/send_message，事件经帧上行。"""
     adapter_cls = _loadAdapterClass(spec.entrypoint)
-
-    from neurova.channels.base import ChannelConfig
-
-    config = ChannelConfig(channel_type=spec.channel_type)
+    config = _channelConfigFromSpec(spec)
     adapter = adapter_cls(config)
 
     loop = asyncio.new_event_loop()

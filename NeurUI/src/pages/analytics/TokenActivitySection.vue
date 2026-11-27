@@ -242,6 +242,18 @@ function heatWeekLabels(days: UsageOverviewHeatmapDay[], cells: [number, number,
   })
 }
 
+const HEAT_COLORS = [[35, 40, 58], [59, 47, 99], [109, 74, 163], [155, 109, 214], [201, 163, 245]]
+
+function heatColor(value: number, maxValue: number): string {
+  const scaled = Math.min(1, Math.max(0, value / maxValue)) * (HEAT_COLORS.length - 1)
+  const lower = Math.floor(scaled)
+  const upper = Math.min(lower + 1, HEAT_COLORS.length - 1)
+  const ratio = scaled - lower
+  const channels = HEAT_COLORS[lower]!.map((channel, index) =>
+    Math.round(channel + (HEAT_COLORS[upper]![index]! - channel) * ratio))
+  return `rgb(${channels.join(',')})`
+}
+
 const heatmapOption = computed(() => {
   const days = heatDays.value
   if (!days.length) return null
@@ -283,17 +295,13 @@ const heatmapOption = computed(() => {
     // 刻度取每周首日的 MM-DD，间隔抽稀到 ≤12 个，避免糊成一片。
     xAxis: { type: 'category', data: heatWeekLabels(days, cells), axisLabel: { color: 'var(--nr-neutral-500)', interval: Math.max(0, Math.ceil((Math.max(...cells.map((c) => c[0])) + 1) / 12) - 1), fontSize: 10 } },
     yAxis: { type: 'category', data: yLabels, axisLabel: { color: 'var(--nr-neutral-500)' } },
-    visualMap: {
-      show: false,
-      min: 0,
-      max: maxTok,
-      dimension: 2,
-      inRange: { color: ['#23283a', '#3b2f63', '#6d4aa3', '#9b6dd6', '#c9a3f5'] },
-    },
     series: [
       {
         type: 'heatmap',
-        data: cells,
+        data: cells.map(([week, day, tokens]) => ({
+          value: [week, day, tokens],
+          itemStyle: { color: heatColor(tokens, maxTok) },
+        })),
         itemStyle: { borderColor: 'transparent', borderWidth: 2 },
         emphasis: { itemStyle: { borderColor: '#fff', borderWidth: 1 } },
       },

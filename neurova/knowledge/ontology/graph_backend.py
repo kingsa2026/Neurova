@@ -2,13 +2,13 @@
 """可插拔图后端门面（U8，specs/2026-11-22 参照系 ae 计划 D-U4）。
 
 本体域的图数据此前锁死 SQLite 单后端：事实行由 admission 咽喉写进
-`KnowledgeFactStore`（`knowledge_facts` active triple），投影/导出面直接吃
+`KnowledgeFactStore`（`knowledge_facts` 当前窗口 triple），投影/导出面直接吃
 `store._conn` 的行。本模块把「图数据的读/写」收成一个**最小契约**
 （`GraphBackend`），能力面从真实消费路径反推，不凭空造大接口：
 
 - `conceptTerms(tenantId)` —— 概念术语行，导出面节点来源
   （`export/graph_exchange._readGraph` 的 termRows）；
-- `activeTriples(tenantId, agentId)` —— active triple 行（含主体规范名），
+- `activeTriples(tenantId, agentId)` —— 当前窗口 triple 行（含主体规范名），
   导出面边来源（同上 factRows）；
 - `writeConceptTerm` / `writeTriple` —— 存储层写原语：sqlite 档委托
   `OntologyTermRegistry.register` 与 `store.upsertSubject`+`upsertFact`
@@ -18,14 +18,14 @@
 两个实现：
 
 - `SQLiteBackend`：既有 `KnowledgeFactStore` 的薄包装，**唯一默认生产实现**，
-  读行与既有 SQL 逐行一致（行为逐字节保持）；
+  读行统一走 `currentFactWhere` 的当前事实窗口，不再以 status 代替时效；
 - `OxigraphBackend`：pyoxigraph 嵌入式 RDF 库（可选依赖，惰性 import＋
   fail-soft）——同一契约的独立实现，仅作可插拔能力证明。
 
 `resolveGraphBackend()` 按 `NEUROVA_ONTOLOGY_GRAPH_BACKEND` 解析：
 缺省/`sqlite` 恒回 SQLite；`oxigraph` 未安装时显式
 `GraphBackendNotSupported`（不静默降级回 sqlite）；未知值显式 `ValueError`。
-**默认绝不切换**——不设该环境变量时全仓行为与单后端时代逐字节一致。
+**默认绝不切换**——不设该环境变量时使用 SQLite 当前事实窗口读面。
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional, Protocol
 from urllib.parse import quote, unquote
 
 from neurova.core.tenant_scope import tenant_sql_where
+from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 
 #: 后端选择环境变量（缺省 sqlite）
 GRAPH_BACKEND_ENV = "NEUROVA_ONTOLOGY_GRAPH_BACKEND"
@@ -74,10 +75,11 @@ class GraphBackend(Protocol):
 
     def activeTriples(self, tenantId: str = "default",
                       agentId: str = "") -> List[Dict[str, str]]:
-        """active triple 行 `{subject_label, predicate_term_id, object_term}`。
+        """当前窗口 triple 行 `{subject_label, predicate_term_id, object_term}`。
 
-        只收 `status='active' AND record_kind='triple'`；空 `agentId` 表示不过滤
-        agent；按 (subject_label, predicate_term_id, object_term) 升序。
+        只收 `currentFactWhere` 判定的当前可见行（active＋有效时间窗口，
+        `record_kind='triple'`）；空 `agentId` 表示不过滤 agent；按
+        (subject_label, predicate_term_id, object_term) 升序。
         """
         ...
 
@@ -128,12 +130,14 @@ class SQLiteBackend:
     def activeTriples(self, tenantId: str = "default",
                       agentId: str = "") -> List[Dict[str, str]]:
         clause, params = tenant_sql_where(tenantId, alias="f")
+        currentClause, currentParams = KnowledgeFactStore.currentFactWhere("f")
         sql = ("SELECT s.canonical_label AS subject_label,"
                " f.predicate_term_id, f.object_term"
                " FROM knowledge_facts f JOIN knowledge_subjects s"
                " ON s.subject_key = f.subject_key"
-               " WHERE %s AND f.status = 'active'"
-               " AND f.record_kind = 'triple'" % clause)
+               " WHERE %s AND %s AND f.record_kind = 'triple'"
+               % (clause, currentClause))
+        params.extend(currentParams)
         if agentId:
             sql += " AND f.agent_id = ?"
             params.append(str(agentId))
@@ -173,6 +177,24 @@ class OxigraphBackend:
 
     def backendName(self) -> str:
         return "oxigraph"
+
+    def rebuildFromStore(self, store: Any, tenantId: str = "default",
+                         agentId: str = "") -> None:
+        """从 SQLite 权威当前窗口重建投影，确保重启、取代与过期均不残留。"""
+        source = SQLiteBackend(store)
+        self._store.clear()
+        for row in source.conceptTerms(tenantId):
+            self.writeConceptTerm(
+                tenantId=tenantId, termId=row["term_id"],
+                label=row["label"], kind=row["kind"],
+            )
+        for row in source.activeTriples(tenantId, agentId):
+            self.writeTriple(
+                tenantId=tenantId, agentId=agentId,
+                subjectLabel=row["subject_label"],
+                predicateTermId=row["predicate_term_id"],
+                objectTerm=row["object_term"],
+            )
 
     def _graphIri(self, tenantId: str, agentId: str = "") -> Any:
         tenant = quote(str(tenantId or "default"), safe="")

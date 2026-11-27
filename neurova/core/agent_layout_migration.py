@@ -811,20 +811,3 @@ def v3_migration_done() -> bool:
     from neurova.core.agent_workspaces import AGENT_PARTITION_DIR
 
     return (get_agent_root() / AGENT_PARTITION_DIR / V3_SENTINEL_NAME).exists()
-
-
-def ensure_agent_layout_v3() -> Dict[str, Any]:
-    """启动期一次性 v2→v3 切换（哨兵把关：完成过就不再做任何扫描/搬移）。
-
-    v1 遗留（agent_workspaces/<id>）若仍在，先走既有 v1→v2 迁移再切 v3。
-    """
-    if v3_migration_done():
-        return {"skipped": "sentinel"}
-    legacy_result: Dict[str, Any] = {}
-    try:
-        legacy_result = auto_migrate_legacy_agent_layout()
-    except Exception as e:  # noqa: BLE001 - v1 遗留失败不阻断 v3 切换
-        logger.error("v1→v2 遗留迁移失败（继续 v3 切换）: %s", e, exc_info=True)
-    result = migrate_agent_layout_v3()
-    result["legacy"] = legacy_result
-    return result

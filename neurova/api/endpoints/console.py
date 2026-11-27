@@ -858,6 +858,7 @@ async def post_console_chat(
                 return []
 
         _delta_buffer: Dict[str, Dict[str, typing.Any]] = {}
+        _delta_flush_handle = None
         _last_flush_at = [time.monotonic()]
         _turn_started_at = [time.monotonic()]
         _timeline_append = getattr(get_session_repository(), "append_timeline_event", None)
@@ -878,7 +879,14 @@ async def post_console_chat(
             if buf:
                 buf["done"] = True
 
+        def _cancelDeltaFlush() -> None:
+            nonlocal _delta_flush_handle
+            if _delta_flush_handle is not None:
+                _delta_flush_handle.cancel()
+                _delta_flush_handle = None
+
         def _flush_deltas() -> typing.List[Dict[str, Any]]:
+            _cancelDeltaFlush()
             merged: typing.List[Dict[str, Any]] = []
             for etype, buf in _delta_buffer.items():
                 if buf.get("content"):
@@ -894,6 +902,22 @@ async def post_console_chat(
                                       # 整轮，非 delta 事件不触发冲刷 ⇒ 空闲也得刷
         _MIN_CHUNK_EVENTS = 40       # 长列表逐 token 出 delta ⇒ 按条数兜底冲刷
 
+        def _scheduleDeltaFlush() -> None:
+            nonlocal _delta_flush_handle
+            if _delta_flush_handle is not None:
+                return
+
+            def flushLater() -> None:
+                nonlocal _delta_flush_handle
+                _delta_flush_handle = None
+                pending = _flush_deltas()
+                if pending:
+                    queue.put_nowait(("events", pending))
+
+            _delta_flush_handle = asyncio.get_running_loop().call_later(
+                _DELTA_FLUSH_INTERVAL, flushLater
+            )
+
         def _note(kind, data) -> typing.List[Dict[str, Any]]:
             """管线的一次发射 → 记账后的事件列表（供投递复用）。"""
             now = time.monotonic()
@@ -905,6 +929,7 @@ async def post_console_chat(
                         or len(buf["content"]) >= _MIN_CHUNK_EVENTS
                         or now - _turn_started_at[0] >= _THINK_FLUSH_INTERVAL):
                     return _flush_deltas()
+                _scheduleDeltaFlush()
                 return []
             pending = _flush_deltas()
             live = _sse_events_from_emitter_item(

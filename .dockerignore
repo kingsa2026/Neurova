@@ -103,6 +103,7 @@ Dockerfile
 docker-compose*.yml
 *.yaml
 !requirements.txt
+!requirements-full.lock
 
 # 测试输出
 test_output.wav

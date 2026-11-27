@@ -27,14 +27,15 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from neurova.core.tenant_scope import tenant_sql_where
+from ..foundation.knowledge_facts import KnowledgeFactStore
 
 ADVICE_STRATEGIES = ("latest", "highest_confidence", "majority_vote",
                      "source_credibility", "manual_review")
 
 _CANDIDATE_SQL = (
     "SELECT fact_id, agent_id, object_term, confidence, recorded_at"
-    " FROM knowledge_facts WHERE {tenant} subject_key = ? AND predicate_term_id = ?"
-    " AND status = 'active' AND record_kind = 'triple'"
+    " FROM knowledge_facts WHERE {tenant}subject_key = ? AND predicate_term_id = ?"
+    " AND {current} AND record_kind = 'triple'"
     " ORDER BY recorded_at, fact_id"
 )
 
@@ -80,8 +81,11 @@ def _readCandidateFacts(store: Any, tenantId: str, subjectKey: str,
                         predicateTermId: str) -> List[Dict[str, Any]]:
     """只读取候选事实：queryReadOnly 仅放行 SELECT，本模块全程无写路径。"""
     tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"))
-    sql = _CANDIDATE_SQL.format(tenant=(tenantClause + " AND ") if tenantClause else "")
-    return store.queryReadOnly(sql, (*tenantParams, subjectKey, predicateTermId))
+    currentClause, currentParams = KnowledgeFactStore.currentFactWhere()
+    sql = _CANDIDATE_SQL.format(
+        tenant=(tenantClause + " AND ") if tenantClause else "", current=currentClause)
+    return store.queryReadOnly(
+        sql, (*tenantParams, subjectKey, predicateTermId, *currentParams))
 
 
 def _autoStrategy(facts: List[Dict[str, Any]]) -> str:

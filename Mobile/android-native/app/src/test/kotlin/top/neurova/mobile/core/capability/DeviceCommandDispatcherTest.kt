@@ -39,15 +39,23 @@ class DeviceCommandDispatcherTest {
     private fun dispatcher(
         executors: List<DeviceActionExecutor>,
         appState: String = "foreground",
-    ): DeviceCommandDispatcher =
-        DeviceCommandDispatcher(
+    ): DeviceCommandDispatcher {
+        val gate = top.neurova.mobile.core.accessibility.ExecutorGate(
+            clock = { 4_000_000_000_000L },
+        )
+        gate.arm(taskId = "task-1", expiresAt = 4_102_444_800_000L)
+        return DeviceCommandDispatcher(
             executors = executors.associateBy { it.action },
             appStateProvider = { appState },
+            gate = gate,
+            clock = { 4_000_000_000_000L },
         )
+    }
 
     private fun executeFrame(action: String, commandId: String = "dev-1", payload: String = "{}") =
         frame(
             """{"type":"device:execute","command_id":"$commandId","action":"$action",
+               "task_id":"task-1","window_expires_at":4102444800000,
                "payload":$payload}""",
         )
 
@@ -137,6 +145,16 @@ class DeviceCommandDispatcherTest {
     fun dispatch_nonDeviceFrameIsIgnored() {
         val d = dispatcher(emptyList())
         assertNull(d.handleFrame(frame("""{"type":"chat:send","content":"hi"}""")))
+    }
+
+    @Test
+    fun dispatch_missingTaskWindowIsRefusedBeforeExecutor() {
+        val executor = FakeExecutor("device_env", ExecuteOutcome.ok())
+        val result = dispatcher(listOf(executor)).handleFrame(
+            frame("""{"type":"device:execute","command_id":"dev-no-task","action":"device_env","payload":{}}"""),
+        )!!
+        assertEquals("task_window_required", (result["error"] as JsonObject)["code"]?.toString()?.trim('"'))
+        assertEquals(0, executor.calls.size)
     }
 
     @Test

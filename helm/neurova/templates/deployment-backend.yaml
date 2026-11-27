@@ -1,3 +1,6 @@
+{{- if and .Values.database.persistence.enabled (gt (int .Values.backend.replicaCount) 1) }}
+{{- fail "持久化 SQLite 不支持 backend.replicaCount > 1 多副本；请保持单副本或先迁移外部共享数据库" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -93,8 +96,8 @@ spec:
                 secretKeyRef:
                   name: {{ include "neurova.fullname" . }}-jwt
                   key: jwt-secret
-            {{- else if and .Values.auth.requireJwtSecret (gt (int .Values.backend.replicaCount) 1) }}
-            {{- fail "auth.jwtSecret 未设置且 backend.replicaCount > 1：多副本必须共享同一 JWT 密钥，否则 token 互不认可" }}
+            {{- else if and .Values.auth.requireJwtSecret (or (gt (int .Values.backend.replicaCount) 1) (and .Values.hpa.enabled (gt (int .Values.hpa.maxReplicas) 1))) }}
+            {{- fail "auth.jwtSecret 未设置且 backend.replicaCount > 1 或 HPA 可扩容：多副本必须共享同一 JWT 密钥，否则 token 互不认可" }}
             {{- end }}
             {{- if .Values.auth.masterRecoveryPassword }}
             # 主恢复口令（P0-1）：经 Secret 注入（-master-recovery）；留空不注入，

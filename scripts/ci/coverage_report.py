@@ -27,11 +27,12 @@
 from __future__ import annotations
 
 import argparse
-import shutil
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
 def coverageFiles(directory: Path) -> list:
@@ -42,22 +43,10 @@ def coverageFiles(directory: Path) -> list:
 
 
 def combineCoverage(directory: Path, target: Path) -> None:
-    """把 `directory` 下的分片数据合进 `target`（单文件），合并后清掉分片，避免下一批串味。
+    """委托唯一合并实现；严格模式确保没有分片时响亮失败。"""
+    from neurova.ci.ci_ratchet_core import combineCoverageFiles
 
-    `combine` 按「目标文件名 + `.` + `*`」在目录里找同名族：目标叫
-    `.coverage.merged` 时它找的是 `.coverage.merged.*`，而各片落的是
-    `.coverage.<host>.<pid>.<rand>`——族名对不上就是"合并成功但一份都没读到"。
-    故这里把**逐片文件**显式交给它（`data_paths` 收文件也收目录），
-    并以 `strict=True` 把"一片都没合到"变成响亮失败。
-    """
-    from coverage import Coverage
-
-    shards = coverageFiles(directory)
-    # `combine` 默认合并完就删掉输入片（`keep=False`），故这里不再自己清理一遍——
-    # 清理与合并不是两件事，写两遍就会在"已经被删了"上抛 FileNotFoundError。
-    merged = Coverage(data_file=str(target))
-    merged.combine(data_paths=[str(p) for p in shards], strict=True)
-    merged.save()
+    combineCoverageFiles(directory, target)
 
 
 def reportCoverage(target: Path, failUnder: float) -> int:
@@ -108,9 +97,7 @@ def main(argv: list | None = None) -> int:
         return 1
 
     combineCoverage(directory, target)
-    exitCode = reportCoverage(target, args.fail_under)
-    shutil.rmtree(directory, ignore_errors=True)
-    return exitCode
+    return reportCoverage(target, args.fail_under)
 
 
 if __name__ == "__main__":

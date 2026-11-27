@@ -23,10 +23,11 @@ def exportJsonLd(store: Any, tenantId: str = "default", agentId: str = "") -> st
             "SELECT term_id, kind, label, parent_term_id, definition, namespace FROM ontology_terms"
             " WHERE %s ORDER BY term_id" % termClause, termParams).fetchall()
         factTenantClause, factTenantParams = tenant_sql_where(tenant)
+        currentClause, currentParams = store.currentFactWhere()
         factSql = ("SELECT subject_key, predicate_term_id, object_term"
-                   " FROM knowledge_facts WHERE %s"
-                   " AND status = 'active' AND record_kind = 'triple'" % factTenantClause)
-        params: list = list(factTenantParams)
+                   " FROM knowledge_facts WHERE %s AND %s"
+                   " AND record_kind = 'triple'" % (factTenantClause, currentClause))
+        params: list = [*factTenantParams, *currentParams]
         if agentId:
             factSql += " AND agent_id = ?"
             params.append(str(agentId))

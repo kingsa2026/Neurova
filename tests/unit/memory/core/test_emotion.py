@@ -1,8 +1,8 @@
 """
-EmotionAnalyzer 单元测试 — 按当前真实 API 重写
+MemoryEmotionAnalyzer 单元测试 — 按当前真实 API 重写
 
 真实 API:
-- EmotionAnalyzer(use_legacy=False)
+- MemoryEmotionAnalyzer(use_legacy=False)
 - analyze(text, context=None) -> {primary_emotion, confidence, emotions, tags, score}
 - get_emotion_tags(emotion_scores: Dict, threshold=0.3) -> List[str]
 - get_emotion_score(text, target_emotion) -> float
@@ -15,12 +15,12 @@ EmotionAnalyzer 单元测试 — 按当前真实 API 重写
 
 import pytest
 
-from neurova.cognitive_layers.memory_layer.emotion import EmotionAnalyzer
+from neurova.cognitive_layers.memory_layer.emotion import MemoryEmotionAnalyzer
 
 
 @pytest.fixture
 def analyzer():
-    return EmotionAnalyzer()
+    return MemoryEmotionAnalyzer()
 
 
 class TestAnalyze:
@@ -86,5 +86,5 @@ class TestScoring:
 
 class TestLegacyMode:
     def test_use_legacy_flag_accepted(self):
-        analyzer = EmotionAnalyzer(use_legacy=True)
+        analyzer = MemoryEmotionAnalyzer(use_legacy=True)
         assert analyzer is not None

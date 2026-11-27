@@ -53,6 +53,18 @@ class DeviceBridgeEventsTest {
     }
 
     @Test
+    fun parseExecute_acceptsBackendFloatSecondDeadline() {
+        val command = DeviceBridgeEvents.parseExecute(
+            frame(
+                """{"type":"device:execute","command_id":"dev-1","action":"open_url",
+                   "task_id":"task-1","window_expires_at":1893456000.125}""",
+            ),
+        )
+        assertNotNull(command)
+        assertEquals(1893456000125L, command!!.windowExpiresAt)
+    }
+
+    @Test
     fun buildResult_carriesCommandIdAndStatus() {
         val ok = DeviceBridgeEvents.buildResult(
             commandId = "dev-1",

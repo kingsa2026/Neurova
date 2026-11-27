@@ -450,6 +450,32 @@ class KnowledgeGraphManager:
             self._save()
             return node
 
+    @staticmethod
+    def nodePayload(node: GraphNode) -> Dict[str, Any]:
+        """节点 API 读形的唯一转换口。"""
+        props = node.properties or {}
+        created_at = node.created_at
+        if created_at is not None and not isinstance(created_at, (int, float)):
+            created_at = created_at.isoformat()
+        return {
+            "id": node.node_id,
+            "label": node.label,
+            "type": _typeValue(node.node_type),
+            "description": props.get("description", ""),
+            "weight": node.weight,
+            "created_at": created_at,
+        }
+
+    @staticmethod
+    def edgePayload(edge: GraphEdge) -> Dict[str, Any]:
+        """边 API 读形的唯一转换口。"""
+        return {
+            "source": edge.source_id,
+            "target": edge.target_id,
+            "relation": _typeValue(edge.relation_type),
+            "weight": edge.weight,
+        }
+
     def get_node(self, node_id: str) -> Optional[GraphNode]:
         """
         获取节点
@@ -759,25 +785,22 @@ class KnowledgeGraphManager:
 
             # 获取关联的边
             edge_ids = self._adjacency.get(node_id, set())
-            edges = [self._edges[eid].to_dict() for eid in edge_ids if eid in self._edges]
+            edges = [self._edges[eid] for eid in edge_ids if eid in self._edges]
 
             # 获取邻居节点
             neighbor_ids = set()
-            for eid in edge_ids:
-                edge = self._edges.get(eid)
-                if edge:
-                    if edge.source_id == node_id:
-                        neighbor_ids.add(edge.target_id)
-                    else:
-                        neighbor_ids.add(edge.source_id)
+            for edge in edges:
+                if edge.source_id == node_id:
+                    neighbor_ids.add(edge.target_id)
+                else:
+                    neighbor_ids.add(edge.source_id)
 
-            neighbors = [self._nodes[nid].to_dict() for nid in neighbor_ids if nid in self._nodes]
+            neighbors = [self._nodes[nid] for nid in neighbor_ids if nid in self._nodes]
 
             return {
-                "node": node.to_dict(),
-                "edges": edges,
-                "neighbors": neighbors,
-                "degree": len(edge_ids),
+                "node": self.nodePayload(node),
+                "edges": [self.edgePayload(edge) for edge in edges],
+                "related_nodes": [self.nodePayload(neighbor) for neighbor in neighbors],
             }
 
     # ============================================================
@@ -834,11 +857,6 @@ class KnowledgeGraphManager:
             self._save()
             return edge
 
-    def get_edge(self, edge_id: str) -> Optional[GraphEdge]:
-        """获取边"""
-        with self._lock:
-            return self._edges.get(edge_id)
-
     def delete_edge(self, edge_id: str) -> bool:
         """
         删除边
@@ -861,14 +879,6 @@ class KnowledgeGraphManager:
 
             self._save()
             return True
-
-    def get_edges_between(self, source_id: str, target_id: str) -> List[GraphEdge]:
-        """获取两个节点之间的所有边"""
-        with self._lock:
-            source_edges = self._source_index.get(source_id, set())
-            target_edges = self._target_index.get(target_id, set())
-            common = source_edges & target_edges
-            return [self._edges[eid] for eid in common if eid in self._edges]
 
     def get_neighbors(
         self,
@@ -1059,8 +1069,8 @@ class KnowledgeGraphManager:
             ]
 
             return {
-                "nodes": [n.to_dict() for n in nodes],
-                "edges": [e.to_dict() for e in edges],
+                "nodes": [self.nodePayload(node) for node in nodes],
+                "edges": [self.edgePayload(edge) for edge in edges],
                 "stats": self.get_stats().to_dict(),
             }
 
@@ -1101,34 +1111,88 @@ class KnowledgeGraphManager:
 
     def get_subgraph(
         self,
-        node_ids: List[str],
+        node_ids: Optional[List[str]] = None,
         include_edges: bool = True,
+        *,
+        focus: str = "",
+        hops: int = 2,
+        types: Optional[Set[str]] = None,
+        limit: int = 200,
     ) -> Dict[str, Any]:
-        """
-        提取子图
+        """提取子图。
 
-        Args:
-            node_ids: 节点 ID 列表
-            include_edges: 是否包含边
-
-        Returns:
-            子图数据
+        `node_ids` 保留旧调用形状；探索读面使用 `focus/hops/types/limit`。
+        类型过滤只作用于结果集，BFS 仍穿过被过滤的中间节点。
         """
         with self._lock:
-            nodes = [self._nodes[nid] for nid in node_ids if nid in self._nodes]
-            node_id_set = set(node_ids)
-
-            edges = []
-            if include_edges:
+            if node_ids is not None:
+                selected = [self._nodes[nid] for nid in node_ids if nid in self._nodes]
+                selected_ids = {node.node_id for node in selected}
                 edges = [
-                    edge
-                    for edge in self._edges.values()
-                    if edge.source_id in node_id_set and edge.target_id in node_id_set
+                    edge for edge in self._edges.values()
+                    if include_edges
+                    and edge.source_id in selected_ids
+                    and edge.target_id in selected_ids
                 ]
+                return {
+                    "nodes": [self.nodePayload(node) for node in selected],
+                    "edges": [self.edgePayload(edge) for edge in edges],
+                }
 
+            if focus and focus not in self._nodes:
+                raise LookupError("节点不存在: %s" % focus)
+
+            adjacency: Dict[str, List[str]] = defaultdict(list)
+            for edge in self._edges.values():
+                adjacency[edge.source_id].append(edge.target_id)
+                adjacency[edge.target_id].append(edge.source_id)
+
+            if not focus:
+                kept_ids = list(self._nodes)[: max(0, int(limit))]
+                kept = set(kept_ids)
+                edges = [
+                    edge for edge in self._edges.values()
+                    if edge.source_id in kept and edge.target_id in kept
+                ]
+                return {
+                    "nodes": [self.nodePayload(self._nodes[node_id]) for node_id in kept_ids],
+                    "edges": [self.edgePayload(edge) for edge in edges],
+                    "dropped_by_limit": len(self._nodes) > len(kept_ids),
+                }
+
+            type_filter = {str(node_type) for node_type in (types or set())}
+            kept = {focus}
+            visited = {focus}
+            dropped_by_limit = False
+            frontier = [focus]
+            for _ in range(max(int(hops), 0)):
+                if len(kept) >= limit:
+                    dropped_by_limit = True
+                    break
+                next_frontier = []
+                for node_id in frontier:
+                    for neighbour in adjacency.get(node_id, ()):
+                        if neighbour in visited:
+                            continue
+                        visited.add(neighbour)
+                        next_frontier.append(neighbour)
+                        if type_filter and _typeValue(self._nodes[neighbour].node_type) not in type_filter:
+                            continue
+                        if len(kept) < limit:
+                            kept.add(neighbour)
+                        else:
+                            dropped_by_limit = True
+                frontier = next_frontier
+
+            nodes = [self.nodePayload(node) for node in self._nodes.values() if node.node_id in kept]
+            edges = [
+                self.edgePayload(edge) for edge in self._edges.values()
+                if edge.source_id in kept and edge.target_id in kept
+            ]
             return {
-                "nodes": [n.to_dict() for n in nodes],
-                "edges": [e.to_dict() for e in edges],
+                "nodes": nodes,
+                "edges": edges,
+                "dropped_by_limit": dropped_by_limit,
             }
 
     def clear(self):

@@ -59,7 +59,7 @@
 
 - `ModuleSystem` API 重写 - 修正了 `Module`、`ModuleInfo`、`DependencyResolver` 的导入和使用
 - `LogManager` - 添加 `set_default_level(LogLevel.DEBUG)` 确保日志级别测试正确
-- `ConfigManager` - 修复单例模式下的状态隔离问题
+- `core.config` 环境读取助手 - 保留 `get/get_int/get_bool/get_list` 与 dotenv 加载；测试专用 `ConfigManager` 已退役（DEAD-07）
 
 ## 📁 目录结构
 
@@ -232,16 +232,15 @@ Python 版本：CI 各 job 实际使用 **3.11 与 3.12**（static-gate、import
 
 示例:
 ```python
-import unittest
-from neurova.core.config import ConfigManager
+import pytest
+from neurova.core.config import get_bool, get_int
 
-class TestConfigManager(unittest.TestCase):
-    def setUp(self):
-        self.config = ConfigManager()
 
-    def test_set_and_get(self):
-        self.config.set("key", "value")
-        self.assertEqual(self.config.get("key"), "value")
+def test_environment_helpers(monkeypatch):
+    monkeypatch.setenv("NEUROVA_TEST_COUNT", "3")
+    monkeypatch.setenv("NEUROVA_TEST_ENABLED", "true")
+    assert get_int("NEUROVA_TEST_COUNT", 0) == 3
+    assert get_bool("NEUROVA_TEST_ENABLED") is True
 ```
 
 ### 集成测试指南

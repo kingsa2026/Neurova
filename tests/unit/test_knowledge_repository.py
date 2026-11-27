@@ -50,7 +50,7 @@ class TestKnowledgeRepository:
 
         all_a = repo.list_knowledge("agent-a")
         assert len(all_a) == 2
-        assert all(x["knowledge_id"] != a1["knowledge_id"] or True for x in all_a)
+        assert {x["title"] for x in all_a} == {"A1", "A2"}
 
         tech = repo.list_knowledge("agent-a", category="tech")
         assert len(tech) == 1
@@ -168,7 +168,6 @@ class TestLegacyMigration:
         assert entry["shared_with"] == []
 
         # 迁移后：仅 default 属主语义（无人持有该虚拟账号）与 admin 可见
-        assert r.visible_items(ADMIN, scope="private") or True
         assert "旧条目" not in titles(r.visible_items(ALICE))
         assert "旧条目" in titles(r.visible_items(ADMIN))
 

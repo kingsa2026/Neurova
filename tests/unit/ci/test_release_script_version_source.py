@@ -35,3 +35,13 @@ def test_dead_version_constant_and_context_link_retired():
     mod = _load_script()
     assert not hasattr(mod, "CURRENT_VERSION"), "无人消费的 CURRENT_VERSION 死常量应退役"
     assert "CONTEXT.md" not in text, "发布模板不得再链仓里不存在的 CONTEXT.md"
+
+
+def test_release_install_command_uses_compiled_lock():
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "pip install -r requirements-full.lock" in text, (
+        "发布说明必须引导用户安装完整锁，不能退回未锁定的 requirements.txt"
+    )
+    assert "pip install -r requirements.txt" not in text, (
+        "发布说明仍含旧安装命令"
+    )

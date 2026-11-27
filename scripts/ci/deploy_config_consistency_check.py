@@ -60,7 +60,7 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CHECK_CMD = "scripts/ci/deploy_config_consistency_check.py"
 
-# 生产镜像（Dockerfile + requirements.txt）必须声明的硬依赖：裸 import 无降级，
+# 生产镜像（Dockerfile + requirements-full.lock）必须声明的硬依赖：裸 import 无降级，
 # 缺席即对应功能路径 import 崩（与 tests/unit/test_ci_thin_env_guards.py 同源口径）。
 # 注：不要把"try/except ImportError 降级"的包放进来——mcp 即属此类
 # （neurova/tool_layers/mcp_client.py 缺席时 _SDK_AVAILABLE=False，功能降级不崩），

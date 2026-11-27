@@ -91,19 +91,6 @@ VIDEO_KEY_NAMES: Dict[str, List[str]] = {
 }
 
 COMMERCE_KEY_NAMES: Dict[str, List[str]] = {
-    "amazon": [
-        "NEUROVA_AMAZON_SP_REFRESH_TOKEN",
-        "NEUROVA_AMAZON_SP_CLIENT_ID",
-        "NEUROVA_AMAZON_SP_CLIENT_SECRET",
-    ],
-    "taobao": ["NEUROVA_TAOBAO_API_KEY", "NEUROVA_TAOBAO_APP_KEY"],
-    "jd": ["NEUROVA_JD_API_KEY"],
-    "douyin-ecom": ["NEUROVA_DOUYIN_ECOM_API_KEY"],
-    "tiktok": ["NEUROVA_TIKTOK_API_KEY"],
-    "pdd": ["NEUROVA_PDD_API_KEY"],
-    "ali1688": ["NEUROVA_1688_API_KEY"],
-    "xiaohongshu": ["NEUROVA_XIAOHONGSHU_API_KEY"],
-    "xianyu": ["NEUROVA_XIANYU_API_KEY"],
     "shein": ["NEUROVA_SHEIN_API_KEY"],
 }
 
@@ -1362,19 +1349,6 @@ class CommercePlatformClient:
             return _ok({"items": items if isinstance(items, list) else [], "raw": data}, platform)
         except ExternalAPIError as exc:
             return _fail(str(exc), platform)
-
-
-_commerce_instance: Optional[CommercePlatformClient] = None
-
-
-@lazySingleton("_commerce_instance")
-def get_commerce_platform_client() -> CommercePlatformClient:
-    return CommercePlatformClient()
-
-
-def reset_commerce_platform_client() -> None:
-    global _commerce_instance
-    _commerce_instance = None
 
 
 # ==================== PublishPlatformClient ====================

@@ -43,6 +43,8 @@ def load_manifest(path: Path) -> BundleManifest:
     except json.JSONDecodeError as exc:
         raise BundleError(f"manifest.json 不是合法 JSON: {exc}") from exc
 
+    if not isinstance(raw, dict):
+        raise BundleError(f"manifest.json 必须是 JSON 对象，实际 {type(raw).__name__}")
     version = raw.get("schema_version")
     if version != SUPPORTED_SCHEMA_VERSION:
         raise BundleError(
@@ -50,6 +52,10 @@ def load_manifest(path: Path) -> BundleManifest:
     missing = [key for key in _REQUIRED_FIELDS if key not in raw]
     if missing:
         raise BundleError(f"manifest 缺字段 {missing}")
+    for field in ("source", "counts"):
+        if not isinstance(raw[field], dict):
+            raise BundleError(
+                f"manifest {field} 必须是 JSON 对象，实际 {type(raw[field]).__name__}")
     return BundleManifest(
         schema_version=version,
         generated_at=str(raw["generated_at"]),

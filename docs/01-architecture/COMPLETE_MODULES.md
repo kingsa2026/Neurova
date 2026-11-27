@@ -21,9 +21,7 @@
 | `module_lib.py` | `neurova/core/` | `ModuleLib` | 模块库（动态加载/卸载/依赖管理） |
 | `event_bus.py` | `neurova/core/` | `EventBus`, `EventPriority` | 统一事件总线（发布-订阅/优先级/异步队列） |
 | `state_manager.py` | `neurova/core/` | `StateManager`, `StateChange` | 统一状态管理（状态树/变更追踪/快照回滚） |
-| `config_manager.py` | `neurova/core/` | `ConfigManager` | 统一配置管理（分层配置/环境变量/验证器） |
 | `logger.py` | `neurova/core/` | `Logger`, `LogEntry`, `LogLevel` | 统一日志管理（结构化日志/分级/导出） |
-| `error_handler.py` | `neurova/core/` | `ErrorHandler`, `ErrorCode`, `NeurovaError` | 统一错误处理（30+ 错误码/恢复策略/安全执行） |
 | `base_module.py` | `neurova/core/` | `BaseModule`, `ModuleState` | 基础模块接口（生命周期管理/6 种状态） |
 | `api_standard.py` | `neurova/core/` | `APIInterface`, `APIResponse`, `APIRequest` | 统一 API 标准（请求/响应格式/错误码规范） |
 
@@ -287,12 +285,16 @@ LogLevel (neurova/core/logger.py)
 ### 4.9 错误码
 
 ```python
-ErrorCode (neurova/core/error_handler.py)
+ErrorCode (neurova/api/error_codes.py)
   SUCCESS = 0
-  INTERNAL_ERROR = 1000
-  INVALID_PARAMETER = 1001
-  RESOURCE_NOT_FOUND = 1002
-  # ... 30+ 错误码定义
+  UNKNOWN_ERROR = 1000
+  AUTH_FAILED = 2000
+  TOKEN_EXPIRED = 2001
+  PERMISSION_DENIED = 2002
+  NOT_FOUND = 3000
+  VALIDATION_ERROR = 4000
+  RATE_LIMITED = 4290
+  SERVER_ERROR = 5000
 ```
 
 ---
@@ -497,9 +499,7 @@ ErrorCode (neurova/core/error_handler.py)
 | `APIInterface` | `core/api_standard.py` | API 标准接口 |
 | `EventBus` | `core/event_bus.py` | 事件总线 |
 | `StateManager` | `core/state_manager.py` | 状态管理器 |
-| `ConfigManager` | `core/config_manager.py` | 配置管理器 |
 | `Logger` | `core/logger.py` | 日志管理器 |
-| `ErrorHandler` | `core/error_handler.py` | 错误处理器 |
 | `ModuleLib` | `core/module_lib.py` | 模块库 |
 
 ### 9.3 记忆系统核心类

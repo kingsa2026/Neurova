@@ -183,7 +183,6 @@ class TestBug4BufferModuleBufferContract:
              patch("neurova.cognitive_layers.memory_layer.temperature.TemperatureEngine"), \
              patch("neurova.cognitive_layers.meta_cognition_layer.growth_log.GrowthLogManager"), \
              patch("neurova.cognitive_layers.meta_cognition_layer.question_queue.QuestionQueueManager"), \
-             patch("neurova.cognitive_layers.memory_layer.attachment_manager.AttachmentManager"), \
              patch("neurova.cognitive_layers.memory_layer.muscle_memory.MuscleMemory"), \
              patch("neurova.cognitive_layers.memory_layer.tool_memory_integration.ToolMemoryIntegration"):
 

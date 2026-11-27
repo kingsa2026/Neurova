@@ -71,6 +71,9 @@ REFUSAL_CODES = frozenset(
         "device_timeout",          # 设备桥：命令在窗口内未回执（可安全重试）
         "device_bridge_disabled",  # 设备桥总闸未开（NEUROVA_DEVICE_BRIDGE_ENABLED）
         "device_budget_exhausted",  # 设备桥：会话步数/时长熔断触顶（重试无意义）
+        "task_window_required",    # 设备桥：命令未携带显式任务窗口（须先开始任务）
+        "task_window_expired",     # 设备桥：显式任务窗口已到期（须重新开始任务）
+        "task_window_mismatch",    # 设备桥：task_id 与当前窗口不匹配（禁止越窗执行）
     }
 )
 
@@ -102,6 +105,9 @@ REFUSAL_RETRY_ADVICE = {
     "device_timeout": "retry",
     "device_bridge_disabled": "never",
     "device_budget_exhausted": "never",
+    "task_window_required": "never",
+    "task_window_expired": "never",
+    "task_window_mismatch": "never",
 }
 
 

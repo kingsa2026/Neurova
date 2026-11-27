@@ -176,6 +176,8 @@ class MobileWsLedger:
         # 订阅范围登记（按需订阅，G4 单源）：pairing_id → SubscriptionScope。
         # 连接级内存态：断线重连由客户端重新订阅（不落库，不跨进程）。
         self._subscriptions: Dict[str, SubscriptionScope] = {}
+        # 显式任务窗口是连接级安全状态：单任务互斥，断开/到期即失效。
+        self._task_windows: Dict[str, Dict[str, Any]] = {}
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=5000")
         with self._lock:
@@ -340,6 +342,86 @@ class MobileWsLedger:
                 continue
             out.append({"seq": int(row["seq"]), "frame": frame})
         return out
+
+    # ── 显式任务窗口（P2-24） ──────────────────────────────────────
+
+    def taskWindow(self, pairing_id: str, task_id: str = "", *,
+                   epoch: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """返回仍有效的任务窗口；到期即删除，可按 task_id/连接世代核对。"""
+        with self._lock:
+            window = self._task_windows.get(pairing_id)
+            if window is None:
+                return None
+            if float(window["expires_at"]) <= time.time():
+                self._task_windows.pop(pairing_id, None)
+                return None
+            if task_id and window["task_id"] != task_id:
+                return None
+            if epoch is not None and window["epoch"] != epoch:
+                return None
+            return dict(window)
+
+    def startTaskWindow(self, pairing_id: str, task_id: str, *,
+                        app_state: str = "foreground", epoch: int = 0) -> Dict[str, Any]:
+        if app_state != "foreground":
+            raise ValueError("foreground_required")
+        if not task_id:
+            raise ValueError("missing_params")
+        with self._lock:
+            current = self._task_windows.get(pairing_id)
+            if current is not None and float(current["expires_at"]) <= time.time():
+                self._task_windows.pop(pairing_id, None)
+                current = None
+            if current is not None:
+                raise ValueError("task_window_busy")
+            from neurova.tunnel import protocol
+
+            now = time.time()
+            window = {
+                "task_id": task_id,
+                "epoch": epoch,
+                "started_at": now,
+                "expires_at": now + protocol.DEVICE_TASK_WINDOW_SECONDS,
+                "expires_at_ms": int((now + protocol.DEVICE_TASK_WINDOW_SECONDS) * 1000),
+                "app_state": "foreground",
+            }
+            self._task_windows[pairing_id] = window
+            return dict(window)
+
+    def renewTaskWindow(self, pairing_id: str, task_id: str, *,
+                        app_state: str = "foreground", epoch: Optional[int] = None) -> Dict[str, Any]:
+        from neurova.tunnel import protocol
+
+        with self._lock:
+            if app_state != "foreground":
+                current = self._task_windows.get(pairing_id)
+                if (current is not None and current["task_id"] == task_id
+                        and (epoch is None or current["epoch"] == epoch)):
+                    self._task_windows.pop(pairing_id, None)
+                raise ValueError("foreground_required")
+            current = self._task_windows.get(pairing_id)
+            if current is not None and current["task_id"] != task_id:
+                raise ValueError("task_window_mismatch")
+            if current is not None and epoch is not None and current["epoch"] != epoch:
+                raise ValueError("task_window_mismatch")
+            current = self.taskWindow(pairing_id, task_id, epoch=epoch)
+            if current is None:
+                raise ValueError("task_window_expired")
+            current["expires_at"] = time.time() + protocol.DEVICE_TASK_WINDOW_SECONDS
+            current["expires_at_ms"] = int(current["expires_at"] * 1000)
+            self._task_windows[pairing_id] = current
+            return dict(current)
+
+    def endTaskWindow(self, pairing_id: str, task_id: str, *,
+                      epoch: Optional[int] = None) -> bool:
+        with self._lock:
+            current = self._task_windows.get(pairing_id)
+            if current is None or current["task_id"] != task_id:
+                return False
+            if epoch is not None and current["epoch"] != epoch:
+                return False
+            self._task_windows.pop(pairing_id, None)
+            return True
 
     # ── 指令记账 ────────────────────────────────────────────────────
 

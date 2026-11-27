@@ -20,6 +20,7 @@ import top.neurova.mobile.core.capability.AppStateTracker
 import top.neurova.mobile.core.capability.AndroidDeviceExecutors
 import top.neurova.mobile.core.capability.DeviceCapabilities
 import top.neurova.mobile.core.capability.DeviceCommandDispatcher
+import top.neurova.mobile.core.capability.ScreenExecutors
 import top.neurova.mobile.core.net.MobileWsChannel
 import top.neurova.mobile.core.notification.NotificationRingHolder
 import top.neurova.mobile.core.protocol.DeviceBridgeEvents
@@ -56,6 +57,7 @@ class DeviceBridgeService : Service() {
     }
 
     override fun onDestroy() {
+        ScreenExecutors.gate.disarm()
         jobs.forEach { it.cancel() }
         jobs = emptyList()
         scope.cancel()
@@ -68,6 +70,17 @@ class DeviceBridgeService : Service() {
         val dispatcher = DeviceCommandDispatcher(
             executors = AndroidDeviceExecutors.all(this),
             appStateProvider = { AppStateTracker.current },
+            gate = ScreenExecutors.gate,
+        )
+        val coordinator = DeviceBridgeCommandCoordinator(
+            isCapabilityEnabled = { runtime.deviceAuth.isEnabled(it) },
+            gate = ScreenExecutors.gate,
+            dispatcher = dispatcher,
+            onActivity = { taskId ->
+                channel.sendDeviceFrame(DeviceBridgeEvents.buildTask(
+                    "renew", taskId, AppStateTracker.current,
+                ))
+            },
         )
         // A5：通知白名单随授权仓同步（空 = 全量采集）
         NotificationRingHolder.ring.whitelist = runtime.deviceAuth.notificationWhitelist()
@@ -78,28 +91,14 @@ class DeviceBridgeService : Service() {
         jobs = listOf(
             scope.launch {
                 channel.events.collect { event ->
-                    if (event is MobileWsChannel.Event.DeviceCommandArrived) {
-                        val auth = runtime.deviceAuth
-                        if (!auth.isEnabled(event.command.action)) {
-                            // D4 双闸的端上半边：未授权能力直接拒绝
-                            channel.sendDeviceFrame(
-                                DeviceBridgeEvents.buildResult(
-                                    event.command.commandId, "error",
-                                    kotlinx.serialization.json.JsonObject(emptyMap()),
-                                    kotlinx.serialization.json.JsonObject(
-                                        mapOf(
-                                            "code" to kotlinx.serialization.json.JsonPrimitive("capability_disabled"),
-                                            "message" to kotlinx.serialization.json.JsonPrimitive(
-                                                "该能力未在手机端授权（设备桥授权页可开启）"),
-                                        ),
-                                    ),
-                                ),
-                            )
-                            return@collect
+                    when (event) {
+                        is MobileWsChannel.Event.DeviceTaskArrived -> coordinator.onTask(event.window)
+                        is MobileWsChannel.Event.DeviceCommandArrived -> {
+                            executedSteps += 1
+                            updateProgressNotification(event.command.action, executedSteps)
+                            channel.sendDeviceFrame(coordinator.handle(event.command))
                         }
-                        executedSteps += 1
-                        updateProgressNotification(event.command.action, executedSteps)
-                        channel.sendDeviceFrame(dispatcher.handleExecute(event.command))
+                        else -> Unit
                     }
                 }
             },

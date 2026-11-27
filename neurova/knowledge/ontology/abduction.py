@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.tenant_scope import tenant_sql_where
+from ..foundation.knowledge_facts import KnowledgeFactStore
 
 logger = get_logger(__name__)
 
@@ -26,13 +27,14 @@ def _factsFor(store: Any, agentId: str, predicate: str,
               subjectKey: str = "", objectTerm: str = "",
               tenantId: str = "default") -> List[Dict[str, Any]]:
     factTenantClause, factTenantParams = tenant_sql_where(tenantId, alias="f")
+    currentClause, currentParams = KnowledgeFactStore.currentFactWhere("f")
     sql = ("SELECT f.fact_id, s.canonical_label AS subject_label,"
            " f.predicate_term_id, f.object_term FROM knowledge_facts f"
            " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
            " WHERE f.agent_id = ? AND %s"
-           " AND f.predicate_term_id = ? AND f.status = 'active'"
-           " AND f.record_kind = 'triple'" % factTenantClause)
-    params: List[Any] = [agentId, *factTenantParams, predicate]
+           " AND f.predicate_term_id = ? AND %s"
+           " AND f.record_kind = 'triple'" % (factTenantClause, currentClause))
+    params: List[Any] = [agentId, *factTenantParams, predicate, *currentParams]
     if subjectKey:
         sql += " AND f.subject_key = ?"
         params.append(subjectKey)

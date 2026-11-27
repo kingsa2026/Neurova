@@ -1539,15 +1539,19 @@ class SessionManager(SessionRepository):
         sessions = self._get_session_data_list(agent_id, session_id)
         if not sessions:
             return []
-        sessions.sort(key=lambda x: x.get("session_date", ""), reverse=True)
-        origins: List[Optional[str]] = []
+        turns: List[tuple] = []
         for session in sessions:
-            for msg in session.get("messages", []):
-                if isinstance(msg, dict) and msg.get("role") == "user":
-                    meta = msg.get("metadata") or {}
-                    origins.append(meta.get("turn_origin"))
+            sessionDate = str(session.get("session_date") or "")
+            for index, msg in enumerate(session.get("messages", [])):
+                if not isinstance(msg, dict) or msg.get("role") != "user":
+                    continue
+                meta = msg.get("metadata") or {}
+                stamp = str(msg.get("timestamp") or sessionDate)
+                turns.append((stamp, sessionDate, index, meta.get("turn_origin")))
+        turns.sort(key=lambda turn: turn[:3])
+        origins: List[Optional[str]] = [turn[3] for turn in turns]
         if max_messages is not None:
-            origins = origins[-max_messages:]
+            origins = origins[-max_messages:] if max_messages > 0 else []
         return origins
 
     # ══════════════════════════════════════════════════════════════

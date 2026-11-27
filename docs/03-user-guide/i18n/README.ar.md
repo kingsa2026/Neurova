@@ -234,7 +234,7 @@ new_temp = max(0.0, current_temp - decay)
 
 ```bash
 cd neurova
-pip install -r requirements.txt
+pip install -r requirements-full.lock
 python -m neurova.api.main
 ```
 

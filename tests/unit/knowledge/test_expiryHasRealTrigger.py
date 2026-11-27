@@ -55,10 +55,11 @@ def _admit(store, subject, predicate, obj, validUntil=None):
 
 
 def _seedExpiringChain(store):
-    """铺一条"带窗口前提 → 传递闭包结论"：前提已到期，结论却无窗口。"""
-    _admit(store, "青梧索引", "is_a", "文档集合", validUntil=_past())
+    """铺一条"带窗口前提 → 传递闭包结论"：先推出，再让前提到期。"""
+    premise = _admit(store, "青梧索引", "is_a", "文档集合")
     mid = _admit(store, "文档集合", "is_a", "实体")
     derived = [f for f in store.searchableFacts() if "由规则" in str(f.get("content", ""))]
+    store.setValidUntil(premise, _past())
     return mid, derived
 
 

@@ -13,19 +13,18 @@
 1. 模板 raw 文件里有声明（否则本套件静默空转，先自证非空）；
 2. `builtinProviderDefs()` 原样保留每条的声明值；
 3. 空配置下管理器种子出的 `ProviderConfig.default_model` 与模板一致；
-4. `resolve_llm_config()` 真把它当候选模型用（消费方，不是"存着好看"）。
+4. `MultiModelLLMClient` 真把它当候选模型用（消费方，不是“存着好看”）。
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from neurova.llm import provider_manager as pm
-from neurova.llm.config_resolver import resolve_llm_config
+from neurova.llm.multi_model_client import MultiModelLLMClient
 from neurova.llm.provider_manager import LLMProviderManager
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -129,16 +128,22 @@ class TestSeededProviderCarriesDefaultModel:
         assert provider.base_url == "https://api.deepseek.com/v1"
 
 
-class TestResolverConsumesDefaultModel:
-    def test_resolvedLlmConfigUsesSeededDefaultModel(self, tmp_path):
-        """消费方闭环：三层合并的服务商层真的把 default_model 当模型候选。"""
+class TestActiveClientConsumesDefaultModel:
+    def test_initializedClientUsesSeededDefaultModel(self, tmp_path):
+        """活跃多模型客户端必须把种子 default_model 建成当前模型客户端。"""
         declared = _rawDeclaredDefaults()
         manager = _newManager(tmp_path)
         for provider_id, expected_model in declared.items():
-            agent = SimpleNamespace(llm_config=None, llm_provider=provider_id)
-            resolved = resolve_llm_config(agent, manager)
-            assert resolved.model == expected_model, (
-                f"{provider_id}: 解析结果 model={resolved.model!r}，"
-                f"模板声明 {expected_model!r}——默认模型未进入消费链路"
+            assert manager.update_provider(provider_id, api_key="test-key")
+            assert manager.set_default_provider(provider_id)
+            client = MultiModelLLMClient(
+                provider_manager=manager,
+                scope=f"default-model:{tmp_path.name}:{provider_id}",
             )
-            assert resolved._source_model == f"provider:{provider_id}"
+            active = client.get_current_client()
+            assert active is not None, f"{provider_id}: 默认模型未生成客户端"
+            assert active.provider.id == provider_id
+            assert active.model == expected_model, (
+                f"{provider_id}: 当前模型 {active.model!r}，模板声明 {expected_model!r}"
+            )
+            assert active.client.config.model == expected_model

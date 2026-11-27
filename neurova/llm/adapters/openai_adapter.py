@@ -13,8 +13,8 @@ from neurova.llm.interfaces.provider_interface import (
     ProviderConfig,
     Message,
     CallResult,
-    ProviderType,
 )
+from neurova.llm.providers.types import ProviderType
 from neurova.llm.sandbox.security_sandbox import SecuritySandbox
 
 logger = get_logger(__name__)

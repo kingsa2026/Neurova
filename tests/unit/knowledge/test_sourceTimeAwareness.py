@@ -131,7 +131,7 @@ class TestSameSourceReingest:
             source_path="docs/课件.pdf", dedupe=True,
         )
         assert second.get("source_updated") is not True
-        assert first["knowledge_id"] == second.get("knowledge_id") or True  # 走指纹/新条目现状
+        assert second["knowledge_id"] != first["knowledge_id"]
         items = repo.list_knowledge("a1", limit=50)
         assert all(i.get("source_updated") is not True for i in items)
 
@@ -275,4 +275,4 @@ class TestSearchTimeRangeFilter:
         results = repo.search_visible_items(None, "排期", scope="all", agent_id="a1")
         # 未设时间范围 ⇒ 无时间过滤（查询词本身仍生效：'无源时间'不含'排期'）
         assert len(results) == 2, f"未设范围时不得做时间过滤（实得 {len(results)}）"
-        assert all(r['title'] != '无源时间' for r in results) or True
+        assert {r["title"] for r in results} == {"新版排期", "旧版排期"}

@@ -22,7 +22,7 @@ pip install PyJWT>=2.8.0
 
 或者重新安装所有依赖：
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-full.lock
 ```
 
 ### 2. 重启后端服务器

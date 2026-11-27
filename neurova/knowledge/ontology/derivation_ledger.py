@@ -114,7 +114,7 @@ class DerivationLedger:
         """全库"被推导过"的事实 id，一条 DISTINCT 取完——读侧灰度的单点取数。
 
         含已退档结论的边（边记的是"曾经怎么来的"，不是"现在还算不算数"）：
-        活动筛选由调用方那侧的 `status='active'` 负责，这里不替别人做决定。
+        当前可见性由调用方的 `currentFactWhere` 负责，这里不替别人做决定。
         """
         with self._store._lock:
             rows = self._store._conn.execute(

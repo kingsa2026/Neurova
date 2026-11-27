@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.tenant_scope import tenant_sql_where
+from ..foundation.knowledge_facts import KnowledgeFactStore
 
 logger = get_logger(__name__)
 
@@ -151,14 +152,19 @@ async def executeAction(action: Dict[str, Any], params: Dict[str, Any],
         current = ""
         if subjectLabel:
             row = None
+            currentClause, currentParams = KnowledgeFactStore.currentFactWhere("f")
+            factTenantClause, factTenantParams = tenant_sql_where(
+                str(tenantId or "default"), alias="f")
             with store._lock:
                 row = store._conn.execute(
                     "SELECT s2.canonical_label, f.object_term FROM knowledge_facts f"
                     " JOIN knowledge_subjects s2 ON s2.subject_key = f.subject_key"
                     " WHERE s2.agent_id = ? AND s2.canonical_label = ?"
-                    " AND f.predicate_term_id = ? AND f.status = 'active'"
-                    " AND f.agent_id = ? ORDER BY f.recorded_at DESC LIMIT 1",
-                    (agentId, subjectLabel, _HAS_STATE_PREDICATE, agentId)).fetchone()
+                    " AND f.predicate_term_id = ? AND f.agent_id = ?"
+                    " AND %s AND %s ORDER BY f.recorded_at DESC LIMIT 1"
+                    % (currentClause, factTenantClause),
+                    (agentId, subjectLabel, _HAS_STATE_PREDICATE, agentId,
+                     *currentParams, *factTenantParams)).fetchone()
             current = str(row["object_term"]) if row is not None else ""
         receipt["state_change"] = {
             "ok": bool(factId), "fact_id": factId, "detail": detail,

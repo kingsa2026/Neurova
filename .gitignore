@@ -90,6 +90,7 @@ pnpm-lock.yaml
 #   不入库则运行时 npx 包的漏洞永远无人可见——这正是 #56 要收的口。
 !NeurUI/package-lock.json
 !tools/npx-runtime/package-lock.json
+!/package-lock.json
 
 # IDE 和编辑器
 .vscode/

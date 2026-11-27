@@ -16,6 +16,7 @@ from neurova.knowledge.foundation.admission import (
 from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 from neurova.knowledge.ontology.shapes import ShapeRegistry
 from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
+from neurova.knowledge.ontology.validation import OntologyValidationReport
 
 
 @pytest.fixture
@@ -125,6 +126,36 @@ class TestShapeEvaluation:
 
         with pytest.raises(ValueError, match="定义域"):
             _admit(store, "游魂X", "weird_rel", "Ghost")
+
+    @pytest.mark.parametrize(("severity", "blocked"), [
+        ("violation", True), ("warning", False), ("info", False),
+    ])
+    def test_patternEvaluationFailureKeepsDeclaredSeverity(self, store, registry, severity, blocked):
+        shapes = ShapeRegistry(store)
+        shapes.register(tenantId="default", shapeId="broken_pattern", targetKind="relation",
+                        targetTermId="hasRiskLevel", constraintKind="pattern",
+                        constraintJson={"pattern": "["}, severity=severity,
+                        message="坏形状 %s" % severity)
+        request = AdmissionRequest(
+            agentId="default", tenantId="default", subjectLabel="订单D01",
+            predicateTermId="hasRiskLevel", objectTerm="High", content="订单D01 hasRiskLevel High",
+            assertions=[{"actorType": "pipeline", "actorId": "unit",
+                         "mediumRef": "unit:test", "statementText": "订单D01 hasRiskLevel High"}],
+        )
+        validator = OntologyValidationReport(registry, shapes=shapes)
+
+        findings = validator.findings(request, "")
+        shapeFinding = next(f for f in findings if f["rule"] == "shape:broken_pattern")
+        assert shapeFinding["kind"] == severity
+        assert "形状求值异常" in shapeFinding["message"]
+
+        if blocked:
+            with pytest.raises(ValueError, match="形状求值异常"):
+                _gate(store).admit(request)
+            assert store.factCount() == 0
+        else:
+            assert _gate(store).admit(request).factId
+            assert store.factCount() == 1
 
     def test_shapesAreTenantScoped(self, store, registry):
         shapes = ShapeRegistry(store)

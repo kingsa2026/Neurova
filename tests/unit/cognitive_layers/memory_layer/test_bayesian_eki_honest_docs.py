@@ -1,14 +1,8 @@
-"""bayesian_eki 诚实标注守卫（完整 EKI 批次后更新）
+"""bayesian_eki 诚实标注守卫。
 
-历史: 本文件原为「阶段3 RED」——钉住当时 docstring 夸大（声称高斯过程、
-嵌入式采样）与 _flush_updates 空方法的诚实缺口。
-
-2026-11-20 完整 EKI 批次落地（ekiUpdate + EnsembleKalmanInversion +
-GaussianProcessSurrogate，EKIModule/EKICognitiveOptimizer 接线）后，按
-「改规则为准」翻转: 高斯过程代理与嵌入式采样转为**已实现**并钉住存在性；
-仍保留的简化面（_compute_information_gain 词汇启发式、_flush_updates
-未实现）继续钉住诚实标注。train_surrogate 的 GP 化由
-test_eki_complete_inversion.py::TestCognitiveOptimizerSurrogateWiring 钉住。
+高斯过程代理与单步 EKI 更新已实现；完整批量求解器没有生产消费者，已退役。
+剩余简化面（_compute_information_gain 词汇启发式、_flush_updates 未实现）
+继续钉住诚实标注。
 """
 from __future__ import annotations
 
@@ -58,15 +52,11 @@ class TestHonestDocstring:
         )
         assert "高斯过程" in docstring or "gaussian" in docstring.lower()
 
-    def test_init_docstring_marks_embedded_sampling_implemented(self):
-        """嵌入式采样已实现：docstring 应列出 EnsembleKalmanInversion 及采样机制"""
+    def test_init_docstring_does_not_claim_retired_solver(self):
         from neurova.cognitive_layers.memory_layer import bayesian_eki
 
         docstring = bayesian_eki.__doc__ or ""
-        assert "EnsembleKalmanInversion" in docstring, (
-            "完整 EKI 求解器已实现，docstring 应列出 EnsembleKalmanInversion"
-        )
-        assert "嵌入式" in docstring or "embedded" in docstring.lower() or "采样" in docstring
+        assert "EnsembleKalmanInversion" not in docstring
 
 
 # ────── _flush_updates 显式失败 ──────

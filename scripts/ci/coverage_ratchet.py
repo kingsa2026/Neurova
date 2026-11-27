@@ -17,7 +17,6 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Tuple
 
 # 脚本自举：仓库根进 sys.path（本脚本不在包内，cwd=仓库根直跑时
 # scripts/ci 才是 sys.path[0]，neurova 包需显式可达）
@@ -26,18 +25,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 logger = logging.getLogger("coverage_ratchet")
 
 DEFAULT_FLOOR = 60.0
-
-
-def judgeAndUpdate(actual: float, recorded: float, floor: float) -> Tuple[bool, float]:
-    """棘轮判定（纯函数）：返回 (是否通过, 新记录值)。
-
-    - actual < recorded → 不通过（退步即红）；
-    - actual < floor → 不通过（绝对下限独立生效）；
-    - 否则通过，记录值上调为 max(actual, recorded)（只升不降）。
-    """
-    if actual < recorded or actual < floor:
-        return False, recorded
-    return True, max(actual, recorded)
 
 
 def loadRatchet(path: Path) -> float:
@@ -68,6 +55,8 @@ def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description="覆盖率棘轮门禁（只升不降）")
     parser.add_argument("--data-dir", default="data/coverage",
                         help="合并后的 coverage 数据目录（.coverage 文件所在）")
+    parser.add_argument("--merged", default="",
+                        help="已合并的 coverage 数据文件；提供后直接读取，不再重复合并")
     parser.add_argument("--ratchet", default="scripts/ci/coverage_ratchet.json",
                         help="棘轮记录文件（JSON：{\"fail_under\": N}）")
     parser.add_argument("--floor", type=float, default=DEFAULT_FLOOR,
@@ -80,12 +69,18 @@ def main(argv: list | None = None) -> int:
         measureCoveragePercent,
     )
 
-    data_dir = Path(args.data_dir)
-    target = data_dir / ".coverage.combined"
-    combineCoverageFiles(data_dir, target)
+    if args.merged:
+        target = Path(args.merged)
+    else:
+        data_dir = Path(args.data_dir)
+        target = data_dir / ".coverage.combined"
+        combineCoverageFiles(data_dir, target)
+    if not target.is_file():
+        logger.error("无法从 %s 计算覆盖率（合并文件不存在）", target)
+        return 1
     actual = measureCoveragePercent(target)
     if actual is None:
-        logger.error("无法从 %s 计算覆盖率（无可测数据）", data_dir)
+        logger.error("无法从 %s 计算覆盖率（无可测数据）", target)
         return 1
 
     ratchet_path = Path(args.ratchet)

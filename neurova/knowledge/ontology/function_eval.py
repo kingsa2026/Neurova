@@ -236,11 +236,12 @@ def makeSelectorRunner(store: Any, agentId: str, tenantId: str = "default",
         factStore = store if store is not None else get_knowledge_fact_store()
         with factStore._lock:
             capClause, capParams = tenant_sql_where(tenantId)
+            currentClause, currentParams = factStore.currentFactWhere()
             total = factStore._conn.execute(
                 "SELECT COUNT(*) AS n FROM knowledge_facts"
                 " WHERE agent_id = ? AND %s AND predicate_term_id = ?"
-                " AND status = 'active' AND record_kind = 'triple'" % capClause,
-                (agentId, *capParams, predicate)).fetchone()["n"]
+                " AND %s AND record_kind = 'triple'" % (capClause, currentClause),
+                (agentId, *capParams, predicate, *currentParams)).fetchone()["n"]
         if int(total) > SELECTOR_ROW_CAP:
             raise SelectorCapError(
                 "selector %r 命中 %d 行超上限 %d（D1：显式拒不截断）"

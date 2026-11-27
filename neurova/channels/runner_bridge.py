@@ -30,7 +30,6 @@ from neurova.channels.base import (
     ChannelMessage,
 )
 from neurova.channels.runner_protocol import (
-    DependencyAuditError,
     FrameProtocolError,
     readFrame,
     requireSatisfied,
@@ -39,6 +38,7 @@ from neurova.channels.runner_protocol import (
 from neurova.channels.runner_spec import LaunchSpec
 
 logger = logging.getLogger(__name__)
+HANDSHAKE_TIMEOUT_S = 30.0
 
 #: 子进程环境白名单基项：够跑 Python 与输出编码即可，其余宿主环境不外泄。
 _RUNNER_ENV_BASE_KEYS = frozenset({
@@ -49,9 +49,11 @@ _RUNNER_ENV_BASE_KEYS = frozenset({
 
 
 def _childEnvironment(spec: LaunchSpec) -> Dict[str, str]:
+    allowed = set(spec.private_env_keys)
     env = {k: v for k, v in os.environ.items()
-           if k in _RUNNER_ENV_BASE_KEYS or k in set(spec.private_env_keys)}
-    env["PYTHONPATH"] = spec.code_root + os.pathsep + env.get("PYTHONPATH", "")
+           if k in _RUNNER_ENV_BASE_KEYS or k in allowed}
+    # PYTHONPATH 只由可信代码根构造，不继承宿主未白名单路径。
+    env["PYTHONPATH"] = spec.code_root
     env.setdefault("PYTHONIOENCODING", "utf-8")
     return env
 
@@ -88,13 +90,26 @@ class RunnerHost:
         self.pid = self.proc.pid
         threading.Thread(target=self._drainStderr, daemon=True, name="runner-stderr").start()
 
-        # 握手期由当前线程**独占**读 stdout（pump 线程在 ready 之后再起，
-        # 否则两线程抢同一帧流，hello 会被 pump 吃掉）
-        hello = readFrame(self.proc.stdout)
+        # 握手读必须独立有界：子进程不写 hello 时不能永久占住渠道装配线程。
+        helloBox: "queue.Queue[Any]" = queue.Queue(maxsize=1)
+
+        def _readHello() -> None:
+            try:
+                helloBox.put(readFrame(self.proc.stdout))
+            except Exception as exc:  # noqa: BLE001 - 读失败原样带回主线程
+                helloBox.put(exc)
+
+        threading.Thread(target=_readHello, daemon=True, name="runner-hello").start()
         try:
+            hello = helloBox.get(timeout=HANDSHAKE_TIMEOUT_S)
+            if isinstance(hello, Exception):
+                raise hello
             requireSatisfied(hello, self.spec)
-        except DependencyAuditError:
-            self.terminate()  # fail-closed：带病进程立即终止
+        except queue.Empty:
+            self.terminate()
+            raise TimeoutError(f"渠道 runner 握手超时（{HANDSHAKE_TIMEOUT_S}s）") from None
+        except Exception:
+            self.terminate()  # fail-closed：读失败、审计不过都终止进程
             raise
         self.hello = hello
         writeFrame(self.proc.stdin, {"op": "ready"})
@@ -183,6 +198,8 @@ class RunnerHost:
 class RunnerChannelAdapter(ChannelAdapter):
     """把 RunnerHost 包成本仓 `ChannelAdapter` 契约——manager 零改动复用。"""
 
+    isRunner = True
+
     def __init__(self, config: ChannelConfig, spec: LaunchSpec):
         super().__init__(config)
         self.spec = spec
@@ -252,10 +269,20 @@ class RunnerChannelAdapter(ChannelAdapter):
 class ChannelProcessSupervisor:
     """渠道子进程监督：登记 runner 适配器，崩溃时标记并有限重启。"""
 
-    def __init__(self, max_restarts: int = 3):
+    def __init__(self, max_restarts: int = 3, manager=None):
         self.max_restarts = max_restarts
+        self._manager = manager
         self._entries: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
+
+    @staticmethod
+    def _entryKey(spec: LaunchSpec) -> str:
+        if spec.instance_key:
+            return spec.instance_key
+        if spec.agent_id and spec.agent_id != "default":
+            return f"{spec.agent_id}:{spec.channel_type}"
+        # 兼容既有 default 单实例读数；生产工厂会显式传复合 instance_key。
+        return spec.channel_type
 
     def launch(self, spec: LaunchSpec, config: ChannelConfig) -> RunnerChannelAdapter:
         """登记并返回 runner 适配器（连接由调用方 `connect()` 触发）。"""
@@ -264,34 +291,47 @@ class ChannelProcessSupervisor:
         self._register(spec, adapter, restarts=0)
         return adapter
 
-    def _register(self, spec: LaunchSpec, adapter: RunnerChannelAdapter, restarts: int) -> None:
+    def _register(self, spec: LaunchSpec, adapter: RunnerChannelAdapter, restarts: int,
+                  *, expected: RunnerChannelAdapter | None = None) -> bool:
         with self._lock:
-            self._entries[spec.channel_type] = {
+            key = self._entryKey(spec)
+            current = self._entries.get(key) or {}
+            if expected is not None and current.get("adapter") is not expected:
+                return False
+            self._entries[key] = {
                 "spec": spec, "adapter": adapter, "restarts": restarts,
                 "crashed": False,
             }
+        return True
 
     def _makeCrashHandler(self, spec: LaunchSpec, adapter: RunnerChannelAdapter,
                           restarts: int) -> Callable[[RunnerHost], None]:
         def _handle(host: RunnerHost) -> None:
+            key = self._entryKey(spec)
             with self._lock:
-                entry = self._entries.get(spec.channel_type) or {}
+                entry = self._entries.get(key) or {}
+                if entry.get("adapter") is not adapter:
+                    return
                 entry["crashed"] = True
                 done = restarts >= self.max_restarts
                 if not done:
                     entry["restarts"] = restarts + 1
             logger.error("渠道 runner 崩溃：%s（第 %s/%s 次重启判定）",
-                         spec.channel_type, restarts + 1, self.max_restarts)
+                         key, restarts + 1, self.max_restarts)
             if restarts < self.max_restarts:
                 try:
                     fresh = RunnerChannelAdapter(adapter.config, spec)
                     fresh._loop = adapter._loop  # 事件仍回宿主原 loop
                     fresh._onHostCrash = self._makeCrashHandler(spec, fresh, restarts + 1)
                     fresh._startHost()
-                    self._register(spec, fresh, restarts + 1)
-                    logger.info("渠道 runner 已重启：%s", spec.channel_type)
+                    if not self._register(spec, fresh, restarts + 1, expected=adapter):
+                        fresh.terminate()
+                        return
+                    if self._manager is not None:
+                        self._manager.register_adapter(fresh, agent_id=spec.agent_id or "default")
+                    logger.info("渠道 runner 已重启：%s", key)
                 except Exception as e:
-                    logger.error("渠道 runner 重启失败：%s（%s）", spec.channel_type, e)
+                    logger.error("渠道 runner 重启失败：%s（%s）", key, e)
         return _handle
 
     def status(self) -> Dict[str, Dict[str, Any]]:

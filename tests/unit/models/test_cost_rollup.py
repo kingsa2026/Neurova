@@ -31,7 +31,7 @@ def store(tmp_path, monkeypatch):
 
 
 def _seed(store, agent_id, provider, model, cost, at):
-    store.record_call(
+    return store.record_call(
         call_id=f"c-{agent_id}-{at.isoformat()}",
         agent_id=agent_id,
         provider=provider,
@@ -50,7 +50,7 @@ def _seed(store, agent_id, provider, model, cost, at):
 class TestLedgerPersistence:
     def test_record_call_persists(self, store):
         fixed = datetime(2026, 9, 18, 10, 15, 0)
-        assert _seed(store, "a1", "openai", "gpt-4", 0.25, fixed) is None or True
+        assert _seed(store, "a1", "openai", "gpt-4", 0.25, fixed) is True
         # Verify a row exists in the SQLite file
         conn = sqlite3.connect(store._db_path)
         n = conn.execute("SELECT COUNT(*) FROM llm_calls").fetchone()[0]

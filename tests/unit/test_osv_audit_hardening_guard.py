@@ -1264,6 +1264,29 @@ class TestOfflineSourceIsTheDefaultVerdictPath:
         )
         assert problems == [], f"缓存齐备却被判缺失: {problems}"
 
+    def test_stale_cache_is_named_and_never_used_as_fresh_evidence(
+        self, auditModule, tmp_path, monkeypatch
+    ):
+        cache = tmp_path / "cache"
+        for scope in ("crates.io", "npm"):
+            db = cache / scope / "all.zip"
+            db.parent.mkdir(parents=True)
+            db.write_bytes(b"x")
+            os.utime(db, (1, 1))
+        monkeypatch.setattr(auditModule, "OSV_DB_CACHE", cache)
+        targets = [str(PROJECT_ROOT / rel) for rel in auditModule.SCAN_TARGETS]
+
+        problems = auditModule.offlineDatabaseProblems(targets)
+        assert len(problems) == 2
+        assert all("过期" in problem for problem in problems), problems
+        assert 0 < auditModule.OFFLINE_DB_MAX_AGE_SECONDS <= 24 * 60 * 60
+
+        offline, channelProblems = auditModule.resolveVerdictChannel(targets, requireOffline=False)
+        assert offline is False
+        assert channelProblems == problems
+        with pytest.raises(auditModule.OfflineDatabaseMissing):
+            auditModule.resolveVerdictChannel(targets, requireOffline=True)
+
 
 class TestVulnerabilityDbUnreachableIsRecognized:
     """「漏洞库数据源不可达」必须被认出来——它是 127 的第三个来源，且 fail-open。"""

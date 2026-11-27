@@ -90,5 +90,6 @@ async def executeDeviceTool(toolName: str, params: Dict[str, Any]) -> Dict[str, 
         return _refused(action, "permission_required",
                         "当前上下文没有请求身份，无法定位属主设备",
                         escalation={"reason": "missing_request_identity"})
+    taskId = str(params.get("task_id") or "").strip()
     return await getDeviceBridgeRouter().execute(
-        user_id=userId, action=action, payload=payload)
+        user_id=userId, action=action, payload=payload, task_id=taskId)

@@ -26,6 +26,7 @@ REPO_NAME = "Neurova"
 from neurova import __version__ as _code_version  # noqa: E402
 
 NEXT_VERSION = f"v{_code_version}"  # 发布版本（=当前代码版本）
+REQUEST_TIMEOUT = (10, 30)  # 连接/读取均有界；发布写请求也不得无限等待。
 
 def get_github_token():
     """获取 GitHub Token"""
@@ -52,7 +53,7 @@ def get_latest_commit(token):
     }
     
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         commits = response.json()
         
@@ -91,7 +92,7 @@ def create_tag(token, commit_sha, tag_name):
     }
     
     try:
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.post(url, headers=headers, json=data, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         tag_data = response.json()
         print(f"✅ 标签创建成功: {tag_name}")
@@ -114,7 +115,7 @@ def create_ref(token, tag_name, tag_sha):
     }
     
     try:
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.post(url, headers=headers, json=data, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         print(f"✅ 引用创建成功: refs/tags/{tag_name}")
         return True
@@ -122,23 +123,91 @@ def create_ref(token, tag_name, tag_sha):
         print(f"❌ 创建引用失败: {e}")
         return False
 
-def create_release(token, tag_name, commit_sha):
-    """创建发布"""
+def get_commit_message(token, commit_sha):
+    """读取发布说明所需详情；失败必须阻止首次写入。"""
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits/{commit_sha}"
+    headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+    try:
+        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        return response.json()["commit"]["message"]
+    except (requests.exceptions.RequestException, KeyError, TypeError) as e:
+        print(f"❌ 获取提交详情失败: {e}")
+        return None
+
+
+def find_release(token, tag_name):
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/releases/tags/{tag_name}"
+    headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+    try:
+        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"❌ 对账发布失败: {e}")
+        raise
+
+
+def find_tag_and_ref(token, tag_name):
+    """重跑先 GET 对账；返回 (tag_sha, ref_sha)，不存在则为 None。"""
+    headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+    root = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}"
+    ref_sha = None
+    tag_sha = None
+    try:
+        response = requests.get(f"{root}/git/ref/tags/{tag_name}", headers=headers, timeout=REQUEST_TIMEOUT)
+        if response.status_code == 404:
+            return None, None
+        response.raise_for_status()
+        ref_sha = response.json()["object"]["sha"]
+        response = requests.get(f"{root}/git/tags/{ref_sha}", headers=headers, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        tag_sha = response.json()["sha"]
+    except (requests.exceptions.RequestException, KeyError, TypeError) as e:
+        print(f"❌ 对账标签/引用失败: {e}")
+        raise
+    return tag_sha, ref_sha
+
+
+def rollback_release(token, tag_name, *, ref_sha=None, tag_sha=None):
+    """仅清理本轮确认创建的资源；清理失败保持非零，留给下次 GET 对账。"""
+    headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+    root = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}"
+    targets = []
+    if ref_sha:
+        targets.append(f"{root}/git/refs/tags/{tag_name}")
+    if tag_sha:
+        targets.append(f"{root}/git/tags/{tag_sha}")
+    clean = True
+    for url in targets:
+        try:
+            response = requests.delete(url, headers=headers, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            clean = False
+            print(f"❌ 回滚失败（下次运行将先对账）: {e}")
+    return clean
+
+
+def create_release(token, tag_name, commit_sha, commit_message=None):
+    """创建发布；详情读取与状态校验先于唯一一次发布写入。"""
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/releases"
     headers = {
         "Authorization": f"token {token}",
         "Accept": "application/vnd.github.v3+json"
     }
-    
-    # 获取提交信息用于发布说明
-    commit_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits/{commit_sha}"
-    commit_response = requests.get(commit_url, headers=headers)
-    commit_data = commit_response.json() if commit_response.status_code == 200 else {}
-    
+
+    if commit_message is None:
+        commit_message = get_commit_message(token, commit_sha)
+        if commit_message is None:
+            return None
+
     release_notes = f"""## Neurova {tag_name}
 
 ### 更新内容
-- {commit_data.get('commit', {}).get('message', '代码更新和改进')}
+- {commit_message}
 
 ### 技术细节
 - 提交: {commit_sha[:7]}
@@ -149,7 +218,7 @@ def create_release(token, tag_name, commit_sha):
 git clone https://github.com/{REPO_OWNER}/{REPO_NAME}.git
 cd {REPO_NAME}
 git checkout {tag_name}
-pip install -r requirements.txt
+pip install -r requirements-full.lock
 ```
 
 ### 文档
@@ -166,7 +235,7 @@ pip install -r requirements.txt
     }
     
     try:
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.post(url, headers=headers, json=data, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         release_data = response.json()
         print(f"✅ 发布创建成功!")
@@ -187,27 +256,48 @@ def main():
     if not token:
         return 1
     
-    # 2. 获取最新提交
-    print("\n1. 获取最新提交...")
+    # 2. 获取最新提交与详情（必须先于首次写入）
+    print("\n1. 获取最新提交与详情...")
     commit_sha = get_latest_commit(token)
     if not commit_sha:
         return 1
-    
-    # 3. 创建标签
-    print(f"\n2. 创建标签 {NEXT_VERSION}...")
-    tag_sha = create_tag(token, commit_sha, NEXT_VERSION)
-    if not tag_sha:
+    commit_message = get_commit_message(token, commit_sha)
+    if commit_message is None:
         return 1
     
-    # 4. 创建引用
-    print(f"\n3. 创建引用...")
-    if not create_ref(token, NEXT_VERSION, tag_sha):
+    # 3. 重跑先 GET 对账，已存在资源幂等复用
+    created_tag_sha = None
+    created_ref = False
+    try:
+        release = find_release(token, NEXT_VERSION)
+        if release:
+            print(f"✅ 复用已存在发布: {release['html_url']}")
+            return 0
+        tag_sha, ref_sha = find_tag_and_ref(token, NEXT_VERSION)
+        if tag_sha and ref_sha:
+            print(f"✅ 复用已存在标签/引用: {NEXT_VERSION}")
+        else:
+            if tag_sha:
+                print(f"✅ 复用已存在标签对象: {tag_sha}")
+            else:
+                print(f"\n2. 创建标签 {NEXT_VERSION}...")
+                tag_sha = create_tag(token, commit_sha, NEXT_VERSION)
+                if not tag_sha:
+                    return 1
+                created_tag_sha = tag_sha
+            print("\n3. 创建引用...")
+            if not create_ref(token, NEXT_VERSION, tag_sha):
+                rollback_release(token, NEXT_VERSION, tag_sha=created_tag_sha)
+                return 1
+            created_ref = True
+    except (requests.exceptions.RequestException, KeyError, TypeError):
         return 1
-    
+
     # 5. 创建发布
     print(f"\n4. 创建发布...")
-    release = create_release(token, NEXT_VERSION, commit_sha)
+    release = create_release(token, NEXT_VERSION, commit_sha, commit_message)
     if not release:
+        rollback_release(token, NEXT_VERSION, ref_sha=created_ref or None, tag_sha=created_tag_sha)
         return 1
     
     print("\n" + "=" * 60)

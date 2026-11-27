@@ -343,10 +343,10 @@ class TestRuntimeArchiveIntegrity:
 
 
 class TestDependencySupplyIsShipped:
-    """首启 pip 装依赖的前提：清单文件得真的在包里，且它只声明运行时所需。
+    """首启 pip 装依赖的前提：完整锁文件得真的在包里，且只声明运行时所需。
 
     真机取证：下载来的裸 CPython 起后端即 ModuleNotFoundError: uvicorn。要修它，
-    先得让 requirements.txt 进包——它此前既不在 bundle_backend 的拷贝清单里，
+    先得让 requirements-full.lock 进包——它此前既不在 bundle_backend 的拷贝清单里，
     也不在 tauri.conf.json 的 resources 里，目标机上根本没有这份文件。
     """
 
@@ -355,13 +355,15 @@ class TestDependencySupplyIsShipped:
             (_REPO / "NeurUI" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8")
         )
         targets = set((conf.get("bundle", {}).get("resources") or {}).values())
-        assert "backend/requirements.txt" in targets, (
-            f"requirements.txt 未随包发运，首启 pip 没有可装的清单。resources 现有: {sorted(targets)}"
+        assert "backend/requirements-full.lock" in targets, (
+            f"requirements-full.lock 未随包发运，首启 pip 没有可装的完整锁。resources 现有: {sorted(targets)}"
         )
 
     def test_bundle_stages_requirements(self):
         src = (_REPO / "scripts" / "desktop" / "bundle_backend.py").read_text(encoding="utf-8")
-        assert "requirements.txt" in src, "bundle_backend.py 没把 requirements.txt 拷进暂存区"
+        assert 'REPO / "requirements-full.lock"' in src, (
+            "bundle_backend.py 没把 requirements-full.lock 拷进暂存区"
+        )
 
     def test_runtime_profile_excludes_test_only_packages(self):
         """pytest 三件在 requirements-ci.txt 已声明，运行时清单里再抄一份是重复声明。"""
@@ -391,8 +393,8 @@ class TestFirstRunInstallsDependencies:
 
     def test_manifest_declares_pip_supply(self):
         pip = self._pip()
-        assert pip.get("requirements") == "requirements.txt", (
-            f"清单未声明要装什么: {pip}"
+        assert pip.get("requirements") == "requirements-full.lock", (
+            f"清单未声明完整依赖锁: {pip}"
         )
         urls = pip.get("indexUrls") or []
         assert len(urls) >= 2, f"pip 索引至少要一个镜像 + 官方兜底: {urls}"

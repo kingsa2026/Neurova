@@ -225,6 +225,13 @@ def _resolve_if_allowed(path: Path) -> Path:
     raise ValueError(f"artifact 路径不在白名单内: {path}")
 
 
+def artifactIdForPath(path: str) -> str:
+    """按当前 artifact 契约从解析后的绝对路径生成稳定 ID。"""
+    return hashlib.sha1(
+        str(Path(path).resolve()).encode("utf-8", errors="replace")
+    ).hexdigest()[:16]
+
+
 def register_artifact(path: str, agent_id: str = "", user_id: str = "",
                      shared: bool = False, db_path: Optional[str] = None) -> Dict[str, Any]:
     """把一个磁盘文件注册为 artifact（幂等：同路径同 id）。
@@ -242,7 +249,7 @@ def register_artifact(path: str, agent_id: str = "", user_id: str = "",
         raise ValueError(f"artifact 文件不存在: {path}")
     resolved = _resolve_if_allowed(p)
 
-    artifact_id = hashlib.sha1(str(resolved).encode("utf-8", errors="replace")).hexdigest()[:16]
+    artifact_id = artifactIdForPath(str(resolved))
     existing = _artifacts_store.get(artifact_id)
     if existing:
         # 幂等复用不得丢归属：先注册时没带属主、后一次带了（导入场景常见），

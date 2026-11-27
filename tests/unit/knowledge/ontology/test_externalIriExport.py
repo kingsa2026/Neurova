@@ -41,7 +41,13 @@ def test_owlKeepsKbgIriAndEmitsAssertions(store):
     text = exportOwlAxioms(store)
     # ① 恒 kbg:——不再被外部名替换
     assert "kbg:spatial_thing" in text
-    assert "<http://example.org/eq#Spatial>" not in text.split("# equivalent")[0] or True
+    class_subjects = {
+        line.split()[0]
+        for line in text.splitlines()
+        if line.strip().endswith("rdf:type owl:Class .")
+    }
+    assert "kbg:spatial_thing" in class_subjects
+    assert "<http://example.org/eq#Spatial>" not in class_subjects
     # ② 类级等价 → owl:equivalentClass
     assert "kbg:spatial_thing owl:equivalentClass <http://example.org/eq#Spatial> ." in text
     # ③ 对齐 → skos:exactMatch

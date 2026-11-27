@@ -416,29 +416,56 @@ class ChannelIngressQueue:
             "processed_total": processed,
         }
 
-    def list_dead_letters(self, limit: int = 50) -> List[dict]:
+    def list_dead_letters(
+        self, *, agent_id: str, channel_type: str = "", limit: int = 50
+    ) -> List[dict]:
+        """按来源 agent（可选渠道）读死信；agent 边界必须由调用方显式给出。"""
+        clauses, params = ["status='dead'", "agent_id=?"], [agent_id]
+        if channel_type:
+            clauses.append("channel_type=?")
+            params.append(channel_type)
+        params.append(max(1, int(limit)))
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, channel_type, message_id, last_error, created_at"
-                " FROM channel_ingress_events WHERE status='dead' ORDER BY id DESC LIMIT ?",
-                (limit,),
+                "SELECT id, agent_id, channel_type, message_id, last_error, created_at"
+                " FROM channel_ingress_events WHERE " + " AND ".join(clauses)
+                + " ORDER BY id DESC LIMIT ?",
+                params,
             ).fetchall()
         return [
             {
                 "id": r[0],
-                "channel_type": r[1],
-                "message_id": r[2],
-                "last_error": r[3],
-                "created_at": r[4],
+                "agent_id": r[1],
+                "channel_type": r[2],
+                "message_id": r[3],
+                "last_error": r[4],
+                "created_at": r[5],
             }
             for r in rows
         ]
 
-    def requeue_dead_letters(self) -> int:
+    def requeue_dead_letters(
+        self, *, agent_id: str, channel_type: str = "", event_ids: List[int]
+    ) -> int:
+        """只重排显式 ID 且仍落在 agent/渠道边界内的死信，拒绝全库重排。"""
+        if not event_ids:
+            raise ValueError("event_ids 不能为空；死信重排必须逐 ID 点名")
+        if any(not isinstance(eventId, int) or isinstance(eventId, bool) or eventId <= 0
+               for eventId in event_ids):
+            raise ValueError("event_ids 必须全是正整数")
+        selectedIds = sorted(set(event_ids))
+        clauses, params = ["status='dead'", "agent_id=?"], [agent_id]
+        if channel_type:
+            clauses.append("channel_type=?")
+            params.append(channel_type)
+        placeholders = ",".join("?" for _ in selectedIds)
+        clauses.append(f"id IN ({placeholders})")
+        params.extend(selectedIds)
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "UPDATE channel_ingress_events SET status='pending', attempt=0,"
-                " last_error=NULL, updated_at=? WHERE status='dead'",
-                (_now_iso(),),
+                " last_error=NULL, claimed_by=NULL, claimed_at=NULL, updated_at=?"
+                " WHERE " + " AND ".join(clauses),
+                [_now_iso(), *params],
             )
             return cur.rowcount

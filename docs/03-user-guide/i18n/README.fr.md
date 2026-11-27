@@ -234,7 +234,7 @@ Neurova supporte la **collaboration d'équipe multi-agents**, vous permettant de
 
 ```bash
 cd neurova
-pip install -r requirements.txt
+pip install -r requirements-full.lock
 python -m neurova.api.main
 ```
 

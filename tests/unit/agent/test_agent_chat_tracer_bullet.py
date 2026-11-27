@@ -93,7 +93,6 @@ def agent(agent_config, mock_memory_manager, mock_llm_client, mock_context_build
         self_agent.storage = MagicMock()
         self_agent.temperature_engine = MagicMock()
         self_agent.recall_engine = MagicMock()
-        self_agent.attachment_manager = MagicMock()
         self_agent.growth_log_manager = MagicMock()
         self_agent.growth_log_manager.get_validated_logs.return_value = []
         self_agent.growth_log_manager.get_pending_logs.return_value = []

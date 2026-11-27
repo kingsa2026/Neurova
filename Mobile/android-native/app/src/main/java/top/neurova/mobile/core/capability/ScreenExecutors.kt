@@ -45,7 +45,6 @@ object ScreenExecutors {
             val check = serviceOrRefusal()
             val service = check.service
             if (service == null) return check.refusal ?: ExecuteOutcome.error("executor_error", "未武装")
-            gate.onActivity()
             val projection = service.snapshot()
             return ExecuteOutcome.ok(NodeProjector.toPayload(projection))
         }
@@ -58,8 +57,6 @@ object ScreenExecutors {
             val check = serviceOrRefusal()
             val service = check.service
             if (service == null) return check.refusal ?: ExecuteOutcome.error("executor_error", "未武装")
-            gate.onActivity()
-
             val op = payload["op"]?.toString()?.trim('"').orEmpty()
             val plan = GesturePlanner.plan(
                 op, payload,
@@ -75,7 +72,6 @@ object ScreenExecutors {
 
         private fun executeSteps(service: ExecutorAccessibilityService, plan: GesturePlan.Plan): ExecuteOutcome {
             for (step in plan.steps) {
-                gate.onActivity()
                 when (step.kind) {
                     "tap" -> if (!service.dispatchTap(step.x, step.y)) {
                         return ExecuteOutcome.error("executor_error", "点击注入失败")

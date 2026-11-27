@@ -543,7 +543,7 @@ class KnowledgeFactStore:
         """让前提离开 active 的每一条路径都必须在事务外叫它一次。
 
         级联算法只准有账本一处；这里只负责在正确的时机叫，且在锁外叫——
-        在 `with self._conn` 里回调会把外层事务提前提交掉。
+        普通单笔事务里回调会提前提交；batchScope 内则随外层统一提交或回滚。
         """
         return self._derivationLedger.retractAllDerivedFrom(factId, reason)
 
@@ -577,7 +577,7 @@ class KnowledgeFactStore:
 
     @contextmanager
     def batchScope(self):
-        """把作用域内的多笔写入折成**一次**提交，交给调用方（`admission.admitBatch`）。
+        """把作用域内的多笔写入折成一次提交；嵌套层只保存点，不提前提交外层。
 
         为什么在 store：提交时机是这条连接的事，别的模块不该隔着两层去调
         `sqlite3.Connection.commit`。这里只加一个计数和一次真提交，写入 SQL 一条不动。
@@ -588,24 +588,31 @@ class KnowledgeFactStore:
         现役唯一批量消费者是抽取落库（后台增强任务），不在用户请求的响应路径上。
         """
         with self._lock:
+            ownsTransaction = not self._conn.in_transaction
+            savepoint = "store_batch_scope_%d" % self._conn.scopeDepth
             self._conn.scopeDepth += 1
-            # 不在事务里时 SAVEPOINT 等效 BEGIN；已在事务里时它只是嵌套一层
-            self._conn.execute("SAVEPOINT store_batch_scope")
-            committed = False
+            started = released = committed = False
             try:
+                self._conn.execute("SAVEPOINT %s" % savepoint)
+                started = True
                 yield self._conn
-                self._conn.execute("RELEASE store_batch_scope")
-                sqlite3.Connection.commit(self._conn)
+                self._conn.execute("RELEASE %s" % savepoint)
+                released = True
+                if ownsTransaction:
+                    sqlite3.Connection.commit(self._conn)
                 committed = True
             finally:
                 self._conn.scopeDepth -= 1
-                if not committed:
-                    # 作用域自己炸了（或调用方抛出）：整批未提交的部分必须退干净，
-                    # 否则这条连接带着半个事务回到池子里，下一笔写会把它一起提交。
+                if not committed and started:
+                    # 作用域自己炸了（或调用方抛出）：本层未提交的部分必须退干净，
+                    # 外层事务仍由最外层作用域提交或回滚。
                     try:
-                        sqlite3.Connection.rollback(self._conn)
-                    except Exception:  # noqa: BLE001 - 退不掉的连接由 close() 兜底
-                        pass
+                        if not released:
+                            self._conn.execute("ROLLBACK TO %s" % savepoint)
+                            self._conn.execute("RELEASE %s" % savepoint)
+                    finally:
+                        if ownsTransaction:
+                            sqlite3.Connection.rollback(self._conn)
 
     # ── 身份层 ────────────────────────────────────────────────
 
@@ -1053,37 +1060,50 @@ class KnowledgeFactStore:
             ).fetchone()
         return self._hydrate(row) if row else None
 
+    @staticmethod
+    def currentFactWhere(alias: str = "", now: Optional[Any] = None) -> tuple:
+        """当前事实的唯一 SQL 判据：active 且 valid_from<=now<valid_until。"""
+        prefix = f"{alias}." if alias else ""
+        stamp = _instant(now) if now is not None else _now()
+        effective = f"COALESCE(NULLIF({prefix}valid_from, ''), {prefix}recorded_at)"
+        clause = (
+            f"{prefix}status = 'active' AND {effective} <= ?"
+            f" AND ({prefix}valid_until IS NULL OR {prefix}valid_until = ''"
+            f" OR {prefix}valid_until > ?)"
+        )
+        return clause, [stamp, stamp]
+
     def latestFactsByPredicate(self, agentId: str, predicate: str,
                                tenantId: str = "default") -> List[Dict[str, Any]]:
         """按 (subject_key, predicate) 取最新一条 active 事实（B-4 最新偏好语义）。
 
         同主体同谓词多条时取 recorded_at 最大的一条——"最新的购买＝当前偏好"。
-        只返回 status='active' 且 record_kind='triple' 的事实。
+        只返回当前窗口内（`currentFactWhere`）且 record_kind='triple' 的事实。
         """
         # 租户过滤单源（S5 批四）：str(tenantId) 保持原参数绑定语义
         #（None → 'None' 空集，与原 `tenant_id = NULL` 行为一致）。
         # 子查询单表内 tenant_id 无歧义；外层 f/s 双表须限定 f. 别名。
         innerTenantClause, innerTenantParams = tenant_sql_where(str(tenantId))
         outerTenantClause, outerTenantParams = tenant_sql_where(str(tenantId), alias="f")
+        innerCurrent, innerCurrentParams = self.currentFactWhere()
+        outerCurrent, outerCurrentParams = self.currentFactWhere("f", now=innerCurrentParams[0])
         sql = (
             "SELECT f.*, s.canonical_label FROM knowledge_facts f"
             " INNER JOIN (SELECT subject_key, MAX(recorded_at) AS max_ts"
             "   FROM knowledge_facts"
             "   WHERE agent_id = ? AND predicate_term_id = ? AND %s"
-            "     AND status = 'active' AND record_kind = 'triple'"
+            "     AND %s AND record_kind = 'triple'"
             "   GROUP BY subject_key) latest"
             " ON f.subject_key = latest.subject_key"
             "  AND f.recorded_at = latest.max_ts"
             " LEFT JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
             "  AND s.agent_id = f.agent_id"
             " WHERE f.agent_id = ? AND f.predicate_term_id = ? AND %s"
-            "  AND f.status = 'active' AND f.record_kind = 'triple'"
+            "  AND %s AND f.record_kind = 'triple'"
             " ORDER BY f.subject_key"
-        ) % (innerTenantClause, outerTenantClause)
-        # ↑ MAX 子查询也过滤 status='active'——撤最新后 MAX 自然回退到次新，
-        #   无需单独处理撤销逻辑（零停机撤销的 SQL 形态）。
-        params: list = [agentId, predicate, *innerTenantParams,
-                        agentId, predicate, *outerTenantParams]
+        ) % (innerTenantClause, innerCurrent, outerTenantClause, outerCurrent)
+        params: list = [agentId, predicate, *innerTenantParams, *innerCurrentParams,
+                        agentId, predicate, *outerTenantParams, *outerCurrentParams]
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
         return [self._hydrate(r) for r in rows]
@@ -1096,7 +1116,7 @@ class KnowledgeFactStore:
         - asOf：`valid_from <= asOf < valid_until`（窗口含头不含尾）；
         - knownAt：`recorded_at <= knownAt` 且 `retracted_at 为空或 > knownAt`
           （当时真的知道才可见，撤销后回看不出现）。
-        两轴都缺省时不裁剪（= 当前全量 active triple）。ISO 字符串直接比字典序。
+        两轴都缺省时取当前窗口（= 当前 active triple），不是历史全量。
         """
         def _axis(value: str) -> str:
             """日期输入补到当日末尾：`2026-11-06` 与同日 `T08:..` 的 fact 不能按字典序排除。"""
@@ -1126,9 +1146,9 @@ class KnowledgeFactStore:
                     " AND (retracted_at IS NULL OR ? < retracted_at)")
             params.extend([knownAt, knownAt])
         elif not asOf:
-            # 双轴都未声明＝当前快照（只看 active）；任一轴声明即放开 status——
-            # valid/transaction 轴自己裁决可见性，superseded 行也有历史位置。
-            sql += " AND status = 'active'"
+            currentClause, currentParams = self.currentFactWhere()
+            sql += " AND " + currentClause
+            params.extend(currentParams)
         sql += " ORDER BY subject_key, predicate_term_id, object_term"
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
@@ -1136,10 +1156,13 @@ class KnowledgeFactStore:
 
     def factsForSubject(self, subjectKey: str, includeInactive: bool = False) -> List[Dict[str, Any]]:
         sql = "SELECT * FROM knowledge_facts WHERE subject_key = ?"
+        params: List[Any] = [subjectKey]
         if not includeInactive:
-            sql += " AND status = 'active'"
+            currentClause, currentParams = self.currentFactWhere()
+            sql += " AND " + currentClause
+            params.extend(currentParams)
         with self._lock:
-            rows = self._conn.execute(sql, (subjectKey,)).fetchall()
+            rows = self._conn.execute(sql, params).fetchall()
         return [self._hydrate(r) for r in rows]
 
     @staticmethod
@@ -1697,21 +1720,22 @@ class KnowledgeFactStore:
         self, agentId: Optional[str] = None, includeNarratives: bool = False,
         tenantId: str = "default",
     ) -> List[Dict[str, Any]]:
-        """读面候选：仅 active 且未过期的事实，带主体规范名。
+        """读面候选：当前窗口内的事实，带主体规范名。
 
-        时效权威仍是 `status`（工单 008 定的唯一真源），这里只额外挡掉已到期但尚未
-        被 `expireDueFacts()` 推进的行——否则读面会跑在巡检前头。
+        当前可见性由 `currentFactWhere` 单点判定；`status` 仍只管生命周期，
+        到期未推进的行不会在巡检前混进读面。
 
         叙述记录默认不进池：它的事实行**有意**不存正文（正文唯一副本在
         `knowledge_narratives`），混进来就是一池空文本。等读路径接上按 knowledge_id
         回查正文的那一刀（019b-3）再放开，而不是先放进来让排序对着空内容打分。
         """
+        currentClause, currentParams = self.currentFactWhere("f")
         sql = ("SELECT f.*, s.canonical_label FROM knowledge_facts f"
                " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
-               " WHERE f.status = 'active' AND s.status != 'merged'"
-               " AND (f.valid_until IS NULL OR f.valid_until > ?)")
+               " WHERE %s AND s.status != 'merged'"
+               % currentClause)
         tenantClause, tenantParams = tenant_sql_where(str(tenantId or "default"), alias="f")
-        params: List[Any] = [_now(), *tenantParams]
+        params: List[Any] = [*currentParams, *tenantParams]
         sql += " AND " + tenantClause
         if not includeNarratives:
             sql += " AND f.record_kind != 'narrative'"
@@ -1751,13 +1775,14 @@ class KnowledgeFactStore:
         取最新一代，因为"改回原样"会开新行。不按 agent 收窄与 `find_item` 同口径——
         knowledge_id 本来就是全局 uuid。
         """
+        currentClause, currentParams = self.currentFactWhere()
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM knowledge_facts WHERE record_kind = 'narrative'"
-                " AND status = 'active' AND (object_term = ?"
+                " AND %s AND (object_term = ?"
                 " OR source_turn_id IN ('entry:' || ?, 'legacy:' || ?))"
-                " ORDER BY recorded_at DESC, fact_id LIMIT 1",
-                (knowledgeId, knowledgeId, knowledgeId),
+                " ORDER BY recorded_at DESC, fact_id LIMIT 1" % currentClause,
+                (*currentParams, knowledgeId, knowledgeId, knowledgeId),
             ).fetchone()
         return self._hydrate(row) if row else None
 
@@ -1771,8 +1796,9 @@ class KnowledgeFactStore:
         不传时按"这个条目当前主张的是什么"回退，客体或溯源前缀（`entry:` 与回填的
         `legacy:`）任一命中都算。两种口径分开，是为了让投影分得清"已对齐"与"待改写"。
         """
-        clauses = ["agent_id = ?", "record_kind = 'narrative'", "status = 'active'"]
-        params: List[Any] = [agentId]
+        currentClause, currentParams = self.currentFactWhere()
+        clauses = ["agent_id = ?", "record_kind = 'narrative'", currentClause]
+        params: List[Any] = [agentId, *currentParams]
         # 租户维度必须随行：同内容、同 agent 的两条条目分属两个租户时，
         # 不带租户会折回对方那一行（条目投影把别人的治理行认成自己的）。
         if tenantId is not None:
@@ -1795,9 +1821,10 @@ class KnowledgeFactStore:
         return self._hydrate(row) if row else None
 
     def activeNarrativeFacts(self, agentId: Optional[str] = None) -> List[Dict[str, Any]]:
+        currentClause, currentParams = self.currentFactWhere()
         sql = ("SELECT * FROM knowledge_facts WHERE record_kind = 'narrative'"
-               " AND status = 'active'")
-        params: List[Any] = []
+               " AND %s" % currentClause)
+        params: List[Any] = list(currentParams)
         if agentId:
             sql += " AND agent_id = ?"
             params.append(agentId)
@@ -1995,8 +2022,11 @@ class KnowledgeFactStore:
         members = sorted({str(m) for m in memberFactIds if m})
         if len(members) < 2:
             raise ValueError("冲突至少需要 2 个成员事实，收到 %d 个" % len(members))
+        winner = str(winnerFactId or "").strip()
         conflictId = "cnf_%s" % uuid.uuid4().hex[:12]
         with self._lock, self._conn:
+            if winner:
+                self._requireConflictWinnerLocked(winner, members)
             cur = self._conn.execute(
                 "INSERT OR IGNORE INTO knowledge_conflicts (conflict_id, kind, subject_key,"
                 " predicate_term_id, member_fact_ids_json, member_signature, severity,"
@@ -2004,7 +2034,7 @@ class KnowledgeFactStore:
                 " tenant_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (conflictId, kind, subjectKey, predicateTermId,
                  json.dumps(members, ensure_ascii=False), "|".join(members), float(severity),
-                 recommendedPolicy, policyBasis, status, _now(), winnerFactId,
+                 recommendedPolicy, policyBasis, status, _now(), winner or None,
                  str(tenantId or "default")),
             )
         return conflictId if cur.rowcount else None
@@ -2073,14 +2103,14 @@ class KnowledgeFactStore:
 
         `supersede_old` 不只是记一笔：它必须真把败方退出活动集——否则队列清空了而两条
         矛盾事实还在同时进上下文，那是假干净。因此这种裁决要求显式指明胜方，
-        且胜方必须是本条冲突的成员事实。
+        且胜方必须是本条冲突的 active 成员事实；其他裁决不接受 winner。
         """
         if resolution not in MANUAL_RESOLUTIONS:
             raise ValueError("未知裁决: %r（有效值: %s）" % (resolution, " / ".join(MANUAL_RESOLUTIONS)))
         winner = str(winnerFactId or "").strip()
         if resolution == "supersede_old" and not winner:
             raise ValueError("supersede_old 需要 winner_fact_id：得有人指明哪条说法胜出")
-        with self._lock, self._conn:
+        with self.batchScope():
             row = self._conn.execute(
                 "SELECT status, tenant_id, member_fact_ids_json FROM knowledge_conflicts"
                 " WHERE conflict_id = ?", (conflictId,)
@@ -2093,8 +2123,10 @@ class KnowledgeFactStore:
             ) != str(tenantId or "default"):
                 return False
             members = json.loads(row["member_fact_ids_json"] or "[]")
-            if resolution == "supersede_old" and winner not in members:
-                raise ValueError("winner_fact_id 必须是本冲突的成员事实之一: %r" % winner)
+            if resolution == "supersede_old":
+                self._requireConflictWinnerLocked(winner, members)
+            elif winner:
+                raise ValueError("winner_fact_id 仅用于 supersede_old 裁决: %r" % resolution)
             self._conn.execute(
                 "UPDATE knowledge_conflicts SET status = 'resolved', resolution = ?,"
                 " resolved_by = ?, resolved_at = ?, winner_fact_id = COALESCE(?, winner_fact_id)"
@@ -2127,9 +2159,10 @@ class KnowledgeFactStore:
     def candidateFactsForConflict(
         self, subjectLabel: str, predicateTermId: str, tenantId: str = "default"
     ) -> List[Dict[str, Any]]:
-        """按归一化标签跨 agent 取候选。
+        """按归一化标签跨 agent 取治理候选。
 
-        旧实现只在同 agent 桶内比对（`repository.py:1119`），跨库分歧因此永远不成账。
+        冲突判定要看见已到期/未来生效的时序版本，不能套当前读面窗口；
+        superseded/retracted 已退出竞争，避免旧冲突被反复检出。
         """
         with self._lock:
             tenantClause, tenantParams = tenant_sql_where(
@@ -2139,16 +2172,16 @@ class KnowledgeFactStore:
                 " s.normalized_label FROM knowledge_facts f"
                 " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
                 " WHERE s.normalized_label = ? AND f.predicate_term_id = ?"
-                " AND %s"
-                " AND s.merged_into IS NULL AND f.status != 'retracted'"
+                " AND %s AND f.status IN ('active', 'expired')"
+                " AND s.merged_into IS NULL"
                 " ORDER BY f.recorded_at, f.fact_id" % tenantClause,
                 (normalizeLabel(subjectLabel), predicateTermId, *tenantParams),
             ).fetchall()
         return [self._hydrate(r) for r in rows]
 
     # ── 生命周期（工单 008 / G06）─────────────────────────────
-    # 状态是生命周期的唯一权威：读侧只看 status，不再各自拿 valid_until 比时钟，
-    # 否则会出现"两处判定不一致"的第二真源。到期靠显式调用推进，不起后台线程。
+    # status 是生命周期状态的唯一权威；当前可见性由 currentFactWhere 单点判定。
+    # 到期仍靠显式调用推进，不起后台线程。
 
     def _requireFact(self, factId: str) -> Dict[str, Any]:
         """读整行并回传，且必须持锁。
@@ -2164,6 +2197,24 @@ class KnowledgeFactStore:
         if row is None:
             raise LookupError("事实不存在: %s" % factId)
         return self._hydrate(row)
+
+    def _requireActiveFactLocked(self, factId: str, *, role: str = "事实") -> Dict[str, Any]:
+        fact = self._requireFact(factId)
+        if fact["status"] != "active":
+            raise ValueError(
+                "%s 必须为 active 事实（%s 当前为 %r）" % (role, factId, fact["status"])
+            )
+        return fact
+
+    def _requireConflictWinnerLocked(
+        self, winnerFactId: str, memberFactIds: List[str]
+    ) -> Dict[str, Any]:
+        if winnerFactId not in memberFactIds:
+            raise ValueError("winner_fact_id 必须是本冲突的成员事实之一: %r" % winnerFactId)
+        try:
+            return self._requireActiveFactLocked(winnerFactId, role="冲突 winner")
+        except LookupError as exc:
+            raise ValueError("winner_fact_id 必须指向现存成员事实: %r" % winnerFactId) from exc
 
     # ── 版本历史与回滚（v19）─────────────────────────────────────
     # 历史只追加：每次写路径变化落一行快照，回滚本身也落一行。
@@ -2294,8 +2345,9 @@ class KnowledgeFactStore:
         tenant = str(tenantId or "default")
         with self._lock, self._conn:
             if factIds is None:
-                sql = "SELECT fact_id FROM knowledge_facts WHERE status = 'active'"
-                params: List[Any] = []
+                currentClause, currentParams = self.currentFactWhere()
+                sql = "SELECT fact_id FROM knowledge_facts WHERE " + currentClause
+                params: List[Any] = list(currentParams)
                 if scopeKey:
                     sql += " AND agent_id = ?"
                     params.append(scopeKey)
@@ -2387,13 +2439,8 @@ class KnowledgeFactStore:
         if newFactId == oldFactId:
             raise ValueError("不能取代自身: %s" % newFactId)
         with self._lock, self._conn:
-            newStatus = self._requireFact(newFactId)["status"]
-            oldStatus = self._requireFact(oldFactId)["status"]
-            for factId, status in ((newFactId, newStatus), (oldFactId, oldStatus)):
-                if status != "active":
-                    raise ValueError(
-                        "取代只发生在 active 事实上（%s 当前为 %r）" % (factId, status)
-                    )
+            self._requireActiveFactLocked(newFactId, role="取代新事实")
+            self._requireActiveFactLocked(oldFactId, role="取代旧事实")
             self._conn.execute(
                 "UPDATE knowledge_facts SET supersedes_fact_id = ? WHERE fact_id = ?",
                 (oldFactId, newFactId),

@@ -208,19 +208,6 @@ class TestVectorStoreIncrementalIdf(unittest.TestCase):
             self.assertEqual(store._tfidf_n_docs, n_before + 1, "文档数应按全语料累积")
 
 
-class TestMetricsCollectorCaps(unittest.TestCase):
-    """P1-8: 时间序列键数量上限"""
-
-    def test_series_keys_bounded(self):
-        from neurova.analytics.collector import MetricsCollector
-
-        col = MetricsCollector()
-        col._MAX_SERIES = 10
-        for i in range(15):
-            col._add_time_series_point(f"metric.key.{i}", 1.0)
-        self.assertLessEqual(len(col._time_series), 10, "序列键数量必须被限制")
-
-
 class TestToolExecutionManagerEviction(unittest.TestCase):
     """P1-2: 终态上下文硬上限淘汰"""
 

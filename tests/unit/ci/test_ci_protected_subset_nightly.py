@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import importlib.util
+import time
 from pathlib import Path
 
 import pytest
@@ -212,3 +213,142 @@ class TestComparatorsAreNotVacuous:
                 "读法把注释/空行之外的条目改了顺序或去了重——夜间跑的就不是准入那份清单")
         finally:
             synthetic.unlink(missing_ok=True)
+
+
+class TestNightlyBudgetAndResume:
+    def testExecutionConcurrencyIsBounded(self, monkeypatch):
+        module = nightlyModule()
+        active = 0
+        peak = 0
+
+        def fakeRunOne(entry, perFileTimeout, deadline=None):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            try:
+                time.sleep(0.03)
+                return "green", 0.03, entry
+            finally:
+                active -= 1
+
+        monkeypatch.setattr(module, "runOne", fakeRunOne)
+        results = module.executeEntries(
+            [f"tests/{index}.py" for index in range(6)],
+            perFileTimeout=1,
+            totalTimeout=2,
+            workers=2,
+        )
+
+        assert peak == 2
+        assert len(results) == 6
+        assert all(result[0] == "green" for result in results.values())
+
+    def testTotalBudgetMarksUnfinishedEntriesInsteadOfSilentSuccess(self, monkeypatch):
+        module = nightlyModule()
+
+        def fakeRunOne(entry, perFileTimeout, deadline=None):
+            if deadline is not None and time.monotonic() >= deadline:
+                return "not_run", 0.0, "总预算耗尽"
+            time.sleep(0.08)
+            return "green", 0.08, entry
+
+        monkeypatch.setattr(module, "runOne", fakeRunOne)
+        results = module.executeEntries(
+            [f"tests/{index}.py" for index in range(8)],
+            perFileTimeout=1,
+            totalTimeout=0.01,
+            workers=2,
+        )
+
+        assert {result[0] for result in results.values()} <= {"green", "not_run"}
+        assert any(result[0] == "not_run" for result in results.values())
+
+    def testRunOneKillsChildWhenTotalDeadlineWins(self, monkeypatch):
+        module = nightlyModule()
+        entry = module.readEntries()[0]
+
+        class FakeProc:
+            returncode = None
+
+            def __init__(self):
+                self.killed = False
+
+            def communicate(self, timeout=None):
+                if self.killed:
+                    return "", ""
+                time.sleep(timeout)
+                raise module.subprocess.TimeoutExpired("pytest", timeout)
+
+            def poll(self):
+                return self.returncode
+
+            def kill(self):
+                self.killed = True
+                self.returncode = -9
+                return None
+
+        proc = FakeProc()
+        monkeypatch.setattr(module.subprocess, "Popen", lambda *args, **kwargs: proc)
+
+        status, _, summary = module.runOne(
+            entry,
+            perFileTimeout=10,
+            deadline=time.monotonic() + 0.01,
+        )
+
+        assert proc.killed is True
+        assert status == "budget"
+        assert "总预算" in summary
+
+    def testResumeRoundTripSkipsOnlyGreenAndRejectsChangedList(self, tmp_path):
+        module = nightlyModule()
+        statePath = tmp_path / "nightly-state.json"
+        listDigest = module.listDigest(["tests/a.py", "tests/b.py"])
+        results = {
+            "tests/a.py": ("green", 1.0, "1 passed"),
+            "tests/b.py": ("red", 2.0, "1 failed"),
+        }
+
+        module.saveState(statePath, "repo-a", listDigest, results)
+        resumed = module.loadState(statePath, "repo-a", listDigest)
+
+        assert resumed == {"tests/a.py": ("green", 1.0, "1 passed")}
+        assert not statePath.with_suffix(".json.tmp").exists()
+        assert module.loadState(statePath, "repo-a", module.listDigest(["tests/a.py"])) == {}
+
+    def testCorruptResumeStateFailsLoudly(self, tmp_path):
+        module = nightlyModule()
+        statePath = tmp_path / "nightly-state.json"
+        statePath.write_text("{not-json", encoding="utf-8")
+
+        with pytest.raises(RuntimeError, match="状态文件损坏"):
+            module.loadState(statePath, "repo-a", module.listDigest(["tests/a.py"]))
+
+    def testCliAcceptsBudgetWorkersAndResumeFlags(self, monkeypatch, tmp_path, capsys):
+        module = nightlyModule()
+        monkeypatch.setattr(module, "readEntries", lambda: ["tests/a.py"])
+
+        code = module.main([
+            "--list",
+            "--workers", "2",
+            "--total-timeout", "120",
+            "--state-file", str(tmp_path / "state.json"),
+            "--resume",
+        ])
+
+        assert code == 0
+        assert "tests/a.py" in capsys.readouterr().out
+
+    def testCnbWiresResumeAndKeepsReportReserve(self):
+        module = nightlyModule()
+        job = nightlyJob(mainBlock())
+        scripts = "\n".join(str(stage.get("script", "")) for stage in job.get("stages", []))
+        stageTimeout = next(
+            int(str(stage.get("timeout", "0m")).removesuffix("m")) * 60
+            for stage in job.get("stages", [])
+            if "protected_subset_nightly.py" in str(stage.get("script", ""))
+        )
+
+        assert "--workers 2" in scripts
+        assert "--state-file" in scripts and "--resume" in scripts
+        assert module.DEFAULT_TOTAL_TIMEOUT + 60 <= stageTimeout

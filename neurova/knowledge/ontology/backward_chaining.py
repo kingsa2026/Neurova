@@ -30,9 +30,8 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from neurova.core.time_utils import nowIso as _now
 from neurova.core.tenant_scope import tenant_sql_where
-from ..foundation.knowledge_facts import normalizeLabel
+from ..foundation.knowledge_facts import KnowledgeFactStore, normalizeLabel
 from .rule_engine import ForwardChainingEngine
 
 #: 与 rule_engine 同一口径：规则变元是单个大写字母。
@@ -118,15 +117,15 @@ class _BackwardProver:
         与 searchableFacts 同口径：未过期、主体未并入他者；按 agent 收窄
         （推导事实的属主即 admit 的 agentId）。"""
         tenantClause, tenantParams = tenant_sql_where(self._tenantId, alias="f")
+        currentClause, currentParams = KnowledgeFactStore.currentFactWhere("f")
         sql = ("SELECT f.fact_id, f.subject_key, f.predicate_term_id, f.object_term,"
                " s.canonical_label FROM knowledge_facts f"
                " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
                " AND s.agent_id = f.agent_id"
-               " WHERE f.agent_id = ? AND f.status = 'active'"
+               " WHERE f.agent_id = ? AND " + currentClause +
                " AND f.record_kind = 'triple'"
-               " AND (f.valid_until IS NULL OR f.valid_until > ?)"
                " AND s.status != 'merged'")
-        params: List[Any] = [self._agentId, _now()]
+        params: List[Any] = [self._agentId, *currentParams]
         if tenantClause:
             sql += " AND " + tenantClause
             params.extend(tenantParams)

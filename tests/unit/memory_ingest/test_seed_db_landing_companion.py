@@ -137,7 +137,6 @@ class TestCompanionPairingIsSingleSourced:
     def test_writerAndAdopterShareOneDerivation(self):
         from neurova.cognitive_layers.memory_layer import manager as memory_manager
 
-        assert not hasattr(memory_manager, "PERSIST_DB_NAME") or True  # 占位：见下条断言
         source = Path(memory_manager.__file__).read_text(encoding="utf-8")
         assert '"neurova_memories_persist.db"' not in source.replace(
             'PERSIST_DB_NAME = "neurova_memories_persist.db"', ""

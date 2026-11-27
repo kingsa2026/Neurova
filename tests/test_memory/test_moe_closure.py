@@ -70,7 +70,6 @@ class TestMoEClosure:
         agent.session_manager = None
         agent.tool_memory = None
         agent.muscle_memory = None
-        agent.attachment_manager = None
         agent._moe_router = None
 
         return MemCore(agent), agent

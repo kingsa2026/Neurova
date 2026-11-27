@@ -3233,37 +3233,29 @@ class PostChatPipeline:
                     {"agent_id": agent_id, "identity": evolutionPassIdentity(agent_id)},
                     idempotency_key=_idem,
                 )
-                processed = 0
-                _tried: list = []
-                queue.recover_stale()
-                while processed < 3:
-                    job = queue.claim(f"postchat-{id(self)}", exclude_ids=tuple(_tried))
-                    if job is None:
-                        break
-                    _tried.append(job["id"])
-                    processed += 1
-                    payload = job.get("payload") or {}
-                    from neurova.evolution.evolution_settings import (
-                        evolutionJobIdentityRejected,
-                    )
+                from neurova.evolution.evolution_settings import (
+                    evolutionJobIdentityRejected,
+                )
 
+                async def consumeEvolutionJob(job):
+                    payload = job.get("payload") or {}
                     if evolutionJobIdentityRejected(payload, agent_id):
-                        queue.complete(job["id"], {"rejected": "identity_changed"})
                         logger.info("技能进化作业身份已变化，拒绝旧作业: %s", job["id"])
-                        continue
-                    try:
-                        await run_skill_evolution_pass(
-                            improver=improver,
-                            growth_log_manager=growth_log_manager,
-                            skill_registry=skill_registry,
-                            skill_service=skill_service,
-                            skill_text_loader=skill_text_loader,
-                            reflection_type=_RealReflectionType,
-                            agent_id=agent_id,
-                        )
-                        queue.complete(job["id"])
-                    except Exception as job_err:  # noqa: BLE001 - 单作业失败可重试
-                        queue.fail(job["id"], str(job_err))
+                        return {"rejected": "identity_changed"}
+                    await run_skill_evolution_pass(
+                        improver=improver,
+                        growth_log_manager=growth_log_manager,
+                        skill_registry=skill_registry,
+                        skill_service=skill_service,
+                        skill_text_loader=skill_text_loader,
+                        reflection_type=_RealReflectionType,
+                        agent_id=agent_id,
+                    )
+                    return None
+
+                await queue.drainAsync(
+                    f"postchat-{id(self)}", consumeEvolutionJob, max_jobs=3
+                )
         except Exception as e:
             logger.debug("技能改进提案扫描跳过: %s", e)
 

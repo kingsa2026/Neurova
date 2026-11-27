@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from neurova.memory_ingest.bundle.manifest import BundleError, load_manifest
 from neurova.memory_ingest.bundle.validate import validate_bundle
 
 MANIFEST = {
@@ -47,6 +48,53 @@ def test_unsupported_schema_version_reported(tmp_path: Path):
     errors = validate_bundle(_bundle(tmp_path, transcripts=[T1, T2], memories=[M1],
                                      manifest=dict(MANIFEST, schema_version=7)))
     assert any("schema_version" in e for e in errors)
+
+
+@pytest.mark.parametrize("manifest", [[], None])
+def test_non_object_manifest_reported_without_crashing(tmp_path: Path, manifest):
+    root = _bundle(tmp_path, transcripts=[T1, T2], memories=[M1])
+    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    errors = validate_bundle(root)
+
+    assert any("manifest.json" in e and "对象" in e for e in errors)
+
+
+@pytest.mark.parametrize("counts", [[], None])
+def test_non_object_counts_reported_without_crashing(tmp_path: Path, counts):
+    errors = validate_bundle(_bundle(
+        tmp_path, transcripts=[T1, T2], memories=[M1],
+        manifest=dict(MANIFEST, counts=counts)))
+
+    assert any("counts" in e and "对象" in e for e in errors)
+
+
+@pytest.mark.parametrize("row", [[], None])
+def test_non_object_jsonl_row_reported_with_lineno(tmp_path: Path, row):
+    root = _bundle(tmp_path, transcripts=[T1, T2], memories=[M1])
+    (root / "memories.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    errors = validate_bundle(root)
+
+    assert any("memories.jsonl:1" in e and "对象" in e for e in errors)
+
+
+@pytest.mark.parametrize("raw", [[], None])
+def test_load_manifest_rejects_non_object_json(tmp_path: Path, raw):
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(BundleError, match="对象"):
+        load_manifest(path)
+
+
+@pytest.mark.parametrize("field", ["counts", "source"])
+def test_load_manifest_rejects_non_object_fields(tmp_path: Path, field):
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(dict(MANIFEST, **{field: None})), encoding="utf-8")
+
+    with pytest.raises(BundleError, match=field):
+        load_manifest(path)
 
 
 def test_counts_must_match_actual_lines(tmp_path: Path):

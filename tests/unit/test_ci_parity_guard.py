@@ -47,6 +47,8 @@ EXPECTED_MAP = {
     # 合并各片数据再判阈值的 `coverage` job——它属同一条腿的第二步，cnb 侧对应的是
     # 同一流水线里的第二个 stage（不是新流水线）。
     "unit-tests": ["unit-tests"],
+    # GitHub 的矩阵准备 job 只把分片清单编号转成 JSON；实际门禁仍由 unit-tests 执行。
+    "protected-shards": ["unit-tests"],
     "coverage": ["unit-tests"],
     "e2e": ["e2e-backend-boot"],
     "frontend": ["frontend"],
@@ -94,10 +96,21 @@ EXPECTED_CORE_COMMANDS = {
         "--cov-report= --cov-fail-under=0",
         "requirements-ci.lock",
     ],
+    "protected-shards": [],
     # 受保护子集的第二步：合并各片覆盖率数据后判一次阈值。
-    "coverage": ["scripts/ci/coverage_report.py --fail-under 60"],
+    "coverage": [
+        "scripts/ci/coverage_report.py --fail-under 60",
+        "scripts/ci/coverage_ratchet.py --merged data/coverage/.coverage.merged",
+    ],
     "e2e": ["python -m pytest tests/e2e/test_backend_boot.py -q --timeout 240"],
-    "frontend": ["npm audit --audit-level=high", "npx vue-tsc --noEmit", "npx vitest run"],
+    "frontend": [
+        "npm audit --audit-level=high",
+        "npx vue-tsc --noEmit",
+        "npx vitest run",
+        "npm run build",
+        "bundle_budget.py --dist dist --budget bundle-budget.json",
+        "npx playwright install --with-deps chromium && npx playwright test",
+    ],
     "perf-gate": [
         "python scripts/ci/perf_gate.py",
         "python -m pip install -r requirements-ci.lock",
@@ -239,6 +252,69 @@ class TestCommandParity:
                 f".cnb.yml 流水线 {pipe_names} 缺核心命令: {cmd}\n"
                 f"ci.yml 对应 job 有而 cnb 无——命令被单侧改动，放行标准漂移。"
             )
+
+
+class TestPortableGateParity:
+    """CI-09：可移植门禁必须两端真实执行，且不能被 step/stage 级放宽。"""
+
+    @staticmethod
+    def _scripts(cnb_pipelines, ghw_jobs, jobName: str) -> tuple[str, str]:
+        pipeNames = EXPECTED_MAP[jobName]
+        return (
+            _job_scripts(ghw_jobs[jobName]),
+            "\n".join(_pipeline_scripts(cnb_pipelines[name]) for name in pipeNames),
+        )
+
+    @staticmethod
+    def _assertBlocking(cnb_pipelines, ghw_jobs, jobName: str, command: str) -> None:
+        githubSteps = [
+            step for step in ghw_jobs[jobName].get("steps") or []
+            if command in str(step.get("run") or "")
+        ]
+        assert githubSteps, f"GitHub job {jobName} 未执行 {command}"
+        assert all(not step.get("continue-on-error") for step in githubSteps), (
+            f"GitHub job {jobName} 的 {command} 被 continue-on-error 放宽"
+        )
+        for pipeName in EXPECTED_MAP[jobName]:
+            stages = [
+                stage for stage in cnb_pipelines[pipeName].get("stages") or []
+                if command in str(stage.get("script") or "")
+            ]
+            assert stages, f"CNB pipeline {pipeName} 未执行 {command}"
+            assert all(not stage.get("allowFailure") for stage in stages), (
+                f"CNB pipeline {pipeName} 的 {command} 被 allowFailure 放宽"
+            )
+
+    def testCoverageRatchetRunsAfterMergeOnBothSides(self, cnb_pipelines, ghw_jobs):
+        merge = "scripts/ci/coverage_report.py --fail-under 60"
+        ratchet = "scripts/ci/coverage_ratchet.py --merged data/coverage/.coverage.merged"
+        for side, scripts in zip(("github", "cnb"), self._scripts(cnb_pipelines, ghw_jobs, "coverage")):
+            assert merge in scripts and ratchet in scripts, (
+                f"{side} 覆盖率门禁缺合判或棘轮：merge={merge in scripts}, ratchet={ratchet in scripts}"
+            )
+            assert scripts.index(merge) < scripts.index(ratchet), (
+                f"{side} 棘轮必须先消费合判产物，不能提前或独立运行"
+            )
+        self._assertBlocking(cnb_pipelines, ghw_jobs, "coverage", ratchet)
+
+    def testFrontendBuildAndBudgetRunInOrderOnBothSides(self, cnb_pipelines, ghw_jobs):
+        build = "npm run build"
+        budget = "bundle_budget.py --dist dist --budget bundle-budget.json"
+        for side, scripts in zip(("github", "cnb"), self._scripts(cnb_pipelines, ghw_jobs, "frontend")):
+            assert build in scripts and budget in scripts, (
+                f"{side} 前端门禁缺构建或体积预算：build={build in scripts}, budget={budget in scripts}"
+            )
+            assert scripts.index(build) < scripts.index(budget), (
+                f"{side} 体积预算必须先构建再计量"
+            )
+        self._assertBlocking(cnb_pipelines, ghw_jobs, "frontend", build)
+        self._assertBlocking(cnb_pipelines, ghw_jobs, "frontend", budget)
+
+    def testPlaywrightPerformanceGateRunsOnBothSides(self, cnb_pipelines, ghw_jobs):
+        command = "npx playwright install --with-deps chromium && npx playwright test"
+        for side, scripts in zip(("github", "cnb"), self._scripts(cnb_pipelines, ghw_jobs, "frontend")):
+            assert command in scripts, f"{side} 缺 Playwright 性能门禁"
+        self._assertBlocking(cnb_pipelines, ghw_jobs, "frontend", command)
 
 
 class TestOfflineDatabasePathIsDeclaredOnBothSides:

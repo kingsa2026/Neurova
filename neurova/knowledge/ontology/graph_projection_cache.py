@@ -19,7 +19,8 @@ U2 的行集缓存（query_cache.py）免掉了「同一查询重复求值」，
   rdflib 图是集合语义（重复加无副作用）：主体块与术语块 IRI 撞名时，摘除波及
   的术语块会由子图原样补回，不丢行；
 - 主体指纹的过滤条件与 `serializeAll` 的 facts 段同形（tenant_sql_where ＋
-  active＋triple ＋ 真值 agentId 过滤），指纹看不到的行就是投影里没有的行。
+  currentFactWhere ＋ triple ＋ 真值 agentId 过滤），指纹看不到的行就是投影里
+  没有的行；时间跨过生效/到期边界时，主体集合与内容指纹随可见行一起变化。
 
 术语/规则指纹变化（本体结构变更）→ 整图重建：terms/rules 段是全量导出，
 增量拼不安全；结构行数小，全量重建成本可控。
@@ -37,6 +38,7 @@ from typing import Any, Dict, Optional, Tuple
 from neurova.core.cache import MemoryCache
 from neurova.core.logger import get_logger
 from neurova.core.tenant_scope import tenant_sql_where
+from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 from neurova.knowledge.ontology.query_cache import termsFingerprint
 
 logger = get_logger(__name__)
@@ -81,10 +83,11 @@ def _subjectFingerprints(store: Any, tenantId: str,
     指纹必变；哈希只在进程内用于失效比对（缓存不跨进程存活），随机化无妨。
     """
     clause, clauseParams = tenant_sql_where(str(tenantId or "default"))
+    currentClause, currentParams = KnowledgeFactStore.currentFactWhere()
     sql = ("SELECT subject_key, predicate_term_id, object_term, fact_id"
-           " FROM knowledge_facts WHERE %s AND status = 'active'"
-           " AND record_kind = 'triple'" % clause)
-    params: list = list(clauseParams)
+           " FROM knowledge_facts WHERE %s AND %s AND record_kind = 'triple'"
+           % (clause, currentClause))
+    params: list = [*clauseParams, *currentParams]
     if agentId:
         sql += " AND agent_id = ?"
         params.append(str(agentId))

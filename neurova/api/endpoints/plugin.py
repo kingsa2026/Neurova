@@ -111,6 +111,10 @@ _REASON_TO_STATUS = {
     "handler_missing": 400,            # 声明的 handler 名在插件类上取不到
     "no_declared_endpoints": 400,
     "routes_still_live": 500,          # 摘除后活路由表里还有：HTTP 面没真的关掉
+    "already_installed": 409,          # 同名重装前必须先完整拆旧
+    "plugin_has_dependents": 409,
+    "lifecycle_failed": 500,
+    "shutdown_failed": 500,
 }
 
 
@@ -372,7 +376,17 @@ async def uninstall_plugin(plugin_id: str):
     if not manager.has_plugin(plugin_id):
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found")
 
-    manager.uninstall_plugin(plugin_id)
+    try:
+        if manager.get_plugin(plugin_id).loaded:
+            await manager.unloadPluginAsync(plugin_id)
+        if manager.get_plugin(plugin_id).enabled:
+            await manager.disablePluginAsync(plugin_id)
+        removed = manager.uninstall_plugin(plugin_id)
+    except PluginError as e:
+        raise HTTPException(status_code=_statusFor(e), detail=str(e))
+    if not removed:
+        raise HTTPException(status_code=500, detail="插件卸载失败")
+
     logger.info("Plugin uninstalled: %s", plugin_id)
     return {"code": 0, "message": "Plugin uninstalled",
             "data": {"removed_record": plugin_id, "files_kept": True}}
@@ -397,7 +411,10 @@ async def unload_plugin(plugin_id: str):
     if not manager.has_plugin(plugin_id):
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found")
 
-    manager.unload_plugin(plugin_id)
+    try:
+        await manager.unloadPluginAsync(plugin_id)
+    except PluginError as e:
+        raise HTTPException(status_code=_statusFor(e), detail=str(e))
     return {"code": 0, "message": "Plugin unloaded", "data": _pluginView(plugin_id)}
 
 
@@ -423,10 +440,10 @@ async def disable_plugin(plugin_id: str):
     if not manager.has_plugin(plugin_id):
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found")
 
-    if not manager.disable_plugin(plugin_id):
-        dependents = manager.dependentsOf(plugin_id)
-        raise HTTPException(status_code=409,
-                            detail="插件 %s 被这些插件依赖，不能禁用：%s" % (plugin_id, dependents))
+    try:
+        await manager.disablePluginAsync(plugin_id)
+    except PluginError as e:
+        raise HTTPException(status_code=_statusFor(e), detail=str(e))
 
     logger.info("Plugin disabled: %s", plugin_id)
     return {"code": 0, "message": "Plugin disabled", "data": _pluginView(plugin_id)}

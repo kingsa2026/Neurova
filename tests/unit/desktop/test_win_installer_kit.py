@@ -20,6 +20,7 @@ WPF 不是可交叉编译的 native 目标 —— 容器里加什么工具链都
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import re
 from pathlib import Path
@@ -68,6 +69,30 @@ def _raises_runtime_error(fn: ast.FunctionDef) -> bool:
 
 def _functions() -> dict[str, ast.FunctionDef]:
     return {n.name: n for n in ast.walk(_kit_ast()) if isinstance(n, ast.FunctionDef)}
+
+
+def testBackendDependencyInstallUsesManifestSelection(tmp_path):
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "MANIFEST.json").write_text(json.dumps({
+        "runtime": {"pip": {"requirements": "compiled.lock"}}
+    }), encoding="utf-8")
+    selectedLock = tmp_path / "compiled.lock"
+    selectedLock.write_text("fastapi==0.0.0\n", encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("win_installer_kit_contract", _KIT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.runtimeRequirements(tmp_path) == selectedLock, (
+        "打包机未从仓库 MANIFEST 选择依赖锁"
+    )
+    runSource = _kit_source().split("def cmd_run", 1)[1].split("def newest_installer", 1)[0]
+    assert "runtimeRequirements(repo)" in runSource, (
+        "依赖选择函数未接入 cmd_run 的真实安装命令"
+    )
+    assert 'repo / "requirements.txt"' not in runSource, (
+        "打包机仍在安装未锁定的 requirements.txt"
+    )
 
 
 def testToolchainIsNamedItemByItem():

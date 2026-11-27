@@ -50,12 +50,14 @@ def _db(path: Path, *rows) -> Path:
 
 
 @pytest.fixture()
-def manager(tmp_path: Path) -> MemoryManager:
+def manager(tmp_path: Path, monkeypatch) -> MemoryManager:
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
     return MemoryManager(db_path=str(tmp_path / "memory" / "memory.db"))
 
 
 @pytest.fixture()
 def sessions(tmp_path: Path, monkeypatch) -> SessionManager:
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("NEUROVA_SESSIONS_DIR", str(tmp_path / "sessions"))
     SessionManager._instance = None
     yield SessionManager()
@@ -198,6 +200,62 @@ def test_apply_refuses_bundle_that_fails_validation(tmp_path: Path, manager, ses
     assert code == EXIT_INVALID_BUNDLE
     assert "identity_key" in printed.out + printed.err
     assert manager._memories == {} and _session_files(tmp_path) == []
+
+
+@pytest.mark.parametrize("manifest", [[], None])
+def test_apply_non_object_manifest_exits_3_without_traceback(
+        tmp_path: Path, manager, sessions, capsys, manifest):
+    bundle = tmp_path / "bad-manifest"
+    bundle.mkdir()
+    (bundle / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    code = main(["apply", str(bundle), "--agent-id", "kai-import", "--yes"],
+                manager=manager, sessions=sessions)
+
+    printed = capsys.readouterr()
+    assert code == EXIT_INVALID_BUNDLE == 3
+    assert "manifest.json" in printed.out + printed.err
+    assert "Traceback" not in printed.out + printed.err
+    assert manager._memories == {} and _session_files(tmp_path) == []
+
+
+def test_apply_non_object_jsonl_row_exits_3_without_traceback(
+        tmp_path: Path, manager, sessions, capsys):
+    bundle = _bundle_with_memories(tmp_path)
+    (bundle / "memories.jsonl").write_text("null\n", encoding="utf-8")
+
+    code = main(["apply", str(bundle), "--agent-id", "kai-import", "--yes"],
+                manager=manager, sessions=sessions)
+
+    printed = capsys.readouterr()
+    assert code == EXIT_INVALID_BUNDLE == 3
+    assert "memories.jsonl:1" in printed.out + printed.err
+    assert "Traceback" not in printed.out + printed.err
+    assert manager._memories == {} and _session_files(tmp_path) == []
+
+
+def test_directory_apply_stops_at_first_bundle_failure(
+        tmp_path: Path, manager, sessions, monkeypatch, capsys):
+    from neurova.memory_ingest.bundle.manifest import BundleError
+    import scripts.ingest_memory as cli
+
+    source = tmp_path / "source"
+    _db(source / "hist" / "history.db", _rows(seq=1, dedup_key="a"))
+    _db(source / "hist2" / "history.db", _rows(seq=1, dedup_key="b"))
+    calls = []
+
+    def fail_first(*args, **kwargs):
+        calls.append(kwargs.get("run_id"))
+        raise BundleError("首错即停")
+
+    monkeypatch.setattr(cli, "apply_bundle", fail_first)
+
+    code = main(["apply", str(source), "--agent-id", "stop-import", "--yes",
+                 "--run-id", "run-stop"], manager=manager, sessions=sessions)
+
+    assert code == EXIT_INVALID_BUNDLE
+    assert len(calls) == 1
+    assert "首错即停" in capsys.readouterr().err
 
 
 def test_undo_removes_the_batch(tmp_path: Path, manager, sessions):

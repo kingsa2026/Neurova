@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 from neurova.core.logger import get_logger
 from neurova.core.time_utils import nowIso as _now
 from neurova.core.tenant_scope import tenant_sql_where
+from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 
 logger = get_logger(__name__)
 
@@ -115,15 +116,16 @@ class CommunityGraphBuilder:
             " ORDER BY canonical_label",
             (self._agentId, *tenantParams))
         fTenantClause, fTenantParams = tenant_sql_where(self._tenantId, alias="f")
+        currentClause, currentParams = KnowledgeFactStore.currentFactWhere("f")
         edgeRows = self._store.queryReadOnly(
             "SELECT s.canonical_label AS src, f.object_term AS dst"
             " FROM knowledge_facts f JOIN knowledge_subjects s"
             " ON s.subject_key = f.subject_key"
             " WHERE f.agent_id = ? AND " + fTenantClause +
-            " AND f.status = 'active'"
+            " AND " + currentClause +
             " AND f.record_kind = 'triple' AND s.canonical_label = s.canonical_label"
             " ORDER BY s.canonical_label, f.object_term, f.fact_id",
-            (self._agentId, *fTenantParams))
+            (self._agentId, *fTenantParams, *currentParams))
         nodes = [str(r["canonical_label"]) for r in nodeRows]
         edges = [(str(r["src"]), str(r["dst"])) for r in edgeRows]
         return nodes, edges
@@ -284,12 +286,13 @@ def communityDriftSearch(store: Any, entityLabel: str, agentId: str = "default",
     """drift 检索：实体邻域（knowledge_facts 既有客体接力一跳）＋所属社区摘要混合。"""
     # P3-6：读数走 store 只读公开口（同 communityGlobalSearch）。
     sTenantClause, sTenantParams = tenant_sql_where(tenantId, alias="s")
+    currentClause, currentParams = KnowledgeFactStore.currentFactWhere("f")
     rows = store.queryReadOnly(
         "SELECT DISTINCT f.object_term FROM knowledge_facts f"
         " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
         " WHERE s.canonical_label = ? AND s.agent_id = ? AND " + sTenantClause +
-        " AND f.status = 'active' AND f.record_kind = 'triple' LIMIT ?",
-        (entityLabel, agentId, *sTenantParams, int(limit)))
+        " AND " + currentClause + " AND f.record_kind = 'triple' LIMIT ?",
+        (entityLabel, agentId, *sTenantParams, *currentParams, int(limit)))
     neighbors = [str(r["object_term"]) for r in rows]
     hits: List[Dict[str, Any]] = []
     commTenantClause, commTenantParams = tenant_sql_where(tenantId)

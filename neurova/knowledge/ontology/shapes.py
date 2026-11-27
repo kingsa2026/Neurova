@@ -159,7 +159,7 @@ class ShapeRegistry:
                            registry: Any) -> List[Dict[str, Any]]:
         """用户 shape 的 findings（与内置校验同一 findings 流，同定位串形状）。
 
-        逐 shape 独立判定：一个 shape 炸了只丢它自己，不影响其余 shape 与内置校验。
+        逐 shape 独立判定：一个 shape 炸了按声明严重级生成 finding，不影响其余 shape 与内置校验。
         """
         tenantId = str(getattr(request, "tenantId", "") or "default")
         predicate = str(getattr(request, "predicateTermId", "") or "")
@@ -171,8 +171,8 @@ class ShapeRegistry:
                 continue
             try:
                 finding = self._evaluateOne(shape, request, subjectKey, objectTerm, registry)
-            except Exception as exc:  # noqa: BLE001 - 单 shape 失败只丢该 shape
-                out.append({"kind": "info", "rule": "shape:" + shape["shape_id"],
+            except Exception as exc:  # noqa: BLE001 - 单 shape 失败按声明严重级记账
+                out.append({"kind": shape["severity"], "rule": "shape:" + shape["shape_id"],
                             "message": "形状求值异常 %s" % exc,
                             "term_id": predicate, "subject_key": subjectKey})
                 continue

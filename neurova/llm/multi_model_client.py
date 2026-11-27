@@ -55,6 +55,10 @@ from neurova.llm.providers.rate_limiter import (
 logger = get_logger(__name__)
 
 
+class LLMBudgetExceededError(RuntimeError):
+    """执行前预算门拒绝；不得触达 provider，也不跨模型重试。"""
+
+
 def _usageAgentId() -> str:
     """usage 行的 agent 归因：读 cost_tracking 既有调用上下文（ChatPipeline
     每轮 set_llm_cost_context 写入），无上下文留空串——不新造第二条身份
@@ -238,6 +242,24 @@ class MultiModelLLMClient:
             reset_provider_manager()
         except ImportError as e:
             logger.warning("Could not reset provider_manager: %s", e)
+
+    @staticmethod
+    def _ensureBudgetAllowed(client: ModelClient) -> None:
+        """每次真实 attempt 前读同一预算账本；服务故障默认放行。"""
+        agentId = _usageAgentId()
+        if not agentId:
+            return
+        try:
+            from neurova.models.cost_budget import get_budget_service
+
+            reason = get_budget_service().check_llm_call_allowed(
+                agentId, client.provider.id, client.model
+            )
+        except Exception as exc:  # noqa: BLE001 - 预算副路径不得阻断 LLM 主流程
+            logger.warning("预算执行前门不可用（放行）: %s", exc)
+            return
+        if reason:
+            raise LLMBudgetExceededError(reason)
 
     def _initialize_default_clients(self) -> None:
         """初始化默认客户端
@@ -599,6 +621,32 @@ class MultiModelLLMClient:
         return classify_model_error(error).kind
 
     @staticmethod
+    def _recordNativeCost(client: ModelClient, usage: Dict[str, int]) -> None:
+        """原生协议客户端没有 OpenAI 装饰器；在其统一响应出口补一次成本结算。"""
+        if isinstance(client.client, LLMClient) or not usage:
+            return
+        from neurova.models.cost_tracking import LLMProvider, record_llm_cost
+
+        providerId = str(client.provider.id or "").lower()
+        provider = {
+            "anthropic": LLMProvider.ANTHROPIC,
+            "google": LLMProvider.GEMINI,
+            "gemini": LLMProvider.GEMINI,
+            "google-vertex": LLMProvider.GEMINI,
+            "google-cn": LLMProvider.GEMINI,
+            "ollama": LLMProvider.OLLAMA,
+        }.get(providerId)
+        if provider is None:
+            logger.warning("原生客户端成本计价缺 provider 映射: %s", providerId)
+            return
+        record_llm_cost(
+            provider=provider,
+            model=client.model,
+            usage=usage,
+            agent_id=_usageAgentId() or None,
+        )
+
+    @staticmethod
     def _extract_cache_tokens(usage) -> tuple:
         """B1-5（#7342）：从 usage 提取 Prompt Cache 命中/写入 token。
 
@@ -761,6 +809,7 @@ class MultiModelLLMClient:
         rc, cb = self._get_retry_guard(client)
 
         async def _attempt():
+            self._ensureBudgetAllowed(client)
             # BUG AUDIT L-01: AnthropicNativeClient.chat / GeminiNativeClient.chat
             # 是 async 方法。asyncio.to_thread 只会"创建"协程并立刻返回它，
             # 从不执行、从不 await → 调用方拿到 coroutine 对象（空回复 +
@@ -1026,6 +1075,12 @@ class MultiModelLLMClient:
                     cache_read_tokens=_cache_read,
                     cache_write_tokens=_cache_write,
                 )
+                self._recordNativeCost(client, {
+                    "prompt_tokens": _prompt or 0,
+                    "completion_tokens": _completion or 0,
+                    "cache_read_tokens": _cache_read,
+                    "cache_write_tokens": _cache_write,
+                })
                 # A1（对照改进项）：尺子校准采样——完成侧净信号（同段文本的
                 # 尺子估算 vs 账单真值）。工具调用响应跳过（账单含参数 JSON
                 # 会污染文本偏差）；估算账本（estimated=True）无真值，同样跳过。
@@ -1066,6 +1121,16 @@ class MultiModelLLMClient:
                 "success": True,
                 "response": result,
                 "duration": duration,
+                "model": client.model,
+                "provider": client.provider.id,
+            }
+        except LLMBudgetExceededError as e:
+            client.increment_request(success=False)
+            limiter.release(model_key)
+            return {
+                "success": False,
+                "error": str(e),
+                "budget_exceeded": True,
                 "model": client.model,
                 "provider": client.provider.id,
             }
@@ -1239,6 +1304,13 @@ class MultiModelLLMClient:
         usage_diag = {"chunks_seen": 0, "usage_chunks_seen": 0}
 
         while True:
+            try:
+                self._ensureBudgetAllowed(client)
+            except LLMBudgetExceededError as e:
+                denied = _instream_error_dict(e)
+                denied["budget_exceeded"] = True
+                yield denied
+                return
             model_key = client.model or "unknown"
             acquired = False
             start_time = time.time()
@@ -1402,6 +1474,7 @@ class MultiModelLLMClient:
                     if acquired:
                         limiter.release(model_key)
                         acquired = False
+                    self._recordNativeCost(client, stream_usage)
                 duration = time.time() - start_time  # P2-4 补刀：原为丢弃结果的死语句
                 # R2：空响应（零载荷收流）视作可切换失败——先于成功入账处理；
                 # 无候选可切时如实空收流（旧行为），但台账留 empty 痕。

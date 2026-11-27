@@ -24,22 +24,10 @@ htmlcov/
 NeurUI/coverage/
 
 # 调试和临时文件
+# 脚本源码只按下方根目录精确路径排除；不使用 check*.py / run_*.py / fix_*.py
+# 等未锚定通配，避免吞掉 scripts/ 与 neurova/ 下的正当工具。
 # 注意：勿用 *_check*.py 这类通配——会吞掉合法测试文件（如 test_health_checks_contract.py，
 # 2026-09-05 踩坑：/tests/ 整目录 ignore 已于 09-04 移除，这里不能 reintroduce 变体）
-_debug*.py
-_diag*.py
-_check*.py
-_verify*.py
-_patch*.py
-*_debug*.py
-*_diag*.py
-*_verify*.py
-*_patch*.py
-debug*.py
-diag*.py
-check*.py
-verify*.py
-patch*.py
 
 # 日志和输出文件
 *.log
@@ -58,14 +46,7 @@ token.txt
 _cfg.json
 
 # 临时脚本
-quick_*.py
-simple_*.py
-reset_*.py
-fix_*.py
-migrate_*.py
-cleanup_*.py
-run_*.py
-upload_*.py
+# 仅排除下方「根目录临时文件」逐项列出的真实脚本；源码目录不按文件名通配排除。
 
 # 测试输出
 pytest_output.txt
@@ -173,7 +154,6 @@ logs/
 /execute_github_release.py
 /github_auto_release.py
 /github_operations.py
-/create_github_release.py
 /test_jwt_fix.py
 /test_chat_pipeline_basic.py
 /test_crystallized_simple.py
@@ -249,7 +229,6 @@ token.txt
 # 临时/生成/测试目录
 /code_patches/
 /embedding/
-/examples/
 /flow-kb-sdk/
 /generated_skills/
 /helm/
@@ -317,6 +296,8 @@ secret_*.json
 !Dockerfile
 !Makefile
 !LICENSE
+# 源码模块名命中 credentials* 但只负责凭据读写，不是敏感件本体。
+!/neurova/web_reach/credentials.py
 
 # ==================== 会话临时产物（不入库） ====================
 /_em.txt
@@ -338,9 +319,8 @@ secret_*.json
 /.tmp_kb_import.txt
 
 # ==================== 专项收纳目录豁免 ====================
-# scripts/diagnostics/ 统一收纳的临时定位/检查脚本需纳入版本控制，
-# 豁免上方未锚定的任意层级规则（check*.py / *_check*.py / *_patch*.py / fix_*.py 等）。
-!scripts/diagnostics/*.py
+# scripts/diagnostics/ 统一收纳的临时定位/检查脚本需纳入版本控制。
+# 上方已删除未锚定的脚本文件名通配，无需再为源码目录开例外。
 
 # ==================== 运行时/调试临时文件 ====================
 # SSE 抓包等诊断输出（youtube/webreach 调试残留）
@@ -436,9 +416,9 @@ thought-retriever-src/
 cumora/
 
 # ==================== 唯一测试根豁免（2026-09-22） ====================
-# 上方「调试和临时文件」「临时脚本」两节是**未锚定**的通配（check*.py /
-# verify*.py / *_patch*.py / debug*.py / run_*.py / fix_*.py …）。它们本意是排除
-# 开发机随手丢的临时脚本，却会连 `tests/` 下的合法测试文件一起吞掉。
+# 上方「调试和临时文件」「临时脚本」历史上的未锚定通配（check*.py /
+# verify*.py / *_patch*.py / debug*.py / run_*.py / fix_*.py …）已删除；
+# 它们本意是排除开发机随手丢的临时脚本，却会连正当源码与 tests/ 合法文件一起吞掉。
 #
 # 2026-09-22 实锤：新增守卫 tests/unit/desktop/test_rust_vendor_patch_guard.py
 # 命中 `*_patch*.py`，提交后仓库里根本没有该文件，而 scripts/ci/protected_tests.txt

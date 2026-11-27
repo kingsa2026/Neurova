@@ -67,7 +67,6 @@ def test_a05_shutdown_agent_closes_persist_db_store(tmp_path):
         asr_manager=None,
         conversation_buffer=None,
         cognitive_engine=None,
-        attachment_manager=None,
         memory_manager=None,
         memory_agent=SimpleNamespace(_persist_db_store=store),
     )

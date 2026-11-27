@@ -26,7 +26,7 @@ def test_large_corpus_uses_fts_and_skips_inmemory(repo, monkeypatch):
 
     def wrapped(*args, **kwargs):
         calls.append(1)
-        return original(*args, **kwargs)
+        return [dict(hit, score=1.0) for hit in original(*args, **kwargs)]
 
     monkeypatch.setattr(repo, "ftsSearch", wrapped)
     monkeypatch.setattr(
@@ -42,6 +42,9 @@ def test_large_corpus_uses_fts_and_skips_inmemory(repo, monkeypatch):
 
     assert calls, "大语料没有调用 FTS5"
     assert hits
+    fts_hit = next(hit for hit in hits if hit["title"] == "doc 0")
+    assert fts_hit["confidence_breakdown"]["fts"] > 0
+    assert fts_hit["confidence_breakdown"]["bm25"] == 0
 
 
 def test_fts_off_uses_inmemory(repo, monkeypatch):
@@ -50,13 +53,35 @@ def test_fts_off_uses_inmemory(repo, monkeypatch):
     called = []
     monkeypatch.setattr(
         hybrid_mod, "bm25_rank",
-        lambda *a, **k: called.append("bm25") or [],
+        lambda *a, **k: called.append("bm25") or [("doc-0", 2.0)],
     )
     monkeypatch.setattr(
         hybrid_mod, "full_text_search",
-        lambda *a, **k: called.append("fts") or [],
+        lambda *a, **k: called.append("fts") or [("doc-1", 3.0)],
     )
 
     hybrid_mod.hybrid_search_knowledge(repo, ALICE, "shared alpha", limit=5)
 
     assert called == ["bm25", "fts"]
+
+
+def test_inmemory_routes_do_not_borrow_each_others_scores(repo, monkeypatch):
+    ids = {item["title"]: item["knowledge_id"] for item in repo.visible_items(ALICE)}
+    monkeypatch.setenv("NEUROVA_KB_AUX_SCAN_LIMIT", "1")
+    monkeypatch.setenv("NEUROVA_KB_FTS_INDEX", "off")
+    monkeypatch.setattr(
+        hybrid_mod, "bm25_rank",
+        lambda *a, **k: [(ids["doc 0"], 2.0)],
+    )
+    monkeypatch.setattr(
+        hybrid_mod, "full_text_search",
+        lambda *a, **k: [(ids["doc 1"], 3.0)],
+    )
+
+    hits = hybrid_mod.hybrid_search_knowledge(repo, ALICE, "shared alpha", limit=5)
+
+    by_title = {hit["title"]: hit["confidence_breakdown"] for hit in hits}
+    assert by_title["doc 0"]["bm25"] == 2.0
+    assert by_title["doc 0"]["fts"] == 0.0
+    assert by_title["doc 1"]["fts"] == 3.0
+    assert by_title["doc 1"]["bm25"] == 0.0

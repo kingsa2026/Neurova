@@ -711,7 +711,7 @@ def productionAdmissionGate(store: Any, toolVersion: str = "foundation-gate") ->
     return KnowledgeAdmissionGate(
         store,
         resolver=SubjectResolver(),
-        conflictJudge=KnowledgeConflictJudge(store),
+        conflictJudge=KnowledgeConflictJudge(store, registry),
         lineageLedger=KnowledgeLineageLedger(store, toolVersion=toolVersion),
         credibility=ConfidenceAggregator(store),
         ontology=OntologyValidationReport(registry, shapes=shapes),

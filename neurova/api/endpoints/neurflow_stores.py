@@ -126,7 +126,7 @@ async def delete_store(store_id: str, current_user: Dict[str, Any] = Depends(get
 
 @router.post("/stores/{store_id}/test")
 async def test_store_connection(store_id: str, current_user: Dict[str, Any] = Depends(get_current_user_or_default)):
-    """连接测试（只读探针；仅限归属用户）"""
+    """连接测试（回写 status/last_error，TikTok 可回写 shop_cipher；仅限归属用户）"""
     from neurova.api.endpoints import neurflow_api as api
 
     manager = api._get_store_manager()

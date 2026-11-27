@@ -22,6 +22,8 @@ import json
 from typing import Any, Dict, List, Optional
 
 from neurova.core.tenant_scope import resolve_tenant, tenant_sql_where
+from .knowledge_facts import KnowledgeFactStore
+from ..derivation_citation import conditionClassRouteOn
 
 _UTC = datetime.timezone.utc
 _MIN_LABEL_CHARS = 2
@@ -110,16 +112,17 @@ class TemporalFactReader:
         # 时刻的说法照样此刻进上下文——`valid_from` 此前恒 NULL 所以这条上界一直空转，
         # 与"写入端不落库"是同一个断点的两端。
         effective = "COALESCE(NULLIF(valid_from, ''), recorded_at)"
+        currentClause, currentParams = KnowledgeFactStore.currentFactWhere(now=now)
         clauses = [
             "subject_key IN (%s)" % placeholders,
-            "status = 'active'",
+            currentClause,
             "record_kind = 'triple'",
             "%s >= ?" % effective,
-            "%s <= ?" % effective,
-            "(valid_until IS NULL OR valid_until = '' OR valid_until > ?)",
         ]
-        params: List[Any] = list(keys) + [windowStart.isoformat(), now.isoformat(),
-                                          now.isoformat()]
+        params: List[Any] = list(keys) + [*currentParams, windowStart.isoformat()]
+        ledger = getattr(self._store, "_derivationLedger", None)
+        if not conditionClassRouteOn() and ledger is not None:
+            clauses.append(ledger.derivedExclusionClause("knowledge_facts"))
         if self._agentId:
             clauses.insert(0, "agent_id = ?")
             params = [self._agentId] + params

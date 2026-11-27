@@ -8,8 +8,8 @@ from neurova.core.logger import get_logger
 from neurova.llm.interfaces.provider_interface import (
     LLMAbstractProvider,
     ProviderConfig,
-    ProviderType,
 )
+from neurova.llm.providers.types import ProviderType
 from neurova.llm.adapters.openai_adapter import OpenAIAdapter
 
 logger = get_logger(__name__)
@@ -98,8 +98,8 @@ class ProviderRegistry:
             return [
                 {
                     "type": pt.value,
-                    "registered": True,
-                    "class": self._providers[pt].__name__,
+                    "registered": pt in self._providers,
+                    "class": self._providers[pt].__name__ if pt in self._providers else None,
                 }
                 for pt in ProviderType
             ]

@@ -15,7 +15,7 @@ B04 的形状是"图有 26% 覆盖率但答题时完全不被利用"。这里**�
   `UNION ALL`，不去重——放任就是组合爆炸。
 
 与 012 的另一处差别是刻意的：这里不按新近窗口筛（多跳问的是结构关系，不是"最近说过"），
-但仍排除已失效说法。
+但只走当前有效窗口——尚未生效与已到期说法都不进入锚点段或递归段。
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from neurova.core.tenant_scope import resolve_tenant, tenant_sql_where
+from .knowledge_facts import KnowledgeFactStore
 from .temporal_facts import subjectsMentionedIn
 from ..derivation_citation import conditionClassRouteOn, derivationInfo
 
@@ -92,12 +93,14 @@ class GraphFactWalker:
         hops = min(max(int(maxHops if maxHops is not None else self._config.maxHops), 2),
                    _MAX_HOPS_CEILING)
         cap = max(int(limit if limit is not None else self._config.limit), 1)
+        moment = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(
+            datetime.timezone.utc)
         anchors = subjectsMentionedIn(
             self._store, query or "", self._agentId, tenantId
         )
         # W0-2 本体扩展（query_expander 先比后合退役并入，D6）：强判据优先，
         # 概念实例/关系主体只增补，不排挤既有锚。
-        expanded = self._expandedAnchors(query or "", tenantId)
+        expanded = self._expandedAnchors(query or "", tenantId, now=moment)
         if expanded:
             existing = set(anchors)
             anchors = anchors + [k for k in expanded if k not in existing]
@@ -107,8 +110,6 @@ class GraphFactWalker:
             seeded = bool(anchors)
         if not anchors:
             return []
-        moment = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(
-            datetime.timezone.utc)
         rows = self._walk(anchors, hops, cap, moment, tenantId,
                           allowedCategories=allowedCategories)
         # 翻主路态才给跳板挂溯源标注：观察态下推导行根本进不了 CTE（_walk 里排除），
@@ -139,7 +140,8 @@ class GraphFactWalker:
 
     # ── 内部 ──────────────────────────────────────────────────
 
-    def _expandedAnchors(self, query: str, tenantId: Optional[str]) -> List[str]:
+    def _expandedAnchors(self, query: str, tenantId: Optional[str],
+                         now: Optional[datetime.datetime] = None) -> List[str]:
         """本体级锚点扩展（W0-2：query_expander 先比后合退役，不可替代部分并入此处）。
 
         查询文本包含注册术语词形（term_id/label/别名，casefold）时：
@@ -216,10 +218,11 @@ class GraphFactWalker:
                        % ",".join("?" * len(children)))
                 params: List[Any] = list(children)
             elif kind == "relation":
+                currentClause, currentParams = KnowledgeFactStore.currentFactWhere(now=now)
                 sql = ("SELECT DISTINCT subject_key FROM knowledge_facts"
-                       " WHERE predicate_term_id = ? AND status = 'active'"
+                       " WHERE predicate_term_id = ? AND " + currentClause +
                        " AND record_kind = 'triple'")
-                params = [termId]
+                params = [termId, *currentParams]
             else:
                 continue
             if self._agentId:
@@ -281,17 +284,14 @@ class GraphFactWalker:
               now: datetime.datetime, tenantId: Optional[str] = None,
               allowedCategories: Optional[List[str]] = None) -> List[Any]:
         placeholders = ",".join("?" * len(anchors))
-        stamp = now.isoformat()
         # 部门分类白名单（specs/2026-11-07 批 E）：锚点段 f 与递归段 f2 同口径——
         # 走查不得"绕道"白名单外事实接出白名单内事实
         catValues: List[Any] = []
         if allowedCategories is not None:
             catValues = [str(c) for c in allowedCategories if str(c)]
             catClause = "category IN (%s)" % ",".join("?" * len(catValues)) if catValues else "1 = 0"
-        anchorClauses = ["f.status = 'active'", "f.record_kind = 'triple'",
-                         "(f.valid_until IS NULL OR f.valid_until = ''"
-                         " OR f.valid_until > ?)"]
-        anchorValues: List[Any] = [stamp]
+        anchorCurrent, anchorValues = KnowledgeFactStore.currentFactWhere("f", now)
+        anchorClauses = [anchorCurrent, "f.record_kind = 'triple'"]
         if allowedCategories is not None:
             anchorClauses.append("f.%s" % catClause)
             anchorValues.extend(catValues)
@@ -313,9 +313,9 @@ class GraphFactWalker:
             anchorClauses.append(ledger.derivedExclusionClause("f"))
         # 递归段不再按 agent 过滤事实本身：域已经由 s2.agent_id = w.agent_id 与
         # f2.agent_id = s2.agent_id 两道锁住；多写一遍只会让"谁约束谁"看不清。
-        headClause = ("f2.status = 'active' AND f2.record_kind = 'triple'"
-                      " AND (f2.valid_until IS NULL OR f2.valid_until = ''"
-                      " OR f2.valid_until > ?) AND f2.agent_id = s2.agent_id")
+        headCurrent, headValues = KnowledgeFactStore.currentFactWhere("f2", now)
+        headClause = (headCurrent + " AND f2.record_kind = 'triple'"
+                      " AND f2.agent_id = s2.agent_id")
         if tenantId is not None:
             headTenantClause, headTenantParams = tenant_sql_where(
                 str(tenantId or "default"), alias="f2")
@@ -362,7 +362,7 @@ class GraphFactWalker:
             " ORDER BY hop, (confidence IS NULL), confidence DESC, recorded_at DESC, fact_id"
             " LIMIT ?"
         ) % (" AND ".join(anchorClauses), placeholders, headClause)
-        params = anchorValues + anchors + [maxHops, stamp]
+        params = anchorValues + anchors + [maxHops, *headValues]
         if tenantId is not None:
             params.extend(headTenantParams)
         if allowedCategories is not None:

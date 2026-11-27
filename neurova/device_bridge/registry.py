@@ -62,8 +62,11 @@ class DeviceConnectionRegistry:
         logger.info("device bridge register: %s (user=%s)", pairingId, userId)
         return conn
 
-    def unregister(self, pairingId: str) -> None:
+    def unregister(self, pairingId: str, *, expected: Any = None) -> None:
         with self._lock:
+            current = self._connections.get(pairingId)
+            if current is None or (expected is not None and current.ledger_ws is not expected):
+                return
             self._connections.pop(pairingId, None)
 
     def updateHello(self, pairingId: str, *, platform: str = "",

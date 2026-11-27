@@ -26,7 +26,6 @@ neurova/llm/
 ├── provider_manager.py      # 服务商管理（元数据/发现/合并/隔离）
 ├── multi_model_client.py    # 多模型客户端（流式/异步）
 ├── llm_router.py            # LLM Router（请求类型检测 + 模型选择）
-├── config_resolver.py       # 配置解析
 ├── model_limits.py          # 模型限制
 └── providers/
     ├── base.py                 # Provider 客户端基类（BaseProvider :23）

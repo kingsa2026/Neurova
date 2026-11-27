@@ -240,8 +240,9 @@ async def runOntologyCheckGate(
     """三臂对照门禁（P1-1，仅管理员）：候选上线前在克隆副本里先演。
 
     臂1 基线 dry-run / 臂2 副本应用假设后对照 / 臂3 基线重放（确定性对照）。
-    候选出现「基线 pass、草稿 violation」倒退即 fail；只读，生产库零写入。
-    判据单一出处 `neurova/knowledge/ontology/pipeline.py::checkGate`。
+    候选出现「基线 pass、草稿 violation」倒退、写入被拒或 post-state 新增
+    violation 即 fail；只读，生产库零写入。判据单一出处
+    `neurova/knowledge/ontology/pipeline.py::checkGate`。
     """
     _requireAdmin(current_user)
     from neurova.knowledge.foundation import get_knowledge_fact_store

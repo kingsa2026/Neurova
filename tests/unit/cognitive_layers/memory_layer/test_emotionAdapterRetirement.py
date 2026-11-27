@@ -1,7 +1,7 @@
 """`emotion_adapter.py` 退役守卫（§6-368）。
 
 依据 `audit-reports/cognitive-layer-zero-reader-dossier-2026-10-20.md` Z5：该档是 8 个方法的
-纯转发门面，目标 `memory_layer/emotion.py` 的 `EmotionAnalyzer` 活着且在 api 与 tool_executor
+纯转发门面，目标 `memory_layer/emotion.py` 的 `MemoryEmotionAnalyzer` 活着且在 api 与 tool_executor
 两侧被直连；适配器净增能力为零，唯一"独有"的是 `_analyze_legacy` 玩具分支与一个
 ImportError 恒返 neutral 的假成功兜底（教义第 2 条点名的形态）。判定＝删。
 
@@ -51,10 +51,10 @@ def test_noImporterRemains():
 
 def test_liveAnalyzerStillExposesTheForwardedSurface():
     """正控：删的是适配器，不是能力。转发目标必须还在、八方法齐全。"""
-    from neurova.cognitive_layers.memory_layer.emotion import EmotionAnalyzer
-    missing = [name for name in FORWARDED if not hasattr(EmotionAnalyzer, name)]
+    from neurova.cognitive_layers.memory_layer.emotion import MemoryEmotionAnalyzer
+    missing = [name for name in FORWARDED if not hasattr(MemoryEmotionAnalyzer, name)]
     assert not missing, (
-        f"EmotionAnalyzer 少了方法 {missing}——刚退役的适配器曾是它们唯一的转发入口，"
+        f"MemoryEmotionAnalyzer 少了方法 {missing}——刚退役的适配器曾是它们唯一的转发入口，"
         "先确认是删错了能力还是目标本身也变了")
 
 
@@ -66,7 +66,7 @@ def test_activeDocsNoLongerClaimTheAdapter():
         if "emotion_adapter" in text or "EmotionAnalyzerAdapter" in text:
             offenders.append(rel)
     assert not offenders, (
-        f"活跃层文档仍在指向已退役的适配器：{offenders}——改成 EmotionAnalyzer 的落点，"
+        f"活跃层文档仍在指向已退役的适配器：{offenders}——改成 MemoryEmotionAnalyzer 的落点，"
         "历史引用留在 04-plans／11-legacy")
 
 

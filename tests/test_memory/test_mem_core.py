@@ -105,7 +105,6 @@ class TestMemCoreMemoryModules:
     @patch('neurova.cognitive_layers.memory_layer.muscle_memory.MuscleMemory')
     @patch('neurova.cognitive_layers.meta_cognition_layer.question_queue.QuestionQueueManager')
     @patch('neurova.cognitive_layers.meta_cognition_layer.growth_log.GrowthLogManager')
-    @patch('neurova.cognitive_layers.memory_layer.attachment_manager.AttachmentManager')
     @patch('neurova.cognitive_layers.memory_layer.modules.buffer_module.BufferModule')
     @patch('neurova.cognitive_layers.memory_layer.conversation_buffer.ConversationMemoryBuffer')
     @patch('neurova.cognitive_layers.memory_layer.neurova_recall.NeurovaRecallEngine')
@@ -121,7 +120,6 @@ class TestMemCoreMemoryModules:
         mock_agent.config.enable_memory = True
         mock_agent.config.db_path = "/tmp/test.db"
         mock_agent.config.workspace_path = "/tmp/workspace"
-        mock_agent.config.attachment_dir = "/tmp/attachments"
 
         mock_memory_manager = Mock()
         mock_memory_manager.storage = Mock()
@@ -139,7 +137,6 @@ class TestMemCoreMemoryModules:
     @patch('neurova.cognitive_layers.memory_layer.muscle_memory.MuscleMemory')
     @patch('neurova.cognitive_layers.meta_cognition_layer.question_queue.QuestionQueueManager')
     @patch('neurova.cognitive_layers.meta_cognition_layer.growth_log.GrowthLogManager')
-    @patch('neurova.cognitive_layers.memory_layer.attachment_manager.AttachmentManager')
     @patch('neurova.cognitive_layers.memory_layer.modules.buffer_module.BufferModule')
     @patch('neurova.cognitive_layers.memory_layer.conversation_buffer.ConversationMemoryBuffer')
     @patch('neurova.cognitive_layers.memory_layer.neurova_recall.NeurovaRecallEngine')
@@ -155,7 +152,6 @@ class TestMemCoreMemoryModules:
         mock_agent.config.enable_memory = True
         mock_agent.config.db_path = "/tmp/test.db"
         mock_agent.config.workspace_path = "/tmp/workspace"
-        mock_agent.config.attachment_dir = "/tmp/attachments"
 
         mock_memory_manager = Mock()
         mock_storage = Mock()
@@ -277,7 +273,7 @@ class TestMemCoreIntegration:
             'memory_manager', 'storage', 'temperature_engine',
             'recall_engine', 'conversation_buffer',
             'buffer_module', 'growth_log_manager', 'question_queue_manager',
-            'tool_memory', 'attachment_manager'
+            'tool_memory'
         ]
         
         for attr in required_attrs:

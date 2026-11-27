@@ -98,7 +98,7 @@ _EMOTION_KEYWORDS = {
 }
 
 
-class EmotionAnalyzer:
+class MemoryEmotionAnalyzer:
     """
     情感分析器
 
@@ -117,7 +117,7 @@ class EmotionAnalyzer:
         self._use_legacy = use_legacy
         self._compiled_patterns: Dict[str, List[re.Pattern]] = {}
         self._compile_patterns()
-        logger.info("EmotionAnalyzer 初始化完成")
+        logger.info("MemoryEmotionAnalyzer 初始化完成")
 
     def _compile_patterns(self):
         """预编译情感关键词正则表达式"""
@@ -420,11 +420,11 @@ class EmotionAnalyzer:
 
 
 # 全局单例
-_emotion_analyzer: Optional[EmotionAnalyzer] = None
+_emotion_analyzer: Optional[MemoryEmotionAnalyzer] = None
 _analyzer_lock = threading.Lock()
 
 
-def get_emotion_analyzer_instance() -> EmotionAnalyzer:
+def get_emotion_analyzer_instance() -> MemoryEmotionAnalyzer:
     """
     获取情感分析器单例实例
 
@@ -435,8 +435,8 @@ def get_emotion_analyzer_instance() -> EmotionAnalyzer:
     if _emotion_analyzer is None:
         with _analyzer_lock:
             if _emotion_analyzer is None:
-                _emotion_analyzer = EmotionAnalyzer()
-                logger.debug("创建新的 EmotionAnalyzer 单例")
+                _emotion_analyzer = MemoryEmotionAnalyzer()
+                logger.debug("创建新的 MemoryEmotionAnalyzer 单例")
 
     return _emotion_analyzer
 
@@ -449,4 +449,4 @@ def reset_emotion_analyzer() -> None:
 
     with _analyzer_lock:
         _emotion_analyzer = None
-        logger.debug("重置 EmotionAnalyzer 单例")
+        logger.debug("重置 MemoryEmotionAnalyzer 单例")

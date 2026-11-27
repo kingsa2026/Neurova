@@ -450,7 +450,8 @@ def _issueConnectTicket(user_id: str, pairing_id: str, token_epoch: int) -> str:
       且只经 header／子协议传输（§4.2）。
     签名覆盖里带上在册 `token_epoch`，撤销后旧票一起失效（§4.8）。
     """
-    message = f"{user_id}:{pairing_id}:{token_epoch}:{int(time.time())}"
+    nonce = secrets.token_hex(8)
+    message = f"{user_id}:{pairing_id}:{token_epoch}:{int(time.time())}:{nonce}"
     signature = hmac.new(_get_ws_secret().encode(), message.encode(), hashlib.sha256).hexdigest()
     ticket = f"{message}:{signature}"
     _outstanding_tickets[ticket] = time.time() + protocol.CONNECT_TICKET_TTL_SECONDS
@@ -496,11 +497,12 @@ def _verify_ws_token(token: str) -> Optional[Dict[str, str]]:
     """
     try:
         parts = token.split(":")
-        if len(parts) != 5:
+        if len(parts) not in (5, 6):
             return None
 
-        user_id, pairing_id, epoch, timestamp, signature = parts
-        message = f"{user_id}:{pairing_id}:{epoch}:{timestamp}"
+        user_id, pairing_id, epoch, timestamp = parts[:4]
+        signature = parts[-1]
+        message = ":".join(parts[:-1])
         expected_signature = hmac.new(_get_ws_secret().encode(), message.encode(), hashlib.sha256).hexdigest()
 
         if not hmac.compare_digest(signature, expected_signature):
@@ -821,8 +823,10 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
     本函数的测试可不传）。
     """
     content = (data.get("content") or "").strip()
+    requestedSessionId = str(data.get("session_id") or "").strip()
     if not content:
-        await ws.send_json({"type": "error", "code": "empty_content", "message": "内容不能为空"})
+        await ws.send_json({"type": "error", "code": "empty_content",
+                            "session_id": requestedSessionId, "message": "内容不能为空"})
         return
 
     # 移动端对齐 PC 对话页（console.py ChatRequest 同族）：回合控制四字段。
@@ -835,6 +839,7 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
     if thinkingEffort and thinkingEffort not in _MOBILE_THINKING_EFFORTS:
         await ws.send_json({
             "type": "error", "code": "invalid_thinking_effort",
+            "session_id": requestedSessionId,
             "message": f"thinking_effort 取值非法：{thinkingEffort}（合法域 light/standard/deep）",
         })
         return
@@ -844,6 +849,7 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
         if permissionMode not in VALID_MODE_VALUES:
             await ws.send_json({
                 "type": "error", "code": "invalid_permission_mode",
+                "session_id": requestedSessionId,
                 "message": f"permission_mode 取值非法：{permissionMode}"
                            f"（合法域 {sorted(VALID_MODE_VALUES)}）",
             })
@@ -854,6 +860,7 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
         if taskProfile not in VALID_PROFILES:
             await ws.send_json({
                 "type": "error", "code": "invalid_task_profile",
+                "session_id": requestedSessionId,
                 "message": f"task_profile 取值非法：{taskProfile}（合法域 {list(VALID_PROFILES)}）",
             })
             return
@@ -867,6 +874,7 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
 
     if agent_id and not agent_exists(agent_id):
         await ws.send_json({"type": "error", "code": "agent_not_found",
+                             "session_id": requestedSessionId,
                              "message": f"Agent '{agent_id}' 不存在"})
         return
 
@@ -903,6 +911,7 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
         await ws.send_json({
             "type": "error",
             "code": "agent_lookup_failed" if agentLookupFailed else "agent_not_found",
+            "session_id": session_id,
             "message": (f"Agent '{agent_id}' 查询失败（详见服务端日志）" if agentLookupFailed
                         else f"Agent '{agent_id}' 不存在"),
         })
@@ -922,6 +931,7 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
             return
         elif etype == "error":
             await ws.send_json({"type": "error", "code": "queue_timeout",
+                                "session_id": session_id,
                                 "message": event.get("message")})
             return
         elif etype == "done":
@@ -1131,7 +1141,8 @@ async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
         # 与 `Agent.chat_stream` 的真签名对不上）就这样把整个移动端对话面挂了四个月而无人可见。
         # 客户端事件契约保持不变（`chat_failed`），但根因必须留在日志里。
         logger.exception("mobile chat:send 回合失败 agent=%s session=%s", agent_id, session_id)
-        await ws.send_json({"type": "error", "code": "chat_failed", "message": str(e)})
+        await ws.send_json({"type": "error", "code": "chat_failed",
+                            "session_id": session_id, "message": str(e)})
     finally:
         # 资源修复 #3: 取消标记随流终态（done/cancelled/error）回收
         _cancelled_sessions.pop(session_id, None)
@@ -1985,8 +1996,81 @@ async def _handle_device_hello(pairing_id: str, message: dict, ledgerWs) -> None
     # 新 seq，不会二次执行；已收敛的命令不在 running 集，天然不重发。
     from neurova.api.mobile_ws_ledger import getMobileWsLedger
 
-    for pendingFrame in getMobileWsLedger().runningCommands(pairing_id):
+    ledger = getMobileWsLedger()
+    for pendingFrame in ledger.runningCommands(pairing_id):
+        taskId = str(pendingFrame.get("task_id") or "")
+        if ledger.taskWindow(pairing_id, taskId) is None:
+            ledger.settleRunningCommand(str(pendingFrame.get("command_id") or ""), pairing_id, {
+                "type": protocol.FRAME_DEVICE_RESULT,
+                "command_id": str(pendingFrame.get("command_id") or ""),
+                "status": "error",
+                "error": {"code": protocol.DEVICE_ERROR_TASK_WINDOW_EXPIRED,
+                          "message": "任务窗口已到期，离线命令未执行"},
+            })
+            continue
         await ledgerWs.send_json(pendingFrame)
+
+
+async def _handle_device_task(pairing_id: str, message: dict, ledgerWs,
+                              epoch: Optional[int] = None) -> None:
+    """显式任务窗口：start/renew/end/cancel 均以 task_id 为归属，单任务互斥。"""
+    from neurova.api.mobile_ws_ledger import getMobileWsLedger
+    from neurova.tunnel import protocol
+
+    action = str(message.get("action") or "")
+    taskId = str(message.get("task_id") or "")
+    ledger = getMobileWsLedger()
+    try:
+        if action == "start":
+            window = ledger.startTaskWindow(
+                pairing_id, taskId, app_state=str(message.get("app_state") or "foreground"),
+                epoch=epoch or 0)
+        elif action == "renew":
+            window = ledger.renewTaskWindow(
+                pairing_id, taskId, app_state=str(message.get("app_state") or "foreground"),
+                epoch=epoch)
+        elif action in ("end", "cancel"):
+            if not ledger.endTaskWindow(pairing_id, taskId, epoch=epoch):
+                raise ValueError("task_window_mismatch")
+            window = {"task_id": taskId, "expires_at": 0.0}
+        else:
+            raise ValueError("invalid_task_action")
+    except ValueError as exc:
+        await ledgerWs.send_json({
+            "type": protocol.FRAME_DEVICE_TASK,
+            "action": action, "task_id": taskId, "status": "error",
+            "code": str(exc), "message": str(exc),
+        })
+        return
+    await ledgerWs.send_json({
+        "type": protocol.FRAME_DEVICE_TASK,
+        "action": action, "task_id": taskId,
+        "status": "ended" if action in ("end", "cancel") else "active",
+        "expires_at": window["expires_at"],
+    })
+
+
+async def _handle_scope_change(pairing_id: str, message: dict, wsLedger, websocket) -> bool:
+    """scope 变更即时登记；返回 False 表示已发出诚实拒绝，调用方应继续收帧。"""
+    from neurova.api.connection_runtime import parseSubscriptionScope
+
+    try:
+        scope = parseSubscriptionScope(message.get("scope"), str(message.get("scope_key") or ""))
+    except ValueError as exc:
+        await websocket.send_json({
+            "type": "error", "code": "invalid_scope", "status": 400,
+            "session_id": str(message.get("session_id") or ""), "message": str(exc),
+        })
+        return False
+    if not _scopeKeyAdmissible(wsLedger, pairing_id, scope):
+        await websocket.send_json({
+            "type": "error", "code": "scope_forbidden", "status": 403,
+            "session_id": str(message.get("session_id") or ""),
+            "message": "订阅范围与当前设备归属不符，已拒绝",
+        })
+        return False
+    wsLedger.subscribe(pairing_id, scope.scope, scope.scope_key)
+    return True
 
 
 def _ticketFromHandshake(websocket: WebSocket) -> Optional[str]:
@@ -2110,6 +2194,15 @@ async def mobile_websocket(websocket: WebSocket):
                 })
                 continue
 
+            # scope 变更不等重连：即时通知服务端并登记；重连时客户端会重发。
+            if message.get("type") == "sync_scope":
+                await _handle_scope_change(pairing_id, message, wsLedger, websocket)
+                continue
+
+            if message.get("type") == protocol.FRAME_DEVICE_TASK:
+                await _handle_device_task(pairing_id, message, ledgerWs, connEpoch)
+                continue
+
             # 远程驾驶（项 1）：断线重连后按游标补发缺失帧（带 replay 标记）。
             # D3：续传模式经 subscription_resume 单源决策——游标过旧（区间内帧
             # 已被老化）或非法/预算耗尽时，诚实下发 sync_snapshot_required 要求
@@ -2160,6 +2253,18 @@ async def mobile_websocket(websocket: WebSocket):
                     continue
                 for row in wsLedger.replaySince(pairing_id, resumeCursor, scope=replayScope):
                     replayFrame = dict(row["frame"])
+                    if replayFrame.get("type") == protocol.FRAME_DEVICE_EXECUTE:
+                        taskId = str(replayFrame.get("task_id") or "")
+                        if wsLedger.taskWindow(pairing_id, taskId) is None:
+                            wsLedger.settleRunningCommand(
+                                str(replayFrame.get("command_id") or ""), pairing_id, {
+                                    "type": protocol.FRAME_DEVICE_RESULT,
+                                    "command_id": str(replayFrame.get("command_id") or ""),
+                                    "status": "error",
+                                    "error": {"code": protocol.DEVICE_ERROR_TASK_WINDOW_EXPIRED,
+                                              "message": "任务窗口已到期，重放命令未执行"},
+                                })
+                            continue
                     replayFrame["seq"] = row["seq"]
                     replayFrame["replay"] = True
                     await websocket.send_json(replayFrame)
@@ -2181,6 +2286,7 @@ async def mobile_websocket(websocket: WebSocket):
                     await ledgerWs.send_json({
                         "type": "error",
                         "code": "chat_busy",
+                        "session_id": str(message.get("session_id") or ""),
                         "message": "当前连接已有回复进行中，请等待完成或先取消",
                     })
                     continue
@@ -2273,12 +2379,19 @@ async def mobile_websocket(websocket: WebSocket):
         # 清理连接：`_ws_connections` 弹出即"不再在线"——在线读数是叠出来的，
         # 没有第二处 `is_online` 需要回写（原实现两处写同一件事，正是漂移的温床）。
         manager.disconnect(connection_id, user_id)
-        _ws_connections.pop(pairing_id, None)
+        if _ws_connections.get(pairing_id) is websocket:
+            _ws_connections.pop(pairing_id, None)
         getDeviceRegistry().recordActivity(pairing_id)
         # D3：订阅是连接级内存态（账本单源语义"断线重连由客户端重新订阅"）——
         # 连接关闭即注销；未登记过的设备此处是空操作，行为不变。
-        wsLedger.unsubscribe(pairing_id)
+        if wsLedger.currentEpoch(pairing_id) == connEpoch:
+            wsLedger.unsubscribe(pairing_id)
+            # 显式任务窗口随连接解除，重连必须由用户动作重新开始，绝不自动续权。
+            currentWindow = wsLedger.taskWindow(pairing_id, epoch=connEpoch)
+            if currentWindow is not None:
+                wsLedger.endTaskWindow(
+                    pairing_id, str(currentWindow["task_id"]), epoch=connEpoch)
         # 设备桥：在线登记同步注销（registry 是 online 的唯一判定处）
         from neurova.device_bridge.registry import getDeviceBridgeRegistry
 
-        getDeviceBridgeRegistry().unregister(pairing_id)
+        getDeviceBridgeRegistry().unregister(pairing_id, expected=ledgerWs)

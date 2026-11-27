@@ -212,7 +212,7 @@ class TestConsoleLiveStreaming:
                     # 给 SSE 消费端一个排空队列的机会窗口
                     import asyncio
 
-                    await asyncio.sleep(0.05)
+                    await asyncio.sleep(0.2)
                     order.append("chat_returned")
                     return {"text": "完整回答", "reasoning": "全部思考", "tool_messages": []}
 
@@ -232,7 +232,10 @@ class TestConsoleLiveStreaming:
             async for chunk in resp.body_iterator:
                 line = chunk.decode() if isinstance(chunk, bytes) else str(chunk)
                 if line.startswith("data: "):
-                    events.append(json.loads(line[6:]))
+                    event = json.loads(line[6:])
+                    events.append(event)
+                    if event.get("type") in {"reasoning", "chunk"}:
+                        order.append(f"consumed:{event['type']}")
 
         types = [e.get("type") for e in events]
         assert "reasoning" in types
@@ -241,7 +244,8 @@ class TestConsoleLiveStreaming:
         assert types[-1] == "done"
         assert events[-1]["session_id"] == "sess-live"
         # 真流式：事件在 chat 返回前已被消费端拿到
-        assert order.index("emitted") < order.index("chat_returned") or True  # 时序宽松断言
+        assert order.index("consumed:reasoning") < order.index("chat_returned"), order
+        assert order.index("consumed:chunk") < order.index("chat_returned"), order
 
 
 class TestConsoleFlushDedup:

@@ -156,7 +156,6 @@ def test_keyResolverInjectionCustomPath():
         key_resolver=lambda ref: "/injected/key",
     )
     assert command[command.index("-i") + 1] == "/injected/key"
-    assert command[command.index("-i") - 1] == "SOME_REF" or True  # key_ref 名不落命令
     assert "SOME_REF" not in command
 
 

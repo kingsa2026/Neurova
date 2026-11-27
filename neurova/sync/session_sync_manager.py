@@ -525,7 +525,9 @@ class SessionSyncManager:
         with self._lock:
             # 已注册: 返回现有 session (幂等)
             existing = self._sessions.get(session_id)
-            if existing and existing.status == "active":
+            if existing is not None:
+                if existing.status != "active":
+                    raise ValueError(f"Session {session_id} is {existing.status}")
                 # 更新外部 ID 映射
                 if external_id:
                     self._external_mapping[external_id] = session_id
@@ -610,6 +612,36 @@ class SessionSyncManager:
             logger.info("Ended session: %s", session_id)
             return True
 
+    def pause_session(self, session_id: str) -> bool:
+        """暂停会话：只有 active 可暂停；状态事件进历史，由 API 层统一广播。"""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session or session.status != "active":
+                return False
+            session.status = "paused"
+            session.add_event(SessionEvent(
+                event_type=EventType.SESSION_PAUSED,
+                session_id=session_id,
+                source_channel="system",
+            ))
+            logger.info("Paused session: %s", session_id)
+            return True
+
+    def resume_session(self, session_id: str) -> bool:
+        """恢复会话：只有 paused 可恢复；ended 是终态，不允许复活。"""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session or session.status != "paused":
+                return False
+            session.status = "active"
+            session.add_event(SessionEvent(
+                event_type=EventType.SESSION_RESUMED,
+                session_id=session_id,
+                source_channel="system",
+            ))
+            logger.info("Resumed session: %s", session_id)
+            return True
+
     def list_sessions(
         self, user_id: Optional[str] = None, agent_id: Optional[str] = None, status: Optional[str] = None
     ) -> List[UnifiedSession]:
@@ -649,6 +681,9 @@ class SessionSyncManager:
             session = self._sessions.get(session_id)
             if not session:
                 logger.warning("Session not found: %s", session_id)
+                return None
+            if session.status != "active":
+                logger.warning("Session is not active: %s (%s)", session_id, session.status)
                 return None
 
             conn = session.register_channel(channel_type, send_callback, metadata)
@@ -711,7 +746,14 @@ class SessionSyncManager:
     # 事件广播
     # -----------------------------------------------------------------------
 
-    async def broadcast_event(self, session_id: str, event: SessionEvent, exclude_channel: Optional[str] = None) -> int:
+    async def broadcast_event(
+        self,
+        session_id: str,
+        event: SessionEvent,
+        exclude_channel: Optional[str] = None,
+        *,
+        record: bool = True,
+    ) -> int:
         """
         广播事件到所有活跃渠道
 
@@ -743,8 +785,9 @@ class SessionSyncManager:
             if _serialize_event_safe(event) is None:
                 return 0
 
-            # 保存到历史
-            session.add_event(event)
+            # 状态事件由 pause/resume/end 先盖章；广播时只发送，不重复入历史。
+            if record:
+                session.add_event(event)
 
             # S6: 复制 channels 到局部变量 (锁内),后续迭代在锁外
             channels_snapshot = list(session.active_channels.items())

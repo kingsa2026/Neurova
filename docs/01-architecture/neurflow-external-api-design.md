@@ -62,7 +62,8 @@
 | **ComfyUIClient 模式** | `neurova/collaboration/neurflow/comfyui_client.py` | `is_available()` + `execute_node()`，httpx 可选依赖 | 外部 API 客户端的**范本**（网络异常隔离为 failed） |
 | ~~**MediaManager** 媒体资产~~ | ~~`neurova/media/manager.py`~~（**已退役 2026-10-11，台账 §6-139**：生产零消费者；它的 sha256 校验位已并入 `api/endpoints/media.py` 的 `media_index.json`，产物登记的现役落点是端点那份） | `get_media_manager()`，记录 media_id/media_type/checksum | 保存生成图片/视频产物并登记 |
 | **TTSManager** | `neurova/tts/manager.py` | `get_tts_manager()` → `synthesize()` | tts 节点已真实接入 |
-| **ConfigManager** | `neurova/core/config.py` | 环境变量加载（`NEUROVA_*` 前缀） | 读取 host/base_url 等非敏感配置 |
+| 环境变量读取 | `neurova/core/config.py` | `get/get_bool/get_int/get_list` | 读取 host/base_url 等非敏感配置；测试专用 `ConfigManager` 已退役 |
+| Commerce 客户端 | `neurova/collaboration/neurflow/external_api.py` | `CommercePlatformClient()` | 六个生产节点直接构造；零调用单例工厂已退役 |
 
 ---
 
@@ -124,9 +125,9 @@ def reset_image_gen_client(): ...
 | 配置项 | SecretStore Key | 说明 |
 |--------|----------------|------|
 | 图像生成 | `NEUROVA_IMAGE_API_KEY` | OpenAI / 可灵 / 通义万相等图像生成 Key |
-| 图像服务地址 | `NEUROVA_IMAGE_API_BASE`（ConfigManager） | 可选，默认官方端点 |
+| 图像服务地址 | `NEUROVA_IMAGE_API_BASE`（环境变量助手 `get`） | 可选，默认官方端点 |
 | 视频生成 | `NEUROVA_VIDEO_API_KEY` | 可灵 / 即梦 / Runway 等视频生成 Key |
-| 视频服务地址 | `NEUROVA_VIDEO_API_BASE`（ConfigManager） | 可选 |
+| 视频服务地址 | `NEUROVA_VIDEO_API_BASE`（环境变量助手 `get`） | 可选 |
 | 抖音发布 | `NEUROVA_DOUYIN_ACCESS_TOKEN` | 抖音开放平台 access_token |
 | 快手发布 | `NEUROVA_KUAISHOU_ACCESS_TOKEN` | 快手开放平台 access_token |
 | 亚马逊电商 | `NEUROVA_AMAZON_SP_REFRESH_TOKEN` + `NEUROVA_AMAZON_SP_CLIENT_ID` + `NEUROVA_AMAZON_SP_CLIENT_SECRET` | Amazon SP-API（LWA 授权三件套） |

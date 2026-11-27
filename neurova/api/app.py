@@ -1622,6 +1622,19 @@ async def _on_shutdown(app_state: AppState) -> None:
         except Exception as e:
             logger.warning("Channel manager stop error: %s", e)
 
+    # 插件统一停机：真实 stop/destroy、摘活路由与模块缓存，不能只随进程退出。
+    try:
+        from neurova.plugins import plugin_manager as plugin_manager_module
+
+        if plugin_manager_module._global_plugin_manager is not None:
+            await asyncio.wait_for(
+                plugin_manager_module._global_plugin_manager.shutdown(),
+                timeout=AGENT_SHUTDOWN_TIMEOUT,
+            )
+            logger.info("Plugin manager stopped")
+    except Exception as _pluginStopErr:  # noqa: BLE001 - 关停路径不互相牵连
+        logger.warning("Plugin manager stop error: %s", _pluginStopErr)
+
     # ShutdownGuard 优雅关停（K2 启动接线，与启动侧 prepare_startup 成对）：
     # 刷新全部 Agent 对话缓冲到持久存储 + 摘除 sentinel（下次启动视为干净
     # 退出，不触发崩溃恢复）。必须先于 agent.shutdown()——缓冲还活着才刷得出。

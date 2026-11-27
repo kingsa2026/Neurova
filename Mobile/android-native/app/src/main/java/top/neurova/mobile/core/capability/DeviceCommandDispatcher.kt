@@ -1,6 +1,7 @@
 package top.neurova.mobile.core.capability
 
 import kotlinx.serialization.json.JsonObject
+import top.neurova.mobile.core.accessibility.ExecutorGate
 import top.neurova.mobile.core.protocol.DeviceBridgeEvents
 import top.neurova.mobile.core.protocol.DeviceCommand
 
@@ -19,13 +20,17 @@ class DeviceCommandDispatcher(
     private val executors: Map<String, DeviceActionExecutor>,
     private val appStateProvider: () -> String = { "foreground" },
     private val dedupCapacity: Int = DEFAULT_DEDUP_CAPACITY,
+    private val gate: ExecutorGate = ExecutorGate(),
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
 
     constructor(
         executors: List<DeviceActionExecutor>,
         appStateProvider: () -> String = { "foreground" },
         dedupCapacity: Int = DEFAULT_DEDUP_CAPACITY,
-    ) : this(executors.associateBy { it.action }, appStateProvider, dedupCapacity)
+        gate: ExecutorGate = ExecutorGate(),
+        clock: () -> Long = System::currentTimeMillis,
+    ) : this(executors.associateBy { it.action }, appStateProvider, dedupCapacity, gate, clock)
 
     /** 已收敛命令的结果缓存（command_id → result 帧）：重连重放时原样回执 */
     private val settled = object : LinkedHashMap<String, JsonObject>(16, 0.75f, true) {
@@ -63,6 +68,19 @@ class DeviceCommandDispatcher(
     }
 
     private fun executeNow(command: DeviceCommand): JsonObject {
+        if (command.taskId.isBlank() || command.windowExpiresAt <= clock()) {
+            return DeviceBridgeEvents.buildResult(
+                command.commandId, "error", JsonObject(emptyMap()),
+                errorPayload("task_window_required", "命令缺少有效 task_id/窗口到期时间"),
+            )
+        }
+        if (!gate.isArmed(command.taskId)) {
+            return DeviceBridgeEvents.buildResult(
+                command.commandId, "error", JsonObject(emptyMap()),
+                errorPayload("accessibility_disarmed", "显式任务窗口未武装或已解除"),
+            )
+        }
+        gate.onActivity(command.taskId)
         val appState = appStateProvider().ifEmpty { "foreground" }
         if (appState != "foreground" && command.action in DeviceCapabilities.BACKGROUND_UNSAFE) {
             return DeviceBridgeEvents.buildResult(

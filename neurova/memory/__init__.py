@@ -59,7 +59,7 @@ from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
 from neurova.cognitive_layers.memory_layer.models import LifecycleStage, MemoryCategory, MemoryType
 
-from neurova.cognitive_layers.memory_layer.emotion import EmotionAnalyzer
+from neurova.cognitive_layers.memory_layer.emotion import MemoryEmotionAnalyzer
 
 try:
     from neurova.cognitive_layers.emotion_context_layer.emotion import (
@@ -107,7 +107,7 @@ __all__ = [
     "MemoryCategory",
     "MemoryType",
     "LifecycleStage",
-    "EmotionAnalyzer",
+    "MemoryEmotionAnalyzer",
     "EMOTION_KEYWORDS",
     "EMOTION_WEIGHTS",
 ]

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
-from datetime import datetime, timedelta
+from datetime import datetime
 from collections import deque
 import threading
 
@@ -364,18 +364,21 @@ class BudgetManager:
             return percentage >= Decimal("100.00")
             
     def throttle_if_needed(self, scope: BudgetScope, identifier: str) -> bool:
-        """
-        Throttle requests if budget exceeded.
-        Returns True if throttling is active.
-        """
-        if self.is_over_budget(scope, identifier):
-            # Log throttling action
-            self._log_alert(
-                AlertLevel.EXCEEDED,
-                f"Throttling requests for {scope.value}:{identifier} - budget exceeded"
-            )
-            return True
-        return False
+        """仅当前生效窗口内的已注册预算可拦截；无预算或过期预算放行。"""
+        with self._lock:
+            key = f"{scope.value}:{identifier}"
+            budget = self._budgets.get(key)
+            if budget is None or not budget.is_active():
+                return False
+            if budget.amount <= 0:
+                return True
+            if not self.is_over_budget(scope, identifier):
+                return False
+        self._log_alert(
+            AlertLevel.EXCEEDED,
+            f"Throttling requests for {scope.value}:{identifier} - budget exceeded"
+        )
+        return True
 
 
 # ============================================================================
@@ -390,23 +393,31 @@ class BudgetService:
         self._initialized = False
         
     def initialize(self):
-        """Initialize budget system from database"""
-        if self._initialized:
-            return
-            
-        # TODO: Load budgets from llm_budgets table
-        # for row in db.query("SELECT * FROM llm_budgets WHERE active = true"):
-        #     config = BudgetConfig(
-        #         scope=BudgetScope(row['scope']),
-        #         identifier=row['identifier'],
-        #         amount=Decimal(str(row['amount'])),
-        #         period_start=row['period_start'],
-        #         period_end=row['period_end'],
-        #     )
-        #     self.manager.register_budget(config)
-            
+        """预算由管理面在运行期注册；无第二份持久化配置源。"""
         self._initialized = True
         
+    def check_llm_call_allowed(
+        self,
+        agent_id: str,
+        provider: str,
+        model: str,
+    ) -> Optional[str]:
+        """返回拒绝原因；无身份、无生效预算或预算服务异常均放行。"""
+        if not str(agent_id or "").strip():
+            return None
+        checks = (
+            (BudgetScope.HOURLY, agent_id),
+            (BudgetScope.AGENT, agent_id),
+            (BudgetScope.DAILY, agent_id),
+            (BudgetScope.MONTHLY, agent_id),
+            (BudgetScope.PROVIDER, provider),
+            (BudgetScope.MODEL, model),
+        )
+        for scope, identifier in checks:
+            if self.manager.throttle_if_needed(scope, str(identifier or "")):
+                return f"预算超支：{scope.value}:{identifier} 已达上限"
+        return None
+
     def record_llm_call_cost(
         self,
         agent_id: str,
@@ -423,16 +434,21 @@ class BudgetService:
         `cost` 接受成本域的原始值（float 或 Decimal）：归一由账本入口
         `BudgetManager.record_usage`（`+=` 的发生处）承担，本方法不重复转一次。
         """
-        # Record against agent hourly budget
+        # 记录标准维度；自定义 agent/provider/model 周期预算按同一笔成本补记。
         self.manager.record_usage(BudgetScope.HOURLY, agent_id, cost)
-        
-        # Record against provider budget
         self.manager.record_usage(BudgetScope.PROVIDER, provider, cost)
-        
-        # Record against model budget
         self.manager.record_usage(BudgetScope.MODEL, model, cost)
-        
-        # TODO: Also record against custom budgets from database
+        with self.manager._lock:
+            customKeys = [
+                key for key, budget in self.manager._budgets.items()
+                if budget.is_active() and (
+                    (budget.scope in (BudgetScope.AGENT, BudgetScope.DAILY, BudgetScope.MONTHLY)
+                     and budget.identifier == agent_id)
+                )
+            ]
+        for key in customKeys:
+            scopeValue, identifier = key.split(":", 1)
+            self.manager.record_usage(BudgetScope(scopeValue), identifier, cost)
         
     def get_agent_budget_status(self, agent_id: str) -> Dict:
         """Get budget status for an agent"""

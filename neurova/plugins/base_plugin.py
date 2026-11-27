@@ -7,6 +7,7 @@ from __future__ import annotations
 """
 
 import logging
+import inspect
 import typing
 from abc import ABC, abstractmethod
 
@@ -171,13 +172,20 @@ class BasePlugin(StateValuesStore, ABC):
 
         return resolveEventBus(self._event_bus)
 
+    @staticmethod
+    async def _invokeHook(hook) -> None:
+        """兼容同步/异步作者钩子；返回值只有 awaitable 才 await。"""
+        outcome = hook()
+        if inspect.isawaitable(outcome):
+            await outcome
+
     async def initialize(self) -> None:
         """初始化插件"""
         if self._initialized:
             return
 
         self._logger.info("初始化插件: %s v%s", self.name, self.version)
-        await self.on_initialize()
+        await self._invokeHook(self.on_initialize)
         self._initialized = True
 
     async def start(self) -> None:
@@ -189,7 +197,7 @@ class BasePlugin(StateValuesStore, ABC):
             return
 
         self._logger.info("启动插件: %s", self.name)
-        await self.on_start()
+        await self._invokeHook(self.on_start)
         self._running = True
 
     async def stop(self) -> None:
@@ -198,7 +206,7 @@ class BasePlugin(StateValuesStore, ABC):
             return
 
         self._logger.info("停止插件: %s", self.name)
-        await self.on_stop()
+        await self._invokeHook(self.on_stop)
         self._running = False
 
     async def destroy(self) -> None:
@@ -207,7 +215,7 @@ class BasePlugin(StateValuesStore, ABC):
             await self.stop()
 
         self._logger.info("销毁插件: %s", self.name)
-        await self.on_destroy()
+        await self._invokeHook(self.on_destroy)
         self._initialized = False
 
     @abstractmethod

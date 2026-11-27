@@ -101,7 +101,6 @@ async def test_patch_facade_after_import_hits_actual_leaf_http(monkeypatch):
     ("video_gen", "video_gen", "_video_gen_instance", None),
     ("amazon_sp", "amazon_sp", "_amazon_sp_instance", None),
     ("amazon_ads", "amazon_ads", "_amazon_ads_instance", None),
-    ("commerce_platform", "commerce_platform", "_commerce_instance", None),
     ("publish_platform", "publish_platform", "_publish_instance", None),
     *[(name, "cn_platforms", "_cn_client_instances", key) for name, key in [
         ("taobao_top", "taobao"), ("jd_open", "jd"), ("pdd_open", "pdd"),

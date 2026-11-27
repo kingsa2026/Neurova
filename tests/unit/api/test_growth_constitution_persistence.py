@@ -88,6 +88,30 @@ class TestRulesPersistence:
         contents = [r["content"] for r in d["data"]["constitution"]]
         assert contents == ["诚实优先"]
 
+    def test_whole_replace_requires_explicit_body_and_preserves_rules(self, store):
+        """缺 body 不是清空请求：必须 422，且旧规则原样留在持久源。"""
+        c, tmp = store
+        c.post("/api/v1/growth/constitution/rules", params={"agent_id": "a1"},
+               json={"content": "不得因缺参丢失"})
+
+        missing = c.put("/api/v1/growth/constitution", params={"agent_id": "a1"})
+
+        assert missing.status_code == 422, missing.text
+        on_disk = json.loads((tmp / "constitution" / "a1.json").read_text(encoding="utf-8"))
+        assert [rule["content"] for rule in on_disk] == ["不得因缺参丢失"]
+
+    def test_whole_replace_accepts_explicit_empty_array(self, store):
+        """显式 [] 是完整替换契约，清空后持久源必须如实回读为空。"""
+        c, tmp = store
+        c.post("/api/v1/growth/constitution/rules", params={"agent_id": "a1"},
+               json={"content": "待清空"})
+
+        cleared = c.put("/api/v1/growth/constitution", params={"agent_id": "a1"}, json=[])
+
+        assert cleared.status_code == 200, cleared.text
+        assert cleared.json()["data"]["constitution"] == []
+        assert json.loads((tmp / "constitution" / "a1.json").read_text(encoding="utf-8")) == []
+
     def test_update_missing_rule_404(self, store):
         c, _ = store
         r = c.put("/api/v1/growth/constitution/rules/no-such",

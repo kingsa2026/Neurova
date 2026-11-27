@@ -51,6 +51,25 @@ class TestTheSecondAndThirdImplementationAreGone:
         assert offenders == [], "这些文件还在自己判 SPO 分歧: %s" % offenders
 
 
+    def test_tkgConstructsJudgeWithSharedTermRegistry(self, store, monkeypatch):
+        from neurova.knowledge.foundation.conflict_judge import KnowledgeConflictJudge
+        from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
+
+        captured = {}
+        originalInit = KnowledgeConflictJudge.__init__
+
+        def observeInit(judge, factStore, termRegistry=None):
+            captured["registry"] = termRegistry
+            originalInit(judge, factStore, termRegistry)
+
+        monkeypatch.setattr(KnowledgeConflictJudge, "__init__", observeInit)
+
+        TKGModule(factStore=store).detect_conflicts("神经瓦", "version", "1.0")
+
+        assert isinstance(captured["registry"], OntologyTermRegistry), \
+            "TKG 是第二个生产构造点，也必须注入同一术语注册表"
+
+
 class TestDetectionNowAnswersFromTheFoundation:
     def _seed(self, store):
         from neurova.knowledge.foundation.conflict_judge import KnowledgeConflictJudge

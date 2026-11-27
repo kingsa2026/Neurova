@@ -492,6 +492,7 @@ class SwarmManager:
         # P1-4（评测报告 G-4）：依赖未就绪的派生请求（subagent_id → 启动信息）。
         # 不占派生槽、不入 _runs；依赖终态结算时放行或判失败。status() 可查。
         self._blocked: Dict[str, Dict[str, Any]] = {}
+        self._blockedRetryHandles: Dict[str, asyncio.Handle] = {}
         # S4 结果候选板：member 结果先落候选（submitted），主侧 CAS 合入；
         # 冲突保留升级。M7（拍板乙）：NEUROVA_SWARM_CANDIDATE_DB 开启时整板落
         # SQLite（候选含正文与集成版本跨进程/重启可见，多副本 CAS 判定权随库）；
@@ -675,41 +676,9 @@ class SwarmManager:
             self._executorProfileFor(externalId, team_id)
             if externalAdapter is not None else None
         )
-        cap = self.MAX_CONCURRENT_PER_MODEL
-
-        # ── fan-out 治理闸（预算/冷却/并发/间隔；全部 fail-open，可 kill-switch）──
-        if self._governance_enabled():
-            if self._over_budget(resolved_id, model):
-                return self._rejection(
-                    "BUDGET_EXCEEDED",
-                    f"agent {resolved_id} 预算已超支——暂缓派生子 Agent，等待配额重置或提升预算",
-                )
-            cooldown = self._model_cooldown_remaining(model)
-            if cooldown > 0:
-                return self._rejection(
-                    "MODEL_COOLDOWN",
-                    f"模型 {model} 正处 429 退避冷却（剩余 {cooldown:.1f}s）——暂缓派生以避开上游限流",
-                    retry_after_ms=int(cooldown * 1000),
-                )
-
-        if cap and cap > 0 and model:
-            with self._lock:
-                if self._model_active.get(model, 0) >= cap:
-                    return self._rejection(
-                        "MODEL_CONCURRENCY",
-                        f"模型 {model} 并发子 Agent 已达上限 {cap}——错峰派生，等待现有同类子任务完成",
-                    )
-
-        interval = self.MIN_SPAWN_INTERVAL_MS
-        if interval and interval > 0:
-            with self._lock:
-                elapsed_ms = (time.monotonic() - self._last_dispatch_ts) * 1000.0
-                if elapsed_ms < interval:
-                    return self._rejection(
-                        "SPAWN_TOO_FAST",
-                        f"派生过快（距上次 {elapsed_ms:.0f}ms < {interval}ms）——确定性错峰防惊群",
-                        retry_after_ms=int(interval - elapsed_ms),
-                    )
+        rejection = self._resourceRejection(resolved_id, model)
+        if rejection is not None:
+            return rejection
 
         if subagent_type not in ("general", "explore"):
             return self._rejection(
@@ -840,41 +809,12 @@ class SwarmManager:
             tenant_id=self._currentTenantId(),
             parent_subagent_id=parentSubagentId,
         )
-        # 通过全部治理闸 → 预留模型并发槽 + 打派生时间戳（错峰）
+        # 普通派生与 blocked 放行共用同一原子治理闸；通过后才落 run 账。
         with self._lock:
-            # P2 §3.2-10: 上方 _count_active() 是无锁快查，与此处落账构成
-            # check-then-act——并发派生可在两步之间突破硬限。权威判定挪进
-            # 锁内原子化（_count_active 走 RLock 可重入），外层快查仅作快路径。
-            activeNow = self._count_active()
-            if activeNow >= self.MAX_ACTIVE_CHILDREN:
-                return self._rejection(
-                    "MAX_ACTIVE_CHILDREN",
-                    f"运行中的子 Agent 已达硬限 {self.MAX_ACTIVE_CHILDREN}——"
-                    f"每条子任务最长 {self._effectiveRuntimeBudget():g}s 内必落终态"
-                    "（完成/失败/超时/取消都收尾并释放槽位），"
-                    "请用 subagent_status 查询后再派生",
-                    active_children=activeNow,
-                )
-            self._last_dispatch_ts = time.monotonic()
-            if cap and cap > 0 and model:
-                self._model_active[model] = self._model_active.get(model, 0) + 1
-                run.slot_model = model
-            self._runs[run.subagent_id] = run
-            # B3：外部成员适配器随 run 登记（终态在 _execute finally 摘除），
-            # cancelRun 据此向外部代理进程传导叫停。
-            if externalAdapter is not None:
-                self._externalAdapters[run.subagent_id] = (
-                    externalAdapter, asyncio.get_running_loop())
-            self._evict_finished_runs()
-            # 资源治理 P2-4：租约开启（NEUROVA_RUN_LEASE_TTL_S>0）时，
-            # 先回收僵死槽记账，再为本 run 挂租约；TTL=0 时两者均 no-op。
-            self._reapStaleRunSlots()
-            from neurova.core.run_lease import leaseTtlSeconds
-
-            if self._runLeaseBoard().acquire(
-                run.subagent_id, owner=run.subagent_id, ttl=leaseTtlSeconds()
-            ):
-                run.slot_lease = True
+            rejection = self._tryReserveRun(run)
+            if rejection is not None:
+                return rejection
+            self._registerReservedRun(run, externalAdapter)
 
         # H-4：派生事实入 run 事件账本（正文不进账本，task 只留摘要）
         self._logRunEvent(run, "spawned", {
@@ -1884,8 +1824,31 @@ class SwarmManager:
         if self._depSatisfied(run):
             self._promoteBlockedIfReady()
 
+    def _cancelBlockedRetry(self, blockedId: str) -> None:
+        with self._lock:
+            retryHandle = self._blockedRetryHandles.pop(blockedId, None)
+        if retryHandle is not None:
+            retryHandle.cancel()
+
+    def _scheduleBlockedRetry(
+        self, blockedId: str, rejection: Dict[str, Any]
+    ) -> None:
+        with self._lock:
+            if blockedId not in self._blocked or blockedId in self._blockedRetryHandles:
+                return
+            retryAfterMs = float(rejection.get("retry_after_ms") or 1000)
+            retryDelay = max(0.05, retryAfterMs / 1000.0)
+
+            def retryBlocked() -> None:
+                self._cancelBlockedRetry(blockedId)
+                self._promoteBlockedIfReady()
+
+            self._blockedRetryHandles[blockedId] = asyncio.get_running_loop().call_later(
+                retryDelay, retryBlocked
+            )
+
     def _promoteBlockedIfReady(self) -> None:
-        """放行依赖已满足的 blocked 任务（槽满则留待下次结算）。"""
+        """放行依赖已满足的 blocked 任务；资源拒绝时有界延时重试。"""
         with self._lock:
             candidates = [bid for bid, info in self._blocked.items()
                           if all(d in self._runs and self._depSatisfied(self._runs[d])
@@ -1894,10 +1857,13 @@ class SwarmManager:
             with self._lock:
                 if self._count_active() >= self.MAX_ACTIVE_CHILDREN:
                     return  # 槽满：留待下一次终态结算再放行
-                info = self._blocked.pop(bid)
-            self._launchRun(info)
+                info = self._blocked.get(bid)
+            if info is None:
+                continue
+            if self._launchRun(info) is None:
+                return  # 资源闸拒绝：保留 blocked，由延时重试或后续终态结算复核
 
-    def _launchRun(self, info: Dict[str, Any]) -> SubAgentRun:
+    def _launchRun(self, info: Dict[str, Any]) -> Optional[SubAgentRun]:
         """把（blocked 放行的）启动信息落成 SubAgentRun 并异步执行。"""
         # B3：外部成员的适配器在 blocked 登记时已解析（外部 id 不在 Agent
         # 注册表，_resolve_agent 会错拿默认兜底）——放行时原样续用。
@@ -1945,11 +1911,20 @@ class SwarmManager:
             parent_subagent_id=info.get("parent_subagent_id") or "",
         )
         with self._lock:
-            self._runs[run.subagent_id] = run
-            # B3：放行的外部成员同样登记适配器（cancelRun 传导链不断）
-            if externalAdapter is not None:
-                self._externalAdapters[run.subagent_id] = (
-                    externalAdapter, asyncio.get_running_loop())
+            if self._blocked.get(run.subagent_id) is not info:
+                return None
+            rejection = self._tryReserveRun(run)
+            if rejection is not None:
+                logger.info(
+                    "Swarm: blocked 放行被资源闸暂缓 id=%s code=%s",
+                    run.subagent_id,
+                    rejection["rejection"]["code"],
+                )
+                self._scheduleBlockedRetry(run.subagent_id, rejection)
+                return None
+            self._cancelBlockedRetry(run.subagent_id)
+            self._blocked.pop(run.subagent_id, None)
+            self._registerReservedRun(run, externalAdapter)
         self._logRunEvent(run, "spawned", {
             "task": run.task[:EVENT_TASK_SUMMARY_CHARS], "origin": run.origin, "depth": run.depth,
             "subagent_type": run.subagent_type, "model": run.model,
@@ -1969,6 +1944,7 @@ class SwarmManager:
 
     def _failBlocked(self, bid: str, info: Dict[str, Any], upstream: SubAgentRun) -> None:
         """依赖失败/未验收 → 下游不执行、不归档，直接以 failed 终态落账（η 门语义）。"""
+        self._cancelBlockedRetry(bid)
         # D-B：依赖门判失败的 run 也落执行体档案快照（外部成员专有）——该 run
         # 终态可续跑，续跑决策需要与 spawn（登记）时刻同口径的快照。
         failedProfile = (
@@ -2063,6 +2039,7 @@ class SwarmManager:
         if run is None and blocked is None:
             return {"success": False, "error": f"未找到子 Agent 运行记录: {sid}"}
         if run is None:
+            self._cancelBlockedRetry(sid)
             # D-B：blocked 等待件被叫停也落执行体档案快照（外部成员专有）——
             # 该 run 落终态后仍可续跑，续跑决策需要与登记时刻同口径的快照。
             blockedProfile = (
@@ -2910,6 +2887,84 @@ class SwarmManager:
     def _governance_enabled() -> bool:
         """治理总开关（kill-switch）：NEUROVA_SWARM_GOVERNANCE=off 关预算/冷却闸。"""
         return (os.environ.get("NEUROVA_SWARM_GOVERNANCE") or "on").strip().lower() != "off"
+
+    def _resourceRejectionLocked(
+        self, agentId: str, model: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        activeNow = self._count_active()
+        if activeNow >= self.MAX_ACTIVE_CHILDREN:
+            return self._rejection(
+                "MAX_ACTIVE_CHILDREN",
+                f"运行中的子 Agent 已达硬限 {self.MAX_ACTIVE_CHILDREN}——"
+                f"每条子任务最长 {self._effectiveRuntimeBudget():g}s 内必落终态"
+                "（完成/失败/超时/取消都收尾并释放槽位），"
+                "请用 subagent_status 查询后再派生",
+                active_children=activeNow,
+            )
+        if self._governance_enabled():
+            if self._over_budget(agentId, model):
+                return self._rejection(
+                    "BUDGET_EXCEEDED",
+                    f"agent {agentId} 预算已超支——暂缓派生子 Agent，等待配额重置或提升预算",
+                )
+            cooldown = self._model_cooldown_remaining(model)
+            if cooldown > 0:
+                return self._rejection(
+                    "MODEL_COOLDOWN",
+                    f"模型 {model} 正处 429 退避冷却（剩余 {cooldown:.1f}s）——暂缓派生以避开上游限流",
+                    retry_after_ms=int(cooldown * 1000),
+                )
+        cap = self.MAX_CONCURRENT_PER_MODEL
+        if cap and cap > 0 and model and self._model_active.get(model, 0) >= cap:
+            return self._rejection(
+                "MODEL_CONCURRENCY",
+                f"模型 {model} 并发子 Agent 已达上限 {cap}——错峰派生，等待现有同类子任务完成",
+            )
+        interval = self.MIN_SPAWN_INTERVAL_MS
+        if interval and interval > 0:
+            elapsedMs = (time.monotonic() - self._last_dispatch_ts) * 1000.0
+            if elapsedMs < interval:
+                return self._rejection(
+                    "SPAWN_TOO_FAST",
+                    f"派生过快（距上次 {elapsedMs:.0f}ms < {interval}ms）——确定性错峰防惊群",
+                    retry_after_ms=int(interval - elapsedMs),
+                )
+        return None
+
+    def _resourceRejection(
+        self, agentId: str, model: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            return self._resourceRejectionLocked(agentId, model)
+
+    def _tryReserveRun(self, run: SubAgentRun) -> Optional[Dict[str, Any]]:
+        """锁内复核并预留模型槽、派生间隔；所有启动路径只走这一处。"""
+        with self._lock:
+            rejection = self._resourceRejectionLocked(run.agent_id, run.model)
+            if rejection is not None:
+                return rejection
+            self._last_dispatch_ts = time.monotonic()
+            cap = self.MAX_CONCURRENT_PER_MODEL
+            if cap and cap > 0 and run.model:
+                self._model_active[run.model] = self._model_active.get(run.model, 0) + 1
+                run.slot_model = run.model
+            return None
+
+    def _registerReservedRun(self, run: SubAgentRun, externalAdapter: Any) -> None:
+        with self._lock:
+            self._runs[run.subagent_id] = run
+            if externalAdapter is not None:
+                self._externalAdapters[run.subagent_id] = (
+                    externalAdapter, asyncio.get_running_loop()
+                )
+            self._evict_finished_runs()
+            self._reapStaleRunSlots()
+            from neurova.core.run_lease import leaseTtlSeconds
+
+            if self._runLeaseBoard().acquire(
+                run.subagent_id, owner=run.subagent_id, ttl=leaseTtlSeconds()
+            ):
+                run.slot_lease = True
 
     @staticmethod
     def _resolve_model_name(agent: Any) -> Optional[str]:

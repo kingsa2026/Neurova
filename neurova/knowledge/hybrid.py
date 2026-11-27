@@ -313,7 +313,7 @@ def hybrid_search_knowledge(
             for hit in fts_hits or []:
                 kid = str(hit.get("id") or hit.get("knowledge_id") or "")
                 if kid and kid in visible_map:
-                    route_scores["bm25"][kid] = max(
+                    route_scores["fts"][kid] = max(
                         float(hit.get("score", 0.0) or 0.0), 0.0
                     )
             used_fts = True

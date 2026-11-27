@@ -41,7 +41,8 @@ def wsClient(monkeypatch):
     """挂载移动配对路由 + 一条已确认配对记录（凭 code 接入 WS）。"""
     monkeypatch.setitem(
         mobile_ep._pairing_codes, PAIRING_CODE,
-        {"status": "confirmed", "user_id": OWNER, "pairing_id": PAIRING_ID},
+        {"status": "confirmed", "user_id": OWNER, "pairing_id": PAIRING_ID,
+         "expires_at": time.time() + 3600},
     )
     app = FastAPI()
     app.include_router(mobile_ep.router, prefix="/api/v1/mobile")
@@ -58,6 +59,8 @@ def _seed(ledger: wsledger.MobileWsLedger, frame: Dict[str, Any]) -> int:
 
 
 def _open(client: TestClient):
+    # 配对码生产语义为一次性消费；多连接用例显式重置为新的已确认码。
+    mobile_ep._pairing_codes[PAIRING_CODE]["status"] = "confirmed"
     return client.websocket_connect(f"/api/v1/mobile/ws?code={PAIRING_CODE}")
 
 

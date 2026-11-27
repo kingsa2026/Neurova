@@ -73,6 +73,7 @@ def _registerDevice(registry: DeviceConnectionRegistry, ledger, *,
     registry.updateHello(pairing, platform="android",
                          capabilities=capabilities or ["open_url"],
                          appState=appState)
+    wsledger.getMobileWsLedger().startTaskWindow(pairing, "task-test", app_state="foreground")
     return raw
 
 
@@ -83,7 +84,8 @@ class TestDisabledGate:
         _registerDevice(registry, ledger)
         router = DeviceBridgeRouter(registry)
         result = asyncio.run(router.execute(
-            user_id=OWNER, action="open_url", payload={"url": "https://example.com"}))
+            user_id=OWNER, action="open_url", payload={"url": "https://example.com"},
+            task_id="task-test"))
         assert result["success"] is False
         assert result["error"]["code"] == "device_bridge_disabled"
         assert result["action_result"]["refusal_code"] == "device_bridge_disabled"
@@ -94,7 +96,7 @@ class TestDisabledGate:
         _registerDevice(registry, ledger)
         router = DeviceBridgeRouter(registry)
         result = asyncio.run(router.execute(
-            user_id=OWNER, action="device_env", payload={}))
+            user_id=OWNER, action="device_env", payload={}, task_id="task-test"))
         assert result["error"]["code"] == "device_bridge_disabled"
 
 
@@ -102,7 +104,8 @@ class TestDeviceSelection:
     def test_no_online_device_is_device_offline(self, ledger):
         router = DeviceBridgeRouter(DeviceConnectionRegistry())
         result = asyncio.run(router.execute(
-            user_id="u-nobody", action="open_url", payload={"url": "https://example.com"}))
+            user_id="u-nobody", action="open_url", payload={"url": "https://example.com"},
+            task_id="task-test"))
         assert result["success"] is False
         assert result["error"]["code"] == "device_offline"
         assert result["action_result"]["retry"] == "retry"
@@ -112,7 +115,8 @@ class TestDeviceSelection:
         _registerDevice(registry, ledger, capabilities=["device_env"])
         router = DeviceBridgeRouter(registry)
         result = asyncio.run(router.execute(
-            user_id=OWNER, action="open_url", payload={"url": "https://example.com"}))
+            user_id=OWNER, action="open_url", payload={"url": "https://example.com"},
+            task_id="task-test"))
         assert result["success"] is False
         assert result["error"]["code"] == "capability_unsupported"
         assert result["action_result"]["refusal_code"] == "unsupported_method"
@@ -125,7 +129,8 @@ class TestDeviceSelection:
         router = DeviceBridgeRouter(registry)
         registry.unregister(PAIRING)
         result = asyncio.run(router.execute(
-            user_id=OWNER, action="open_url", payload={"url": "https://example.com"}))
+            user_id=OWNER, action="open_url", payload={"url": "https://example.com"},
+            task_id="task-test"))
         assert result["error"]["code"] == "device_offline"
         assert raw.sent == []
 
@@ -137,7 +142,8 @@ class TestBackgroundGating:
                         appState="background")
         router = DeviceBridgeRouter(registry)
         result = asyncio.run(router.execute(
-            user_id=OWNER, action="open_url", payload={"url": "https://example.com"}))
+            user_id=OWNER, action="open_url", payload={"url": "https://example.com"},
+            task_id="task-test"))
         assert result["success"] is False
         assert result["error"]["code"] == "capability_unavailable_in_background"
         assert result["action_result"]["refusal_code"] == "background_unavailable"
@@ -150,6 +156,18 @@ class TestBackgroundGating:
         task = asyncio.run(_drive(router, raw, action="device_env", payload={},
                                   data={"battery": 0.8}))
         assert task["success"] is True
+
+
+class TestTaskWindowGate:
+    def test_execute_without_task_window_is_refused_before_send(self, ledger):
+        registry = DeviceConnectionRegistry()
+        raw = _registerDevice(registry, ledger, capabilities=["device_env"])
+        router = DeviceBridgeRouter(registry)
+        result = asyncio.run(router.execute(
+            user_id=OWNER, action="device_env", payload={}, timeout_ms=50))
+        assert result["success"] is False
+        assert result["error"]["code"] == "task_window_required"
+        assert raw.sent == []
 
 
 class TestCommandRoundtrip:
@@ -171,6 +189,7 @@ class TestCommandRoundtrip:
         assert sent["type"] == "device:execute"
         assert sent["action"] == "open_url"
         assert sent["payload"] == {"url": "https://example.com"}
+        assert sent["window_expires_at"] > 1_000_000_000_000, "端上按毫秒与 ExecutorGate 比较"
         assert isinstance(sent["seq"], int) and sent["seq"] > 0
         # 命令已收敛：同 command_id 再登记得到回放终态
         _, prior = ledger.beginCommand(sent["command_id"], PAIRING, "device:execute", {})
@@ -197,7 +216,7 @@ class TestCommandRoundtrip:
         async def scenario():
             task = asyncio.create_task(router.execute(
                 user_id=OWNER, action="open_url",
-                payload={"url": "https://example.com"}, timeout_ms=50))
+                payload={"url": "https://example.com"}, task_id="task-test", timeout_ms=50))
             await asyncio.sleep(0.05)
             frame = raw.sent[0]
             return await task, frame
@@ -220,7 +239,7 @@ class TestCommandRoundtrip:
 
         async def scenario():
             task = asyncio.create_task(router.execute(
-                user_id=OWNER, action="device_env", payload={}, timeout_ms=2000))
+                user_id=OWNER, action="device_env", payload={}, task_id="task-test", timeout_ms=2000))
             await asyncio.sleep(0.05)
             frame = raw.sent[0]
             delivered = router.onResult(PAIRING, {
@@ -247,6 +266,7 @@ class TestOfflineQueue:
         store.register(pairingId=pairing, userId=user, deviceName="测试手机",
                        deviceType="mobile", deviceSecret="secret")
         monkeypatch.setattr(mobile_pairing, "getDeviceRegistry", lambda: store)
+        wsledger.getMobileWsLedger().startTaskWindow(pairing, "task-test", app_state="foreground")
         return store
 
     def test_offline_with_registered_device_queues_and_pushes(self, ledger, monkeypatch, tmp_path):
@@ -256,7 +276,8 @@ class TestOfflineQueue:
                             lambda uid, cid: pushes.append((uid, cid)) or {"sent": 0, "failed": 1})
         router = DeviceBridgeRouter(DeviceConnectionRegistry())  # 空 = 无在线连接
         result = asyncio.run(router.execute(
-            user_id=OWNER, action="open_url", payload={"url": "https://example.com"}))
+            user_id=OWNER, action="open_url", payload={"url": "https://example.com"},
+            task_id="task-test"))
         assert result["success"] is False
         assert result["error"]["code"] == "device_offline_queued"
         assert result["queued"] is True and result["pairing_id"] == PAIRING
@@ -274,7 +295,8 @@ class TestOfflineQueue:
         """连在册设备都没有：诚实 device_offline，不入队也不发信令。"""
         router = DeviceBridgeRouter(DeviceConnectionRegistry())
         result = asyncio.run(router.execute(
-            user_id="u-nobody", action="open_url", payload={"url": "https://example.com"}))
+            user_id="u-nobody", action="open_url", payload={"url": "https://example.com"},
+            task_id="task-test"))
         assert result["error"]["code"] == "device_offline"
         assert "queued" not in result
 
@@ -285,7 +307,7 @@ class TestOfflineQueue:
                             lambda uid, cid: {"sent": 0, "failed": 1})
         router = DeviceBridgeRouter(DeviceConnectionRegistry())
         result = asyncio.run(router.execute(
-            user_id=OWNER, action="device_env", payload={}))
+            user_id=OWNER, action="device_env", payload={}, task_id="task-test"))
         commandId = result["command_id"]
         # 设备回连补执行，回执到达（此时 execute 早已返回，无在等 future）
         delivered = router.onResult(PAIRING, {"type": "device:result",
@@ -305,7 +327,7 @@ class TestOfflineQueue:
         async def scenario():
             task = asyncio.create_task(router.execute(
                 user_id=OWNER, action="open_url",
-                payload={"url": "https://example.com"}, timeout_ms=50))
+                payload={"url": "https://example.com"}, task_id="task-test", timeout_ms=50))
             await asyncio.sleep(0.05)
             return await task, raw.sent[0]
 
@@ -325,7 +347,7 @@ async def _drive(router: DeviceBridgeRouter, raw: FakeRawWs, *, action: str,
                  timeout_ms: int = 2000) -> Dict[str, Any]:
     """驱动一次完整往返：派发 → 等帧下发 → 模拟手机回执 → 收结果。"""
     task = asyncio.create_task(router.execute(
-        user_id=OWNER, action=action, payload=payload, timeout_ms=timeout_ms))
+        user_id=OWNER, action=action, payload=payload, task_id="task-test", timeout_ms=timeout_ms))
     for _ in range(100):
         await asyncio.sleep(0.01)
         if raw.sent:

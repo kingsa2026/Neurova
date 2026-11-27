@@ -234,7 +234,7 @@ Neurova는 **다중 에이전트 팀 협업**을 지원하여, 자체 "별 팀"�
 
 ```bash
 cd neurova
-pip install -r requirements.txt
+pip install -r requirements-full.lock
 python -m neurova.api.main
 ```
 

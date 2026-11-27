@@ -55,7 +55,8 @@ class KnowledgeConflictJudge:
             distinct = {str(m.get("object_term", "")) for m in members}
             if len(distinct) < 2:
                 continue
-            kind = self._classify(members, qualifierScoped=bool(members[0].get("qualifier")))
+            kind = self._classify(
+                members, qualifierScoped=bool(members[0].get("qualifier")), tenantId=tenantId)
             conflicts.append({
                 "kind": kind,
                 "subject_key": members[0]["subject_key"],
@@ -66,11 +67,13 @@ class KnowledgeConflictJudge:
             })
         return sorted(conflicts, key=lambda c: (-c["severity"], c["member_fact_ids"][0]))
 
-    def _classify(self, members: List[Dict[str, Any]], qualifierScoped: bool) -> str:
+    def _classify(self, members: List[Dict[str, Any]], qualifierScoped: bool,
+                  tenantId: str = "default") -> str:
         if any(_hasClosedWindow(m) for m in members) and self._windowsDisjoint(members):
             return "temporal"
         if self._registry is not None:
-            cardinality = self._registry.maxCardinality(members[0]["predicate_term_id"])
+            cardinality = self._registry.maxCardinality(
+                members[0]["predicate_term_id"], tenantId=tenantId)
             if cardinality == 1 and len(members) > 1:
                 return "cardinality"
         return "qualifier" if qualifierScoped else "value"
@@ -100,7 +103,8 @@ class KnowledgeConflictJudge:
 
     # ── 策略与依据 ────────────────────────────────────────────
 
-    def decide(self, members: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def decide(self, members: List[Dict[str, Any]],
+               tenantId: str = "default") -> Dict[str, Any]:
         """返回 (policy, basis, winner)。basis 为空即不得自动裁决。
 
         阶梯顺序刻意如此：confidence 自 009 起是断言聚合出来的**派生值**，
@@ -112,7 +116,8 @@ class KnowledgeConflictJudge:
         if self._registry is not None and members:
             term = None
             try:
-                term = self._registry.term(members[0].get("predicate_term_id") or "")
+                term = self._registry.term(
+                    members[0].get("predicate_term_id") or "", tenantId=tenantId)
             except Exception:  # noqa: BLE001 - 注册表故障回退阶梯
                 term = None
             declared = str((term or {}).get("conflict_policy") or "").strip()
@@ -201,32 +206,36 @@ class KnowledgeConflictJudge:
                tenantId: str = "default") -> List[Dict[str, Any]]:
         """检测并成账；可自动裁决的顺手取代败方。重复检测同一组成员不再开新账。"""
         recorded: List[Dict[str, Any]] = []
-        for conflict in self.detect(subjectLabel, predicateTermId, tenantId):
-            members = self._store.factsByIds(conflict["member_fact_ids"])
-            decision = self.decide(members)
-            status = "auto_resolved" if decision["winner"] else "pending"
-            conflictId = self._store.insertConflict(
-                kind=conflict["kind"],
-                subjectKey=conflict["subject_key"],
-                predicateTermId=conflict["predicate_term_id"],
-                memberFactIds=conflict["member_fact_ids"],
-                severity=conflict["severity"],
-                recommendedPolicy=decision["policy"],
-                policyBasis=decision["basis"],
-                status=status,
-                winnerFactId=decision["winner"],
-                tenantId=tenantId,
-            )
-            if conflictId is None:
-                continue
-            if decision["winner"]:
-                self._applySupersede(conflict["member_fact_ids"], decision["winner"])
-            self._markMutuallyContradicted(conflict["member_fact_ids"])
-            conflict.update({
-                "conflict_id": conflictId, "status": status,
-                "recommended_policy": decision["policy"], "policy_basis": decision["basis"],
-            })
-            recorded.append(conflict)
+        detected = self.detect(subjectLabel, predicateTermId, tenantId)
+        if not detected:
+            return recorded
+        with self._store.batchScope():
+            for conflict in detected:
+                members = self._store.factsByIds(conflict["member_fact_ids"])
+                decision = self.decide(members, tenantId=tenantId)
+                status = "auto_resolved" if decision["winner"] else "pending"
+                conflictId = self._store.insertConflict(
+                    kind=conflict["kind"],
+                    subjectKey=conflict["subject_key"],
+                    predicateTermId=conflict["predicate_term_id"],
+                    memberFactIds=conflict["member_fact_ids"],
+                    severity=conflict["severity"],
+                    recommendedPolicy=decision["policy"],
+                    policyBasis=decision["basis"],
+                    status=status,
+                    winnerFactId=decision["winner"],
+                    tenantId=tenantId,
+                )
+                if conflictId is None:
+                    continue
+                if decision["winner"]:
+                    self._applySupersede(conflict["member_fact_ids"], decision["winner"])
+                self._markMutuallyContradicted(conflict["member_fact_ids"])
+                conflict.update({
+                    "conflict_id": conflictId, "status": status,
+                    "recommended_policy": decision["policy"], "policy_basis": decision["basis"],
+                })
+                recorded.append(conflict)
         return recorded
 
     def _markMutuallyContradicted(self, memberFactIds: List[str]) -> None:

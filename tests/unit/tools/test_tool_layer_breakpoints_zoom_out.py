@@ -326,21 +326,9 @@ class TestToolExecutionContextUnified:
 
     def test_tool_pipeline_context_removed(self):
         """tool_pipeline.py 的 ToolExecutionContext 应被删除（随死代码 C2）。"""
-        # 修复后 tool_pipeline.py 应不再定义 ToolExecutionContext
-        # 或整个文件被删除
-        try:
-            from neurova.agent.tool_pipeline import ToolExecutionContext as PipelineCtx
-            # 契约更新（82dbdf09 五段流水线）：兼容层以规范类为基类重新引入
-            # （非 re-export 同一对象）。实质约束保持：必须派生自规范定义，
-            # 单一规范源不破（原 `is` 身份断言过死，残留处理 2026-09-13）。
-            import inspect as _inspect
-            from neurova.tool_layers.types import ToolExecutionContext as CanonicalCtx
-            assert issubclass(PipelineCtx, CanonicalCtx), (
-                "tool_pipeline 的 ToolExecutionContext 必须是规范定义派生（单一规范源）"
-            )
-            assert "result" not in _inspect.signature(CanonicalCtx).parameters or True
-        except ImportError:
-            pass  # 文件被删除也是可接受的
+        from neurova.agent import tool_pipeline
+
+        assert not hasattr(tool_pipeline, "ToolExecutionContext")
 
 
 class TestSkillRegistryUnified:

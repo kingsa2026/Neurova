@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -61,6 +62,9 @@ class MobileWsChannel(
      */
     private val lastSeqRestore: () -> Int = { 0 },
     private val lastSeqPersist: (Int) -> Unit = {},
+    /** P2-23：有界持久收件箱；进程重启后先清偿，再接收新帧。 */
+    private val inboxRestore: () -> String = { "" },
+    private val inboxPersist: (String) -> Unit = {},
     client: OkHttpClient = OkHttpClient(),
 ) {
     enum class State { IDLE, CONNECTING, AUTHED, REAUTHING, RECONNECTING, FAILED, CLOSED }
@@ -69,8 +73,9 @@ class MobileWsChannel(
         data class Chunk(val content: String, val sessionId: String) : Event
         data class Done(val sessionId: String, val messageId: String?) : Event
         data class Cancelled(val sessionId: String) : Event
-        data class Error(val code: String, val message: String) : Event
+        data class Error(val code: String, val message: String, val sessionId: String = "") : Event
         data class AgentSwitched(val agentId: String) : Event
+        data class DeviceTaskArrived(val window: top.neurova.mobile.core.protocol.DeviceTaskWindow) : Event
 
         /** 排队位/让位闸等待/挂起（运行态透明化；position/attempt/waitSeconds/reason 依来源可选） */
         data class Queued(
@@ -119,12 +124,20 @@ class MobileWsChannel(
     private val eventsFlow = MutableSharedFlow<Event>(extraBufferCapacity = 64)
     val events: SharedFlow<Event> = eventsFlow
 
+    private val inbox = MobileFrameInbox(load = inboxRestore, save = inboxPersist)
+    private val seenMessageIds = object : LinkedHashMap<String, Boolean>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>): Boolean = size > 256
+    }
+    private var pendingCursorWrites = 0
+    private var lastCursorChangeAt = 0L
+
     private val client = client.newBuilder()
         .pingInterval(0, TimeUnit.SECONDS) // 心跳由应用层驱动，禁用 OkHttp 自动 ping
         .build()
 
     private var socket: WebSocket? = null
     private var heartbeatJob: Job? = null
+    private var connectionGeneration = 0L
 
     /**
      * U9：本次连接若为 relay 模式，onOpen 后**先发**这条 auth 帧（先于 sync_resume
@@ -141,6 +154,7 @@ class MobileWsChannel(
     private var reconnectCount = 0
     private var refreshAlreadyTried = false
     private var manualClosed = false
+    private var hasAuthenticatedConnection = false
 
     /**
      * D-5 三端契约对齐：连接契约（服务端 pong 帧 `connection_runtime` 字段，
@@ -153,6 +167,10 @@ class MobileWsChannel(
     private var activeBackoffBaseMs: Long = DEFAULT_BACKOFF_BASE_MS
     @Volatile
     private var activeBackoffCapMs: Long = DEFAULT_BACKOFF_CAP_MS
+
+    init {
+        scope.launch { Listener(0).consumeInbox() }
+    }
 
     /**
      * D3 出站帧游标：服务端账本单调 seq（先落账再发送）。重连成功且游标 > 0
@@ -181,6 +199,15 @@ class MobileWsChannel(
         if (normalized != "global" && key.isEmpty()) return
         subscriptionScope = normalized
         subscriptionScopeKey = if (normalized == "global") "" else key
+        sendSubscriptionScope()
+    }
+
+    private fun sendSubscriptionScope() {
+        sendFrame(JsonObject(linkedMapOf(
+            "type" to JsonPrimitive("sync_scope"),
+            "scope" to JsonPrimitive(subscriptionScope),
+            "scope_key" to JsonPrimitive(subscriptionScopeKey),
+        )))
     }
 
     fun connect() {
@@ -225,8 +252,12 @@ class MobileWsChannel(
         pendingRelayAuthFrame = buildRelayAuthFrame(url, relayAuthSecretProvider)
         sentRelayAuthThisConnection = false
         stateFlow.value = State.CONNECTING
-        socket = client.newWebSocket(buildHandshakeRequest(url, ticket), Listener())
+        connectionGeneration += 1
+        socket = client.newWebSocket(buildHandshakeRequest(url, ticket), Listener(connectionGeneration))
     }
+
+    internal fun isCurrentConnection(webSocket: WebSocket, generation: Long): Boolean =
+        socket === webSocket && connectionGeneration == generation
 
     /** 续签被拒的统一终态：设备已解除配对，通道进 FAILED 并上抛明确事件 */
     private fun failAsDeregistered() {
@@ -288,29 +319,30 @@ class MobileWsChannel(
         pairs.mapNotNull { (key, value) -> value?.let { key to JsonPrimitive(it) } }.toMap(),
     )
 
-    private fun startHeartbeat() {
+    private fun startHeartbeat(webSocket: WebSocket, generation: Long) {
         heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
             while (true) {
                 delay(activeHeartbeatMs)
+                if (!isCurrentConnection(webSocket, generation)) return@launch
                 awaitingPong.set(true)
                 // 心跳是 JSON 帧 {"type":"ping"}：后端消息循环 json.loads 只吃 JSON，
                 // 裸文本 "ping" 会炸掉连接（鸿蒙 WebSocketAdapter 同契约，勿回潮）
-                if (!sendFrame(buildJsonObject("type" to "ping"))) break
+                if (!webSocket.send(json.encodeToString(JsonObject.serializer(), buildJsonObject("type" to "ping")))) break
                 // 等 pong：到达即进入下一周期（不把 pongTimeout 硬拼进周期——
                 // 否则契约 15s 会被拉长成 interval+10s）；超时仍未到视为断流。
                 var waited = 0L
                 while (awaitingPong.get() && waited < pongTimeoutMs) {
                     delay(50)
                     waited += 50
+                    if (!isCurrentConnection(webSocket, generation)) return@launch
                 }
                 if (awaitingPong.get()) {
                     // 超时未收到 pong：视为断流，主动拆线走传输层重连档。关闭码用线上
                     // 合法的 1000——1006 是 RFC 保留码，OkHttp 发送侧直接抛
                     // IllegalArgumentException（原实现的 close(1006) 从未发出去过，
                     // 心跳协程当场崩死，连接成僵尸）
-                    socket?.close(1000, "pong-timeout")
-                    socket = null
+                    if (isCurrentConnection(webSocket, generation)) webSocket.close(1000, "pong-timeout")
                     break
                 }
             }
@@ -360,14 +392,13 @@ class MobileWsChannel(
      * （旧后端 pong 无该字段 = 行为零变化）。
      */
     private fun applyConnectionRuntime(contract: JsonObject) {
-        val intervalS = (contract["heartbeat"] as? JsonObject)
-            ?.get("interval_s")?.toString()?.trim('"')?.toDoubleOrNull()
+        val intervalS = (contract["heartbeat"] as? JsonObject)?.text("interval_s")?.toDoubleOrNull()
         if (intervalS != null && intervalS > 0) {
             activeHeartbeatMs = (intervalS * 1000).toLong().coerceIn(100L, 300_000L)
         }
         val reconnect = contract["reconnect"] as? JsonObject
-        val baseS = reconnect?.get("backoff_base_s")?.toString()?.trim('"')?.toDoubleOrNull()
-        val capS = reconnect?.get("backoff_cap_s")?.toString()?.trim('"')?.toDoubleOrNull()
+        val baseS = reconnect?.text("backoff_base_s")?.toDoubleOrNull()
+        val capS = reconnect?.text("backoff_cap_s")?.toDoubleOrNull()
         if (baseS != null && baseS > 0) {
             activeBackoffBaseMs = (baseS * 1000).toLong().coerceIn(100L, 60_000L)
         }
@@ -376,8 +407,9 @@ class MobileWsChannel(
         }
     }
 
-    private inner class Listener : WebSocketListener() {
+    private inner class Listener(private val generation: Long) : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            if (!isCurrentConnection(webSocket, generation)) return
             reconnectCount = 0
             refreshAlreadyTried = false
             stateFlow.value = State.AUTHED
@@ -387,30 +419,64 @@ class MobileWsChannel(
             if (authFrame != null && sendFrame(authFrame)) {
                 sentRelayAuthThisConnection = true
             }
-            startHeartbeat()
+            startHeartbeat(webSocket, generation)
+            // 首连缺省 global 无需额外帧，保持既有首帧契约；重连或显式非 global
+            // 范围必须重设，服务端不沿用上一连接的范围。
+            if (hasAuthenticatedConnection || subscriptionScope != "global") {
+                sendSubscriptionScope()
+            }
+            hasAuthenticatedConnection = true
             // D3 断线补拉：游标 > 0（断线前收过账本帧）时发 sync_resume，
             // 服务端补发 (cursor, head] 的帧（带 replay 标记）；首连游标 0 不发
             resumeMissedFrames()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            val frame = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return
-            // D3 游标推进：服务端出站帧带单调 seq（先落账再发送），幂等取大
-                frame["seq"]?.toString()?.trim('"')?.toLongOrNull()?.let { seq ->
-                    if (seq > lastServerSeq) {
-                        lastServerSeq = seq
-                        // 游标落盘：进程重启后 sync_resume 仍能从断点补拉（B7 离线入队）
-                        runCatching { lastSeqPersist(lastServerSeq.toInt()) }
+            if (!isCurrentConnection(webSocket, generation)) return
+            val frame = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull()
+            if (frame == null || !inbox.enqueue(text)) {
+                eventsFlow.tryEmit(Event.Error("inbox_overflow", "持久帧队列已满，正在重连补拉", ""))
+                webSocket.close(1000, "inbox-overflow")
+            }
+        }
+
+        suspend fun consumeInbox() {
+            while (true) {
+                var raw = inbox.peek()
+                if (raw == null) {
+                    if (pendingCursorWrites > 0 && System.currentTimeMillis() - lastCursorChangeAt >= CURSOR_BATCH_MS) {
+                        flushCursor()
                     }
+                    kotlinx.coroutines.delay(25)
+                    continue
                 }
-            when (frame["type"]?.toString()?.trim('"')) {
+                val frame = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull()
+                if (frame != null && !isDuplicate(frame)) dispatchFrame(frame)
+                inbox.ack()
+                if (pendingCursorWrites >= CURSOR_BATCH_SIZE) flushCursor()
+            }
+        }
+
+        private suspend fun dispatchFrame(frame: JsonObject) {
+            // D3 游标推进：服务端出站帧带单调 seq（先落账再发送），幂等取大
+            frame.long("seq")?.let { seq ->
+                if (seq > lastServerSeq) {
+                    lastServerSeq = seq
+                    pendingCursorWrites += 1
+                    lastCursorChangeAt = System.currentTimeMillis()
+                }
+            }
+            when (frame.text("type")) {
                 // D3 快照降级：游标过旧/非法/重放预算耗尽——服务端拒绝部分重放。
                 // 弃游标并主动拆线走重连档：重连后游标为 0，按首连语义由既有
                 // 历史加载链路恢复，不携旧游标补拉（避免漏帧的部分重放）。
                 "sync_snapshot_required" -> {
                     lastServerSeq = 0
+                    pendingCursorWrites += 1
+                    lastCursorChangeAt = System.currentTimeMillis()
+                    synchronized(seenMessageIds) { seenMessageIds.clear() }
+                    inbox.clear()
                     socket?.close(1000, "snapshot-resync")
-                    socket = null
                 }
                 // 后端 pong 是 JSON 帧 {"type":"pong",...}（mobile_pairing.py 消息循环），
                 // 裸文本 "pong" 不在契约内；收到即清除等待标记，心跳循环据此判活。
@@ -420,24 +486,24 @@ class MobileWsChannel(
                     awaitingPong.set(false)
                     (frame["connection_runtime"] as? JsonObject)?.let { applyConnectionRuntime(it) }
                 }
-                "chat:chunk" -> eventsFlow.tryEmit(
+                "chat:chunk" -> eventsFlow.emit(
                     Event.Chunk(
-                        content = frame["content"]?.toString()?.trim('"').orEmpty(),
-                        sessionId = frame["session_id"]?.toString()?.trim('"').orEmpty(),
+                        content = frame.text("content").orEmpty(),
+                        sessionId = frame.text("session_id").orEmpty(),
                     ),
                 )
-                "chat:done" -> eventsFlow.tryEmit(
+                "chat:done" -> eventsFlow.emit(
                     Event.Done(
-                        sessionId = frame["session_id"]?.toString()?.trim('"').orEmpty(),
-                        messageId = frame["message_id"]?.toString()?.trim('"'),
+                        sessionId = frame.text("session_id").orEmpty(),
+                        messageId = frame.text("message_id"),
                     ),
                 )
-                "chat:cancelled" -> eventsFlow.tryEmit(
-                    Event.Cancelled(frame["session_id"]?.toString()?.trim('"').orEmpty()),
+                "chat:cancelled" -> eventsFlow.emit(
+                    Event.Cancelled(frame.text("session_id").orEmpty()),
                 )
                 "chat:error", "error" -> {
-                    val errorCode = frame["code"]?.toString()?.trim('"').orEmpty()
-                    val errorMessage = frame["message"]?.toString()?.trim('"').orEmpty()
+                    val errorCode = frame.text("code").orEmpty()
+                    val errorMessage = frame.text("message").orEmpty()
                     // U9 relay auth 首帧的已知良性回声：mobile WS 消息循环尚未消费
                     // auth 帧时按 unknown_type 退回（{"...Unknown message type: auth"}）。
                     // auth 帧本身已按新形态发出，这不是链路故障；上抛成对话错误会让
@@ -447,33 +513,36 @@ class MobileWsChannel(
                     ) {
                         return
                     }
-                    eventsFlow.tryEmit(Event.Error(code = errorCode, message = errorMessage))
+                    eventsFlow.emit(Event.Error(
+                        code = errorCode, message = errorMessage,
+                        sessionId = frame.text("session_id").orEmpty(),
+                    ))
                 }
-                "agent:switched" -> eventsFlow.tryEmit(
-                    Event.AgentSwitched(frame["agent_id"]?.toString()?.trim('"').orEmpty()),
+                "agent:switched" -> eventsFlow.emit(
+                    Event.AgentSwitched(frame.text("agent_id").orEmpty()),
                 )
-                "chat:queued" -> eventsFlow.tryEmit(
+                "chat:queued" -> eventsFlow.emit(
                     Event.Queued(
-                        sessionId = frame["session_id"]?.toString()?.trim('"').orEmpty(),
-                        position = frame["position"]?.toString()?.trim('"')?.toIntOrNull(),
-                        attempt = frame["attempt"]?.toString()?.trim('"')?.toIntOrNull(),
-                        waitSeconds = frame["wait_seconds"]?.toString()?.trim('"')?.toDoubleOrNull(),
-                        reason = frame["reason"]?.toString()?.trim('"'),
-                        parked = frame["parked"]?.toString()?.trim('"') == "true",
+                        sessionId = frame.text("session_id").orEmpty(),
+                        position = frame.text("position")?.toIntOrNull(),
+                        attempt = frame.text("attempt")?.toIntOrNull(),
+                        waitSeconds = frame.text("wait_seconds")?.toDoubleOrNull(),
+                        reason = frame.text("reason"),
+                        parked = frame.text("parked") == "true",
                     ),
                 )
-                "chat:reasoning" -> eventsFlow.tryEmit(
+                "chat:reasoning" -> eventsFlow.emit(
                     Event.Reasoning(
-                        sessionId = frame["session_id"]?.toString()?.trim('"').orEmpty(),
-                        content = frame["content"]?.toString()?.trim('"').orEmpty(),
+                        sessionId = frame.text("session_id").orEmpty(),
+                        content = frame.text("content").orEmpty(),
                     ),
                 )
                 // 工具事件呈现（卡 C）：computer_action 实时动作流 + 两类交互卡
                 "computer_action" -> {
-                    val sessionId = frame["session_id"]?.toString()?.trim('"').orEmpty()
+                    val sessionId = frame.text("session_id").orEmpty()
                     val payload = ToolActionEvents.payloadOf(frame)
                     if (payload != null) {
-                        eventsFlow.tryEmit(
+                        eventsFlow.emit(
                             Event.ComputerAction(
                                 sessionId = sessionId,
                                 tool = payload["tool"]?.toString()?.trim('"').orEmpty(),
@@ -483,28 +552,28 @@ class MobileWsChannel(
                             ),
                         )
                         ToolActionEvents.parseHostConfirmation(sessionId, payload)?.let {
-                            eventsFlow.tryEmit(Event.HostConfirmationRequired(sessionId, it))
+                            eventsFlow.emit(Event.HostConfirmationRequired(sessionId, it))
                         }
                         ToolActionEvents.parseApproval(sessionId, payload)?.let {
-                            eventsFlow.tryEmit(Event.ApprovalRequired(sessionId, it))
+                            eventsFlow.emit(Event.ApprovalRequired(sessionId, it))
                         }
                     }
                 }
                 // U6 审批：console._extract_approval_payload 同源的移动派生帧
                 "chat:approval_required" -> {
-                    val sessionId = frame["session_id"]?.toString()?.trim('"').orEmpty()
+                    val sessionId = frame.text("session_id").orEmpty()
                     (frame["data"] as? JsonObject)?.let { data ->
                         ToolActionEvents.parseApproval(sessionId, data)?.let {
-                            eventsFlow.tryEmit(Event.ApprovalRequired(sessionId, it))
+                            eventsFlow.emit(Event.ApprovalRequired(sessionId, it))
                         }
                     }
                 }
                 // U1 主机确认：现行移动通路经 tool_result 内容 JSON 透传
                 "chat:tool_result" -> {
-                    val sessionId = frame["session_id"]?.toString()?.trim('"').orEmpty()
+                    val sessionId = frame.text("session_id").orEmpty()
                     (frame["data"] as? JsonObject)?.let { data ->
                         ToolActionEvents.parseHostConfirmationFromToolResult(sessionId, data)?.let {
-                            eventsFlow.tryEmit(Event.HostConfirmationRequired(sessionId, it))
+                            eventsFlow.emit(Event.HostConfirmationRequired(sessionId, it))
                         }
                     }
                 }
@@ -512,24 +581,32 @@ class MobileWsChannel(
                 // 通道自身不执行、不回执（回执由 DeviceBridgeService 经 sendDeviceFrame 走同一 socket）
                 "device:execute" -> {
                     DeviceBridgeEvents.parseExecute(frame)?.let { command ->
-                        eventsFlow.tryEmit(Event.DeviceCommandArrived(command, frame))
+                        eventsFlow.emit(Event.DeviceCommandArrived(command, frame))
+                    }
+                }
+                "device:task" -> {
+                    DeviceBridgeEvents.parseTaskWindow(frame)?.let {
+                        eventsFlow.emit(Event.DeviceTaskArrived(it))
                     }
                 }
             }
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            if (!isCurrentConnection(webSocket, generation)) return
             // 服务端先发 close（如快照降级链路）：必须应答完成关闭握手，
             // onClosed → 重连链路才得以继续（OkHttp 不会代答 close 帧）
             webSocket.close(code, reason)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (!isCurrentConnection(webSocket, generation)) return
             heartbeatJob?.cancel()
             scheduleReconnect(code, reason)
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (!isCurrentConnection(webSocket, generation)) return
             heartbeatJob?.cancel()
             // 握手被 HTTP 401/403 拒绝 = ticket 无效/已消费（一次性票重连必遇），
             // 按 4001 语义走续签重试；其余传输层失败无 close 码：以 1006 语义进入决策
@@ -541,6 +618,34 @@ class MobileWsChannel(
             }
         }
     }
+
+    private fun isDuplicate(frame: JsonObject): Boolean {
+        val seq = frame.long("seq")
+        if (seq != null) {
+            if (seq <= lastServerSeq) return true
+            // 先推进到最大 seq：业务 ID 重复只抑制派发，不能把已消费游标卡住。
+            lastServerSeq = seq
+            pendingCursorWrites += 1
+            lastCursorChangeAt = System.currentTimeMillis()
+        }
+        val id = frame.text("message_id") ?: frame.text("event_id") ?: return false
+        return synchronized(seenMessageIds) {
+            val duplicate = seenMessageIds[id] != null
+            if (!duplicate) seenMessageIds[id] = true
+            duplicate
+        }
+    }
+
+    private fun flushCursor() {
+        if (pendingCursorWrites <= 0) return
+        pendingCursorWrites = 0
+        runCatching { lastSeqPersist(lastServerSeq.toInt()) }
+    }
+
+    private fun JsonObject.text(key: String): String? =
+        (this[key] as? JsonPrimitive)?.contentOrNull
+
+    private fun JsonObject.long(key: String): Long? = text(key)?.toLongOrNull()
 
     companion object {
         /** 握手唯一装配点：Authorization: Bearer 头携带一次性 ticket（勿用子协议，已证伪） */
@@ -588,6 +693,8 @@ class MobileWsChannel(
         private const val PONG_TIMEOUT_MS = 10_000L
         private const val DEFAULT_BACKOFF_BASE_MS = 1_000L
         private const val DEFAULT_BACKOFF_CAP_MS = 16_000L
+        private const val CURSOR_BATCH_SIZE = 16
+        private const val CURSOR_BATCH_MS = 100L
 
         /**
          * 重连退避（可测纯函数）：min(base * 2^count, cap)，与服务端

@@ -140,7 +140,13 @@ async def websocket_sync(
         await websocket.accept()
         await websocket.close(code=4401, reason="unauthorized")
         return
-    user_id = payload.get("neuser_id") or payload.get("user_id") or payload.get("sub") or "anonymous"
+    user_id = str(payload.get("user_id") or payload.get("sub") or "anonymous")
+    neuser_id = str(payload.get("neuser_id") or user_id)
+    ws_current_user = {
+        "user_id": user_id,
+        "neuser_id": neuser_id,
+        "username": payload.get("username") or user_id,
+    }
 
     await websocket.accept()
 
@@ -162,12 +168,16 @@ async def websocket_sync(
         except HTTPException:
             await websocket.close(code=4403, reason="forbidden")
             return
-    session = manager.register_or_create_session(
-        session_id=session_id,
-        user_id=user_id,
-        agent_id="default",
-        metadata={"source": "ws_sync"},
-    )
+    try:
+        session = manager.register_or_create_session(
+            session_id=session_id,
+            user_id=user_id,
+            agent_id="default",
+            metadata={"source": "ws_sync"},
+        )
+    except ValueError as exc:
+        await websocket.close(code=4404, reason=str(exc))
+        return
 
     # 创建连接包装器
     ws_conn = WebSocketConnection(websocket, session_id, channel_type)
@@ -181,12 +191,15 @@ async def websocket_sync(
     async def send_callback(event: SessionEvent):
         await ws_conn.send_event(event)
 
-    manager.register_channel(
+    conn = manager.register_channel(
         session_id=session_id,
         channel_type=channel_type,
         send_callback=send_callback,
         metadata={"connection_id": ws_conn.connection_id},
     )
+    if conn is None:
+        await websocket.close(code=409, reason="session_not_active")
+        return
 
     # 纪元探测帧：告知客户端当前发号器位置，必须
     # 先于历史重放发送。客户端游标 >= next_seq 说明服务端已重启（seq 归
@@ -241,29 +254,48 @@ async def websocket_sync(
                 await websocket.send_json({"type": "sync_resume_done"})
                 continue
 
+            if msg_type in ("pause_session", "resume_session"):
+                changed = (
+                    manager.pause_session(session_id)
+                    if msg_type == "pause_session"
+                    else manager.resume_session(session_id)
+                )
+                if not changed:
+                    await websocket.send_json({"error": f"Cannot {msg_type}"})
+                    continue
+                await _broadcastLatestState(manager, session_id)
+
+            elif msg_type == "end_session":
+                if manager.end_session(session_id):
+                    await _broadcastLatestState(manager, session_id)
+                    await _closeSessionConnections(session_id)
+                    for channel_type in list(session.active_channels):
+                        manager.unregister_channel(session_id, channel_type)
+                    break
+
             # 处理用户消息
-            if msg_type == "user_message":
+            elif msg_type == "user_message":
                 content = message.get("content", "")
                 if not content:
                     await websocket.send_json({"error": "Empty message"})
                     continue
+                try:
+                    _requireActiveSession(session, session_id)
+                except HTTPException as exc:
+                    await websocket.send_json({"error": exc.detail})
+                    continue
 
-                # 创建事件
-                event = SessionEvent(
-                    event_type=EventType.USER_MESSAGE,
-                    session_id=session_id,
-                    source_channel=channel_type,
-                    payload={"content": content, "metadata": message.get("metadata", {})},
+                async def _acceptMessage(event_id: str) -> None:
+                    await websocket.send_json({"type": "message_sent", "event_id": event_id})
+
+                await _dispatchSyncMessage(
+                    session,
+                    content=content,
+                    channel_type=channel_type,
+                    current_user=ws_current_user,
+                    metadata=message.get("metadata", {}),
+                    on_accepted=_acceptMessage,
                 )
-
-                # 广播到其他渠道
-                await manager.broadcast_event(session_id, event, exclude_channel=channel_type)
-
-                # 确认发送
-                await websocket.send_json({"type": "message_sent", "event_id": event.event_id})
-
-                # TODO: 触发 Agent 处理
-                # 这里应该调用 Agent 的 chat 方法
 
             # 处理同步请求
             elif msg_type == "sync_request":
@@ -318,6 +350,121 @@ def _requireSessionOwnership(session, current_user: Dict[str, Any]) -> None:
         {"user_id": getattr(session, "user_id", "") or ""},
         _callerUserId(current_user),
     )
+
+
+def _requireActiveSession(session, session_id: str) -> None:
+    """所有 Sync 入站共用的 active 门；paused/ended 不得再触发 Agent。"""
+    if session.status != "active":
+        raise HTTPException(status_code=409, detail=f"Session is {session.status}")
+
+
+async def _dispatchSyncMessage(
+    session,
+    *,
+    content: str,
+    channel_type: str,
+    current_user: Dict[str, Any],
+    metadata: Optional[Dict[str, Any]] = None,
+    on_accepted=None,
+) -> Dict[str, Any]:
+    """Sync WS/REST 与渠道共用的唯一入站处理口。
+
+    发送者身份来自已鉴权 token；Agent 属主仍由 channel_router 从
+    `agent.config.owner_user_id` 显式写入 `session_owner_id`。REST 没有 WS
+    适配器可回发，因此 Agent 回复由本层广播回同一 SessionSyncManager 历史。
+    """
+    from neurova.channels.base import ChannelMessage
+    from neurova.channels.channel_router import process_inbound
+    from neurova.channels.manager import get_channel_manager
+
+    manager = get_session_sync_manager()
+    sender_id = _callerUserId(current_user)
+    sender_neuser_id = str(current_user.get("neuser_id") or sender_id)
+    message_metadata = {
+        "agent_id": session.agent_id,
+        "sync_session_id": session.session_id,
+        "source": "session_sync",
+        **dict(metadata or {}),
+    }
+    user_event = SessionEvent(
+        event_type=EventType.USER_MESSAGE,
+        session_id=session.session_id,
+        source_channel=channel_type,
+        payload={"content": content, "metadata": message_metadata},
+    )
+    sent_count = await manager.broadcast_event(
+        session.session_id, user_event, exclude_channel=channel_type
+    )
+    if on_accepted is not None:
+        await on_accepted(user_event.event_id)
+
+    message = ChannelMessage(
+        channel_type=channel_type,
+        message_id=f"sync_{uuid.uuid4().hex[:12]}",
+        sender_id=sender_id,
+        sender_name=str(current_user.get("username") or sender_id),
+        content=content,
+        chat_id=session.session_id,
+        chat_type="p2p",
+        metadata=message_metadata,
+    )
+    history_start = len(session.history)
+    reply = await process_inbound(
+        get_channel_manager(),
+        message,
+        session_id=session.session_id,
+        turn_identity={
+            "user_id": sender_id,
+            "neuser_id": sender_neuser_id,
+            "bound": "true",
+        },
+    )
+    # 真实 ChatPipeline 会经 _sync_final_reply 广播 AGENT_REPLY；只有它没广播时
+    # （如独立 Agent/评测替身）才由 Sync 层补一条，避免同一回复双写历史。
+    pipelineReplied = any(
+        event.event_type == EventType.AGENT_REPLY for event in session.history[history_start:]
+    )
+    reply_items = []
+    if session.status == "active" and not pipelineReplied:
+        reply_items = reply if isinstance(reply, list) else ([reply] if reply else [])
+    reply_count = 0
+    for item in reply_items:
+        text = str(getattr(item, "paired_text", "") or item or "").strip()
+        if not text:
+            continue
+        await manager.broadcast_event(
+            session.session_id,
+            SessionEvent(
+                event_type=EventType.AGENT_REPLY,
+                session_id=session.session_id,
+                source_channel=channel_type,
+                payload={"content": text, "metadata": message_metadata},
+            ),
+        )
+        reply_count += 1
+    return {
+        "event_id": user_event.event_id,
+        "sent_to_channels": sent_count,
+        "reply_count": reply_count,
+    }
+
+
+async def _broadcastLatestState(manager, session_id: str) -> None:
+    """把 pause/resume/end 已盖章的状态事件广播给所有活连接。"""
+    session = manager.get_session(session_id)
+    if session is None or not session.history:
+        return
+    await manager.broadcast_event(session_id, session.history[-1], record=False)
+
+
+async def _closeSessionConnections(session_id: str, reason: str = "session_ended") -> None:
+    """结束会话时断开全部 WS，并清掉连接表，避免 ended 会话继续收消息。"""
+    connections = _ws_connections.pop(session_id, [])
+    for conn in connections:
+        try:
+            await conn.websocket.close(code=1000, reason=reason)
+        except Exception as exc:  # noqa: BLE001 - 单条连接关闭失败不阻断其余连接
+            logger.warning("关闭会话 WebSocket 失败 %s: %s", session_id, exc)
 
 
 @router.post("/sessions", response_model=SessionResponse)
@@ -390,19 +537,17 @@ async def send_message(
         raise HTTPException(status_code=404, detail="Session not found")
 
     _requireSessionOwnership(session, current_user)
+    _requireActiveSession(session, session_id)
 
-    # 创建事件
-    event = SessionEvent(
-        event_type=EventType.USER_MESSAGE,
-        session_id=session_id,
-        source_channel=body.channel_type,
-        payload={"content": body.content, "metadata": body.metadata},
+    result = await _dispatchSyncMessage(
+        session,
+        content=body.content,
+        channel_type=body.channel_type,
+        current_user=current_user,
+        metadata=body.metadata,
     )
 
-    # 广播事件
-    sent_count = await manager.broadcast_event(session_id, event)
-
-    return {"success": True, "event_id": event.event_id, "sent_to_channels": sent_count}
+    return {"success": True, **result}
 
 
 @router.delete("/sessions/{session_id}")
@@ -426,7 +571,44 @@ async def end_session(
     if not manager.end_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
 
+    await _broadcastLatestState(manager, session_id)
+    await _closeSessionConnections(session_id)
+    for channel_type in list(session.active_channels):
+        manager.unregister_channel(session_id, channel_type)
+
     return {"success": True, "session_id": session_id}
+
+
+@router.post("/sessions/{session_id}/pause")
+async def pause_session(
+    session_id: str, current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """暂停会话：状态先落历史，再统一广播给所有活连接。"""
+    manager = get_session_sync_manager()
+    session = manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _requireSessionOwnership(session, current_user)
+    if not manager.pause_session(session_id):
+        raise HTTPException(status_code=409, detail=f"Session is {session.status}")
+    await _broadcastLatestState(manager, session_id)
+    return {"success": True, "session_id": session_id, "status": "paused"}
+
+
+@router.post("/sessions/{session_id}/resume")
+async def resume_session(
+    session_id: str, current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """恢复会话：只允许 paused → active，ended 是终态。"""
+    manager = get_session_sync_manager()
+    session = manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _requireSessionOwnership(session, current_user)
+    if not manager.resume_session(session_id):
+        raise HTTPException(status_code=409, detail=f"Session is {session.status}")
+    await _broadcastLatestState(manager, session_id)
+    return {"success": True, "session_id": session_id, "status": "active"}
 
 
 @router.get("/sessions")

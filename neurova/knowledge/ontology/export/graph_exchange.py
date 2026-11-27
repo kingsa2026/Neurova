@@ -26,6 +26,9 @@ def _readGraph(store: Any, tenantId: str = "default",
     from neurova.knowledge.ontology.graph_backend import resolveGraphBackend
 
     backend = resolveGraphBackend(store)
+    rebuild = getattr(backend, "rebuildFromStore", None)
+    if callable(rebuild):
+        rebuild(store, tenantId, agentId)
     termRows = backend.conceptTerms(tenantId)
     factRows = backend.activeTriples(tenantId, agentId)
     nodes: List[Dict[str, Any]] = []

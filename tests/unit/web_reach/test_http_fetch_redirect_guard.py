@@ -224,5 +224,7 @@ class TestSharedLayerHopLoop:
                     if u.startswith("http://127.0.0.1") else None,
                 )
             assert bo.called, "urllib 路径必须经禁跟随 opener"
-            assert any(isinstance(a, urllib.request.HTTPRedirectHandler) is False or True
-                       for a in bo.call_args[0]), "opener 需装配自定义重定向策略"
+            assert any(
+                isinstance(handler, http_fetch._NoRedirectHandler)
+                for handler in bo.call_args[0]
+            ), "opener 需装配自定义重定向策略"

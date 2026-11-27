@@ -37,7 +37,6 @@ RESIDENT_CONN_FILES = [
     "neurova/channels/channel_ingress_queue.py",
     "neurova/cognitive_layers/memory_layer/cognitive_storage_engine.py",
     "neurova/cognitive_layers/memory_layer/modules/emotion_module.py",
-    "neurova/cognitive_layers/memory_layer/attachment_manager.py",
     "neurova/cognitive_layers/meta_cognition_layer/ledger.py",
     "neurova/collaboration/neurflow/storage.py",
     "neurova/aigc_studio/store.py",

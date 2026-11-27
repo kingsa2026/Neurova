@@ -99,10 +99,14 @@ class OutboundFailureLedger:
             return int(cur.lastrowid)
 
     def queryFailures(
-        self, *, channel_type: str = "", chat_id: str = "", limit: int = 100
+        self, *, agent_id: str = "", channel_type: str = "", chat_id: str = "",
+        limit: int = 100,
     ) -> List[Dict[str, Any]]:
-        """按渠道/会话过滤倒序读——"哪个会话在丢片"必须查得到。"""
+        """按 agent/渠道/会话过滤倒序读，保留既有渠道与会话过滤能力。"""
         clauses, params = [], []
+        if agent_id:
+            clauses.append("agent_id = ?")
+            params.append(agent_id)
         if channel_type:
             clauses.append("channel_type = ?")
             params.append(channel_type)

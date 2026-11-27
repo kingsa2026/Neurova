@@ -39,6 +39,7 @@ class FakeStorage:
 
     def __init__(self):
         self.saved: List[Dict[str, Any]] = []
+        self._records: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
 
     def save(self, content, memory_type, owner="default", tags=None,
@@ -53,7 +54,12 @@ class FakeStorage:
         }
         with self._lock:
             self.saved.append(rec)
+            self._records["mem_fake"] = rec
         return "mem_fake"
+
+    def get(self, memory_id):
+        with self._lock:
+            return self._records.get(memory_id)
 
 
 # ===========================================================================

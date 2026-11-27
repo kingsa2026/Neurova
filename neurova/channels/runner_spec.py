@@ -6,7 +6,8 @@
 核对，子进程握手时回带审计结果——两侧对不上就拒绝启动（fail-closed）。
 
 设计边界（显式规格形制，实现为本仓自研）：
-- 只声明"可信根"，不携带渠道密钥——密钥仍走既有 ChannelConfig，不经本规格扩散；
+- `channel_config` 保真传递渠道配置；密钥可用 `{"env": "KEY"}` 引用白名单环境变量，
+  避免直接出现在规格/命令行中；
 - `required_deps` 是该渠道适配器的**可导入依赖**清单，握手期逐个 import 实测；
 - `source_revision` 供宿主核对"拉起来的代码就是我以为的代码"。
 """
@@ -62,6 +63,12 @@ class LaunchSpec:
     required_deps: List[str] = field(default_factory=list)
     #: 允许透传给子进程的环境变量键（白名单；空＝只带基础项）。
     private_env_keys: List[str] = field(default_factory=list)
+    #: 宿主侧实例归属；同一渠道可被多个 agent 各跑一个子进程。
+    agent_id: str = "default"
+    #: Supervisor 状态表键；缺省由 agent_id + channel_type 复合而成。
+    instance_key: str = ""
+    #: 传给子进程的 ChannelConfig 保真载荷；值可用 {"env": "KEY"} 引用白名单环境变量。
+    channel_config: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.python_executable:
@@ -80,6 +87,9 @@ class LaunchSpec:
             "source_revision": self.source_revision,
             "required_deps": list(self.required_deps),
             "private_env_keys": list(self.private_env_keys),
+            "agent_id": self.agent_id,
+            "instance_key": self.instance_key,
+            "channel_config": dict(self.channel_config),
         }
 
     def to_json(self) -> str:
@@ -95,6 +105,9 @@ class LaunchSpec:
             source_revision=str(payload.get("source_revision") or ""),
             required_deps=[str(x) for x in (payload.get("required_deps") or [])],
             private_env_keys=[str(x) for x in (payload.get("private_env_keys") or [])],
+            agent_id=str(payload.get("agent_id") or "default"),
+            instance_key=str(payload.get("instance_key") or ""),
+            channel_config=dict(payload.get("channel_config") or {}),
         )
 
     @classmethod

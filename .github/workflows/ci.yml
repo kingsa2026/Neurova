@@ -128,9 +128,19 @@ jobs:
       - name: Run audit regression tests
         run: python -m pytest tests/unit/test_audit_regressions.py -q
 
+  protected-shards:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.matrix.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        run: python scripts/ci/protected_shard_matrix.py --github-output >> "$GITHUB_OUTPUT"
+
   unit-tests:
     name: Unit tests (protected subset + coverage)
     runs-on: ubuntu-latest
+    needs: [protected-shards]
     # 本 job 的墙：整段上限。它与下面的单档墙（`--timeout 1500`）必须严格有序。
     # `timeout-minutes` 是**矩阵里每个 job 各一份**，每 job 只跑一片（实测最慢
     # 1022.53s ≈ 17m，含检出与装锁约 20m 量级），与 cnb 侧「几片串行共用一道墙」
@@ -146,7 +156,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: ${{ fromJSON(needs.protected-shards.outputs.shards) }}
     steps:
       # fetch-depth: 0 是**判据的运行前提**，不是优化项：
       #   受保护子集里的 test_protected_subset_registration_history.py 按清单
@@ -236,7 +246,7 @@ jobs:
       # QwenPaw 对照批 C6：覆盖率棘轮——实际低于记录值即红；超越则把记录值
       # 上调写回 scripts/ci/coverage_ratchet.json（只升不降，演进史即提交史）。
       - name: Coverage ratchet (only ratchets up)
-        run: python scripts/ci/coverage_ratchet.py --data-dir data/coverage --ratchet scripts/ci/coverage_ratchet.json --floor 60
+        run: python scripts/ci/coverage_ratchet.py --merged data/coverage/.coverage.merged --ratchet scripts/ci/coverage_ratchet.json --floor 60
 
   e2e:
     name: E2E backend boot smoke (P1-8)
@@ -304,6 +314,9 @@ jobs:
       - name: Bundle budget gate
         run: python ../scripts/ci/bundle_budget.py --dist dist --budget bundle-budget.json
 
+      - name: E2E performance budget (playwright)
+        run: npx playwright install --with-deps chromium && npx playwright test
+
   perf-gate:
     name: Performance regression gate (import budget + microbench)
     runs-on: ubuntu-latest
@@ -340,11 +353,15 @@ jobs:
       # 而它与「某次提交是否引入漏洞」毫无关系——纯网络往返（Issue #223 第 1 条）。
       # 卷/缓存判据由 tests/unit/test_ci_pipeline_speed_guard.py 与脚本的
       # OSV_DB_CACHE 同源校验，不写死第二份口径。
+      - name: Date OSV cache bucket
+        id: osv-cache-date
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       - name: Cache OSV offline databases
         uses: actions/cache@v4
         with:
           path: ~/.cache/osv-scalibr
-          key: osv-scalibr-${{ runner.os }}
+          key: osv-scalibr-${{ runner.os }}-${{ steps.osv-cache-date.outputs.day }}-${{ hashFiles('scripts/ci/osv_audit.py') }}
 
       - name: Prefetch OSV offline databases (best effort)
         # 先把漏洞库落到 runner 本地缓存，让下面两条门禁的裁决**都不依赖**
@@ -360,9 +377,9 @@ jobs:
         # 预取覆盖的生态由 `osv_audit.py` 的 `OFFLINE_DB_SCOPE` 单源给出
         # （crates.io / npm / PyPI），不在本文件里手抄第二份。
         #
-        # 预取失败**不判红**：库过期只漏报新公告，库缺失只是让门禁回退直连；
+        # 预取失败**不判红**：过期库不参与裁决，预取未刷新时门禁回退直连；
         # 把一条随网络抖动的命令放进阻塞门禁，就是本单在消灭的那个形态。
-        # 判据在门禁本体：缓存齐就走离线、不齐则点名并回退（可读、可复算）。
+        # 判据在门禁本体：缓存齐且未超过 24h 就走离线、缺失/过期则点名并回退。
         run: python scripts/ci/osv_audit.py --prefetch-offline-databases || true
 
       # pip-audit 经 scripts/ci/pip_audit_gate.py 调用（Issue #354）：直调

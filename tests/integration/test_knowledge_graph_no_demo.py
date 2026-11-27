@@ -23,6 +23,20 @@ class StubManager:
         self._nodes = nodes or {}
         self._edges = edges or {}
 
+    def get_graph(self, limit=100):
+        from neurova.cognitive_layers.knowledge_graph.manager import KnowledgeGraphManager
+
+        nodes = list(self._nodes.values())[:limit]
+        node_ids = {node.node_id for node in nodes}
+        edges = [
+            edge for edge in self._edges.values()
+            if edge.source_id in node_ids and edge.target_id in node_ids
+        ]
+        return {
+            "nodes": [KnowledgeGraphManager.nodePayload(node) for node in nodes],
+            "edges": [KnowledgeGraphManager.edgePayload(edge) for edge in edges],
+        }
+
     def get_stats(self):
         from collections import Counter
 

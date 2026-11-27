@@ -4,6 +4,7 @@ Neurova 配置管理模块
 """
 
 import os
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -110,6 +111,13 @@ def get_frontend_package_json() -> Path:
         Path: package.json 路径
     """
     return FRONTEND_DIR / "package.json"
+
+
+def frontendInstallArgv(frontendDir: Path) -> list[str]:
+    """前端干净安装的单一 argv 构造；shell=False 时须解析 Windows npm.CMD。"""
+    npm = shutil.which("npm") or "npm"
+    command = "ci" if (frontendDir / "package-lock.json").is_file() else "install"
+    return [npm, command, "--no-audit", "--no-fund"]
 
 
 def is_frontend_available() -> bool:

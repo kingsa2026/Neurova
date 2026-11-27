@@ -193,6 +193,13 @@ CLOCK_LEDGER: Dict[str, tuple] = {
         "注入的 0.2s 延迟在加压机器上会漂，那正是本门要逐条给结论的形态；"
         "§6-230 改判为虚拟钟驱动（同 §6-96/§6-216 那一族的处理方向）。",
     ),
+    "tests/unit/ci/test_ci_protected_subset_nightly.py": (
+        ("wallClock",),
+        "本文件量的是 Nightly 的**总预算截止与并发上限**，不是机器性能："
+        "`time.monotonic()` 只用来生成真实单调 deadline，短等待只保证两个worker"
+        "真实重叠；断言面是并发峰值不超过 2、截止后出现 budget/not_run、子进程被终止，"
+        "没有任何耗时上下界或速度比值。",
+    ),
 }
 
 

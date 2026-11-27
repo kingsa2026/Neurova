@@ -202,7 +202,10 @@ class TestCacheStability:
         # 判据从"逐条 [历史回忆] 行的位置"换成"信封所在位置"——语义等价、更强
         from neurova.context.envelope import parse_envelope
 
-        assert parse_envelope(str(ctx[-1].get("content", ""))) or True
+        content = str(ctx[-1].get("content", ""))
+        last_blocks = parse_envelope(content)
+        assert "time" in last_blocks, "末条 user 缺瞬态信封"
+        assert content.endswith("还记得我要去哪里吗"), "信封必须位于当前输入之前"
         assert roles[-1] == "user", "当前输入不在末尾"
         for i, m in enumerate(ctx[:-1]):
             assert "system-reminder" not in str(m.get("content", "")), (

@@ -410,32 +410,43 @@ def _grantNotAllowedLevel(level: str) -> Optional[str]:
     return None
 
 
-def acceptForSession(run: Any, action: str, *, level: str, granted_by: str) -> Dict[str, Any]:
-    """记忆式批准·会话档：本 run/会话域内同类动作免再批（run 结束即失效）。
+def _grantExpiresAt(value: Any) -> float:
+    """授权期限归一；0/缺省表示仅随既有作用域生命周期结束。"""
+    if value in (None, "", 0, 0.0):
+        return 0.0
+    try:
+        expires = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("expires_at 必须是 Unix 时间戳") from exc
+    if expires < 0:
+        raise ValueError("expires_at 不能早于 Unix 纪元")
+    return expires
 
-    - scope 绑定该 member run 的会话域（member_session_id；缺省按 run 自身收口），
-      并锚定发起 run——run 终态（或被逐出 runsMap）即失效（见 :func:`_grantRunAlive`）；
-    - level 只收 L0/L1：L2 拒绝建单（ValueError）。
 
-    Returns:
-        grant 字典（副本）：grant_id/kind/action/level/session_key/run_id/
-        team_id/granted_by/granted_at/revoked/revoked_at/revoked_by。
-    """
+def acceptSessionGrant(
+    session_key: str, run_id: str, team_id: str, action: str, *,
+    level: str, granted_by: str, expires_at: float = 0.0,
+) -> Dict[str, Any]:
+    """记忆式批准·会话档的显式可信入口（REST 与 run 对象入口共用同一实现）。"""
+    skey = str(session_key or "").strip()
+    rid = str(run_id or "").strip()
+    if not skey or not rid:
+        raise ValueError("session_key 与 run_id 不能为空（会话档 grant 必须绑定会话与锚 run）")
     act = str(action or "").strip()
     if not act:
         raise ValueError("action 不能为空（要放行哪类操作必须写明）")
     _grantNotAllowedLevel(level)
-    grantLevel = normalizeLevel(level)
     grant = {
         "grant_id": _nextGrantId(),
         "kind": GRANT_KIND_SESSION,
         "action": act,
-        "level": grantLevel,
-        "session_key": _memberSessionKey(run),
-        "run_id": str(getattr(run, "subagent_id", "") or ""),
-        "team_id": str(getattr(run, "team_id", "") or ""),
+        "level": normalizeLevel(level),
+        "session_key": skey,
+        "run_id": rid,
+        "team_id": str(team_id or "").strip(),
         "granted_by": str(granted_by or "").strip(),
         "granted_at": time.time(),
+        "expires_at": _grantExpiresAt(expires_at),
         "revoked": False,
         "revoked_at": 0.0,
         "revoked_by": "",
@@ -445,7 +456,22 @@ def acceptForSession(run: Any, action: str, *, level: str, granted_by: str) -> D
     return dict(grant)
 
 
-def acceptAlways(team_id: str, action: str, *, level: str, granted_by: str) -> Dict[str, Any]:
+def acceptForSession(run: Any, action: str, *, level: str, granted_by: str,
+                     expires_at: float = 0.0) -> Dict[str, Any]:
+    """记忆式批准·会话档：本 run/会话域内同类动作免再批（run 结束即失效）。
+
+    - scope 绑定该 member run 的会话域（member_session_id；缺省按 run 自身收口），
+      并锚定发起 run——run 终态（或被逐出 runsMap）即失效（见 :func:`_grantRunAlive`）；
+    - level 只收 L0/L1：L2 拒绝建单（ValueError）。
+    """
+    return acceptSessionGrant(
+        _memberSessionKey(run), str(getattr(run, "subagent_id", "") or ""),
+        str(getattr(run, "team_id", "") or ""), action,
+        level=level, granted_by=granted_by, expires_at=expires_at)
+
+
+def acceptAlways(team_id: str, action: str, *, level: str, granted_by: str,
+                 expires_at: float = 0.0) -> Dict[str, Any]:
     """记忆式批准·团队档：本团队内同类动作配置化放行，可撤销，持久化到数据根。
 
     跨 run 生效（按 team_id 匹配，双方都非空才认）；level 只收 L0/L1。
@@ -470,6 +496,7 @@ def acceptAlways(team_id: str, action: str, *, level: str, granted_by: str) -> D
         "team_id": tid,
         "granted_by": str(granted_by or "").strip(),
         "granted_at": time.time(),
+        "expires_at": _grantExpiresAt(expires_at),
         "revoked": False,
         "revoked_at": 0.0,
         "revoked_by": "",
@@ -554,6 +581,11 @@ def _grantRunAlive(grant: Dict[str, Any], requestingRun: Any = None) -> bool:
     return isinstance(info, dict) and info.get("status") in SUBAGENT_ACTIVE_STATUSES
 
 
+def _grantExpired(grant: Dict[str, Any]) -> bool:
+    expires = float(grant.get("expires_at", 0.0) or 0.0)
+    return bool(expires and time.time() >= expires)
+
+
 def matchGrant(run: Any, action: str, level: str) -> Optional[Dict[str, Any]]:
     """按 会话档 → 团队档 顺序找第一张能覆盖本次请求的有效 grant。
 
@@ -574,7 +606,7 @@ def matchGrant(run: Any, action: str, level: str) -> Optional[Dict[str, Any]]:
     with _grantLock:
         rows = list(_loadGrantsLocked())
     for grant in rows:  # 会话档优先（更贴身的作用域）
-        if grant.get("kind") != GRANT_KIND_SESSION or grant.get("revoked"):
+        if grant.get("kind") != GRANT_KIND_SESSION or grant.get("revoked") or _grantExpired(grant):
             continue
         if grant.get("session_key") != skey:
             continue
@@ -584,7 +616,7 @@ def matchGrant(run: Any, action: str, level: str) -> Optional[Dict[str, Any]]:
                 and grantCoversLevel(grant.get("level", ""), requestLevel)):
             return dict(grant)
     for grant in rows:  # 团队档跨 run 生效（双方 team_id 都非空才认）
-        if grant.get("kind") != GRANT_KIND_TEAM or grant.get("revoked"):
+        if grant.get("kind") != GRANT_KIND_TEAM or grant.get("revoked") or _grantExpired(grant):
             continue
         if not tid or grant.get("team_id") != tid:
             continue
@@ -641,6 +673,7 @@ def projectTeamGrants(team_id: str) -> List[Dict[str, Any]]:
             "team_id": grant.get("team_id", ""),
             "granted_by": grant.get("granted_by", ""),
             "granted_at": grant.get("granted_at", 0.0),
+            "expires_at": grant.get("expires_at", 0.0),
             "revoked": revoked,
             "revoked_by": grant.get("revoked_by", ""),
             "revoked_at": grant.get("revoked_at", 0.0),

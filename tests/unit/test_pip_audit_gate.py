@@ -381,6 +381,20 @@ class TestVerdictChannelDoesNotDependOnLiveOsv:
             f"问题清单没点名缺的是哪个生态的库: {problems}"
         )
 
+    def test_stale_pypi_cache_falls_back_instead_of_asserting_freshness(
+        self, gate, tmp_path, monkeypatch
+    ):
+        cache_root = tmp_path / "osv-scalibr-stale"
+        db = cache_root / "PyPI" / "all.zip"
+        db.parent.mkdir(parents=True)
+        db.write_bytes(b"stub")
+        os.utime(db, (1, 1))
+        monkeypatch.setattr(gate, "OSV_DB_CACHE", cache_root)
+
+        offline, problems = gate.resolveVerdictChannel()
+        assert offline is False
+        assert any("过期" in item for item in problems), problems
+
     def test_cache_root_is_the_same_source_as_the_osv_gate(self, gate):
         """离线库落点必须与 `osv_audit.py` **同值**——不新造第二套缓存口径。
 

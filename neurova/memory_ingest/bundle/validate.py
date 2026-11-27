@@ -36,10 +36,14 @@ def validate_bundle(root: Path) -> List[str]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         return [f"manifest.json 不是合法 JSON: {exc}"]
+    if not isinstance(manifest, dict):
+        return [f"manifest.json 必须是 JSON 对象，实际 {type(manifest).__name__}"]
     if manifest.get("schema_version") != SUPPORTED_SCHEMA_VERSION:
         return [f"schema_version 不支持: {manifest.get('schema_version')!r}"]
 
     counts = manifest.get("counts", {})
+    if not isinstance(counts, dict):
+        return [f"manifest.json counts 必须是 JSON 对象，实际 {type(counts).__name__}"]
     errors: List[str] = []
     for name, required in _REQUIRED.items():
         path = root / name
@@ -73,9 +77,13 @@ def _read_jsonl(path: Path) -> List[dict]:
         if not line.strip():
             continue
         try:
-            rows.append(json.loads(line))
+            value = json.loads(line)
         except json.JSONDecodeError as exc:
             raise ValueError(f"{path.name}:{lineno} 不是合法 JSON: {exc}") from exc
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"{path.name}:{lineno} 必须是 JSON 对象，实际 {type(value).__name__}")
+        rows.append(value)
     return rows
 
 

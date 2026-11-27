@@ -149,7 +149,7 @@ def generate_report(results: Dict[str, Any], output_file: str = "tests/COMPREHEN
         "## 测试覆盖模块",
         "",
         "### 核心模块 (Core)",
-        "- ConfigManager - 配置管理",
+        "- 环境配置助手 - 配置读取",
         "- StateManager - 状态管理",
         "- EventBus - 事件总线",
         "- LogManager - 日志管理",

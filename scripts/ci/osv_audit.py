@@ -51,8 +51,8 @@ pip-audit 与 npm audit 只覆盖"Python 声明锁"与"NeurUI 的 npm 树"。
   ③ 把这条外部依赖收进可控面：**优先走离线库**（`--offline --offline-vulnerabilities`
   + 预取缓存，实测下载 47s / 扫描 12.7s，与直连逐条一致），CI 两侧各加一步
   best-effort 预取（`--prefetch-offline-databases || true`）。
-  裁决通路收口在 `resolveVerdictChannel()` 一处：缓存齐 → 离线（不再依赖远端）；
-  缓存不齐 → **回退直连并点名缺哪一份**。门禁本体**不带** `--require-offline`：
+  裁决通路收口在 `resolveVerdictChannel()` 一处：缓存齐且新鲜 → 离线（不再依赖远端）；
+  缓存缺失或过期 → **回退直连并点名原因**。门禁本体**不带** `--require-offline`：
   预取既然允许失败，门禁就不能要求「预取必须成功」——两者放在同一条流水线里会
   互相抵消，预取一失败就是阻塞红灯，而这与「真有未允许漏洞」同形，
   读日志的人仍只能重跑（正是本单要消灭的形态）。`--require-offline` 保留给
@@ -369,6 +369,8 @@ def verify_local_patches() -> list:
 # 为什么用扫描器自己的目录而不是本脚本另建一个：另建就等于维护第二份缓存口径，
 # 而「哪个生态的库存在哪」是扫描器随版本变的事实——本脚本不抄它。
 OSV_DB_CACHE = Path.home() / ".cache" / "osv-scalibr"
+#: 离线漏洞库最长可复用年龄；超过即不参与裁决，预取刷新失败时诚实回退直连。
+OFFLINE_DB_MAX_AGE_SECONDS = 24 * 60 * 60
 # 被扫依赖树 → 它需要的离线库归属（crates.io / npm）。缺一份即整条离线路径不可用：
 # 实测缓存只有 crates.io 时，npm 那一路会报
 # `no offline version of the OSV database is available` 并退 127。
@@ -409,20 +411,32 @@ def _requiredOfflineScopes(targets) -> list:
     return scopes
 
 
-def offlineDatabaseProblems(targets) -> list:
-    """检查离线库缓存是否已备齐，返回问题清单（空 = 可供 `--offline` 使用）。
+def offlineDatabaseFileProblems(db: Path, scope: str, maxAgeSeconds=None) -> list:
+    """单份离线库必须在场且未过期；返回问题清单（空 = 可作新鲜裁决证据）。"""
+    if not db.is_file():
+        return [f"离线库缺失: {db}（生态 {scope}）"]
+    if maxAgeSeconds is None:
+        maxAgeSeconds = OFFLINE_DB_MAX_AGE_SECONDS
+    ageSeconds = time.time() - db.stat().st_mtime
+    if ageSeconds > maxAgeSeconds:
+        return [
+            f"离线库过期: {db}（生态 {scope}，年龄 {ageSeconds / 3600:.1f}h，"
+            f"上限 {maxAgeSeconds / 3600:.1f}h）"
+        ]
+    return []
 
-    判据是**文件在场**，不是「下载过」：扫描器把每个生态的库落成
-    `<scopes>/<ecosystem>/all.zip`（实测 crates.io/all.zip 3.4MB、npm/all.zip 206MB）。
-    只查在场不查新鲜度——新鲜度由预取步骤负责，且**过期库仍好过一个不可达的库**：
-    过期只会漏报新公告，不可达会让整条门禁在「网络抖动」与「真有漏洞」之间无从分辨。
+
+def offlineDatabaseProblems(targets) -> list:
+    """检查离线库缓存是否齐备且新鲜，返回问题清单（空 = 可供 `--offline` 使用）。
+
+    判据是**文件在场 + mtime 未超 24h**，不是「下载过」：过期库会漏报新公告，
+    不能继续冒充新鲜裁决证据；预取失败时由 `resolveVerdictChannel` 回退直连并点名。
     """
     scopes = _requiredOfflineScopes(targets)
     problems = []
     for scope in scopes:
         db = OSV_DB_CACHE / scope / "all.zip"
-        if not db.is_file():
-            problems.append(f"离线库缺失: {db}（生态 {scope}）")
+        problems.extend(offlineDatabaseFileProblems(db, scope))
     if not scopes:
         problems.append("没有可归属到生态的被扫目标——离线库归属表需复核")
     return problems
@@ -449,8 +463,8 @@ def resolveVerdictChannel(targets, requireOffline: bool):
     实测（清空缓存后跑 CI 两阶段命令）：预取失败 ⇒ 门禁 exit 2，红的成因与修复前
     同形（远端不可达，不是本仓代码），读日志的人仍只能重跑。
 
-    故收口为：缓存齐 → 走离线（不依赖远端）；缓存不齐且未显式要求 → 回退直连并点名；
-    缓存不齐且显式要求 → 抛 `OfflineDatabaseMissing`（调用方收口为 exit 2）。
+    故收口为：缓存齐且新鲜 → 走离线（不依赖远端）；缓存缺失/过期且未显式要求 →
+    回退直连并点名；缓存缺失/过期且显式要求 → 抛 `OfflineDatabaseMissing`（调用方收口为 exit 2）。
     """
     problems = offlineDatabaseProblems(targets)
     if not problems:
@@ -499,8 +513,8 @@ def prefetch_offline_databases(scanner: Path, targets) -> int:
     `buildScanCommand` 的离线 flag 同源，否则会出现「预取到 A 处、扫描读 B 处」
     ——那时门禁报的是「离线库缺失」，而缓存其实就在旁边。
 
-    预取**允许失败**（本函数返回非 0，但 CI 步不据此判红）：库过期只漏报新公告，
-    而库缺失只是让门禁回退直连。把预取写成硬门禁，等于把「CI 出站策略」升级成
+    预取**允许失败**（本函数返回非 0，但 CI 步不据此判红）：过期库不参与裁决，
+    预取未刷新时门禁回退直连；把预取写成硬门禁，等于把「CI 出站策略」升级成
     一个会随网络抖动的红灯——那正是本单要消灭的形态。真正的判据在门禁本体。
     """
     binary = resolveBinaryPath(scanner)
@@ -534,7 +548,7 @@ def _prefetchOneScope(binary, scope: str, scopeTargets) -> bool:
 
     成功与否**不看退出码**：实测「刚下载完」rc=1（扫描器下完顺手拿新库扫了一遍，
     报了允许清单外的历史命中）、「已最新」rc=0——码在这里没有判别力。判据落在
-    **缓存文件是否在场**，与门禁本体吃的那条离线通路同一处（`offlineDatabaseProblems`）。
+    **缓存文件在场且未过期**，与门禁本体吃的那条离线通路同一处（`offlineDatabaseProblems`）。
     """
     cmd = [str(binary), "scan", "source", "--offline", "--download-offline-databases"]
     # Python 锁要暂存成扫描器认得出的文件名才能被解析（见 scannerReadableAlias）。

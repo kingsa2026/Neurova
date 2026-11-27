@@ -166,7 +166,7 @@ def serializeAll(store: Any, tenantId: str = "default",
     """本租户全库导出成单个 Turtle 文档（升级计划 B5，A4 互通面）。
 
     三段注释分段：terms（ontology_terms 全部行）→ rules（ontology_rules 全部行）
-    → facts（`status='active' AND record_kind='triple'` 的全部行）。
+    → facts（`currentFactWhere` 当前窗口内且 `record_kind='triple'` 的全部行）。
     确定性判据：排序只来自固定 ORDER BY，时间戳与写入次序一律不进文本，
     同一库内容两次输出逐字节一致。
 
@@ -195,10 +195,11 @@ def serializeAll(store: Any, tenantId: str = "default",
             "SELECT * FROM ontology_rules WHERE %s ORDER BY rule_id" % ruleClause,
             ruleParams).fetchall()
         factTenantClause, factTenantParams = tenant_sql_where(tenant)
+        currentClause, currentParams = store.currentFactWhere()
         factSql = ("SELECT subject_key, predicate_term_id, object_term, fact_id FROM knowledge_facts"
-                   " WHERE %s AND status = 'active' AND record_kind = 'triple'"
-                   % factTenantClause)
-        factParams: List[Any] = list(factTenantParams)
+                   " WHERE %s AND %s AND record_kind = 'triple'"
+                   % (factTenantClause, currentClause))
+        factParams: List[Any] = [*factTenantParams, *currentParams]
         if agentId:
             factSql += " AND agent_id = ?"
             factParams.append(str(agentId))

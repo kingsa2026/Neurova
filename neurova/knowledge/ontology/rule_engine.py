@@ -25,6 +25,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from .term_registry import IS_A_PREDICATE
+from ..foundation.knowledge_facts import KnowledgeFactStore
 from neurova.core.time_utils import nowIso as _now
 from neurova.core.tenant_scope import tenant_sql_where
 
@@ -360,11 +361,12 @@ class ForwardChainingEngine:
         preds = sorted({a["predicate"] for a in rule["body"] if a["predicate"]})
         with self._store._lock:
             agentsClause, agentsParams = tenant_sql_where(tenantId)
+            currentClause, currentParams = KnowledgeFactStore.currentFactWhere()
             agents = [r["agent_id"] for r in self._store._conn.execute(
                 "SELECT DISTINCT agent_id FROM knowledge_facts"
-                " WHERE %s AND predicate_term_id IN (%s)"
-                " AND status = 'active'" % (agentsClause, ",".join("?" * len(preds))),
-                [*agentsParams] + preds).fetchall()]
+                " WHERE %s AND predicate_term_id IN (%s) AND %s"
+                % (agentsClause, ",".join("?" * len(preds)), currentClause),
+                [*agentsParams, *preds, *currentParams]).fetchall()]
         for agentId in agents:
             self._fireRule(rule, agentId, tenantId=tenantId)
 
@@ -648,7 +650,7 @@ class ForwardChainingEngine:
                          tenantId: str) -> bool:
         """rete alpha 节点：规则 body 各原子的谓词在域内是否有 active 事实
         （单次 COUNT 命中即真——零命中规则跳过整轮求值）。"""
-        live = "status = 'active' AND record_kind = 'triple'"
+        currentClause, currentParams = KnowledgeFactStore.currentFactWhere()
         alphaTenantClause, alphaTenantParams = tenant_sql_where(tenantId)
         for atom in rule.get("body") or []:
             pred = str(atom.get("predicate") or atom.get("atom") or "")
@@ -657,8 +659,8 @@ class ForwardChainingEngine:
             if str(atom.get("kind") or "atom") == "not":
                 continue  # 否定原子反向命中不做 alpha 预筛（保守全量）
             sql = ("SELECT 1 FROM knowledge_facts WHERE predicate_term_id = ?"
-                   " AND %s" % live)
-            params: List[Any] = [pred]
+                   " AND %s AND record_kind = 'triple'" % currentClause)
+            params: List[Any] = [pred, *currentParams]
             if agentId:
                 sql += " AND agent_id = ?"
                 params.append(agentId)
@@ -686,8 +688,10 @@ class ForwardChainingEngine:
         negated = [a for a in atoms if a["kind"] == "not"]
         params: List[Any] = []
         first, second = positive[0], (positive[1] if len(positive) > 1 else None)
-        live = "status = 'active' AND record_kind = 'triple'"
-        aLive, bLive = "a." + live.replace(" AND ", " AND a."), "b." + live.replace(" AND ", " AND b.")
+        currentClause, currentParams = KnowledgeFactStore.currentFactWhere()
+        moment = currentParams[0]
+        aCurrentClause, aCurrentParams = KnowledgeFactStore.currentFactWhere("a", now=moment)
+        bCurrentClause, bCurrentParams = KnowledgeFactStore.currentFactWhere("b", now=moment)
         # KNOW-02：前提组合全链带租户——规则按租户分区，跨租户事实不得进入
         # 本租户规则的前提（否则他租户事实会推出本租户结论与血缘）。
         tenantClause, tenantParams = tenant_sql_where(tenantId)
@@ -696,15 +700,14 @@ class ForwardChainingEngine:
         if len(positive) > 2:
             # rete_network 档放宽出的 3 原子接力链：与两原子路径同一接法逐跳 JOIN，
             # 结论集与 Rete 网络逐字一致（test_reteNetwork 对拍钉住）。
-            sql, params = self._relayChainQuery(positive, agentId, live,
-                                                tenantId=tenantId)
+            sql, params = self._relayChainQuery(positive, agentId, tenantId=tenantId)
         elif second is None:
             scope = " AND agent_id = ?" if agentId else ""
             sql = ("SELECT subject_key, object_term, fact_id AS pair FROM knowledge_facts"
-                   " WHERE predicate_term_id = ? AND %s%s AND %s"
-                   % (live, scope, tenantClause))
-            params = ([first["predicate"]] + ([agentId] if agentId else [])
-                      + tenantParams)
+                   " WHERE predicate_term_id = ? AND %s AND record_kind = 'triple'%s AND %s"
+                   % (currentClause, scope, tenantClause))
+            params = ([first["predicate"], *currentParams]
+                      + ([agentId] if agentId else []) + tenantParams)
         else:
             # 中项靠"上一跳的客体 = 下一跳主体的规范标签"接上。没被登记成主体的客体接不上，
             # 那是消解段（006）的活，不在推理层偷偷做字符串相似。
@@ -717,9 +720,11 @@ class ForwardChainingEngine:
                    " JOIN knowledge_facts b ON b.subject_key = s2.subject_key"
                    "  AND b.agent_id = a.agent_id AND b.tenant_id = a.tenant_id"
                    " WHERE a.predicate_term_id = ? AND b.predicate_term_id = ?"
-                   "  AND %s AND %s%s AND %s AND %s"
-                   % (aLive, bLive, scope, aTenantClause, bTenantClause))
-            params = ([first["predicate"], second["predicate"]]
+                   " AND %s AND %s AND a.record_kind = 'triple'"
+                   " AND b.record_kind = 'triple'%s AND %s AND %s"
+                   % (aCurrentClause, bCurrentClause, scope, aTenantClause, bTenantClause))
+            params = ([first["predicate"], second["predicate"],
+                       *aCurrentParams, *bCurrentParams]
                       + ([agentId] if agentId else [])
                       + aTenantParams + bTenantParams)
         sql = ("SELECT t.subject_key, t.object_term, MIN(s.canonical_label) AS label,"
@@ -746,12 +751,12 @@ class ForwardChainingEngine:
 
     @staticmethod
     def _relayChainQuery(positive: List[Dict[str, str]], agentId: Optional[str],
-                         live: str, tenantId: str = "default") -> Tuple[str, List[Any]]:
+                         tenantId: str = "default") -> Tuple[str, List[Any]]:
         """≥3 个正原子的接力链 SQL（rete_network 档放宽，登记闸限 3）。
 
         与两原子路径同一接法：上一跳客体按规范标签找到下一跳主体，逐跳 JOIN；
         head 主语取首原子主体、head 客体取末原子客体；agent 圈域、租户过滤
-        （KNOW-02：每个 fact 别名都带 tenant 谓词）与 live 条件同源。
+        （KNOW-02：每个 fact 别名都带 tenant 谓词）与当前事实判据同源。
         """
         from string import ascii_lowercase
 
@@ -770,8 +775,16 @@ class ForwardChainingEngine:
                     % (subj, subj, prev, subj, prev, subj, cur, cur, subj, cur, prev))
         where = ["%s.predicate_term_id = ?" % alias for alias in aliases]
         params: List[Any] = [atom["predicate"] for atom in positive]
+        moment = None
         for alias in aliases:
-            where.append("%s.%s" % (alias, live.replace(" AND ", " AND %s." % alias)))
+            if moment is None:
+                currentClause, currentParams = KnowledgeFactStore.currentFactWhere(alias)
+                moment = currentParams[0]
+            else:
+                currentClause, currentParams = KnowledgeFactStore.currentFactWhere(alias, now=moment)
+            where.append(currentClause)
+            where.append("%s.record_kind = 'triple'" % alias)
+            params.extend(currentParams)
             aliasClause, aliasParams = tenant_sql_where(tenantId, alias=alias)
             if aliasClause:
                 where.append(aliasClause)
@@ -791,13 +804,14 @@ class ForwardChainingEngine:
             return False
         for atom in negated:
             clause, negParams = tenant_sql_where(tenantId)
+            currentClause, currentParams = KnowledgeFactStore.currentFactWhere()
             params: List[Any] = [agentId or "", subjectKey, atom["predicate"],
-                                 objectTerm, *negParams]
+                                 objectTerm, *currentParams, *negParams]
             with self._store._lock:
                 row = self._store._conn.execute(
                     "SELECT 1 FROM knowledge_facts WHERE agent_id = ? AND subject_key = ?"
                     " AND predicate_term_id = ? AND object_term = ?"
-                    " AND status = 'active' AND " + clause,
+                    " AND " + currentClause + " AND " + clause,
                     params).fetchone()
             if row:
                 return True
@@ -814,13 +828,19 @@ class ForwardChainingEngine:
         positive = [a for a in rule["body"] if a["kind"] == "atom"]
         negated = [a for a in rule["body"] if a["kind"] == "not"]
         conjTenantClause, conjTenantParams = tenant_sql_where(tenantId)
+        currentClause, currentParams = KnowledgeFactStore.currentFactWhere()
+        moment = currentParams[0]
+        aCurrentClause, aCurrentParams = KnowledgeFactStore.currentFactWhere("a", now=moment)
+        bCurrentClause, bCurrentParams = KnowledgeFactStore.currentFactWhere("b", now=moment)
+        cCurrentClause, cCurrentParams = KnowledgeFactStore.currentFactWhere("c", now=moment)
         if len(positive) == 1:
             a0 = positive[0]
             inner = ("SELECT subject_key, fact_id AS pair FROM knowledge_facts"
                      " WHERE predicate_term_id = ? AND object_term = ?"
-                     " AND %s AND status = 'active' AND record_kind = 'triple'"
-                     % conjTenantClause)
-            params: List[Any] = [a0["predicate"], a0["objectConst"], *conjTenantParams]
+                     " AND %s AND %s AND record_kind = 'triple'"
+                     % (conjTenantClause, currentClause))
+            params: List[Any] = [a0["predicate"], a0["objectConst"],
+                                 *conjTenantParams, *currentParams]
             if agentId:
                 inner += " AND agent_id = ?"
                 params.append(agentId)
@@ -834,14 +854,12 @@ class ForwardChainingEngine:
                      " JOIN knowledge_facts b ON b.subject_key = a.subject_key"
                      "  AND b.agent_id = a.agent_id AND b.tenant_id = a.tenant_id"
                      " WHERE a.predicate_term_id = ? AND a.object_term = ?"
-                     "  AND %s AND a.status = 'active'"
-                     "  AND a.record_kind = 'triple'"
+                     "  AND %s AND %s AND a.record_kind = 'triple'"
                      "  AND b.predicate_term_id = ? AND b.object_term = ?"
-                     "  AND %s AND b.status = 'active'"
-                     "  AND b.record_kind = 'triple'"
-                     % (aTenantClause, bTenantClause))
-            params = [a0["predicate"], a0["objectConst"], *aTenantParams,
-                      a1["predicate"], a1["objectConst"], *bTenantParams]
+                     "  AND %s AND %s AND b.record_kind = 'triple'"
+                     % (aTenantClause, aCurrentClause, bTenantClause, bCurrentClause))
+            params = [a0["predicate"], a0["objectConst"], *aTenantParams, *aCurrentParams,
+                      a1["predicate"], a1["objectConst"], *bTenantParams, *bCurrentParams]
             if agentId:
                 inner += " AND a.agent_id = ?"
                 params.append(agentId)
@@ -861,15 +879,16 @@ class ForwardChainingEngine:
                      " JOIN knowledge_facts c ON c.subject_key = a.subject_key"
                      "  AND c.agent_id = a.agent_id AND c.tenant_id = a.tenant_id"
                      " WHERE a.predicate_term_id = ? AND a.object_term = ?"
-                     "  AND %s AND a.status = 'active' AND a.record_kind = 'triple'"
+                     "  AND %s AND %s AND a.record_kind = 'triple'"
                      "  AND b.predicate_term_id = ? AND b.object_term = ?"
-                     "  AND %s AND b.status = 'active' AND b.record_kind = 'triple'"
+                     "  AND %s AND %s AND b.record_kind = 'triple'"
                      "  AND c.predicate_term_id = ? AND c.object_term = ?"
-                     "  AND %s AND c.status = 'active' AND c.record_kind = 'triple'"
-                     % (aTenantClause, bTenantClause, cTenantClause))
-            params = [a0["predicate"], a0["objectConst"], *aTenantParams,
-                      a1["predicate"], a1["objectConst"], *bTenantParams,
-                      a2["predicate"], a2["objectConst"], *cTenantParams]
+                     "  AND %s AND %s AND c.record_kind = 'triple'"
+                     % (aTenantClause, aCurrentClause, bTenantClause, bCurrentClause,
+                        cTenantClause, cCurrentClause))
+            params = [a0["predicate"], a0["objectConst"], *aTenantParams, *aCurrentParams,
+                      a1["predicate"], a1["objectConst"], *bTenantParams, *bCurrentParams,
+                      a2["predicate"], a2["objectConst"], *cTenantParams, *cCurrentParams]
             if agentId:
                 inner += " AND a.agent_id = ?"
                 params.append(agentId)
@@ -900,11 +919,12 @@ class ForwardChainingEngine:
         """条件类的否定判定：每个否定原子自带常量客体，逐原子查活事实。"""
         for atom in negated:
             negTenantClause, negTenantParams = tenant_sql_where(tenantId)
+            currentClause, currentParams = KnowledgeFactStore.currentFactWhere()
             sql = ("SELECT 1 FROM knowledge_facts WHERE subject_key = ?"
                    " AND predicate_term_id = ? AND object_term = ?"
-                   " AND %s AND status = 'active'" % negTenantClause)
+                   " AND %s AND %s" % (negTenantClause, currentClause))
             params: List[Any] = [subjectKey, atom["predicate"], atom["objectConst"],
-                                 *negTenantParams]
+                                 *negTenantParams, *currentParams]
             if agentId:
                 sql += " AND agent_id = ?"
                 params.append(agentId)
@@ -945,13 +965,15 @@ class ForwardChainingEngine:
                                  tenantId: str) -> List[Tuple[str, str, str]]:
         """本规则（不分版本——推导账是追加的）名下仍 active 的结论行。"""
         clause, params = tenant_sql_where(tenantId, alias="f")
+        currentClause, currentParams = KnowledgeFactStore.currentFactWhere("f")
         sql = ("SELECT f.fact_id AS fact_id, f.agent_id AS agent_id,"
                " s.canonical_label AS label FROM knowledge_derivation_edges e"
                " JOIN knowledge_facts f ON f.fact_id = e.derived_fact_id"
                " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
-               " WHERE e.rule_id = ? AND f.status = 'active' AND " + clause)
+               " WHERE e.rule_id = ? AND " + currentClause + " AND " + clause)
         with self._store._lock:
-            rows = self._store._conn.execute(sql, (ruleId, *params)).fetchall()
+            rows = self._store._conn.execute(
+                sql, (ruleId, *currentParams, *params)).fetchall()
         return [(r["fact_id"], r["agent_id"], r["label"]) for r in rows]
 
     def _conclusionBlockedByNegation(self, rule: Dict[str, Any],
@@ -989,10 +1011,11 @@ class ForwardChainingEngine:
     def _negatedFactExists(self, agentId: Optional[str], subjectKey: Any,
                            predicate: str, objectTerm: Any, tenantId: str) -> bool:
         clause, params = tenant_sql_where(tenantId)
+        currentClause, currentParams = KnowledgeFactStore.currentFactWhere()
         sql = ("SELECT 1 FROM knowledge_facts WHERE subject_key = ?"
                " AND predicate_term_id = ? AND object_term = ?"
-               " AND status = 'active' AND " + clause)
-        args: List[Any] = [subjectKey, predicate, objectTerm, *params]
+               " AND " + currentClause + " AND " + clause)
+        args: List[Any] = [subjectKey, predicate, objectTerm, *currentParams, *params]
         if agentId:
             sql += " AND agent_id = ?"
             args.append(agentId)
@@ -1012,14 +1035,15 @@ class ForwardChainingEngine:
         negated = [a for a in rule["body"] if a["kind"] == "not"]
         a0 = positive[0]
         invTenantClause, invTenantParams = tenant_sql_where(tenantId, alias="a")
+        currentClause, currentParams = KnowledgeFactStore.currentFactWhere("a")
         inner = ("SELECT a.subject_key AS x_key, MIN(s1.canonical_label) AS x_label,"
                  " a.object_term AS y_label,"
                  " GROUP_CONCAT(DISTINCT a.fact_id) AS pairs"
                  " FROM knowledge_facts a"
                  " JOIN knowledge_subjects s1 ON s1.subject_key = a.subject_key"
-                 " WHERE a.predicate_term_id = ? AND %s"
-                 "  AND a.status = 'active' AND a.record_kind = 'triple'" % invTenantClause)
-        params: List[Any] = [a0["predicate"], *invTenantParams]
+                 " WHERE a.predicate_term_id = ? AND %s AND %s"
+                 "  AND a.record_kind = 'triple'" % (invTenantClause, currentClause))
+        params: List[Any] = [a0["predicate"], *invTenantParams, *currentParams]
         if agentId:
             inner += " AND a.agent_id = ?"
             params.append(agentId)
@@ -1164,13 +1188,15 @@ class ForwardChainingEngine:
         `UNION`（不是 UNION ALL）自带行去重，再加一条 path 判重防同一客体被反复绕。
         返回 (主体键, 可达客体) 对，不含自反。
         """
+        rootClause, rootParams = KnowledgeFactStore.currentFactWhere()
+        stepClause, stepParams = KnowledgeFactStore.currentFactWhere("f", now=rootParams[0])
         sql = (
             "WITH RECURSIVE closure(agent_id, subject_key, object_term, path) AS ("
             "  SELECT agent_id, subject_key, object_term,"
             "         '|' || subject_key || '|' || object_term || '|'"
             "  FROM knowledge_facts"
             "  WHERE agent_id = ? AND predicate_term_id = ?"
-            "    AND status = 'active' AND record_kind = 'triple'"
+            "    AND " + rootClause + " AND record_kind = 'triple'"
             "  UNION"
             "  SELECT c.agent_id, c.subject_key, f.object_term,"
             "         c.path || f.object_term || '|'"
@@ -1179,7 +1205,7 @@ class ForwardChainingEngine:
             "    AND s2.normalized_label = lower(trim(c.object_term)) AND s2.status = 'active'"
             "  JOIN knowledge_facts f ON f.subject_key = s2.subject_key"
             "    AND f.agent_id = c.agent_id AND f.predicate_term_id = ?"
-            "    AND f.status = 'active' AND f.record_kind = 'triple'"
+            "    AND " + stepClause + " AND f.record_kind = 'triple'"
             "    AND instr(c.path, '|' || f.object_term || '|') = 0"
             ") SELECT c.subject_key, c.object_term FROM closure c"
             " LEFT JOIN knowledge_subjects s3 ON s3.agent_id = c.agent_id"
@@ -1189,7 +1215,8 @@ class ForwardChainingEngine:
             " ORDER BY c.subject_key, c.object_term"
         )
         with self._store._lock:
-            rows = self._store._conn.execute(sql, (agentId, predicate, predicate)).fetchall()
+            rows = self._store._conn.execute(
+                sql, (agentId, predicate, *rootParams, predicate, *stepParams)).fetchall()
         # B8：传递闭包上限——超限显式报错，不静默截断（截断的闭包是错的语义）。
         maxClosureRows = int(os.environ.get("NEUROVA_TRANSITIVE_CLOSURE_MAX", "200000") or 200000)
         if len(rows) > maxClosureRows:

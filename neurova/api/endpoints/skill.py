@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
+from neurova.skill_system import SkillStatus
 
 logger = get_logger(__name__)
 
@@ -113,123 +114,62 @@ def _get_skill_manager():
         return None
 
 
-def _get_skills_from_registry() -> List[Dict[str, Any]]:
-    """从 SkillRegistry 拉取技能（单一事实源）；不可用时回退内置列表。
-
-    2026-09-07（C1 闭环回归接线）：audit 发现 skill 端点绕过 registry
-    直接读 _get_builtin_skills 静态表，导致市场安装/进化技能不出现在
-    技能列表中。此 helper 统一数据源。
-    """
+def _get_skill_registry_or_503():
+    """注册表是技能事实源；不可用必须显式 503，不能回退内置表演列表。"""
     try:
         from neurova.skills import get_skill_registry
 
         registry = get_skill_registry()
-        if registry is None:
-            return _get_builtin_skills()
-        # Wave G-2：身份解析单源（skill_contract 规范次序 skill_id→id→name——
-        # API 展示向记账面对齐；此处曾取 id 优先，与其他消费方矛盾）
-        from neurova.skills.skill_contract import resolve_skill_identity
-
-        skills = []
-        for skill in registry.list_skills() or []:
-            if isinstance(skill, dict):
-                data = dict(skill)
-            elif hasattr(skill, "__dict__"):
-                data = {
-                    "skill_id": resolve_skill_identity(skill),
-                    "name": getattr(skill, "name", "") or "",
-                    "description": getattr(skill, "description", ""),
-                    "version": getattr(skill, "version", "1.0"),
-                    "tags": getattr(skill, "tags", []) or [],
-                    "parameters": getattr(skill, "parameters", {}) or {},
-                    "enabled": getattr(skill, "enabled", True),
-                }
-            elif hasattr(skill, "to_dict"):
-                data = skill.to_dict()
-            elif hasattr(skill, "__dict__"):
-                # skill_id 单源解析（mock/SkillInfo 形态兜底分支）
-                sid = resolve_skill_identity(skill)
-                data = {
-                    "skill_id": sid,
-                    "name": getattr(skill, "name", "") or sid,
-                    "description": getattr(skill, "description", ""),
-                    "version": getattr(skill, "version", "1.0"),
-                    "tags": getattr(skill, "tags", []) or [],
-                    "parameters": getattr(skill, "parameters", {}) or {},
-                    "enabled": getattr(skill, "enabled", True)
-                    if hasattr(skill, "enabled")
-                    else (
-                        getattr(skill, "status", None) is None
-                        or str(getattr(skill, "status", "")).endswith("ACTIVE")
-                    ),
-                }
-            else:
-                continue
-            data.setdefault("skill_id", data.get("name", ""))
-            data.setdefault("enabled", True)
-            skills.append(data)
-        # C1.9：registry 可用且成功返回（哪怕空列表）→ 尊重 registry 为单一
-        # 事实源；回退内置表仅限 registry 不可用场景（下方 except 分支）
-        return skills
-    except Exception as e:
-        logger.warning("从 registry 拉取技能失败，回退内置列表: %s", e)
-        return _get_builtin_skills()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"Skill registry unavailable: {exc}") from exc
+    if registry is None:
+        raise HTTPException(status_code=503, detail="Skill registry unavailable")
+    return registry
 
 
-def _get_builtin_skills() -> List[Dict[str, Any]]:
-    """获取内置技能列表"""
-    return [
-        {
-            "skill_id": "memory_search",
-            "name": "Memory Search",
-            "description": "搜索记忆库中的相关信息",
-            "category": "memory",
-            "version": "1.0.0",
-            "enabled": True,
-            "usage_count": 0,
-            "success_rate": 0.95,
-        },
-        {
-            "skill_id": "web_search",
-            "name": "Web Search",
-            "description": "搜索互联网获取最新信息",
-            "category": "research",
-            "version": "1.0.0",
-            "enabled": True,
-            "usage_count": 0,
-            "success_rate": 0.88,
-        },
-        {
-            "skill_id": "code_execution",
-            "name": "Code Execution",
-            "description": "执行 Python 代码",
-            "category": "development",
-            "version": "1.0.0",
-            "enabled": True,
-            "usage_count": 0,
-            "success_rate": 0.92,
-        },
-        {
-            "skill_id": "file_read",
-            "name": "File Read",
-            "description": "读取文件内容",
-            "category": "filesystem",
-            "version": "1.0.0",
-            "enabled": True,
-            "usage_count": 0,
-            "success_rate": 0.99,
-        },
-        {
-            "skill_id": "file_write",
-            "name": "File Write",
-            "description": "写入文件内容",
-            "category": "filesystem",
-            "version": "1.0.0",
-            "enabled": True,
-            "usage_count": 0,
-            "success_rate": 0.97,
-        },
-    ]
+def _statusEnabled(status: Any) -> bool:
+    if status is None:
+        return True
+    value = str(getattr(status, "value", status) or "").strip().lower()
+    return value not in {"inactive", "disabled", "disabled_pending_review"}
+
+
+def _get_skills_from_registry() -> List[Dict[str, Any]]:
+    """从唯一 SkillRegistry 拉取技能；registry 故障显式失败，不回退内置表。"""
+    registry = _get_skill_registry_or_503()
+    try:
+        listed = registry.list_skills() or []
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"Skill registry unavailable: {exc}") from exc
+
+    from neurova.skills.skill_contract import resolve_skill_identity
+
+    skills = []
+    for skill in listed:
+        if isinstance(skill, dict):
+            data = dict(skill)
+            data.setdefault("enabled", _statusEnabled(data.get("status")))
+        elif hasattr(skill, "__dict__"):
+            status = getattr(skill, "status", None)
+            enabled = getattr(skill, "enabled", None)
+            data = {
+                "skill_id": resolve_skill_identity(skill),
+                "name": getattr(skill, "name", "") or "",
+                "description": getattr(skill, "description", ""),
+                "version": getattr(skill, "version", "1.0"),
+                "tags": getattr(skill, "tags", []) or [],
+                "parameters": getattr(skill, "parameters", {}) or {},
+                "enabled": bool(enabled) if enabled is not None else _statusEnabled(status),
+            }
+        elif hasattr(skill, "to_dict"):
+            data = skill.to_dict()
+            data.setdefault("enabled", _statusEnabled(data.get("status")))
+        else:
+            continue
+        data.setdefault("skill_id", data.get("name", ""))
+        data.setdefault("enabled", True)
+        skills.append(data)
+    return skills
 
 
 @router.get("", response_model=List[SkillInfo])
@@ -397,13 +337,12 @@ async def execute_skill(
 
     # C3 闭环真实现：优先 Agent 执行；agent 不可用/无该方法时
     # 直接调 registry.execute_skill（删除 "simulated" 假结果）
-    registry = None
-    try:
-        from neurova.skills import get_skill_registry
-
-        registry = get_skill_registry()
-    except Exception as e:  # noqa: BLE001
-        logger.warning("get_skill_registry failed: %s", e)
+    registry = _get_skill_registry_or_503()
+    runtime_skill = registry.get_skill(skill_id)
+    if runtime_skill is None:
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
+    if not _statusEnabled(getattr(runtime_skill, "status", None)):
+        raise HTTPException(status_code=409, detail=f"Skill '{skill_id}' is inactive")
 
     agent = _get_agent()
     if agent is not None and getattr(agent, "tool_executor", None) is not None:
@@ -490,14 +429,17 @@ async def enable_skill(
     if not skill_exists:
         raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
 
+    registry = _get_skill_registry_or_503()
     try:
-        from neurova.skills import get_skill_registry
-
-        registry = get_skill_registry()
-        if registry is not None and hasattr(registry, "set_skill_enabled"):
-            registry.set_skill_enabled(skill_id, True)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("registry.set_skill_enabled failed: %s", e)
+        changed = registry.set_skill_enabled(skill_id, True)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"Skill registry unavailable: {exc}") from exc
+    if not changed:
+        raise HTTPException(status_code=409, detail=f"Skill '{skill_id}' cannot be enabled")
+    runtime_skill = registry.get_skill(skill_id)
+    status = getattr(runtime_skill, "status", None)
+    if isinstance(status, (str, SkillStatus)) and not _statusEnabled(status):
+        raise HTTPException(status_code=500, detail=f"Skill '{skill_id}' enable was not applied")
 
     return {
         "code": 0,
@@ -518,14 +460,17 @@ async def disable_skill(
     if not skill_exists:
         raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
 
+    registry = _get_skill_registry_or_503()
     try:
-        from neurova.skills import get_skill_registry
-
-        registry = get_skill_registry()
-        if registry is not None and hasattr(registry, "set_skill_enabled"):
-            registry.set_skill_enabled(skill_id, False)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("registry.set_skill_enabled failed: %s", e)
+        changed = registry.set_skill_enabled(skill_id, False)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"Skill registry unavailable: {exc}") from exc
+    if not changed:
+        raise HTTPException(status_code=409, detail=f"Skill '{skill_id}' cannot be disabled")
+    runtime_skill = registry.get_skill(skill_id)
+    status = getattr(runtime_skill, "status", None)
+    if isinstance(status, (str, SkillStatus)) and _statusEnabled(status):
+        raise HTTPException(status_code=500, detail=f"Skill '{skill_id}' disable was not applied")
 
     return {
         "code": 0,

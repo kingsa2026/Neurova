@@ -66,7 +66,7 @@ def _declared(registry: OntologyTermRegistry) -> None:
         identityKeys=["external_id"], labels={"zh": "风险订单", "en": "Risk Order"},
         altLabels={"zh": ["高危单"]}, module="domain",
         namespace="so", iriBase="https://example.org/base/",
-        qualifierSchema={"level": {"required": True}}, version="v1")
+        qualifierSchema={"level": {"required": True}}, conflictPolicy="manual", version="v1")
 
 
 @pytest.fixture
@@ -100,7 +100,8 @@ class TestPipelinePartialUpsert:
                 ("module", "domain"),
                 ("namespace", "so"),
                 ("iri_base", "https://example.org/base/"),
-                ("qualifier_schema", {"level": {"required": True}})):
+                ("qualifier_schema", {"level": {"required": True}}),
+                ("conflict_policy", "manual")):
             assert term[column] == expected, "%s 被批次写回默认值了" % column
 
     def testExplicitEmptyContainerStillClears(self, seeded):
@@ -147,6 +148,24 @@ class TestRestPutKeepsHiddenColumns:
         assert term["label"] == "改名"
         assert term["namespace"] == "so"
         assert term["iri_base"] == "https://example.org/base/"
+
+    def testRestWriteSurfaceDeclaresAndPreservesConflictPolicy(self, seeded, client):
+        resp = client.post(PREFIX + "/ontology/terms", json={
+            "term_id": "post_policy", "kind": "relation", "conflict_policy": "most_recent"})
+        assert resp.status_code == 200, resp.text
+        assert OntologyTermRegistry(seeded).term("post_policy")["conflict_policy"] == "most_recent"
+
+        resp = client.put(PREFIX + "/ontology/terms/RiskOrder", json={
+            "term_id": "RiskOrder", "kind": "concept", "label": "保留策略"})
+        assert resp.status_code == 200, resp.text
+        assert OntologyTermRegistry(seeded).term("RiskOrder")["conflict_policy"] == "manual"
+
+    def testPipelineWriteSurfaceDeclaresConflictPolicy(self, seeded):
+        result = _runPipeline(seeded, [{
+            "termId": "pipeline_policy", "kind": "relation", "conflictPolicy": "highest_confidence"}])
+        assert result["accepted"], result["summary"]
+        term = OntologyTermRegistry(seeded).term("pipeline_policy")
+        assert term["conflict_policy"] == "highest_confidence"
 
     def testPostStillWritesFreshRowWithoutPreexistingValues(self, seeded, client):
         resp = client.post(PREFIX + "/ontology/terms", json={

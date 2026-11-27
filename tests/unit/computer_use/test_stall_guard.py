@@ -99,17 +99,20 @@ class TestStallGuard:
         assert STALL_DEFAULT_WINDOW == 3
         assert StallGuard().enabled is True, "缺省开启（env 显式关才关）"
 
-    def test_managerWiringScreenshotObserveAndActionMark(self):
+    def test_managerWiringScreenshotObserveAndActionMark(self, monkeypatch):
         """manager 接线：截图走 observe、前台动作走 markAction、信号出结果面。"""
-        from neurova.computer_use import get_computer_use_manager
+        from neurova.computer_use import get_computer_use_manager, reset_computer_use_manager
 
+        monkeypatch.delenv(STALL_GUARD_ENV, raising=False)
+        reset_computer_use_manager()
         manager = get_computer_use_manager()
         guard = manager.stallGuard()
         assert guard is not None, "manager 必须持有 StallGuard"
         guard.reset()
-        guard.markAction()
+        monkeypatch.setattr(manager, "screenshot", lambda region=None: _SAME)
+
+        manager.markDesktopAction()
         first = manager.screenshot()
-        assert first is not None or True, "无桌面环境时截图为 None，不阻断"
-        signal = manager.stallObserve(first) if first else None
-        if signal is not None:
-            assert "hint" in signal
+        assert first == _SAME
+        assert manager.stallObserve(first) is None
+        assert guard.streak == 1

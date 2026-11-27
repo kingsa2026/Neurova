@@ -72,8 +72,7 @@ class TestLoader:
     def test_keyless_providers_still_keyless(self):
         # 迁移不改变「哪些 id 免 key」的口径
         defs = {d["id"]: d for d in pm.builtinProviderDefs()}
-        assert defs["opencode"].get("api_key_prefix", "") == "" or True
-        assert "api_key_prefix" not in defs["opencode"] or defs["opencode"]["api_key_prefix"] == ""
+        assert defs["opencode"]["api_key_prefix"] == ""
 
     def test_missing_file_raises_clear_error(self, tmp_path, monkeypatch):
         monkeypatch.setattr(

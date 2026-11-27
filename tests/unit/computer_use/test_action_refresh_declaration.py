@@ -190,9 +190,8 @@ class TestInteractiveAxisIsDistinct:
 
     def test_nonInteractiveDesktopDeclarationIsIgnored(self, monkeypatch):
         monkeypatch.setitem(_BUILTIN_SCHEMAS["computer_shell"], "interactive_desktop", True)
-        assert "computer_shell" not in _declaredInteractive() or True  # 声明侧照读
-        # 但消费侧仍以**声明面**为准：这里断言"声明面认得它"，证明不是白名单过滤
         assert "computer_shell" in _declaredInteractive()
+        assert "computer_shell" in computerActionRefreshTools()
 
 
 if __name__ == "__main__":  # pragma: no cover

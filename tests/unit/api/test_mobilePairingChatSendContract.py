@@ -35,6 +35,7 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List
@@ -124,7 +125,8 @@ def wsClient(monkeypatch, request):
     mobile_ep._ws_connections.clear()
     monkeypatch.setitem(
         mobile_ep._pairing_codes, PAIRING_CODE,
-        {"status": "confirmed", "user_id": OWNER, "pairing_id": "pair-1"},
+        {"status": "confirmed", "user_id": OWNER, "pairing_id": "pair-1",
+         "expires_at": time.time() + 3600},
     )
 
     app = FastAPI()

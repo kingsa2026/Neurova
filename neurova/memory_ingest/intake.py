@@ -11,6 +11,7 @@ import json
 import mimetypes
 import re
 import shutil
+import time
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
@@ -57,7 +58,8 @@ class IngestReport:
 
     def undo(self, *, manager, sessions) -> Tuple[int, int]:
         """返回 (撤销记忆条数, 撤销消息条数)；只删本批，不碰运行期数据。"""
-        return undo_run(self.agent_id, self.run_id, manager=manager, sessions=sessions)
+        return undo_run(self.agent_id, self.run_id, manager=manager, sessions=sessions,
+                        staged_media=self.staged_media)
 
     def owner_of_run(self, sessions) -> Tuple[str, ...]:
         """本批落盘消息里记着的属主（去重）。报告态取不到时为空元组，不猜。"""
@@ -83,7 +85,8 @@ def session_manager_for(sessions_dir: Optional[str] = None, *, exact_agent_dir: 
     return SessionManager(exact_agent_dir=exact_agent_dir)
 
 
-def undo_run(agent_id: str, run_id: str, *, manager, sessions) -> Tuple[int, int]:
+def undo_run(agent_id: str, run_id: str, *, manager, sessions,
+             staged_media: Sequence[str] = ()) -> Tuple[int, int]:
     """撤销一条批次——报告在不在手都走这条路，媒体清理不留第二条口径。
 
     媒体按"这批引用过、删完已无人引用"来清：内容寻址允许共享，所以不能直接删；
@@ -91,10 +94,34 @@ def undo_run(agent_id: str, run_id: str, *, manager, sessions) -> Tuple[int, int
     候选要在删消息**之前**取：删完再扫，这批碰过谁就无从知道了。
     """
     _, candidates = _referenced_media(agent_id, run_id, sessions)
-    removed = (manager.delete_ingested_memories(run_id),
+    candidates.update(str(name) for name in staged_media if str(name))
+    removed = (manager.delete_ingested_memories(run_id) if manager is not None else 0,
                sessions.delete_ingested_messages(agent_id, run_id))
     _prune_media(agent_id, candidates, sessions)
     return removed
+
+
+def _runReceiptPath(run_id: str) -> Path:
+    """批次号的一次性收据；哈希文件名避免 run_id 参与路径拼接。"""
+    from neurova.core.data_root import dataLanding
+
+    digest = hashlib.sha256(str(run_id).encode("utf-8")).hexdigest()
+    return Path(dataLanding("ingest_runs")) / f"{digest}.json"
+
+
+def _claimRunReceipt(run_id: str, agent_id: str) -> None:
+    """原子占号：run_id 终身不可复用，补偿删除才不会误伤旧批。"""
+    path = _runReceiptPath(run_id)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("x", encoding="utf-8") as handle:
+            json.dump({"run_id": run_id, "agent_id": agent_id,
+                       "claimed_at": time.time()}, handle,
+                      ensure_ascii=False, indent=2)
+    except FileExistsError as exc:
+        raise BundleError(f"run_id 已使用，拒绝复用: {run_id}") from exc
+    except OSError as exc:
+        raise BundleError(f"无法登记 run_id {run_id!r}，拒绝写库: {exc}") from exc
 
 
 def _referenced_media(agent_id: str, run_id: str, sessions) -> Tuple[Set[str], Set[str]]:
@@ -159,28 +186,37 @@ def apply_bundle(root: Path, *, agent_id: str, manager, sessions,
     except SessionOwnerConflict as exc:
         raise BundleError(str(exc)) from exc
 
-    if memories:
-        if manager is None:
-            # 包里带记忆却没人接 = 这批记忆会被静默丢掉，那正是"半导"；响亮拒绝
-            raise BundleError(
-                f"包里有 {len(memories)} 条记忆，但未提供记忆写入面（manager）")
-        # 写入口的返回值是带取代读数的字典：计数与"声明取代是否真发生"都取这一份，
-        # 不再另立第二条读取路径（两侧合流后唯一的读处）。
-        outcome = manager.import_memories(memories, ingest_run_id=report.run_id,
-                                          owner_user_id=report.owner_user_id)
-        report.memories_added = outcome["added"]
-        report.memories_skipped = outcome["skipped"]
-        report.memories_superseded = tuple(outcome["superseded"])
-        report.supersede_unresolved = tuple(outcome["supersede_unresolved"])
-
-    try:
-        _write_sessions(report, transcripts, sessions, Path(root))
-    except BundleError:
-        raise
-    except Exception as exc:                       # 半途失败必须给出去路，不能留悬批
+    if memories and manager is None:
+        # 包里带记忆却没人接 = 这批记忆会被静默丢掉，那正是"半导"；响亮拒绝
         raise BundleError(
-            f"写会话中断（run_id={report.run_id}）：{exc}；"
-            f"已写入部分请用 undo(manager=..., sessions=...) 或 --undo 撤销") from exc
+            f"包里有 {len(memories)} 条记忆，但未提供记忆写入面（manager）")
+
+    # 先占号再写：同名旧批仍在时，失败补偿绝不能按 run_id 删到旧批头上。
+    _claimRunReceipt(report.run_id, report.agent_id)
+    try:
+        if memories:
+            # 写入口的返回值是带取代读数的字典：计数与"声明取代是否真发生"都取这一份，
+            # 不再另立第二条读取路径（两侧合流后唯一的读处）。
+            outcome = manager.import_memories(memories, ingest_run_id=report.run_id,
+                                              owner_user_id=report.owner_user_id)
+            report.memories_added = outcome["added"]
+            report.memories_skipped = outcome["skipped"]
+            report.memories_superseded = tuple(outcome["superseded"])
+            report.supersede_unresolved = tuple(outcome["supersede_unresolved"])
+
+        _write_sessions(report, transcripts, sessions, Path(root))
+    except Exception as exc:
+        try:
+            undo_run(report.agent_id, report.run_id, manager=manager, sessions=sessions,
+                     staged_media=report.staged_media)
+        except Exception as rollbackExc:  # noqa: BLE001 - 补偿失败必须与主故障一并暴露
+            raise BundleError(
+                f"写会话中断（run_id={report.run_id}）：{exc}；"
+                f"自动补偿也失败：{rollbackExc}；请人工核查本批残留") from exc
+        if isinstance(exc, BundleError):
+            raise
+        raise BundleError(
+            f"写入中断（run_id={report.run_id}）：{exc}；已完成部分已自动补偿撤销") from exc
     return report
 
 
@@ -227,10 +263,10 @@ def _stage_media(bundle_root: Path, message: Dict[str, Any], report: "IngestRepo
         target = destination / Path(rel).name
         if not target.exists():
             shutil.copyfile(bundle_root / rel, target)
+        staged.add(target.name)
         artifacts.append(_artifact_info(target, report.agent_id, ref,
                                         owner_user_id=report.owner_user_id))
-        staged.add(target.name)
-    report.staged_media = tuple(sorted(staged))
+        report.staged_media = tuple(sorted(staged))
 
 
 def _prune_media(agent_id: str, candidates: Set[str], sessions) -> int:

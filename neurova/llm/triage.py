@@ -17,8 +17,8 @@ from neurova.llm.interfaces.provider_interface import (
     ProviderConfig,
     Message,
     CallResult,
-    ProviderType,
 )
+from neurova.llm.providers.types import ProviderType
 from neurova.llm.registry.provider_registry import get_provider_registry
 
 logger = get_logger(__name__)

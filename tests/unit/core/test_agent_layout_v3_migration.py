@@ -11,7 +11,6 @@ import json
 import pytest
 
 from neurova.core.agent_layout_migration import (
-    ensure_agent_layout_v3,
     migrate_agent_layout_v3,
     v3_migration_done,
 )
@@ -107,18 +106,3 @@ def test_v3_migration_conflict_keeps_both(layout):
     assert report["conflicts"], "目标已存在必须报冲突（不覆盖）"
     assert (layout / "kai" / "agent_config.json").exists(), "源保留"
     assert (target / "extra.txt").exists(), "目标保留"
-
-
-def test_ensure_skips_when_sentinel_present(layout):
-    _seedLegacyAgent(layout, "kai", owner="u1")
-    migrate_agent_layout_v3()
-    again = ensure_agent_layout_v3()
-    assert again.get("skipped") == "sentinel"
-    assert v3_migration_done() is True
-
-
-def test_ensure_runs_cutover_when_sentinel_absent(layout):
-    _seedLegacyAgent(layout, "kai", owner="u1")
-    report = ensure_agent_layout_v3()
-    assert report["moved"]
-    assert v3_migration_done() is True

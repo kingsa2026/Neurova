@@ -35,7 +35,7 @@ async def demo_github_push_skill():
     info = skill.get_info()
     print("📋 技能信息:")
     print(f"   标签: {', '.join(info.tags)}")
-    print(f"   参数: {', '.join(info.parameters.keys())}")
+    print(f"   参数: {', '.join(parameter['name'] for parameter in info.parameters)}")
     print()
     
     # 创建临时演示目录

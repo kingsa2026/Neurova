@@ -4,7 +4,7 @@
 定位（教义第 6/7 条：只编排既有单点实现，不造第二套分析栈）：
 
 - 图形状与 `community_graph._readGraph` 同一份数据面：主体
-  （knowledge_subjects.canonical_label）沿 active triple 的 object_term 展开，
+  （knowledge_subjects.canonical_label）沿当前可见 triple 的 object_term 展开，
   **无向**处理（邻域/最短路按探索语义双向走）；
 - 社区检测**直接复用** `community_graph._labelPropagation`（全仓唯一的标签
   传播实现），本模块只做只读投影不落库（持久化仍是 CommunityGraphBuilder
@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from neurova.core.logger import get_logger
 from neurova.core.tenant_scope import tenant_sql_where
+from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 
 logger = get_logger(__name__)
 
@@ -40,13 +41,14 @@ def _readEdges(store: Any, agentId: Optional[str],
     """读边集：(主体规范标签, 谓词, 客体词) 三元组列表（与 community_graph
     的图数据面同形）。返回 (edges, truncated)。"""
     fClause, fParams = tenant_sql_where(str(tenantId or "default"), alias="f")
+    currentClause, currentParams = KnowledgeFactStore.currentFactWhere("f")
     sql = ("SELECT s.canonical_label AS src, f.predicate_term_id AS pred,"
            " f.object_term AS dst"
            " FROM knowledge_facts f JOIN knowledge_subjects s"
            " ON s.subject_key = f.subject_key"
-           " WHERE " + fClause + " AND f.status = 'active'"
+           " WHERE " + fClause + " AND " + currentClause +
            " AND f.record_kind = 'triple'")
-    params: List[Any] = list(fParams)
+    params: List[Any] = [*fParams, *currentParams]
     if agentId:
         sql += " AND f.agent_id = ?"
         params.append(str(agentId))

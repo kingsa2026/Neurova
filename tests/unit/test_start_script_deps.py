@@ -10,6 +10,8 @@ npm run dev 报 "'vite' 不是内部或外部命令" 且脚本不自愈。
 """
 from __future__ import annotations
 
+import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -60,6 +62,72 @@ class TestCheckNodeDeps:
         assert calls and "install" in " ".join(map(str, calls[0]))
 
 
+class TestNpmInvocationKeepsArguments:
+    """OPS-04：npm 安装命令必须以 argv 形态交给 subprocess，参数不得被 shell 吃掉。
+
+    审计 2026-11-25 批次 E 实测：`subprocess.run(["npm", "ci"], shell=True)` 在
+    POSIX 下由 CPython 拼成 `['/bin/sh', '-c', 'npm', 'ci']` —— 只有 argv[0] 被当成
+    命令串，`"ci"` 变成 `$0` 被丢掉，npm 无参数运行（退出码 0），锁文件干净安装
+    语义静默丢失。Windows 侧因 list2cmdline 拼整串而"恰好正常"，两平台语义分叉。
+    """
+
+    @staticmethod
+    def _captureInvocation(start_mod, monkeypatch, tmp_path, *, withLock: bool = True):
+        fe = tmp_path / "NeurUI"
+        fe.mkdir(parents=True)
+        if withLock:
+            (fe / "package-lock.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(start_mod, "FRONTEND_DIR", fe)
+        calls = []
+
+        def fakeRun(cmd, **kw):
+            calls.append((cmd, kw))
+
+        monkeypatch.setattr(start_mod.subprocess, "run", fakeRun)
+        start_mod.check_node_deps()
+        assert calls, "半损坏 node_modules 必须触发重装"
+        return calls[0]
+
+    def test_reinstallUsesArgvWithoutShell(self, start_mod, tmp_path, monkeypatch):
+        cmd, kwargs = self._captureInvocation(start_mod, monkeypatch, tmp_path)
+        assert isinstance(cmd, (list, tuple)), (
+            f"npm 命令必须是 argv 序列（实际 {type(cmd).__name__}）——"
+            "shell=True + 列表在 POSIX 下只把首项当命令，其余参数被丢掉"
+        )
+        assert not kwargs.get("shell"), (
+            "重装调用仍在用 shell=True：POSIX 下 npm ci 的参数会被 sh -c 吃掉，"
+            "Windows 下靠 list2cmdline 侥幸成串——两平台语义分叉（OPS-04）"
+        )
+
+    def test_reinstallCarriesCleanInstallFlags(self, start_mod, tmp_path, monkeypatch):
+        cmd, _ = self._captureInvocation(start_mod, monkeypatch, tmp_path)
+        argv = [str(part) for part in cmd]
+        assert "--no-audit" in argv and "--no-fund" in argv, (
+            f"npm 干净安装参数缺失（实际 argv={argv}）——两侧必须同参数，"
+            "否则一侧装依赖时会卡在无关的网络审计/赞助输出上"
+        )
+
+    def test_reinstallResolvesRealNpmExecutable(self, start_mod, tmp_path, monkeypatch):
+        """Windows 上 npm 是 npm.CMD：shell=False 必须用 which 解析真实路径。
+
+        裸 `["npm", ...]` 走 CreateProcess 不认 PATHEXT（WinError 2），
+        scripts/desktop/win_installer_kit.py 已在实机踩过同一坑。
+        """
+        resolved = shutil.which("npm")
+        if not resolved:
+            pytest.skip("本机没有 npm，无法判定可执行文件解析面")
+        cmd, _ = self._captureInvocation(start_mod, monkeypatch, tmp_path)
+        assert str(cmd[0]) == resolved, (
+            f"npm 可执行文件未按 which 解析（实际 {cmd[0]!r}，应为 {resolved!r}）——"
+            "Windows 上裸名 + shell=False 会找不到 npm.CMD"
+        )
+
+    def test_installFallbackWithoutLockStillArgv(self, start_mod, tmp_path, monkeypatch):
+        cmd, kwargs = self._captureInvocation(start_mod, monkeypatch, tmp_path, withLock=False)
+        assert "install" in [str(part) for part in cmd]
+        assert not kwargs.get("shell")
+
+
 class TestCheckPythonDeps:
     def test_check_runs_with_backend_interpreter(self, start_mod, monkeypatch, tmp_path):
         """检查必须用 _get_backend_python 选定的解释器（venv 优先），
@@ -80,4 +148,30 @@ class TestCheckPythonDeps:
         start_mod.check_python_deps()
         assert str(fake_venv) in str(seen["cmd"][0]), (
             f"依赖检查应跑在后端解释器上，实际用 {seen['cmd'][0]}"
+        )
+
+    def testMissingDepsInstallsManifestSelectedLock(self, start_mod, monkeypatch, tmp_path):
+        fakeVenv = tmp_path / "venvpy.exe"
+        fakeVenv.write_text("", encoding="utf-8")
+        models = tmp_path / "models"
+        models.mkdir()
+        (models / "MANIFEST.json").write_text(json.dumps({
+            "runtime": {"pip": {"requirements": "compiled.lock"}}
+        }), encoding="utf-8")
+        selectedLock = tmp_path / "compiled.lock"
+        selectedLock.write_text("fastapi==0.0.0\n", encoding="utf-8")
+        monkeypatch.setattr(start_mod, "ROOT_DIR", tmp_path)
+        monkeypatch.setattr(start_mod, "get_venv_python", lambda: fakeVenv)
+        commands = []
+
+        def fakeRun(cmd, **kwargs):
+            commands.append(cmd)
+            return type("Result", (), {"returncode": 1 if len(commands) == 1 else 0})()
+
+        monkeypatch.setattr(start_mod.subprocess, "run", fakeRun)
+
+        assert start_mod.check_python_deps(), "缺依赖分支未完成安装"
+        assert len(commands) == 2, f"探针与安装命令不完整: {commands}"
+        assert commands[1][-2:] == ["-r", str(selectedLock)], (
+            f"启动器未按 MANIFEST 选择完整锁: {commands[1]}"
         )

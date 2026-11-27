@@ -382,11 +382,11 @@ class StoreConnectionManager:
     # ---- 连接测试 / 令牌刷新 ----
 
     async def test_connection(self, store_id: str, user_id: str = "") -> Dict[str, Any]:
-        """只读探针：验证店铺凭据可用性（无副作用）。
+        """验证店铺凭据可用性，并回写本次探测状态。
 
-        探针选择（按协议可低成本验证）：TikTok 取回 shop_cipher 并回写 extra；
-        含 refresh_token 的平台做一次令牌刷新（网络）验证；亚马逊 LWA 令牌交换；
-        其余做成凭据本地校验（标记明示）。
+        成功/失败都会回写 status 与 last_error；TikTok 成功时还会把 shop_cipher
+        写回 extra。含 refresh_token 的平台会发起网络令牌校验，亚马逊执行 LWA
+        令牌交换，其余平台做本地凭据校验。调用方不得把本探针当作只读操作。
         """
         store = self._db.get_store_connection(store_id, user_id)
         if store is None:
@@ -409,7 +409,7 @@ class StoreConnectionManager:
         return {"status": "error", "detail": detail}
 
     async def _probe(self, store: StoreConnection, creds: StoreCredentials) -> tuple:
-        """返回 (ok, detail)；按平台选择低成本只读探针"""
+        """返回 (ok, detail)；按平台选择探测，TikTok 会回写 shop_cipher。"""
         from . import external_api as api
 
         platform = store.platform

@@ -231,6 +231,39 @@ class KnowledgeRetrieverAdapter:
                 logger.debug("知识条目反馈读取失败（保持中性）: %s", exc)
         return hits, lineageIds, store, surface is not None
 
+    async def _remoteRoute(self, query: str, userId: str, limit: int):
+        """按发送者身份检索 active 远程 KB；失败保持本地结果不变。"""
+        if not userId or limit <= 0:
+            return []
+        try:
+            from neurova.knowledge.federated_kb import FederatedKBService
+            from neurova.knowledge.storage import get_knowledge_storage
+
+            outcome = await FederatedKBService(get_knowledge_storage()).search(
+                query, userId, limit=limit
+            )
+            items = []
+            for hit in outcome.get("results") or []:
+                if not isinstance(hit, dict):
+                    continue
+                content = hit.get("content") or hit.get("text") or hit.get("snippet") or ""
+                if not str(content).strip():
+                    continue
+                items.append({
+                    "title": hit.get("title") or hit.get("document_name") or "",
+                    "content": str(content),
+                    "source": "remote_kb",
+                    "category": "knowledge",
+                    "score": float(hit.get("score", 0.0) or 0.0),
+                    "confidence": float(hit.get("confidence", 0.5) or 0.5),
+                    "kb_id": str(hit.get("kb_id") or ""),
+                    "remote_url": hit.get("url") or hit.get("source_url") or "",
+                })
+            return items[:limit]
+        except Exception as exc:  # noqa: BLE001 - 远程 KB 是补充源，故障不得打掉本地检索
+            logger.warning("远程 KB 检索跳过: %s", exc)
+            return []
+
     async def retrieve(self, context) -> Any:
         """执行知识库检索（走用户可见性过滤）"""
         from neurova.agent.memory_retrieval_chain import RetrievalResult, RetrievalQuality
@@ -352,8 +385,14 @@ class KnowledgeRetrieverAdapter:
                     except (ValueError, TypeError):
                         pass
 
-            # 采纳先验在最终截断前生效；候选窗由上面的 oversample 提供替补位。
+            # 本地候选先走采纳重排；远程 KB 只补剩余空位，不挤占本地权威命中。
             knowledge_items = rerankByAdoption(knowledge_items)[:requested]
+            remoteItems = await self._remoteRoute(
+                searchQuery,
+                str(context.user_id) if getattr(context, "user_id", None) else "",
+                requested - len(knowledge_items),
+            )
+            knowledge_items.extend(remoteItems)
             selectedLineage = list(dict.fromkeys(
                 str(item["lineage_id"])
                 for item in knowledge_items
@@ -457,6 +496,9 @@ class KnowledgeRetrieverAdapter:
                     for item in knowledge_items
                     if item.get("knowledge_id") and not item.get("lineage_id")
                 },
+                "remote_kb_ids": list(dict.fromkeys(
+                    str(item["kb_id"]) for item in knowledge_items if item.get("kb_id")
+                )),
                 "adoption_rerank": {
                     "requested": requested,
                     "candidate_limit": candidateLimit,
@@ -606,4 +648,7 @@ class KnowledgeRetrieverAdapter:
         derivation = cls._derivationOf(item)
         if derivation is not None:
             payload["derivation"] = derivation
+        if item.get("kb_id"):
+            payload["kb_id"] = str(item["kb_id"])
+            payload["remote_url"] = item.get("remote_url", "")
         return payload

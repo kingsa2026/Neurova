@@ -13,11 +13,13 @@ from __future__ import annotations
 - 通过核心模块库管理插件生命周期
 """
 
+import asyncio
 import importlib
 import importlib.util
 import inspect
 import json
 import shutil
+import threading
 import uuid
 import zipfile
 from neurova.core.logger import get_logger
@@ -469,6 +471,19 @@ class PluginManager:
                 % plugin_path.name)
 
         name = manifest.get("name", plugin_path.name)
+        existing = self._plugins.get(name)
+        if existing is not None:
+            if existing.loaded or self.routesMounted(name)[0]:
+                raise PluginError(
+                    "already_installed",
+                    "插件 %s 已装载或仍有活路由，必须先完整停机/卸载再重装：%s"
+                    % (name, existing.path),
+                )
+            if Path(existing.path).resolve() == plugin_path.resolve():
+                return existing
+            # 未装载的同名替换先清净旧模块缓存，避免重装后读到旧代码。
+            self._modules.pop(name, None)
+            sys.modules.pop("neurova_plugin_%s" % name, None)
         record = PluginRecord(
             name=name,
             installSource=str(installSource or ""),
@@ -536,14 +551,14 @@ class PluginManager:
 
         try:
             self._lifecycleEvent("before_uninstall", plugin_name)
-            # 先关 HTTP 面（带审计与授权撤销），再禁用/卸载
+            # 先关 HTTP 面（带审计与授权撤销），再走唯一停机核心。
             self._teardownRoutes(plugin_name, note="uninstall")
-            # 先禁用和卸载
             if self._plugins[plugin_name].enabled:
-                self.disable_plugin(plugin_name)
-
+                self._assertNoDependents(plugin_name)
             if self._plugins[plugin_name].loaded:
-                self.unload_plugin(plugin_name)
+                self._unloadPlugin(plugin_name)
+            elif self._plugins[plugin_name].enabled:
+                self._disablePlugin(plugin_name)
 
             # 人的决定不能留在库里等下一个同名插件白捡：授予与挂载授权同批摘掉。
             # 落点在 manager 而不是端点——`uninstall_all()` 与任何脚本路径都得同样生效。
@@ -805,6 +820,123 @@ class PluginManager:
         return True
 
     @staticmethod
+    def _runSync(awaitable):
+        """在同步入口执行异步生命周期；已有事件循环时换线程，避免复用失败。"""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(awaitable)
+
+        outcome: Dict[str, Any] = {}
+
+        def runLifecycle() -> None:
+            try:
+                outcome["value"] = asyncio.run(awaitable)
+            except Exception as exc:  # noqa: BLE001 - 回到调用线程原样抛出
+                outcome["error"] = exc
+
+        worker = threading.Thread(target=runLifecycle, name="plugin-lifecycle")
+        worker.start()
+        worker.join()
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome.get("value")
+
+    def _assertNoDependents(self, plugin_name: str) -> None:
+        dependents = self._get_dependents(plugin_name)
+        if dependents:
+            raise PluginError(
+                "plugin_has_dependents",
+                "插件 %s 被这些插件依赖，不能禁用：%s" % (plugin_name, dependents),
+            )
+
+    def _disablePlugin(self, plugin_name: str) -> bool:
+        """禁用事务唯一实现：落盘禁用态、真实 stop/destroy、拆路由，失败回滚。"""
+        record = self._plugins.get(plugin_name)
+        if record is None:
+            raise PluginError("not_installed", "插件未安装：%s" % plugin_name)
+        if not record.enabled:
+            return True
+        self._assertNoDependents(plugin_name)
+
+        record.enabled = False
+        try:
+            self._persistState()
+        except Exception as exc:  # noqa: BLE001
+            record.enabled = True
+            raise PluginError("state_write_failed", "禁用状态未能落盘：%s" % exc) from exc
+
+        try:
+            if record.loaded:
+                self._runSync(self.stopPlugin(plugin_name))
+            self._teardownRoutes(plugin_name, note="disable")
+        except Exception as exc:  # noqa: BLE001 - 任何一步失败都要把启用态还回去
+            record.enabled = True
+            try:
+                self._persistState()
+            except Exception as rollbackExc:  # noqa: BLE001
+                logger.error("禁用失败后的状态回滚也未落盘 %s: %s", plugin_name, rollbackExc)
+            if record.loaded:
+                try:
+                    self._runSync(self.startPlugin(plugin_name))
+                except Exception as restartExc:  # noqa: BLE001
+                    logger.error("禁用失败后的插件重启也未成功 %s: %s", plugin_name, restartExc)
+            raise PluginError("lifecycle_failed", "插件 %s 禁用失败：%s" % (plugin_name, exc)) from exc
+
+        self._lifecycleEvent("after_disable", plugin_name)
+        logger.info("Disabled plugin: %s", plugin_name)
+        return True
+
+    async def disablePluginAsync(self, plugin_name: str) -> bool:
+        """异步门面只切线程，禁用事务仍由同步核心单一实现。"""
+        return await asyncio.to_thread(self._disablePlugin, plugin_name)
+
+    def _unloadPlugin(self, plugin_name: str) -> bool:
+        """卸载事务唯一实现：真实 stop/destroy、拆路由、摘模块与注册表。"""
+        record = self._plugins.get(plugin_name)
+        if record is None:
+            raise PluginError("not_installed", "插件未安装：%s" % plugin_name)
+        if not record.loaded:
+            return True
+        try:
+            self._runSync(self.stopPlugin(plugin_name))
+            self._teardownRoutes(plugin_name, note="unload")
+            mounted, _reason = self.routesMounted(plugin_name)
+            if mounted:
+                raise PluginError("routes_still_live", "插件 %s 卸载后活路由仍在" % plugin_name)
+            from neurova.plugins.plugin_api_registry import get_plugin_api_registry
+
+            get_plugin_api_registry().unregister_plugin(plugin_name)
+            self._modules.pop(plugin_name, None)
+            sys.modules.pop("neurova_plugin_%s" % plugin_name, None)
+            record.loaded = False
+            self._lifecycleEvent("after_unload", plugin_name)
+            logger.info("Unloaded plugin: %s", plugin_name)
+            return True
+        except PluginError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise PluginError("lifecycle_failed", "插件 %s 卸载失败：%s" % (plugin_name, exc)) from exc
+
+    async def unloadPluginAsync(self, plugin_name: str) -> bool:
+        """异步门面只切线程，卸载事务仍由同步核心单一实现。"""
+        return await asyncio.to_thread(self._unloadPlugin, plugin_name)
+
+    async def shutdown(self) -> None:
+        """统一停机：所有已装载插件必须真实 stop/destroy 并摘掉活路由。"""
+        failures = []
+        for plugin_name in list(self._plugins):
+            if not self._plugins[plugin_name].loaded:
+                continue
+            try:
+                await self.unloadPluginAsync(plugin_name)
+            except Exception as exc:  # noqa: BLE001 - 单插件失败不阻断其余停机
+                failures.append((plugin_name, str(exc)))
+                logger.error("插件停机失败 %s: %s", plugin_name, exc)
+        if failures:
+            raise PluginError("shutdown_failed", "插件停机失败：%r" % failures)
+
+    @staticmethod
     async def _driveLifecycle(instance: Any, method: str) -> None:
         target = getattr(instance, method, None)
         if target is None:
@@ -887,55 +1019,11 @@ class PluginManager:
         return None
 
     def unload_plugin(self, plugin_name: str) -> bool:
-        """
-        卸载插件
-
-        Args:
-            plugin_name: 插件名称
-
-        Returns:
-            bool: 是否卸载成功
-        """
-        if plugin_name not in self._plugins:
-            logger.error("Plugin not found: %s", plugin_name)
-            return False
-
-        record = self._plugins[plugin_name]
-
-        if not record.loaded:
-            logger.warning("Plugin not loaded: %s", plugin_name)
-            return True
-
+        """同步卸载口：与异步口共用唯一停机事务。"""
         try:
-            # 先关 HTTP 面再拆实例：反过来会有一小段「路由还在、handler 背后的模块已被摘掉」
-            self._teardownRoutes(plugin_name, note="unload")
-            # 获取插件实例
-            if plugin_name in self._modules:
-                instance = self._modules[plugin_name].get("instance")
-                if instance and hasattr(instance, "on_disable"):
-                    instance.on_disable()
-
-                # 清理模块，并把动态注册进 `sys.modules` 的那条一起摘掉：
-                # 原实现只删自己的缓存，进程里仍留着 `neurova_plugin_<name>`，
-                # 于是"卸载"之后旧实例与旧代码都还在（再 load 会拿到脏的那份）。
-                sys.modules.pop("neurova_plugin_%s" % plugin_name, None)
-                del self._modules[plugin_name]
-
-            # handler 绑定的是刚摘掉的那个模块，登记必须同批清（否则下一次挂载
-            # 拿到的是上一次进程里的死对象）
-            from neurova.plugins.plugin_api_registry import get_plugin_api_registry
-
-            get_plugin_api_registry().unregister_plugin(plugin_name)
-
-            # 更新记录
-            record.loaded = False
-            self._lifecycleEvent("after_unload", plugin_name)
-
-            logger.info("Unloaded plugin: %s", plugin_name)
-            return True
-
-        except Exception as e:
-            logger.error("Failed to unload plugin %s: %s", plugin_name, e)
+            return self._unloadPlugin(plugin_name)
+        except PluginError as exc:
+            logger.error("Failed to unload plugin %s: %s", plugin_name, exc.detail)
             return False
 
     def _teardownRoutes(self, plugin_name: str, *, note: str, actor: str = "") -> int:
@@ -982,12 +1070,6 @@ class PluginManager:
                 logger.error("启用未能落盘（已回滚内存）plugin %s: %s", plugin_name, e)
                 return False
 
-            # 如果已加载，调用 on_enable
-            if record.loaded and plugin_name in self._modules:
-                instance = self._modules[plugin_name].get("instance")
-                if instance and hasattr(instance, "on_enable"):
-                    instance.on_enable()
-
             self._lifecycleEvent("after_enable", plugin_name)
             logger.info("Enabled plugin: %s", plugin_name)
             return True
@@ -997,57 +1079,11 @@ class PluginManager:
             return False
 
     def disable_plugin(self, plugin_name: str) -> bool:
-        """
-        禁用插件
-
-        Args:
-            plugin_name: 插件名称
-
-        Returns:
-            bool: 是否禁用成功
-        """
-        if plugin_name not in self._plugins:
-            logger.error("Plugin not found: %s", plugin_name)
-            return False
-
-        record = self._plugins[plugin_name]
-
-        if not record.enabled:
-            logger.warning("Plugin already disabled: %s", plugin_name)
-            return True
-
+        """同步禁用口：与异步口共用唯一停机事务。"""
         try:
-            # 检查是否有其他插件依赖此插件
-            dependents = self._get_dependents(plugin_name)
-            if dependents:
-                logger.error("Cannot disable plugin %s: other plugins depend on it: %s", plugin_name, dependents)
-                return False
-
-            # 禁用插件
-            record.enabled = False
-            try:
-                self._persistState()
-            except Exception as e:
-                record.enabled = True
-                logger.error("禁用未能落盘（已回滚内存，HTTP 面未动）plugin %s: %s", plugin_name, e)
-                return False
-
-            # HTTP 面同批关掉：禁用不是读数，是可执行的动作——只翻布尔的话，
-            # 面板显示「已禁用」而流量照旧进得来。
-            self._teardownRoutes(plugin_name, note="disable")
-
-            # 如果已加载，调用 on_disable
-            if record.loaded and plugin_name in self._modules:
-                instance = self._modules[plugin_name].get("instance")
-                if instance and hasattr(instance, "on_disable"):
-                    instance.on_disable()
-
-            self._lifecycleEvent("after_disable", plugin_name)
-            logger.info("Disabled plugin: %s", plugin_name)
-            return True
-
-        except Exception as e:
-            logger.error("Failed to disable plugin %s: %s", plugin_name, e)
+            return self._disablePlugin(plugin_name)
+        except PluginError as exc:
+            logger.error("Failed to disable plugin %s: %s", plugin_name, exc.detail)
             return False
 
     def _check_dependencies(self, record: PluginRecord) -> bool:

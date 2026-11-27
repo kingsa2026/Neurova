@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 from typing import Any, List, Optional, Dict
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 from neurova.api.auth import get_current_user
 from neurova.api.deps import require_admin
@@ -155,6 +155,53 @@ async def record_cost(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to record cost: {str(e)}")
+
+
+@router.post("")
+async def create_budget(
+    config: BudgetCreate,
+    budget_service: BudgetService = Depends(get_budget_service),
+    _admin: Dict[str, Any] = Depends(require_admin()),
+):
+    """注册运行期预算；管理面注册与 LLM 执行前门共用同一账本。"""
+    from neurova.models.cost_budget import BudgetConfig, BudgetScope
+
+    try:
+        scope = BudgetScope(config.scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not config.identifier.strip():
+        raise HTTPException(status_code=400, detail="identifier 不得为空")
+    if config.amount <= 0:
+        raise HTTPException(status_code=400, detail="amount 必须大于 0")
+
+    now = datetime.now()
+    duration = {
+        BudgetScope.HOURLY: timedelta(hours=1),
+        BudgetScope.DAILY: timedelta(days=1),
+        BudgetScope.MONTHLY: timedelta(days=30),
+    }.get(scope, timedelta(days=1))
+    start = config.period_start or now
+    end = config.period_end or (start + duration)
+    if end <= start:
+        raise HTTPException(status_code=400, detail="period_end 必须晚于 period_start")
+
+    budget = BudgetConfig(
+        scope=scope,
+        identifier=config.identifier.strip(),
+        amount=Decimal(str(config.amount)),
+        period_start=start,
+        period_end=end,
+        auto_reset=config.auto_reset,
+    )
+    budget_service.manager.register_budget(budget)
+    return {
+        "scope": scope.value,
+        "identifier": budget.identifier,
+        "amount": float(budget.amount),
+        "period_start": start.isoformat(),
+        "period_end": end.isoformat(),
+    }
 
 
 @router.get("/{scope}/{identifier}/status")

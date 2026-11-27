@@ -12,6 +12,7 @@
 """
 import inspect
 import json
+import time
 from types import SimpleNamespace
 from typing import Any, Dict, List
 
@@ -98,7 +99,8 @@ def wsClient(monkeypatch):
     mobile_ep._ws_connections.clear()
     monkeypatch.setitem(
         mobile_ep._pairing_codes, PAIRING_CODE,
-        {"status": "confirmed", "user_id": OWNER, "pairing_id": "pair-drive"},
+        {"status": "confirmed", "user_id": OWNER, "pairing_id": "pair-drive",
+         "expires_at": time.time() + 3600},
     )
 
     app = FastAPI()
@@ -111,6 +113,7 @@ def wsClient(monkeypatch):
 def _driveChat(client, content: str, sessionId: str, commandId: str = "") -> List[Dict[str, Any]]:
     """一条连接内发一条 chat:send 并读到终态；返回收到的帧序列。"""
     frames: List[Dict[str, Any]] = []
+    mobile_ep._pairing_codes[PAIRING_CODE]["status"] = "confirmed"
     with client.websocket_connect(f"/api/v1/mobile/ws?code={PAIRING_CODE}") as ws:
         payload: Dict[str, Any] = {"type": "chat:send", "content": content, "session_id": sessionId}
         if commandId:
@@ -261,6 +264,7 @@ class TestRemoteDrivingWebSocket:
         assert all(isinstance(s, int) for s in seqs), "账本化后每帧都应带单调 seq"
 
         # 第二条连接从首帧之前补拉：应收到全部缺失帧（带 replay 标记）
+        mobile_ep._pairing_codes[PAIRING_CODE]["status"] = "confirmed"
         with wsClient.websocket_connect(f"/api/v1/mobile/ws?code={PAIRING_CODE}") as ws:
             ws.send_json({"type": "sync_resume", "last_seq": seqs[0] - 1})
             replayed: List[Dict[str, Any]] = []

@@ -180,7 +180,7 @@ class TestRecallRespectsScope:
             metadata={"chat_scope": "room:project_roomB"},
         )
         drawer = SemanticMatchDrawer(max_tokens=8000)
-        assert drawer.draw([chunk], need="量子项目代号") == [chunk] or True
+        assert drawer.draw([chunk], need="量子项目代号") == [chunk]
         assert scope_from_metadata(chunk.metadata) == "room:project_roomB"
 
 

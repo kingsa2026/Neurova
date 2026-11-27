@@ -287,3 +287,20 @@ class TestFactAxisConflictApi:
         assert factStore.fact(newer)["status"] == "active"
         assert factStore.fact(older)["status"] == "superseded"
         assert factStore.conflicts("pending") == []
+
+    def test_manualSupersedeRejectsWinnerRetiredAfterDetection(self, api, factStore):
+        client, holder, _ = api
+        holder["user"] = dict(ADMIN)
+        conflictId, older, newer = self._seedFactConflict(factStore)
+        factStore.retract(newer, reason="测试裁决前退休")
+        factStore.retract(older, reason="测试裁决前退休")
+
+        resp = client.post(
+            f"{PREFIX}/conflicts/{conflictId}/resolve",
+            json={"resolution": "supersede_old", "winner_fact_id": newer},
+        )
+
+        assert resp.status_code == 400, resp.text
+        assert "active" in resp.text
+        assert [row["conflict_id"] for row in factStore.conflicts("pending")] == [conflictId]
+        assert factStore.conflict(conflictId)["winner_fact_id"] is None

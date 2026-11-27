@@ -17,7 +17,7 @@
 # 为什么是这个基础镜像而不是 `cnbcool/default-dev-env`：
 #   默认镜像里没有本仓的生产解释器，也没有前端工具链 —— 用它只能得到一个
 #   "能开 WebIDE、但跑不了本仓测试"的壳。故本文件以 `python:3.12-slim` 为基，
-#   在其上装 Node 20 与 code-server。
+#   在其上装 Node 22 与 code-server。
 #
 # 单/双容器模式（官方《单/双容器模式》）：
 #   下文装了 code-server ⇒ 平台走**单容器模式**，WebIDE 与开发环境同容器，
@@ -63,7 +63,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         vim \
     && rm -rf /var/lib/apt/lists/*
 
-# Node 20（大版本与 CI 同源）：用 NodeSource 官方源装，不用 `apt install nodejs`
+# Node 22（大版本与 CI 同源）：用 NodeSource 官方源装，不用 `apt install nodejs`
 # —— 后者在 Debian 系给出的是旧大版本，与 CI 的 node-version 分叉。
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
@@ -93,7 +93,8 @@ RUN npm install -g @tencent-ai/codebuddy-code \
 
 # 后端全量运行环境（构建期装机，不留给 stages）。
 #
-# 装的是 `requirements-full.lock` —— 它与生产镜像装的 `requirements.txt` 同源
+# 装的是 `requirements-full.lock` —— 它与生产镜像装的是同一份完整锁，
+# 由 `requirements.txt` 编译而来
 # （`uv pip compile --universal requirements.txt -o requirements-full.lock`），
 # 是同一份依赖的**锁定形态**，不是第二份清单（教义第 6 条）。
 #

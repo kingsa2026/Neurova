@@ -152,6 +152,16 @@ class TestStoreCrud:
 
 
 class TestStoreTestConnection:
+    def test_probe_contract_documents_persistence(self, client):
+        """探针会回写状态与店铺参数，API 文档不得再宣称只读无副作用。"""
+        from neurova.collaboration.neurflow.store_connections import StoreConnectionManager
+
+        implementationDoc = StoreConnectionManager.test_connection.__doc__ or ""
+        apiDoc = client.app.openapi()["paths"]["/stores/{store_id}/test"]["post"].get("description") or ""
+        for doc in (implementationDoc, apiDoc):
+            assert "无副作用" not in doc, doc
+            assert "回写" in doc, doc
+
     def test_unknown_store_404(self, client):
         assert client.post("/stores/store_missing/test").status_code == 404
 

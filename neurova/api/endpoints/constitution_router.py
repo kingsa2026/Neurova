@@ -9,7 +9,7 @@ import time
 import uuid
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 
 from neurova.api.auth import get_current_user, Depends
 from neurova.api.endpoints._pydantic_compat import safe_model_dump
@@ -47,7 +47,7 @@ async def get_constitution(
 async def update_constitution(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
-    constitution: List[Dict[str, Any]] = [],
+    constitution: List[Dict[str, Any]] = Body(...),
 ):
     """整表更新宪法（落盘）"""
     request_id = get_request_id(request)

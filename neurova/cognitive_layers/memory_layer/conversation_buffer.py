@@ -364,16 +364,18 @@ class MemoryWriteQueue:
 
                 # 写入 MemoryManager（recall 主数据源）
                 if memory_manager and hasattr(memory_manager, "remember"):
-                    memory_manager.remember(
+                    memoryId = memory_manager.remember(
                         content=content,
                         memory_type=classification,
                         category=category,
                         metadata=metadata,
                     )
+                    if not memoryId or memory_manager.get_memory(memoryId) is None:
+                        raise RuntimeError("记忆写入后读回失败: %s" % memoryId)
                     written += 1
                 # 降级写入痕迹库（无 manager 时唯一出口）
                 elif storage and hasattr(storage, "save"):
-                    storage.save(
+                    memoryId = storage.save(
                         content=content,
                         memory_type=classification,
                         owner=self.agent_id or "default",
@@ -381,6 +383,8 @@ class MemoryWriteQueue:
                         metadata=metadata,
                         importance=0.5,
                     )
+                    if not memoryId or storage.get(memoryId) is None:
+                        raise RuntimeError("记忆写入后读回失败: %s" % memoryId)
                     written += 1
 
             except Exception as e:
@@ -407,19 +411,6 @@ class MemoryWriteQueue:
             logger.warning("批量写入全部失败: %s 条", errors)
 
         return written
-
-    def verify_write(self, item: MemoryItem) -> bool:
-        """验证写入是否成功
-
-        Args:
-            item: 内存项
-
-        Returns:
-            bool: 是否成功写入
-        """
-        # 这里应该实现实际的验证逻辑
-        # 为了测试，我们假设验证成功
-        return True
 
     def get_queue_size(self) -> int:
         """获取队列大小

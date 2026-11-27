@@ -106,7 +106,9 @@ class SchemaCatalogStore:
                      schema: Any, relations: Optional[Dict[str, Any]] = None,
                      profiles: Optional[Dict[str, Dict[str, Dict[str, Any]]]] = None
                      ) -> Dict[str, int]:
-        """一份 SourceSchema 落目录：同 (租户, 源) 先清后插（陈旧列不残留）。
+        """一份 SourceSchema 落目录：同 (租户, 源) 差量更新后清除陈旧表列。
+
+        仍存在的稳定 ID 只覆盖元数据与画像，保留审批写入的 term_id。
 
         relations 形状：{"foreign_keys": [{source_table, source_column,
         target_table, target_column}], "primary_keys": {table: [col, ...]}}；
@@ -129,12 +131,16 @@ class SchemaCatalogStore:
         fkCount = 0
         with self._store._lock, self._store._conn:
             tenantClause, tenantParams = tenant_sql_where(tenant)
-            self._store._conn.execute(
-                "DELETE FROM ontology_catalog_columns WHERE %s AND source_id = ?" % tenantClause,
-                (*tenantParams, source))
-            self._store._conn.execute(
-                "DELETE FROM ontology_catalog_tables WHERE %s AND source_id = ?" % tenantClause,
-                (*tenantParams, source))
+            existingTables = {str(row[0]) for row in self._store._conn.execute(
+                "SELECT catalog_table_id FROM ontology_catalog_tables"
+                " WHERE %s AND source_id = ?" % tenantClause,
+                (*tenantParams, source)).fetchall()}
+            existingColumns = {str(row[0]) for row in self._store._conn.execute(
+                "SELECT catalog_column_id FROM ontology_catalog_columns"
+                " WHERE %s AND source_id = ?" % tenantClause,
+                (*tenantParams, source)).fetchall()}
+            retainedTables = set()
+            retainedColumns = set()
             for table in tables:
                 tableName = str(table.get("name") or "").strip()
                 if not tableName:
@@ -143,15 +149,21 @@ class SchemaCatalogStore:
                 columns = list(table.get("columns") or [])
                 pkColumns = {str(c) for c in (primaryKeys.get(tableName) or [])}
                 self._store._conn.execute(
-                    "INSERT OR REPLACE INTO ontology_catalog_tables"
+                    "INSERT INTO ontology_catalog_tables"
                     " (catalog_table_id, tenant_id, source_id, source_type, table_schema,"
                     "  table_name, table_type, description, term_id, column_count, ingested_at)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+                    " ON CONFLICT(catalog_table_id) DO UPDATE SET"
+                    " source_type=excluded.source_type, table_schema=excluded.table_schema,"
+                    " table_name=excluded.table_name, table_type=excluded.table_type,"
+                    " description=excluded.description, column_count=excluded.column_count,"
+                    " ingested_at=excluded.ingested_at",
                     (tableId, tenant, source, str(sourceType or ""), "",
                      tableName, str(table.get("table_type") or ""),
                      str(table.get("description") or ""), "",
                      len(columns), stamp),
                 )
+                retainedTables.add(tableId)
                 tableCount += 1
                 for position, column in enumerate(columns):
                     # 适配器列形状两态并存：SQL 族是 {name, type}，文件族是裸列名
@@ -177,16 +189,29 @@ class SchemaCatalogStore:
                             fkCount += 1
                             break
                     profile = (profiles.get(tableName) or {}).get(columnName) or {}
+                    columnId = _columnId(tenant, tableId, columnName)
                     self._store._conn.execute(
-                        "INSERT OR REPLACE INTO ontology_catalog_columns"
+                        "INSERT INTO ontology_catalog_columns"
                         " (catalog_column_id, tenant_id, source_id, catalog_table_id,"
                         "  column_name, data_type, ordinal_position, is_primary_key,"
                         "  is_foreign_key, foreign_key_target, description, term_id,"
                         "  ingested_at, profile_distinct, profile_null_rate,"
                         "  profile_min, profile_max, profile_samples_json,"
                         "  profile_sample_rows)"
-                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (_columnId(tenant, tableId, columnName), tenant, source, tableId,
+                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                        " ON CONFLICT(catalog_column_id) DO UPDATE SET"
+                        " column_name=excluded.column_name, data_type=excluded.data_type,"
+                        " ordinal_position=excluded.ordinal_position,"
+                        " is_primary_key=excluded.is_primary_key,"
+                        " is_foreign_key=excluded.is_foreign_key,"
+                        " foreign_key_target=excluded.foreign_key_target,"
+                        " description=excluded.description, ingested_at=excluded.ingested_at,"
+                        " profile_distinct=excluded.profile_distinct,"
+                        " profile_null_rate=excluded.profile_null_rate,"
+                        " profile_min=excluded.profile_min, profile_max=excluded.profile_max,"
+                        " profile_samples_json=excluded.profile_samples_json,"
+                        " profile_sample_rows=excluded.profile_sample_rows",
+                        (columnId, tenant, source, tableId,
                          columnName, dataType, position,
                          1 if columnName in pkColumns else 0,
                          isFk, fkTarget, columnDescription, "", stamp,
@@ -197,7 +222,22 @@ class SchemaCatalogStore:
                          profile.get("profile_samples_json") or "[]",
                          int(profile.get("profile_sample_rows") or 0)),
                     )
+                    retainedColumns.add(columnId)
                     columnCount += 1
+            for staleTable in existingTables - retainedTables:
+                self._store._conn.execute(
+                    "DELETE FROM ontology_catalog_columns"
+                    " WHERE %s AND source_id = ? AND catalog_table_id = ?" % tenantClause,
+                    (*tenantParams, source, staleTable))
+                self._store._conn.execute(
+                    "DELETE FROM ontology_catalog_tables"
+                    " WHERE %s AND source_id = ? AND catalog_table_id = ?" % tenantClause,
+                    (*tenantParams, source, staleTable))
+            for staleColumn in existingColumns - retainedColumns:
+                self._store._conn.execute(
+                    "DELETE FROM ontology_catalog_columns"
+                    " WHERE %s AND source_id = ? AND catalog_column_id = ?" % tenantClause,
+                    (*tenantParams, source, staleColumn))
         return {"tables": tableCount, "columns": columnCount, "foreign_keys": fkCount}
 
     # ── 读取 ────────────────────────────────────────────────

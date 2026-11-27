@@ -7,9 +7,13 @@ export default defineConfig({
     vue(),
   ],
   resolve: {
-    alias: {
-      '@': resolve(__dirname, 'src'),
-    },
+    alias: [
+      { find: /^ant-design-vue$/, replacement: resolve(__dirname, 'src/antd.ts') },
+      { find: /^@ant-design\/icons-vue$/, replacement: resolve(__dirname, 'src/icons.ts') },
+      { find: /^ant-design-vue\/locale\/(.+)$/, replacement: 'ant-design-vue/es/locale/$1' },
+      { find: /^three\/webgpu$/, replacement: resolve(__dirname, 'src/threeWebgpu.ts') },
+      { find: '@', replacement: resolve(__dirname, 'src') },
+    ],
   },
   css: {
     preprocessorOptions: {},
@@ -39,15 +43,17 @@ export default defineConfig({
     },
   },
   build: {
-    target: 'es2020',
+    target: 'es2022',
     outDir: 'dist',
     sourcemap: false,
+    cssCodeSplit: false,
+    modulePreload: { polyfill: false },
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
       output: {
+        experimentalMinChunkSize: 50 * 1024,
         manualChunks: {
           'vendor-vue': ['vue', 'vue-router', 'pinia', 'vue-i18n'],
-          'vendor-ant': ['ant-design-vue'],
           'vendor-charts': ['echarts', 'vue-echarts'],
           'vendor-flow': ['@vue-flow/core', '@vue-flow/background', '@vue-flow/controls', '@vue-flow/minimap'],
         },

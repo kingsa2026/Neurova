@@ -1350,6 +1350,7 @@ class TermWriteRequest(BaseModel):
     module: Optional[str] = None
     identity_keys: Optional[List[str]] = None
     qualifier_schema: Optional[Dict[str, Any]] = None
+    conflict_policy: Optional[str] = None
     version: Optional[str] = None
     basis: str = ""
 
@@ -1427,7 +1428,7 @@ def _registerTerm(registry: Any, termId: str, body: TermWriteRequest,
         replacedBy=body.replaced_by or "",
         labels=body.labels, altLabels=body.alt_labels,
         module=body.module or "", identityKeys=body.identity_keys,
-        qualifierSchema=body.qualifier_schema,
+        qualifierSchema=body.qualifier_schema, conflictPolicy=body.conflict_policy or "",
         tenantId=tenantId)
 
 
@@ -1450,6 +1451,7 @@ def _putDeclaration(body: TermWriteRequest) -> Dict[str, Any]:
         "replacedBy": body.replaced_by, "identityKeys": body.identity_keys,
         "labels": body.labels, "altLabels": body.alt_labels,
         "module": body.module, "qualifierSchema": body.qualifier_schema,
+        "conflictPolicy": body.conflict_policy,
         "version": body.version,
     }
 
@@ -1863,6 +1865,7 @@ class PipelineTermUpsert(BaseModel):
     module: Optional[str] = None
     identityKeys: Optional[List[str]] = None
     qualifierSchema: Optional[Dict[str, Any]] = None
+    conflictPolicy: Optional[str] = None
     # None = 保留现值（版本推进是治理动作，不该由不带 version 的批次顺手重置）
     version: Optional[str] = None
 

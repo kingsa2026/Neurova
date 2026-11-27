@@ -17,6 +17,8 @@ from __future__ import annotations
 """
 
 import asyncio
+import inspect
+import re
 from neurova.core.atomic_io import loadJsonStore, saveJsonStore
 from neurova.core.logger import get_logger
 from pathlib import Path
@@ -126,6 +128,12 @@ class ChannelTestResult(BaseModel):
     message: str
     needs_scan: bool = False  # F-2：wechat iLink 无 token 时诚实失败并引导扫码
     details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DeadLetterRequeueRequest(BaseModel):
+    """死信重排必须逐 ID 点名，空数组不是“全部”的别名。"""
+
+    event_ids: list[int] = Field(..., min_length=1, max_length=500)
 
 
 # ============================================================
@@ -363,7 +371,10 @@ async def bootstrap_channel_adapters(manager=None) -> Dict[str, int]:
                 extra=cfg.get("extra", {}) or {},
             )
             try:
-                adapter = await asyncio.to_thread(_create_adapter, channel_type, channel_config)
+                adapter = await asyncio.to_thread(
+                    _create_adapter_for_agent, channel_type, channel_config,
+                    agent_id=agent_id, manager=manager,
+                )
             except Exception as e:  # noqa: BLE001 - 单渠道故障不拖装配
                 stats["failed"] += 1
                 logger.warning("渠道装配失败 %s(agent=%s): %s", channel_type, agent_id, e)
@@ -382,9 +393,13 @@ async def bootstrap_channel_adapters(manager=None) -> Dict[str, int]:
                     # 装配日志 connected=1/failed=0 把钉钉连接失败完全掩盖
                     # （2026-09-14 无响应事故）
                     stats["failed"] += 1
+                    if getattr(adapter, "isRunner", False) is True:
+                        manager.unregister_adapter(channel_type, agent_id=agent_id)
                     logger.warning("渠道连接失败(connect 返回 False) %s(agent=%s)", channel_type, agent_id)
             except Exception as e:  # noqa: BLE001
                 stats["failed"] += 1
+                if getattr(adapter, "isRunner", False) is True:
+                    manager.unregister_adapter(channel_type, agent_id=agent_id)
                 logger.warning("渠道连接失败 %s(agent=%s): %s", channel_type, agent_id, e)
     logger.info("渠道启动装配完成: %s", stats)
     return stats
@@ -405,6 +420,111 @@ async def ingress_stats():
         return {"enabled": True, **queue.stats()}
     except Exception as e:  # noqa: BLE001 - 状态查询失败不炸端点
         return {"enabled": False, "error": str(e)}
+
+
+def _auditDeadLetterRequeue(request: Request, current_user: Any, *, agentId: str,
+                            channelType: str, eventIds: list[int], requeued: int) -> None:
+    """写操作复用仓内审计单源；审计失败只告警，不谎报重排结果。"""
+    try:
+        from neurova.security.audit_logger import (
+            AuditEventType, AuditLogEntry, AuditSeverity, get_audit_logger,
+        )
+
+        identity = current_user if isinstance(current_user, Mapping) else {}
+        get_audit_logger().log(AuditLogEntry(
+            event_type=AuditEventType.SECURITY_EVENT,
+            severity=AuditSeverity.HIGH,
+            user_id=str(identity.get("user_id") or identity.get("neuser_id") or ""),
+            action="channel_ingress_dead_letter_requeue",
+            details={
+                "agent_id": agentId,
+                "channel_type": channelType,
+                "event_ids": eventIds,
+                "requeued": requeued,
+            },
+            resource_type="channel_ingress_event",
+            resource_id=",".join(str(eventId) for eventId in eventIds),
+            ip_address=request.client.host if request.client else "",
+            user_agent=request.headers.get("user-agent", ""),
+        ))
+    except Exception as exc:  # noqa: BLE001 - 审计故障不改写已提交的重排事实
+        logger.warning("渠道死信重排审计写入失败: %s", exc)
+
+
+@router.get("/ingress/dead-letters", summary="按 Agent 读取入站死信明细")
+async def list_ingress_dead_letters(
+    request: Request,
+    agent_id: str = Query(..., min_length=1, description="归属 Agent（必填）"),
+    channel_type: str = Query(default="", description="渠道类型；留空＝该 Agent 全渠道"),
+    limit: int = Query(default=50, ge=1, le=500),
+    current_user: Any = Depends(get_current_user),
+):
+    """登录后按属主权限读取；存储故障以 5xx 暴露，不伪装成空列表。"""
+    _requireChannelAccess(agent_id, current_user, action="read")
+    try:
+        queue = get_channel_manager()._get_ingress_queue()
+        if queue is None:
+            raise HTTPException(status_code=503, detail="入站持久化队列不可用")
+        return {"dead_letters": queue.list_dead_letters(
+            agent_id=agent_id, channel_type=channel_type, limit=limit
+        )}
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - 读取失败必须诚实暴露
+        raise HTTPException(status_code=500, detail=f"读取入站死信失败: {exc}") from exc
+
+
+@router.post("/ingress/dead-letters/requeue", summary="按 ID 重排入站死信")
+async def requeue_ingress_dead_letters(
+    request: Request,
+    body: DeadLetterRequeueRequest,
+    agent_id: str = Query(..., min_length=1, description="归属 Agent（必填）"),
+    channel_type: str = Query(default="", description="渠道类型；留空＝该 Agent 全渠道"),
+    current_user: Any = Depends(get_current_user),
+):
+    """属主可写；只接受明确 ID，并再次按 agent/渠道收口更新范围。"""
+    _requireChannelAccess(agent_id, current_user, action="write")
+    try:
+        queue = get_channel_manager()._get_ingress_queue()
+        if queue is None:
+            raise HTTPException(status_code=503, detail="入站持久化队列不可用")
+        requeued = queue.requeue_dead_letters(
+            agent_id=agent_id, channel_type=channel_type, event_ids=body.event_ids
+        )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - 写入失败不得报成功
+        raise HTTPException(status_code=500, detail=f"重排入站死信失败: {exc}") from exc
+    _auditDeadLetterRequeue(
+        request, current_user, agentId=agent_id, channelType=channel_type,
+        eventIds=body.event_ids, requeued=requeued,
+    )
+    return {"requeued": requeued}
+
+
+@router.get("/outbound/failures", summary="按 Agent 读取出口失败明细")
+async def list_outbound_failures(
+    agent_id: str = Query(..., min_length=1, description="归属 Agent（必填）"),
+    channel_type: str = Query(default="", description="渠道类型；留空＝该 Agent 全渠道"),
+    chat_id: str = Query(default="", description="会话 ID；留空＝该 Agent 全会话"),
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: Any = Depends(get_current_user),
+):
+    """登录后按属主权限读取出口失败片；保留渠道/会话组合过滤。"""
+    _requireChannelAccess(agent_id, current_user, action="read")
+    try:
+        ledger = get_channel_manager()._get_outbound_ledger()
+        if ledger is None:
+            raise HTTPException(status_code=503, detail="出口失败台账不可用")
+        return {"failures": ledger.queryFailures(
+            agent_id=agent_id, channel_type=channel_type, chat_id=chat_id, limit=limit
+        )}
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - 读取失败必须诚实暴露
+        raise HTTPException(status_code=500, detail=f"读取出口失败明细失败: {exc}") from exc
 
 
 def _connection_status(adapter) -> Dict[str, Any]:
@@ -723,7 +843,10 @@ async def create_or_update_config(
     if not needs_scan and request.enabled:
         # RES-P0-2：工厂内含同步网络工作（如 iLink 认证最长 300s 轮询），
         # 必须下沉线程池，否则一次保存即冻结整个事件循环
-        adapter = await asyncio.to_thread(_create_adapter, request.channel_type, channel_config)
+        adapter = await asyncio.to_thread(
+            _create_adapter_for_agent, request.channel_type, channel_config,
+            agent_id=agent_id, manager=manager,
+        )
         if adapter is not None:
             manager.register_adapter(adapter, agent_id=agent_id)
             # 启用即连接：保存路径此前只 register 不 connect，导致"启用后
@@ -731,7 +854,15 @@ async def create_or_update_config(
             try:
                 ok = await adapter.connect()
                 logger.info("渠道保存后连接 %s(agent=%s): %s", request.channel_type, agent_id, ok)
-            except Exception as e:  # noqa: BLE001 - 连接失败不阻断保存（配置已持久化）
+                if not ok and getattr(adapter, "isRunner", False) is True:
+                    manager.unregister_adapter(request.channel_type, agent_id=agent_id)
+                    raise HTTPException(status_code=502, detail="Runner 握手/启动失败")
+            except HTTPException:
+                raise
+            except Exception as e:  # noqa: BLE001
+                if getattr(adapter, "isRunner", False) is True:
+                    manager.unregister_adapter(request.channel_type, agent_id=agent_id)
+                    raise HTTPException(status_code=502, detail=f"Runner 握手/启动失败：{e}") from e
                 logger.warning("渠道保存后连接失败 %s(agent=%s): %s", request.channel_type, agent_id, e)
 
     return {
@@ -850,7 +981,10 @@ async def migrate_agent_configs(
             extra=cfg.get("extra", {}) or {},
         )
         try:
-            adapter = await asyncio.to_thread(_create_adapter, channel_type, channel_config)
+            adapter = await asyncio.to_thread(
+                _create_adapter_for_agent, channel_type, channel_config,
+                agent_id=to_id, manager=manager,
+            )
         except Exception as e:  # noqa: BLE001 - 单渠道注册失败不吞迁移结果（如实点名）
             logger.warning("迁移后重建实例失败 %s(agent=%s): %s", channel_type, to_id, e)
             continue
@@ -926,7 +1060,10 @@ async def test_connection(
     )
 
     # RES-P0-2：同 create_or_update_config——同步工厂下沉线程池
-    adapter = await asyncio.to_thread(_create_adapter, channel_type, channel_config)
+    adapter = await asyncio.to_thread(
+        _create_adapter_for_agent, channel_type, channel_config,
+        agent_id=agent_id, manager=get_channel_manager(),
+    )
 
     if adapter is None:
         return ChannelTestResult(
@@ -961,9 +1098,114 @@ async def test_connection(
         )
 
 
-def _create_adapter(channel_type: str, config: ChannelConfig):
-    """根据类型创建适配器"""
+def _create_adapter_for_agent(channel_type: str, config: ChannelConfig, *, agent_id: str, manager=None):
+    """给生产工厂带上 agent/manager 上下文，同时兼容既有两参数工厂替身。"""
+    factory = _create_adapter
+    try:
+        parameters = inspect.signature(factory).parameters
+        accepts_context = "agent_id" in parameters or any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()
+        )
+    except (TypeError, ValueError):
+        accepts_context = False
+    if accepts_context:
+        return factory(channel_type, config, agent_id=agent_id, manager=manager)
+    return factory(channel_type, config)
+
+
+def _runnerSecretKey(key: str) -> bool:
+    compact = re.sub(r"[^a-z0-9]", "", str(key or "").lower())
+    return any(compact == part or compact.startswith(part) or compact.endswith(part)
+               for part in ("secret", "token", "password", "passwd", "apikey",
+                            "privatekey", "encryptkey", "credential"))
+
+
+def _runnerConfigValue(value: Any, path: str, secretEnv: Dict[str, str],
+                       privateEnvKeys: list[str]) -> Any:
+    if isinstance(value, dict):
+        resolved = {}
+        for key, item in value.items():
+            itemPath = f"{path}.{key}" if path else str(key)
+            if _runnerSecretKey(key) and item not in (None, "", {}, []):
+                envKey = str(secretEnv.get(itemPath) or "").strip()
+                if not envKey:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"runner 凭据 {itemPath} 必须通过 runner.secret_env 引用环境变量",
+                    )
+                if envKey not in privateEnvKeys:
+                    privateEnvKeys.append(envKey)
+                resolved[key] = {"env": envKey}
+            else:
+                resolved[key] = _runnerConfigValue(item, itemPath, secretEnv, privateEnvKeys)
+        return resolved
+    if isinstance(value, list):
+        return [_runnerConfigValue(item, path, secretEnv, privateEnvKeys) for item in value]
+    return value
+
+
+def _create_adapter(
+    channel_type: str,
+    config: ChannelConfig,
+    *,
+    agent_id: str = "default",
+    manager=None,
+):
+    """根据类型创建适配器；Runner 仅在 `extra.runner.enabled=true` 时显式启用。"""
     extra = config.extra or {}
+    runner_cfg = extra.get("runner")
+    from neurova.channels.access_policy import truthySetting
+
+    if isinstance(runner_cfg, dict) and truthySetting(runner_cfg.get("enabled"), False):
+        from neurova.channels.runner_bridge import ChannelProcessSupervisor
+        from neurova.channels.runner_spec import LaunchSpec
+
+        entrypoint = str(runner_cfg.get("entrypoint") or "").strip()
+        if not entrypoint:
+            raise HTTPException(status_code=400, detail="runner.enabled=true 时必须提供 runner.entrypoint")
+        manager = manager or get_channel_manager()
+        supervisor = getattr(manager, "_runner_supervisor", None)
+        if supervisor is None:
+            supervisor = ChannelProcessSupervisor(
+                manager=manager,
+                max_restarts=int(runner_cfg.get("max_restarts", 3)),
+            )
+            manager._runner_supervisor = supervisor
+
+        private_env_keys = [str(x) for x in (runner_cfg.get("private_env_keys") or [])]
+        config_payload = {
+            "channel_type": config.channel_type,
+            "enabled": config.enabled,
+            "app_id": config.app_id,
+            "app_secret": config.app_secret,
+            "webhook_url": config.webhook_url,
+            "webhook_token": config.webhook_token,
+            "use_stream": config.use_stream,
+            "encrypt_key": config.encrypt_key,
+            "verification_token": config.verification_token,
+            "extra": {key: value for key, value in dict(config.extra or {}).items()
+                      if key != "runner"},
+        }
+        # 凭据只经白名单环境变量进入子进程，禁止明文进入进程命令行规格。
+        secretEnv = runner_cfg.get("secret_env") or {}
+        if not isinstance(secretEnv, dict):
+            raise HTTPException(status_code=400, detail="runner.secret_env 必须是对象")
+        config_payload = _runnerConfigValue(
+            config_payload, "", {str(key): str(value) for key, value in secretEnv.items()},
+            private_env_keys,
+        )
+
+        spec = LaunchSpec(
+            channel_type=channel_type,
+            entrypoint=entrypoint,
+            required_deps=[str(x) for x in (runner_cfg.get("required_deps") or [])],
+            private_env_keys=private_env_keys,
+            agent_id=agent_id,
+            instance_key=str(runner_cfg.get("instance_key") or f"{agent_id}:{channel_type}"),
+            source_revision=str(runner_cfg.get("source_revision") or ""),
+            channel_config=config_payload,
+        )
+        return supervisor.launch(spec, config)
 
     # --- Gen 1: formal ChannelConfig-based adapters ---
     if channel_type == "feishu":

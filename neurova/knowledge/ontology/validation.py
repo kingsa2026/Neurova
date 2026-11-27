@@ -117,7 +117,8 @@ class OntologyValidationReport:
         declaredTypes = registry.assertedTypesOf(agentId, subjectKey)
         for index, left in enumerate(declaredTypes):
             for right in declaredTypes[index + 1:]:
-                if right in registry.disjointWith(left, tenantId=tenantId):
+                if right in registry.disjointWith(left, tenantId=tenantId) \
+                        or left in registry.disjointWith(right, tenantId=tenantId):
                     out.append(self._finding(
                         "violation", "disjoint",
                         "主体同时被断言为不相交类型 %s 与 %s" % (left, right), predicate,

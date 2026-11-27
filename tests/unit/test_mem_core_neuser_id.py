@@ -33,7 +33,6 @@ _TARGET_MODULES = {
     "neurova.cognitive_layers.meta_cognition_layer.question_queue": {
         "QuestionQueueManager"
     },
-    "neurova.cognitive_layers.memory_layer.attachment_manager": {"AttachmentManager"},
     "neurova.cognitive_layers.memory_layer.muscle_memory": {"MuscleMemory"},
     "neurova.cognitive_layers.memory_layer.tool_memory_integration": {
         "ToolMemoryIntegration"
@@ -86,7 +85,6 @@ def test_init_memory_modules_forwards_neuser_id(monkeypatch):
             agent_id="agent_x",
             name="test_agent",
             workspace_path="/tmp/ws",
-            attachment_dir="/tmp/att",
         ),
         _agent=SimpleNamespace(),
     )

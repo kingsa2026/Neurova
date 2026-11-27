@@ -53,7 +53,7 @@ _KNOWN_CAPS = frozenset(CAPABILITY_ORDER)
 # 键为族前缀，段边界匹配（"deepseek-r1" 不误吃 "deepseek-r2"）。
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
-class ModelPreset:
+class ModelCapabilityPreset:
     """模型预埋档案：能力 + 限额兜底值（None = 未知，不落库）。"""
 
     capabilities: Tuple[str, ...] = ()
@@ -61,146 +61,146 @@ class ModelPreset:
     max_tokens: Optional[int] = None
 
 
-MODEL_PRESETS: dict[str, ModelPreset] = {
+MODEL_PRESETS: dict[str, ModelCapabilityPreset] = {
     # --- OpenAI ---
-    "gpt-5": ModelPreset(("reasoning", "vision", "tool_use"), 400_000, 128_000),
-    "gpt-4o": ModelPreset(("vision", "tool_use"), 128_000, 16_384),
-    "gpt-4.1": ModelPreset(("vision", "tool_use"), 1_047_576, 32_768),
-    "gpt-4-turbo": ModelPreset(("vision", "tool_use"), 131_072, 4_096),
-    "gpt-4": ModelPreset(("tool_use",), 8_192, 8_192),
-    "gpt-3.5-turbo": ModelPreset(("tool_use",), 16_385, 4_096),
-    "gpt-oss": ModelPreset(("reasoning", "tool_use"), 131_072),
-    "o1": ModelPreset(("reasoning",), 204_800, 100_000),
-    "o3": ModelPreset(("reasoning",), 204_800, 100_000),
-    "o4-mini": ModelPreset(("reasoning",), 204_800, 100_000),
+    "gpt-5": ModelCapabilityPreset(("reasoning", "vision", "tool_use"), 400_000, 128_000),
+    "gpt-4o": ModelCapabilityPreset(("vision", "tool_use"), 128_000, 16_384),
+    "gpt-4.1": ModelCapabilityPreset(("vision", "tool_use"), 1_047_576, 32_768),
+    "gpt-4-turbo": ModelCapabilityPreset(("vision", "tool_use"), 131_072, 4_096),
+    "gpt-4": ModelCapabilityPreset(("tool_use",), 8_192, 8_192),
+    "gpt-3.5-turbo": ModelCapabilityPreset(("tool_use",), 16_385, 4_096),
+    "gpt-oss": ModelCapabilityPreset(("reasoning", "tool_use"), 131_072),
+    "o1": ModelCapabilityPreset(("reasoning",), 204_800, 100_000),
+    "o3": ModelCapabilityPreset(("reasoning",), 204_800, 100_000),
+    "o4-mini": ModelCapabilityPreset(("reasoning",), 204_800, 100_000),
     # --- Anthropic ---
-    "claude-3-5": ModelPreset(("vision", "tool_use"), 200_000, 8_192),
-    "claude-3": ModelPreset(("vision", "tool_use"), 200_000, 4_096),
-    "claude-sonnet-4": ModelPreset(("vision", "tool_use"), 200_000, 64_000),
-    "claude-opus-4": ModelPreset(("vision", "tool_use"), 200_000, 32_000),
+    "claude-3-5": ModelCapabilityPreset(("vision", "tool_use"), 200_000, 8_192),
+    "claude-3": ModelCapabilityPreset(("vision", "tool_use"), 200_000, 4_096),
+    "claude-sonnet-4": ModelCapabilityPreset(("vision", "tool_use"), 200_000, 64_000),
+    "claude-opus-4": ModelCapabilityPreset(("vision", "tool_use"), 200_000, 32_000),
     # --- Google Gemini ---
-    "gemini-3": ModelPreset(("vision", "audio", "video", "tool_use"), 1_048_576, 65_536),
-    "gemini-2.5": ModelPreset(("vision", "audio", "video", "tool_use"), 1_048_576, 65_536),
-    "gemini-2.0": ModelPreset(("vision", "audio", "video", "tool_use"), 1_048_576, 8_192),
-    "gemini-1.5": ModelPreset(("vision", "audio", "video", "tool_use"), 1_048_576, 8_192),
+    "gemini-3": ModelCapabilityPreset(("vision", "audio", "video", "tool_use"), 1_048_576, 65_536),
+    "gemini-2.5": ModelCapabilityPreset(("vision", "audio", "video", "tool_use"), 1_048_576, 65_536),
+    "gemini-2.0": ModelCapabilityPreset(("vision", "audio", "video", "tool_use"), 1_048_576, 8_192),
+    "gemini-1.5": ModelCapabilityPreset(("vision", "audio", "video", "tool_use"), 1_048_576, 8_192),
     # --- DeepSeek ---
-    "deepseek-r1": ModelPreset(("reasoning",), 65_536, 8_192),
-    "deepseek-reasoner": ModelPreset(("reasoning",), 65_536, 8_192),
-    "deepseek-v4": ModelPreset(("tool_use",)),          # vision/think 变体由名称信号补
-    "deepseek-v3.1": ModelPreset(("reasoning", "tool_use")),  # 3.1 起混合思考
-    "deepseek-v3": ModelPreset(("tool_use",)),
-    "deepseek-chat": ModelPreset(("tool_use",), 65_536, 8_192),
-    "janus-pro": ModelPreset(("vision", "image_generation")),
+    "deepseek-r1": ModelCapabilityPreset(("reasoning",), 65_536, 8_192),
+    "deepseek-reasoner": ModelCapabilityPreset(("reasoning",), 65_536, 8_192),
+    "deepseek-v4": ModelCapabilityPreset(("tool_use",)),          # vision/think 变体由名称信号补
+    "deepseek-v3.1": ModelCapabilityPreset(("reasoning", "tool_use")),  # 3.1 起混合思考
+    "deepseek-v3": ModelCapabilityPreset(("tool_use",)),
+    "deepseek-chat": ModelCapabilityPreset(("tool_use",), 65_536, 8_192),
+    "janus-pro": ModelCapabilityPreset(("vision", "image_generation")),
     # --- 智谱 GLM ---
-    "glm-5.3": ModelPreset(("reasoning", "tool_use")),  # GLM-5 系混合思考（含 flash）
-    "glm-5": ModelPreset(("reasoning", "tool_use")),
-    "glm-4.6": ModelPreset(("reasoning", "tool_use"), 204_800, 131_072),
-    "glm-4.5v": ModelPreset(("vision",), 65_536),
-    "glm-4.5": ModelPreset(("reasoning", "tool_use"), 131_072, 98_304),
-    "glm-4v": ModelPreset(("vision",), 131_072),
-    "glm-4": ModelPreset(("tool_use",), 131_072, 4_095),
-    "glm-3-turbo": ModelPreset(("tool_use",), 131_072, 2_048),
-    "glm-z1": ModelPreset(("reasoning",)),
+    "glm-5.3": ModelCapabilityPreset(("reasoning", "tool_use")),  # GLM-5 系混合思考（含 flash）
+    "glm-5": ModelCapabilityPreset(("reasoning", "tool_use")),
+    "glm-4.6": ModelCapabilityPreset(("reasoning", "tool_use"), 204_800, 131_072),
+    "glm-4.5v": ModelCapabilityPreset(("vision",), 65_536),
+    "glm-4.5": ModelCapabilityPreset(("reasoning", "tool_use"), 131_072, 98_304),
+    "glm-4v": ModelCapabilityPreset(("vision",), 131_072),
+    "glm-4": ModelCapabilityPreset(("tool_use",), 131_072, 4_095),
+    "glm-3-turbo": ModelCapabilityPreset(("tool_use",), 131_072, 2_048),
+    "glm-z1": ModelCapabilityPreset(("reasoning",)),
     # --- 通义 Qwen ---
-    "qwen-long": ModelPreset(("tool_use",), 10_000_000),
-    "qvq": ModelPreset(("vision", "reasoning")),
-    "qwen-vl": ModelPreset(("vision", "video")),        # qwen-vl 系支持视频输入
-    "qwen2.5-vl": ModelPreset(("vision", "video"), 131_072),
-    "qwen3-vl": ModelPreset(("vision", "video")),
-    "qwen2.5-omni": ModelPreset(("vision", "audio", "tts"), 131_072),
-    "qwen-omni": ModelPreset(("vision", "audio", "tts")),
-    "qwen-audio": ModelPreset(("audio",)),
-    "qwen-image": ModelPreset(("image_generation",)),
-    "qwen-turbo": ModelPreset(("tool_use",), 1_000_000),
-    "qwen-plus": ModelPreset(("tool_use",), 131_072, 8_192),
-    "qwen-max": ModelPreset(("tool_use",), 32_768, 8_192),
-    "qwen3": ModelPreset(("tool_use",)),                # 混合思考，-thinking 变体由信号补
-    "qwq": ModelPreset(("reasoning",), 131_072),
+    "qwen-long": ModelCapabilityPreset(("tool_use",), 10_000_000),
+    "qvq": ModelCapabilityPreset(("vision", "reasoning")),
+    "qwen-vl": ModelCapabilityPreset(("vision", "video")),        # qwen-vl 系支持视频输入
+    "qwen2.5-vl": ModelCapabilityPreset(("vision", "video"), 131_072),
+    "qwen3-vl": ModelCapabilityPreset(("vision", "video")),
+    "qwen2.5-omni": ModelCapabilityPreset(("vision", "audio", "tts"), 131_072),
+    "qwen-omni": ModelCapabilityPreset(("vision", "audio", "tts")),
+    "qwen-audio": ModelCapabilityPreset(("audio",)),
+    "qwen-image": ModelCapabilityPreset(("image_generation",)),
+    "qwen-turbo": ModelCapabilityPreset(("tool_use",), 1_000_000),
+    "qwen-plus": ModelCapabilityPreset(("tool_use",), 131_072, 8_192),
+    "qwen-max": ModelCapabilityPreset(("tool_use",), 32_768, 8_192),
+    "qwen3": ModelCapabilityPreset(("tool_use",)),                # 混合思考，-thinking 变体由信号补
+    "qwq": ModelCapabilityPreset(("reasoning",), 131_072),
     # --- Kimi / Moonshot ---
-    "kimi-k2": ModelPreset(("tool_use",), 262_144),
-    "kimi-latest": ModelPreset(("vision",)),
-    "kimi-vl": ModelPreset(("vision",)),
-    "moonshot-v1-8k-vision-preview": ModelPreset(("vision",), 8_192),
-    "moonshot-v1-128k": ModelPreset(("tool_use",), 131_072, 4_096),
-    "moonshot-v1-32k": ModelPreset(("tool_use",), 32_768, 4_096),
-    "moonshot-v1-8k": ModelPreset(("tool_use",), 8_192, 4_096),
+    "kimi-k2": ModelCapabilityPreset(("tool_use",), 262_144),
+    "kimi-latest": ModelCapabilityPreset(("vision",)),
+    "kimi-vl": ModelCapabilityPreset(("vision",)),
+    "moonshot-v1-8k-vision-preview": ModelCapabilityPreset(("vision",), 8_192),
+    "moonshot-v1-128k": ModelCapabilityPreset(("tool_use",), 131_072, 4_096),
+    "moonshot-v1-32k": ModelCapabilityPreset(("tool_use",), 32_768, 4_096),
+    "moonshot-v1-8k": ModelCapabilityPreset(("tool_use",), 8_192, 4_096),
     # --- MiniMax ---
-    "minimax-m1": ModelPreset(("reasoning", "tool_use"), 1_000_000, 40_960),
-    "minimax-m2": ModelPreset(("reasoning", "tool_use")),
-    "minimax-video": ModelPreset(("video_generation",)),
-    "hailuo": ModelPreset(("video_generation",)),
-    "video-01": ModelPreset(("video_generation",)),
-    "speech-01": ModelPreset(("tts",)),
-    "speech-02": ModelPreset(("tts",)),
-    "abab": ModelPreset(("tool_use",)),
+    "minimax-m1": ModelCapabilityPreset(("reasoning", "tool_use"), 1_000_000, 40_960),
+    "minimax-m2": ModelCapabilityPreset(("reasoning", "tool_use")),
+    "minimax-video": ModelCapabilityPreset(("video_generation",)),
+    "hailuo": ModelCapabilityPreset(("video_generation",)),
+    "video-01": ModelCapabilityPreset(("video_generation",)),
+    "speech-01": ModelCapabilityPreset(("tts",)),
+    "speech-02": ModelCapabilityPreset(("tts",)),
+    "abab": ModelCapabilityPreset(("tool_use",)),
     # --- 豆包 / 字节 ---
-    "doubao-seed-1.6": ModelPreset(("vision", "reasoning", "tool_use")),  # 1.6 混合思考+视觉
-    "doubao-pro-256k": ModelPreset(("tool_use",), 262_144),
-    "doubao-pro-128k": ModelPreset(("tool_use",), 131_072),
-    "doubao-pro-32k": ModelPreset(("tool_use",), 32_768),
-    "doubao-pro": ModelPreset(("tool_use",)),
-    "seedance": ModelPreset(("video_generation",)),
-    "seededit": ModelPreset(("image_generation",)),
-    "ui-tars": ModelPreset(("vision", "tool_use")),
+    "doubao-seed-1.6": ModelCapabilityPreset(("vision", "reasoning", "tool_use")),  # 1.6 混合思考+视觉
+    "doubao-pro-256k": ModelCapabilityPreset(("tool_use",), 262_144),
+    "doubao-pro-128k": ModelCapabilityPreset(("tool_use",), 131_072),
+    "doubao-pro-32k": ModelCapabilityPreset(("tool_use",), 32_768),
+    "doubao-pro": ModelCapabilityPreset(("tool_use",)),
+    "seedance": ModelCapabilityPreset(("video_generation",)),
+    "seededit": ModelCapabilityPreset(("image_generation",)),
+    "ui-tars": ModelCapabilityPreset(("vision", "tool_use")),
     # --- 百度 ERNIE ---
-    "ernie-x1": ModelPreset(("reasoning", "tool_use")),
-    "ernie-4.5": ModelPreset(("tool_use",)),            # -vl 变体由名称信号补 vision
-    "ernie": ModelPreset(("tool_use",)),
+    "ernie-x1": ModelCapabilityPreset(("reasoning", "tool_use")),
+    "ernie-4.5": ModelCapabilityPreset(("tool_use",)),            # -vl 变体由名称信号补 vision
+    "ernie": ModelCapabilityPreset(("tool_use",)),
     # --- 商汤 SenseNova ---
-    "sensechat-vision": ModelPreset(("vision",)),
-    "sensechat": ModelPreset(("tool_use",)),
-    "sensenova": ModelPreset(("tool_use",)),
+    "sensechat-vision": ModelCapabilityPreset(("vision",)),
+    "sensechat": ModelCapabilityPreset(("tool_use",)),
+    "sensenova": ModelCapabilityPreset(("tool_use",)),
     # --- 美团 LongCat ---
-    "longcat-video": ModelPreset(("video_generation",)),  # 显式优先于 "video"=理解 信号
-    "longcat": ModelPreset(("tool_use",)),
+    "longcat-video": ModelCapabilityPreset(("video_generation",)),  # 显式优先于 "video"=理解 信号
+    "longcat": ModelCapabilityPreset(("tool_use",)),
     # --- 小米 MiMo ---
-    "mimo": ModelPreset(("reasoning",)),                # -vl 变体由名称信号补 vision
+    "mimo": ModelCapabilityPreset(("reasoning",)),                # -vl 变体由名称信号补 vision
     # --- 京东 JoyAI/言犀（已知族，能力不虚假标注） ---
-    "joyai": ModelPreset(()),
-    "yanxi": ModelPreset(()),
+    "joyai": ModelCapabilityPreset(()),
+    "yanxi": ModelCapabilityPreset(()),
     # --- 视觉理解（开源） ---
-    "internvl": ModelPreset(("vision",)),
-    "llava": ModelPreset(("vision",)),
-    "pixtral": ModelPreset(("vision",)),
-    "mistral-small-3": ModelPreset(("vision",)),
-    "magistral": ModelPreset(("reasoning",)),
+    "internvl": ModelCapabilityPreset(("vision",)),
+    "llava": ModelCapabilityPreset(("vision",)),
+    "pixtral": ModelCapabilityPreset(("vision",)),
+    "mistral-small-3": ModelCapabilityPreset(("vision",)),
+    "magistral": ModelCapabilityPreset(("reasoning",)),
     # --- 图片生成 ---
-    "dall-e": ModelPreset(("image_generation",)),
-    "stable-diffusion": ModelPreset(("image_generation",)),
-    "flux": ModelPreset(("image_generation",)),
-    "flux.1": ModelPreset(("image_generation",)),
-    "imagen": ModelPreset(("image_generation",)),
-    "seedream": ModelPreset(("image_generation",)),
-    "cogview": ModelPreset(("image_generation",)),
-    "wanx": ModelPreset(("image_generation",)),
-    "hidream": ModelPreset(("image_generation",)),
-    "ideogram": ModelPreset(("image_generation",)),
-    "recraft": ModelPreset(("image_generation",)),
-    "hunyuan-image": ModelPreset(("image_generation",)),
+    "dall-e": ModelCapabilityPreset(("image_generation",)),
+    "stable-diffusion": ModelCapabilityPreset(("image_generation",)),
+    "flux": ModelCapabilityPreset(("image_generation",)),
+    "flux.1": ModelCapabilityPreset(("image_generation",)),
+    "imagen": ModelCapabilityPreset(("image_generation",)),
+    "seedream": ModelCapabilityPreset(("image_generation",)),
+    "cogview": ModelCapabilityPreset(("image_generation",)),
+    "wanx": ModelCapabilityPreset(("image_generation",)),
+    "hidream": ModelCapabilityPreset(("image_generation",)),
+    "ideogram": ModelCapabilityPreset(("image_generation",)),
+    "recraft": ModelCapabilityPreset(("image_generation",)),
+    "hunyuan-image": ModelCapabilityPreset(("image_generation",)),
     # --- 视频生成 ---
-    "sora": ModelPreset(("video_generation",)),
-    "veo": ModelPreset(("video_generation",)),
-    "kling": ModelPreset(("video_generation",)),
-    "cogvideox": ModelPreset(("video_generation",)),
-    "wan2": ModelPreset(("video_generation",)),
-    "hunyuan-video": ModelPreset(("video_generation",)),
-    "ltx-video": ModelPreset(("video_generation",)),
-    "t2v": ModelPreset(("video_generation",)),
-    "pika": ModelPreset(("video_generation",)),
-    "luma": ModelPreset(("video_generation",)),
-    "runway": ModelPreset(("video_generation",)),
-    "pixverse": ModelPreset(("video_generation",)),
+    "sora": ModelCapabilityPreset(("video_generation",)),
+    "veo": ModelCapabilityPreset(("video_generation",)),
+    "kling": ModelCapabilityPreset(("video_generation",)),
+    "cogvideox": ModelCapabilityPreset(("video_generation",)),
+    "wan2": ModelCapabilityPreset(("video_generation",)),
+    "hunyuan-video": ModelCapabilityPreset(("video_generation",)),
+    "ltx-video": ModelCapabilityPreset(("video_generation",)),
+    "t2v": ModelCapabilityPreset(("video_generation",)),
+    "pika": ModelCapabilityPreset(("video_generation",)),
+    "luma": ModelCapabilityPreset(("video_generation",)),
+    "runway": ModelCapabilityPreset(("video_generation",)),
+    "pixverse": ModelCapabilityPreset(("video_generation",)),
     # --- 音频 ---
-    "whisper": ModelPreset(("audio", "stt")),
-    "sensevoice": ModelPreset(("audio", "stt")),
-    "paraformer": ModelPreset(("stt",)),
-    "cosyvoice": ModelPreset(("tts",)),
-    "fish-speech": ModelPreset(("tts",)),
-    "parler-tts": ModelPreset(("tts",)),
-    "chat-tts": ModelPreset(("tts",)),
-    "bark": ModelPreset(("tts",)),
-    "kokoro": ModelPreset(("tts",)),
-    "moss": ModelPreset(("tts", "audio")),
+    "whisper": ModelCapabilityPreset(("audio", "stt")),
+    "sensevoice": ModelCapabilityPreset(("audio", "stt")),
+    "paraformer": ModelCapabilityPreset(("stt",)),
+    "cosyvoice": ModelCapabilityPreset(("tts",)),
+    "fish-speech": ModelCapabilityPreset(("tts",)),
+    "parler-tts": ModelCapabilityPreset(("tts",)),
+    "chat-tts": ModelCapabilityPreset(("tts",)),
+    "bark": ModelCapabilityPreset(("tts",)),
+    "kokoro": ModelCapabilityPreset(("tts",)),
+    "moss": ModelCapabilityPreset(("tts", "audio")),
 }
 
 # 前缀匹配用（长键优先，防 "o1" 抢先吃掉 "o1-mini" 之外的无关项）
@@ -240,7 +240,7 @@ def _catalog_caps(model_lower: str) -> Optional[List[str]]:
     return None
 
 
-def lookup_model_preset(model_id: str) -> Optional[ModelPreset]:
+def lookup_model_preset(model_id: str) -> Optional[ModelCapabilityPreset]:
     """按模型 ID 查预埋档案（能力 + 限额兜底值）；未知族返回 None。"""
     model_lower = (model_id or "").lower().strip()
     for key in _KNOWN_MODEL_KEYS:

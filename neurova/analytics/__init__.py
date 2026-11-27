@@ -8,4 +8,4 @@ from neurova.core.logger import get_logger
 logger = get_logger(__name__)
 
 # 懒导入，避免循环依赖
-__all__ = ["collector", "models"]
+__all__ = ["models"]

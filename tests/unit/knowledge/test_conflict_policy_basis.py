@@ -8,11 +8,16 @@ from __future__ import annotations
 
 import pytest
 
+from neurova.knowledge.foundation.admission import (
+    AdmissionRequest,
+    productionAdmissionGate,
+)
 from neurova.knowledge.foundation.conflict_judge import (
     RESOLUTION_POLICIES,
     KnowledgeConflictJudge,
 )
 from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
+from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
 
 
 @pytest.fixture
@@ -40,6 +45,79 @@ def _record(store):
     judge = _judge(store)
     conflicts = judge.record(subjectLabel="神经瓦", predicateTermId="version")
     return judge, conflicts
+
+
+class TestRegistryPolicyWiring:
+    def test_registryDeclaresPolicyAndPartialUpdatePreservesIt(self, store):
+        registry = OntologyTermRegistry(store)
+        registry.register("version", "relation", conflictPolicy="manual", cardinality=1)
+
+        registry.declarePartial("version", "relation", {"label": "版本"})
+        term = registry.term("version")
+
+        assert term["conflict_policy"] == "manual"
+        assert term["cardinality"] == 1
+
+    def test_productionGateHonorsDeclaredManualPolicy(self, store):
+        OntologyTermRegistry(store).register("version", "relation", conflictPolicy="manual")
+        gate = productionAdmissionGate(store, toolVersion="conflict-policy-test")
+        older = _admitThroughGate(gate, "1.0", "2026-01-01T00:00:00+00:00")
+        newer = _admitThroughGate(gate, "2.0", "2026-06-01T00:00:00+00:00")
+
+        pending = store.conflicts("pending")
+        assert len(pending) == 1, "manual 策略不得自动选 winner"
+        assert pending[0]["recommended_policy"] == "manual"
+        assert store.fact(older.factId)["status"] == "active"
+        assert store.fact(newer.factId)["status"] == "active"
+        assert store.conflicts("auto_resolved") == []
+
+    def test_decisionReadsPolicyFromFactTenant(self, store):
+        registry = OntologyTermRegistry(store)
+        registry.register("version", "relation", conflictPolicy="manual")
+        registry.register("version", "relation", conflictPolicy="most_recent", tenantId="tenant-a")
+        older, newer = _tenantFacts(store, "tenant-a")
+        judge = KnowledgeConflictJudge(store, registry)
+
+        conflicts = judge.record("神经瓦", "version", tenantId="tenant-a")
+
+        assert conflicts[0]["recommended_policy"] == "most_recent", \
+            "不得误读 default 租户的 manual 策略"
+        assert conflicts[0]["status"] == "auto_resolved"
+        assert store.fact(older)["status"] == "superseded"
+        assert store.fact(newer)["status"] == "active"
+
+    def test_classificationReadsCardinalityFromFactTenant(self, store):
+        registry = OntologyTermRegistry(store)
+        registry.register("version", "relation")
+        registry.register("version", "relation", cardinality=1, tenantId="tenant-a")
+        _tenantFacts(store, "tenant-a")
+        judge = KnowledgeConflictJudge(store, registry)
+
+        conflicts = judge.detect("神经瓦", "version", tenantId="tenant-a")
+
+        assert [conflict["kind"] for conflict in conflicts] == ["cardinality"], \
+            "不得用 default 租户的基数给 tenant-a 分类"
+
+
+def _admitThroughGate(gate, obj, sourceModifiedAt):
+    content = "神经瓦 version %s" % obj
+    return gate.admit(AdmissionRequest(
+        agentId="default", subjectLabel="神经瓦", predicateTermId="version",
+        objectTerm=obj, content=content, sourceModifiedAt=sourceModifiedAt,
+        assertions=[{"actorType": "user", "actorId": "u1",
+                     "mediumRef": "unit:conflict-policy", "statementText": content}],
+    ))
+
+
+def _tenantFacts(store, tenantId):
+    key = store.upsertSubject("default", "神经瓦", tenantId=tenantId)
+    older = store.upsertFact("default", key, "version", "1.0", "旧说法",
+                             recordedAt="2026-01-01T00:00:00+00:00", tenantId=tenantId)
+    newer = store.upsertFact("default", key, "version", "2.0", "新说法",
+                             recordedAt="2026-06-01T00:00:00+00:00", tenantId=tenantId)
+    for factId in (older, newer):
+        store.setEvidenceState(factId, "evidenced")
+    return older, newer
 
 
 class TestPolicies:

@@ -15,9 +15,16 @@ import yaml
 
 from neurova.ci.bundle_budget_core import collectBundleStats, judgeBudget
 from neurova.ci.ci_ratchet_core import judgeAndUpdate
+from scripts.ci import coverage_ratchet
 
 
 class TestRatchetJudge:
+
+    def test_shell_does_not_keep_a_duplicate_judge(self):
+        assert not hasattr(coverage_ratchet, "judgeAndUpdate"), (
+            "coverage_ratchet.py 仍暴露未被 main 消费的同名判定实现；"
+            "棘轮判定只能留在 neurova.ci.ci_ratchet_core"
+        )
 
     def test_regression_is_red(self):
         passed, record = judgeAndUpdate(58.0, 61.0, floor=60.0)

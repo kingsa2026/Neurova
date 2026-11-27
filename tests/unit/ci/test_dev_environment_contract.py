@@ -36,6 +36,7 @@
 from __future__ import annotations
 
 import io
+import json
 import re
 from pathlib import Path
 
@@ -60,6 +61,9 @@ REQUIREMENTS_FULL_LOCK = PROJECT_ROOT / "requirements-full.lock"
 REQUIREMENTS_TXT = PROJECT_ROOT / "requirements.txt"
 PLAYWRIGHT_CLI = PROJECT_ROOT / "scripts" / "ci" / "dev_env_playwright_install.sh"
 NEURUI_PACKAGE = PROJECT_ROOT / "NeurUI" / "package.json"
+ROOT_PACKAGE = PROJECT_ROOT / "package.json"
+ROOT_PACKAGE_LOCK = PROJECT_ROOT / "package-lock.json"
+COST_GUARDS_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "cost-guards.yml"
 
 #: `vscode` 事件下 Job 的 `services` 必须声明的两个服务：WebIDE 与 docker CLI。
 EXPECTED_SERVICES = ("vscode", "docker")
@@ -259,6 +263,30 @@ class TestDevEnvironmentDeclarationIsShippable:
         )
 
 
+class TestRootCostGuardLockIsShippable:
+    def testRootPackageLockIsNotGitignored(self):
+        assert _isTracked("package-lock.json"), (
+            "根 package-lock.json 被 git 忽略；cost-guards 两个 job 都在根目录 "
+            "执行 npm ci，干净 checkout 必然失败"
+        )
+
+    def testRootPackageLockMatchesManifest(self):
+        manifest = json.loads(_read(ROOT_PACKAGE))
+        lock = json.loads(_read(ROOT_PACKAGE_LOCK))
+        assert lock["packages"][""]["devDependencies"] == manifest["devDependencies"], (
+            "根 package-lock.json 与 package.json 的 devDependencies 分叉，npm ci 会拒绝安装"
+        )
+
+    def testCostGuardJobsInstallFromRootLock(self):
+        workflow = yaml.safe_load(_read(COST_GUARDS_WORKFLOW))
+        for jobName in ("cost-guards", "enforce-on-main"):
+            steps = workflow["jobs"][jobName]["steps"]
+            installs = [step for step in steps if step.get("name") == "Install dependencies"]
+            assert len(installs) == 1
+            assert str(installs[0].get("run", "")).strip() == "npm ci"
+            assert not installs[0].get("working-directory")
+
+
 class TestIdeImageRidesTheRepoInterpreter:
     def testDevelopmentImageRunsTheProductionInterpreter(self):
         """.ide/Dockerfile 的解释器必须与生产镜像同版本（不新造第二个版本口径）。"""
@@ -279,6 +307,14 @@ class TestIdeImageRidesTheRepoInterpreter:
 
 
 class TestIdeFrontendToolchainMatchesCi:
+    def testNodeVersionCommentsMatchInstalledMajor(self):
+        dockerfile = _read(IDE_DOCKERFILE)
+        commented = set(re.findall(r"^#.*\bNode\s+(\d+)\b", dockerfile, re.M))
+        assert commented == {_ideNodeMajor()}, (
+            f".ide/Dockerfile 注释 Node 版本 {sorted(commented)} 与安装源 "
+            f"setup_{_ideNodeMajor()}.x 漂移"
+        )
+
     def testDevelopmentNodeMajorMatchesCi(self):
         """.ide/Dockerfile 的 Node 大版本必须与 CI 一致（vitest/vite 行为不因环境分叉）。"""
         assert _ideNodeMajor() == _ciNodeMajor(), (
@@ -400,9 +436,9 @@ class TestDevelopmentEnvironmentPreinstallsTheFullRuntime:
     用户诉求（Issue #289 评论）：不要平台默认镜像，把 neurova 的**运行环境**
     都预装好。这里的"运行环境"有确定的外延，不是"多装几个包"：
 
-    - 后端：生产镜像装的就是 `requirements.txt`（`Dockerfile` 第 25 行
-      `pip install -r requirements.txt`），故开发环境的后端依赖事实源也是它，
-      且以 `requirements-full.lock` 锁定 —— 与 `requirements.txt` 同源
+    - 后端：生产镜像装的是 `requirements-full.lock`（由 `Dockerfile` 第 25 行
+      `pip install -r requirements-full.lock` 消费），开发环境装同一份锁；
+      它由 `requirements.txt` 编译而来
       （`uv pip compile --universal requirements.txt -o requirements-full.lock`），
       不是第二份清单；
     - 前端：`NeurUI/package-lock.json` 的 `npm ci` 是 CI 的同源装法；

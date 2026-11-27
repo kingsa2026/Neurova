@@ -191,7 +191,7 @@ class TestGateScriptExists:
             "check_import_budget",
             "check_step_metric_overhead",
             "check_shared_pool_reuse",
-            "check_no_mock_metrics_by_default",
+            "check_mock_metrics_collector_retired",
             "check_hot_path_file_size",
         ):
             assert check in src, f"门禁缺检查 {check}"

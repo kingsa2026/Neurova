@@ -19,10 +19,10 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件
-COPY requirements.txt .
+COPY requirements-full.lock .
 
 # 安装 Python 依赖
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir --user -r requirements-full.lock
 
 # 生产阶段
 FROM python:3.12-slim as production
@@ -66,7 +66,7 @@ COPY --from=builder --chown=neurova:neurova /root/.local /home/neurova/.local
 # 复制应用代码
 COPY neurova/ ./neurova/
 COPY start_server.py .
-COPY requirements.txt .
+COPY requirements-full.lock .
 
 # 复制配置文件
 COPY config/ ./config/

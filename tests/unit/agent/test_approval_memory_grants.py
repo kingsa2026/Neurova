@@ -414,3 +414,88 @@ class TestProjection:
         assert flags[g2["grant_id"]]["revocable"] is False, "已撤销的 grant 不可再撤销"
         assert flags[g2["grant_id"]]["revoked_by"] == OWNER
         assert projectTeamGrants(TEAM_B) == []
+
+
+class TestGrantExpiry:
+    def test_expired_team_grant_no_longer_matches(self, approvals):
+        grant = acceptAlways(TEAM_A, "Bash:*", level="L1", granted_by=OWNER,
+                             expires_at=1.0)
+        assert grant["expires_at"] == 1.0
+        assert matchGrant(makeRun(), "Bash:run_x", "L1") is None
+
+    def test_session_grant_can_be_created_from_trusted_scope(self, approvals):
+        grant = ac.acceptSessionGrant(
+            session_key="sess_api", run_id="run_api", team_id=TEAM_A,
+            action="Bash:*", level="L1", granted_by=OWNER, expires_at=4_000_000_000.0)
+        assert grant["session_key"] == "sess_api"
+        assert grant["run_id"] == "run_api"
+        assert grant["team_id"] == TEAM_A
+        assert grant["expires_at"] == 4_000_000_000.0
+
+
+class TestGrantRestApi:
+    def _client(self, role="admin"):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from neurova.api.auth import get_current_user
+        from neurova.api.endpoints.swarm_queue_api import router
+
+        app = FastAPI()
+        app.include_router(router, prefix="/v1/swarm-queue")
+        app.dependency_overrides[get_current_user] = lambda: {
+            "user_id": "admin_api", "role": role}
+        return TestClient(app)
+
+    def test_default_off_does_not_expose_grant_routes(self, monkeypatch):
+        monkeypatch.delenv("NEUROVA_SWARM_GRANT_API", raising=False)
+        client = self._client()
+        assert client.get("/v1/swarm-queue/grants").status_code == 404
+        assert client.post("/v1/swarm-queue/grants", json={}).status_code == 404
+
+    def test_non_admin_is_forbidden_when_enabled(self, monkeypatch):
+        monkeypatch.setenv("NEUROVA_SWARM_GRANT_API", "on")
+        client = self._client(role="user")
+        assert client.get("/v1/swarm-queue/grants").status_code == 403
+        assert client.post("/v1/swarm-queue/grants", json={}).status_code == 403
+
+    def test_admin_create_list_and_revoke_team_grant(self, monkeypatch):
+        monkeypatch.setenv("NEUROVA_SWARM_GRANT_API", "on")
+        client = self._client()
+        response = client.post("/v1/swarm-queue/grants", json={
+            "kind": "team", "team_id": TEAM_A, "action": "Bash:*", "level": "L1",
+            "expires_at": "2099-01-01T00:00:00Z"})
+        assert response.status_code == 200, response.text
+        grant = response.json()["grant"]
+        assert grant["granted_by"] == "admin_api"
+        assert grant["team_id"] == TEAM_A and grant["level"] == "L1"
+        assert grant["expires_at"] > 0
+
+        listed = client.get("/v1/swarm-queue/grants", params={"team_id": TEAM_A})
+        assert listed.status_code == 200
+        assert [row["grant_id"] for row in listed.json()["grants"]] == [grant["grant_id"]]
+
+        revoked = client.delete(f"/v1/swarm-queue/grants/{grant['grant_id']}")
+        assert revoked.status_code == 200
+        rows = client.get("/v1/swarm-queue/grants", params={"team_id": TEAM_A}).json()["grants"]
+        assert rows[0]["revoked"] is True and rows[0]["revocable"] is False
+
+    def test_api_creates_session_grant_with_bound_scope(self, monkeypatch):
+        monkeypatch.setenv("NEUROVA_SWARM_GRANT_API", "on")
+        client = self._client()
+        response = client.post("/v1/swarm-queue/grants", json={
+            "kind": "session", "team_id": TEAM_A, "session_key": "sess_api",
+            "run_id": "run_api", "action": "Bash:*", "level": "L0",
+            "expires_at": "2099-01-01T00:00:00Z"})
+        assert response.status_code == 200, response.text
+        grant = response.json()["grant"]
+        assert grant["session_key"] == "sess_api" and grant["run_id"] == "run_api"
+        assert grant["team_id"] == TEAM_A and grant["granted_by"] == "admin_api"
+
+    def test_api_rejects_l2_and_expired_deadline(self, monkeypatch):
+        monkeypatch.setenv("NEUROVA_SWARM_GRANT_API", "on")
+        client = self._client()
+        base = {"kind": "team", "team_id": TEAM_A, "action": "Bash:*",
+                "expires_at": "2099-01-01T00:00:00Z"}
+        assert client.post("/v1/swarm-queue/grants", json=dict(base, level="L2")).status_code == 400
+        assert client.post("/v1/swarm-queue/grants", json=dict(
+            base, level="L1", expires_at="2000-01-01T00:00:00Z")).status_code == 400

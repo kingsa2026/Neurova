@@ -324,6 +324,9 @@ main:
         - name: coverage gate (fail_under=60, judged once over the whole subset)
           script: python scripts/ci/coverage_report.py --fail-under 60
           timeout: 10m
+        - name: coverage ratchet (only ratchets up)
+          script: python scripts/ci/coverage_ratchet.py --merged data/coverage/.coverage.merged --ratchet scripts/ci/coverage_ratchet.json --floor 60
+          timeout: 10m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
     # `services` 必须显式为空：不声明时平台给**每条流水线**自动起
@@ -390,6 +393,12 @@ main:
         - name: unit tests (vitest)
           script: cd NeurUI && npx vitest run
           timeout: 30m
+        - name: build (vite build)
+          script: cd NeurUI && npm run build
+          timeout: 20m
+        - name: bundle budget gate
+          script: cd NeurUI && python ../scripts/ci/bundle_budget.py --dist dist --budget bundle-budget.json
+          timeout: 10m
         # ── C3 本体图性能预算门（specs/2026-11-12 §18）：Chromium 主线程
         # 单任务上限＋首屏节点上限；预算单源 src/pages/graph-workbench/perfBudget.ts
         - name: e2e performance budget (playwright)
@@ -803,6 +812,7 @@ main:
         image: python:3.12
         volumes:
           - /root/.cache/pip
+          - /root/.cache/neurova
       stages:
         - name: install uv + locked dependencies
           script: |
@@ -810,7 +820,7 @@ main:
             uv pip install --system -r requirements-ci.lock
           timeout: 30m
         - name: per-file audit of the protected subset
-          script: python scripts/ci/protected_subset_nightly.py --quiet
+          script: python scripts/ci/protected_subset_nightly.py --quiet --workers 2 --state-file /root/.cache/neurova/protected-subset-nightly.json --resume
           timeout: 90m
 
 # ============================================================================

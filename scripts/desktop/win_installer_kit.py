@@ -75,6 +75,15 @@ def log(msg: str) -> None:
     print(f"[winbuild] {msg}", flush=True)
 
 
+def runtimeRequirements(repo: Path) -> Path:
+    """依赖安装目标由仓库 MANIFEST 选择，打包机不另抄文件名。"""
+    manifest = json.loads((repo / "models" / "MANIFEST.json").read_text(encoding="utf-8"))
+    requirements = manifest["runtime"]["pip"]["requirements"]
+    if not requirements:
+        raise RuntimeError("models/MANIFEST.json 缺少 runtime.pip.requirements")
+    return repo / requirements
+
+
 def product_version() -> str:
     """产物版本的事实源：`tauri.conf.json`（不是本脚本里再抄一份）。"""
     ver = json.loads(TAURI_CONF.read_text(encoding="utf-8"))["version"]
@@ -333,7 +342,8 @@ def cmd_run(args) -> int:
     log("工具链自证 PASSED")
 
     # 依赖：pip / npm 都走国内镜像，避免在打包机上挂住（失败形态是超时而非报错）。
-    if run([sys.executable, "-m", "pip", "install", "-q", "-r", str(repo / "requirements.txt"),
+    requirements = runtimeRequirements(repo)
+    if run([sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements),
             "-i", PIP_INDEX]) != 0:
         raise RuntimeError("后端依赖安装失败")
 

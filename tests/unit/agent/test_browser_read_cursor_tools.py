@@ -61,7 +61,7 @@ class TestSchemas:
         assert "session_id" in props
         assert "offset" in props
         assert "chunk_size" in props
-        assert _BUILTIN_SCHEMAS["browser_dom_read"]["parameters"].get("required") in (None, [], ["chunk_size"]) or True
+        assert _BUILTIN_SCHEMAS["browser_dom_read"]["parameters"]["required"] == []
 
 
 class TestBrowserReadExecutor:

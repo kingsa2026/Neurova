@@ -3,20 +3,15 @@ Neurova LLM Provider Interface
 LLM 提供商统一接口定义 - 适配器模式基础
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List, AsyncGenerator
-from dataclasses import dataclass, field
-from enum import Enum
+from typing import TYPE_CHECKING, Optional, Dict, Any, List, AsyncGenerator
+from dataclasses import dataclass
 import time
 
-
-class ProviderType(str, Enum):
-    """Supported provider types"""
-    OPENAI = "openai"
-    ANTHROPIC = "anthropic"
-    GEMINI = "gemini"
-    OLLAMA = "ollama"
-    LOCAL = "local"
+if TYPE_CHECKING:
+    from neurova.llm.providers.types import ProviderType
 
 
 @dataclass

@@ -34,6 +34,7 @@ Neurova 统一启动脚本
 """
 
 import argparse
+import json
 import os
 import signal
 import subprocess
@@ -58,7 +59,7 @@ from scripts.common import print_logo, c, Colors, ProgressBar
 from scripts.config import (
     ROOT_DIR, FRONTEND_DIR, BACKEND_PORT, FRONTEND_PORT,
     get_venv_python, get_backend_script, is_venv_available,
-    is_frontend_available,
+    is_frontend_available, frontendInstallArgv,
 )
 from scripts.port_utils import check_port, kill_port, wait_for_port, get_processes_by_port, wait_for_port_free
 from scripts.health_check import (
@@ -474,6 +475,17 @@ def restart_services(
 # 依赖检查
 # ═══════════════════════════════════════════════════════════════
 
+def pythonRequirementsPath() -> Path:
+    """依赖安装目标由 MANIFEST 选择，启动器不另抄文件名。"""
+    manifest = json.loads(
+        (ROOT_DIR / "models" / "MANIFEST.json").read_text(encoding="utf-8")
+    )
+    requirements = manifest["runtime"]["pip"]["requirements"]
+    if not requirements:
+        raise RuntimeError("models/MANIFEST.json 缺少 runtime.pip.requirements")
+    return ROOT_DIR / requirements
+
+
 def check_python_deps() -> bool:
     """检查 Python 依赖——在后端解释器（venv 优先）上检查。
 
@@ -488,7 +500,7 @@ def check_python_deps() -> bool:
         return True
     print(f"\n  {c('!', Colors.YELLOW)} 缺少 Python 依赖，正在安装...")
     subprocess.run(
-        [py, "-m", "pip", "install", "-r", "requirements.txt"],
+        [py, "-m", "pip", "install", "-r", str(pythonRequirementsPath())],
         cwd=str(ROOT_DIR), check=True,
     )
     return True
@@ -508,11 +520,10 @@ def check_node_deps() -> bool:
     if vite_bin.exists():
         return True
     print(f"\n  {c('!', Colors.YELLOW)} 前端依赖缺失或损坏，正在重装...")
-    lock = FRONTEND_DIR / "package-lock.json"
-    cmd = ["npm", "ci"] if lock.exists() else ["npm", "install"]
+    cmd = frontendInstallArgv(FRONTEND_DIR)
     subprocess.run(
         cmd,
-        cwd=str(FRONTEND_DIR), check=True, shell=True,
+        cwd=str(FRONTEND_DIR), check=True,
     )
     return True
 

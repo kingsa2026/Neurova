@@ -26,6 +26,16 @@ def test_ticket_expires_at_stored_deadline(monkeypatch):
     assert ticket not in pairing._outstanding_tickets
 
 
+def test_same_second_renewal_issues_distinct_single_use_tickets(monkeypatch):
+    monkeypatch.setattr(pairing.time, "time", lambda: 1_800_000_000.0)
+    first_ticket = pairing._issueConnectTicket("u1", "pair-1", 3)
+    second_ticket = pairing._issueConnectTicket("u1", "pair-1", 3)
+
+    assert first_ticket != second_ticket
+    assert pairing._consumeConnectTicket(first_ticket) is not None
+    assert pairing._consumeConnectTicket(second_ticket) is not None
+
+
 def test_ticket_is_single_use(monkeypatch):
     monkeypatch.setattr(pairing.time, "time", lambda: 1_800_000_000.0)
     ticket = pairing._issueConnectTicket("u1", "pair-1", 3)

@@ -14,6 +14,7 @@
 """
 
 import argparse
+import getpass
 import io
 import json
 import os
@@ -367,18 +368,21 @@ def merge_continuation(lines: List[str]) -> str:
 
 
 def parse_sse_events(data: Any) -> Iterator[dict]:
-    """解析 console 通道 SSE 帧（每帧一行 `data: {...}`），产出事件 dict。"""
-    if hasattr(data, "read"):
-        data = data.read()
-    if isinstance(data, bytes):
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError:
-            text = data.decode("utf-8", errors="replace")
-    else:
-        text = data
-    for line in text.splitlines():
-        line = line.strip()
+    """解析 console 通道 SSE；支持完整正文或逐行迭代器。"""
+    lines = data if hasattr(data, "__iter__") and not isinstance(data, (str, bytes, bytearray)) else None
+    if lines is None:
+        if hasattr(data, "read"):
+            data = data.read()
+        if isinstance(data, bytes):
+            try:
+                data = data.decode("utf-8")
+            except UnicodeDecodeError:
+                data = data.decode("utf-8", errors="replace")
+        lines = data.splitlines()
+    for raw_line in lines:
+        if isinstance(raw_line, bytes):
+            raw_line = raw_line.decode("utf-8", errors="replace")
+        line = raw_line.strip()
         if not line.startswith("data:"):
             continue
         payload = line[len("data:"):].strip()
@@ -404,7 +408,7 @@ def aggregate_events(events: List[dict]) -> Tuple[str, dict]:
             raise RuntimeError(f"服务端错误: {ev.get('error', 'unknown')}")
         if ev_type == "chunk":
             text += ev.get("content", "")
-        elif ev_type == "done":
+        elif ev_type in ("done", "session"):
             info["session_id"] = ev.get("session_id")
         elif ev_type == "reasoning":
             info.setdefault("reasoning", "")
@@ -412,6 +416,29 @@ def aggregate_events(events: List[dict]) -> Tuple[str, dict]:
         elif ev_type == "approval_required":
             info.setdefault("approvals", []).append(ev)
     return text, info
+
+
+def extractCommandOptions(args: List[str], allowed: Tuple[str, ...]) -> Tuple[Dict[str, str], List[str]]:
+    """先剥离命名选项再拼正文；支持 --key value 与 --key=value，缺值即报错。"""
+    options: Dict[str, str] = {}
+    positional: List[str] = []
+    index = 0
+    while index < len(args):
+        token = args[index]
+        key, separator, value = token.partition("=")
+        if key in allowed:
+            if not separator:
+                index += 1
+                if index >= len(args) or args[index].startswith("--"):
+                    raise CliError(f"选项 {key} 缺少值")
+                value = args[index]
+            if not value:
+                raise CliError(f"选项 {key} 缺少值")
+            options[key[2:]] = value
+        else:
+            positional.append(token)
+        index += 1
+    return options, positional
 
 
 # ==================== 错误封装 ====================
@@ -542,10 +569,25 @@ class NeurovaCLI:
             raise CliError("缺少用户名（可用 --username 或 NEUROVA_USERNAME 提供）")
         if not password:
             raise CliError("缺少密码（可用 --password 或 NEUROVA_PASSWORD 提供）")
+        # 旧凭证先失效；登录失败或 2FA 未完成都不能继续携带旧身份。
+        self.token = None
         try:
             body = self._post("/auth/login", json={"username": username, "password": password})
         except CliError:
             return False
+        if not isinstance(body, dict):
+            return False
+        if body.get("two_factor_required"):
+            challenge = body.get("challenge_token")
+            if not challenge:
+                return False
+            code = input("两步验证码: ").strip()
+            if not code:
+                return False
+            try:
+                body = self._post("/auth/2fa/verify", json={"challenge_token": challenge, "code": code})
+            except CliError:
+                return False
         token = body.get("access_token") if isinstance(body, dict) else None
         if not token:
             return False
@@ -647,28 +689,31 @@ class NeurovaCLI:
         url = f"{self.api_url}/console/chat"
         try:
             with self._client(timeout=300) as client:
-                resp = client.post(url, json=payload, headers=self._headers())
-            if resp.status_code >= 400:
-                raise CliError(_error_message(resp.status_code, self._parse_json(resp)))
-            if stream:
-                events = []
-                for ev in parse_sse_events(resp.content):
-                    events.append(ev)
-                    if on_event and ev.get("type") != "done":
-                        ev_type = ev.get("type")
-                        if ev_type in ("chunk", "reasoning"):
-                            on_event(ev_type, ev.get("content", ""))
-                        else:
-                            on_event(ev_type, ev)
-                text, info = aggregate_events(events or [{"type": "chunk", "content": ""}])
-                if info.get("session_id"):
-                    self.current_session_id = info["session_id"]
-                return text
-            body = self._parse_json(resp)
-            data = body.get("data", {}) if isinstance(body, dict) else {}
-            if isinstance(data, dict) and data.get("session_id"):
-                self.current_session_id = data["session_id"]
-            return data
+                with client.stream("POST", url, json=payload, headers=self._headers()) as resp:
+                    if resp.status_code >= 400:
+                        resp.read()
+                        raise CliError(_error_message(resp.status_code, self._parse_json(resp)))
+                    if stream:
+                        events = []
+                        for ev in parse_sse_events(resp.iter_lines()):
+                            events.append(ev)
+                            ev_type = ev.get("type")
+                            if ev_type == "session" and ev.get("session_id"):
+                                self.current_session_id = ev["session_id"]
+                            if on_event and ev_type != "done":
+                                if ev_type in ("chunk", "reasoning"):
+                                    on_event(ev_type, ev.get("content", ""))
+                                else:
+                                    on_event(ev_type, ev)
+                        text, info = aggregate_events(events or [{"type": "chunk", "content": ""}])
+                        if info.get("session_id"):
+                            self.current_session_id = info["session_id"]
+                        return text
+                    body = self._parse_json(resp)
+                    data = body.get("data", {}) if isinstance(body, dict) else {}
+                    if isinstance(data, dict) and data.get("session_id"):
+                        self.current_session_id = data["session_id"]
+                    return data
         except httpx.ConnectError as e:
             raise CliError(f"无法连接到服务器 {self.base_url}（{e}）") from e
         except KeyboardInterrupt:
@@ -1052,7 +1097,7 @@ class NeurovaCLI:
         base_url = self._input(f"API URL [{default_urls[ptype]}]: ").strip() or default_urls[ptype]
         api_key = ""
         if ptype != "ollama":
-            api_key = self._input("API Key: ").strip()
+            api_key = getpass.getpass("API Key: ").strip()
             if not api_key:
                 self._warn("未提供 API Key，连接可能失败")
         payload: Dict[str, Any] = {"name": name, "provider_type": ptype, "base_url": base_url}
@@ -1405,16 +1450,17 @@ class NeurovaCLI:
         if sub == "stats":
             self._memory_stats()
         elif sub == "save":
-            content = " ".join(args[1:])
+            try:
+                options, positional = extractCommandOptions(args[1:], ("--category",))
+            except CliError as e:
+                self._err(str(e))
+                return
+            content = " ".join(positional)
             if not content:
                 self._err("用法: /memory save <内容>")
                 return
-            category = None
-            if "--category" in args:
-                i = args.index("--category")
-                category = args[i + 1] if i + 1 < len(args) else None
             try:
-                data = self.save_memory(content, category=category)
+                data = self.save_memory(content, category=options.get("category"))
                 self._ok(f"记忆已保存: {data.get('memory_id', '-')}")
             except CliError as e:
                 self._err(str(e))
@@ -1451,16 +1497,13 @@ class NeurovaCLI:
             self._err("用法: /knowledge [list|find <关键词>|add <标题> --content <内容>|del <ID>]")
 
     def _knowledge_list(self, args: List[str]) -> None:
-        scope = "private"
-        category = None
-        if "--scope" in args:
-            i = args.index("--scope")
-            if i + 1 < len(args):
-                scope = args[i + 1]
-        if "--category" in args:
-            i = args.index("--category")
-            if i + 1 < len(args):
-                category = args[i + 1]
+        try:
+            options, _ = extractCommandOptions(args, ("--scope", "--category"))
+        except CliError as e:
+            self._err(str(e))
+            return
+        scope = options.get("scope", "private")
+        category = options.get("category")
         try:
             items = self.list_knowledge(scope=scope, category=category)
         except CliError as e:
@@ -1499,26 +1542,17 @@ class NeurovaCLI:
         self.console.print(table)
 
     def _knowledge_add(self, args: List[str]) -> None:
-        title = None
-        content = None
-        category = "general"
-        visibility = "private"
-        rest = list(args)
-        if "--content" in rest:
-            i = rest.index("--content")
-            title = " ".join(rest[:i]) or None
-            content = " ".join(rest[i + 1:])
-        elif len(args) >= 2:
-            title = args[0]
-            content = " ".join(args[1:])
-        if "--category" in rest:
-            i = rest.index("--category")
-            if i + 1 < len(rest):
-                category = rest[i + 1]
-        if "--visibility" in rest:
-            i = rest.index("--visibility")
-            if i + 1 < len(rest):
-                visibility = rest[i + 1]
+        try:
+            options, positional = extractCommandOptions(
+                args, ("--content", "--category", "--visibility")
+            )
+        except CliError as e:
+            self._err(str(e))
+            return
+        title = " ".join(positional) or None
+        content = options.get("content")
+        category = options.get("category", "general")
+        visibility = options.get("visibility", "private")
         if not title or not content:
             self._err("用法: /knowledge add <标题> --content <内容> [--category 分类] [--visibility private|public]")
             return

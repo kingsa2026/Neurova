@@ -78,41 +78,6 @@ def _get_kg_manager(agent_id: str = "default", tenant_id: str = "default"):
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-def _node_to_dict(node) -> dict:
-    props = getattr(node, "properties", {}) or {}
-    created_at = getattr(node, "created_at", None)
-    if created_at is not None and not isinstance(created_at, (int, float)):
-        created_at = created_at.isoformat()
-    return {
-        "id": node.node_id,
-        "label": node.label,
-        "type": getattr(node.node_type, "value", str(node.node_type)),
-        "description": props.get("description", ""),
-        "weight": node.weight,
-        "created_at": created_at,
-    }
-
-
-def _edge_to_dict(edge) -> dict:
-    return {
-        "source": edge.source_id,
-        "target": edge.target_id,
-        "relation": getattr(edge.relation_type, "value", str(edge.relation_type)),
-        "weight": edge.weight,
-    }
-
-
-def _graph_payload(manager, limit: int) -> dict:
-    nodes = [_node_to_dict(n) for n in list(manager._nodes.values())[:limit]]
-    node_ids = {n["id"] for n in nodes}
-    edges = [
-        _edge_to_dict(e)
-        for e in manager._edges.values()
-        if e.source_id in node_ids and e.target_id in node_ids
-    ]
-    return {"nodes": nodes, "edges": edges}
-
-
 def _statsOf(manager) -> dict:
     """统计口径的唯一出处是 manager.get_stats()（未合并入统计的节点在那里已经扣掉）。
 
@@ -134,7 +99,7 @@ async def get_knowledge_graph(
     _get_request_id(request)
     try:
         manager = _get_kg_manager(agent_id, _tenant_of(current_user))
-        data = _graph_payload(manager, limit) if manager else {}
+        data = manager.get_graph(limit=limit) if manager else {}
     except Exception as e:  # noqa: BLE001
         logger.warning("读取知识图谱失败，返回空图谱: %s", e)
         manager, data = None, {}
@@ -175,7 +140,7 @@ async def get_graph_spatial_nodes(
     与条目读数同源（repo.visible_items）。
     """
     manager = _get_kg_manager(agent_id, _tenant_of(current_user))
-    nodes = list(manager._nodes.values()) if manager is not None else []
+    nodes = manager.nodesSnapshot() if manager is not None else []
     from neurova.api.endpoints.knowledge_common import get_repository
 
     repo = get_repository()
@@ -205,7 +170,7 @@ async def search_graph_nodes(
     try:
         manager = _get_kg_manager(agent_id, _tenant_of(current_user))
         found = manager.search_nodes(q, limit=limit) if manager else []
-        matches = [_node_to_dict(n) for n in found]
+        matches = [manager.nodePayload(node) for node in found]
     except Exception as e:  # noqa: BLE001
         logger.warning("知识图谱搜索失败: %s", e)
         matches = []
@@ -225,29 +190,14 @@ async def get_graph_node_detail(
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(e))
 
-    node = manager.get_node(node_id) if manager else None
-    if not node:
+    details = manager.get_node_details(node_id) if manager else None
+    if not details:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
-
-    related_edges = []
-    related_node_ids = set()
-    for e in manager._edges.values():
-        if e.source_id == node_id or e.target_id == node_id:
-            related_edges.append(_edge_to_dict(e))
-            related_node_ids.add(e.source_id if e.target_id == node_id else e.target_id)
-
-    related_nodes = [
-        _node_to_dict(manager._nodes[nid]) for nid in related_node_ids if nid in manager._nodes
-    ]
 
     return {
         "code": 0,
         "message": "success",
-        "data": {
-            "node": _node_to_dict(node),
-            "edges": related_edges,
-            "related_nodes": related_nodes,
-        },
+        "data": details,
     }
 
 
@@ -499,7 +449,7 @@ async def get_knowledge_graph_studio(
     tenant = _tenant_of(current_user)
     manager = _get_kg_manager(agent_id, tenant)
     try:
-        data = _graph_payload(manager, _effectiveSubgraphLimit(limit)) if manager else {}
+        data = manager.get_graph(limit=_effectiveSubgraphLimit(limit)) if manager else {}
     except Exception as e:  # noqa: BLE001
         logger.warning("读取工作台子图失败，返回空图谱: %s", e)
         manager, data = None, {}
@@ -526,71 +476,6 @@ async def get_knowledge_graph_studio(
     }
 
 
-def _subgraphPayload(manager, focus: str, hops: int, types: set, limit: int) -> dict:
-    """以 focus 为中心的 BFS 子图：3D 画布的渲染预算由服务端先兜住。
-
-    类型过滤只作用于**结果集**，遍历穿过全部节点——中间类型的节点挡路的话，
-    两跳外的同型节点永远到不了。裁剪边界上的边一律不外带。
-    """
-    nodes = getattr(manager, "_nodes", {}) or {}
-    if focus and focus not in nodes:
-        raise LookupError("节点不存在: %s" % focus)
-
-    adjacency: dict = {}
-    edges = []
-    for edge in (getattr(manager, "_edges", {}) or {}).values():
-        edges.append(edge)
-        adjacency.setdefault(edge.source_id, []).append(edge.target_id)
-        adjacency.setdefault(edge.target_id, []).append(edge.source_id)
-
-    if not focus:
-        # 无焦点模式（3D 首屏）：按 limit 取全图子集，truncated 如实报。
-        keptAll = set(list(nodes.keys())[:limit])
-        outNodes = [_node_to_dict(nodes[i]) for i in keptAll if i in nodes]
-        outEdges = [_edge_to_dict(e) for e in edges
-                    if e.source_id in keptAll and e.target_id in keptAll]
-        return {"nodes": outNodes, "edges": outEdges,
-                "dropped_by_limit": len(nodes) > limit}
-
-    def _kindOf(nodeId: str) -> str:
-        node = nodes.get(nodeId)
-        return str(getattr(getattr(node, "node_type", None),
-                           "value", getattr(node, "node_type", "")) or "")
-
-    kept = {focus}
-    visited = {focus}
-    droppedByLimit = False
-    frontier = [focus]
-    for _ in range(max(int(hops), 0)):
-        if len(kept) >= limit:
-            # 收录满 limit 后继续扩展层没有任何产出（kept 不可能再收），
-            # 大 hops 参数在大图上会退化为全图遍历——提前停。
-            droppedByLimit = True
-            break
-        nextFrontier = []
-        for nodeId in frontier:
-            for neighbour in adjacency.get(nodeId, ()):
-                if neighbour in visited:
-                    continue
-                visited.add(neighbour)
-                nextFrontier.append(neighbour)
-                if types and _kindOf(neighbour) not in types:
-                    continue
-                if len(kept) < limit:
-                    kept.add(neighbour)
-                else:
-                    droppedByLimit = True
-        frontier = nextFrontier
-
-    outNodes = [_node_to_dict(nodes[nodeId]) for nodeId in kept if nodeId in nodes]
-    outEdges = [
-        _edge_to_dict(e) for e in edges
-        if e.source_id in kept and e.target_id in kept
-    ]
-    return {"nodes": outNodes, "edges": outEdges,
-            "dropped_by_limit": droppedByLimit}
-
-
 @router.get("/{agent_id}/subgraph")
 async def get_knowledge_graph_subgraph(
     agent_id: str,
@@ -611,9 +496,15 @@ async def get_knowledge_graph_subgraph(
     manager = _get_kg_manager(agent_id, tenant)
     typeSet = {t.strip() for t in str(types or "").split(",") if t.strip()}
     try:
-        data = (_subgraphPayload(manager, focus, hops, typeSet,
-                                 _effectiveSubgraphLimit(limit))
-                if manager else {})
+        data = (
+            manager.get_subgraph(
+                focus=focus,
+                hops=hops,
+                types=typeSet,
+                limit=_effectiveSubgraphLimit(limit),
+            )
+            if manager else {}
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as e:  # noqa: BLE001

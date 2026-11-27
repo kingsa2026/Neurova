@@ -25,7 +25,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.db_migration import migrate as apply_migrations, register_migration
@@ -58,6 +58,11 @@ register_migration(
     CREATE INDEX IF NOT EXISTS idx_ej_claim
         ON evolution_jobs(status, created_at);
     """,
+    domain=EVOLUTION_JOBS_DOMAIN,
+)
+register_migration(
+    2,
+    "ALTER TABLE evolution_jobs ADD COLUMN lease_token TEXT",
     domain=EVOLUTION_JOBS_DOMAIN,
 )
 
@@ -177,51 +182,75 @@ class EvolutionJobQueue:
             if row is None:
                 self._conn.rollback()
                 return None
+            leaseToken = uuid.uuid4().hex
             self._conn.execute(
                 "UPDATE evolution_jobs SET status='running', attempts=attempts+1,"
-                " locked_by=?, locked_at=?, updated_at=? WHERE id=?",
-                (worker_id, now, now, row["id"]),
+                " locked_by=?, locked_at=?, lease_token=?, updated_at=? WHERE id=?",
+                (worker_id, now, leaseToken, now, row["id"]),
             )
             self._conn.commit()
             out = dict(row)
             out["attempts"] = int(row["attempts"]) + 1
+            out["lease_token"] = leaseToken
             out["payload"] = self._load_payload(row["payload_json"])
             return out
 
-    def complete(self, job_id: str, result: Optional[Dict[str, Any]] = None) -> None:
-        self._set_status(job_id, "done", result=result, error=None)
+    def renewLease(self, jobId: str, leaseToken: str) -> bool:
+        """续租当前领取；token 已失效或作业已换主时返回 False。"""
+        now = time.time()
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE evolution_jobs SET locked_at=?, updated_at=?"
+                " WHERE id=? AND status='running' AND lease_token=?",
+                (now, now, jobId, leaseToken),
+            )
+            self._conn.commit()
+            return cur.rowcount == 1
 
-    def fail(self, job_id: str, error: str) -> None:
+    def complete(
+        self, jobId: str, leaseToken: str, result: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        return self._setStatus(jobId, leaseToken, "done", result=result, error=None)
+
+    def fail(self, jobId: str, leaseToken: str, error: str) -> bool:
         """失败：attempts<max → failed_retryable（可再 claim），否则终态 failed。"""
         with self._lock:
             row = self._conn.execute(
-                "SELECT attempts FROM evolution_jobs WHERE id=?", (job_id,)
+                "SELECT attempts FROM evolution_jobs"
+                " WHERE id=? AND status='running' AND lease_token=?",
+                (jobId, leaseToken),
             ).fetchone()
-            attempts = int(row["attempts"]) if row else 0
+            if row is None:
+                return False
+            attempts = int(row["attempts"])
             status = "failed_retryable" if attempts < self.max_attempts else "failed"
-        self._set_status(job_id, status, result=None, error=str(error)[:500])
+            return self._setStatus(jobId, leaseToken, status, result=None, error=str(error)[:500])
 
-    def _set_status(
+    def _setStatus(
         self,
-        job_id: str,
+        jobId: str,
+        leaseToken: str,
         status: str,
         result: Optional[Dict[str, Any]],
         error: Optional[str],
-    ) -> None:
+    ) -> bool:
         assert status in _STATUS, f"非法作业状态: {status}"
         with self._lock:
-            self._conn.execute(
+            cur = self._conn.execute(
                 "UPDATE evolution_jobs SET status=?, result_json=?, error=?,"
-                " locked_by=NULL, locked_at=NULL, updated_at=? WHERE id=?",
+                " locked_by=NULL, locked_at=NULL, lease_token=NULL, updated_at=?"
+                " WHERE id=? AND status='running' AND lease_token=?",
                 (
                     status,
                     json.dumps(result or {}, ensure_ascii=False, default=str),
                     error,
                     time.time(),
-                    job_id,
+                    jobId,
+                    leaseToken,
                 ),
             )
             self._conn.commit()
+            return cur.rowcount == 1
 
     def recover_stale(self, lease_seconds: Optional[int] = None) -> int:
         """崩溃恢复：running 且租约超时的作业重置 failed_retryable（可再领取）。"""
@@ -230,7 +259,7 @@ class EvolutionJobQueue:
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE evolution_jobs SET status='failed_retryable',"
-                " locked_by=NULL, locked_at=NULL, updated_at=?"
+                " locked_by=NULL, locked_at=NULL, lease_token=NULL, updated_at=?"
                 " WHERE status='running' AND (locked_at IS NULL OR locked_at < ?)",
                 (time.time(), cutoff),
             )
@@ -282,6 +311,54 @@ class EvolutionJobQueue:
             ).fetchone()
             return int(row["c"]) if row else 0
 
+    def _heartbeatLease(
+        self,
+        jobId: str,
+        leaseToken: str,
+        stopEvent: threading.Event,
+        lostEvent: threading.Event,
+    ) -> None:
+        interval = max(0.05, self.lease_seconds / 3)
+        while not stopEvent.wait(interval):
+            try:
+                renewed = self.renewLease(jobId, leaseToken)
+            except Exception as e:  # noqa: BLE001 - 续租失败必须停止该 worker 的写回
+                logger.warning("进化作业 %s 续租失败: %s", jobId, e)
+                renewed = False
+            if not renewed:
+                lostEvent.set()
+                return
+
+    def _startLeaseHeartbeat(
+        self, jobId: str, leaseToken: str
+    ) -> tuple[threading.Event, threading.Event, threading.Thread]:
+        stopEvent = threading.Event()
+        lostEvent = threading.Event()
+        thread = threading.Thread(
+            target=self._heartbeatLease,
+            args=(jobId, leaseToken, stopEvent, lostEvent),
+            name=f"evolution-lease-{jobId}",
+            daemon=True,
+        )
+        thread.start()
+        return stopEvent, lostEvent, thread
+
+    def _settleDrainedJob(
+        self,
+        job: Dict[str, Any],
+        lostLease: threading.Event,
+        handlerError: Optional[Exception],
+        result: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if lostLease.is_set():
+            logger.warning("进化作业 %s 租约已失效，丢弃旧 worker 状态回写", job["id"])
+            return
+        if handlerError is None:
+            if not self.complete(job["id"], job["lease_token"], result=result):
+                logger.warning("进化作业 %s 完成回写前已失去租约", job["id"])
+        elif not self.fail(job["id"], job["lease_token"], str(handlerError)):
+            logger.warning("进化作业 %s 失败回写前已失去租约", job["id"])
+
     def drain(
         self,
         worker_id: str,
@@ -301,12 +378,56 @@ class EvolutionJobQueue:
                 break
             tried.append(job["id"])
             processed += 1
+            stopHeartbeat, lostLease, heartbeat = self._startLeaseHeartbeat(
+                job["id"], job["lease_token"]
+            )
+            handlerError = None
             try:
                 handler(job)
-                self.complete(job["id"])
             except Exception as e:  # noqa: BLE001 - 单作业失败不影响队列其余
+                handlerError = e
                 logger.warning("进化作业 %s 处理失败: %s", job["id"], e)
-                self.fail(job["id"], str(e))
+            finally:
+                stopHeartbeat.set()
+                heartbeat.join()
+            self._settleDrainedJob(job, lostLease, handlerError)
+        return processed
+
+    async def drainAsync(
+        self,
+        workerId: str,
+        handler: Callable[[Dict[str, Any]], Awaitable[Any]],
+        max_jobs: int = 5,
+    ) -> int:
+        """异步消费入口；与同步 drain 共用租约心跳和 fencing 终态写回。"""
+        processed = 0
+        tried: List[str] = []
+        self.recover_stale()
+        while processed < max_jobs:
+            job = self.claim(workerId, exclude_ids=tuple(tried))
+            if job is None:
+                break
+            tried.append(job["id"])
+            processed += 1
+            stopHeartbeat, lostLease, heartbeat = self._startLeaseHeartbeat(
+                job["id"], job["lease_token"]
+            )
+            handlerError = None
+            handlerResult = None
+            try:
+                handlerResult = await handler(job)
+            except Exception as e:  # noqa: BLE001 - 单作业失败不影响队列其余
+                handlerError = e
+                logger.warning("进化作业 %s 处理失败: %s", job["id"], e)
+            finally:
+                stopHeartbeat.set()
+                heartbeat.join()
+            self._settleDrainedJob(
+                job,
+                lostLease,
+                handlerError,
+                result=handlerResult if isinstance(handlerResult, dict) else None,
+            )
         return processed
 
     def close(self) -> None:

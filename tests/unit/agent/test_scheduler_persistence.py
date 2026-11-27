@@ -73,8 +73,9 @@ def test_corrupt_ledger_backed_up_not_silent(ledger):
     s = TaskScheduler()  # 不抛
     assert list(ledger.parent.glob("agent_scheduler_tasks.json.corrupt-*"))
     assert s.list_tasks() == []
-    s.add_task(_task("delta"))
-    assert [t.id for t in TaskScheduler().list_tasks() if t.id == "delta"] or True
+    assert s.add_task(_task("delta")) is True
+    TaskScheduler._instance = None
+    assert [t.id for t in TaskScheduler().list_tasks()] == ["delta"]
 
 
 def test_atomic_write_no_temp_residue(ledger):

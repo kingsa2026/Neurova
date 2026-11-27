@@ -17,6 +17,7 @@ TDD Tracer Bullet: 工具层调用 → 工具进化 → 经验积累 → 肌肉�
 import pytest
 import tempfile
 import os
+from types import SimpleNamespace
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 
 
@@ -29,9 +30,26 @@ class TestGapAEvolutionHookNotCalled:
 
     def test_agent_has_evolution_attribute(self):
         """Agent 应该持有 EvolutionOrchestrator 实例"""
-        from neurova.agent_core import Agent
-        # 验证 Agent 类有 self.evolution 属性
-        assert hasattr(Agent, 'evolution') or True  # 属性在 __init__ 中设置
+        from neurova.agent_core import Agent, SubSystemContainer
+        from neurova.evolution.closed_loop import EvolutionOrchestrator
+
+        agent = Agent.__new__(Agent)
+        agent.config = SimpleNamespace(enable_evolution=True, enable_experience_summary=False)
+        agent._skill_registry = None
+        agent.tool_memory = None
+        agent.crystallizer = None
+        agent.rsi_orchestrator = None
+        orchestrator = EvolutionOrchestrator()
+
+        with patch(
+            "neurova.evolution.closed_loop.get_evolution_orchestrator",
+            return_value=orchestrator,
+        ), patch("neurova.evolution.rsi.agent_wiring.wireAgentRsi"), patch(
+            "neurova.agent_core.NLToolSynthesizer"
+        ):
+            SubSystemContainer(agent).init_evolution()
+
+        assert agent.evolution is orchestrator
 
     @pytest.mark.asyncio
     async def test_on_before_tool_selection_exists(self):

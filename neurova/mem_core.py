@@ -448,7 +448,7 @@ class MemCore:
 
     通过 agent_ref 访问 Agent 实例的：
     - config, memory_manager, storage, temperature_engine
-    - recall_engine, attachment_manager, growth_log_manager
+    - recall_engine, growth_log_manager
     - question_queue_manager, conflict_detector, version_control
     - working_memory
     - conversation_buffer, buffer_module, session_manager
@@ -568,14 +568,6 @@ class MemCore:
     # 真实句柄是 agent.tool_memory.muscle_memory（agent_core 装配点单源）。
 
     @property
-    def attachment_manager(self):
-        return getattr(self._agent, "attachment_manager", None)
-
-    @attachment_manager.setter
-    def attachment_manager(self, value):
-        self._agent.attachment_manager = value
-
-    @property
     def moe_router(self):
         return getattr(self._agent, "_moe_router", None)
 
@@ -634,16 +626,6 @@ class MemCore:
             else:
                 self.recall_engine = None
                 logger.warning("Agent %s: storage 不可用，NeurovaRecallEngine 未启用", self.config.name)
-
-            # 初始化附件管理器（Agent隔离 + 用户隔离）
-            from neurova.cognitive_layers.memory_layer.attachment_manager import AttachmentManager
-
-            self._agent.attachment_manager = AttachmentManager.from_agent_config(
-                agent_id=self.config.agent_id,
-                agent_workspace_path=str(self.config.workspace_path),
-                db_path=db_path,
-            )
-            logger.info("AttachmentManager 初始化成功: %s", self.config.attachment_dir)
 
             # 初始化反思日志管理器
             self._agent.growth_log_manager = GrowthLogManager(

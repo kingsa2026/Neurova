@@ -147,7 +147,7 @@ auth:
   # 容器内文件 —— 表现为"重启即全员掉线、多副本间 token 互不认可"。
   # 生成：python -c "import secrets; print(secrets.token_hex(32))"
   jwtSecret: ""
-  # 开启后：replicaCount > 1 且未提供 jwtSecret 时渲染期直接失败
+  # 开启后：replicaCount > 1 或 HPA 可扩容，且未提供 jwtSecret 时渲染期直接失败
   # （防"多副本各自随机密钥"这种只在生产暴露的故障）
   requireJwtSecret: false
   # 主恢复口令（P0-1，2026-11-16 拍板）：经 Secret 注入，分发包/仓库不含口令值。
@@ -181,14 +181,6 @@ logging:
   json: true
   file: "/app/logs/neurova.log"
 
-# 监控配置
-monitoring:
-  enabled: false
-  serviceMonitor:
-    enabled: false
-    namespace: ""
-    interval: 30s
-
 # Ingress 配置
 ingress:
   enabled: false
@@ -200,11 +192,6 @@ ingress:
         - path: /
           pathType: Prefix
   tls: []
-
-# PodDisruptionBudget
-pdb:
-  enabled: false
-  minAvailable: 1
 
 # HorizontalPodAutoscaler
 hpa:

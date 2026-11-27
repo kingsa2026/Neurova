@@ -68,8 +68,7 @@ tests/unit/channels/test_attentionHoldDuringTurn.py
 tests/unit/channels/test_identityBindingFlow.py
 tests/unit/api/test_channelIdentityBindingEndpoints.py
 tests/unit/api/test_text_evolution_api.py
-# Issue #55 P2：假指标 dev-only 门控
-tests/unit/analytics/test_collector_mock_data_gated.py
+# DEAD-08：假指标采集器已退役；性能门禁改为禁止其复活
 # Issue #55 P2：性能回归门禁常驻自检（双侧 CI 接线 + 门禁可通过）
 tests/performance/test_perf_gate_contract.py
 # §6-381（TM-1）：记忆联想召回的可达性基线棘轮 + 数据集自反证。该文件另含**两条
