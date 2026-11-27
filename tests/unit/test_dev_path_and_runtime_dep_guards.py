@@ -356,7 +356,7 @@ class TestProviderChatModelDepsDeclaredForRuntime:
             )
             assert re.search(rf"(?m)^{re.escape(dist)}==", ci_lock), (
                 f"requirements-ci.lock 缺 {dist} pin——声明了没重编等于没装。\n"
-                "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+                "修复：uv pip compile --universal --python-version 3.11 requirements-ci.txt -o requirements-ci.lock"
             )
 
     def test_absence_is_not_registered_as_graceful_optional(self):
@@ -753,7 +753,7 @@ class TestCiTestRunnerAndFixtureDepsAreReal:
         assert version >= (9, 0, 3), (
             f"requirements-ci.lock 把 pytest 锁在 {m.group(0)}——CI 装的是锁文件，"
             "低于 9.0.3 即落在 CVE-2025-71176 区间，dependency-audit 必红。\n"
-            "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+            "修复：uv pip compile --universal --python-version 3.11 requirements-ci.txt -o requirements-ci.lock"
         )
 
     def test_document_pdf_render_path_deps_declared_in_ci(self):
@@ -767,7 +767,7 @@ class TestCiTestRunnerAndFixtureDepsAreReal:
         lock = io.open(PROJECT_ROOT / "requirements-ci.lock", encoding="utf-8").read()
         assert re.search(r"(?m)^reportlab==", lock), (
             "requirements-ci.lock 缺 reportlab pin——CI 装的是锁文件。\n"
-            "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+            "修复：uv pip compile --universal --python-version 3.11 requirements-ci.txt -o requirements-ci.lock"
         )
 
     def test_embeddingRuntimeDepsDeclaredInCi(self):
@@ -800,7 +800,7 @@ class TestCiTestRunnerAndFixtureDepsAreReal:
             )
             assert re.search(rf"(?m)^{pkg}==", lock), (
                 f"requirements-ci.lock 缺 {pkg} pin——CI 装的是锁文件。\n"
-                "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+                "修复：uv pip compile --universal --python-version 3.11 requirements-ci.txt -o requirements-ci.lock"
             )
 
     def test_localEmbeddingEngineYieldsRealVectors(self):

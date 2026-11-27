@@ -221,7 +221,7 @@ class TestCILockCoversDirectDeps:
     requirements-ci.lock`），lock 缺 pin 时本地声明的包在 CI 环境根本不存在，
     且两侧日志都只表现为 ModuleNotFoundError，根因指向漂移而非代码。
     修法：改 requirements-ci.txt 后必须重跑
-    `uv pip compile --universal requirements-ci.txt -o requirements-ci.lock`。
+    `uv pip compile --universal --python-version 3.11 requirements-ci.txt -o requirements-ci.lock`。
     """
 
     def test_every_direct_dep_is_pinned_in_lock(self):
@@ -233,8 +233,8 @@ class TestCILockCoversDirectDeps:
         missing = sorted(_ci_top_packages() - pinned)
         assert not missing, (
             "requirements-ci.lock 缺直接依赖 pin（CI 装 lock，这些包在 CI 环境缺席）: "
-            f"{missing}\n修法：uv pip compile --universal requirements-ci.txt "
-            "-o requirements-ci.lock"
+            f"{missing}\n修法：uv pip compile --universal --python-version 3.11 "
+            "requirements-ci.txt -o requirements-ci.lock"
         )
 
 
@@ -366,7 +366,7 @@ class TestEmbeddingTierIsInstallableInCi:
             f"requirements-ci.lock 缺稠密向量档的加载面 {missing}——\n"
             "  嵌入档在 CI 里加载不了，引擎静默退成零向量兜底，\n"
             "  联想召回/向量库存/近似问法那几格的读数就都不是检索本身。\n"
-            "修法：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+            "修法：uv pip compile --universal --python-version 3.11 requirements-ci.txt -o requirements-ci.lock"
         )
 
     def test_denseTierIsDeclaredInCiTxt(self):

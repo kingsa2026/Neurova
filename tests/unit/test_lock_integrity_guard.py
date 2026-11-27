@@ -31,8 +31,14 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # (声明 txt, 锁文件, 锁头记录的编译命令)
+# CI 锁带 `--python-version 3.11`：CI 矩阵最低腿是 3.11。缺该标记时 uv 0.13
+# 会把只支持 py3.12+ 的 numpy 2.5.x 无标记锁进 lock，3.11 腿装锁即解析失败。
 LOCK_PAIRS = (
-    ("requirements-ci.txt", "requirements-ci.lock", "uv pip compile --universal requirements-ci.txt"),
+    (
+        "requirements-ci.txt",
+        "requirements-ci.lock",
+        "uv pip compile --universal --python-version 3.11 requirements-ci.txt",
+    ),
     ("requirements.txt", "requirements-full.lock", "uv pip compile --universal requirements.txt"),
 )
 
@@ -179,7 +185,7 @@ class TestKnownDriftsStayFixed:
         assert "prometheus-client" in ci_lock, (
             "requirements-ci.lock 缺 prometheus_client pin——"
             "unit-tests job（uv 装锁）会缺 neurova/core/metrics.py 的裸 import 依赖。\n"
-            "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+            "修复：uv pip compile --universal --python-version 3.11 requirements-ci.txt -o requirements-ci.lock"
         )
 
     def test_litellm_not_in_ci_lock(self, ci_lock):
@@ -187,7 +193,7 @@ class TestKnownDriftsStayFixed:
         assert "litellm" not in ci_lock, (
             "requirements-ci.lock 残留 litellm（txt 已摘除，锁按旧 txt 编译）——"
             "会连带带入 boto3/botocore/jinja2/tokenizers 等一整套无用依赖。\n"
-            "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+            "修复：uv pip compile --universal --python-version 3.11 requirements-ci.txt -o requirements-ci.lock"
         )
 
     def test_openai_lock_satisfies_declared_floor(self, ci_lock):
@@ -208,7 +214,7 @@ class TestKnownDriftsStayFixed:
                 violations.append(f"{name}: 锁 {entry['version']} < 声明下界 {'.'.join(map(str, floor))}")
         assert not violations, (
             "锁违反 txt 自己声明的版本下界:\n  " + "\n  ".join(violations) +
-            "\n修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+            "\n修复：uv pip compile --universal --python-version 3.11 requirements-ci.txt -o requirements-ci.lock"
         )
 
     def test_litellm_fully_removed_from_declarations(self):
