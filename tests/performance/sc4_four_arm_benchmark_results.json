@@ -13,8 +13,8 @@
   "arms": {
     "arm1_fixed_interval": {
       "session": "sess-sc4-arm1",
-      "peak_view_tokens": 5243,
-      "mean_view_tokens": 3535,
+      "peak_view_tokens": 5233,
+      "mean_view_tokens": 3531,
       "fold_count": 3,
       "folds_by_reason": {
         "fixed_interval": 2,
@@ -43,8 +43,8 @@
     },
     "arm2_growth_gate": {
       "session": "sess-sc4-arm2",
-      "peak_view_tokens": 5247,
-      "mean_view_tokens": 3549,
+      "peak_view_tokens": 5237,
+      "mean_view_tokens": 3539,
       "fold_count": 2,
       "folds_by_reason": {
         "growth_gate": 1,
@@ -69,8 +69,8 @@
     },
     "arm3_growth_gate_phase": {
       "session": "sess-sc4-arm3",
-      "peak_view_tokens": 5197,
-      "mean_view_tokens": 3597,
+      "peak_view_tokens": 5187,
+      "mean_view_tokens": 3587,
       "fold_count": 3,
       "folds_by_reason": {
         "growth_gate": 1,
@@ -96,8 +96,8 @@
     },
     "arm4_growth_gate_early": {
       "session": "sess-sc4-arm4",
-      "peak_view_tokens": 5142,
-      "mean_view_tokens": 3621,
+      "peak_view_tokens": 5132,
+      "mean_view_tokens": 3611,
       "fold_count": 3,
       "folds_by_reason": {
         "growth_gate": 1,

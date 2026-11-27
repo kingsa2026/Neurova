@@ -34,7 +34,7 @@ from neurova.core import turn_context as tc
 from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-TOOL_EXECUTOR = REPO_ROOT / "neurova" / "tool_executor.py"
+TOOL_EXECUTOR = REPO_ROOT / "neurova" / "tool_layers" / "tool_executor_impl.py"
 
 #: 量时长可用的单调系时钟。`time.time` 刻意不在列内——它答的是"现在几点"。
 MONOTONIC_FUNCS = {"perf_counter", "perf_counter_ns", "monotonic", "monotonic_ns", "clock_gettime"}

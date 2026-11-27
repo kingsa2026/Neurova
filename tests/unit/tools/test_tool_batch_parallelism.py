@@ -525,7 +525,7 @@ class TestHazardsExcluded:
         import ast
         from pathlib import Path
 
-        import neurova.tool_executor as executor_module
+        import neurova.tool_layers.tool_executor_impl as executor_module
         from neurova.agent.tool_coordinator import resolveToolCapability
         from neurova.builtin_tools import _BUILTIN_SCHEMAS
         from neurova.core.tool_capability import isParallelEligible

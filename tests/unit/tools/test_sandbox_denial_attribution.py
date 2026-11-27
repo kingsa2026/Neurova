@@ -82,7 +82,7 @@ class TestEscalationOrchestration:
     async def test_sandbox_failure_with_attribution_creates_escalation(self, tmp_path, monkeypatch):
         from neurova.security.approval_manager import ApprovalManager, ApprovalLevel
         from neurova.sandbox import exec_sandbox as es
-        from neurova import tool_executor as te
+        from neurova.tool_layers import tool_executor_impl as te
 
         am = ApprovalManager(str(tmp_path / "ws"), approval_level=ApprovalLevel.SMART)
         monkeypatch.setattr(te, "_get_approval_manager", lambda: am)
@@ -137,7 +137,7 @@ class TestEscalationOrchestration:
     async def test_sandbox_failure_without_attribution_no_escalation(self, tmp_path, monkeypatch):
         from neurova.security.approval_manager import ApprovalManager, ApprovalLevel
         from neurova.sandbox import exec_sandbox as es
-        from neurova import tool_executor as te
+        from neurova.tool_layers import tool_executor_impl as te
 
         am = ApprovalManager(str(tmp_path / "ws"), approval_level=ApprovalLevel.SMART)
         monkeypatch.setattr(te, "_get_approval_manager", lambda: am)

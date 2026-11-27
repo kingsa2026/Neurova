@@ -222,7 +222,7 @@ class TestResultFaceStaysLive:
 
     def test_executorStillNotifiesThroughTheFacade(self):
         """`ToolExecutor.on_tool_executed` 尾部仍调 `notify_tool_result`。"""
-        executor = (PROJECT_ROOT / "neurova/tool_executor.py").read_text(encoding="utf-8")
+        executor = (PROJECT_ROOT / "neurova/tool_layers/tool_executor_impl.py").read_text(encoding="utf-8")
         assert "notify_tool_result" in executor, (
             "ToolExecutor 不再调 notify_tool_result——result 面的写入侧断了"
         )

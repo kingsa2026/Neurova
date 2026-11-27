@@ -86,7 +86,7 @@ async def test_blank_content_produces_no_file(out_dir):
 
 @pytest.mark.asyncio
 async def test_missing_render_library_is_structured_error(monkeypatch):
-    import neurova.tool_executor as te
+    import neurova.tool_layers.tool_executor_impl as te
 
     def _boom(*a, **k):
         raise RenderUnavailable("reportlab 未安装")

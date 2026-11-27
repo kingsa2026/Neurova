@@ -37,7 +37,7 @@ def executorWithHooks(monkeypatch, tmp_path, request):
     fired = []
     monkeypatch.setenv("NEUROVA_HOOKS_CONFIG", str(tmp_path / "hooks.json"))
     approvals = ApprovalManager(tmp_path)
-    monkeypatch.setattr("neurova.tool_executor._get_approval_manager", lambda: approvals)
+    monkeypatch.setattr("neurova.tool_layers.tool_executor_impl._get_approval_manager", lambda: approvals)
     monkeypatch.setattr(
         "neurova.security.governance.get_governance",
         lambda: GovernancePolicy(ask_on_high=True),

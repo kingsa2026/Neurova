@@ -17,10 +17,17 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from neurova.builtin_tools import _BUILTIN_SCHEMAS
-import neurova.tool_executor as _te
+import neurova.tool_layers.tool_executor_impl as _te
 from tests.ast_scan import parseSource
 
 _SRC = Path(_te.__file__).read_text(encoding="utf-8")
+
+# 工具族 Mixin（拆分后 _execute_* 分住 tool_layers/*_tools.py）与实现主类一并入扫，
+# 契约面 = 全部执行体，不许有body逃出 schema 对账。
+_FAMILY_SOURCES = [
+    p.read_text(encoding="utf-8")
+    for p in sorted(Path(_te.__file__).parent.glob("*_tools.py"))
+]
 
 # dispatch 表中不另立 schema 的既有别名（2026-09-13 AST 对账实据；两键均为
 # 正规名方法的第二入口，参数面与目标一致，属有意兼容别名非漂移）
@@ -49,16 +56,19 @@ def _dispatch_map() -> dict:
 
 
 def _method_ast(name: str):
-    tree = parseSource(_SRC)
-    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "ToolExecutor")
+    # 扫实现主类（tool_executor_impl）+ 全部工具族 Mixin（*_tools.py）；
     # 内置执行体全部 async def → 必须同时匹配 FunctionDef/AsyncFunctionDef
-    fn = next(
-        (f for f in cls.body
-         if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)) and f.name == name),
-        None,
-    )
-    assert fn, f"ToolExecutor 缺失 {name}"
-    return fn
+    for source in [_SRC, *_FAMILY_SOURCES]:
+        tree = parseSource(source)
+        for cls in (n for n in tree.body if isinstance(n, ast.ClassDef)):
+            fn = next(
+                (f for f in cls.body
+                 if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)) and f.name == name),
+                None,
+            )
+            if fn is not None:
+                return fn
+    raise AssertionError(f"ToolExecutor 缺失 {name}（主类与 *_tools.py Mixin 均未命中）")
 
 
 def _params_read(fn) -> set:

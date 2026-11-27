@@ -29,7 +29,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import neurova.computer_use.ssh_runner as ssh_runner  # noqa: E402
-import neurova.tool_executor as te  # noqa: E402
+import neurova.tool_layers.tool_executor_impl as te  # noqa: E402
 from neurova.tool_executor import ToolExecutor, parkResultSnapshot  # noqa: E402
 
 PARK_HOST = "park-host.test"

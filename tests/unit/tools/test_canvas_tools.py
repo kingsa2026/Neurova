@@ -115,7 +115,7 @@ class TestCanvasToolExecution:
             return_value=[{"type": "builtin:start", "label": "开始", "category": "flow"}]
         )
         patcher = patch(
-            "neurova.tool_executor.get_canvas_op_service", return_value=service
+            "neurova.tool_layers.tool_executor_impl.get_canvas_op_service", return_value=service
         )
         return patcher, service
 

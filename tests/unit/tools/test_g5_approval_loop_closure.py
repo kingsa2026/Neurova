@@ -84,7 +84,7 @@ def testApprovalRecordCarriesReturnAddress():
     `**` 展开（本仓的正当写法），扫字面键的判据会被这种写法**假绿**——
     判据比实现弱就等于没有判据。故此处真调生产方法，验实际落库的 metadata。
     """
-    import neurova.tool_executor as te
+    import neurova.tool_layers.tool_executor_impl as te
 
     created: typing.List[typing.Dict[str, typing.Any]] = []
 
@@ -148,7 +148,7 @@ def testApprovalReturnAddressIsIsolatedAcrossParallelCalls():
     """
     import asyncio
 
-    import neurova.tool_executor as te
+    import neurova.tool_layers.tool_executor_impl as te
     from neurova.core.turn_context import set_turn_identity, set_turn_tool_call_id
 
     created: typing.List[typing.Dict[str, typing.Any]] = []
@@ -356,7 +356,7 @@ async def testTimeoutReleasesWaiterSoLateApprovalStillExecutes(monkeypatch):
     是批准端点决定"要不要重放"的唯一依据。超时若留着陈旧登记，端点就认为
     "原调用会执行"而跳过重放，而原调用早已放手 —— 工具谁都不跑，且无任何报错。
     """
-    import neurova.tool_executor as te
+    import neurova.tool_layers.tool_executor_impl as te
     from neurova.security.approval_relay import hasApprovalWaiter
 
     monkeypatch.setenv("NEUROVA_APPROVAL_WAIT_SECONDS", "0.05")
@@ -452,7 +452,7 @@ def testGuardIsNotVacuous():
     没有这条，A/B/C/D 任何一条判据写坏（比如路径拼错导致永远扫不到文件）
     都会以"全红"或"全绿"的形态蒙过去。
     """
-    source = _readSource("tool_executor.py")
+    source = _readSource("tool_layers/tool_executor_impl.py")
     assert "_create_approval_request" in source
     assert inspect.isawaitable  # 端点侧断言用得上，顺带钉住 asyncio 标记非空转
     fn = _functionNode(source, "_governance_precheck")
@@ -476,7 +476,7 @@ async def testApprovalWakeCrossesRealThreadBoundary(tmp_path, monkeypatch):
     import threading
     import time
 
-    import neurova.tool_executor as te
+    import neurova.tool_layers.tool_executor_impl as te
     from neurova.security.approval_manager import ApprovalManager
     from neurova.security.approval_relay import hasApprovalWaiter, installApprovalRelay
 
