@@ -1489,7 +1489,8 @@ class MemCore:
         """
         # 委托给 MemoryManager（其内部调用 Memory.touch()）
         # 不直接调用 TemperatureEngine — TemperatureEngine 没有 update_temperature 方法，
-        # 仅暴露 on_access / on_decay 用于贝叶斯温度计算（由 manager.run_decay_cycle 调用）。
+        # 仅暴露 on_decay 用于贝叶斯衰减计算（由 manager.run_decay_cycle 调用）；
+        # 命中升温唯一出口是 apply_recall_gain（D5-R2 比例式）。
         memory_manager = self.memory_manager
         if memory_manager is None:
             logger.debug("跳过温度更新：memory_manager 未初始化, memory_id=%s", memory_id)

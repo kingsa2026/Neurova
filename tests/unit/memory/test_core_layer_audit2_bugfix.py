@@ -401,28 +401,21 @@ class TestBug11ClassmethodOverridesInstance:
     """
 
     def test_bug11_instance_uses_custom_params(self):
-        """RED: engine.on_access() 应使用实例自定义参数, 而非默认实例参数
+        """RED: engine.on_decay() 应使用实例自定义参数, 而非默认实例参数
 
-        如果 classmethod 覆盖了 instance method, engine.on_access() 会
+        如果 classmethod 覆盖了 instance method, engine.on_decay() 会
         使用 _get_default() 的参数 (base_decay_rate=0.1), 忽略自定义 0.2。
+        （on_access 公式已随 58a652ee6 比例回温退役——hybrid 语义由 on_decay 承载。）
         """
         engine_custom = TemperatureEngine(base_decay_rate=0.2)
         engine_default = TemperatureEngine(base_decay_rate=0.1)
 
-        # boost = 10.0 * importance * (base_decay_rate / 0.1)
-        # custom: 10.0 * 0.5 * 2.0 = 10.0, saturation at 50 = 0.6 → boost=6.0
-        # default: 10.0 * 0.5 * 1.0 = 5.0, saturation at 50 = 0.6 → boost=3.0
-        result_custom = engine_custom.on_access(
-            current_temp=50.0, importance=0.5, recall_count=0,
-            access_count=0, emotion_score=0.0, relation_count=0,
-        )
-        result_default = engine_default.on_access(
-            current_temp=50.0, importance=0.5, recall_count=0,
-            access_count=0, emotion_score=0.0, relation_count=0,
-        )
+        # base_decay_rate 越大衰减越多：自定义实例衰减快于默认实例
+        result_custom = engine_custom.on_decay(current_temp=50.0, days_idle=30)["new_temp"]
+        result_default = engine_default.on_decay(current_temp=50.0, days_idle=30)["new_temp"]
 
-        assert result_custom > result_default, (
-            f"Bug 11: 实例 on_access 未使用自定义参数. "
+        assert result_custom < result_default, (
+            f"Bug 11: 实例 on_decay 未使用自定义参数. "
             f"custom={result_custom}, default={result_default}"
         )
 

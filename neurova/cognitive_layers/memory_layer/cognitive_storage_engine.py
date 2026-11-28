@@ -129,10 +129,6 @@ class UnifiedMemoryNode:
         self.temperature = apply_recall_gain(self.temperature)
         self.updated_at = datetime.now(timezone.utc)
 
-    def decay(self, hours: float = 1.0, rate: float = 1.0):
-        """温度衰减"""
-        self.temperature = max(0.0, self.temperature - rate * hours)
-
     def to_dict(self) -> Dict[str, Any]:
         """序列化为字典"""
         d = asdict(self)

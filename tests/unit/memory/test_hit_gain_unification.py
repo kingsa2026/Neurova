@@ -137,3 +137,26 @@ class TestFeedbackLightSignal:
             session_id="s1", user_input="帮我整理周报",
             agent_response="已按上周格式整理", feedback="dislike")
         assert sorted(mgr.updates) == [("m1", 0.0), ("m2", 0.0)]
+
+
+class TestLegacyRewarmRetired:
+    """58a652ee6 收口后旧回温/衰减双实现退役（缺席守卫，防复活）。
+
+    - TemperatureEngine.on_access：旧「importance×饱和×连击」公式，零生产调用
+      的测试专用死码，与比例式权威语义冲突——随测试改投 apply_recall_gain 退役；
+    - UnifiedMemoryNode.decay：旧线性 temp -= rate*hours（Bug M-5 同族形态），
+      零生产调用——真衰减唯一出口是 models.Memory.decay → on_decay 贝叶斯曲线。
+    """
+
+    def test_on_access_formula_retired(self):
+        from neurova.cognitive_layers.memory_layer import temperature as temp_mod
+
+        assert not hasattr(temp_mod.TemperatureEngine, "on_access")
+        assert not hasattr(temp_mod.TemperatureEngine, "_on_access_impl")
+
+    def test_cse_node_linear_decay_retired(self):
+        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
+            UnifiedMemoryNode,
+        )
+
+        assert not hasattr(UnifiedMemoryNode, "decay")

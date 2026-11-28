@@ -93,11 +93,14 @@ def _validate_score(value: float, name: str = "score") -> float:
 class _hybrid_method:
     """混合方法描述符: 实例调用使用实例参数, 类调用使用默认实例.
 
-    BUG-3 修复: 原 on_access/on_decay 先定义为实例方法, 后用 @classmethod 覆盖,
-    导致 engine.on_access() 实际调用 classmethod (使用默认实例, 忽略自定义参数).
+    BUG-3 修复: 原 on_decay 先定义为实例方法, 后用 @classmethod 覆盖,
+    导致 engine.on_decay() 实际调用 classmethod (使用默认实例, 忽略自定义参数).
     此描述符实现:
-    - 类调用 TemperatureEngine.on_access(...) → 委托到 _get_default() (向后兼容)
-    - 实例调用 engine.on_access(...) → 使用该实例的参数 (bug 修复)
+    - 类调用 TemperatureEngine.on_decay(...) → 委托到 _get_default() (向后兼容)
+    - 实例调用 engine.on_decay(...) → 使用该实例的参数 (bug 修复)
+
+    （旧 on_access 公式已随 58a652ee6 比例回温收口退役——命中升温唯一出口是
+    apply_recall_gain，见本文件顶部。）
     """
 
     def __init__(self, func):
@@ -190,72 +193,6 @@ class TemperatureEngine:
             temp_min,
             temp_max,
         )
-
-    @_hybrid_method
-    def on_access(
-        self,
-        current_temp: float,
-        importance: float = 0.5,
-        recall_count: int = 0,
-        access_count: int = 0,
-        emotion_score: float = 0.0,
-        relation_count: int = 0,
-    ) -> float:
-        return self._on_access_impl(current_temp, importance, recall_count, access_count, emotion_score, relation_count)
-
-    def _on_access_impl(
-        self,
-        current_temp: float,
-        importance: float,
-        recall_count: int,
-        access_count: int,
-        emotion_score: float,
-        relation_count: int,
-    ) -> float:
-        """记忆被访问时更新温度
-
-        Args:
-            current_temp: 当前温度
-            importance: 重要性分数 (0.0 - 1.0)
-            recall_count: 回忆次数
-            access_count: 访问次数(用于连击倍率)
-            emotion_score: 情感分数 (0.0 - 1.0)
-            relation_count: 关联记忆数
-
-        Returns:
-            float: 更新后的温度
-        """
-        # T-1: 输入校验
-        current_temp = _validate_temp(current_temp, "current_temp")
-        importance = _validate_score(importance, "importance")
-        recall_count = max(0, int(recall_count))
-        access_count = max(0, int(access_count))
-        emotion_score = _validate_score(emotion_score, "emotion_score")
-        relation_count = max(0, int(relation_count))
-
-        # 访问升温 — 饱和效应: 高温时升温幅度减缓
-        base_boost = 10.0 * importance * (self.base_decay_rate / 0.1)
-        # 温度越高,升温空间越小 (90度时只有一半升温幅度)
-        saturation = max(0.1, 1.0 - (current_temp / 100.0) * 0.8)
-        access_boost = base_boost * saturation
-
-        # 回忆次数加成
-        recall_boost = min(recall_count * 2.0, 20.0)
-
-        # 连击倍率: access_count%10 影响 multiplier (1.0 ~ 2.0)
-        combo_multiplier = 1.0 + (access_count % 10) * 0.1
-
-        # 情感加成
-        emotion_bonus = emotion_score * 5.0
-
-        # 关联加成 (上限 3.0)
-        relation_bonus = min(relation_count * 0.5, 3.0)
-
-        # 计算新温度
-        new_temp = current_temp + (access_boost + recall_boost) * combo_multiplier + emotion_bonus + relation_bonus
-
-        # 限制在有效范围内
-        return max(0.0, min(100.0, new_temp))
 
     @_hybrid_method
     def on_decay(
@@ -604,8 +541,8 @@ class TemperatureEngine:
         }
 
     # ── 默认实例管理 ──
-    # on_access/on_decay 是实例方法（定义在类上方），不应被 classmethod 覆盖。
-    # 旧代码如需以类方式调用，应显式使用 TemperatureEngine._get_default().on_access(...)
+    # on_decay 是实例方法（定义在类上方），不应被 classmethod 覆盖。
+    # 旧代码如需以类方式调用，应显式使用 TemperatureEngine._get_default().on_decay(...)
 
     @classmethod
     def _get_default(cls) -> "TemperatureEngine":

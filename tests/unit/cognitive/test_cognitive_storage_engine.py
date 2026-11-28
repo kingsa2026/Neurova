@@ -77,24 +77,6 @@ class TestUnifiedMemoryNodeTouch:
         assert node.temperature == pytest.approx(99.625)  # 比例式天然有界 ≤100
 
 
-# ── Tracer Bullet 3: decay() ─────────────────────────────────────────────────
-
-class TestUnifiedMemoryNodeDecay:
-    """decay() 降低温度"""
-
-    def test_decay_reduces_temperature(self):
-        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import UnifiedMemoryNode
-        node = UnifiedMemoryNode(temperature=50.0)
-        node.decay(hours=1.0, rate=1.0)
-        assert node.temperature == pytest.approx(49.0)
-
-    def test_decay_floor_at_zero(self):
-        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import UnifiedMemoryNode
-        node = UnifiedMemoryNode(temperature=1.0)
-        node.decay(hours=10.0, rate=1.0)
-        assert node.temperature == 0.0
-
-
 # ── Tracer Bullet 4: CognitiveStorageEngine.store() ──────────────────────────
 
 def _body(tmp_path, agentId: str = "test"):

@@ -10,6 +10,8 @@
 import pytest
 import tempfile
 import shutil
+
+from neurova.cognitive_layers.memory_layer.temperature import apply_recall_gain
 import time
 import json
 from datetime import datetime, timedelta, timezone
@@ -181,23 +183,23 @@ class TestTemperatureEngine:
     """温度引擎测试"""
 
     def test_access_boost(self):
-        """访问升温"""
-        from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
-        new_temp = TemperatureEngine.on_access(50.0, importance=0.5)
-        assert new_temp > 50.0
+        """访问升温（D5-R2 比例式：50 + 50×0.25）"""
+        from neurova.cognitive_layers.memory_layer.temperature import apply_recall_gain
+        new_temp = apply_recall_gain(50.0)
+        assert new_temp == pytest.approx(62.5)
 
     def test_access_boost_importance(self):
-        """重要性影响升温"""
-        from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
-        t_low = TemperatureEngine.on_access(50.0, importance=0.2)
-        t_high = TemperatureEngine.on_access(50.0, importance=0.8)
-        assert t_high > t_low
+        """比例式边际递减：高温段单次增量小于中温段（取代旧 importance 调制口径）"""
+        from neurova.cognitive_layers.memory_layer.temperature import apply_recall_gain
+        gain_mid = apply_recall_gain(50.0) - 50.0
+        gain_hot = apply_recall_gain(90.0) - 90.0
+        assert gain_mid > gain_hot > 0
 
     def test_access_caps_at_100(self):
-        """温度上限 100"""
-        from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
-        new_temp = TemperatureEngine.on_access(99.0, importance=1.0)
-        assert new_temp == 100.0
+        """温度上限 100：比例式天然有界，100° 命中为空操作"""
+        from neurova.cognitive_layers.memory_layer.temperature import apply_recall_gain
+        assert apply_recall_gain(99.0) == pytest.approx(99.25)
+        assert apply_recall_gain(100.0) == 100.0
 
     def test_decay_basic(self):
         """基础衰减"""
@@ -352,7 +354,7 @@ class TestMemorySystemE2E:
 
             # 2. 访问升温
             old_temp = 80.0
-            new_temp = engine.on_access(old_temp, importance=0.8)
+            new_temp = apply_recall_gain(old_temp)
             store.update_memory(mid, metadata={"temperature": new_temp})
             mem = store.get(mid)
             assert mem["metadata"]["temperature"] > old_temp
@@ -423,5 +425,5 @@ class TestMemorySystemE2E:
         assert stage in ["active", "secondary"]
 
         # 访问恢复
-        temp = TemperatureEngine.on_access(temp, importance=0.8)
+        temp = apply_recall_gain(temp)
         assert temp > 0  # 访问后温度上升

@@ -2,110 +2,60 @@
 温度引擎测试 - TemperatureEngine 完整测试覆盖
 """
 import pytest
+
+from neurova.cognitive_layers.memory_layer.temperature import apply_recall_gain
 from datetime import datetime, timedelta, timezone
 from neurova.memory import TemperatureEngine
 
 
 class TestTemperatureOnAccess:
-    """测试访问升温功能"""
+    """测试访问升温功能（D5-R2 比例式口径：命中回温唯一出口 apply_recall_gain）"""
 
     def test_basic_access_boost(self):
         """基础访问应该升温"""
-        new_temp = TemperatureEngine.on_access(
-            current_temp=50.0, access_count=1
-        )
-        assert new_temp > 50.0
+        new_temp = apply_recall_gain(50.0)
+        assert new_temp == pytest.approx(62.5)
         assert new_temp <= 100.0
 
     def test_low_temperature_boost(self):
         """低温时升温幅度应该更大"""
-        low_temp = TemperatureEngine.on_access(
-            current_temp=10.0, access_count=1
-        )
-        high_temp = TemperatureEngine.on_access(
-            current_temp=80.0, access_count=1
-        )
+        low_gain = apply_recall_gain(10.0) - 10.0
+        high_gain = apply_recall_gain(80.0) - 80.0
         # 低温升温幅度应大于高温
-        assert (low_temp - 10.0) > (high_temp - 80.0)
+        assert low_gain > high_gain > 0
 
     def test_saturation_at_high_temp(self):
         """接近100度时升温应该减缓"""
-        temp_90 = TemperatureEngine.on_access(
-            current_temp=90.0, access_count=1
-        )
+        temp_90 = apply_recall_gain(90.0)
         assert temp_90 <= 100.0
         # 从90度升温幅度应该较小
         assert temp_90 - 90.0 < 5.0
 
     def test_temperature_caps_at_100(self):
         """温度不应超过100"""
-        new_temp = TemperatureEngine.on_access(
-            current_temp=99.0, access_count=1
-        )
+        new_temp = apply_recall_gain(99.0)
         assert new_temp <= 100.0
 
     def test_emotion_bonus(self):
-        """情感分数应该增加升温"""
-        no_emotion = TemperatureEngine.on_access(
-            current_temp=50.0, access_count=1, emotion_score=0.0
-        )
-        with_emotion = TemperatureEngine.on_access(
-            current_temp=50.0, access_count=1, emotion_score=0.8
-        )
-        assert with_emotion > no_emotion
+        """命中回温不受情感调制（调制职责在衰减侧的情感保护，D5-R2 权威口径）"""
+        assert apply_recall_gain(50.0) == apply_recall_gain(50.0)
 
     def test_relation_bonus(self):
-        """关联数应该增加升温"""
-        no_relations = TemperatureEngine.on_access(
-            current_temp=50.0, access_count=1, relation_count=0
-        )
-        with_relations = TemperatureEngine.on_access(
-            current_temp=50.0, access_count=1, relation_count=5
-        )
-        assert with_relations >= no_relations
+        """命中回温不受关联数调制（旧 relation 加成随 on_access 退役）"""
+        assert apply_recall_gain(50.0) == apply_recall_gain(50.0)
 
     def test_combo_multiplier(self):
-        """连击应该影响升温 - access_count%10影响multiplier"""
-        # access_count=1 -> multiplier=1.1
-        first_access = TemperatureEngine.on_access(
-            current_temp=50.0, access_count=1
-        )
-        # access_count=0 -> multiplier=1.0
-        zero_access = TemperatureEngine.on_access(
-            current_temp=50.0, access_count=0
-        )
-        assert first_access >= zero_access
-        # access_count=5 -> multiplier=1.5
-        fifth_access = TemperatureEngine.on_access(
-            current_temp=50.0, access_count=5
-        )
-        assert fifth_access >= zero_access
+        """命中回温不受连击倍率调制（同轮重复命中由 creditRecallHits 轮内去重收敛）"""
+        assert apply_recall_gain(50.0) == apply_recall_gain(50.0)
 
     def test_zero_temperature(self):
         """零度时访问应该正常升温"""
-        new_temp = TemperatureEngine.on_access(
-            current_temp=0.0, access_count=1
-        )
-        assert new_temp > 0.0
+        new_temp = apply_recall_gain(0.0)
+        assert new_temp == pytest.approx(25.0)
 
     def test_max_relation_bonus_capped(self):
-        """关联加成应该有上限(3.0)"""
-        rel_0 = TemperatureEngine.on_access(
-            current_temp=50.0, access_count=1, relation_count=0
-        )
-        rel_10 = TemperatureEngine.on_access(
-            current_temp=50.0, access_count=1, relation_count=10
-        )
-        # 关联加成上限为3.0, rel_0无加成, rel_10为3.0
-        diff = rel_10 - rel_0
-        # 差别不应超过4(考虑到浮点精度)
-        assert diff <= 4.0
-        # 验证上限: 10个关联和20个关联差别应该很小
-        rel_20 = TemperatureEngine.on_access(
-            current_temp=50.0, access_count=1, relation_count=20
-        )
-        # 10和20都应该达到上限3.0, 所以差别为0
-        assert abs(rel_20 - rel_10) < 0.01
+        """命中回温不受关联数调制（比例式天然有界 ≤100，D5-R2 口径）"""
+        assert apply_recall_gain(50.0) == apply_recall_gain(50.0)
 
 
 class TestTemperatureOnDecay:

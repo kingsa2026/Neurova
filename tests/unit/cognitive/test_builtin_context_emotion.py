@@ -284,21 +284,51 @@ class TestExecMemoryNodes:
         manager.search.assert_called_once_with("开会", limit=2)
 
     @pytest.mark.asyncio
-    async def test_memory_save_uses_ctx_first(self):
+    async def test_memory_save_uses_ctx_first(self, monkeypatch):
         """memory_save 优先使用 ctx 中的 memory_manager
 
-        P1-2 待审记忆语义后，默认走 propose 待审队列；confirm=True 才直写。
-        本测原意是验证 ctx-first 管理器选择——走 confirm 直写路径断言。
+        P1-2/E-fix 后：待审队列可用时走 propose（remember 不被调用）；
+        config.confirm 不是可信确认、不得绕过待审门。ctx-first 管理器选择
+        只有在「队列缺席降级直写」路径上才可见——本测 monkeypatch 队列缺席，
+        走降级直写断言 ctx 管理器被使用。
         """
         from neurova.collaboration.neurflow.builtin import exec_memory_save
         manager = _make_memory_manager()
+
+        def _noPendingStore():
+            raise RuntimeError("队列缺席（测试注入）")
+
+        monkeypatch.setattr(
+            "neurova.memory.pending_memory.get_pending_memory_store", _noPendingStore
+        )
         result = await exec_memory_save(
             {"content": "新记忆", "importance": 0.9, "confirm": True},
             {"memory_manager": manager},
         )
 
         assert result["status"] == "success"
+        assert result["output"]["saved"] is True
         manager.remember.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_memory_save_proposes_when_pending_store_available(self, monkeypatch):
+        """待审队列可用时：默认进 propose 待审队列，不直写主库"""
+        from neurova.collaboration.neurflow.builtin import exec_memory_save
+        manager = _make_memory_manager()
+        store = MagicMock()
+        store.propose.return_value = {"id": "rev_test_1"}
+        monkeypatch.setattr(
+            "neurova.memory.pending_memory.get_pending_memory_store", lambda: store
+        )
+        result = await exec_memory_save(
+            {"content": "新记忆", "importance": 0.9},
+            {"memory_manager": manager, "user_id": "u1"},
+        )
+
+        assert result["status"] == "success"
+        assert result["output"]["pending"] is True
+        assert result["output"]["review_id"] == "rev_test_1"
+        manager.remember.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_memory_load_skip_when_no_manager(self):

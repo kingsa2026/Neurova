@@ -71,6 +71,10 @@ def manager(tmp_path):
     conn.commit()
     conn.close()
     mgr._load_from_db()
+    # 分层装载（启动规模化批二）：forgotten 行在冷层由后台线程补载，
+    # 快照断言前必须等冷层补齐，否则 agent 全量口径出现竞态缺行
+    if getattr(mgr, "_cold_load_done", None) is not None:
+        assert mgr._cold_load_done.wait(timeout=5), "冷层补载超时"
     # 模拟登录用户 scope（页面带 token 时的注入值）
     mgr.set_request_scope(neuser_id="7", user_id="7")
     yield mgr

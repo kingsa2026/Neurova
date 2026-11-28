@@ -333,7 +333,7 @@ class Memory:
             self.shared = self.isolation_context.shared
             if self.isolation_context.share_group_ids:
                 self.share_group_ids = list(self.isolation_context.share_group_ids)
-        # 温度域统一 [0, 100]（与 touch/on_access/on_decay 的 clamp 一致）。
+        # 温度域统一 [0, 100]（与 touch/on_decay 的 clamp 一致）。
         # 超域视为历史污染数据（批量导入曾把 68.6 万条灌到 13363.36，霸占
         # hot 列表致配置阈值失效），降级为中温 50，加载时即自愈。
         if self.temperature > 100.0:

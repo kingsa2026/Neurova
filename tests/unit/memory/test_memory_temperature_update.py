@@ -8,7 +8,10 @@
 import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, patch
-from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
+from neurova.cognitive_layers.memory_layer.temperature import (
+    TemperatureEngine,
+    apply_recall_gain,
+)
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from neurova.post_chat_pipeline import PostChatPipeline
 
@@ -17,41 +20,21 @@ class TestTemperatureEngineBasics:
     """TemperatureEngine 核心功能测试"""
 
     def test_on_access_boosts_temperature(self):
-        """on_access 应提升温度
-
-        实际公式（temperature.py 行 97-149）：
-          base_boost = 10 * importance * (decay_rate/0.1) = 10 * 0.8 * 1.0 = 8.0
-          saturation = max(0.1, 1.0 - (50/100) * 0.8) = 0.6
-          access_boost = 8.0 * 0.6 = 4.8
-          recall_boost = min(3*2, 20) = 6.0
-          combo_multiplier = 1.0 (access_count=0)
-          emotion_bonus = 0.0, relation_bonus = 0.0
-          new_temp = 50 + (4.8 + 6.0) * 1.0 = 60.8
-        """
-        new_temp = TemperatureEngine.on_access(
-            current_temp=50.0,
-            importance=0.8,
-            recall_count=3,
-        )
-        assert new_temp == 60.8
+        """命中回温应提升温度（D5-R2 比例式：50 + 50×0.25）"""
+        new_temp = apply_recall_gain(50.0)
+        assert new_temp == pytest.approx(62.5)
 
     def test_on_access_clamped_to_100(self):
-        """on_access 温度不应超过 100"""
-        new_temp = TemperatureEngine.on_access(
-            current_temp=95.0,
-            importance=1.0,
-            recall_count=10,
-        )
-        assert new_temp == 100.0
+        """命中回温不应超过 100（比例式天然有界）"""
+        new_temp = apply_recall_gain(95.0)
+        assert new_temp == pytest.approx(96.25)
+        assert apply_recall_gain(100.0) == 100.0
 
     def test_on_access_clamped_to_0(self):
-        """on_access 温度不应低于 0"""
-        new_temp = TemperatureEngine.on_access(
-            current_temp=0.0,
-            importance=0.0,
-            recall_count=0,
-        )
-        assert new_temp == 0.0
+        """命中回温不应低于 0（比例式单调不减且下界为当前温度）"""
+        new_temp = apply_recall_gain(0.0)
+        assert new_temp == pytest.approx(25.0)
+        assert new_temp >= 0.0
 
     def test_on_decay_reduces_temperature(self):
         """on_decay 应降低温度

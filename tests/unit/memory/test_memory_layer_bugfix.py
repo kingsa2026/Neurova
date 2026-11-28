@@ -130,31 +130,26 @@ class TestBug3TemperatureEngineClassmethodOverride:
     修复: 删除 classmethod 兼容包装器
     """
 
-    def test_instance_on_access_uses_custom_params(self):
-        """实例方法 on_access 应使用自定义 base_decay_rate"""
+    def test_instance_on_decay_uses_custom_params(self):
+        """实例方法 on_decay 应使用自定义 base_decay_rate
+
+        （on_access 公式已随 58a652ee6 比例回温退役，hybrid 实例语义由 on_decay 承载。）
+        """
         # 创建一个自定义参数的实例
         engine = TemperatureEngine(base_decay_rate=0.2, emotional_protection_factor=0.3)
         # 调用实例方法（不应被 classmethod 覆盖）
-        result = engine.on_access(current_temp=50.0, importance=0.5)
+        result = engine.on_decay(current_temp=50.0, days_idle=30)["new_temp"]
         assert isinstance(result, float)
         assert 0.0 <= result <= 100.0
         # 如果 classmethod 覆盖了实例方法, 会用默认实例（base_decay_rate=0.1）
-        # 自定义实例 base_decay_rate=0.2 应产生更高升温
+        # 自定义实例 base_decay_rate=0.2 应衰减更多
         default_engine = TemperatureEngine(base_decay_rate=0.1)
-        default_result = default_engine.on_access(current_temp=50.0, importance=0.5)
-        custom_result = engine.on_access(current_temp=50.0, importance=0.5)
-        assert custom_result > default_result, (
+        default_result = default_engine.on_decay(current_temp=50.0, days_idle=30)["new_temp"]
+        custom_result = engine.on_decay(current_temp=50.0, days_idle=30)["new_temp"]
+        assert custom_result < default_result, (
             f"自定义 base_decay_rate=0.2 的结果 {custom_result} "
-            f"不大于默认 base_decay_rate=0.1 的结果 {default_result}。"
+            f"不小于默认 base_decay_rate=0.1 的结果 {default_result}。"
             "可能根因: classmethod 覆盖了实例方法, 使用了默认实例。"
-        )
-
-    def test_on_access_is_not_classmethod(self):
-        """on_access 不应是 classmethod（实例方法不应被 classmethod 覆盖）"""
-        attr = TemperatureEngine.__dict__.get("on_access")
-        assert attr is not None, "TemperatureEngine 必须有 on_access 属性"
-        assert not hasattr(attr, "__func__") or not inspect.ismethod(attr), (
-            "on_access 不应是 classmethod/descriptor 覆盖"
         )
 
     def test_on_decay_is_not_classmethod(self):

@@ -160,21 +160,32 @@ class TestBug2RunDecayCycleUsesTemperatureEngine:
         assert mem.temperature == original_temp, f"固化记忆被衰减: {original_temp} → {mem.temperature}"
 
     def test_run_decay_cycle_skips_high_temperature(self, tmp_path):
-        """高温记忆（>=80）不应衰减（视为固化）
+        """冻结门（D5-R3：>=95）不衰减；85° 不再享受固化保护
 
-        贝叶斯特性：current_temp >= 80.0 时 on_decay 返回 new_temp=current_temp。
+        贝叶斯特性：current_temp >= 冻结门（默认 95，env NEUROVA_MEMORY_FREEZE_TEMP）
+        时 on_decay 返回 new_temp=current_temp——固化必须由持续使用挣得，
+        80~95 区间必须真实衰减。
         """
         manager = self._make_manager(tmp_path)
-        mem_id = manager.remember(content="高温记忆", temperature=85.0)
+        mem_hot = manager.remember(content="高温记忆", temperature=96.0)
+        mem_warm = manager.remember(content="中高温记忆", temperature=85.0)
 
-        mem = manager._memories[mem_id]
-        mem.last_accessed_at = datetime.now(timezone.utc) - timedelta(days=30)
+        for mem_id in (mem_hot, mem_warm):
+            manager._memories[mem_id].last_accessed_at = (
+                datetime.now(timezone.utc) - timedelta(days=30)
+            )
 
-        original_temp = mem.temperature
+        hot_before = manager._memories[mem_hot].temperature
+        warm_before = manager._memories[mem_warm].temperature
         manager.run_decay_cycle()
 
-        # 高温记忆温度不变
-        assert mem.temperature == original_temp, f"高温记忆被衰减: {original_temp} → {mem.temperature}"
+        # 冻结门上不衰减；门内真实衰减
+        assert manager._memories[mem_hot].temperature == hot_before, (
+            f"冻结门记忆被衰减: {hot_before} → {manager._memories[mem_hot].temperature}"
+        )
+        assert manager._memories[mem_warm].temperature < warm_before, (
+            f"85° 应按 D5-R3 真实衰减，实测未动: {warm_before}"
+        )
 
     def test_run_decay_cycle_skips_recently_accessed(self, tmp_path):
         """今天访问过的记忆（days_idle < 1）不应衰减

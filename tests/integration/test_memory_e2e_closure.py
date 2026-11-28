@@ -25,7 +25,10 @@ from neurova.cognitive_layers.memory_layer.conversation_buffer import (
     MemoryItem,
     ConversationTurn,
 )
-from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
+from neurova.cognitive_layers.memory_layer.temperature import (
+    TemperatureEngine,
+    apply_recall_gain,
+)
 
 
 # ============================================================
@@ -182,34 +185,25 @@ class TestBayesianForgetting:
 # ============================================================
 
 class TestTemperatureAccess:
-    """P1: 温度访问升温验证"""
+    """P1: 温度访问升温验证（D5-R2 比例式口径）"""
 
     def test_access_increases_temperature(self):
         """测试9: 访问能提升温度"""
-        new_temp = TemperatureEngine.on_access(
-            current_temp=50.0,
-            importance=0.5,
-            recall_count=3,
-        )
-        
-        assert new_temp > 50.0
+        new_temp = apply_recall_gain(50.0)
+
+        assert new_temp == pytest.approx(62.5)
         assert new_temp <= 100.0
 
-    def test_recall_count_boosts_warming(self):
-        """测试10: 回忆次数越高，升温越多"""
-        temp_low_recall = TemperatureEngine.on_access(
-            current_temp=50.0,
-            importance=0.5,
-            recall_count=1,
-        )
-        
-        temp_high_recall = TemperatureEngine.on_access(
-            current_temp=50.0,
-            importance=0.5,
-            recall_count=10,
-        )
-        
-        assert temp_high_recall >= temp_low_recall
+    def test_gain_diminishes_as_temperature_rises(self):
+        """测试10: 比例式边际递减——同一记忆越热，单次命中增量越小
+
+        （旧「recall_count 越高升温越多」口径随 on_access 退役；同轮重复命中
+          本就由 creditRecallHits 的轮内去重收敛为一次记账。）
+        """
+        gain_first = apply_recall_gain(50.0) - 50.0
+        gain_second = apply_recall_gain(62.5) - 62.5
+
+        assert gain_first > gain_second > 0
 
 
 # ============================================================
