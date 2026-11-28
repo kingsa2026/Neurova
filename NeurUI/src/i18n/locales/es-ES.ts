@@ -3508,7 +3508,6 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
     paramNameManagerDecayHours: "Período de decaimiento",
     paramNameManagerDecayRate: "Tasa de decaimiento",
     paramtemperatureDecayRate: 'Tasa de atenuación de la temperatura de memoria (por hora)',
-    paramtemperatureAccessBoost: 'Aumento de temperatura en cada recuperación (limitado por temperature.max en touch)',
     paramtemperatureMin: 'Límite inferior de la temperatura de memoria (suelo de la atenuación)',
     paramtemperatureMax: 'Límite superior de la temperatura de memoria (techo del impulso/atenuación)',
     paramautoContextUpdateInterval: '[Reservado] Intervalo del bucle de actualización automática (segundos). Motor no conectado a la cadena principal; los cambios aún no tienen efecto',

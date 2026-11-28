@@ -342,20 +342,24 @@ class Memory:
             self.temperature = 0.0
 
     def touch(self):
-        """访问一次，温度升高
+        """访问一次，温度按比例回温（D5-R2 权威语义，58a652ee6）
 
-        升温量/封顶配置化（memory-settings 配置页）: temperature.access_boost /
-        temperature.max，默认 10.0/100.0 与历史硬编码一致。
+        `T += (100−T)×k`，k 解析单源在 apply_recall_gain（env
+        NEUROVA_MEMORY_HIT_GAIN > 记忆设置 recall.hit_gain > 0.25）；
+        封顶/下限仍尊重 temperature.max / temperature.min 配置。
         """
         from neurova.cognitive_layers.memory_layer.settings_config import (
             get_memory_settings,
         )
+        from neurova.cognitive_layers.memory_layer.temperature import (
+            apply_recall_gain,
+        )
 
         _cfg = get_memory_settings()
-        boost = float(_cfg.get("temperature.access_boost", 10.0))
         cap = float(_cfg.get("temperature.max", 100.0))
+        floor = float(_cfg.get("temperature.min", 0.0))
         self.access_count += 1
-        self.temperature = min(cap, self.temperature + boost)
+        self.temperature = min(cap, max(floor, apply_recall_gain(self.temperature)))
         self.last_accessed_at = datetime.now(timezone.utc)
         self.updated_at = self.last_accessed_at
 

@@ -3508,7 +3508,6 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
     paramNameManagerDecayHours: "Période de décroissance",
     paramNameManagerDecayRate: "Taux de décroissance",
     paramtemperatureDecayRate: 'Taux de décroissance de la température de mémoire (par heure)',
-    paramtemperatureAccessBoost: 'Augmentation de température à chaque récupération (plafonnée à temperature.max au touch)',
     paramtemperatureMin: 'Borne inférieure de la température de mémoire (plancher de décroissance)',
     paramtemperatureMax: 'Borne supérieure de la température de mémoire (plafond boost/décroissance)',
     paramautoContextUpdateInterval: '[Réservé] Intervalle de la boucle de mise à jour automatique (secondes). Moteur non raccordé à la chaîne principale ; sans effet pour l\'instant',

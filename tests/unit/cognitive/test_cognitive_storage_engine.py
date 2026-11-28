@@ -68,13 +68,13 @@ class TestUnifiedMemoryNodeTouch:
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import UnifiedMemoryNode
         node = UnifiedMemoryNode(temperature=50.0)
         node.touch()
-        assert node.temperature == pytest.approx(60.0)  # +10
+        assert node.temperature == pytest.approx(62.5)  # 比例回温 50+50×0.25
 
     def test_touch_caps_temperature_at_100(self):
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import UnifiedMemoryNode
-        node = UnifiedMemoryNode(temperature=95.0)
+        node = UnifiedMemoryNode(temperature=99.5)
         node.touch()
-        assert node.temperature == 100.0
+        assert node.temperature == pytest.approx(99.625)  # 比例式天然有界 ≤100
 
 
 # ── Tracer Bullet 3: decay() ─────────────────────────────────────────────────

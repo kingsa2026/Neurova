@@ -74,10 +74,10 @@ class TestBug1MemCoreUpdateTemperature:
         mem_core = MemCore(mock_agent)
 
         # 修复前：调用不存在的 update_temperature → AttributeError 被吞没 → 温度不变
-        # 修复后：委托给 manager.update_memory_temperature → touch() → 温度 +10
+        # 修复后：委托给 manager.update_memory_temperature → touch() → 比例回温（D5-R2）
         mem_core.update_memory_temperature(mem_id, interaction_type="recall")
 
-        assert manager._memories[mem_id].temperature == 60.0  # 50 + 10 = 60
+        assert manager._memories[mem_id].temperature == pytest.approx(62.5)  # 50 + 50×0.25
 
     def test_mem_core_update_memory_temperature_handles_missing_manager(self):
         """memory_manager 为 None 时应优雅跳过，不抛异常"""

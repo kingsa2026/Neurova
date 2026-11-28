@@ -101,7 +101,8 @@ def runScheduledRecallCycle(
     闲置阈值：重要记忆（``metadata.is_important``）默认 3 天、普通记忆默认
     7 天，可经 ``proactive_recall.important_interval_days`` /
     ``proactive_recall.normal_interval_days`` 调整；升温暖存量
-    ``proactive_recall.temperature_boost``（默认 5.0，弱于真实访问的 +10）。
+    ``proactive_recall.temperature_boost``（默认 5.0，k=boost/50=0.1，
+    弱于真实召回记账 creditRecallHits 的 k=0.25）。
 
     Returns:
         ``{"recalled_count", "recalled_ids", "candidate_count", "skipped"?}``

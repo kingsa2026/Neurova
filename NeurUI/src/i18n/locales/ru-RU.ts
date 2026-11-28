@@ -3508,7 +3508,6 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
     paramNameManagerDecayHours: "Период затухания",
     paramNameManagerDecayRate: "Скорость затухания",
     paramtemperatureDecayRate: 'Скорость затухания температуры памяти (в час)',
-    paramtemperatureAccessBoost: 'Прибавка температуры при каждом поиске (при touch ограничена temperature.max)',
     paramtemperatureMin: 'Нижняя граница температуры памяти (нижний предел затухания)',
     paramtemperatureMax: 'Верхняя граница температуры памяти (верхний предел буста/затухания)',
     paramautoContextUpdateInterval: '[Зарезервировано] Интервал цикла автообновления (секунды). Движок не подключён к основному конвейеру; изменения пока не действуют',

@@ -3508,7 +3508,6 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     paramNameManagerDecayHours: "क्षय अवधि",
     paramNameManagerDecayRate: "क्षय दर",
     paramtemperatureDecayRate: 'मेमोरी तापमान क्षय दर (प्रति घंटा)',
-    paramtemperatureAccessBoost: 'हर पुनर्प्राप्ति पर तापमान वृद्धि (touch पर temperature.max से सीमित)',
     paramtemperatureMin: 'मेमोरी तापमान की निचली सीमा (क्षय का क्लैंप फ्लोर)',
     paramtemperatureMax: 'मेमोरी तापमान की ऊपरी सीमा (बूस्ट/क्षय का क्लैंप सीलिंग)',
     paramautoContextUpdateInterval: '[आरक्षित] ऑटो-अपडेट लूप अंतराल (सेकंड)। इंजन मुख्य पाइपलाइन से जुड़ा नहीं है; परिवर्तन अभी प्रभावी नहीं',

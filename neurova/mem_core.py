@@ -1123,8 +1123,10 @@ class MemCore:
     # 对话记忆清除/反馈（轮次删除、编辑覆写、点赞点踩质量闭环）
     # ══════════════════════════════════════════════════════════════
 
-    # 点踩温度抑制量（负值；like 走 touch() 的原生 +10 强化）
-    DISLIKE_TEMPERATURE_DELTA = -15.0
+    # 反馈温度增量（拍板 2026-11-28）：like +0.5 / dislike −0.5——反馈是轻信号，
+    # 不走 touch() 的命中回温（apply_recall_gain 比例式），也不挤占其幅度。
+    LIKE_TEMPERATURE_DELTA = 0.5
+    DISLIKE_TEMPERATURE_DELTA = -0.5
 
     def _find_round_memories(
         self,
@@ -1221,10 +1223,12 @@ class MemCore:
         feedback: str,
         approx_ts: Optional[str] = None,
     ) -> int:
-        """把点赞/点踩反馈作用于该轮记忆温度（反馈质量闭环）。
+        """把点赞/点踩反馈作用于该轮记忆温度（反馈质量闭环，轻信号 ±0.5）。
 
-        - like  → update_memory_temperature（touch，+10 强化，召回概率提升）
-        - dislike → update_memory(temperature=max(0, temp-15)) 抑制，加速遗忘
+        - like    → temperature + 0.5（LIKE_TEMPERATURE_DELTA，clamp ≤100）
+        - dislike → temperature − 0.5（DISLIKE_TEMPERATURE_DELTA，clamp ≥0）
+        - 反馈是轻信号：不走 touch() 的命中回温（apply_recall_gain 比例式），
+          也不刷新 access_count/last_accessed_at——点赞不是一次访问。
         - feedback 非 like/dislike（如取消反馈 None）→ 无操作
 
         Returns:
@@ -1234,20 +1238,21 @@ class MemCore:
         if not memory_manager or not session_id or feedback not in ("like", "dislike"):
             return 0
 
+        delta = (
+            self.LIKE_TEMPERATURE_DELTA
+            if feedback == "like"
+            else self.DISLIKE_TEMPERATURE_DELTA
+        )
         affected = 0
         for target in self._find_round_memories(session_id, user_input, agent_response, approx_ts):
             memory_id = target.get("id")
             if not memory_id:
                 continue
             try:
-                if feedback == "like":
-                    if memory_manager.update_memory_temperature(memory_id, interaction_type="use"):
-                        affected += 1
-                else:
-                    current = float(target.get("temperature") or 0.0)
-                    new_temp = max(0.0, current + self.DISLIKE_TEMPERATURE_DELTA)
-                    if memory_manager.update_memory(memory_id, temperature=new_temp):
-                        affected += 1
+                current = float(target.get("temperature") or 0.0)
+                new_temp = min(100.0, max(0.0, current + delta))
+                if memory_manager.update_memory(memory_id, temperature=new_temp):
+                    affected += 1
             except Exception as e:
                 logger.warning("反馈温度更新失败: memory_id=%s, %s", memory_id, e)
 
@@ -1476,7 +1481,7 @@ class MemCore:
         """更新记忆温度
 
         委托给 MemoryManager.update_memory_temperature，由其调用 Memory.touch()
-        应用 access_count++ / temperature +10 / last_accessed_at 更新。
+        应用 access_count++ / 比例回温（apply_recall_gain）/ last_accessed_at 更新。
 
         Args:
             memory_id: 记忆ID

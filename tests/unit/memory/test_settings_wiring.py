@@ -84,8 +84,8 @@ class TestHotMemoriesThreshold:
     def test_get_hot_memories_uses_settings_threshold(self, settings, tmp_path):
         """阈值来自配置：60 时 90/70 命中，50 被过滤。
 
-        注意 recall 会 touch() 命中记忆（+10 封顶 100）：90→100、70→80。
-        若 50 未被过滤，其 touch 后 60.0 会出现在结果里。
+        注意 recall 会 touch() 命中记忆（比例回温 k=0.25）：90→92.5、70→77.5。
+        若 50 未被过滤，其 touch 后 62.5 会出现在结果里。
         """
         settings.update({"manager.hot_memories_threshold": 60.0})
         mgr = _make_manager(tmp_path)
@@ -93,7 +93,7 @@ class TestHotMemoriesThreshold:
         temps = sorted(
             (m["temperature"] for m in mgr.get_hot_memories()), reverse=True
         )
-        assert temps == [100.0, 80.0]
+        assert temps == [92.5, 77.5]
 
     def test_explicit_threshold_overrides_settings(self, settings, tmp_path):
         """显式传 min_temperature 时优先于配置"""
@@ -103,13 +103,13 @@ class TestHotMemoriesThreshold:
         assert mgr.get_hot_memories(min_temperature=100.0) == []
 
     def test_default_threshold_keeps_legacy_behavior(self, settings, tmp_path):
-        """未修改配置时保持 80 阈值：仅 90 命中（touch 后 100）"""
+        """未修改配置时保持 80 阈值：仅 90 命中（比例回温后 92.5）"""
         mgr = _make_manager(tmp_path)
         self._seed(mgr)
         temps = sorted(
             (m["temperature"] for m in mgr.get_hot_memories()), reverse=True
         )
-        assert temps == [100.0]
+        assert temps == [92.5]
 
 
 class TestDecayRate:
@@ -160,33 +160,33 @@ class TestTemperatureDomainClamp:
 
 
 class TestTemperatureRuntimeParams:
-    """temperature.access_boost / temperature.max / temperature.min 接线。
+    """temperature.max / temperature.min + recall.hit_gain 接线（D5-R2 权威语义）。
 
-    设计对齐：核心事实温度域 [0, 100]（touch/on_access/on_decay 均 clamp 100），
-    schema 原默认 0.3/0.01/1.0 是 0~1 域幻觉，与核心量级冲突 → 修正为
-    access_boost=10（touch 历史硬编码）、min=0、max=100。
+    设计对齐：核心事实温度域 [0, 100]；touch 自 58a652ee6 起为比例回温
+    T += (100−T)×k（k 默认 0.25，设置 recall.hit_gain 可调），封顶仍尊重
+    temperature.max；旧 temperature.access_boost（平 +10 量）随语义退役删除。
     """
 
     def test_schema_defaults_match_core_reality(self, settings):
-        """schema 默认值必须与核心历史硬编码一致（保证零默认回归）"""
-        assert settings.get("temperature.access_boost") == 10.0
+        """schema 默认值必须与核心权威语义一致（保证零默认回归）"""
+        assert settings.get("recall.hit_gain") == 0.25
         assert settings.get("temperature.min") == 0.0
         assert settings.get("temperature.max") == 100.0
 
-    def test_touch_uses_access_boost(self, settings):
-        """touch 的升温量来自 temperature.access_boost"""
+    def test_touch_is_proportional_and_uses_hit_gain(self, settings):
+        """touch 升温为比例式，增益来自 recall.hit_gain"""
         from neurova.cognitive_layers.memory_layer.models import Memory
 
-        settings.update({"temperature.access_boost": 3.0})
-        m = Memory(id="x", temperature=50.0)
+        settings.update({"recall.hit_gain": 0.5})
+        m = Memory(id="x", temperature=88.0)
         m.touch()
-        assert m.temperature == 53.0
+        assert m.temperature == pytest.approx(94.0)  # 88 + 12×0.5
 
     def test_touch_caps_at_configured_max(self, settings):
         """touch 的封顶来自 temperature.max（默认 100 与历史一致）"""
         from neurova.cognitive_layers.memory_layer.models import Memory
 
-        settings.update({"temperature.max": 60.0, "temperature.access_boost": 10.0})
+        settings.update({"temperature.max": 60.0})
         m = Memory(id="x", temperature=55.0)
         m.touch()
         assert m.temperature == 60.0

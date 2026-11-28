@@ -116,7 +116,7 @@ class TestCognitiveGraphFullStack:
         # 创建中等温度节点
         node2 = UnifiedMemoryNode(content="medium", temperature=50.0)
         node2.touch()
-        assert node2.temperature == 60.0  # +10
+        assert node2.temperature == pytest.approx(62.5)  # 比例回温 50+50×0.25
 
         # TemperatureEngine 也应使用 0-100
         stage = TemperatureEngine.get_lifecycle_stage(80.0)

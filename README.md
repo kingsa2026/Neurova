@@ -104,10 +104,10 @@ Every memory carries a temperature:
 
 | Mechanism | Behavior |
 |------|------|
-| Access heating | +10 per hit (`touch()`), capped at 100 |
-| No-decay conditions | crystallized, temperature ≥ 80, accessed within 24h |
+| Access heating | proportional: `T += (100−T) × 0.25` per effective hit (deduped per turn; `recall.hit_gain` / `NEUROVA_MEMORY_HIT_GAIN` configurable) |
+| No-decay conditions | crystallized, temperature ≥ 95, accessed within 24h |
 | Forgetting curve | anchors at 1/7/30/90 days, log-log power-law interpolation |
-| User feedback | like +10 / dislike −15, applied directly to temperature |
+| User feedback | like +0.5 / dislike −0.5, applied directly to temperature |
 
 Decay rate = curve factor × emotional protection (0.6) × saturation × importance weight × association protection, capped at 0.95.
 

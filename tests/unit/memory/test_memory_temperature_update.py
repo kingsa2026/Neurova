@@ -175,8 +175,8 @@ class TestMemoryManagerDecayCycle:
 
         result = manager.update_memory_temperature(mem_id, interaction_type="recall")
         assert result is True
-        # touch 方法增加 10 温度
-        assert manager._memories[mem_id].temperature == 60.0
+        # touch 为比例回温（D5-R2）：50 + 50×0.25
+        assert manager._memories[mem_id].temperature == pytest.approx(62.5)
 
     def test_update_memory_temperature_nonexistent(self, tmp_path):
         """更新不存在的记忆应返回 False"""

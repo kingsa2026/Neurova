@@ -48,9 +48,9 @@ class TestMemorySettingsConfig:
         cfg = get_memory_settings(tmp)
 
         assert cfg.get("temperature.decay_rate") == 0.1
-        # 2026-08-29 温度域对齐核心实现（[0,100]）：access_boost=touch 历史硬编码 +10，
-        # min/max 从 0~1 域幻觉修正为 0~100
-        assert cfg.get("temperature.access_boost") == 10.0
+        # 2026-11-28 温度回温统一到 D5-R2 比例式：增益走 recall.hit_gain（默认 0.25），
+        # 旧 access_boost（平 +10 量）随语义退役删除；min/max 保持 0~100 域
+        assert cfg.get("recall.hit_gain") == 0.25
         assert cfg.get("temperature.min") == 0.0
         assert cfg.get("temperature.max") == 100.0
         assert cfg.get("compression.similarity_threshold") == 0.7
@@ -141,10 +141,9 @@ class TestMemorySettingsConfig:
 
         section = cfg.get_section("temperature")
         assert "temperature.decay_rate" in section
-        assert "temperature.access_boost" in section
         assert "temperature.min" in section
         assert "temperature.max" in section
-        assert len(section) == 4
+        assert len(section) == 3
 
     def test_get_all(self):
         """获取所有参数"""

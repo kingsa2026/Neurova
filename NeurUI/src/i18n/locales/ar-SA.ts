@@ -3508,7 +3508,6 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     paramNameManagerDecayHours: "فترة التلاشي",
     paramNameManagerDecayRate: "معدل التلاشي",
     paramtemperatureDecayRate: 'معدل تدهور درجة حرارة الذاكرة (كل ساعة)',
-    paramtemperatureAccessBoost: 'مقدار رفع درجة الحرارة عند كل استرجاع (محدود بـ temperature.max عند touch)',
     paramtemperatureMin: 'الحد الأدنى لدرجة حرارة الذاكرة (أرضية التدهور)',
     paramtemperatureMax: 'الحد الأعلى لدرجة حرارة الذاكرة (سقف التعزيز/التدهور)',
     paramautoContextUpdateInterval: '[محجوز] فاصل حلقة التحديث التلقائي (ثوانٍ). المحرك غير متصل بالمسار الرئيسي؛ التغييرات غير فعالة حالياً',

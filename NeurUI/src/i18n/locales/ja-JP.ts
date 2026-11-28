@@ -3508,7 +3508,6 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     paramNameManagerDecayHours: "減衰周期",
     paramNameManagerDecayRate: "減衰レート",
     paramtemperatureDecayRate: 'メモリ温度の減衰率（毎時）',
-    paramtemperatureAccessBoost: '検索ごとの温度上昇量（touch 時は temperature.max で上限）',
     paramtemperatureMin: 'メモリ温度の下限（減衰のクランプ下界）',
     paramtemperatureMax: 'メモリ温度の上限（ブースト/減衰のクランプ上界）',
     paramautoContextUpdateInterval: '【予約】自動更新ループの間隔（秒）。エンジンは主パイプライン未接続のため、変更はまだ有効になりません',

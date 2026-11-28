@@ -120,9 +120,13 @@ class UnifiedMemoryNode:
     trace_id: Optional[str] = None  # 推理链溯源
 
     def touch(self):
-        """访问一次，温度升高"""
+        """访问一次，温度按比例回温（D5-R2 单源 apply_recall_gain，与 DB 行同语义）"""
+        from neurova.cognitive_layers.memory_layer.temperature import (
+            apply_recall_gain,
+        )
+
         self.access_count += 1
-        self.temperature = min(100.0, self.temperature + 10.0)
+        self.temperature = apply_recall_gain(self.temperature)
         self.updated_at = datetime.now(timezone.utc)
 
     def decay(self, hours: float = 1.0, rate: float = 1.0):
@@ -482,9 +486,10 @@ class CognitiveStorageEngine:
         top = deduped[:limit]
 
         # 记账只给**真回出去**的那批，顺序不能倒：先记账再过滤，被过滤掉的行也已经
-        # 挨了一次 +10，冷档就被自己这次命中复活（工单 017 的淘汰因此永不成立）。
-        # 库里那部分的计数由 `MemoryManager.creditRecallHits` 一处落盘；
-        # 还压在 L0 的节点库里没行，touch 的值随 flush 落盘（契约 006 第 3 条）。
+        # 挨过一次比例回温，冷档就被自己这次命中复活（工单 017 的淘汰因此永不成立）。
+        # 库里那部分的计数由 `MemoryManager.creditRecallHits` 一处落盘（比例式，k=0.25）；
+        # 还压在 L0 的节点库里没行，touch 的值随 flush 落盘（契约 006 第 3 条）——
+        # 两边同为 apply_recall_gain 单源，热层与 DB 行不再分裂。
         bufferedIds = {node.id for node in l0Snapshot}
         for node in top:
             node.touch()
